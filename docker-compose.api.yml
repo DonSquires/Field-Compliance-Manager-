@@ -1,0 +1,47 @@
+services:
+  fcm-api:
+    image: registry.gitlab.com/don-squires1/field-compliance-manager/api:latest
+    container_name: fcm-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    env_file:
+      - /opt/fcm/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  fcm-inference:
+    image: registry.gitlab.com/don-squires1/field-compliance-manager/inference:latest
+    container_name: fcm-inference
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3000"
+    env_file:
+      - /opt/fcm/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      VEHICLE_ATTRS_PROVIDER: "basic"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

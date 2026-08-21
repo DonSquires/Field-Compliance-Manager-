@@ -1,0 +1,225 @@
+# Full FCM stack — replaces docker-compose.api.yml once OSRM data is ready.
+# Services: fcm-api, fcm-inference, fcm-voice, osrm (internal), fcm-solver (internal),
+#           ollama (internal, in-house embeddings — nomic-embed-text on CPU)
+# All on fcm-net bridge network. Only :3001 and :3002 exposed via Nginx.
+#
+# Embeddings policy: high-frequency, low-complexity embedding calls run IN-HOUSE
+# on ollama (CPU) for privacy + zero per-call cost. Heavy reasoning stays on
+# OpenAI. This is why ollama is back in the stack (see !592/!593/!595 thread).
+
+services:
+  fcm-api:
+    image: registry.gitlab.com/don-squires1/field-compliance-manager/api:latest
+    container_name: fcm-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    env_file: /opt/fcm/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      OSRM_URL: "http://osrm:5000"
+      SOLVER_URL: "http://fcm-solver:5001"
+      # In-house embeddings (Bob RAG). Reachable by compose service name on fcm-net.
+      OLLAMA_URL: "http://ollama:11434"
+      EMBED_MODEL: "nomic-embed-text"
+      # Self-hosted TTS/STT. Compose service name + INTERNAL port 3000
+      # (3003 is only the host-published port). Without this, fcm-api fell back
+      # to 127.0.0.1:3003 and bob-voice-speak 502'd. See STAGING.md 2026-07-06.
+      VOICE_URL: "http://fcm-voice:3000"
+    depends_on:
+      fcm-solver:
+        condition: service_healthy
+      osrm:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  fcm-inference:
+    image: registry.gitlab.com/don-squires1/field-compliance-manager/inference:latest
+    container_name: fcm-inference
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3000"
+    env_file: /opt/fcm/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      VEHICLE_ATTRS_PROVIDER: "basic"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  # fcm-voice — self-hosted STT (faster-whisper) + TTS (Piper) for "Hey Bob".
+  fcm-voice:
+    image: registry.gitlab.com/don-squires1/field-compliance-manager/voice:latest
+    container_name: fcm-voice
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3003:3000"
+    env_file: /opt/fcm/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      WHISPER_MODEL: "base"
+      WHISPER_DEVICE: "cpu"
+      PIPER_VOICE_PATH: "/app/voices/voice.onnx"
+    volumes:
+      - /opt/fcm/voices:/app/voices:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  # fcm-planner — persistent job-plan runner (#86 Phase 3). Polls
+  # bob_job_plans/bob_job_plan_steps and advances ready steps via the
+  # bob-plan-step-advance edge function (service-role auth). Mirrors fcm-api's
+  # block exactly (health check, restart policy, env_file, logging).
+  fcm-planner:
+    image: registry.gitlab.com/don-squires1/field-compliance-manager/planner:latest
+    container_name: fcm-planner
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3004:3004"
+    env_file: /opt/fcm/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3004"
+      PLANNER_POLL_INTERVAL_MS: "15000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  osrm:
+    image: osrm/osrm-backend:latest
+    container_name: osrm
+    restart: unless-stopped
+    expose: ["5000"]
+    volumes:
+      - /opt/fcm/osrm-data:/data:ro
+    # --max-table-size 200 supports 150-stop shifts + depot
+    command: osrm-routed --algorithm mld /data/new-zealand-latest.osrm --max-table-size 200
+    # BUGFIX (2026-07-18): the osrm/osrm-backend image has NO wget (or curl)
+    # installed -- `docker exec osrm wget ...` fails with "executable file
+    # not found in $PATH". This made the healthcheck ALWAYS fail even though
+    # the service itself was genuinely healthy and answering real routing
+    # queries correctly the whole time (confirmed live via `docker exec
+    # fcm-api wget -qO- http://osrm:5000/...` returning a valid waypoints
+    # response) -- a false "unhealthy" status for 2+ weeks with no actual
+    # functional impact. The osrm-backend image DOES have a plain TCP
+    # listener with no HTTP-aware CLI tool baked in, so the healthcheck now
+    # uses a bash /dev/tcp probe (bash IS present in this image, unlike
+    # wget/curl) to confirm the port accepts connections -- a true positive
+    # is good enough here; deep HTTP-response checking is done by fcm-api's
+    # own healthcheck + real traffic, not this container's healthcheck.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/5000' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  fcm-solver:
+    image: registry.gitlab.com/don-squires1/field-compliance-manager/solver:latest
+    container_name: fcm-solver
+    restart: unless-stopped
+    expose: ["5001"]
+    healthcheck:
+      # python:3.11-slim has no wget/curl — use stdlib urllib
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  # In-house embedding server. CPU-only; nomic-embed-text is small + fast enough
+  # for the knowledge-card volume. Not exposed publicly — only fcm-api on fcm-net
+  # talks to it at http://ollama:11434.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    expose: ["11434"]
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      # ollama has no curl/wget in-image; use its own CLI. `ollama list` returns 0
+      # once the server is up (even with no models yet).
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  # One-shot: pull nomic-embed-text into the ollama volume on (re)deploy, then
+  # exit. Idempotent — `ollama pull` is a no-op if the model is already present.
+  # This removes the manual `ollama pull` step that was previously forgotten.
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c", "ollama pull nomic-embed-text && echo 'nomic-embed-text ready'"]
+    restart: "no"
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+networks:
+  fcm-net:
+    driver: bridge
+
+  # ── ollama — in-house embeddings (nomic-embed-text, CPU) ──────────────────
+  # High-frequency embedding calls for Bob RAG run here, not on OpenAI, for
+  # privacy + zero per-call cost. The companion `ollama-init` one-shot pulls the
+  # model on startup so nomic-embed-text is always present after a fresh deploy.
+  # Persisted to /opt/fcm/ollama so the model survives restarts (no re-download).
+
+volumes:
+  ollama-models:
