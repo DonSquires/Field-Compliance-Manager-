@@ -6,3 +6,5 @@ supabase/.temp/
 osrm-data/
 voices/
 *.log
+
+supabase/migrations/0333_lowburn_inferred_breach_candidates_dedup.sql
