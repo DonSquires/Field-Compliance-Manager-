@@ -1,0 +1,306 @@
+diff --git a/supabase/migrations/0333_lowburn_inferred_breach_candidates_dedup.sql b/supabase/migrations/0333_lowburn_inferred_breach_candidates_dedup.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..ed4301780c93b8795cda8a99426be703ddfca5aa
+--- /dev/null
++++ b/supabase/migrations/0333_lowburn_inferred_breach_candidates_dedup.sql
+@@ -0,0 +1,300 @@
++-- ============================================================
++-- 0333 — Lowburn inferred breach candidates, dedup fix
++--        (supersedes 0332; issue #257)
++-- ============================================================
++-- WHY THIS EXISTS: migration 0332 (ID-anchored) applied correctly up to
++-- the breach_alerts INSERT, then failed with:
++--   duplicate key value violates unique constraint
++--   "idx_breach_alerts_parking_dedup" (SQLSTATE 23505)
++--   Key (organization_id, plate_number, zone_id, breach_type)=
++--     (5197f4a5-…, NYZ566, d496626f-…, monthly_limit) already exists.
++--
++-- ROOT CAUSE: idx_breach_alerts_parking_dedup (migration 0233) is a
++-- PARTIAL unique index:
++--   unique (organization_id, plate_number, zone_id, breach_type)
++--   where status in ('open','acknowledged','actioned')
++-- i.e. at most ONE active breach per org+plate+zone+breach_type. But
++-- 0332 inserted one breach row per breach NIGHT, so a plate that breaches
++-- 'monthly_limit' on several nights produced several rows that collide.
++-- 0332's NOT EXISTS guard keyed on overnight_session_id, which does not
++-- match the constraint's key, so it did not prevent the collision.
++--
++-- 0332 ran inside begin/commit, so the failure rolled the whole thing
++-- back — verified live: 0 inferred sessions, 0 inferred breaches. Nothing
++-- to clean up; this is a clean forward migration.
++--
++-- TWO FIXES vs 0332:
++--   1. Collapse breach candidates to ONE representative row per
++--      (plate, zone, breach_type) — the PEAK night (max streak_at_date,
++--      tie-break max monthly_at_date, then latest date). This matches the
++--      constraint's one-active-alert-per-type model and is the correct
++--      review-queue shape (one alert per plate per breach type, not one
++--      per night).
++--   2. Partial-index-aware ON CONFLICT: the arbiter WHERE clause must
++--      match the partial index predicate EXACTLY, otherwise Postgres
++--      42P10 (cannot infer arbiter). See the #162 note in
++--      supabase/functions/process-officer-scan. DO NOTHING makes this
++--      idempotent + race-safe against re-runs and pre-existing alerts.
++--
++-- Everything else is identical to 0332 (verified against live schema;
++-- ID-anchored org 5197f4a5-… / zone d496626f-…; 3,113 Lowburn obs →
++-- ~3,065 inferred sessions). evidence_strength='inferred' allowed by
++-- 0330. rule_type CHECK allows 'restricted' (verified live).
++--
++-- 0332 remains in the tree; it is idempotent-superseded by 0333. If a
++-- future env has 0332 recorded but not applied, that is fine — 0333
++-- re-runs the whole slice idempotently (ON CONFLICT DO NOTHING on both
++-- the session insert and the breach insert).
++-- ============================================================
++
++begin;
++
++do $$
++declare
++  v_org_id   uuid := '5197f4a5-6762-46ba-aa50-f2e91fed205a';
++  v_zone_id  uuid := 'd496626f-9429-4893-9891-43dd6c652b8d';
++  v_bob_id   uuid := '00000000-0000-0000-0000-00000000b0b0';
++  v_max_consecutive integer := 3;
++  v_max_per_month   integer := 3;
++  v_session_count   integer := 0;
++  v_breach_count    integer := 0;
++begin
++  -- ── 0. Confirm anchored org + zone (defensive; id-first) ───────────────
++  if not exists (select 1 from public.organizations where id = v_org_id) then
++    select id into v_org_id
++      from public.organizations
++     where name in ('Downer/LINZ', 'LINZ - Downer')
++       and organization_type = 'branch'
++     limit 1;
++  end if;
++  if v_org_id is null then
++    raise exception '0333: Downer/LINZ branch org not found by id or name; cannot run inference';
++  end if;
++
++  if not exists (select 1 from public.location_zones where id = v_zone_id and organization_id = v_org_id) then
++    select id into v_zone_id
++      from public.location_zones
++     where organization_id = v_org_id and name ilike '%lowburn%'
++     limit 1;
++  end if;
++  if v_zone_id is null then
++    raise exception '0333: Lowburn zone not found under org %; cannot run inference', v_org_id;
++  end if;
++
++  raise notice '0333: org=%, zone=% (Lowburn)', v_org_id, v_zone_id;
++
++  -- ── 1. Lowburn zone config: restricted, SCV, 3/3 ───────────────────────
++  update public.location_zones
++     set rule_type = 'restricted',
++         scv_required = true,
++         nightly_limit_consecutive = v_max_consecutive,
++         nightly_limit_monthly = v_max_per_month
++   where id = v_zone_id
++     and (rule_type is distinct from 'restricted'
++       or scv_required is distinct from true
++       or nightly_limit_consecutive is distinct from v_max_consecutive
++       or nightly_limit_monthly is distinct from v_max_per_month);
++
++  update public.zone_compliance_matrix
++     set is_current = false
++   where zone_id = v_zone_id
++     and is_current = true
++     and (max_consecutive_nights is distinct from v_max_consecutive
++       or max_nights_per_month is distinct from v_max_per_month
++       or scv_required is distinct from true);
++
++  if not exists (
++    select 1 from public.zone_compliance_matrix
++     where zone_id = v_zone_id and is_current = true
++       and max_consecutive_nights = v_max_consecutive
++       and max_nights_per_month = v_max_per_month
++       and scv_required = true
++  ) then
++    insert into public.zone_compliance_matrix
++      (organization_id, zone_id, version, is_current,
++       max_consecutive_nights, max_nights_per_month, scv_required,
++       effective_from, notes, created_by)
++    values (
++      v_org_id, v_zone_id,
++      coalesce((select max(version) from public.zone_compliance_matrix where zone_id = v_zone_id), 0) + 1,
++      true,
++      v_max_consecutive, v_max_per_month, true,
++      current_date,
++      '0333: Lowburn restricted zone — SCV required, 3 consecutive / 3 per month (owner-confirmed for #257)',
++      v_bob_id
++    );
++    raise notice '0333: inserted zone_compliance_matrix row for Lowburn';
++  end if;
++
++  -- ── 2. Create inferred overnight sessions (idempotent) ─────────────────
++  with deduped as (
++    select distinct on (plate_number, zone_id, (observed_at at time zone 'Pacific/Auckland')::date)
++      id as observation_id, organization_id, plate_number, zone_id,
++      (observed_at at time zone 'Pacific/Auckland')::date as overnight_date,
++      observed_at as evening_seen_at,
++      gps_lat as evening_gps_lat, gps_lng as evening_gps_lng,
++      photo_url as evening_photo_url, is_scv
++    from public.observations
++    where organization_id = v_org_id
++      and zone_id = v_zone_id
++      and module_key = 'freedom_camping'
++    order by plate_number, zone_id,
++             (observed_at at time zone 'Pacific/Auckland')::date,
++             observed_at asc
++  )
++  insert into public.vehicle_overnight_sessions (
++    organization_id, plate_number, zone_id, overnight_date, timezone,
++    evening_observation_id, evening_seen_at,
++    evening_gps_lat, evening_gps_lng, evening_photo_url,
++    verification_status, evidence_strength,
++    manual_review_required, observation_count,
++    is_scv, is_compliant, compliance_reason, client_org_id
++  )
++  select
++    d.organization_id, d.plate_number, d.zone_id, d.overnight_date, 'Pacific/Auckland',
++    d.observation_id, d.evening_seen_at,
++    d.evening_gps_lat, d.evening_gps_lng, d.evening_photo_url,
++    'verified_overnight', 'inferred', true, 1,
++    d.is_scv, null, 'historical data - nights inferred', v_org_id
++  from deduped d
++  on conflict (organization_id, plate_number, zone_id, overnight_date) do nothing;
++
++  get diagnostics v_session_count = row_count;
++  raise notice '0333: inserted % inferred overnight sessions', v_session_count;
++
++  -- ── 3. Breach alerts — ONE representative row per (plate, zone, type) ───
++  -- Compute streak + monthly counters (mirrors 0195), find every breach
++  -- night, then collapse to the PEAK night per (plate, breach_type) so we
++  -- insert exactly one active alert per type — matching
++  -- idx_breach_alerts_parking_dedup. ON CONFLICT arbiter matches the
++  -- partial index predicate exactly.
++  with sessions as (
++    select id as session_id, plate_number, zone_id, overnight_date,
++           organization_id, is_scv, evening_observation_id
++    from public.vehicle_overnight_sessions
++    where organization_id = v_org_id
++      and zone_id = v_zone_id
++      and evidence_strength = 'inferred'
++      and verification_status = 'verified_overnight'
++  ),
++  numbered as (
++    select session_id, plate_number, overnight_date, evening_observation_id,
++           overnight_date
++             - (row_number() over (partition by plate_number order by overnight_date))::integer * interval '1 day'
++             as streak_group
++    from sessions
++  ),
++  with_streak as (
++    select n.*,
++           count(*) over (
++             partition by n.plate_number, n.streak_group
++             order by n.overnight_date
++             rows between unbounded preceding and current row
++           ) as streak_at_date
++    from numbered n
++  ),
++  with_monthly as (
++    select ws.*,
++           count(*) over (
++             partition by ws.plate_number, date_trunc('month', ws.overnight_date)
++             order by ws.overnight_date
++             rows between unbounded preceding and current row
++           ) as monthly_at_date
++    from with_streak ws
++  ),
++  breach_nights as (
++    select wm.*,
++      case
++        when wm.streak_at_date > v_max_consecutive then 'nightly_limit'
++        when wm.monthly_at_date > v_max_per_month then 'monthly_limit'
++      end as breach_type,
++      case
++        when wm.streak_at_date > v_max_consecutive then wm.streak_at_date
++        when wm.monthly_at_date > v_max_per_month then wm.monthly_at_date
++      end as nights_count,
++      case
++        when wm.streak_at_date > v_max_consecutive then v_max_consecutive
++        when wm.monthly_at_date > v_max_per_month then v_max_per_month
++      end as limit_value
++    from with_monthly wm
++    where wm.streak_at_date > v_max_consecutive
++       or wm.monthly_at_date > v_max_per_month
++  ),
++  -- Collapse to ONE representative (peak) row per plate + breach_type.
++  representative as (
++    select distinct on (plate_number, breach_type)
++      session_id, evening_observation_id, plate_number, breach_type,
++      nights_count, limit_value, streak_at_date, monthly_at_date
++    from breach_nights
++    order by plate_number, breach_type,
++             nights_count desc, monthly_at_date desc, overnight_date desc
++  )
++  insert into public.breach_alerts (
++    organization_id, observation_id, overnight_session_id,
++    zone_id, plate_number, breach_type, nights_count, limit_value,
++    status, notes, client_org_id
++  )
++  select
++    v_org_id, r.evening_observation_id, r.session_id,
++    v_zone_id, r.plate_number, r.breach_type, r.nights_count, r.limit_value,
++    'open',
++    'historical data - nights inferred | Lowburn inferred breach candidate (#257). '
++      || 'Evidence strength: inferred (not court-grade). '
++      || 'Peak consecutive streak: ' || r.streak_at_date || ' nights. '
++      || 'Peak monthly total: ' || r.monthly_at_date || ' nights. '
++      || 'Requires human review before any enforcement action.',
++    v_org_id
++  from representative r
++  on conflict (organization_id, plate_number, zone_id, breach_type)
++    where status in ('open', 'acknowledged', 'actioned')
++  do nothing;
++
++  get diagnostics v_breach_count = row_count;
++  raise notice '0333: inserted % inferred breach alerts', v_breach_count;
++
++  -- ── 4. Backfill compliance verdict on sessions ────────────────────────
++  -- A session is a breach night if its (plate, streak/monthly) tripped a
++  -- limit — recompute inline so per-night verdicts are correct even though
++  -- only one alert per type is stored.
++  with sessions as (
++    select id as session_id, plate_number, overnight_date
++    from public.vehicle_overnight_sessions
++    where organization_id = v_org_id and zone_id = v_zone_id
++      and evidence_strength = 'inferred'
++      and verification_status = 'verified_overnight'
++  ),
++  numbered as (
++    select session_id, plate_number, overnight_date,
++           overnight_date
++             - (row_number() over (partition by plate_number order by overnight_date))::integer * interval '1 day'
++             as streak_group
++    from sessions
++  ),
++  with_streak as (
++    select n.*,
++           count(*) over (partition by n.plate_number, n.streak_group
++             order by n.overnight_date rows between unbounded preceding and current row) as streak_at_date
++    from numbered n
++  ),
++  with_monthly as (
++    select ws.*,
++           count(*) over (partition by ws.plate_number, date_trunc('month', ws.overnight_date)
++             order by ws.overnight_date rows between unbounded preceding and current row) as monthly_at_date
++    from with_streak ws
++  )
++  update public.vehicle_overnight_sessions vos
++     set is_compliant = case when wm.streak_at_date > v_max_consecutive
++                               or wm.monthly_at_date > v_max_per_month
++                             then false else true end,
++         compliance_reason = case when wm.streak_at_date > v_max_consecutive
++                                    or wm.monthly_at_date > v_max_per_month
++                                  then 'historical data - nights inferred | breach candidate'
++                                  else 'historical data - nights inferred | within limits' end
++    from with_monthly wm
++   where vos.id = wm.session_id;
++
++  raise notice '0333: Lowburn inferred breach review complete. Sessions: %, Breaches: %',
++    v_session_count, v_breach_count;
++end $$;
++
++commit;
