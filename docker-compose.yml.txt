@@ -1,0 +1,18 @@
+services:
+  bob-control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bob-control-plane
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      GITEA_WEBHOOK_SECRET: ${GITEA_WEBHOOK_SECRET:?set GITEA_WEBHOOK_SECRET}
+      BOB_ADMIN_TOKEN: ${BOB_ADMIN_TOKEN:?set BOB_ADMIN_TOKEN}
+    ports:
+      - "127.0.0.1:8090:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
