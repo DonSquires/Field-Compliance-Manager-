@@ -1,0 +1,16 @@
+name: Runner test
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Confirm runner
+        run: |
+          echo "Gitea Actions runner is working"
+          uname -a
