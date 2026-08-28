@@ -2,20 +2,25 @@
  * useOfficerSafety.ts — unified officer welfare/SOS/man-down safety state
  *
  * Rebuilt per docs/ui-baseline.md ("P0 SAFETY-CRITICAL" findings). Replaces
- * the original two independent, uncoordinated hooks (useWelfareCheckin's
- * time-based missed-check-in detector and useManDownDetection's GPS-motion
- * detector) with ONE shared safety-state model, because the originals could
- * each independently reach an "alerting" condition for the same officer with
- * neither aware of the other, and resolving one never reset the other.
+ * THREE original independent, uncoordinated writers to `welfare_alerts`
+ * (useWelfareCheckin's time-based missed-check-in detector,
+ * useManDownDetection's GPS-motion detector, and useInactivityDetection's
+ * gps-lost/inactivity detector) with ONE shared safety-state model, because
+ * the originals could each independently reach an "alerting" condition for
+ * the same officer with neither aware of the others, and resolving one
+ * never reset the others.
  *
  * Corrected defects (all verified against the original behaviour):
- *   1. Movement alone can NEVER resolve an active alert. The original
- *      auto-resolved a man-down alert purely from GPS movement, with no
- *      acknowledgement step — a distressed officer's own struggling
- *      movement, or someone else moving the device, was enough to silently
- *      clear a live emergency. Here, movement only updates `last_activity_at`
- *      as evidence; only an explicit officer action (`checkIn` or
- *      `acknowledgeAlert`) can clear `activeAlert`.
+ *   1. Movement or a fresh GPS fix alone can NEVER resolve an active alert.
+ *      The original auto-resolved a man-down alert purely from GPS movement,
+ *      and separately auto-resolved gps_lost/inactivity episodes from
+ *      movement OR merely a fresh fix arriving — none of these required an
+ *      acknowledgement step. A distressed officer's own struggling movement,
+ *      someone else moving the device, or the GPS simply reacquiring a
+ *      signal, was enough to silently clear a live emergency in the
+ *      original. Here, movement/fixes only update evidence (`recordMovement`);
+ *      only an explicit officer action (`checkIn` or `acknowledgeAlert`) can
+ *      clear `activeAlert`.
  *   2. Every write checks `{ error }` and surfaces it via `writeStatus`,
  *      instead of silently appearing to succeed on failure (the original
  *      `checkIn`/`triggerSOS`/shift-`respond`-style writes did not).
@@ -25,17 +30,36 @@
  *   4. Escalation timing remains entirely server-owned — this hook only
  *      fires the INITIAL alert and reports status; it never re-implements
  *      escalation levels client-side.
+ *
+ * `motion` (man-down, from useManDownDetection) and `inactivity` (from
+ * useInactivityDetection) both derive from time-since-last-movement, with
+ * separate thresholds. Whether these two are meant to be genuinely distinct
+ * product signals or are themselves an unintentional duplication in the
+ * original is an open question recorded in docs/ui-baseline.md — both are
+ * preserved here as separate kinds rather than silently merged, since we
+ * have no product-owner confirmation either way.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 const DEFAULT_CHECKIN_INTERVAL_MINUTES = 30;
 const DEFAULT_STATIONARY_MINUTES = 15;
+const DEFAULT_INACTIVITY_MINUTES = 20;
 const MOVEMENT_THRESHOLD_M = 25;
 const TICK_MS = 10_000;
 
+function haversineMetres(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 export type SafetyStatus = 'ok' | 'due' | 'overdue' | 'alerting';
-export type AlertKind = 'sos' | 'timeout' | 'motion';
+export type AlertKind = 'sos' | 'timeout' | 'motion' | 'inactivity' | 'gps_lost';
 export type DetectionState = 'active' | 'disabled_by_org' | 'disabled_by_officer' | 'unknown';
 export type WriteStatus = 'idle' | 'pending' | 'error';
 
@@ -53,6 +77,8 @@ export interface UseOfficerSafetyOptions {
   officerManDownEnabled?: boolean;
   checkinIntervalMinutes?: number;
   stationaryMinutes?: number;
+  /** Threshold for the gps_lost/inactivity signals (previously useInactivityDetection). */
+  inactivityMinutes?: number;
   getGps?: () => Promise<{ lat: number; lng: number } | null>;
 }
 
@@ -65,9 +91,9 @@ export interface UseOfficerSafetyApi {
   lastError: string | null;
   checkIn: () => Promise<boolean>;
   triggerSOS: () => Promise<boolean>;
-  /** The ONLY other way to clear a motion/timeout alert besides checkIn(). */
+  /** The ONLY other way to clear an active alert besides checkIn(). */
   acknowledgeAlert: () => Promise<boolean>;
-  /** Records movement as evidence only — never resolves an alert by itself. */
+  /** Records a GPS fix as evidence only — never resolves an alert by itself. */
   recordMovement: (lat: number, lng: number) => void;
 }
 
@@ -83,6 +109,7 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
     officerManDownEnabled = true,
     checkinIntervalMinutes = DEFAULT_CHECKIN_INTERVAL_MINUTES,
     stationaryMinutes = DEFAULT_STATIONARY_MINUTES,
+    inactivityMinutes = DEFAULT_INACTIVITY_MINUTES,
     getGps = defaultGetGps,
   } = options;
 
@@ -94,6 +121,7 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
 
   const lastCheckinRef = useRef<Date>(new Date());
   const lastMovementRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  const lastFixAtRef = useRef<number | null>(null);
   const lastPositionRef = useRef<{ lat: number; lng: number } | null>(null);
   const activeAlertRef = useRef<ActiveAlert | null>(null);
   useEffect(() => {
@@ -134,6 +162,24 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
         const stationaryMin = (Date.now() - lastMovement.at) / 60_000;
         if (stationaryMin >= stationaryMinutes) {
           void fireAlert('motion');
+          return;
+        }
+      }
+
+      // gps_lost takes priority over inactivity: no fix at all beats a fix
+      // that arrived but showed no movement.
+      const lastFix = lastFixAtRef.current;
+      if (lastFix != null) {
+        const sinceFixMin = (Date.now() - lastFix) / 60_000;
+        if (sinceFixMin >= inactivityMinutes) {
+          void fireAlert('gps_lost');
+          return;
+        }
+      }
+      if (lastMovement) {
+        const sinceMovementMin = (Date.now() - lastMovement.at) / 60_000;
+        if (sinceMovementMin >= inactivityMinutes) {
+          void fireAlert('inactivity');
         }
       }
     }
@@ -142,7 +188,7 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
     const timer = setInterval(tick, TICK_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detectionState, checkinIntervalMinutes, stationaryMinutes]);
+  }, [detectionState, checkinIntervalMinutes, stationaryMinutes, inactivityMinutes]);
 
   const fireAlert = useCallback(
     async (kind: AlertKind) => {
@@ -156,7 +202,7 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
         .insert({
           officer_user_id: officerId,
           organization_id: organizationId,
-          alert_type: kind === 'sos' ? 'sos' : kind === 'timeout' ? 'man_down' : 'man_down',
+          alert_type: kind === 'sos' ? 'sos' : kind === 'timeout' ? 'man_down' : kind === 'motion' ? 'man_down' : kind,
           status: 'pending',
           triggered_at: nowIso,
           gps_lat: pos?.lat ?? null,
@@ -168,7 +214,11 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
               ? 'SOS triggered by officer'
               : kind === 'timeout'
                 ? 'Missed check-in: no check-in received within the expected interval'
-                : 'GPS-stationary: no movement detected',
+                : kind === 'motion'
+                  ? 'GPS-stationary: no movement detected'
+                  : kind === 'gps_lost'
+                    ? 'No GPS fix received within the inactivity threshold'
+                    : 'No officer movement within the inactivity threshold',
         })
         .select('id')
         .single();
@@ -274,10 +324,15 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
   }, [officerId]);
 
   const recordMovement = useCallback((lat: number, lng: number) => {
-    // Evidence only. Deliberately does NOT touch activeAlert/status —
-    // movement can never resolve an alert by itself.
+    // Evidence only. Deliberately does NOT touch activeAlert/status — a GPS
+    // fix or genuine movement can never resolve an alert by itself.
+    const now = Date.now();
+    lastFixAtRef.current = now;
+    const prev = lastPositionRef.current;
+    if (!prev || haversineMetres(prev.lat, prev.lng, lat, lng) >= MOVEMENT_THRESHOLD_M) {
+      lastMovementRef.current = { lat, lng, at: now };
+    }
     lastPositionRef.current = { lat, lng };
-    lastMovementRef.current = { lat, lng, at: Date.now() };
   }, []);
 
   return {

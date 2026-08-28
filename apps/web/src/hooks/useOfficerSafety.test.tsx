@@ -222,4 +222,99 @@ describe('useOfficerSafety', () => {
     });
     expect(insertCallCount).toBe(1);
   });
+
+  it('gps_lost fires automatically when no GPS fix arrives within the inactivity threshold', async () => {
+    vi.useFakeTimers();
+    try {
+      let insertedType: string | undefined;
+      mockTable({
+        welfare_alerts: () => ({
+          insert: (payload: { alert_type: string }) => {
+            insertedType = payload.alert_type;
+            return { select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-gl' }, error: null }) }) };
+          },
+        }),
+      });
+      const { result } = renderHook(() =>
+        useOfficerSafety(baseOptions({ stationaryMinutes: 1000, inactivityMinutes: 0.2 })),
+      );
+      // One fix establishes a baseline (matches the original hook's own
+      // behaviour: gps_lost is measured from the last fix received, not from
+      // hook-mount time), then no further fixes ever arrive.
+      act(() => {
+        result.current.recordMovement(-36.8, 174.7);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(result.current.activeAlert?.kind).toBe('gps_lost');
+      expect(insertedType).toBe('gps_lost');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('inactivity fires when fixes keep arriving but show no real movement, and is distinct from gps_lost', async () => {
+    vi.useFakeTimers();
+    try {
+      let insertedType: string | undefined;
+      mockTable({
+        welfare_alerts: () => ({
+          insert: (payload: { alert_type: string }) => {
+            insertedType = payload.alert_type;
+            return { select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-ia' }, error: null }) }) };
+          },
+        }),
+      });
+      const { result } = renderHook(() =>
+        useOfficerSafety(baseOptions({ stationaryMinutes: 1000, inactivityMinutes: 0.2 })),
+      );
+      act(() => {
+        result.current.recordMovement(-36.8, 174.7);
+      });
+      // Fresh fixes keep arriving at the exact same spot — refreshes lastFixAtRef
+      // (so gps_lost never fires) but never moves far enough to refresh lastMovementRef.
+      await act(async () => {
+        for (let i = 0; i < 3; i += 1) {
+          await vi.advanceTimersByTimeAsync(10_000);
+          result.current.recordMovement(-36.8, 174.7);
+        }
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(result.current.activeAlert?.kind).toBe('inactivity');
+      expect(insertedType).toBe('inactivity');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recordMovement below MOVEMENT_THRESHOLD_M does not reset the stationary timer (fixes the original unused-threshold bug)', async () => {
+    vi.useFakeTimers();
+    try {
+      mockTable({
+        welfare_alerts: () => ({
+          insert: () => ({
+            select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-mv' }, error: null }) }),
+          }),
+        }),
+      });
+      const { result } = renderHook(() =>
+        useOfficerSafety(baseOptions({ stationaryMinutes: 0.2, inactivityMinutes: 1000 })),
+      );
+      act(() => {
+        result.current.recordMovement(-36.8, 174.7);
+      });
+      // Tiny jitter well under the 25m threshold — must NOT count as real movement.
+      await act(async () => {
+        for (let i = 0; i < 3; i += 1) {
+          await vi.advanceTimersByTimeAsync(10_000);
+          result.current.recordMovement(-36.800001, 174.700001);
+        }
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(result.current.activeAlert?.kind).toBe('motion');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
