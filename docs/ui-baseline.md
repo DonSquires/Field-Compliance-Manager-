@@ -717,3 +717,32 @@ Any UI change must check its impact on:
 - tests, screenshots, and release artifacts
 
 No UI implementation should be considered complete until the affected Atlas nodes and edges have been reviewed.
+
+## Cross-app gating audit (open — not yet verified)
+
+Fixing module gating in the shell/nav layer (`useEnabledModules`, `AdminShell`, `OfficerShell`) does not prove every other surface fails closed. A hidden nav item is not the same as a hidden or absent data layer: any page, panel, or subscription that reads state independently of the shell's gate, caches it differently, or trusts route access after initial load can still expose safety-relevant content or actions even when navigation to it is correctly hidden.
+
+**UX rule**: for every safety-sensitive surface, the same four states must be shown, at both the action level and the data level, not just the menu level:
+
+1. loading
+2. unavailable — configuration/entitlement not yet verified
+3. not enabled for this organisation
+4. enabled
+
+**Not yet verified — still needs Bob read-only evidence before any implementation**:
+
+- **Heat map**: map layers, live pins, welfare overlays, filter chips, and legend/count badges. A hidden tab is not sufficient if the underlying data layer still renders once any map component mounts.
+- **Dispatch**: direct-entry screens, incident panels, officer status cards, quick actions, and alert creation/resolution controls. Dispatch UIs are prone to "button visible because data already arrived" logic that bypasses gating entirely.
+- **Live monitoring**: websocket/subscription consumers, polling hooks, and presence/state banners. Real-time code paths often bypass the gate checks the rest of the UI relies on.
+- **Other systems**: deep links, bookmarked URLs, command palette/search results, mobile shortcuts, notifications, and API-backed dashboard widgets — any entry point that can reach a safety-relevant surface without passing through the shell's normal navigation gate.
+
+**Standard to build to**: action-level and data-level fail-closed, not menu-level hiding. Every one of the surfaces above should render exactly the four states listed above and should be built on the shared `SafetyGate` component below rather than reimplementing the check.
+
+**Implemented ahead of the specific findings**: `apps/web/src/components/SafetyGate.tsx` is a general-purpose enforcement point — it wraps `useEnabledModules`'s status/enabled output with `getModuleAccessMessage` and renders children ONLY when access is positively confirmed (`configured` and enabled for safety-relevant content). It is deliberately usable at the individual map-layer, panel-section, or action-button level, not only the page/route level, since that is exactly where the audit above expects gating to be missing. It does not, and cannot, verify the actual heat map/dispatch/live-monitoring source — that requires the reads below before those specific pages are rebuilt or wrapped.
+
+**Next Bob reads (read-only, no implementation until evidence is in)**:
+
+1. Locate and read the heat map component(s): map layer definitions, live pin data source, welfare overlay toggle, and any legend/count badge that reflects safety-relevant counts.
+2. Locate and read the dispatch surfaces: incident panel, officer status card, quick-action buttons, and alert creation/resolution controls — specifically whether any of these check module/entitlement state before rendering or firing an action.
+3. Locate and read the live-monitoring data path: websocket or subscription setup, polling hook, and any presence/status banner — specifically whether the subscription itself is gated or only the banner that displays its output.
+4. Locate and read how deep links / direct route entry (bookmarked URLs, notifications, command palette) reach these same surfaces, and whether they pass through the same gate as normal in-app navigation.
