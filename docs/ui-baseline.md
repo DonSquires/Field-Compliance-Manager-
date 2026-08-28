@@ -113,6 +113,26 @@ Concrete named example: Welfare Monitoring is available platform-wide but is **n
 3. Non-critical UI discovery may still choose to fail open on `unconfigured` if that is a deliberate rollout decision, but `loading` and `error` must never be treated as authorization to show a gated feature.
 4. Any safety-relevant or write-capable module (welfare/man-down included) must default to fail-closed until entitlement is positively confirmed as `configured`.
 
+**Implemented**: `apps/web/src/hooks/useEnabledModules.ts` exposes exactly these four states plus an `isModuleEnabled(key, { safetyRelevant })` helper matching requirements 3-4, with tests covering error/unconfigured/configured-disabled/configured-enabled in `useEnabledModules.test.tsx`.
+
+## Bob's UX presentation review (state communication, not a new defect class)
+
+Bob's review of the `useEnabledModules`-driven UI surface identified nine presentation-layer requirements that sit on top of the four-state hook contract above. These are refinements to how state is communicated, not new categories of defect:
+
+1. **Distinct visible outcomes** for loading, read failure, and not-configured — they must not collapse into the same message/appearance.
+2. **Safety-closed presentation**: for welfare/safety-sensitive surfaces, say the feature is unavailable because configuration could not be verified — never silently hide it *or* silently show it.
+3. **Hidden vs. unavailable wording**: a module that exists platform-wide but isn't enabled for this org must say "not enabled for this organisation" — not "missing" or "broken."
+4. **Shell consistency**: the same gating language/behavior must appear everywhere modules are surfaced (Admin and Officer must not draw different conclusions from the same backend state) — satisfied structurally by using one shared hook/message source, not per-shell copies.
+5. **Action-level guarding**: menu/nav gating is not enough — direct page entry, deep links, and action buttons tied to welfare must fail closed too.
+6. **Man-down status visibility**: whether detection is active, paused, org-disabled, or officer-disabled must be shown to the officer in plain language.
+7. **Alert lifecycle visibility**: if movement auto-resolves an alert (pending the required-acknowledgement fix above), the officer-facing wording must make that resolution reason explicit — it must not look like the alert vanished arbitrarily.
+8. **No loading flicker on safety-sensitive tabs**: a safety-relevant nav item must not briefly appear then disappear while config loads — that teaches the user the feature exists for them even when it does not.
+9. **Access explanation, not a dead end**: when a user cannot open welfare-related UI, give a compact explanation and the responsible scope (e.g. "contact your administrator") rather than nothing.
+
+### Implementation priority (Bob's own recommendation, adopted)
+
+Focus first on: distinct empty/error/loading states, fail-closed messaging for welfare, and officer-visible man-down status text. Everything else in the list follows the same shared-message-source pattern once those three exist.
+
 ## Verified ReportButton.tsx submission logic (lines 281-534)
 
 `ReportButton` requires GPS plus location context (zone/site ID, resolved address, or officer-entered address) before allowing submission, with a deliberate offline exception: if the location resolver failed, GPS-only submission is allowed and the record is marked as needing server-side location resolution — derived from column state (`gps_lat` set, `zone_id`/`site_id`/`address` all null), not a persisted flag. This is a reasonable offline-resilience pattern worth preserving.
