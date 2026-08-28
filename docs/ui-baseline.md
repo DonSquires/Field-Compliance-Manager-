@@ -788,11 +788,12 @@ Also surfaced, not yet read: `apps/web/src/pages/OfficerMapPage.tsx` — a page 
 
 Also of note: the original repo's own `docs/atlas/CODE_PATH_VIEW.md` lists `LiveMapPage`'s data-read edges as `location_zones`, `officer_gps_log`, and `observations` — with no `welfare_alerts` edge listed for `LiveMapPage`. If accurate and complete, this corroborates the earlier finding independently (from the original repo's own documentation, not just source reading) that `LiveMapPage` does not read real welfare alert state. This should be treated as corroborating evidence, not proof — the document itself hasn't been verified for completeness.
 
-**Next Bob reads, in order**:
-1. Full contents of `packages/shared/src/welfareSafetySignal.ts` — what it computes, what state it exposes, and its full consumer list (the `'dispatcher_console'` comments suggest there's a registered-consumer pattern worth seeing in full).
-2. Whether `LiveMapPage.tsx` or `OfficerMapPage.tsx` import `welfareSafetySignal` at all — this is the single fact that determines whether the earlier "GPS-age-only" finding is the full picture or only part of it.
-3. `apps/web/src/pages/OfficerMapPage.tsx` — what it is, how it differs from `LiveMapPage.tsx`, and which roles reach it.
-4. The relevant rows of `docs/atlas/CODE_PATH_VIEW.md` around lines 1378-1381 in fuller context, to confirm there truly is no `welfare_alerts` edge recorded for `LiveMapPage`/`OfficerMapPage`.
+**Next Bob reads, in order — use the original repo's OWN atlas artifacts first, since they are pre-curated cross-file relationships and answer several of these questions faster than raw source tracing**:
+1. `docs/atlas/CODE_PATH_VIEW.md` in full for every row mentioning `LiveMapPage`, `OfficerMapPage`, `DispatchConsolePage`, and `welfareSafetySignal`/`welfare_alerts` — not just the four lines already surfaced. This single document may already state consumer/producer edges for all of the open questions below without needing to open the source files at all.
+2. List `docs/atlas/` in full (it is not a single file — treat the directory as a small index) to find any sibling document that maps shared modules (`packages/shared/src/*`) to their consumers; `welfareSafetySignal.ts`'s consumer list may already be documented there rather than needing to be read from its own source.
+3. Whether the "bob knowledge" tables referenced in `supabase/migrations/0163_bob_knowledge_ui_visual.sql` (e.g. content describing "Dispatch Resources: DispatchResourcesPage.tsx") hold a queryable UI/page knowledge base — if the original repo has its own Bob-queryable atlas equivalent to this repo's `bob-query-atlas`, prefer querying it over ad hoc greps for the remaining open questions.
+4. Only if the above do not resolve it: read `packages/shared/src/welfareSafetySignal.ts` in full, and confirm directly in source whether `LiveMapPage.tsx`/`OfficerMapPage.tsx` import it.
+5. `apps/web/src/pages/OfficerMapPage.tsx` — what it is, how it differs from `LiveMapPage.tsx`, and which roles reach it (fall back to source only if not already answered by the atlas docs).
 
 Until these come back, `apps/web/src/lib/officerPinStatus.ts` (already implemented in the rebuild) is not necessarily wrong, but its exact contract may need to be reconciled with whatever `welfareSafetySignal.ts` turns out to define, rather than treated as the sole model.
 
