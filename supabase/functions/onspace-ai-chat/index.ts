@@ -3153,7 +3153,7 @@ async function execSchemaInspect(authHeader, args) {
 // Bob's EYES: resolve a live entity (org/branch/sites) via the whitelisted
 // bob-query-records tool, scoped to the caller's authorised orgs. Read-only.
 // ADMIRAL-ONLY repo grep/read (bob-repo-search). Read-only, secret-safe.
-async function execRepoSearch(authHeader, caps, args) {
+async function execRepoSearch(authHeader, caps, conversationId, args) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'Repository search is restricted to the admiral (grand_master).',
@@ -3215,6 +3215,7 @@ async function execRepoSearch(authHeader, caps, args) {
     query: args.query ?? args.q,
     path: args.path,
     ref: args.ref,
+    conversation_id: conversationId || undefined,
     start_line: typeof args.start_line === 'number' ? args.start_line : undefined,
     end_line: typeof args.end_line === 'number' ? args.end_line : undefined,
     limit: typeof args.limit === 'number' ? args.limit : 30,
@@ -3239,9 +3240,12 @@ async function execRepoSearch(authHeader, caps, args) {
     // it -- that was the read-branch half of the flattening).
     const lineHeader = typeof r.data?.start_line === 'number' ? ` lines ${r.data.start_line}-${r.data.end_line} of ${r.data.total_lines}` : '';
     const continuation = typeof r.data?.next_start_line === 'number' ? ` [has_more; next_start_line ${r.data.next_start_line}]` : hasMore ? ` [has_more; next_offset ${r.data?.next_offset}]` : '';
+    // Out-of-order/repeated read detection (real bug: reads arriving scrambled
+    // across turns). Make this loud in the reply, not just buried in meta.
+    const overlapWarning = r.data?.overlaps_prior_read ? `\n\n[WARNING: you already read through line ${r.data.already_read_through} of this file. Re-reading lines ${r.data?.start_line}-${r.data?.end_line} is redundant -- continue from line ${r.data.suggested_next_start_line} instead.]` : '';
     const readHeader = `\`${r.data?.path}\` @ ${r.data?.ref}${lineHeader} \u2014 read_state: ${readState}` + (r.data?.read_note ? ` (${r.data.read_note})` : '') + continuation;
     return {
-      reply: `${readHeader}\n\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``,
+      reply: `${readHeader}${overlapWarning}\n\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``,
       meta: {
         tool: 'repo_search',
         outcome: 'ok',
@@ -3253,7 +3257,9 @@ async function execRepoSearch(authHeader, caps, args) {
         start_line: r.data?.start_line ?? null,
         end_line: r.data?.end_line ?? null,
         next_start_line: r.data?.next_start_line ?? null,
-        total_length: r.data?.total_length ?? null
+        total_length: r.data?.total_length ?? null,
+        overlaps_prior_read: Boolean(r.data?.overlaps_prior_read),
+        already_read_through: r.data?.already_read_through ?? null
       }
     };
   }
@@ -7352,7 +7358,7 @@ serve(async (req)=>{
         case 'sql_read':
           return execSqlRead(authHeader, caps, toolArgs);
         case 'repo_search':
-          return execRepoSearch(authHeader, caps, toolArgs);
+          return execRepoSearch(authHeader, caps, conversationId, toolArgs);
         case 'self_audit':
           return execSelfAudit(authHeader, caps, conversationId, toolArgs);
         case 'review_merge_request':

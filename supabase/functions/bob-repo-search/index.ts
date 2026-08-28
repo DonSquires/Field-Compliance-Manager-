@@ -33,7 +33,7 @@
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { BOB_CHAT_PATH as _BOB_CHAT_PATH, parseUnansweredEntries } from '../_shared/deterministic-logic.ts';
-import { splitSearchTerms, detectCompoundQuery, deriveSearchStatus, deriveTermStatus, computeReadWindow, computeLineWindow } from './search-logic.ts';
+import { splitSearchTerms, detectCompoundQuery, deriveSearchStatus, deriveTermStatus, computeReadWindow, computeLineWindow, deriveReadProgress } from './search-logic.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -72,6 +72,31 @@ function json(body, status = 200) {
 }
 function redactSecretLines(text) {
   return text.split('\n').map((l)=>l.replace(SECRET_LINE, '$1[redacted]')).join('\n');
+}
+// Records the high-water line read for (conversation, path, ref) so an
+// out-of-order or repeated read is detected instead of silently re-served.
+// Best-effort/fail-open: a lookup or write failure never blocks the read.
+async function trackReadProgress(admin, conversationId, path, ref, startLine, endLine) {
+  const empty = { previously_read_through: null, overlaps_prior_read: false, suggested_next_start_line: null };
+  const convId = String(conversationId ?? '').trim();
+  if (!convId) return empty;
+  try {
+    const { data: existing } = await admin.from('bob_repo_read_progress').select('max_line_read').eq('conversation_id', convId).eq('path', path).eq('ref', ref).maybeSingle();
+    const progress = deriveReadProgress(existing?.max_line_read ?? 0, startLine, endLine);
+    await admin.from('bob_repo_read_progress').upsert({
+      conversation_id: convId,
+      path,
+      ref,
+      max_line_read: progress.max_line_read,
+      last_start_line: startLine,
+      last_end_line: endLine,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'conversation_id,path,ref' });
+    return progress;
+  } catch (e) {
+    console.warn('[bob-repo-search] trackReadProgress failed (non-fatal):', e);
+    return empty;
+  }
 }
 async function gl(path, token = GITLAB_READ_TOKEN) {
   return fetch(`${GITLAB_BASE_URL}/api/v4/projects/${encodeURIComponent(GITLAB_PROJECT_ID)}${path}`, {
@@ -257,6 +282,7 @@ serve(async (req)=>{
       const redacted = redactSecretLines(raw);
       if (body.start_line !== undefined || body.end_line !== undefined) {
         const lineWindow = computeLineWindow(redacted, Number(body.start_line), Number(body.end_line));
+        const progress = await trackReadProgress(admin, body.conversation_id, path, ref, lineWindow.startLine, lineWindow.endLine);
         return json({
           ok: true,
           action,
@@ -270,7 +296,10 @@ serve(async (req)=>{
           has_more: lineWindow.hasMore,
           next_start_line: lineWindow.nextStartLine,
           truncated: lineWindow.hasMore,
-          content: lineWindow.content
+          content: lineWindow.content,
+          already_read_through: progress.previously_read_through,
+          overlaps_prior_read: progress.overlaps_prior_read,
+          suggested_next_start_line: progress.overlaps_prior_read ? progress.suggested_next_start_line : null
         });
       }
       const rawOffset = Number(body.offset ?? 0);

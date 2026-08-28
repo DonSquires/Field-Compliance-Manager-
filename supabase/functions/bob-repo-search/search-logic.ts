@@ -145,3 +145,26 @@ export function computeLineWindow(redacted, rawStartLine, rawEndLine, maxLines =
     readState: totalLines === 0 ? 'empty_file' : startLine > totalLines ? 'line_past_end' : 'line_window'
   };
 }
+
+// ── Read-progress / out-of-order detection ───────────────────────────────────
+// Nothing in computeLineWindow (or the caller) tracks what has ALREADY been
+// read for a given (conversation, path, ref) across turns. Without this, a
+// caller re-requesting an already-read window, skipping ahead, or jumping
+// backward is indistinguishable from genuine forward progress -- the exact
+// failure observed live: repo_search reads for the same file arriving in
+// scrambled, overlapping order across turns. This is PURE: given the
+// previously-recorded high-water mark (max line number ever returned for this
+// file in this conversation) and the window just computed, derive whether
+// this read overlaps/regresses and what the caller should read next.
+export function deriveReadProgress(previousMaxLineRead, startLine, actualEndLine) {
+  const prevMax = Number.isFinite(previousMaxLineRead) ? Math.max(0, Math.trunc(previousMaxLineRead)) : 0;
+  const isRegression = prevMax > 0 && startLine <= prevMax;
+  const newMax = Math.max(prevMax, actualEndLine);
+  return {
+    previously_read_through: prevMax > 0 ? prevMax : null,
+    overlaps_prior_read: isRegression,
+    suggested_next_start_line: prevMax > 0 ? prevMax + 1 : null,
+    max_line_read: newMax
+  };
+}
+

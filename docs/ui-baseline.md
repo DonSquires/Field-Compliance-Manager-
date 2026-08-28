@@ -25,11 +25,17 @@ A legacy slug can be syntactically recognized yet still fail semantically if its
 
 The current source confirms that `VALID_ADMIN_PAGES` contains only canonical container/page keys, while `LEGACY_REDIRECTS` contains dozens of older CRM, roster, field-operations, and reporting slugs. The redirect table therefore acts as a second route registry. Its child values must be validated against `CRMFinanceTab`, `RosterHRTab`, `FieldOpsSubArea`, and `ReportsTab`; TypeScript shape alone does not prove that every string is still accepted by the child page.
 
-### P0 legacy-route initialization defect
+### P0 legacy-route render-phase side effect (corrected)
 
-`pageFromUrl()` performs tab-state setters while resolving a legacy URL, but the initial `activePage` state is created by calling `pageFromUrl(location.pathname)` before the tab state declarations have initialized their setter bindings. A first load on a legacy path such as `/admin/invoicing` can therefore call `setCrmTab` during initialization before `setCrmTab` exists, causing a runtime failure.
+Earlier evidence (a partial read) suggested `pageFromUrl()` could call `setCrmTab`/`setRosterTab`/etc. before those setters exist, causing a temporal-dead-zone crash. The complete function body shows this was wrong: `crmTab`, `rosterTab`, `fieldOpsSubArea`, `reportsTab`, and `site360Tab` state (and their setters) are all declared *before* `pageFromUrl` is defined and before `activePage`'s `useState(() => pageFromUrl(location.pathname))` initializer calls it, so there is no reference-before-declaration failure.
 
-The route resolver must be pure. It should return the page and child-state values together, then a post-initialization effect or navigation handler should apply those values. Add a first-render regression test for every container family, not just a canonical `/admin` path.
+The real defect is narrower but still real: `pageFromUrl` is passed as a **lazy `useState` initializer**, and it calls other components' `setState` functions (`setCrmTab`, etc.) as a side effect of computing the initial value. React expects initializer functions to be pure. Consequences:
+
+- In React 18 `StrictMode` (dev), initializer functions are invoked twice, so a legacy URL like `/admin/invoicing` will call `setCrmTab('invoicing')` twice on mount — harmless here since it is idempotent, but it signals a render-phase side effect that React does not guarantee runs exactly once.
+- The same `pageFromUrl` logic is duplicated in the separate `popstate`/`location.pathname` sync effect (URL sync on browser back/forward), so tab-state setters can fire from two different code paths for the same URL, making the source of truth for "which tab is selected" harder to reason about.
+- Because the setters fire during the initial render pass (not after commit), any logic that assumes `crmTab` is still `'crm'` (the default) during that very first render will observe stale state until the extra re-render settles.
+
+The fix is still to make `pageFromUrl` pure: return `{ page, crmTab?, rosterTab?, fieldOpsSubArea?, reportsTab? }` and apply the child-tab values in one place (either the initial `useState` default computed inline, or a single `useEffect` keyed on `location.pathname`), rather than mutating other state from inside a value-computing function. Add a regression test asserting `setCrmTab`/etc. are each called at most once per distinct URL.
 
 ### Verified silent module-gate fallback
 
@@ -38,6 +44,17 @@ When `isPageEnabled(activePage)` returns false, the shell renders `AdminHubPage`
 ### Uneven container gating inputs
 
 `FieldOperationsPage` and `ReportsPage` receive `enabledModules` and `isPlatformOperator` directly. CRM & Finance, Roster & HR, and Site 360 receive no equivalent module-gating props in this render path. This may be intentional because their child gates use another contract, but it must be verified rather than assumed; otherwise module policy can be enforced unevenly across the consolidated navigation.
+
+### Search navigation bypasses the shell's own context channel
+
+`handleSearchNavigate()` writes a `vehicle-search`/`breach-review` plate value to `localStorage` (`fcm:searchPlate`) instead of passing it through `pageExtra`, route state, or a prop, even though the shell already has that exact channel for record-scoped navigation (`record_id`/`targetRoute` in `getBobContext()`). This creates a second, untyped, un-scoped state path that:
+
+- is not visible to `getBobContext()` or Bob's page context
+- persists across navigations and sign-out/sign-in unless explicitly cleared
+- can leak a stale plate into an unrelated later visit to the same sub-area
+- is not organisation-scoped, unlike the rest of the shell's state
+
+This should be routed through the existing `pageExtra`/context channel rather than `localStorage`, and `fcm:searchPlate` should be cleared once consumed.
 ## Verified current Admin Hub structure
 
 The original repository contains `apps/web/src/pages/AdminHubPage.tsx`. The current evidence confirms these areas:

@@ -44,7 +44,12 @@ const REQUIREMENTS = [
   {
     name: 'gitlab_read_boundary',
     file: 'supabase/functions/bob-repo-search/index.ts',
-    requiredMarkers: ['GITLAB_READ_TOKEN', 'GITLAB_WRITE_TOKEN', 'GITLAB_ALLOWED_PROJECTS', 'write_bob_chat']
+    requiredMarkers: ['GITLAB_READ_TOKEN', 'GITLAB_WRITE_TOKEN', 'GITLAB_ALLOWED_PROJECTS', 'write_bob_chat', 'trackReadProgress']
+  },
+  {
+    name: 'repo_read_progress',
+    file: 'supabase/migrations/20260828010000_bob_repo_read_progress.sql',
+    requiredMarkers: ['bob_repo_read_progress', 'max_line_read', 'conversation_id']
   },
   {
     name: 'ui_ux_contract',
