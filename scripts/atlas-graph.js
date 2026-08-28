@@ -4,7 +4,7 @@ const path = require('node:path');
 function classifyDomain(relPath) {
   const normalized = relPath.replace(/\\/g, '/');
 
-  if (normalized.startsWith('src/') || normalized.startsWith('supabase/')) return 'app';
+  if (normalized.startsWith('src/') || normalized.startsWith('supabase/') || normalized.startsWith('apps/')) return 'app';
   if (
     normalized.startsWith('scripts/') ||
     normalized.startsWith('.gitea/') ||
@@ -129,7 +129,7 @@ function buildAtlasGraph(rootDir = process.cwd()) {
   }
 
   const domainMap = {
-    app: ['src', 'supabase'],
+    app: ['src', 'supabase', 'apps'],
     platform: ['bob-control-plane-server.js', 'bob-runner.js', 'scripts', 'assessment-manifest.js', 'worker-executor.js'],
     deployment: ['docker-compose', 'Dockerfile', 'deploy'],
     governance: ['README.md', 'Build-Plan', 'docs', '.gitignore']

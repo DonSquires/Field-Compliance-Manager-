@@ -52,6 +52,21 @@ const REQUIREMENTS = [
     requiredMarkers: ['bob_repo_read_progress', 'max_line_read', 'conversation_id']
   },
   {
+    name: 'officer_safety_system',
+    file: 'apps/web/src/hooks/useOfficerSafety.ts',
+    requiredMarkers: ['recordMovement', 'acknowledgeAlert', 'detectionState', 'activeAlert']
+  },
+  {
+    name: 'safety_gating',
+    file: 'apps/web/src/components/SafetyGate.tsx',
+    requiredMarkers: ['getModuleAccessMessage', 'safetyRelevant']
+  },
+  {
+    name: 'officer_pin_status',
+    file: 'apps/web/src/lib/officerPinStatus.ts',
+    requiredMarkers: ['gpsAgeMs', 'safetyStatus', 'alerting']
+  },
+  {
     name: 'ui_ux_contract',
     file: 'README.md',
     requiredMarkers: ['Architecture', 'Local validation', 'Worker isolation']
