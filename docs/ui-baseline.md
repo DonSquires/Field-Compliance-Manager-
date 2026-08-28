@@ -811,6 +811,17 @@ Fixing module gating in the shell/nav layer (`useEnabledModules`, `AdminShell`, 
 3. Locate and read the live-monitoring data path: websocket or subscription setup, polling hook, and any presence/status banner — specifically whether the subscription itself is gated or only the banner that displays its output.
 4. Locate and read how deep links / direct route entry (bookmarked URLs, notifications, command palette) reach these same surfaces, and whether they pass through the same gate as normal in-app navigation.
 
+### Partial evidence: `DispatchConsolePage.tsx` (lines 341-520 of 1568) has its own independent officer-GPS load, no `welfare_alerts` join or gating call visible in this window
+
+Confirmed in this window only (treat as partial, not proof of absence — ~1180 lines remain unread):
+
+- `DispatchConsolePage` loads the latest `officer_gps_log` row per officer itself (`.from('officer_gps_log').select(...).in('officer_id', officerIds).order('created_at', { ascending: false })`, keeping the first/most-recent row per officer) — this is a **separate query from `LiveMapPage`'s**, not shared logic, even though both read the same table. This answers part of the earlier open question: dispatch does NOT reuse `LiveMapPage`'s data-loading code, it duplicates the same pattern independently.
+- The resulting `activeShifts`/`resources` objects carry `officerGpsLat`/`officerGpsLng`/`officerLastSeen` (and `gpsLat`/`gpsLng` on assigned dispatch resources) — but **no `welfare_alerts` read or join appears in this window**. If this holds across the full file, dispatch's officer status cards would have the same "GPS presence looks like a status" risk already found in `LiveMapPage`, independently duplicated rather than shared.
+- **No module-gating call** (`useEnabledModules`/`isModuleEnabled`) is visible in this data-loading window. Still open whether gating exists elsewhere in the file (e.g. at the shell/route level wrapping this whole page) — do not conclude "ungated" from this slice alone.
+- Unrelated to the safety audit, also visible in this window: dispatch resource/callsign loading and a "Phase C" geofence-based requester-org picklist (PostGIS `ST_Contains` via RPC) for job payer resolution — noted for completeness, out of scope here.
+
+**Next Bob read**: the remaining ~1180 lines of `DispatchConsolePage.tsx` (both before line 341 and after line 520), specifically to confirm/deny (1) any `welfare_alerts` read anywhere in the file, (2) any module-gating check wrapping the page or its officer-status rendering, and (3) whether officer status cards present any safety-relevant colour/state derived from this GPS-only data.
+
 ## Verified `LiveMapPage.tsx` findings (heat map + officer live monitoring, same screen)
 
 Bob's read-only inspection resolved the "heat map" item from the cross-app gating audit above: officer live monitoring and the breach heat map are two views on one screen, `apps/web/src/pages/LiveMapPage.tsx` (`buildHotspots` ~lines 78-91, `showHeat`/`selected` state ~lines 149-150, zone/heat/officer map layers assembled together ~lines 270-272, GPS filtering ~line 203).
