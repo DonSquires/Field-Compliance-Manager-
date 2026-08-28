@@ -57,6 +57,39 @@ Verified gaps:
 
 Do not assume `ScanShell`/`ClientShell` mirror `AdminShell`'s or `OfficerShell`'s structure just because the routing pattern looks similar — neither has been opened yet.
 
+## Verified OfficerShell.tsx head content (lines 1-120)
+
+`OfficerShell.tsx` cites a *different* source-of-truth document than the Admin side: `docs/PRODUCT_DESIGN.md` §3.1, §4 — versus `docs/INSTRUCTION_MANUAL.md` §4.1/§2.3 for `AdminShell`/`RoleRouter`. Neither document has actually been read yet; every "source of truth" comment cited across the audit so far has been treated as a pointer, not verified content. Both should be read before finalizing any rebuild decision that claims to follow them.
+
+Confirmed structure:
+
+- Four officer entry states: **welfare standby** (no active/upcoming shift, no direct module access), **officer home** (has a shift, roster-first landing), **module selector** (admin granted multiple direct modules), **module portal** (inside one module). Note this is a *shift-gated* authorization axis distinct from Admin's module-gated axis — officer module access depends on active shift state, not just permission grants.
+- Persistent chrome on every officer screen: `FieldSafetyBar` (top) and `PttBar` (bottom) — the latter is very likely the frontend integration point for this repo's own `ptt-server/` push-to-talk backend service; this connection has not been separately verified and should be traced (does `PttBar` call `ptt-server/` directly, through an Edge Function, or through Supabase Realtime?).
+- Hooks: `useWelfareCheckin` (verified), `useManDownDetection` (NOT yet read — see open question below), `useInactivityDetection` (not yet read), `useActiveShift` (not yet read), `useEnabledModules` (not yet read — see open question below).
+- `OFFICER_MODULE_TO_CANONICAL` remaps officer-facing module keys to canonical `organization_modules` keys where they differ (e.g. `parking` → `parking_enforcement`, `smoke_control` → `smoke_complaints`, `site_guard` → `static_guarding`), citing `packages/shared/src/modules.ts` as the canonical source (also not yet read). This is the same kind of multi-structure-must-stay-synchronized risk already flagged for `AdminShell`'s `VALID_ADMIN_PAGES`/`LEGACY_REDIRECTS` pair — here it's `ActiveModule`/`VALID_OFFICER_MODULES`/`MODULE_META`/`OFFICER_MODULE_TO_CANONICAL`/canonical shared modules, all needing to agree.
+
+### Open question: possible duplicate man-down detection
+
+`useWelfareCheckin`'s own `tick()` already computes a `man_down` status locally (overdue ≥ a full second interval). `OfficerShell` separately imports a distinct `useManDownDetection` hook. Do not assume these are redundant or that one supersedes the other — read `useManDownDetection.ts` next to determine whether it covers a different signal (e.g. device motion/inactivity-based fall detection) or duplicates the welfare-timer logic, which would be a real defect (two independent, possibly disagreeing, sources of the same safety-critical status).
+
+### Open question: does `useEnabledModules` have the same fail-open ambiguity as AdminShell?
+
+`AdminShell` queries `organization_modules` inline and fails open (`null` = show everything) with no distinction between "loading," "genuinely unconfigured," and "query failed" (recorded as a P1 issue above). `OfficerShell` uses a dedicated `useEnabledModules` hook instead of an inline query — this may already solve that ambiguity properly, or may share the same defect. Read `useEnabledModules.ts` before assuming either way.
+
+## Verified ReportButton.tsx submission logic (lines 281-534)
+
+`ReportButton` requires GPS plus location context (zone/site ID, resolved address, or officer-entered address) before allowing submission, with a deliberate offline exception: if the location resolver failed, GPS-only submission is allowed and the record is marked as needing server-side location resolution — derived from column state (`gps_lat` set, `zone_id`/`site_id`/`address` all null), not a persisted flag. This is a reasonable offline-resilience pattern worth preserving.
+
+Confirmed error-handling is **inconsistent across the codebase**, not uniformly absent as the welfare-check-in finding alone might suggest:
+
+- The primary `officer_field_reports` insert **does** check its error and surfaces it to the officer (`if (repErr) { setError(repErr.message); return; }`) — this is the correct pattern.
+- The **LOI** (location-of-interest) `entity_flags` insert, triggered automatically for high/critical severity or when explicitly checked, has **no error check at all** — if it fails, the flag silently never exists and the officer is never told, unlike every other failure path in this same file.
+- The **VOI** (vehicle-of-interest) plate resolution is wrapped in `try/catch` and defensively appends a failure note directly into the report (`oiNotes.push(...flag not saved...)`) rather than silently dropping it — this is the correct pattern and should be applied to the LOI insert as well.
+
+### Required rebuild behavior
+
+Apply the VOI insert's error-handling pattern (try/catch + user-visible failure note appended to the record) uniformly to every write in this component, including the currently-silent LOI insert. Do not treat "some inserts here are checked" as evidence the file is safe overall — verify each write individually.
+
 ## Verified RoleRouter.tsx contract
 
 `RoleRouter.tsx` (source of truth: `docs/INSTRUCTION_MANUAL.md` §2.3) is the single role-to-shell dispatcher. Confirmed role → expected URL prefix → shell mapping:
