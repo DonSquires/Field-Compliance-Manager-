@@ -858,3 +858,29 @@ Read: `packages/shared/src/welfareSafetySignal.ts` (lines 1-240 of 448), `apps/w
 
 **Remaining open, not yet answered**: whether `LiveMapPage`/`OfficerMapPage` are gated by the same module/config check used elsewhere in the app (the original cross-app gating audit question), and whether `DispatchConsolePage` (confirmed via code comments to read `welfare_alerts` directly, separately from this shared module) reuses any of the same GPS/officer-loading logic as `LiveMapPage`.
 
+## ⚠️ Two unresolved evidence conflicts requiring a human decision before further safety-fix work — flagging rather than silently proceeding
+
+### Conflict 1 — a product backlog document may describe "auto-resolve" as an INTENDED requirement, not a bug
+
+A search surfaced `docs/WELFARE_MODULE_INVESTIGATION.md` line 122, a backlog row (truncated in transit): `W2 | GPS-stationary man-down: port `useManDownDetection` into the new OfficerShell (replace/augment the time-based man_down); auto-escalate + auto-resolve | h...`. Read literally, this is the product team's OWN backlog explicitly requesting "auto-resolve" alongside "auto-escalate" for the man-down feature — which would directly contradict this rebuild's P0 fix (movement/fixes can never resolve an alert; only explicit officer action can).
+
+**This must not be silently resolved either way.** Two very different situations are consistent with this one truncated row:
+- The backlog genuinely intends automatic resolution (e.g., movement is trusted as sufficient signal) — in which case the P0 "fix" in this rebuild is a deliberate deviation from stated product intent, and that deviation needs to be an explicit, informed decision by a human product owner, not something this audit imposes unilaterally.
+- "Auto-resolve" here means something narrower/safer than what was implemented in `useManDownDetection.ts` (e.g., auto-resolve only after a supervisor/server-side confirmation step, or auto-resolve only below some severity threshold) — in which case the original *implementation* still deviated from even this intent, and the rebuild's fix is correct, but for a different reason than originally assumed.
+
+Also note: `docs/WELFARE_MODULE_INVESTIGATION.md` line 73 states "Writes `check_in`/`sos`/`missed` alerts (!248). SOS latches." — "latches" strongly implies SOS specifically is NOT meant to auto-resolve (consistent with this rebuild's `triggerSOS`/`acknowledgeAlert` requiring an explicit clear). If "auto-resolve" in the W2 row applies only to the man-down/motion signal and not to SOS, that would be a materially different (and more defensible) scope than "nothing can ever require acknowledgement."
+
+**Next Bob read, highest priority, before any further change to `useOfficerSafety.ts`'s resolve behaviour**: the FULL `docs/WELFARE_MODULE_INVESTIGATION.md` document, at minimum the complete W1/W2/W3 backlog rows (the visible row was cut off mid-word at "h...", likely a priority column) and any surrounding narrative that explains what "auto-resolve" was actually meant to mean and why.
+
+### Conflict 2 — `welfareSafetySignal.ts`'s own `CURRENT_WELFARE_CHANNELS` list claims `live_map` IS wired, contradicting the "neither page imports it" finding above
+
+`packages/shared/src/welfareSafetySignal.ts` (lines ~430-445) contains a `CURRENT_WELFARE_CHANNELS` array including `'live_map', // LiveMapPage officer pin colour-coded by welfare status`. This directly conflicts with the earlier, source-verified finding (this same document, section above) that neither `LiveMapPage.tsx` nor `OfficerMapPage.tsx` imports `welfareSafetySignal` at all, based on both files' fully-recovered top import blocks.
+
+Two explanations are possible, and neither should be assumed:
+- `CURRENT_WELFARE_CHANNELS` is aspirational/planning metadata (a list of channels that are *supposed* to consume welfare state) rather than a verified registry of actual imports — i.e. documentation-as-code that has drifted from the real implementation. This would be consistent with everything else found so far (module "not yet wired into the live conductor runtime").
+- `LiveMapPage` consumes welfare state indirectly through something this audit hasn't traced yet (e.g. a shared hook, a different re-export path, or server-computed data already containing welfare state baked in before it reaches the page) — in which case the "GPS-age-only" finding could be incomplete rather than wrong.
+
+**Do not resolve this by assumption.** The full context around `CURRENT_WELFARE_CHANNELS` (what reads this array, whether anything validates against it, whether it's just a comment/plan vs. an enforced list) needs to be read before treating either explanation as settled.
+
+**Next Bob read**: full context of `packages/shared/src/welfareSafetySignal.ts` around lines 420-448 (the `CURRENT_WELFARE_CHANNELS` definition and whatever consumes it), to determine whether this is aspirational documentation or an enforced/consumed registry.
+
