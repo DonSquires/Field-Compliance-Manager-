@@ -1,14 +1,14 @@
 # UI Baseline
 
-Status: working baseline
-Source: current repository evidence plus partial read-only findings from the original GitLab repository
+Status: rebuild specification
+Source: Bob's read-only, verified findings from the original GitLab repository (project ID 83317421, ref `Main`) via `bob-repo-search` — NOT this GitHub repo, which has never contained a frontend. See [historical-sources.md](historical-sources.md) for the open question of whether this GitLab ref matches what is actually live on Vercel.
 Last reviewed: 2026-08-28
 
 ## Purpose
 
-This document is the starting UI contract for Field Compliance Manager. It prevents future work from being designed as an isolated screen and keeps the interface connected to the operational, evidence, permission, and accountability model.
+This document is the build specification for the new Field Compliance Manager frontend. We do not have write access to the original GitLab repository, so defects and gaps found there are not "reported back" — they are requirements this rebuild must NOT repeat. Every verified behavior, data contract, route, and permission boundary recorded here is what the new implementation must reproduce faithfully; every defect recorded here is what the new implementation must fix instead of copy.
 
-The baseline is intentionally split into verified facts, provisional findings, and open evidence. Items marked unknown must not be presented as settled product behavior.
+The baseline is intentionally split into verified facts, provisional findings, and open evidence. Items marked unknown must not be presented as settled product behavior, and must not be guessed at during implementation — they must be resolved from further Bob evidence first.
 
 ## Product UI principles
 
@@ -16,8 +16,89 @@ The baseline is intentionally split into verified facts, provisional findings, a
 
 - `apps/web/src/pages/AdminHubPage.tsx` (599 lines): accumulated read coverage is complete to end-of-file. Findings recorded below and in the Admin Hub sections are treated as verified except where a window was dropped/truncated in transit — those tails are explicitly excluded from verified evidence rather than assumed.
 - `apps/web/src/shells/AdminShell.tsx` (810 lines): accumulated read coverage is complete to end-of-file, same caveat for truncated-in-transit windows.
-- Neither file should be re-requested in full; further work on them should target specific symbols/behaviors not yet traced (e.g. `NAV_GROUPS`/`MOBILE_NAV` full definitions, `getBobContext` callers) rather than re-reading line ranges already covered.
-- Remaining open frontend targets: `RoleRouter.tsx` (full read, not yet closed), and the shared API/Supabase client (`apps/web/src/lib/supabase.ts` or equivalent) for the dependency map.
+- `apps/web/src/routing/RoleRouter.tsx`: fully read in one clean sequential window (no truncation) and is treated as complete verified evidence, including the `PortalSelector` sub-component and its inline styles.
+- Neither `AdminHubPage.tsx` nor `AdminShell.tsx` should be re-requested in full; further work on them should target specific symbols/behaviors not yet traced (e.g. `NAV_GROUPS`/`MOBILE_NAV` full definitions, `getBobContext` callers) rather than re-reading line ranges already covered.
+- Remaining open frontend target: the shared API/Supabase client (`apps/web/src/lib/supabase.ts` — already spot-read once, treat as read for the client singleton itself, but `apps/web/src/lib/env.ts` it imports is not yet verified) for the dependency map.
+
+### Explicit gap: Officer/Scan/Client shells
+
+`RoleRouter.tsx` proves that `officer`, `scan_operator`, and `client_*` roles are routed to `OfficerShell`, `ScanShell`, and `ClientShell` respectively.
+
+- `apps/web/src/shells/OfficerShell.tsx` (975 lines): Bob reports this was read to end-of-file, but per the same discipline used for `AdminHubPage.tsx`/`AdminShell.tsx`, only windows actually shown in this conversation are treated as verified evidence — a file-level "read to line N" claim on its own is not. See the verified findings below for what has genuinely been confirmed from this file so far; the remainder (imports, hooks, full component list, module-gating source, Supabase/API calls) is still open.
+- `apps/web/src/shells/ScanShell.tsx` — not yet read at all, including how it differs given it has no dynamic route segment.
+- `apps/web/src/shells/ClientShell.tsx` — not yet read at all, including its internal nested routing under the `/client/*` wildcard.
+
+Next read: the child components/hooks `OfficerShell.tsx` imports near its top (per Bob's own recommendation), to ground the audit in actual dependencies rather than re-summarizing a file already marked complete.
+
+## P0 SAFETY-CRITICAL: welfare check-in / SOS has no confirmed-delivery guarantee
+
+`apps/web/src/hooks/useWelfareCheckin.ts` (179 lines, fully read) implements officer welfare escalation: `ok` → `due` (≤5 min remaining) → `overdue` (0 min remaining) → `man_down` (a full second interval elapsed past deadline) → `sos` (latched — once set, `tick()` refuses to overwrite it: `if (prev === 'sos') return 'sos'`). This is the most safety-critical code path found in the audit so far and ranks above every other finding, including the NOC telemetry issue.
+
+Verified gaps:
+
+- `triggerSOS()` inserts into `welfare_alerts` with a plain `await supabase.from(...).insert(...)` — the returned `{ error }` is never checked. If the insert fails (network loss, RLS denial, outage), the UI still sets local `status` to `'sos'` and reports success to the officer, who has no indication the alert never reached a supervisor. This is the same "silent zero" pattern found elsewhere in the codebase (`AdminHubPage` KPI/trend loaders), but here it can mean a genuine emergency alert appears sent when it was not.
+- `checkIn()` has the identical unchecked-error pattern for both the `welfare_checks` insert and the `officer_welfare_settings` upsert.
+- Supervisor escalation alerts use `void emitMissedAlert(...)` — `void` only suppresses the "unused promise" lint signal, it does not attach a `.catch`. A rejected promise here becomes an unhandled rejection: no retry, no user-facing failure state, no confirmation the supervisor was actually notified.
+- No visible mechanism in this hook for a supervisor-side SOS clear to reach the officer's device. Once `status` latches to `'sos'`, the only path shown back to `'ok'` is the officer's own `checkIn()`. If clearing is meant to happen from a supervisor console, this hook would need to subscribe to or poll for that state change — not present here. Flag as an open question, not yet resolved either way.
+- `lastCheckin ?? new Date()` as the tick anchor means: if `lastCheckin` is `null` because it failed to load (vs. genuinely never having checked in), the officer is shown a fresh full countdown rather than an unknown/unavailable state — the same load-failure-vs-empty-state ambiguity flagged for `AdminShell`'s module gating.
+
+### Required rebuild behavior
+
+1. Every write in the welfare/SOS path (`welfare_checks`, `welfare_alerts`, `officer_welfare_settings`) must check its `{ error }` and surface a distinct, visible "not confirmed — retry" state to the officer. A tap on SOS must never silently appear successful.
+2. `emitMissedAlert` (and any other fire-and-forget escalation call) must have an explicit `.catch`/retry path, not bare `void`.
+3. Resolve the open question on supervisor-side SOS clearing before implementation — do not guess at a mechanism.
+4. Distinguish "no prior check-in" from "check-in state failed to load" explicitly; do not default a load failure to a fresh safe countdown.
+
+### Verified OfficerShell.tsx findings (from windows actually shown)
+
+- The module-selection screen shows an explicit user-facing note: "Only modules granted by your administrator are shown." This is a real pattern the Admin side lacks — recall the P1 "silent module-gate fallback" finding for `AdminShell`/`AdminHubPage`, where a disabled page falls back to the hub with no explanation. The rebuild should give Admin the same honesty the Officer side already has, not the other way around.
+- `ModulePortal` is a shared wrapper: a "← Home" back button, module icon/title, optional zone name, module content, and a persistent `ReportButton` FAB shown only for genuine field modules (excluded for `report`, `leave`, `timesheet`, `schedule`, `overnight_verification`, `checkpoint_scan` self-service screens). This back+FAB pattern is worth preserving as-is.
+- `ShiftCard` formats shift date/time explicitly in `Pacific/Auckland` (hard-coded IANA timezone, `en-NZ` locale) via `toLocaleDateString`/`toLocaleTimeString`. This is a legitimate regional business constant (not fabricated data like the NOC telemetry), but it is a hard dependency on NZ-only operation that should be called out explicitly in the rebuild rather than silently baked in again — confirm whether this should become a configured constant if multi-region support is ever a goal.
+
+Do not assume `ScanShell`/`ClientShell` mirror `AdminShell`'s or `OfficerShell`'s structure just because the routing pattern looks similar — neither has been opened yet.
+
+## Verified RoleRouter.tsx contract
+
+`RoleRouter.tsx` (source of truth: `docs/INSTRUCTION_MANUAL.md` §2.3) is the single role-to-shell dispatcher. Confirmed role → expected URL prefix → shell mapping:
+
+| Role(s) | Expected prefix | Shell | Route shape |
+|---|---|---|---|
+| `grand_master`, `master`, `admin`, `nzscv_monitor` | `/admin` | `AdminShell` | `/admin`, `/admin/:page` |
+| `admin_officer` (after portal choice) | `/admin` or `/officer` | `AdminShell` or `OfficerShell` | as above / below |
+| `officer` | `/officer` | `OfficerShell` | `/officer`, `/officer/:module` |
+| `scan_operator` | `/scan` | `ScanShell` | `/scan` only (no dynamic segment) |
+| `client_admin`, `client_officer`, `client_viewer` | `/client` | `ClientShell` | `/client`, `/client/*` (wildcard, not a named param) |
+| any other role string | none | inline "Unknown role" message | none |
+
+Confirmed behavior:
+
+- `admin_officer` with no stored portal choice sees `PortalSelector` (a full-screen admin/field choice) before any prefix logic runs.
+- The portal choice is persisted in `sessionStorage` under `fcm.admin_officer.portal` (tab-scoped, cleared on sign-out per the UI's own copy: "You can switch portals by signing out and back in"). This is a deliberate, correct pattern — unlike the `localStorage`-based `fcm:searchPlate` finding elsewhere, this one should be replicated as-is, not fixed.
+- URL-prefix mismatch triggers `<Navigate to={expectedPrefix} replace />`.
+- `ClientShell` uses a wildcard (`/client/*`) rather than a single named segment, meaning it owns its own nested routing internally — structurally different from `AdminShell`/`OfficerShell`, which each get one dynamic segment (`:page`/`:module`) from `RoleRouter` itself. The rebuild must preserve this asymmetry rather than normalizing all four shells to the same routing shape.
+
+### Verified defect: silent blank screen when profile is null
+
+```tsx
+if (loading) return <LoadingScreen />;
+if (!profile) return null;
+```
+
+Once `loading` is `false`, a `null` profile (failed fetch, missing profile row, revoked access, race condition) renders literally nothing — no loading indicator, no error message, no sign-out option. This is a real accountability/UX gap: the user sees a blank page with no explanation and no way to recover except manually navigating away or refreshing. The rebuild must add a distinct "profile unavailable" state with an explanation and a sign-out action, not `return null`.
+
+### Verified defect: prefix matching uses `startsWith`, not a boundary check
+
+```tsx
+if (!path.startsWith(expectedPrefix)) {
+  return <Navigate to={expectedPrefix} replace />;
+}
+```
+
+`path.startsWith('/admin')` is also `true` for a hypothetical `/administrator` or `/admins` path — there is no current colliding route, but the check has no path-boundary guard (`path === expectedPrefix || path.startsWith(expectedPrefix + '/')`). The rebuild should use a boundary-safe prefix check from the start so a future route addition can't silently bypass role enforcement.
+
+### Verified defect: unknown-role screen is a dead end
+
+The `else { return <div>Unknown role: {role}...</div>; }` branch has no sign-out action and no navigation escape — a user who somehow reaches this state is stuck on a static message. The rebuild should offer sign-out from this screen.
 
 
 ## Verified legacy URL compatibility surface

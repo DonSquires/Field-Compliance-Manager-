@@ -3245,7 +3245,13 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
     // When the file was already read to its end, telling the caller to
     // "continue from line N" (N > total_lines) would be a fabricated next
     // step -- say plainly that there is nothing left to read instead.
-    const overlapWarning = r.data?.overlaps_prior_read ? r.data?.file_fully_read ? `\n\n[NOTE: \`${r.data?.path}\` has ${r.data?.total_lines} lines and has already been fully read in this conversation. There is no further content in this file -- move to a different file or symbol.]` : `\n\n[WARNING: you already read through line ${r.data.already_read_through} of this file. Re-reading lines ${r.data?.start_line}-${r.data?.end_line} is redundant -- continue from line ${r.data.suggested_next_start_line} instead.]` : '';
+    //
+    // IMPORTANT: this tracks whether the FETCH already happened, not whether
+    // the content actually reached the reviewer -- a transcript can drop/clip
+    // a window in transit even though the read itself succeeded. So this must
+    // read as a caution, not a prohibition: re-reading to recover content that
+    // may not have been relayed is a legitimate reason to proceed anyway.
+    const overlapWarning = r.data?.overlaps_prior_read ? r.data?.file_fully_read ? `\n\n[NOTE: \`${r.data?.path}\` has ${r.data?.total_lines} lines and has already been fully read in this conversation. There is no further content in this file -- move to a different file or symbol, unless you are deliberately re-reading to recover content that may not have reached the reviewer (e.g. a truncated transcript) -- if so, say so explicitly.]` : `\n\n[CAUTION: a fetch already ran for lines ${r.data.already_read_through ? `up to ${r.data.already_read_through}` : 'this range'} of this file. If you intend genuine forward progress, continue from line ${r.data.suggested_next_start_line} instead. If you are deliberately re-reading because this content may not have reached the reviewer earlier (e.g. a truncated transcript), that is a valid reason -- say so explicitly rather than presenting it as new coverage.]` : '';
     const readHeader = `\`${r.data?.path}\` @ ${r.data?.ref}${lineHeader} \u2014 read_state: ${readState}` + (r.data?.read_note ? ` (${r.data.read_note})` : '') + continuation;
     return {
       reply: `${readHeader}${overlapWarning}\n\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``,
