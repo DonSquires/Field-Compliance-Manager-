@@ -68,13 +68,32 @@ Confirmed structure:
 - Hooks: `useWelfareCheckin` (verified), `useManDownDetection` (NOT yet read — see open question below), `useInactivityDetection` (not yet read), `useActiveShift` (not yet read), `useEnabledModules` (not yet read — see open question below).
 - `OFFICER_MODULE_TO_CANONICAL` remaps officer-facing module keys to canonical `organization_modules` keys where they differ (e.g. `parking` → `parking_enforcement`, `smoke_control` → `smoke_complaints`, `site_guard` → `static_guarding`), citing `packages/shared/src/modules.ts` as the canonical source (also not yet read). This is the same kind of multi-structure-must-stay-synchronized risk already flagged for `AdminShell`'s `VALID_ADMIN_PAGES`/`LEGACY_REDIRECTS` pair — here it's `ActiveModule`/`VALID_OFFICER_MODULES`/`MODULE_META`/`OFFICER_MODULE_TO_CANONICAL`/canonical shared modules, all needing to agree.
 
-### Open question: possible duplicate man-down detection
+### Resolved: `useManDownDetection.ts` is a separate trigger, not duplicate logic — but shares no state with `useWelfareCheckin`
 
-`useWelfareCheckin`'s own `tick()` already computes a `man_down` status locally (overdue ≥ a full second interval). `OfficerShell` separately imports a distinct `useManDownDetection` hook. Do not assume these are redundant or that one supersedes the other — read `useManDownDetection.ts` next to determine whether it covers a different signal (e.g. device motion/inactivity-based fall detection) or duplicates the welfare-timer logic, which would be a real defect (two independent, possibly disagreeing, sources of the same safety-critical status).
+Confirmed: `useManDownDetection` is a distinct, GPS-motion-based detector (`fireManDownAlert` fires when no movement is detected for `stationaryMinutes`), independent from `useWelfareCheckin`'s time-based missed-check-in detector. Both are legitimate, complementary signals for the same underlying safety condition — this is not code duplication.
 
-### Open question: does `useEnabledModules` have the same fail-open ambiguity as AdminShell?
+The real gap: **the two hooks maintain fully independent local React state with no shared source of truth**, while both write toward `welfare_alerts`. Concretely:
 
-`AdminShell` queries `organization_modules` inline and fails open (`null` = show everything) with no distinction between "loading," "genuinely unconfigured," and "query failed" (recorded as a P1 issue above). `OfficerShell` uses a dedicated `useEnabledModules` hook instead of an inline query — this may already solve that ambiguity properly, or may share the same defect. Read `useEnabledModules.ts` before assuming either way.
+- `useWelfareCheckin`'s `status` (`ok`/`due`/`overdue`/`man_down`/`sos`) and `useManDownDetection`'s `manDownState.isActive` are two separate state machines that can each independently reach an "alerting" condition for the same officer, with neither aware of the other.
+- `resolveManDownAlert()` only resets `useManDownDetection`'s own local state; it does not touch `useWelfareCheckin`'s `status`, and `useWelfareCheckin.checkIn()` (the only reset path shown for its own state) does not touch `useManDownDetection`'s state either.
+- The rebuild must unify these into one shared safety-state model (or explicitly document why they must stay separate) so a supervisor clearing one alert type can't leave the officer's device showing a contradictory safety state from the other detector.
+
+Verified good patterns in this file (correcting the earlier "systemic unchecked-write" framing to be precise, not blanket): both `fireManDownAlert()` and `resolveManDownAlert()` correctly check `{ error }` before updating local state (`if (error || !data) return;` / `if (error) return;`), so a failed write does not falsely flip local safety state. This hook does **not** exhibit the unchecked-write defect found in `useWelfareCheckin`/`ReportButton`'s LOI insert/`OfficerShell`'s shift `respond()` — the systemic-pattern note above should be read as "confirmed in 3 of the files audited so far," not "true everywhere."
+
+Also verified: `escalationMinutes` is intentionally loaded for settings/display only and explicitly **not** used for client-side escalation writes — the code comment states the server-side tick owns escalation timing. This is a correct, deliberate client/server separation of concerns and should be preserved as-is in the rebuild.
+
+### Resolved: `useEnabledModules.ts` has the exact same fail-open ambiguity as `AdminShell` — and is the single shared fix point
+
+Confirmed: `useEnabledModules` is the one shared hook used by both `AdminShell` and `OfficerShell` for module gating (a genuine consistency win — no drift between the two shells' gating logic). But it collapses three distinct states into one fail-open outcome: a transient query error, zero rows loaded yet, and a genuinely unconfigured organization all currently resolve to the same `configured: false` / "show everything" behavior. This is exactly the tri-state defect already recorded as a P1 issue for `AdminShell`, now confirmed to originate from this one shared hook rather than being duplicated per-shell.
+
+Practical consequence flagged: if a module (e.g. welfare/man-down) is available platform-wide but deliberately not enabled for a given organization, a transient load failure could still expose it, because "not yet loaded" and "not entitled" currently look identical to callers.
+
+### Required rebuild behavior for `useEnabledModules`
+
+1. Fixing this single hook fixes module-gating consistency for both `AdminShell` and `OfficerShell` at once — do not patch each shell independently.
+2. Expose four distinct states explicitly: `loading`, `error`, `unconfigured` (confirmed zero rows exist for this org), `configured` (rows loaded).
+3. Non-critical UI discovery may still choose to fail open on `unconfigured` if that is a deliberate rollout decision, but `loading` and `error` must never be treated as authorization to show a gated feature.
+4. Any safety-relevant or write-capable module (welfare/man-down included) must default to fail-closed until entitlement is positively confirmed as `configured`.
 
 ## Verified ReportButton.tsx submission logic (lines 281-534)
 
