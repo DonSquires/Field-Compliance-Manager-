@@ -78,15 +78,33 @@ The real gap: **the two hooks maintain fully independent local React state with 
 - `resolveManDownAlert()` only resets `useManDownDetection`'s own local state; it does not touch `useWelfareCheckin`'s `status`, and `useWelfareCheckin.checkIn()` (the only reset path shown for its own state) does not touch `useManDownDetection`'s state either.
 - The rebuild must unify these into one shared safety-state model (or explicitly document why they must stay separate) so a supervisor clearing one alert type can't leave the officer's device showing a contradictory safety state from the other detector.
 
-Verified good patterns in this file (correcting the earlier "systemic unchecked-write" framing to be precise, not blanket): both `fireManDownAlert()` and `resolveManDownAlert()` correctly check `{ error }` before updating local state (`if (error || !data) return;` / `if (error) return;`), so a failed write does not falsely flip local safety state. This hook does **not** exhibit the unchecked-write defect found in `useWelfareCheckin`/`ReportButton`'s LOI insert/`OfficerShell`'s shift `respond()` — the systemic-pattern note above should be read as "confirmed in 3 of the files audited so far," not "true everywhere."
+Full verified state/data inventory for this hook: `officerId`/`organizationId` gate every write; `enabled` (prop) and `settingsEnabled` (loaded) are two separate on/off switches; `stationaryMinutes`/`stationaryMs` is the no-movement threshold; `escalationMinutes` is loaded/retained for display only; `lastMovementRef` tracks the last meaningful-movement timestamp/coordinates; `lastPositionRef` holds the latest GPS fix used in the fired alert's payload; `manDownState`/`manDownStateRef` track active/alert-id/triggered-time; settings are read from `officer_welfare_settings` (`man_down_enabled`, `man_down_stationary_minutes`, `man_down_escalation_minutes`); resolution writes `status`/`resolved_by`/`resolved_at`/`resolution_notes` to `welfare_alerts`; the fire write sets `alert_type='man_down'`, `status='pending'`, `escalation_level=1`, GPS, and timestamps.
 
-Also verified: `escalationMinutes` is intentionally loaded for settings/display only and explicitly **not** used for client-side escalation writes — the code comment states the server-side tick owns escalation timing. This is a correct, deliberate client/server separation of concerns and should be preserved as-is in the rebuild.
+Also verified: `escalationMinutes` is intentionally loaded for settings/display only and explicitly **not** used for client-side escalation writes — the code comment states the server-side tick owns escalation timing. This is a correct, deliberate client/server separation of concerns and should be preserved as-is in the rebuild. Duplicate firing is also correctly guarded via `manDownStateRef.current.isActive` plus a running flag in the interval loop.
 
-### Resolved: `useEnabledModules.ts` has the exact same fail-open ambiguity as `AdminShell` — and is the single shared fix point
+## P0 SAFETY-CRITICAL: man-down alert auto-resolves on movement alone, with no positive human acknowledgement
 
-Confirmed: `useEnabledModules` is the one shared hook used by both `AdminShell` and `OfficerShell` for module gating (a genuine consistency win — no drift between the two shells' gating logic). But it collapses three distinct states into one fail-open outcome: a transient query error, zero rows loaded yet, and a genuinely unconfigured organization all currently resolve to the same `configured: false` / "show everything" behavior. This is exactly the tri-state defect already recorded as a P1 issue for `AdminShell`, now confirmed to originate from this one shared hook rather than being duplicated per-shell.
+This is the single highest-risk finding in the audit so far, ranking above the SOS confirmed-delivery gap. Movement above `MOVEMENT_THRESHOLD_M` updates `lastMovementRef` and **automatically resolves an active man-down alert** — there is no acknowledgement step, no server-side policy check, and no distinction between "officer is fine and moving normally" and "officer's device moved for an unrelated reason while the officer is still in danger" (dropped, kicked, carried, thrown, taken by someone else, etc.). A distressed officer's own struggling movement, or someone else moving the device, is enough to silently clear a live safety alert.
 
-Practical consequence flagged: if a module (e.g. welfare/man-down) is available platform-wide but deliberately not enabled for a given organization, a transient load failure could still expose it, because "not yet loaded" and "not entitled" currently look identical to callers.
+Secondary, lower-severity gaps confirmed in the same hook:
+
+- `resolveManDownAlert()`'s error check (`if (error) return;`) correctly prevents local state corruption on failure (state is not falsely cleared), but gives **no visible feedback** to the officer or supervisor that the resolve attempt failed — from the user's perspective, tapping resolve can silently do nothing.
+- The `officer_welfare_settings` load has no visible error branch — if that read fails, the hook silently continues on seeded/default values rather than surfacing an unknown-configuration state.
+
+### Required rebuild behavior
+
+1. Movement alone must never be sufficient to resolve a man-down alert. Require an explicit positive acknowledgement action from the officer (or a policy-backed server-side check), and treat movement as, at most, evidence that downgrades severity — not a resolution.
+2. A failed resolve attempt must surface a visible local warning/retry state, not silently no-op.
+3. A failed settings load must be represented as an unknown/unavailable configuration state, not silently fall through to defaults.
+4. Keep the server-owned escalation timing exactly as-is — that separation is correct and should not be changed.
+
+Next step (agreed with Bob's own recommendation): trace where `resolveManDownAlert` is actually invoked in the UI to confirm whether any positive-acknowledgement path already exists elsewhere in the flow, or whether movement is currently the only practical resolver.
+
+### Resolved: `useEnabledModules.ts` has the exact same fail-open ambiguity as `AdminShell` — confirmed live in `OfficerShell`, not just theoretical
+
+Confirmed: `useEnabledModules` is the one shared hook used by both `AdminShell` and `OfficerShell` for module gating (a genuine consistency win — no drift between the two shells' gating logic). But it collapses three distinct states into one fail-open outcome: a transient query error, zero rows loaded yet, and a genuinely unconfigured organization all currently resolve to the same `configured: false` / "show everything" behavior. This is exactly the tri-state defect already recorded as a P1 issue for `AdminShell`, now confirmed to originate from this one shared hook rather than being duplicated per-shell — and confirmed as **live behavior in `OfficerShell`**, not a theoretical risk: when `orgConfigured` is false, `OfficerShell` shows all granted modules regardless of whether that `false` came from a real read failure or genuine absence of configuration.
+
+Concrete named example: Welfare Monitoring is available platform-wide but is **not enabled for this organization**. If any welfare-related surface reuses this same gating pattern, a read failure or unconfigured state could present safety-related UI that the organization never actually entitled — the opposite of the intended safety posture.
 
 ### Required rebuild behavior for `useEnabledModules`
 
