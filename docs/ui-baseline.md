@@ -102,7 +102,19 @@ Secondary, lower-severity gaps confirmed in the same hook:
 
 **Implemented**: `apps/web/src/hooks/useOfficerSafety.ts` — `recordMovement()` only updates evidence (position/last-movement timestamp) and never calls anything that clears `activeAlert`; only `acknowledgeAlert()` or `checkIn()` can, and both are explicit officer actions with checked writes. See the full implementation note under "Required rebuild behavior" below the welfare check-in section.
 
-Next step (agreed with Bob's own recommendation): trace where `resolveManDownAlert` is actually invoked in the UI to confirm whether any positive-acknowledgement path already exists elsewhere in the flow, or whether movement is currently the only practical resolver.
+**Resolved (source confirmed, lines 161-230 of 230, end-of-file window)**: the exact defect is in `recordGPSUpdate`, not a separate call site — there is no other invocation to trace. The source shows:
+
+```ts
+if (moved >= MOVEMENT_THRESHOLD_M) {
+  lastMovementRef.current = { lat, lng, at: now };
+  // Movement clears an active man-down.
+  if (manDownStateRef.current.isActive && manDownStateRef.current.alertId) {
+    void resolveManDownAlert(manDownStateRef.current.alertId);
+  }
+}
+```
+
+This confirms, at the source line level, that GPS movement alone — with no officer acknowledgement and no server-side policy check — is sufficient to clear a live man-down alert; the comment ("Movement clears an active man-down.") shows this was the intended design, not an accidental bug. The hook does separately expose an explicit `resolveManDown(alertId?)` in its return value, so a genuine officer-initiated resolution path already exists in the original UI somewhere — the defect is specifically that movement *also* triggers the same resolution automatically, making the explicit path redundant rather than authoritative. `useOfficerSafety.ts` already fixes this correctly: `recordMovement()` has no call to anything that can clear `activeAlert`, full stop. No further tracing or additional fix is required for this finding.
 
 ### Resolved: `useEnabledModules.ts` has the exact same fail-open ambiguity as `AdminShell` — confirmed live in `OfficerShell`, not just theoretical
 
