@@ -758,3 +758,25 @@ Fixing module gating in the shell/nav layer (`useEnabledModules`, `AdminShell`, 
 2. Locate and read the dispatch surfaces: incident panel, officer status card, quick-action buttons, and alert creation/resolution controls — specifically whether any of these check module/entitlement state before rendering or firing an action.
 3. Locate and read the live-monitoring data path: websocket or subscription setup, polling hook, and any presence/status banner — specifically whether the subscription itself is gated or only the banner that displays its output.
 4. Locate and read how deep links / direct route entry (bookmarked URLs, notifications, command palette) reach these same surfaces, and whether they pass through the same gate as normal in-app navigation.
+
+## Verified `LiveMapPage.tsx` findings (heat map + officer live monitoring, same screen)
+
+Bob's read-only inspection resolved the "heat map" item from the cross-app gating audit above: officer live monitoring and the breach heat map are two views on one screen, `apps/web/src/pages/LiveMapPage.tsx` (`buildHotspots` ~lines 78-91, `showHeat`/`selected` state ~lines 149-150, zone/heat/officer map layers assembled together ~lines 270-272, GPS filtering ~line 203).
+
+- **Officer live monitoring loads `officer_gps_log`**, keeps only the latest point per officer from the last 4 hours, and renders clickable officer pins. Positions auto-refresh every 30 seconds.
+- **Displayed welfare status is derived from GPS age alone**: older than 1 hour → `offline`, otherwise → `ok`. No join against actual welfare alert state was found in the read slices. This is a substantive gap: the UI's own colour legend supports `due` and `alert`, but the load logic shown never produces those values — the map can present welfare semantics that look richer than the underlying data path actually is. An officer could be genuinely overdue or mid-alert and still render as a plain "ok" green pin as long as their GPS happens to still be fresh.
+- **Heat map** buckets non-compliant `observations` from the last 30 days into concentration cells and renders them as graduated circles. Loads on initial page load and manual refresh, not on the 30-second timer. Operationally straightforward — not the risky part of this screen.
+- **Zones** overlay boundaries and colour them red when there are open/acknowledged breach alerts.
+- **Gating concern (unresolved)**: no module-gate hook or fail-closed guard was found in the recovered slices before loading officer positions, zones, or heat points. This matters concretely because this organisation's module overlay shows Welfare Monitoring as available but **not enabled** — if this page loads unconditionally, it may present officer welfare-like status regardless of that entitlement.
+
+### Required rebuild behavior
+
+1. Officer pin status must be derived from real welfare/safety state (`useOfficerSafety`'s `status`), not GPS recency. GPS age may still separately indicate `offline` (position unknown), but must never substitute for or suppress a real `due`/`overdue`/`alerting` state.
+2. If welfare status has not loaded, is gated, or is otherwise unavailable, the pin must show an explicit unknown state — never default to `ok`.
+3. The whole live-monitoring surface (officer pins, at minimum) must be wrapped in the same `SafetyGate`/`useEnabledModules` check used elsewhere, so this page is not the one place an ungated welfare-adjacent UI slips through. The heat map/zone layers are not safety-relevant in the same way and are lower priority for gating, but should still respect ordinary loading/error states.
+4. Preserve the correct pieces as-is: GPS-log-based positions, 30-second officer refresh cadence, and observation-based heat bucketing are legitimate and not defects — do not change data sources, only how status is computed and gated.
+
+**Implemented**: `apps/web/src/lib/officerPinStatus.ts` provides `deriveOfficerPinStatus({ gpsAgeMs, safetyStatus })`, combining GPS recency with `useOfficerSafety`'s real `SafetyStatus` so a live alert always wins (even over stale GPS — a phone going quiet does not cancel a real SOS), an unloaded/gated welfare status renders as `'unknown'` rather than defaulting to `'ok'`, and `due`/`overdue`/`ok` now actually reach the pin instead of being collapsed into GPS-age-only logic. 7 tests cover the priority ordering and the two "must never silently show ok" cases. Building the actual `LiveMapPage` component (map layers, hotspot rendering, zone overlays) is still blocked on one open question: which mapping library the original page uses (Leaflet/Mapbox/Google Maps/other) has not yet been verified — this should not be guessed at.
+
+**Next Bob read**: confirm the mapping library via `LiveMapPage.tsx`'s imports (or `package.json`) before any map-rendering code is written, then trace whether `LiveMapPage` is gated by the same module/config check used elsewhere, and whether dispatch panels or other pages import the same live-map data-loading logic.
+
