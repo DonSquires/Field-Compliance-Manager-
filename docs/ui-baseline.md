@@ -70,6 +70,20 @@ Confirmed structure:
 - Four officer entry states: **welfare standby** (no active/upcoming shift, no direct module access), **officer home** (has a shift, roster-first landing), **module selector** (admin granted multiple direct modules), **module portal** (inside one module). Note this is a *shift-gated* authorization axis distinct from Admin's module-gated axis — officer module access depends on active shift state, not just permission grants.
 - Persistent chrome on every officer screen: `FieldSafetyBar` (top) and `PttBar` (bottom) — the latter is very likely the frontend integration point for this repo's own `ptt-server/` push-to-talk backend service; this connection has not been separately verified and should be traced (does `PttBar` call `ptt-server/` directly, through an Edge Function, or through Supabase Realtime?).
 - Hooks: `useWelfareCheckin` (verified), `useManDownDetection` (NOT yet read — see open question below), `useInactivityDetection` (not yet read), `useActiveShift` (not yet read), `useEnabledModules` (not yet read — see open question below).
+
+### Confirmed from `OfficerShell.tsx` lines 80-240: exact org-gating fail-open source, a good visual pattern to preserve, and shell-level GPS facts
+
+- **Org module gating, confirmed at the exact source line** (corroborates the `useEnabledModules` fail-open finding above with the real call site, not inference):
+  ```ts
+  const { enabled: orgModules, configured: orgConfigured } = useEnabledModules();
+  const moduleAccess: string[] = orgConfigured
+    ? grantedModules.filter((m) => orgModules.has(canonicalModuleKey(m)))
+    : grantedModules;
+  ```
+  When `orgConfigured` is `false` — which the original hook returns for a transient read error just as much as for a genuinely unconfigured org — `moduleAccess` becomes the full unfiltered `grantedModules` list. This is the precise fail-open code path already fixed in this rebuild's `useEnabledModules.ts`/`isModuleEnabled`.
+- **A good pattern worth preserving**: `OfficerShell` defines `WELFARE_BG`/`WELFARE_DOT`/`WELFARE_COLOUR` keyed by a five-value `WelfareStatus` (`ok`/`due`/`overdue`/`man_down`/`sos`) that visually distinguishes man-down (`'!!'`) from SOS (`'SOS'`) as separate labels, even though both currently share the same background/colour. This is more granular than this rebuild's `SafetyStatus` (`'ok'|'due'|'overdue'|'alerting'`), which folds man-down and SOS into one `'alerting'` value and relies on `activeAlert.kind` (`'sos'|'timeout'|'motion'`) to carry the distinction. **Rebuild requirement**: when a status-badge/indicator component is built (not yet built), it must render `activeAlert.kind` into a distinct label the same way the original does — never present a man-down and an SOS as the same generic "alert" text.
+- **`GPS_HEARTBEAT_MS = 2 * 60 * 1000`** — the shell enforces a minimum 2-minute gap between `officer_gps_log` heartbeat writes. Record this as the confirmed real-world cadence for whenever a GPS-writing hook is rebuilt; do not invent a different interval.
+- **Single shared GPS watcher at shell level**: `OfficerShell` holds one `gps` state from a single watcher and shares it with `FieldSafetyBar` (man-down detection + armed banner) rather than each module/component running its own watcher. This is a reasonable architecture to preserve — one source of truth for the officer's own live position, not duplicated watchers.
 - `OFFICER_MODULE_TO_CANONICAL` remaps officer-facing module keys to canonical `organization_modules` keys where they differ (e.g. `parking` → `parking_enforcement`, `smoke_control` → `smoke_complaints`, `site_guard` → `static_guarding`), citing `packages/shared/src/modules.ts` as the canonical source (also not yet read). This is the same kind of multi-structure-must-stay-synchronized risk already flagged for `AdminShell`'s `VALID_ADMIN_PAGES`/`LEGACY_REDIRECTS` pair — here it's `ActiveModule`/`VALID_OFFICER_MODULES`/`MODULE_META`/`OFFICER_MODULE_TO_CANONICAL`/canonical shared modules, all needing to agree.
 
 ### Resolved: `useManDownDetection.ts` is a separate trigger, not duplicate logic — but shares no state with `useWelfareCheckin`
