@@ -72,11 +72,13 @@ serve(async (req)=>{
     }, 400);
     const memoryType = String(body.memory_type ?? 'observation').trim();
     const context = String(body.context ?? '').trim() || null;
+    // Schema note: bob_self_memory has no `context` column, so it is folded
+    // into memory_text rather than dropped or written to an unrelated field.
+    const memoryText = context ? `${content}\n\n[context: ${context}]` : content;
     const { data, error } = await admin.from('bob_self_memory').insert({
-      content,
-      memory_type: memoryType,
-      context,
-      proposed_by: 'bob',
+      memory_text: memoryText,
+      memory_kind: memoryType,
+      proposed_by: '00000000-0000-0000-0000-00000000b0b0',
       status: 'kept'
     }).select('id, created_at').single();
     if (error) {

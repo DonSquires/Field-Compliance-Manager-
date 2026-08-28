@@ -64,11 +64,13 @@ serve(async (req)=>{
     const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 100);
     const memoryType = String(body.memory_type ?? '').trim();
     const search = String(body.search ?? '').trim();
-    let q = admin.from('bob_self_memory').select('id, content, memory_type, context, created_at, status').order('created_at', {
+    // Alias the live column names (memory_text/memory_kind) back to the
+    // external tool contract (content/memory_type) the Conductor expects.
+    let q = admin.from('bob_self_memory').select('id, content:memory_text, memory_type:memory_kind, created_at, status').order('created_at', {
       ascending: false
     }).limit(limit);
-    if (memoryType) q = q.eq('memory_type', memoryType);
-    if (search) q = q.ilike('content', `%${search}%`);
+    if (memoryType) q = q.eq('memory_kind', memoryType);
+    if (search) q = q.ilike('memory_text', `%${search}%`);
     const { data, error } = await q;
     if (error) {
       console.error('[bob-self-memory-read] query error:', error.message);
