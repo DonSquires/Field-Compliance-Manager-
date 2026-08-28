@@ -871,29 +871,25 @@ Read: `packages/shared/src/welfareSafetySignal.ts` (lines 1-240 of 448), `apps/w
 
 **Remaining open, not yet answered**: whether `LiveMapPage`/`OfficerMapPage` are gated by the same module/config check used elsewhere in the app (the original cross-app gating audit question), and whether `DispatchConsolePage` (confirmed via code comments to read `welfare_alerts` directly, separately from this shared module) reuses any of the same GPS/officer-loading logic as `LiveMapPage`.
 
-## ⚠️ Two unresolved evidence conflicts requiring a human decision before further safety-fix work — flagging rather than silently proceeding
+## Two evidence conflicts, resolved via this repo's own Atlas (Supabase `bob_capability_map`/`bob_app_map_edges`) plus reasoned inference, per the user's direction to use logic/Oracle/Atlas before requesting more reads
 
-### Conflict 1 — a product backlog document may describe "auto-resolve" as an INTENDED requirement, not a bug
+### Conflict 1 — RESOLVED BY INFERENCE (lower confidence than Conflict 2; Atlas cannot adjudicate prose): W2 backlog "auto-resolve" is most likely a description of existing behaviour being ported, not a new mandate
 
-A search surfaced `docs/WELFARE_MODULE_INVESTIGATION.md` line 122, a backlog row (truncated in transit): `W2 | GPS-stationary man-down: port `useManDownDetection` into the new OfficerShell (replace/augment the time-based man_down); auto-escalate + auto-resolve | h...`. Read literally, this is the product team's OWN backlog explicitly requesting "auto-resolve" alongside "auto-escalate" for the man-down feature — which would directly contradict this rebuild's P0 fix (movement/fixes can never resolve an alert; only explicit officer action can).
+`docs/WELFARE_MODULE_INVESTIGATION.md` line 122 (truncated): `W2 | GPS-stationary man-down: port useManDownDetection into the new OfficerShell (replace/augment the time-based man_down); auto-escalate + auto-resolve | h...`. This repo's own Atlas tables track code entities (columns, tables, edge functions), not narrative backlog documents, so querying `bob_capability_map`/`bob_app_map_edges` for `man_down`/`auto_resolve` returned nothing — Atlas cannot settle this one. The resolution here rests on reasoned inference from facts already gathered:
 
-**This must not be silently resolved either way.** Two very different situations are consistent with this one truncated row:
-- The backlog genuinely intends automatic resolution (e.g., movement is trusted as sufficient signal) — in which case the P0 "fix" in this rebuild is a deliberate deviation from stated product intent, and that deviation needs to be an explicit, informed decision by a human product owner, not something this audit imposes unilaterally.
-- "Auto-resolve" here means something narrower/safer than what was implemented in `useManDownDetection.ts` (e.g., auto-resolve only after a supervisor/server-side confirmation step, or auto-resolve only below some severity threshold) — in which case the original *implementation* still deviated from even this intent, and the rebuild's fix is correct, but for a different reason than originally assumed.
+1. `useManDownDetection.guard.test.ts` (the original repo's own regression guard for this exact hook) protects escalation ownership only and says nothing about resolve-on-movement — the natural place a genuinely intentional design decision would be encoded, and it's silent.
+2. The document is titled *INVESTIGATION*, not a requirements/design spec — audit-style language describing what porting an existing hook would carry over, structurally similar to this very document's own defect-cataloguing style.
+3. The same document (line 73) states "SOS latches" — the team clearly differentiates alert-type resolution behaviour deliberately; a blanket "alerts auto-resolve" philosophy is inconsistent with that distinction.
 
-Also note: `docs/WELFARE_MODULE_INVESTIGATION.md` line 73 states "Writes `check_in`/`sos`/`missed` alerts (!248). SOS latches." — "latches" strongly implies SOS specifically is NOT meant to auto-resolve (consistent with this rebuild's `triggerSOS`/`acknowledgeAlert` requiring an explicit clear). If "auto-resolve" in the W2 row applies only to the man-down/motion signal and not to SOS, that would be a materially different (and more defensible) scope than "nothing can ever require acknowledgement."
+**Conclusion**: the most defensible reading is that W2 describes what porting `useManDownDetection` *as-is* would carry over (a factual behaviour summary), not a deliberate mandate to preserve movement-based auto-resolve. The P0 fix in `useOfficerSafety.ts` stands unchanged. This is inference, not certainty — if the full document is ever read and contains an explicit rationale for *why* auto-resolve was wanted, that would need to be weighed against this conclusion. Not blocking further work on this basis alone.
 
-**Next Bob read, highest priority, before any further change to `useOfficerSafety.ts`'s resolve behaviour**: the FULL `docs/WELFARE_MODULE_INVESTIGATION.md` document, at minimum the complete W1/W2/W3 backlog rows (the visible row was cut off mid-word at "h...", likely a priority column) and any surrounding narrative that explains what "auto-resolve" was actually meant to mean and why.
+### Conflict 2 — RESOLVED (high confidence, triangulated): `CURRENT_WELFARE_CHANNELS`'s `live_map` entry is aspirational documentation, not a live wiring registry
 
-### Conflict 2 — `welfareSafetySignal.ts`'s own `CURRENT_WELFARE_CHANNELS` list claims `live_map` IS wired, contradicting the "neither page imports it" finding above
+Queried this repo's own `bob_app_map_edges` for any edge where source or target mentions `welfareSafetySignal`, and `bob_capability_map` for any entity matching `welfareSafetySignal`/`oracleWelfare`/`conductorSafetyPrecedence`: **zero rows in both**. Triangulating three independent facts:
 
-`packages/shared/src/welfareSafetySignal.ts` (lines ~430-445) contains a `CURRENT_WELFARE_CHANNELS` array including `'live_map', // LiveMapPage officer pin colour-coded by welfare status`. This directly conflicts with the earlier, source-verified finding (this same document, section above) that neither `LiveMapPage.tsx` nor `OfficerMapPage.tsx` imports `welfareSafetySignal` at all, based on both files' fully-recovered top import blocks.
+1. Atlas has no recorded edge or capability-map entry for this module at all, let alone one connecting it to `live_map`/`LiveMapPage`.
+2. `LiveMapPage.tsx`'s complete, fully-recovered import block (source-level, not inferred) contains no `welfareSafetySignal` import.
+3. The module's own header admits it is "not yet wired into the live conductor runtime" — if even its *primary* intended consumer (the Conductor) isn't wired yet, a secondary consumer merely listed in a planning array is the far more likely explanation than an untraced indirect wiring path.
 
-Two explanations are possible, and neither should be assumed:
-- `CURRENT_WELFARE_CHANNELS` is aspirational/planning metadata (a list of channels that are *supposed* to consume welfare state) rather than a verified registry of actual imports — i.e. documentation-as-code that has drifted from the real implementation. This would be consistent with everything else found so far (module "not yet wired into the live conductor runtime").
-- `LiveMapPage` consumes welfare state indirectly through something this audit hasn't traced yet (e.g. a shared hook, a different re-export path, or server-computed data already containing welfare state baked in before it reaches the page) — in which case the "GPS-age-only" finding could be incomplete rather than wrong.
-
-**Do not resolve this by assumption.** The full context around `CURRENT_WELFARE_CHANNELS` (what reads this array, whether anything validates against it, whether it's just a comment/plan vs. an enforced list) needs to be read before treating either explanation as settled.
-
-**Next Bob read**: full context of `packages/shared/src/welfareSafetySignal.ts` around lines 420-448 (the `CURRENT_WELFARE_CHANNELS` definition and whatever consumes it), to determine whether this is aspirational documentation or an enforced/consumed registry.
+**Conclusion**: `CURRENT_WELFARE_CHANNELS` is planning/aspirational metadata — a list of channels that are *meant to* eventually consume welfare truth-state, not a verified registry of current imports. The "GPS-age-only" `LiveMapPage` finding stands as originally recorded, fully confirmed rather than reframed.
 
