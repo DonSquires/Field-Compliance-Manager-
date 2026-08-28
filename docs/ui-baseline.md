@@ -49,6 +49,8 @@ Verified gaps:
 3. Resolve the open question on supervisor-side SOS clearing before implementation — do not guess at a mechanism.
 4. Distinguish "no prior check-in" from "check-in state failed to load" explicitly; do not default a load failure to a fresh safe countdown.
 
+**Implemented**: `apps/web/src/hooks/useOfficerSafety.ts` replaces the original two independent, uncoordinated hooks with one shared safety-state model. Every write (`checkIn`, `triggerSOS`, `acknowledgeAlert`) checks `{ error }` and surfaces failure via `writeStatus`/`lastError` rather than appearing to succeed silently. Movement (`recordMovement`) is evidence-only and can never clear `activeAlert` — only an explicit officer action (`checkIn` or `acknowledgeAlert`) can, satisfying the P0 auto-resolve fix above. `detectionState` exposes `active`/`disabled_by_org`/`disabled_by_officer`/`unknown` in plain terms (Bob's UX item 6), with matching text in `apps/web/src/lib/safetyStatusMessage.ts` (items 6-7, including explicit "cleared because you checked in" / "you acknowledged" wording so a resolved alert never looks like it vanished arbitrarily). Server-owned escalation timing and the duplicate-fire guard are both preserved exactly as required. 9 focused tests in `useOfficerSafety.test.tsx` plus 3 in `safetyStatusMessage.test.ts` cover: movement-never-resolves, acknowledge success/failure, SOS write failure, check-in error on either write, check-in-as-valid-acknowledgement, detection-state for every case, and the duplicate-fire guard. The open question on supervisor-side SOS/alert clearing (item 3 above) remains unresolved and is not guessed at in this implementation — `acknowledgeAlert` only covers the officer-initiated path.
+
 ### Verified OfficerShell.tsx findings (from windows actually shown)
 
 - The module-selection screen shows an explicit user-facing note: "Only modules granted by your administrator are shown." This is a real pattern the Admin side lacks — recall the P1 "silent module-gate fallback" finding for `AdminShell`/`AdminHubPage`, where a disabled page falls back to the hub with no explanation. The rebuild should give Admin the same honesty the Officer side already has, not the other way around.
@@ -97,6 +99,8 @@ Secondary, lower-severity gaps confirmed in the same hook:
 2. A failed resolve attempt must surface a visible local warning/retry state, not silently no-op.
 3. A failed settings load must be represented as an unknown/unavailable configuration state, not silently fall through to defaults.
 4. Keep the server-owned escalation timing exactly as-is — that separation is correct and should not be changed.
+
+**Implemented**: `apps/web/src/hooks/useOfficerSafety.ts` — `recordMovement()` only updates evidence (position/last-movement timestamp) and never calls anything that clears `activeAlert`; only `acknowledgeAlert()` or `checkIn()` can, and both are explicit officer actions with checked writes. See the full implementation note under "Required rebuild behavior" below the welfare check-in section.
 
 Next step (agreed with Bob's own recommendation): trace where `resolveManDownAlert` is actually invoked in the UI to confirm whether any positive-acknowledgement path already exists elsewhere in the flow, or whether movement is currently the only practical resolver.
 
