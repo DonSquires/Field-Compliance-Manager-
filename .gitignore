@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+
+supabase/.temp/
+supabase/.branches/
+
+__pycache__/
+*.py[cod]
+
+node_modules/
+bob-data/
+bob-artifacts/
+.bob/
+!.bob/.gitkeep
+
+# Local recovery and command-output artifacts
+supabase/migrations_backup/
+1250.diff
+docker-compose.yml.txt
+migration_list.txt
+short_out*.txt

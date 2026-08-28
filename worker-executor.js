@@ -1,0 +1,72 @@
+const { spawn } = require('node:child_process');
+
+const WORKER_PROFILES = Object.freeze({
+  assessment: Object.freeze(['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']),
+  test: Object.freeze(['npm', 'test']),
+  build: Object.freeze(['npm', 'run', 'build']),
+  lint: Object.freeze(['npm', 'run', 'lint'])
+});
+
+function workerCommand(profile) {
+  const command = WORKER_PROFILES[profile];
+  if (!command) throw new Error(`unsupported worker profile: ${profile}`);
+  return [...command];
+}
+
+function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g', cpus = '1', pidsLimit = 128 }) {
+  if (!image) throw new Error('worker image is required');
+  if (!sourceDir || !artifactDir) throw new Error('sourceDir and artifactDir are required');
+  const command = workerCommand(profile);
+  return [
+    'run', '--rm', '--init',
+    '--network=none',
+    '--read-only',
+    '--cap-drop=ALL',
+    '--security-opt=no-new-privileges:true',
+    '--user=1000:1000',
+    `--memory=${memory}`,
+    `--cpus=${cpus}`,
+    `--pids-limit=${pidsLimit}`,
+    '--tmpfs=/tmp:rw,noexec,nosuid,size=64m',
+    '--mount', `type=bind,src=${sourceDir},dst=/workspace,readonly`,
+    '--mount', `type=bind,src=${artifactDir},dst=/artifacts`,
+    image,
+    ...command
+  ];
+}
+
+function executeWorker(options, { spawnImpl = spawn } = {}) {
+  const timeoutMs = options.timeoutMs || 10 * 60 * 1000;
+  const args = dockerArguments(options);
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      resolve({
+        status: timedOut ? 'timeout' : code === 0 ? 'succeeded' : 'failed',
+        exitCode: code,
+        stdout: redact(stdout),
+        stderr: redact(stderr),
+        profile: options.profile
+      });
+    });
+  });
+}
+
+function redact(value) {
+  return value
+    .replace(/(authorization|token|secret|password|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
+    .replace(/(sk-[A-Za-z0-9_-]+)/g, '[REDACTED]');
+}
+
+module.exports = { WORKER_PROFILES, dockerArguments, executeWorker, redact, workerCommand };

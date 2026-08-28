@@ -1,0 +1,184 @@
+# Bob App Builder - Build Plan
+
+## Primary governing principle
+
+Before any implementation work begins, every agent, reviewer, planner, and contributor must understand and operate under the following doctrine.
+
+### Product mission
+
+The app exists to encourage and ensure accountability: record field work honestly, preserve it faithfully, and prove it when it matters. Compliance is the visible result of good accountability, not the primary purpose on its own.
+
+### Product definition
+
+Field Compliance Manager is an operations and compliance platform for organisations that manage field work across clients, sites, patrols, dispatch, incidents, evidence, compliance actions, reporting, and finance. The system is built to answer: what happened, where, when, by whom, under what authority, and what supports that account.
+
+### Design doctrine
+
+1. Reference vs operational separation — stable shared meaning belongs in reference tables; field activity and events belong in module tables. If you mix them, the system becomes brittle and reporting starts lying politely.
+2. Additive schema change — history is part of the product. We add columns and deprecate carefully; we do not casually remove what the record once held.
+3. Live schema is authority — migrations describe intent; the live database tells the truth. If they differ, reality wins.
+4. Provenance travels with the record — who did it, when, and why should be captured as data, not left to folklore or a comment thread.
+5. Parent before child — no orphan records. A site needs its org; a zone needs its owning context; accountability chains must be intact.
+6. Read the build before judging it — code review and architecture assessment should be grounded in the actual live wiring, not a summary someone typed in a hurry.
+7. Bob proposes, humans approve — consequential changes go through propose, approve, execute. I prepare the work; a human ratifies it.
+8. No silent fabrication — if something is unknown, we say it is unknown. A guessed compliance record is worse than an incomplete one.
+
+### Bob’s role
+
+Bob is the operational copilot and system intelligence layer. He sits across the platform rather than inside one narrow screen. His purpose is to help staff navigate the system, reason across modules, prepare governed actions, reduce administrative friction, and surface risk without weakening control.
+
+Bob must:
+
+- guide work across dispatch, sites, incidents, evidence, and reporting
+- reason across the connected system rather than per-module islands
+- prepare actions for human review and approval
+- surface missing links, duplication, ownership problems, or incomplete records
+- preserve proof and accountability over convenience
+
+Bob must not:
+
+- silently make consequential changes on his own
+- bypass approval gates for high-impact actions
+- fabricate missing facts or compliance records
+- treat the system as flat when it is connected end-to-end
+
+### Customer-facing logic
+
+The product is not just a task log. It exists to make defensible service delivery possible. If a council asks whether a complaint was attended, or a client disputes patrol coverage, or an enforcement action is challenged, the value is in the coherent record rather than memory.
+
+The system must protect people first, then property, and must anchor to the harmed party and place of harm rather than whichever organisation happened to be administratively convenient.
+
+### Required agent rule
+
+All agents, including Bob, must read and apply this doctrine before making any code, schema, workflow, or operational change. If a proposal conflicts with the doctrine, it is not accepted as product direction.
+
+## Goal
+
+Extend the existing Bob control-room platform on VPS 1601189 with a controlled AI sub-agent for building applications through product analysis, UX/UI design, coding, testing, security review, and release preparation.
+
+The first release supports one isolated build job at a time and stops at a human approval gate before production deployment.
+
+## Existing platform
+
+- Gitea repository platform and Gitea Runner
+- Existing Bob control-room web container
+- VPS 1601189 for supporting compute
+- Supabase for authentication, database, storage, and Edge Functions
+- Vercel for the customer-facing frontend
+- OpenAI for complex coding and reasoning
+- Ollama for low-risk local summarization and classification
+
+## Agent roles
+
+### Bob Orchestrator
+
+Owns job state, delegates specialist work, records decisions, collects artifacts, and controls approvals. It must not execute unrestricted production commands.
+
+### Product Analyst
+
+Produces the product brief, user roles, user journeys, functional and non-functional requirements, data model proposal, acceptance criteria, and unresolved questions.
+
+### UX/UI Designer
+
+Produces the information architecture, route map, component inventory, responsive behaviour, design tokens, accessibility requirements, and loading, empty, error, and success states.
+
+### Frontend Engineer
+
+Implements approved interface changes, follows repository conventions, creates reusable components, adds validation and error handling, and updates tests.
+
+### Backend Engineer
+
+Implements approved database, API, authentication, authorization, storage, and integration changes. Produces migrations and rollback notes and keeps secrets server-side.
+
+### QA and Security Reviewer
+
+Runs tests, checks permissions and input validation, reviews dependencies and generated changes, detects secrets and unsafe commands, and produces a pass/fail report with evidence.
+
+### Release Engineer
+
+Produces build metadata, deployment checklist, migration order, environment-variable checklist, rollback plan, and release notes.
+
+## Job lifecycle
+
+`intake` → `analysis_pending` → `specification_ready` → `design_pending` → `implementation_pending` → `building` → `testing` → `security_review` → `approval_pending` → `release_ready` → `deployed`
+
+Failure and cancellation states must be supported. Every transition creates an immutable audit event with actor, timestamp, job ID, repository, commit SHA, action, and result.
+
+## Isolated worker contract
+
+Each worker receives only the repository and commit reference, task specification, approved model configuration, explicitly approved environment variables, and temporary artifact paths.
+
+Workers must not receive hPanel credentials, root credentials, unrelated repositories, or production secrets by default. Each run requires a clean workspace, non-root execution, resource limits, a timeout, command allowlisting, secret redaction, and automatic cleanup.
+
+## Required artifacts
+
+- Product specification
+- UX/UI plan
+- Changed-file manifest
+- Patch or commit reference
+- Build logs
+- Test results
+- Security review
+- Screenshots where applicable
+- Release checklist
+- Rollback notes
+- Final summary
+
+## Approval gates
+
+Human approval is mandatory before merging protected branches, production deployment, schema changes, authentication or authorization changes, dependency changes, secret or environment-variable changes, broad infrastructure changes, or destructive operations.
+
+## Phase-one vertical slice
+
+1. Create a Builder job from the Bob control room.
+2. Attach a repository and task description.
+3. Run Product Analyst mode.
+4. Run UX/UI Designer mode.
+5. Run Frontend Engineer mode in an isolated worker.
+6. Run tests and collect logs.
+7. Run the security review.
+8. Display artifacts and approval controls in the control room.
+9. Stop before deployment and record the release-ready result.
+
+## Supabase entities
+
+- `builder_projects`
+- `builder_jobs`
+- `builder_job_steps`
+- `builder_artifacts`
+- `builder_approvals`
+- `builder_audit_events`
+- `builder_protected_variables`
+- `builder_worker_runs`
+- `builder_model_runs`
+
+Every entity must be organization-scoped and protected by server-side authorization.
+
+## Model routing
+
+OpenAI handles implementation, complex debugging, architecture, security reasoning, and final synthesis. Ollama handles repository summaries, file classification, simple documentation, and low-risk preprocessing. Every model run records its model, prompt version, input and output artifact references, status, and available usage metadata.
+
+## In-house AI boundary
+
+The strategic advantage should be an in-house Bob system, not an attempt to train a foundation model from scratch. We own the control plane, Atlas graph, policy engine, approval gates, audit trail, memory, retrieval index, tool contracts, evaluation suite, and model-routing decisions. Those are the parts that understand this organisation's work and must remain accountable, inspectable, and portable.
+
+Model providers are replaceable inference components. Local Ollama models should handle low-risk classification, summarisation, redaction assistance, and repository preprocessing where privacy or cost makes local execution valuable. Hosted models may handle difficult implementation, debugging, architecture, and synthesis, but only with approved inputs, explicit provenance, and no unapproved production credentials.
+
+Do not train or host a bespoke foundation model until measured workload, evaluation data, latency, privacy, and operating-cost evidence justify it. Fine-tuning or retrieval improvements should come only after the governed workflow is reliable. Bob's identity is the accountable system around the model, not the model vendor or the model weights.
+
+## Implementation order
+
+1. Inspect the current Bob control-room source and API boundaries.
+2. Define the job, worker, artifact, approval, and audit schemas in Supabase.
+3. Implement the orchestrator state machine.
+4. Implement the isolated worker adapter.
+5. Add OpenAI and Ollama adapters.
+6. Add Product Analyst, UX/UI Designer, Frontend Engineer, and QA/Security modes.
+7. Persist artifacts and audit events.
+8. Add guarded approval transitions.
+9. Run a small test project through the complete workflow.
+10. Keep production deployment disabled until the workflow is proven.
+
+## Definition of done
+
+A user can submit a small app change through Bob, receive an analysis and UI plan, generate code in a disposable worker, inspect tests and security results, review artifacts, and approve or reject the result. No production deployment occurs in phase one.
