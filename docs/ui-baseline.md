@@ -12,6 +12,13 @@ The baseline is intentionally split into verified facts, provisional findings, a
 
 ## Product UI principles
 
+## File read coverage status (repo_search)
+
+- `apps/web/src/pages/AdminHubPage.tsx` (599 lines): accumulated read coverage is complete to end-of-file. Findings recorded below and in the Admin Hub sections are treated as verified except where a window was dropped/truncated in transit — those tails are explicitly excluded from verified evidence rather than assumed.
+- `apps/web/src/shells/AdminShell.tsx` (810 lines): accumulated read coverage is complete to end-of-file, same caveat for truncated-in-transit windows.
+- Neither file should be re-requested in full; further work on them should target specific symbols/behaviors not yet traced (e.g. `NAV_GROUPS`/`MOBILE_NAV` full definitions, `getBobContext` callers) rather than re-reading line ranges already covered.
+- Remaining open frontend targets: `RoleRouter.tsx` (full read, not yet closed), and the shared API/Supabase client (`apps/web/src/lib/supabase.ts` or equivalent) for the dependency map.
+
 
 ## Verified legacy URL compatibility surface
 

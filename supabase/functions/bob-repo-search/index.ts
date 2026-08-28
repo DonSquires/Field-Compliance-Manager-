@@ -76,13 +76,13 @@ function redactSecretLines(text) {
 // Records the high-water line read for (conversation, path, ref) so an
 // out-of-order or repeated read is detected instead of silently re-served.
 // Best-effort/fail-open: a lookup or write failure never blocks the read.
-async function trackReadProgress(admin, conversationId, path, ref, startLine, endLine) {
-  const empty = { previously_read_through: null, overlaps_prior_read: false, suggested_next_start_line: null };
+async function trackReadProgress(admin, conversationId, path, ref, startLine, endLine, totalLines) {
+  const empty = { previously_read_through: null, overlaps_prior_read: false, suggested_next_start_line: null, file_fully_read: false };
   const convId = String(conversationId ?? '').trim();
   if (!convId) return empty;
   try {
     const { data: existing } = await admin.from('bob_repo_read_progress').select('max_line_read').eq('conversation_id', convId).eq('path', path).eq('ref', ref).maybeSingle();
-    const progress = deriveReadProgress(existing?.max_line_read ?? 0, startLine, endLine);
+    const progress = deriveReadProgress(existing?.max_line_read ?? 0, startLine, endLine, totalLines);
     await admin.from('bob_repo_read_progress').upsert({
       conversation_id: convId,
       path,
@@ -282,7 +282,7 @@ serve(async (req)=>{
       const redacted = redactSecretLines(raw);
       if (body.start_line !== undefined || body.end_line !== undefined) {
         const lineWindow = computeLineWindow(redacted, Number(body.start_line), Number(body.end_line));
-        const progress = await trackReadProgress(admin, body.conversation_id, path, ref, lineWindow.startLine, lineWindow.endLine);
+        const progress = await trackReadProgress(admin, body.conversation_id, path, ref, lineWindow.startLine, lineWindow.endLine, lineWindow.totalLines);
         return json({
           ok: true,
           action,
@@ -299,7 +299,8 @@ serve(async (req)=>{
           content: lineWindow.content,
           already_read_through: progress.previously_read_through,
           overlaps_prior_read: progress.overlaps_prior_read,
-          suggested_next_start_line: progress.overlaps_prior_read ? progress.suggested_next_start_line : null
+          suggested_next_start_line: progress.overlaps_prior_read ? progress.suggested_next_start_line : null,
+          file_fully_read: progress.file_fully_read
         });
       }
       const rawOffset = Number(body.offset ?? 0);

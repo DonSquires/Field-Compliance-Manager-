@@ -156,15 +156,23 @@ export function computeLineWindow(redacted, rawStartLine, rawEndLine, maxLines =
 // previously-recorded high-water mark (max line number ever returned for this
 // file in this conversation) and the window just computed, derive whether
 // this read overlaps/regresses and what the caller should read next.
-export function deriveReadProgress(previousMaxLineRead, startLine, actualEndLine) {
+//
+// totalLines lets the "suggested next line" be honest: if the prior
+// high-water mark already covers the whole file, there is no next line to
+// read, and telling the caller to "continue from line N" (where N > totalLines)
+// is misleading -- the file is simply done.
+export function deriveReadProgress(previousMaxLineRead, startLine, actualEndLine, totalLines) {
   const prevMax = Number.isFinite(previousMaxLineRead) ? Math.max(0, Math.trunc(previousMaxLineRead)) : 0;
   const isRegression = prevMax > 0 && startLine <= prevMax;
   const newMax = Math.max(prevMax, actualEndLine);
+  const total = Number.isFinite(totalLines) ? Math.max(0, Math.trunc(totalLines)) : null;
+  const fileFullyRead = prevMax > 0 && total !== null && prevMax >= total;
   return {
     previously_read_through: prevMax > 0 ? prevMax : null,
     overlaps_prior_read: isRegression,
-    suggested_next_start_line: prevMax > 0 ? prevMax + 1 : null,
-    max_line_read: newMax
+    suggested_next_start_line: prevMax > 0 && !fileFullyRead ? prevMax + 1 : null,
+    max_line_read: newMax,
+    file_fully_read: fileFullyRead
   };
 }
 

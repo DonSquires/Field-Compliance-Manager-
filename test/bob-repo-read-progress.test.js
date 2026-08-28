@@ -36,3 +36,21 @@ test('deriveReadProgress: a read starting exactly at the high-water mark is a re
   assert.equal(result.overlaps_prior_read, true);
   assert.equal(result.suggested_next_start_line, 141);
 });
+
+// Real bug found live: a 33-line file was re-read after already being read to
+// EOF, and the fix's own resume advice said "continue from line 34" -- a line
+// that does not exist. file_fully_read must be true here, and
+// suggested_next_start_line must be null (there is truly nothing more to read).
+test('deriveReadProgress: re-reading a file already read to its total-line EOF reports fully_read, not a fabricated next line', () => {
+  const result = deriveReadProgress(33, 1, 33, 33);
+  assert.equal(result.overlaps_prior_read, true);
+  assert.equal(result.file_fully_read, true);
+  assert.equal(result.suggested_next_start_line, null);
+});
+
+test('deriveReadProgress: re-reading an overlap that is NOT yet at EOF still suggests the real next line', () => {
+  const result = deriveReadProgress(140, 1, 100, 599);
+  assert.equal(result.overlaps_prior_read, true);
+  assert.equal(result.file_fully_read, false);
+  assert.equal(result.suggested_next_start_line, 141);
+});

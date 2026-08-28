@@ -3242,7 +3242,10 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
     const continuation = typeof r.data?.next_start_line === 'number' ? ` [has_more; next_start_line ${r.data.next_start_line}]` : hasMore ? ` [has_more; next_offset ${r.data?.next_offset}]` : '';
     // Out-of-order/repeated read detection (real bug: reads arriving scrambled
     // across turns). Make this loud in the reply, not just buried in meta.
-    const overlapWarning = r.data?.overlaps_prior_read ? `\n\n[WARNING: you already read through line ${r.data.already_read_through} of this file. Re-reading lines ${r.data?.start_line}-${r.data?.end_line} is redundant -- continue from line ${r.data.suggested_next_start_line} instead.]` : '';
+    // When the file was already read to its end, telling the caller to
+    // "continue from line N" (N > total_lines) would be a fabricated next
+    // step -- say plainly that there is nothing left to read instead.
+    const overlapWarning = r.data?.overlaps_prior_read ? r.data?.file_fully_read ? `\n\n[NOTE: \`${r.data?.path}\` has ${r.data?.total_lines} lines and has already been fully read in this conversation. There is no further content in this file -- move to a different file or symbol.]` : `\n\n[WARNING: you already read through line ${r.data.already_read_through} of this file. Re-reading lines ${r.data?.start_line}-${r.data?.end_line} is redundant -- continue from line ${r.data.suggested_next_start_line} instead.]` : '';
     const readHeader = `\`${r.data?.path}\` @ ${r.data?.ref}${lineHeader} \u2014 read_state: ${readState}` + (r.data?.read_note ? ` (${r.data.read_note})` : '') + continuation;
     return {
       reply: `${readHeader}${overlapWarning}\n\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``,
@@ -3259,7 +3262,8 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
         next_start_line: r.data?.next_start_line ?? null,
         total_length: r.data?.total_length ?? null,
         overlaps_prior_read: Boolean(r.data?.overlaps_prior_read),
-        already_read_through: r.data?.already_read_through ?? null
+        already_read_through: r.data?.already_read_through ?? null,
+        file_fully_read: Boolean(r.data?.file_fully_read)
       }
     };
   }
