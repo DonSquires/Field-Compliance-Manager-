@@ -780,3 +780,19 @@ Bob's read-only inspection resolved the "heat map" item from the cross-app gatin
 
 **Next Bob read**: confirm the mapping library via `LiveMapPage.tsx`'s imports (or `package.json`) before any map-rendering code is written, then trace whether `LiveMapPage` is gated by the same module/config check used elsewhere, and whether dispatch panels or other pages import the same live-map data-loading logic.
 
+### Open lead: a shared `welfareSafetySignal` module may already exist and may not be used by the map pages
+
+A repo-wide search surfaced `packages/shared/src/welfareSafetySignal.ts`, which appears to be a shared module already consumed by at least `dispatcher_console` (comments found: `'dispatcher_console', // DispatchConsolePage live view` and `'dispatcher_console', // DispatchConsolePage reads welfare_alerts`). This has NOT been read in full yet, so nothing about its contract is verified — but if it is a genuine shared source of truth for welfare status that `DispatchConsolePage` correctly consumes, that reframes the `LiveMapPage`/officer-pin finding: the gap may not be "no shared welfare logic exists," it may be "a correct shared signal exists and the map page(s) bypass it." Do not assume either framing until read.
+
+Also surfaced, not yet read: `apps/web/src/pages/OfficerMapPage.tsx` — a page distinct from `LiveMapPage.tsx`. Whether these are the officer-facing vs. admin/dispatch-facing views of the same data, or something else entirely, is unverified.
+
+Also of note: the original repo's own `docs/atlas/CODE_PATH_VIEW.md` lists `LiveMapPage`'s data-read edges as `location_zones`, `officer_gps_log`, and `observations` — with no `welfare_alerts` edge listed for `LiveMapPage`. If accurate and complete, this corroborates the earlier finding independently (from the original repo's own documentation, not just source reading) that `LiveMapPage` does not read real welfare alert state. This should be treated as corroborating evidence, not proof — the document itself hasn't been verified for completeness.
+
+**Next Bob reads, in order**:
+1. Full contents of `packages/shared/src/welfareSafetySignal.ts` — what it computes, what state it exposes, and its full consumer list (the `'dispatcher_console'` comments suggest there's a registered-consumer pattern worth seeing in full).
+2. Whether `LiveMapPage.tsx` or `OfficerMapPage.tsx` import `welfareSafetySignal` at all — this is the single fact that determines whether the earlier "GPS-age-only" finding is the full picture or only part of it.
+3. `apps/web/src/pages/OfficerMapPage.tsx` — what it is, how it differs from `LiveMapPage.tsx`, and which roles reach it.
+4. The relevant rows of `docs/atlas/CODE_PATH_VIEW.md` around lines 1378-1381 in fuller context, to confirm there truly is no `welfare_alerts` edge recorded for `LiveMapPage`/`OfficerMapPage`.
+
+Until these come back, `apps/web/src/lib/officerPinStatus.ts` (already implemented in the rebuild) is not necessarily wrong, but its exact contract may need to be reconciled with whatever `welfareSafetySignal.ts` turns out to define, rather than treated as the sole model.
+
