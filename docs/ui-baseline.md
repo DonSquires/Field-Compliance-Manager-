@@ -90,6 +90,25 @@ Confirmed error-handling is **inconsistent across the codebase**, not uniformly 
 
 Apply the VOI insert's error-handling pattern (try/catch + user-visible failure note appended to the record) uniformly to every write in this component, including the currently-silent LOI insert. Do not treat "some inserts here are checked" as evidence the file is safe overall — verify each write individually.
 
+## Verified: officer welfare-standby (no-shift) screen
+
+`OfficerShell`'s "no shift assigned" state (spec §4 State 1, issue #7) confirms:
+
+- Auto-refreshes every 30 seconds.
+- Explicitly states in the UI copy: "Emergency SOS and welfare check-in are always available above" — i.e. safety controls are confirmed NOT gated behind shift assignment, only operational modules are. Preserve this exactly; it is a correct safety property.
+- Quick actions available with no shift: My Schedule, standalone module open (`onOpenModules`, optional — the condition that makes it available is not yet known and must not be guessed at), Vehicle Lookup, My Credentials, Submit Field Report, Request Leave, Submit Timesheet.
+- Open shifts can be accepted/declined directly from this screen via `respond(id, status)`.
+
+### Systemic pattern, not an isolated bug: unchecked Supabase writes
+
+`respond()` performs `await supabase.from('shifts').update({ status }).eq('id', id)` with no error check — if it fails, the UI still calls `onRefresh()` and the officer sees no indication their accept/decline did not save. This is now the **third** confirmed instance of the same defect class across three unrelated files:
+
+1. `useWelfareCheckin.ts` — `checkIn()` and `triggerSOS()` (safety-critical).
+2. `ReportButton.tsx` — the LOI `entity_flags` insert (evidence-integrity).
+3. `OfficerShell.tsx` — shift accept/decline (operational).
+
+Three occurrences across independently-audited files is enough to treat this as a **systemic gap in the original codebase's write-error handling**, not a one-off. The rebuild should adopt one shared, mandatory pattern (e.g. a thin wrapper around every mutating Supabase call that requires the caller to handle `{ error }`, enforced by lint/type rather than convention) rather than fixing each call site independently and hoping the next one remembers.
+
 ## Verified RoleRouter.tsx contract
 
 `RoleRouter.tsx` (source of truth: `docs/INSTRUCTION_MANUAL.md` §2.3) is the single role-to-shell dispatcher. Confirmed role → expected URL prefix → shell mapping:
