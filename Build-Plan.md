@@ -169,15 +169,16 @@ Do not train or host a bespoke foundation model until measured workload, evaluat
 ## Implementation order
 
 1. Inspect the current Bob control-room source and API boundaries.
-2. Define the job, worker, artifact, approval, and audit schemas in Supabase.
-3. Implement the orchestrator state machine.
-4. Implement the isolated worker adapter.
-5. Add OpenAI and Ollama adapters.
-6. Add Product Analyst, UX/UI Designer, Frontend Engineer, and QA/Security modes.
-7. Persist artifacts and audit events.
-8. Add guarded approval transitions.
-9. Run a small test project through the complete workflow.
-10. Keep production deployment disabled until the workflow is proven.
+2. Define durable task and task-step state so Bob can resume multi-step work from verified progress rather than conversation memory. See [the task continuity contract](docs/bob/task-continuity.md).
+3. Define the job, worker, artifact, approval, and audit schemas in Supabase.
+4. Implement the orchestrator state machine.
+5. Implement the isolated worker adapter.
+6. Add OpenAI and Ollama adapters.
+7. Add Product Analyst, UX/UI Designer, Frontend Engineer, and QA/Security modes.
+8. Persist artifacts, task evidence, and audit events.
+9. Add guarded approval transitions.
+10. Run a small test project through the complete workflow.
+11. Keep production deployment disabled until the workflow is proven.
 
 ## Definition of done
 

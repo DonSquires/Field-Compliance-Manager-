@@ -12,13 +12,32 @@ The baseline is intentionally split into verified facts, provisional findings, a
 
 ## Product UI principles
 
-- The interface must help staff create defensible service records: what happened, where, when, by whom, under what authority, and what evidence supports it.
-- Bob is an operational copilot. He may explain, surface risk, and prepare governed actions, but consequential changes require human approval.
-- The UI must preserve provenance and uncertainty. Unknown, unavailable, stale, and failed data need distinct states.
-- Organisation scoping is mandatory. A screen must not display cross-organisation operational data unless the user's role explicitly permits it.
-- Parent context must be visible before child actions: organisation, site, zone, patrol, incident, evidence, and report relationships should remain navigable.
-- The UI should support the field workflow first, with administration and analysis connected to the same records rather than separate invented data.
 
+## Verified legacy URL compatibility surface
+
+Bob's latest read confirms that `AdminShell.tsx` maintains a broad `LEGACY_REDIRECTS` map while exposing a smaller canonical `AdminPage`/`VALID_ADMIN_PAGES` set. Legacy slugs for CRM, roster, field operations, reporting, and other admin areas resolve into consolidated parent containers with child tab or sub-area state.
+
+The compatibility map is part of the product contract: bookmarked links must continue to open the intended operational view after navigation consolidation. The canonical page type, valid URL set, redirect target interface, container tab types, `RoleRouter`, and child module gates are separate structures and therefore need synchronized validation.
+
+### Route-contract drift risk
+
+A legacy slug can be syntactically recognized yet still fail semantically if its target tab is removed, its module is disabled, its role is not permitted, or the container no longer accepts the target state. Route tests must cover every redirect target, canonical URL replacement, child tab selection, module state, and role/prefix combination. A redirect is not proof of authorization.
+
+The current source confirms that `VALID_ADMIN_PAGES` contains only canonical container/page keys, while `LEGACY_REDIRECTS` contains dozens of older CRM, roster, field-operations, and reporting slugs. The redirect table therefore acts as a second route registry. Its child values must be validated against `CRMFinanceTab`, `RosterHRTab`, `FieldOpsSubArea`, and `ReportsTab`; TypeScript shape alone does not prove that every string is still accepted by the child page.
+
+### P0 legacy-route initialization defect
+
+`pageFromUrl()` performs tab-state setters while resolving a legacy URL, but the initial `activePage` state is created by calling `pageFromUrl(location.pathname)` before the tab state declarations have initialized their setter bindings. A first load on a legacy path such as `/admin/invoicing` can therefore call `setCrmTab` during initialization before `setCrmTab` exists, causing a runtime failure.
+
+The route resolver must be pure. It should return the page and child-state values together, then a post-initialization effect or navigation handler should apply those values. Add a first-render regression test for every container family, not just a canonical `/admin` path.
+
+### Verified silent module-gate fallback
+
+When `isPageEnabled(activePage)` returns false, the shell renders `AdminHubPage` without explaining whether the requested page is disabled, unavailable, or unauthorized. The fallback prevents the gated page from rendering, but the silent replacement can confuse operators and hide a policy-source problem. The UI should provide a truthful, accessible reason while avoiding disclosure of protected module details.
+
+### Uneven container gating inputs
+
+`FieldOperationsPage` and `ReportsPage` receive `enabledModules` and `isPlatformOperator` directly. CRM & Finance, Roster & HR, and Site 360 receive no equivalent module-gating props in this render path. This may be intentional because their child gates use another contract, but it must be verified rather than assumed; otherwise module policy can be enforced unevenly across the consolidated navigation.
 ## Verified current Admin Hub structure
 
 The original repository contains `apps/web/src/pages/AdminHubPage.tsx`. The current evidence confirms these areas:
@@ -208,6 +227,249 @@ To be confirmed from the original repository:
 - Bob chat and response rendering
 - shared API/Supabase client
 - loading, error, empty, and permission components
+
+## Verified original UI architecture
+
+Bob's repository search has verified the following routing and identity spine:
+
+- `apps/web/src/main.tsx` is the `BrowserRouter` entry point.
+- `apps/web/src/App.tsx` references `AuthContext` and `RoleRouter` and is a primary application composition point.
+- `apps/web/src/routing/RoleRouter.tsx` is a real routing entry and must be read before changing page access or navigation.
+- `apps/web/src/context/AuthContext.tsx` is the primary auth/profile definition and is consumed by the app, role router, shells, and multiple pages.
+- `createBrowserRouter` was not found, so the data-router API is not currently evidenced.
+- The app uses `BrowserRouter`; nearby alternatives such as `Routes`, `useRoutes`, or wrapped router abstractions still require verification.
+
+The actual shared Sidebar component is not yet verified. Search results were capped and surfaced `PortalSwitcher.tsx`, `CrmBranchPicker.tsx`, `App.tsx`, and `RoleRouter.tsx` as candidates, but none should be treated as the Sidebar implementation until Bob reads the exact files.
+
+### Required next routing reads
+
+1. Read `apps/web/src/main.tsx`.
+2. Read `apps/web/src/App.tsx`.
+3. Read `apps/web/src/routing/RoleRouter.tsx`.
+4. Read `apps/web/src/context/AuthContext.tsx`.
+5. Search and read the exact shared shell/navigation component.
+6. Trace route-level permission checks to the canonical profile/role source.
+
+## Verified shell and route permission map
+
+Bob's read-only inspection has now verified the shared admin shell and role router:
+
+- `apps/web/src/shells/AdminShell.tsx` is the shared admin/master/grand-master portal shell.
+- `AdminShell.tsx` imports `NotificationsBell`, `PortalSwitcher`, `UniversalSearch`, `BobPanel`, and `LazyPageFallback`.
+- Navigation chrome is consolidated in `AdminShell.tsx`; `RoleRouter.tsx` chooses the shell but does not own the shared admin chrome.
+- `apps/web/src/routing/RoleRouter.tsx` enforces both role-to-shell selection and expected URL prefixes through redirects.
+
+| Role | Expected prefix | Shell |
+|---|---|---|
+| `grand_master`, `master`, `admin`, `nzscv_monitor` | `/admin` | `AdminShell` |
+| `admin_officer` | `/admin` or `/officer` after portal choice | `AdminShell` or `OfficerShell` |
+| `officer` | `/officer` | `OfficerShell` |
+| `scan_operator` | `/scan` | `ScanShell` |
+| `client_admin`, `client_officer`, `client_viewer` | `/client` | `ClientShell` |
+| unknown role | none | inline access error |
+
+Verified route shapes include `/admin`, `/admin/:page`, `/officer`, and `/officer/:module`; catch-all routes redirect to the relevant shell root.
+
+### Authorization boundary caveat
+
+Parent shell and URL-prefix access are verified, but not every internal navigation item or tab-level gate has been read end to end. The original architecture comments state that module gating also occurs inside container pages at tab/card level. Any UI change must therefore verify both the `RoleRouter` shell gate and the target page's internal permission checks.
+
+## Verified AdminShell behavior
+
+Bob's read-only inspection has verified the shared shell's desktop and mobile integration:
+
+- Desktop navigation renders inside `AdminShell.tsx` with a collapsible sidebar.
+- The desktop top bar displays the live organisation name, profile role, and display name/ID fallback.
+- `NotificationsBell` can navigate to an admin page and open a Bob conversation.
+- `UniversalSearch` routes through the shell's page navigation handler.
+- `BobPanel` is mounted by the shell and receives page context, an optional initial conversation, and an optional seed prompt.
+- Mobile navigation uses grouped menu items plus a bottom tab bar and also mounts the same `BobPanel` context.
+- The shell sign-out action is available from both desktop and mobile layouts.
+- Mobile and desktop controls use buttons for most navigation actions; `NavItem` is a `div` with `role="button"`, `tabIndex={0}`, click handling, and Enter-key handling.
+
+### AdminShell implementation risks
+
+- `NavItem` handles Enter but not Space, so keyboard activation is incomplete for a button-like control.
+- `NavItem` uses a non-semantic `div` instead of a native button or link, increasing accessibility and focus-state risk.
+- The shell's live organisation, role, and user identity are visible in the top bar, but downstream page data still requires independent organisation and role enforcement.
+- Bob receives shell page context, but every page-specific Bob action must still be checked against the active page's actual data and permission boundary.
+
+The next shell implementation check is to read the complete `NAV_GROUPS`, `MOBILE_NAV`, `navigate`, `renderPage`, and `getBobContext` definitions, then compare every target against `RoleRouter` and the container-page tab gates.
+
+## Verified AdminShell architecture contract
+
+Bob's complete header read confirms that `AdminShell.tsx` is governed by `docs/INSTRUCTION_MANUAL.md` section 4.1 and implements the Phase 1 navigation information architecture:
+
+- The former flat navigation is consolidated into CRM & Finance, Roster & HR, Field Operations, and Reports containers.
+- Legacy bookmarked URLs are redirected to the correct parent container with the relevant tab or sub-area selected.
+- Module gating occurs inside tabs/cards as well as at the parent shell/router boundary.
+- Bob context is specific to each tab or sub-area, preserving the specificity of the former flat navigation rather than giving Bob only a generic shell label.
+- Heavy container pages are loaded with `React.lazy` and named-export adapters for route-level code splitting.
+- Lightweight type/context extraction modules are imported separately so importing the shell does not pull all heavy component trees into the main bundle.
+- The shell uses React Router location/navigation primitives and the shared auth, Supabase, notification, portal, search, Bob, and lazy-fallback components.
+
+The verified shell imports establish these dependency boundaries:
+
+- React state/effect hooks and React Router location/navigation are shell infrastructure.
+- `AuthContext` supplies identity and profile context.
+- The Supabase client is available directly to the shell.
+- Admin Hub, site, access, organisation, user, platform, testing, and approvals pages are eagerly imported as shell-critical pages.
+- CRM & Finance, Roster & HR, Field Operations, Reports, and Site 360 containers are lazy-loaded with named-export adapters.
+- The lightweight `crmFinanceTypes`, `rosterHRTypes`, `fieldOpsTypes`, `reportsTypes`, and `site360Types` modules carry tab types and Bob context without importing heavy component trees.
+
+The header also identifies `docs/INSTRUCTION_MANUAL.md` section 4.1 as the shell's source of truth. That document must be recovered or verified in the original repository before changing the navigation information architecture.
+
+### Bundle-boundary verification
+
+The consolidated container pages are explicitly lazy-loaded, while Admin Hub, site, access, organisation, user, platform, testing, approvals, and shared chrome components are eagerly imported. This may be intentional for shell-critical or frequently used surfaces, but it should be checked against the production bundle output rather than assumed to keep the initial bundle small. Any change to eager/lazy boundaries must preserve shell stability, loading fallback behavior, and Bob context availability.
+
+### Architecture preservation rules
+
+Future UI changes must preserve:
+
+1. Legacy URL compatibility and selected-tab behavior.
+2. Parent and child/module authorization checks.
+3. Specific Bob context for the active tab/sub-area.
+4. Lazy loading for heavy container trees and a visible loading fallback.
+5. The authoritative instruction-manual contract, with any intentional change recorded as a reviewed architecture decision.
+
+## Verified AdminShell rendering and module-gate contract
+
+Bob's latest read confirms the shell applies a module gate before rendering the active page:
+
+- If `isPageEnabled(activePage)` is false, the shell falls back to `AdminHubPage` instead of rendering a disabled or unauthorized deep-linked page.
+- Lazy container pages are wrapped in `React.Suspense` with `LazyPageFallback` inside the shell's main content area.
+- The sidebar, top bar, and shell chrome remain mounted while a lazy page chunk loads.
+- CRM & Finance receives an initial tab, tab-change callback, site-zone configuration callback, and Bob-context update callback.
+- Roster & HR receives an initial tab and tab-change callback.
+- Field Operations receives an initial sub-area, sub-area callback, enabled-module state, and platform-operator state.
+- Reports receives an initial tab, tab-change callback, enabled-module state, and platform-operator state.
+- Site 360 receives an initial tab, tab-change callback, and a navigation callback to Locations.
+- Sites and CRM can update shell-level `pageExtra`, which is converted into first-class Bob context fields such as `record_id` and `targetRoute`.
+
+### Rendering and authorization preservation rules
+
+Future UI work must preserve these behaviors:
+
+1. Evaluate module availability before page rendering, including stale-state and deep-link entry.
+2. Fall back to a truthful accessible hub state when a module is unavailable.
+3. Keep Suspense boundaries inside page content so navigation and identity chrome remain stable.
+4. Preserve initial tab/sub-area state and change callbacks across route compatibility redirects.
+5. Keep record IDs, target routes, and other page context available to Bob without duplicating first-class fields inside an opaque `extra` object.
+
+## Verified module-gating risk
+
+Bob's latest read confirms that `AdminShell.tsx` derives navigation and rendering from `organization_modules`, but `isPageEnabled()` returns `true` when `enabledModules` is `null`. The same `null` state is used while modules are loading and when the module query fails. The documented intent is fail-open so existing admins are not locked out, but this means a non-platform user can see and deep-link to module pages without the organisation's enabled-module state being successfully verified.
+
+Platform operators (`grand_master` and `master`) intentionally bypass module gating. Other roles should not receive that bypass implicitly through a missing, delayed, or failed module query.
+
+### Priority authorization issue
+
+Treat module state as a tri-state contract rather than a nullable Set:
+
+- `loading`: render a loading/fallback state and do not authorize gated pages yet.
+- `configured`: show only enabled modules.
+- `unconfigured`: allow the documented product behavior only if the database explicitly confirms that no module configuration exists.
+- `error`: show an unavailable state and block gated navigation until the authorization source is verified.
+
+The current implementation conflates `loading`, `unconfigured`, and `error`. This is a P1 authorization and accountability issue because visibility and deep-link access can become broader when the policy source is unavailable. Any fix must preserve platform-operator access and test stale URL entry, query failure, empty configuration, and enabled/disabled module cases.
+
+The organisation-name query also has no visible error or stale-state handling; a missing name should be represented as unavailable rather than silently leaving the shell context ambiguous.
+
+## Verified AdminShell state and navigation findings
+
+Bob's latest read confirms:
+
+- Top-level navigation is intentionally limited to Core, Config, and System groups, with Platform appended for `grand_master`.
+- Mobile bottom navigation exposes only the top-level container pages: Home, Field Ops, Roster, CRM, and Reports.
+- `PAGE_REQUIRED_MODULE` is empty at the shell level in Phase 1; module gating is delegated to the CRM, Field Operations, and Reports container pages.
+- Shell state tracks the active CRM tab, roster tab, field-operations sub-area, reports tab, and Site 360 tab so legacy URLs can select the correct child view.
+- `pageFromUrl()` parses the URL and also sets child tab/sub-area state when it resolves a legacy redirect.
+
+### Render-phase mutation risk
+
+Because `pageFromUrl()` is used to derive active page state and performs `setCrmTab`, `setRosterTab`, or `setFieldOpsSubArea` during that derivation, legacy URL resolution can mutate React state during render. This should be moved into an effect or an explicit navigation-resolution step that returns both page and child state before applying state updates.
+
+Required regression coverage:
+
+- legacy URL resolves to the expected container and child tab
+- browser back/forward does not trigger render-phase updates
+- repeated renders do not reset a user's selected tab unexpectedly
+- canonical URL replacement preserves the selected child context
+
+### Delegated gating dependency
+
+With no top-level required modules, the safety of module access depends entirely on child container gates. Any container that forgets to apply `enabledModules` can expose its whole sub-area even though the shell appears to support module gating. The tri-state module-loading fix must therefore be shared by every container page, not implemented only in `AdminShell`.
+
+## Verified AdminShell route taxonomy
+
+Bob's read-only inspection confirms that `AdminShell.tsx` provides a compatibility map from legacy page slugs into consolidated containers:
+
+- Field operations sub-areas include patrol, routes, monitoring, checkpoints, checkpoint logs, live map, welfare, vehicle search/flags, field reports, breach review, SCV import, notice print, NZSCV, overnight, enforcement, homeless claims, disputes, parking, noise control/settings, biosecurity, and smoke control.
+- Reporting sub-areas include command results, reports hub, report packs, obligations, compliance, and FC reporting.
+- CRM and roster legacy slugs are similarly mapped into their respective container tabs.
+- The active top-level page set is intentionally smaller than the legacy surface and is validated through `VALID_ADMIN_PAGES`.
+
+The shell passes Bob a top-level `PAGE_CONTEXT` such as Dashboard, CRM, Roster, Field Operations, Reports Hub, Sites, Access Control, Approvals, Testing, or Platform. Container pages own their own tab/sub-area context, so Bob's shell context alone is not sufficient to authorize or reason about a specific field-operations or reporting action.
+
+### Route-impact rule
+
+Any UI change to a legacy slug, consolidated container, tab, or sub-area must verify all three layers:
+
+1. Legacy redirect compatibility.
+2. `VALID_ADMIN_PAGES` and `RoleRouter` prefix/role access.
+3. Container-page tab gates and the page-specific Bob context.
+
+## Verified shell control details
+
+Additional AdminShell evidence confirms:
+
+- Mobile page content renders above a bottom tab bar, with Bob as an additional tab-like control.
+- Desktop page content renders beside a collapsible sidebar with grouped navigation items.
+- The desktop collapse control has an accessible label and title that change with its state.
+- Navigation items are delegated through `navigate` or `navigateToPage`, preserving the shell's compatibility mapping.
+- `BobPanel` receives the current shell context in both layouts, along with initial conversation and seed-prompt state.
+- The desktop shell loads the Iron Eagle logo from a hard-coded public Supabase Storage URL.
+
+### Additional review items
+
+- Mobile tab buttons need explicit current-page semantics such as `aria-current` or an equivalent accessible state; visual active styling alone is insufficient.
+- Bob's button should expose whether the panel is open and should preserve keyboard/focus behavior in both mobile and desktop layouts.
+- The public logo URL is an external runtime dependency. It needs a documented availability/fallback state or a local/controlled asset strategy; a broken asset must not make the shell appear unbranded or misrepresent service ownership.
+- Desktop `NavItem` still uses the previously noted `div` button pattern and should be replaced with native button/link semantics or fully tested keyboard behavior, including Space activation.
+
+The final shell read adds two specific control-state gaps:
+
+- The desktop sign-out control renders only `⎋` when the sidebar is collapsed and has no state-aware `aria-label` or title in that branch, leaving the action ambiguous to assistive technology.
+- The Bob toggle has `aria-label="Open Bob AI assistant"` even when the panel is open and does not expose `aria-expanded` or an associated panel relationship.
+
+The shell accessibility fix should give every stateful control a stateful accessible name/current state, and should use native buttons or links wherever the interaction is a command or navigation action.
+
+## Verified AdminShell rendering and mobile menu findings
+
+Bob's latest source read confirms that `renderPage()` maps the consolidated admin pages to concrete page components, including Approvals & Activity, Testing, Test Data Entry, Grand Master Platform, Module Catalog, Provider Subscriptions, and Owner Billing. Its default branch returns `AdminHubPage` with the shell navigation callback.
+
+The mobile shell includes:
+
+- public organisation context in the top bar
+- an admin-to-field `PortalSwitcher` for `admin_officer`
+- `NotificationsBell` on mobile
+- a menu toggle and full-screen grouped navigation overlay
+- a sign-out action inside the overlay
+- a bottom tab bar and Bob panel
+
+### Verified mobile menu defect
+
+The `navigate()` helper is documented as “navigate and close the menu,” but its implementation only calls `navigateToPage(page)` and does not call `setMobileMenuOpen(false)`. Selecting a mobile menu item can therefore leave the full-screen overlay open over the newly selected page.
+
+Required regression test: open the mobile menu, activate a menu item, verify navigation occurs, and verify the overlay closes.
+
+### Mobile overlay requirements
+
+- The menu toggle label should reflect state (`Open menu` versus `Close menu`) and expose `aria-expanded`/`aria-controls`.
+- The close control should be keyboard reachable and Escape should close the overlay.
+- Focus should move into the open menu and return to the toggle when it closes; background content should not remain accidentally interactive.
+- Active mobile menu items and bottom tabs need accessible current-state semantics, not only visual styling.
 
 ## Evidence still required from Bob
 
