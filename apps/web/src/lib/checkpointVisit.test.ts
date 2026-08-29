@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateCheckpointVisit } from './checkpointVisit';
+import { countCompletedCheckpoints, evaluateCheckpointVisit, mapCheckpointVisitScanMethod } from './checkpointVisit';
 
 describe('evaluateCheckpointVisit', () => {
   it('accepts a close GPS fix within the checkpoint radius', () => {
@@ -76,5 +76,21 @@ describe('evaluateCheckpointVisit', () => {
     expect(result.accepted).toBe(false);
     expect(result.reason).toBe('gps_inaccurate');
     expect(result.withinRadius).toBe(false);
+  });
+
+  it('maps checkpoint evaluation to schema-safe visit methods', () => {
+    expect(mapCheckpointVisitScanMethod({ mode: 'gps', accepted: true })).toBe('qr_camera');
+    expect(mapCheckpointVisitScanMethod({ mode: 'manual', accepted: true })).toBe('manual_code');
+    expect(mapCheckpointVisitScanMethod({ mode: 'gps', accepted: false })).toBe('url_deep_link');
+  });
+
+  it('counts completed checkpoints by unique checkpoint instead of raw visit rows', () => {
+    expect(
+      countCompletedCheckpoints([
+        { checkpoint_id: 'a' },
+        { checkpoint_id: 'a' },
+        { checkpoint_id: 'b' },
+      ])
+    ).toBe(2);
   });
 });

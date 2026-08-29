@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { evaluateCheckpointVisit } from '../lib/checkpointVisit';
+import { countCompletedCheckpoints, evaluateCheckpointVisit, mapCheckpointVisitScanMethod } from '../lib/checkpointVisit';
 import './PageStyles.css';
 
 interface Shift {
@@ -342,6 +342,11 @@ const PatrolPage: React.FC = () => {
               : undefined,
       ].filter(Boolean).join(' ') || null;
 
+      const scanMethod = mapCheckpointVisitScanMethod({
+        mode: evaluation.mode,
+        accepted: evaluation.accepted,
+      });
+
       // ATLAS WRITES: patrol_checkpoint_visits
       const { data, error: visitErr } = await supabase
         .from('patrol_checkpoint_visits')
@@ -351,9 +356,10 @@ const PatrolPage: React.FC = () => {
             patrol_id: session.id,
             checkpoint_id: checkpointId,
             officer_user_id: profile.id,
-            scan_method: evaluation.mode === 'manual' ? 'manual_code' : 'gps',
+            scan_method: scanMethod,
             gps_lat: lat,
             gps_lng: lng,
+            gps_accuracy: gpsPrecisionMetres,
             gps_distance_from_checkpoint: evaluation.distanceMetres,
             within_radius: evaluation.withinRadius,
             notes: recordedNotes,
@@ -415,7 +421,7 @@ const PatrolPage: React.FC = () => {
     );
   }
 
-  const completedCount = session?.visits.length ?? 0;
+  const completedCount = session ? countCompletedCheckpoints(session.visits) : 0;
   const totalCount = session?.checkpoints.length ?? 0;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 

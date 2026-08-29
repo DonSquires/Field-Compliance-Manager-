@@ -1,4 +1,5 @@
 export type VisitMode = 'gps' | 'manual';
+export type CheckpointVisitScanMethod = 'qr_camera' | 'nfc' | 'manual_code' | 'url_deep_link';
 
 export type CheckpointVisitEvaluation = {
   mode: VisitMode;
@@ -12,6 +13,27 @@ export type CheckpointVisitEvaluation = {
     | 'gps_missing_manual_blocked'
     | 'gps_inaccurate';
 };
+
+export function mapCheckpointVisitScanMethod({
+  mode,
+  accepted,
+}: {
+  mode: VisitMode;
+  accepted: boolean;
+}): CheckpointVisitScanMethod {
+  if (mode === 'manual') return 'manual_code';
+  return accepted ? 'qr_camera' : 'url_deep_link';
+}
+
+export function countCompletedCheckpoints(
+  visits: Array<{ checkpoint_id: string | null | undefined }>
+): number {
+  return new Set(
+    visits
+      .map((visit) => visit.checkpoint_id)
+      .filter((checkpointId): checkpointId is string => Boolean(checkpointId))
+  ).size;
+}
 
 export function evaluateCheckpointVisit({
   checkpointLat,
