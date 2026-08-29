@@ -5,6 +5,12 @@
  * compliance_reason, nights_this_zone/month, zone_id, module_key). Recording
  * a vehicle scan against a governed zone is the core freedom-camping
  * compliance workflow — the observation IS the evidence record.
+ *
+ * Compliance verdict is computed server-side by calculate_vehicle_compliance
+ * (Atlas-confirmed: real RPC, proven flow, currently only invoked by the
+ * process-officer-scan edge function) rather than left to officer judgement —
+ * the two independent counters (consecutive-night streak, monthly total) are
+ * the actual product rule and cannot be guessed correctly by eye.
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -27,6 +33,22 @@ interface ZoneOption {
   name: string;
 }
 
+interface ComplianceVerdict {
+  is_compliant: boolean;
+  reason: string | null;
+  nights_this_zone: number;
+  nights_this_month: number;
+  limit_consecutive: number | null;
+  limit_monthly: number | null;
+  scv_required: boolean;
+  is_scv: boolean;
+}
+
+const REASON_LABEL: Record<string, string> = {
+  consecutive_night_limit_exceeded: 'Consecutive night limit exceeded',
+  monthly_limit_exceeded: 'Monthly night limit exceeded',
+};
+
 const OfficerFreedomCampingPage: React.FC = () => {
   const { profile } = useAuth();
   const [observations, setObservations] = useState<Observation[]>([]);
@@ -34,12 +56,10 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    plate_number: '',
-    zone_id: '',
-    is_compliant: 'true',
-    compliance_reason: '',
-  });
+  const [form, setForm] = useState({ plate_number: '', zone_id: '' });
+  const [verdict, setVerdict] = useState<ComplianceVerdict | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
 
   // ATLAS READS: observations, location_zones
   const loadData = useCallback(async () => {
@@ -80,9 +100,43 @@ const OfficerFreedomCampingPage: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // ATLAS CALLS: calculate_vehicle_compliance (RPC) — the actual compliance
+  // engine (consecutive-night streak + monthly total, two independent
+  // counters). Confirmed callable by 'authenticated' role in schema.sql.
+  const handleCheckCompliance = async () => {
+    if (!profile?.organizationId || !form.plate_number.trim() || !form.zone_id) return;
+
+    try {
+      setChecking(true);
+      setCheckError(null);
+      setVerdict(null);
+
+      const { data, error } = await supabase.rpc('calculate_vehicle_compliance', {
+        p_plate: form.plate_number.toUpperCase(),
+        p_zone_id: form.zone_id,
+        p_org_id: profile.organizationId,
+      });
+
+      if (error) throw error;
+      setVerdict(data as ComplianceVerdict);
+    } catch (err) {
+      setCheckError(err instanceof Error ? err.message : 'Failed to check compliance');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  // Any change to plate/zone invalidates a previously-computed verdict so a
+  // stale result can never be submitted against a different vehicle/zone.
+  const updateForm = (next: Partial<typeof form>) => {
+    setForm((f) => ({ ...f, ...next }));
+    setVerdict(null);
+    setCheckError(null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.id || !profile?.organizationId || !form.plate_number.trim()) return;
+    if (!profile?.id || !profile?.organizationId || !form.plate_number.trim() || !verdict) return;
 
     try {
       // ATLAS WRITES: observations
@@ -94,8 +148,11 @@ const OfficerFreedomCampingPage: React.FC = () => {
             officer_id: profile.id,
             plate_number: form.plate_number.toUpperCase(),
             zone_id: form.zone_id || null,
-            is_compliant: form.is_compliant === 'true',
-            compliance_reason: form.compliance_reason || null,
+            is_compliant: verdict.is_compliant,
+            compliance_reason: verdict.reason,
+            nights_this_zone: verdict.nights_this_zone,
+            nights_this_month: verdict.nights_this_month,
+            is_scv: verdict.is_scv,
             module_key: 'freedom_camping',
           },
         ])
@@ -104,7 +161,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
 
       if (error) throw error;
       setObservations([data as Observation, ...observations]);
-      setForm({ plate_number: '', zone_id: form.zone_id, is_compliant: 'true', compliance_reason: '' });
+      setForm({ plate_number: '', zone_id: form.zone_id });
+      setVerdict(null);
       setShowForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to record observation');
@@ -150,12 +208,12 @@ const OfficerFreedomCampingPage: React.FC = () => {
               type="text"
               required
               value={form.plate_number}
-              onChange={(e) => setForm({ ...form, plate_number: e.target.value.toUpperCase() })}
+              onChange={(e) => updateForm({ plate_number: e.target.value.toUpperCase() })}
             />
           </div>
           <div className="form-group">
             <label>Zone</label>
-            <select value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value })}>
+            <select value={form.zone_id} onChange={(e) => updateForm({ zone_id: e.target.value })}>
               {zones.length === 0 && <option value="">No zones configured</option>}
               {zones.map((z) => (
                 <option key={z.id} value={z.id}>
@@ -164,24 +222,41 @@ const OfficerFreedomCampingPage: React.FC = () => {
               ))}
             </select>
           </div>
-          <div className="form-group">
-            <label>Compliant</label>
-            <select value={form.is_compliant} onChange={(e) => setForm({ ...form, is_compliant: e.target.value })}>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
-          </div>
-          {form.is_compliant === 'false' && (
-            <div className="form-group">
-              <label>Compliance Reason</label>
-              <textarea
-                rows={3}
-                value={form.compliance_reason}
-                onChange={(e) => setForm({ ...form, compliance_reason: e.target.value })}
-              />
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={checking || !form.plate_number.trim() || !form.zone_id}
+            onClick={handleCheckCompliance}
+          >
+            {checking ? 'Checking…' : 'Check Compliance'}
+          </button>
+
+          {checkError && (
+            <div className="alert alert-error" role="alert">
+              {checkError}
             </div>
           )}
-          <button type="submit" className="btn btn-primary btn-block">
+
+          {verdict && (
+            <div className="assessment-card">
+              <div className="assessment-header">
+                <span className={`badge ${verdict.is_compliant ? 'badge-success' : 'badge-danger'}`}>
+                  {verdict.is_compliant ? 'Compliant' : 'Breach'}
+                </span>
+                {verdict.is_scv && <span className="badge badge-info">SCV</span>}
+              </div>
+              <p className="contact-meta">
+                {verdict.nights_this_zone} night(s) this zone
+                {verdict.limit_consecutive !== null ? ` (limit ${verdict.limit_consecutive})` : ''} ·{' '}
+                {verdict.nights_this_month} night(s) this month
+                {verdict.limit_monthly !== null ? ` (limit ${verdict.limit_monthly})` : ''}
+              </p>
+              {verdict.reason && <p className="contact-meta">{REASON_LABEL[verdict.reason] ?? verdict.reason}</p>}
+            </div>
+          )}
+
+          <button type="submit" className="btn btn-primary btn-block" disabled={!verdict}>
             Record Observation
           </button>
         </form>
