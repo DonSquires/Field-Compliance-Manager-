@@ -1,9 +1,92 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useActiveShift } from '../hooks/useActiveShift';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
+import './PageStyles.css';
+
+// shift_coverage_requests: real table + real trg_notify_shift_coverage_open_created
+// trigger, but Atlas shows zero app-layer readers/writers -- present and wired
+// server-side (a notification fires on insert), never surfaced to officers.
+interface OpenShift {
+  id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  required_staff_count: number;
+  urgency: string;
+  notes: string | null;
+  site_name: string | null;
+}
+
+function useOpenShifts(organizationId: string | null | undefined) {
+  const [openShifts, setOpenShifts] = useState<OpenShift[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!organizationId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const { data, error: err } = await supabase
+        .from('shift_coverage_requests')
+        .select('id, shift_date, start_time, end_time, required_staff_count, urgency, notes, site:site_id(name)')
+        .eq('organization_id', organizationId)
+        .eq('status', 'open')
+        .order('urgency', { ascending: false })
+        .order('shift_date', { ascending: true });
+
+      if (err) throw err;
+      setOpenShifts(
+        ((data as any[]) || []).map((row) => ({
+          id: row.id,
+          shift_date: row.shift_date,
+          start_time: row.start_time,
+          end_time: row.end_time,
+          required_staff_count: row.required_staff_count,
+          urgency: row.urgency,
+          notes: row.notes,
+          site_name: row.site?.name ?? null,
+        }))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load open shifts');
+    } finally {
+      setLoading(false);
+    }
+  }, [organizationId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const claim = useCallback(
+    async (requestId: string, officerId: string) => {
+      try {
+        setClaimingId(requestId);
+        setError(null);
+        const { error: err } = await supabase
+          .from('shift_coverage_requests')
+          .update({ status: 'claimed', claimed_by: officerId, claimed_at: new Date().toISOString() })
+          .eq('id', requestId)
+          .eq('status', 'open');
+
+        if (err) throw err;
+        setOpenShifts((prev) => prev.filter((s) => s.id !== requestId));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to claim shift');
+      } finally {
+        setClaimingId(null);
+      }
+    },
+    []
+  );
+
+  return { openShifts, loading, error, claimingId, claim };
+}
 
 export function OfficerHomePage() {
   const { profile } = useAuth();
@@ -52,6 +135,10 @@ export function OfficerHomePage() {
     return { count: String(shift.stops.length), details: `stops scheduled` };
   }, [shift]);
 
+  const { openShifts, loading: openShiftsLoading, error: openShiftsError, claimingId, claim } = useOpenShifts(
+    profile?.organizationId
+  );
+
   return (
     <div style={{ padding: 24 }}>
       <div style={{ marginBottom: 32 }}>
@@ -88,6 +175,58 @@ export function OfficerHomePage() {
           <p style={{ margin: 0, color: '#EF5350', fontSize: 12 }}>Error: {safety.lastError}</p>
         </div>
       )}
+
+      <div style={{ marginTop: 32 }}>
+        <h2 style={{ margin: '0 0 4px 0', fontSize: 16, fontWeight: 700 }}>Open Shifts</h2>
+        <p style={{ margin: '0 0 12px 0', color: '#94a3b8', fontSize: 13 }}>Coverage requests you can claim.</p>
+
+        {openShiftsError && (
+          <div style={{ padding: 10, background: '#3A0000', border: '1px solid #EF5350', borderRadius: 8, marginBottom: 12 }}>
+            <p style={{ margin: 0, color: '#EF5350', fontSize: 12 }}>{openShiftsError}</p>
+          </div>
+        )}
+
+        {openShiftsLoading ? (
+          <p style={{ color: '#94a3b8', fontSize: 13 }}>Loading open shifts…</p>
+        ) : openShifts.length === 0 ? (
+          <p style={{ color: '#94a3b8', fontSize: 13 }}>No open shifts need coverage right now.</p>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {openShifts.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: '#0f172a',
+                  border: '1px solid #334155',
+                  borderRadius: 8,
+                  padding: '10px 14px',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>
+                    {new Date(s.shift_date).toLocaleDateString()} · {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}
+                    {s.site_name ? ` · ${s.site_name}` : ''}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                    {s.urgency.toUpperCase()} priority · {s.required_staff_count} staff needed
+                    {s.notes ? ` · ${s.notes}` : ''}
+                  </div>
+                </div>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={claimingId === s.id || !profile?.id}
+                  onClick={() => profile?.id && claim(s.id, profile.id)}
+                >
+                  {claimingId === s.id ? 'Claiming…' : 'Claim'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

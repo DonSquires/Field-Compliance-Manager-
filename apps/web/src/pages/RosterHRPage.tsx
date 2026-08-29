@@ -12,7 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
-type RosterTab = 'staff' | 'credentials' | 'shift-templates' | 'leave' | 'timesheets';
+type RosterTab = 'staff' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets';
 
 interface StaffRow {
   id: string;
@@ -55,6 +55,18 @@ interface LeaveRequestRow {
   reason: string | null;
 }
 
+interface CoverageRequestRow {
+  id: string;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  required_staff_count: number;
+  urgency: string;
+  status: string;
+  notes: string | null;
+  site_name: string | null;
+}
+
 interface TimesheetRow {
   id: string;
   staff_id: string;
@@ -69,6 +81,7 @@ const TABS: { id: RosterTab; label: string }[] = [
   { id: 'staff', label: 'Staff' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'shift-templates', label: 'Shift Templates' },
+  { id: 'coverage', label: 'Open Shifts' },
   { id: 'leave', label: 'Leave' },
   { id: 'timesheets', label: 'Timesheets' },
 ];
@@ -85,9 +98,19 @@ const RosterHRPage: React.FC = () => {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
+  const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
+  const [showCoverageForm, setShowCoverageForm] = useState(false);
+  const [coverageForm, setCoverageForm] = useState({
+    shift_date: '',
+    start_time: '',
+    end_time: '',
+    required_staff_count: '1',
+    urgency: 'normal',
+    notes: '',
+  });
 
   // ATLAS READS: user_profiles, staff_profiles, staff_credentials,
-  // shift_templates, leave_requests, timesheets
+  // shift_templates, leave_requests, timesheets, shift_coverage_requests
   const loadAll = useCallback(async () => {
     const orgId = profile?.organizationId;
     if (!orgId) return;
@@ -96,7 +119,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes] =
+      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -126,6 +149,13 @@ const RosterHRPage: React.FC = () => {
             .select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, status')
             .eq('organization_id', orgId)
             .order('period_start', { ascending: false }),
+          supabase
+            .from('shift_coverage_requests')
+            .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes, site:site_id(name)')
+            .eq('organization_id', orgId)
+            .eq('status', 'open')
+            .order('urgency', { ascending: false })
+            .order('shift_date', { ascending: true }),
         ]);
 
       if (profilesRes.error) throw profilesRes.error;
@@ -134,6 +164,7 @@ const RosterHRPage: React.FC = () => {
       if (templatesRes.error) throw templatesRes.error;
       if (leaveRes.error) throw leaveRes.error;
       if (timesheetsRes.error) throw timesheetsRes.error;
+      if (coverageRes.error) throw coverageRes.error;
 
       const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.id, s]));
       const merged: StaffRow[] = (profilesRes.data || []).map((p: any) => ({
@@ -158,6 +189,19 @@ const RosterHRPage: React.FC = () => {
       setShiftTemplates((templatesRes.data as ShiftTemplateRow[]) || []);
       setLeaveRequests((leaveRes.data as LeaveRequestRow[]) || []);
       setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
+      setCoverageRequests(
+        ((coverageRes.data as any[]) || []).map((row) => ({
+          id: row.id,
+          shift_date: row.shift_date,
+          start_time: row.start_time,
+          end_time: row.end_time,
+          required_staff_count: row.required_staff_count,
+          urgency: row.urgency,
+          status: row.status,
+          notes: row.notes,
+          site_name: row.site?.name ?? null,
+        }))
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load roster data');
     } finally {
@@ -196,6 +240,39 @@ const RosterHRPage: React.FC = () => {
       setTimesheets(timesheets.map((t) => (t.id === id ? { ...t, status } : t)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update timesheet');
+    }
+  };
+
+  const handleCreateCoverage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.id || !profile?.organizationId) return;
+    if (!coverageForm.shift_date || !coverageForm.start_time || !coverageForm.end_time) return;
+
+    try {
+      // ATLAS WRITES: shift_coverage_requests (fires trg_notify_shift_coverage_open_created)
+      const { data, error } = await supabase
+        .from('shift_coverage_requests')
+        .insert([
+          {
+            organization_id: profile.organizationId,
+            shift_date: coverageForm.shift_date,
+            start_time: coverageForm.start_time,
+            end_time: coverageForm.end_time,
+            required_staff_count: Number(coverageForm.required_staff_count) || 1,
+            urgency: coverageForm.urgency,
+            notes: coverageForm.notes || null,
+            created_by: profile.id,
+          },
+        ])
+        .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes')
+        .single();
+
+      if (error) throw error;
+      setCoverageRequests([{ ...(data as CoverageRequestRow), site_name: null }, ...coverageRequests]);
+      setCoverageForm({ shift_date: '', start_time: '', end_time: '', required_staff_count: '1', urgency: 'normal', notes: '' });
+      setShowCoverageForm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create coverage request');
     }
   };
 
@@ -312,6 +389,108 @@ const RosterHRPage: React.FC = () => {
                 )}
               </tbody>
             </table>
+          </div>
+        </section>
+      )}
+
+      {tab === 'coverage' && (
+        <section className="reports-section">
+          <h2>Open Shifts ({coverageRequests.length})</h2>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowCoverageForm(!showCoverageForm)}>
+            {showCoverageForm ? 'Cancel' : '+ New Coverage Request'}
+          </button>
+
+          {showCoverageForm && (
+            <form className="assessment-form" onSubmit={handleCreateCoverage}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={coverageForm.shift_date}
+                    onChange={(e) => setCoverageForm({ ...coverageForm, shift_date: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Required Staff</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={coverageForm.required_staff_count}
+                    onChange={(e) => setCoverageForm({ ...coverageForm, required_staff_count: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Start Time</label>
+                  <input
+                    type="time"
+                    required
+                    value={coverageForm.start_time}
+                    onChange={(e) => setCoverageForm({ ...coverageForm, start_time: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>End Time</label>
+                  <input
+                    type="time"
+                    required
+                    value={coverageForm.end_time}
+                    onChange={(e) => setCoverageForm({ ...coverageForm, end_time: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Urgency</label>
+                <select value={coverageForm.urgency} onChange={(e) => setCoverageForm({ ...coverageForm, urgency: e.target.value })}>
+                  <option value="low">Low</option>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Notes</label>
+                <textarea
+                  rows={2}
+                  value={coverageForm.notes}
+                  onChange={(e) => setCoverageForm({ ...coverageForm, notes: e.target.value })}
+                />
+              </div>
+              <button type="submit" className="btn btn-primary btn-block">
+                Create Request
+              </button>
+            </form>
+          )}
+
+          <div className="contacts-list" style={{ marginTop: '12px' }}>
+            {coverageRequests.length === 0 ? (
+              <div className="empty-state">
+                <p>No open shifts need coverage right now.</p>
+              </div>
+            ) : (
+              coverageRequests.map((c) => (
+                <div key={c.id} className="contact-card">
+                  <div className="contact-header">
+                    <h3>
+                      {new Date(c.shift_date).toLocaleDateString()} · {c.start_time.slice(0, 5)}–{c.end_time.slice(0, 5)}
+                    </h3>
+                    <span className={`badge ${c.urgency === 'urgent' || c.urgency === 'high' ? 'badge-danger' : 'badge-info'}`}>
+                      {c.urgency.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="contact-details">
+                    <p className="contact-meta">
+                      {c.site_name ? `${c.site_name} · ` : ''}
+                      Requires {c.required_staff_count} staff
+                    </p>
+                    {c.notes && <p className="contact-meta">{c.notes}</p>}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </section>
       )}
