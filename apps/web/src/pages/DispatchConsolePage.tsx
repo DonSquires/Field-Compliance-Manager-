@@ -351,9 +351,13 @@ const DispatchConsolePage: React.FC = () => {
           scheduledStart: s.scheduled_start,
           scheduledEnd: s.scheduled_end,
           status: s.status,
-          shiftHealth: Math.random() > 0.5 ? 'healthy' : 'degraded',
-          totalStops: Math.floor(Math.random() * 10) + 3,
-          completedStops: Math.floor(Math.random() * 5) + 1,
+          // shifts.shift_health has no confirmed writer anywhere in the build
+          // (Atlas: only 'references' edges, no 'writes') -- it sits at its
+          // schema default forever. Read the real column rather than fabricate
+          // one, but do not present it as a live-computed signal.
+          shiftHealth: s.shift_health ?? 'on_track',
+          totalStops: s.total_stops ?? 0,
+          completedStops: s.completed_stops ?? 0,
         }));
         setActiveShifts(formatted);
       }
@@ -366,7 +370,7 @@ const DispatchConsolePage: React.FC = () => {
           status: j.status,
           briefingNotes: j.briefing_notes || '',
           slaMinutes: j.sla_minutes || 15,
-          slaBreached: false,
+          slaBreached: j.sla_breached ?? false,
           siteName: j.site?.name || 'Unknown Site',
           siteId: j.client_site_id,
           createdAt: j.created_at,

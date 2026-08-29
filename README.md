@@ -2,6 +2,8 @@
 
 Backend and deployment workspace for the Field Compliance Manager project.
 
+**Before editing shared code (schema, hooks, shared components), read [AGENTS.md](AGENTS.md) first** — it explains how to query the live Atlas terrain map (`bob_capability_map`/`bob_app_map_edges`) alongside `supabase/schema.sql` to check blast radius before touching anything that isn't purely local to one page.
+
 ## Architecture
 
 The VPS contains the Node-based Field Compliance Manager backend, Bob's control plane, a PTT service, and Docker deployment definitions. Supabase provides the database, authentication, storage, row-level security, and workflow data used by the application. Gitea is the private Git service used by the in-house Bob development workflow.
