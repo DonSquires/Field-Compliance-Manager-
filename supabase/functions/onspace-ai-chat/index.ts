@@ -30,6 +30,7 @@ import { createClient as _createClient } from 'https://esm.sh/@supabase/supabase
 import { OWNER_EMAILS } from '../_shared/auth.ts';
 import { buildToolDispatchedPayload, buildToolOutcomePayload, buildIntrospectPayload, renderNotepadTail } from '../_shared/deterministic-logic.ts';
 import { buildModuleMap } from '../_shared/moduleProfiles.ts';
+import { startToolExecution, finishToolExecution, reloadTaskLedger } from '../_shared/task-lifecycle.ts';
 const createClient = (url, key, opts)=>_createClient(url, key, opts);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -2025,6 +2026,94 @@ async function loadUserMemory(supabase, userId, orgId) {
     };
   } catch (e) {
     console.warn('[conductor][facts] loadConversationFacts failed (non-fatal):', e);
+    return null;
+  }
+}
+
+async function loadTaskLedger(supabase, conversationId) {
+  if (!conversationId) return null;
+  try {
+    const { data: task, error: taskErr } = await supabase.from('bob_task_runs').select('id, task_id, conversation_id, organization_id, goal, status, current_step_index, total_steps, updated_at, last_verified_at, last_error').eq('conversation_id', conversationId).order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    if (taskErr) {
+      console.warn('[conductor][task-ledger] loadTaskLedger query failed (non-fatal):', taskErr.message);
+      return null;
+    }
+    if (!task) return null;
+    const { data: steps, error: stepErr } = await supabase.from('bob_task_steps').select('id, task_id, task_run_id, step_id, ordinal_position, requested_operation, normalized_tool, normalized_args, status, attempt_count, started_at, completed_at, result_summary, evidence_refs, error, retryable').eq('task_run_id', task.id).order('ordinal_position', { ascending: true });
+    if (stepErr) {
+      console.warn('[conductor][task-ledger] task steps query failed (non-fatal):', stepErr.message);
+    }
+    const safeSteps = Array.isArray(steps) ? steps : [];
+    const completed = safeSteps.filter((s)=>s.status === 'completed').map((s)=>s.step_id).filter(Boolean);
+    const nextStep = safeSteps.find((s)=>s.status === 'failed' && s.retryable) ?? safeSteps.find((s)=>s.status === 'pending') ?? safeSteps.find((s)=>s.status === 'blocked') ?? null;
+    const checkpoint = {
+      completed_step_ids: completed,
+      next_step_id: nextStep ? nextStep.step_id : null,
+      blocked_reason: safeSteps.find((s)=>s.status === 'blocked')?.error ?? null,
+      progress_unverified: false,
+      last_error: task.last_error ?? null,
+      current_step_index: Number.isInteger(task.current_step_index) ? task.current_step_index : 0,
+      total_steps: Number.isInteger(task.total_steps) ? task.total_steps : safeSteps.length
+    };
+    return {
+      task,
+      steps: safeSteps,
+      checkpoint
+    };
+  } catch (e) {
+    console.warn('[conductor][task-ledger] loadTaskLedger failed (non-fatal):', e);
+    return null;
+  }
+}
+
+async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
+  if (!conversationId || !goal) return null;
+  const existing = await loadTaskLedger(supabase, conversationId);
+  if (existing) return existing;
+  try {
+    const taskId = `conversation-${conversationId}`;
+    const { data: task, error: insertErr } = await supabase.from('bob_task_runs').insert({
+      task_id: taskId,
+      conversation_id: conversationId,
+      organization_id: orgId,
+      goal: String(goal).slice(0, 2000),
+      status: 'active',
+      current_step_index: 0,
+      total_steps: 1
+    }).select('id, task_id, conversation_id, organization_id, goal, status, current_step_index, total_steps, updated_at, last_verified_at, last_error').single();
+    if (insertErr || !task) {
+      console.warn('[conductor][task-ledger] ensureTaskLedger insert failed (non-fatal):', insertErr?.message ?? 'unknown');
+      return null;
+    }
+    const { data: steps, error: stepErr } = await supabase.from('bob_task_steps').insert({
+      task_id: task.task_id,
+      task_run_id: task.id,
+      step_id: 'initial_turn',
+      ordinal_position: 1,
+      requested_operation: 'Perceive and plan the next turn',
+      status: 'pending',
+      evidence_refs: [],
+      retryable: false
+    }).select('id, task_id, task_run_id, step_id, ordinal_position, requested_operation, normalized_tool, normalized_args, status, attempt_count, started_at, completed_at, result_summary, evidence_refs, error, retryable').single();
+    if (stepErr || !steps) {
+      console.warn('[conductor][task-ledger] ensureTaskLedger insert step failed (non-fatal):', stepErr?.message ?? 'unknown');
+      return { task, steps: [], checkpoint: { completed_step_ids: [], next_step_id: null, blocked_reason: null, progress_unverified: false, last_error: task.last_error ?? null, current_step_index: 0, total_steps: 1 } };
+    }
+    return {
+      task,
+      steps: [steps],
+      checkpoint: {
+        completed_step_ids: [],
+        next_step_id: steps.step_id,
+        blocked_reason: null,
+        progress_unverified: false,
+        last_error: task.last_error ?? null,
+        current_step_index: 0,
+        total_steps: 1
+      }
+    };
+  } catch (e) {
+    console.warn('[conductor][task-ledger] ensureTaskLedger failed (non-fatal):', e);
     return null;
   }
 }
@@ -6215,6 +6304,7 @@ serve(async (req)=>{
     // Resume-and-act: give the brain the recent turns + any in-flight plan so a
     // user's answer CONTINUES the stage-gate instead of cold-starting a re-ask.
     const { history, pending } = await loadHistory(admin, conversationId, 8);
+    let taskLedger = await ensureTaskLedger(admin, conversationId, orgId, message);
     // ── PILLAR A Step 2 — load structured conversation facts (#136) ─────────
     // Read the bob_conversation_facts row for this conversation (if it exists).
     // The active slot's facts are injected as ADDITIONAL structured context into
@@ -7721,7 +7811,16 @@ serve(async (req)=>{
       enabled_module_profiles: enabledModuleProfiles,
       // Pillar A Step 2 (#136): inject structured conversation facts as
       // additional context for the planner. Optional, backward-compatible.
-      conversation_facts: conversationFactsContext
+      conversation_facts: conversationFactsContext,
+      // Task continuity: include the active task ledger and resume checkpoint so
+      // a follow-on turn can continue from durable state instead of only chat
+      // history. This is best-effort and fail-closed only when the ledger is
+      // unavailable or unreadable.
+      task_state: taskLedger ? {
+        task: taskLedger.task,
+        checkpoint: taskLedger.checkpoint,
+        steps: taskLedger.steps
+      } : null
     };
     const plan = await callPlan(planPayload);
     if (!plan.ok) {
@@ -8604,6 +8703,16 @@ serve(async (req)=>{
       return json(structured);
     }
     // ── LAYER 4 — execute the chosen tool (governed), or answer directly ─────
+    // TASK CONTINUITY: Claim the current pending step before dispatch
+    const claimResult = await startToolExecution(admin, taskLedger, chosenTool || 'unknown_tool');
+    if (claimResult.success && taskLedger) {
+      // Step successfully claimed as running; proceed with tool dispatch
+      console.log(`[conductor][task-continuity] step claimed for tool ${chosenTool}`);
+    } else if (taskLedger) {
+      // Non-fatal: step claim failed but tool dispatch proceeds
+      console.warn('[conductor][task-continuity] step claim failed (non-fatal), tool dispatch will proceed');
+    }
+
     let result;
     try {
       result = await dispatchTool(chosenTool, args, decision);
@@ -8621,6 +8730,20 @@ serve(async (req)=>{
         }
       };
     }
+
+    // TASK CONTINUITY: Mark the step completed/failed/blocked based on result
+    const finishResult = await finishToolExecution(admin, taskLedger, chosenTool || 'unknown_tool', result);
+    if (finishResult.success && finishResult.updatedSteps) {
+      // Step status updated; refresh the task ledger for the loop
+      taskLedger = await reloadTaskLedger(admin, taskLedger);
+      if (finishResult.checkpoint) {
+        console.log(`[conductor][task-continuity] step marked as ${finishResult.updatedStep?.status}, checkpoint updated`);
+      }
+    } else if (taskLedger) {
+      // Non-fatal: step finish failed but loop proceeds with stale ledger
+      console.warn('[conductor][task-continuity] step finish failed (non-fatal), loop will proceed with stale checkpoint');
+    }
+
     // PILLAR H: tool_outcome event (all propose_* paths — Phase 2)
     if (chosenTool && chosenTool.startsWith('propose_')) {
       await emitEvent("tool_outcome", buildToolOutcomePayload(chosenTool, result.meta), {
@@ -8979,9 +9102,17 @@ serve(async (req)=>{
         // allowFallback=false inside the loop: the loop already degrades
         // gracefully by breaking, and per-step VPS fallback could blow the
         // 150s budget across multiple loop iterations.
+
+        // TASK CONTINUITY: Merge durable task checkpoint with ephemeral loop state
+        const loopTaskState = {
+          ...taskState,
+          // Include the durable task checkpoint if available
+          ...(taskLedger && taskLedger.checkpoint ? { durable_checkpoint: taskLedger.checkpoint } : {})
+        };
+
         const nextPlan = await callPlan({
           ...planPayload,
-          task_state: taskState
+          task_state: loopTaskState
         }, false);
         if (!nextPlan.ok) {
           // Graceful degradation: return the best answer so far, never error.

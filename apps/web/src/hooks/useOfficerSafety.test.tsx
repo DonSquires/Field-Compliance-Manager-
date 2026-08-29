@@ -169,6 +169,38 @@ describe('useOfficerSafety', () => {
     expect(result.current.status).toBe('ok');
   });
 
+  it('checkIn keeps an active alert when its resolution write fails', async () => {
+    mockTable({
+      welfare_alerts: () => ({
+        insert: () => ({
+          select: () => ({
+            single: () => Promise.resolve({ data: { id: 'alert-4b' }, error: null }),
+          }),
+        }),
+        update: () => ({ eq: () => Promise.resolve({ error: { message: 'alert update failed' } }) }),
+      }),
+      welfare_checks: () => ({
+        insert: () => Promise.resolve({ error: null }),
+      }),
+      officer_welfare_settings: () => ({
+        upsert: () => Promise.resolve({ error: null }),
+      }),
+    });
+    const { result } = renderHook(() => useOfficerSafety(baseOptions()));
+    await act(async () => {
+      await result.current.triggerSOS();
+    });
+
+    await act(async () => {
+      const ok = await result.current.checkIn();
+      expect(ok).toBe(false);
+    });
+    expect(result.current.activeAlert?.id).toBe('alert-4b');
+    expect(result.current.status).toBe('alerting');
+    expect(result.current.writeStatus).toBe('error');
+    expect(result.current.lastError).toMatch(/alert update failed/);
+  });
+
   it('checkIn fails visibly (does not silently succeed) when the check-in insert errors', async () => {
     mockTable({
       welfare_checks: () => ({

@@ -277,7 +277,7 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
     // valid positive acknowledgement — clearing any active alert IS allowed
     // here because the officer took a deliberate action, unlike raw movement.
     if (activeAlertRef.current) {
-      await supabase
+      const { error: alertResolutionError } = await supabase
         .from('welfare_alerts')
         .update({
           status: 'resolved',
@@ -286,6 +286,11 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
           resolution_notes: 'Resolved by officer check-in',
         })
         .eq('id', activeAlertRef.current.id);
+      if (alertResolutionError) {
+        setWriteStatus('error');
+        setLastError(alertResolutionError.message);
+        return false;
+      }
       setActiveAlert(null);
     }
 

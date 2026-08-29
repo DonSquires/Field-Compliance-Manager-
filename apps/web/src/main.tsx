@@ -1,17 +1,12 @@
 /**
  * main.tsx — application entry point (Vite/React)
  *
- * Placeholder root: routing (BrowserRouter -> RoleRouter -> shells) is a
- * separate, larger slice to be implemented against the verified contract in
- * docs/ui-baseline.md. This exists so the app is buildable while individual
- * hooks/components are implemented and tested independently.
+ * The rebuild restores the real app shell and routing contract expected by
+ * docs/ui-baseline.md, while keeping the codebase lightweight and testable.
  */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-
-function App() {
-  return <div>Field Compliance Manager — rebuild in progress</div>;
-}
+import { App } from './App';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

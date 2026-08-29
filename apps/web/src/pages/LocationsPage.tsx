@@ -1,0 +1,268 @@
+/**
+ * LocationsPage.tsx
+ *
+ * Canonical schema: locations ("house" — client-owned physical place) groups
+ * a Site facet (client_sites, addressed point) and Zone facet(s)
+ * (location_zones, area) as siblings via location_id. zone_closures track
+ * temporary/prohibited closures per zone.
+ */
+
+import React, { useEffect, useState, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
+import './PageStyles.css';
+
+interface LocationRow {
+  id: string;
+  name: string;
+  address: string | null;
+  suburb: string | null;
+  postcode: string | null;
+  notes: string | null;
+}
+
+interface SiteFacet {
+  id: string;
+  name: string;
+  site_type: string | null;
+  active: boolean;
+}
+
+interface ZoneFacet {
+  id: string;
+  name: string;
+  zone_type: string;
+  is_active: boolean;
+  nightly_limit_consecutive: number | null;
+  scv_required: boolean;
+}
+
+interface ZoneClosure {
+  id: string;
+  zone_id: string;
+  closure_type: string;
+  status: string;
+  effective_from: string;
+  effective_to: string | null;
+  reason: string | null;
+}
+
+const LocationsPage: React.FC = () => {
+  const { profile } = useAuth();
+  const [locations, setLocations] = useState<LocationRow[]>([]);
+  const [selected, setSelected] = useState<LocationRow | null>(null);
+  const [sites, setSites] = useState<SiteFacet[]>([]);
+  const [zones, setZones] = useState<ZoneFacet[]>([]);
+  const [closures, setClosures] = useState<ZoneClosure[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // ATLAS READS: locations
+  useEffect(() => {
+    const loadLocations = async () => {
+      const orgId = profile?.organizationId;
+      if (!orgId) return;
+
+      try {
+        setLoading(true);
+        setError(null);
+
+        const { data, error: err } = await supabase
+          .from('locations')
+          .select('id, name, address, suburb, postcode, notes')
+          .eq('organization_id', orgId)
+          .order('name', { ascending: true });
+
+        if (err) throw err;
+        setLocations((data as LocationRow[]) || []);
+
+        if (data && data.length > 0) {
+          setSelected(data[0] as LocationRow);
+          await loadFacets(data[0].id);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load locations');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadLocations();
+  }, [profile?.organizationId]);
+
+  const loadFacets = async (locationId: string) => {
+    try {
+      // ATLAS READS: client_sites, location_zones
+      const [sitesRes, zonesRes] = await Promise.all([
+        supabase.from('client_sites').select('id, name, site_type, active').eq('location_id', locationId),
+        supabase
+          .from('location_zones')
+          .select('id, name, zone_type, is_active, nightly_limit_consecutive, scv_required')
+          .eq('location_id', locationId),
+      ]);
+
+      if (sitesRes.error) throw sitesRes.error;
+      if (zonesRes.error) throw zonesRes.error;
+
+      const zoneRows = (zonesRes.data as ZoneFacet[]) || [];
+      setSites((sitesRes.data as SiteFacet[]) || []);
+      setZones(zoneRows);
+
+      if (zoneRows.length > 0) {
+        // ATLAS READS: zone_closures
+        const { data: closureData, error: closureErr } = await supabase
+          .from('zone_closures')
+          .select('id, zone_id, closure_type, status, effective_from, effective_to, reason')
+          .in(
+            'zone_id',
+            zoneRows.map((z) => z.id)
+          )
+          .eq('status', 'active');
+
+        if (closureErr) throw closureErr;
+        setClosures((closureData as ZoneClosure[]) || []);
+      } else {
+        setClosures([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load location facets');
+    }
+  };
+
+  const handleSelect = (location: LocationRow) => {
+    setSelected(location);
+    loadFacets(location.id);
+  };
+
+  if (loading) {
+    return (
+      <div className="page-container">
+        <div className="loading-state">
+          <div className="spinner"></div>
+          <p>Loading locations...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-container">
+      <header className="page-header">
+        <h1>Locations</h1>
+        <p className="subtitle">{locations.length} locations · sites and zones grouped by physical place</p>
+      </header>
+
+      {error && (
+        <div className="alert alert-error" role="alert">
+          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
+            ×
+          </button>
+          {error}
+        </div>
+      )}
+
+      <div className="smoke-layout">
+        <div className="site-selector">
+          <h2>All Locations ({locations.length})</h2>
+          <div className="sites-list">
+            {locations.length === 0 ? (
+              <div className="empty-state">
+                <p>No locations configured.</p>
+              </div>
+            ) : (
+              locations.map((loc) => (
+                <button
+                  key={loc.id}
+                  className={`site-card ${selected?.id === loc.id ? 'active' : ''}`}
+                  onClick={() => handleSelect(loc)}
+                >
+                  <h3>{loc.name}</h3>
+                  <p className="site-address">
+                    {loc.address}
+                    {loc.suburb ? `, ${loc.suburb}` : ''}
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+
+        {selected && (
+          <div className="assessment-details">
+            <div className="details-header">
+              <h2>{selected.name}</h2>
+            </div>
+
+            {selected.notes && <p className="contact-meta">{selected.notes}</p>}
+
+            <section className="reports-section">
+              <h3>Site Facet ({sites.length})</h3>
+              {sites.length === 0 ? (
+                <div className="empty-state">
+                  <p>No addressed site facet for this location.</p>
+                </div>
+              ) : (
+                <div className="contacts-list">
+                  {sites.map((site) => (
+                    <div key={site.id} className="contact-card">
+                      <div className="contact-header">
+                        <h3>{site.name}</h3>
+                        <span className={`status-badge status-${site.active ? 'active' : 'inactive'}`}>
+                          {site.active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      {site.site_type && <p className="contact-meta">{site.site_type}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="reports-section">
+              <h3>Zone Facet(s) ({zones.length})</h3>
+              {zones.length === 0 ? (
+                <div className="empty-state">
+                  <p>No area/zone facet for this location.</p>
+                </div>
+              ) : (
+                <div className="contacts-list">
+                  {zones.map((zone) => {
+                    const zoneClosures = closures.filter((c) => c.zone_id === zone.id);
+                    return (
+                      <div key={zone.id} className="contact-card">
+                        <div className="contact-header">
+                          <h3>{zone.name}</h3>
+                          <span className="contact-type-badge">{zone.zone_type}</span>
+                        </div>
+                        <div className="contact-details">
+                          <p className="contact-meta">
+                            {zone.is_active ? 'Active' : 'Inactive'}
+                            {zone.scv_required ? ' · SCV required' : ''}
+                            {zone.nightly_limit_consecutive
+                              ? ` · limit ${zone.nightly_limit_consecutive} consecutive nights`
+                              : ''}
+                          </p>
+                        </div>
+                        {zoneClosures.length > 0 && (
+                          <div className="assessment-actions">
+                            {zoneClosures.map((c) => (
+                              <span key={c.id} className="severity-badge severity-high">
+                                {c.closure_type} since {new Date(c.effective_from).toLocaleDateString()}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default LocationsPage;
