@@ -167,6 +167,30 @@
   border: 1px solid var(--color-border, #334155);
 }
 
+.badge-success {
+  color: var(--color-success, #4caf50);
+  border-color: var(--color-success, #4caf50);
+  background: var(--color-success-bg, #0f2a14);
+}
+
+.badge-warning {
+  color: var(--color-warning, #ff9800);
+  border-color: var(--color-warning, #ff9800);
+  background: var(--color-warning-bg, #2a1c05);
+}
+
+.badge-danger {
+  color: var(--color-danger, #ef5350);
+  border-color: var(--color-danger, #ef5350);
+  background: var(--color-danger-bg, #3a0000);
+}
+
+.badge-info {
+  color: var(--color-info, #3b82f6);
+  border-color: var(--color-info, #3b82f6);
+  background: var(--color-info-bg, #0d1e33);
+}
+
 .crm-branch-filter {
   display: flex;
   align-items: center;
@@ -185,6 +209,12 @@
   border: 1px solid var(--color-border, #334155);
   border-radius: 10px;
   padding: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.contact-card:hover {
+  border-color: var(--color-border-strong, #475569);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.4));
 }
 
 .contact-header {
@@ -235,6 +265,12 @@
   padding: 10px 12px;
   cursor: pointer;
   color: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.shift-card:hover,
+.site-card:hover {
+  background: var(--color-bg-hover, #1a2942);
 }
 
 .shift-card.active,
@@ -299,6 +335,31 @@
   gap: 4px;
 }
 
+.form-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #334155);
+  background: var(--color-bg-primary, #020617);
+  color: var(--color-text-primary, #f1f5f9);
+  font-size: 13px;
+  transition: border-color 0.15s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--color-primary, #1d4ed8);
+  outline: none;
+}
+
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -311,11 +372,25 @@
   border: none;
   cursor: pointer;
   font-weight: 600;
+  transition: background 0.15s ease, opacity 0.15s ease, transform 0.05s ease;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-primary {
   background: var(--color-primary, #1d4ed8);
   color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover, #2563eb);
 }
 
 .btn-secondary {
@@ -324,9 +399,17 @@
   color: inherit;
 }
 
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-bg-hover, #1a2942);
+}
+
 .btn-danger {
   background: #ef4444;
   color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
 }
 
 .btn-sm {
