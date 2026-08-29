@@ -17,6 +17,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobStatus } from '../lib/dispatchStatus';
+import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { supabase } from '../lib/supabase';
 
 // Type definitions
@@ -24,7 +25,7 @@ type JobType = 'alarm_response' | 'event' | 'incident' | 'patrol_support' | 'wel
 type JobPriority = 'low' | 'medium' | 'high' | 'critical';
 type JobStatus = 'pending' | 'pending_approval' | 'dispatched' | 'acknowledged' | 'en_route' | 'on_scene' | 'completed' | 'cancelled';
 type ShiftStatus = 'scheduled' | 'published' | 'accepted' | 'declined' | 'in_progress' | 'completed' | 'cancelled';
-type StopStatus = 'pending' | 'arrived' | 'completed';
+type StopStatus = 'pending' | 'en_route' | 'on_scene' | 'completed' | 'skipped' | 'cancelled';
 type MobileTab = 'shifts' | 'stops' | 'jobs';
 
 interface ActiveShift {
@@ -192,13 +193,13 @@ const StopCard: React.FC<{ stop: ShiftStop }> = ({ stop }) => (
         style={{
           fontSize: '11px',
           fontWeight: 600,
-          color: stop.status === 'completed' ? '#4CAF50' : stop.status === 'arrived' ? '#3B82F6' : '#666',
+          color: stop.status === 'completed' ? '#4CAF50' : stop.status === 'on_scene' ? '#3B82F6' : stop.status === 'en_route' ? '#FF9800' : '#666',
           padding: '2px 6px',
-          backgroundColor: stop.status === 'completed' ? '#1B5E20' : stop.status === 'arrived' ? '#0D1F3C' : '#2A2A2A',
+          backgroundColor: stop.status === 'completed' ? '#1B5E20' : stop.status === 'on_scene' ? '#0D1F3C' : stop.status === 'en_route' ? '#231A00' : '#2A2A2A',
           borderRadius: '3px',
         }}
       >
-        {stop.status.toUpperCase()}
+        {shiftStopStatusLabel(stop.status).toUpperCase()}
       </div>
     </div>
     <div style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}>
@@ -406,19 +407,19 @@ const DispatchConsolePage: React.FC = () => {
 
       const { data, error } = await supabase
         .from('shift_stops')
-        .select('id, shift_id, sequence, site_name, arrival, departure, status')
+        .select('id, shift_id, stop_order, site_id, zone_id, status, actual_arrived_at, actual_departed_at')
         .eq('shift_id', shiftId)
-        .order('sequence');
+        .order('stop_order');
 
       if (error) throw error;
       setShiftStops(
         (data || []).map((row: any) => ({
           id: row.id,
           shiftId: row.shift_id,
-          sequence: row.sequence,
-          siteName: row.site_name,
-          arrival: row.arrival,
-          departure: row.departure,
+          sequence: row.stop_order,
+          siteName: row.site_id ?? row.zone_id ?? 'Stop',
+          arrival: row.actual_arrived_at,
+          departure: row.actual_departed_at,
           status: row.status,
         }))
       );
