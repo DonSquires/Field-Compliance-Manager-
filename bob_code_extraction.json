@@ -1,0 +1,439 @@
+{
+  "extraction_metadata": {
+    "total_messages_searched": 5000,
+    "unique_files_mentioned": 59,
+    "files_with_complete_code": 1,
+    "total_file_mentions": 347,
+    "extraction_timestamp": "from bob_messages table"
+  },
+  "files_with_code": {
+    "apps/web/src/routing/RoleRouter.tsx": {
+      "file_path": "apps/web/src/routing/RoleRouter.tsx",
+      "total_lines": 188,
+      "code_length": 7177,
+      "line_range": "complete file",
+      "coverage_percent": 100,
+      "is_complete": true,
+      "code": "/**\n * RoleRouter.tsx \u2014 Role-based portal routing with URL prefix enforcement\n *\n * Source of truth: docs/INSTRUCTION_MANUAL.md \u00a72.3\n *\n * Routes the authenticated user to the correct portal\n * based on their role:\n *\n *   grand_master / master / admin / admin_officer / nzscv_monitor\n *     \u2192 Admin shell  (/admin/*)\n *\n *   officer\n *     \u2192 Officer shell (/officer/*)\n *\n *   scan_operator (or officer with standalone mode)\n *     \u2192 Scan shell   (/scan)\n *\n *   client_admin / client_officer / client_viewer\n *     \u2192 Client shell  (/client/*)\n *\n * Admin officers see a portal selection screen.\n * URL prefix is enforced: if the URL doesn't match the role, <Navigate> redirects.\n */\n\nimport React, { useState } from 'react';\nimport { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';\nimport { useAuth } from '../context/AuthContext';\nimport { AdminShell } from '../shells/AdminShell';\nimport { OfficerShell } from '../shells/OfficerShell';\nimport { ClientShell } from '../shells/ClientShell';\nimport { ScanShell } from '../shells/ScanShell';\nimport { LoadingScreen } from '../components/LoadingScreen';\n\nconst PORTAL_CHOICE_KEY = 'fcm.admin_officer.portal';\ntype PortalChoice = 'admin' | 'field';\n\nexport function RoleRouter() {\n  const { profile, loading } = useAuth();\n  const location = useLocation();\n  const navigate = useNavigate();\n  const [portalChoice, setPortalChoice] = useState<PortalChoice | null>(\n    () => (sessionStorage.getItem(PORTAL_CHOICE_KEY) as PortalChoice | null),\n  );\n\n  if (loading) return <LoadingScreen />;\n\n  if (!profile) return null;\n\n  const { role } = profile;\n\n  function choosePortal(choice: PortalChoice | null) {\n    if (choice) sessionStorage.setItem(PORTAL_CHOICE_KEY, choice);\n    else sessionStorage.removeItem(PORTAL_CHOICE_KEY);\n    setPortalChoice(choice);\n    // Navigate to the chosen portal prefix\n    if (choice === 'admin') navigate('/admin', { replace: true });\n    else if (choice === 'field') navigate('/officer', { replace: true });\n  }\n\n  // Determine the expected URL prefix for this role.\n  let expectedPrefix: string;\n\n  if (role === 'admin_officer') {\n    if (!portalChoice) {\n      // Show portal selector \u2014 no prefix enforcement yet\n      return (\n        <PortalSelector\n          officerName={profile.displayName ?? 'Officer'}\n          onChoose={choosePortal}\n        />\n      );\n    }\n    expectedPrefix = portalChoice === 'admin' ? '/admin' : '/officer';\n  } else if (role === 'scan_operator') {\n    // Scan operators always go to the lightweight /scan shell \u2014 no roster,\n    // dispatch, welfare, or full dashboard. (#150 slice 2)\n    expectedPrefix = '/scan';\n  } else if (\n    role === 'grand_master' ||\n    role === 'master' ||\n    role === 'admin' ||\n    role === 'nzscv_monitor'\n  ) {\n    expectedPrefix = '/admin';\n  } else if (role === 'officer') {\n    expectedPrefix = '/officer';\n  } else if (\n    role === 'client_admin' ||\n    role === 'client_officer' ||\n    role === 'client_viewer'\n  ) {\n    expectedPrefix = '/client';\n  } else {\n    return (\n      <div style={{ padding: 32, color: 'var(--color-text-primary)' }}>\n        Unknown role: {role}. Contact your administrator.\n      </div>\n    );\n  }\n\n  // Redirect if the URL prefix doesn't match the role.\n  const path = location.pathname;\n  if (!path.startsWith(expectedPrefix)) {\n    return <Navigate to={expectedPrefix} replace />;\n  }\n\n  // Render the correct shell under its prefix.\n  if (expectedPrefix === '/admin') {\n    return (\n      <Routes>\n        <Route path=\"/admin\" element={<AdminShell />} />\n        <Route path=\"/admin/:page\" element={<AdminShell />} />\n        <Route path=\"*\" element={<Navigate to=\"/admin\" replace />} />\n      </Routes>\n    );\n  }\n\n  if (expectedPrefix === '/officer') {\n    return (\n      <Routes>\n        <Route path=\"/officer\" element={<OfficerShell />} />\n        <Route path=\"/officer/:module\" element={<OfficerShell />} />\n        <Route path=\"*\" element={<Navigate to=\"/officer\" replace />} />\n      </Routes>\n    );\n  }\n\n  if (expectedPrefix === '/scan') {\n    return (\n      <Routes>\n        <Route path=\"/scan\" element={<ScanShell />} />\n        <Route path=\"*\" element={<Navigate to=\"/scan\" replace />} />\n      </Routes>\n    );\n  }\n\n  if (expectedPrefix === '/client') {\n    return (\n      <Routes>\n        <Route path=\"/client\" element={<ClientShell />} />\n        <Route path=\"/client/*\" element={<ClientShell />} />\n        <Route path=\"*\" element={<Navigate to=\"/client\" replace />} />\n      </Routes>\n    );\n  }\n\n  return null;\n}\n\n/** Portal chooser shown to admin_officer at login. */\nfunction PortalSelector({ officerName, onChoose }: {\n  officerName: string;\n  onChoose: (choice: 'admin' | 'field') => void;\n}) {\n  return (\n    <div style={ps.page}>\n      <div style={ps.card}>\n        <div style={ps.title}>Welcome, {officerName.split(' ')[0]}</div>\n        <div style={ps.hint}>You have dual access. Choose how you want to work right now.</div>\n        <div style={ps.grid}>\n          <button type=\"button\" style={ps.choice} onClick={() => onChoose('admin')} aria-label=\"Enter Admin portal\">\n            <span style={{ fontSize: 40 }}>\ud83d\udda5\ufe0f</span>\n            <span style={ps.choiceLabel}>Admin Portal</span>\n            <span style={ps.choiceSub}>Manage operations, staff, compliance</span>\n          </button>\n          <button type=\"button\" style={ps.choice} onClick={() => onChoose('field')} aria-label=\"Enter Field portal\">\n            <span style={{ fontSize: 40 }}>\ud83d\udeb6</span>\n            <span style={ps.choiceLabel}>Field Portal</span>\n            <span style={ps.choiceSub}>Patrol, scan, welfare check-in, PTT</span>\n          </button>\n        </div>\n        <div style={ps.note}>You can switch portals by signing out and back in.</div>\n      </div>\n    </div>\n  );\n}\n\nconst ps: Record<string, React.CSSProperties> = {\n  page:        { minHeight: '100dvh', background: 'var(--color-bg-base, #121212)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: 'var(--font-family, Inter, system-ui, sans-serif)' },\n  card:        { background: '#1E1E1E', border: '1px solid rgba(158,158,158,0.15)', borderRadius: 12, padding: '32px 24px', width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.6)' },\n  title:       { fontSize: 22, fontWeight: 700, color: '#FFFFFF', textAlign: 'center' },\n  hint:        { fontSize: 14, color: '#9E9E9E', textAlign: 'center', lineHeight: 1.5, marginBottom: 12 },\n  grid:        { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: '100%' },\n  choice:      { background: '#2A2A2A', border: '1px solid rgba(158,158,158,0.2)', borderRadius: 12, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 150, padding: '16px 10px', fontFamily: 'inherit' },\n  choiceLabel: { fontSize: 16, fontWeight: 700, color: '#FFFFFF', textAlign: 'center' },\n  choiceSub:   { fontSize: 12, color: '#9E9E9E', textAlign: 'center', lineHeight: 1.4 },\n  note:        { fontSize: 12, color: '#757575', textAlign: 'center', marginTop: 12 },\n};",
+      "first_100_chars": "/**\n * RoleRouter.tsx \u2014 Role-based portal routing with URL prefix enforcement\n *\n * Source of truth:",
+      "message_id": "01fd74cf-5806-42db-a166-25cb75cdf37a",
+      "extracted_at": "2026-08-29T00:25:11.953682+12:00"
+    }
+  },
+  "files_mentioned_without_code": {
+    "apps/web/src/App.tsx": {
+      "file_path": "apps/web/src/App.tsx",
+      "mention_count": 7,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/BobPanel.tsx": {
+      "file_path": "apps/web/src/components/BobPanel.tsx",
+      "mention_count": 6,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/EvidencePhotoUpload.tsx": {
+      "file_path": "apps/web/src/components/EvidencePhotoUpload.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/FacetMap.tsx": {
+      "file_path": "apps/web/src/components/FacetMap.tsx",
+      "mention_count": 2,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/NotificationsBell.tsx": {
+      "file_path": "apps/web/src/components/NotificationsBell.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/PortalSwitcher.tsx": {
+      "file_path": "apps/web/src/components/PortalSwitcher.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/PreArrivalDossier.tsx": {
+      "file_path": "apps/web/src/components/PreArrivalDossier.tsx",
+      "mention_count": 4,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/ReportButton.tsx": {
+      "file_path": "apps/web/src/components/ReportButton.tsx",
+      "mention_count": 3,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/ZoneBoundaryEditor.tsx": {
+      "file_path": "apps/web/src/components/ZoneBoundaryEditor.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/access/AccessBasisChip.tsx": {
+      "file_path": "apps/web/src/components/access/AccessBasisChip.tsx",
+      "mention_count": 4,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/access/WhyCanISeeThisDrawer.tsx": {
+      "file_path": "apps/web/src/components/access/WhyCanISeeThisDrawer.tsx",
+      "mention_count": 4,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/components/freedom-camping/FCTaskFlow.tsx": {
+      "file_path": "apps/web/src/components/freedom-camping/FCTaskFlow.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/context/AuthContext.tsx": {
+      "file_path": "apps/web/src/context/AuthContext.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/hooks/useActiveShift.ts": {
+      "file_path": "apps/web/src/hooks/useActiveShift.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/hooks/useEnabledModules.ts": {
+      "file_path": "apps/web/src/hooks/useEnabledModules.ts",
+      "mention_count": 2,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/hooks/useInactivityDetection.ts": {
+      "file_path": "apps/web/src/hooks/useInactivityDetection.ts",
+      "mention_count": 2,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/hooks/useManDownDetection.ts": {
+      "file_path": "apps/web/src/hooks/useManDownDetection.ts",
+      "mention_count": 13,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/hooks/useOrganization.ts": {
+      "file_path": "apps/web/src/hooks/useOrganization.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/hooks/useWelfareCheckin.ts": {
+      "file_path": "apps/web/src/hooks/useWelfareCheckin.ts",
+      "mention_count": 15,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/accessBasis.ts": {
+      "file_path": "apps/web/src/lib/accessBasis.ts",
+      "mention_count": 7,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/basemap.ts": {
+      "file_path": "apps/web/src/lib/basemap.ts",
+      "mention_count": 6,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/bobBeaconContext.ts": {
+      "file_path": "apps/web/src/lib/bobBeaconContext.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/canonicalSiteEntry.ts": {
+      "file_path": "apps/web/src/lib/canonicalSiteEntry.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/canonicalZoneEntry.ts": {
+      "file_path": "apps/web/src/lib/canonicalZoneEntry.ts",
+      "mention_count": 4,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/env.ts": {
+      "file_path": "apps/web/src/lib/env.ts",
+      "mention_count": 2,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/officerPinStatus.test.ts": {
+      "file_path": "apps/web/src/lib/officerPinStatus.test.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/officerPinStatus.ts": {
+      "file_path": "apps/web/src/lib/officerPinStatus.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/resolveOrCreateHouse.ts": {
+      "file_path": "apps/web/src/lib/resolveOrCreateHouse.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/lib/supabase.ts": {
+      "file_path": "apps/web/src/lib/supabase.ts",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/main.tsx": {
+      "file_path": "apps/web/src/main.tsx",
+      "mention_count": 3,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/AdminHubPage.tsx": {
+      "file_path": "apps/web/src/pages/AdminHubPage.tsx",
+      "mention_count": 22,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/AuthCallbackPage.tsx": {
+      "file_path": "apps/web/src/pages/AuthCallbackPage.tsx",
+      "mention_count": 33,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/CRMPage.tsx": {
+      "file_path": "apps/web/src/pages/CRMPage.tsx",
+      "mention_count": 26,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/DispatchConsolePage.tsx": {
+      "file_path": "apps/web/src/pages/DispatchConsolePage.tsx",
+      "mention_count": 18,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/FCEnforcementCommandCentre.tsx": {
+      "file_path": "apps/web/src/pages/FCEnforcementCommandCentre.tsx",
+      "mention_count": 5,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/FCNoticePrintPage.tsx": {
+      "file_path": "apps/web/src/pages/FCNoticePrintPage.tsx",
+      "mention_count": 2,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/FCSCVImportPage.tsx": {
+      "file_path": "apps/web/src/pages/FCSCVImportPage.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/FieldOperationsPage.tsx": {
+      "file_path": "apps/web/src/pages/FieldOperationsPage.tsx",
+      "mention_count": 5,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/LiveMapPage.tsx": {
+      "file_path": "apps/web/src/pages/LiveMapPage.tsx",
+      "mention_count": 16,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/LivePatrolMonitorPage.tsx": {
+      "file_path": "apps/web/src/pages/LivePatrolMonitorPage.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/LocationsPage.tsx": {
+      "file_path": "apps/web/src/pages/LocationsPage.tsx",
+      "mention_count": 4,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/OfficerMapPage.tsx": {
+      "file_path": "apps/web/src/pages/OfficerMapPage.tsx",
+      "mention_count": 11,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/PatrolPage.tsx": {
+      "file_path": "apps/web/src/pages/PatrolPage.tsx",
+      "mention_count": 10,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/QuotesPage.tsx": {
+      "file_path": "apps/web/src/pages/QuotesPage.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/RateRulesPage.tsx": {
+      "file_path": "apps/web/src/pages/RateRulesPage.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/ReportsHubPage.tsx": {
+      "file_path": "apps/web/src/pages/ReportsHubPage.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/RosterPage.tsx": {
+      "file_path": "apps/web/src/pages/RosterPage.tsx",
+      "mention_count": 3,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/Site360Page.tsx": {
+      "file_path": "apps/web/src/pages/Site360Page.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/TestDataEntryPage.tsx": {
+      "file_path": "apps/web/src/pages/TestDataEntryPage.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/WelfareAlertsPage.tsx": {
+      "file_path": "apps/web/src/pages/WelfareAlertsPage.tsx",
+      "mention_count": 20,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/crm/CrmBranchPicker.tsx": {
+      "file_path": "apps/web/src/pages/crm/CrmBranchPicker.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/modules/NoiseControlPage.tsx": {
+      "file_path": "apps/web/src/pages/modules/NoiseControlPage.tsx",
+      "mention_count": 12,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/modules/ParkingEnforcementPage.tsx": {
+      "file_path": "apps/web/src/pages/modules/ParkingEnforcementPage.tsx",
+      "mention_count": 2,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/pages/modules/TestDataEntryPage.tsx": {
+      "file_path": "apps/web/src/pages/modules/TestDataEntryPage.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/shells/AdminShell.tsx": {
+      "file_path": "apps/web/src/shells/AdminShell.tsx",
+      "mention_count": 26,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/shells/ClientShell.tsx": {
+      "file_path": "apps/web/src/shells/ClientShell.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/shells/OfficerShell.tsx": {
+      "file_path": "apps/web/src/shells/OfficerShell.tsx",
+      "mention_count": 14,
+      "coverage_percent": 0,
+      "is_complete": false
+    },
+    "apps/web/src/shells/ScanShell.tsx": {
+      "file_path": "apps/web/src/shells/ScanShell.tsx",
+      "mention_count": 1,
+      "coverage_percent": 0,
+      "is_complete": false
+    }
+  },
+  "summary": {
+    "description": "Bob transcribed code from the repository. This extraction searched 5000 messages and found 1 complete React component file with code blocks.",
+    "files_fully_extracted": [
+      "apps/web/src/routing/RoleRouter.tsx"
+    ],
+    "files_referenced_only": [
+      "apps/web/src/App.tsx",
+      "apps/web/src/components/BobPanel.tsx",
+      "apps/web/src/components/EvidencePhotoUpload.tsx",
+      "apps/web/src/components/FacetMap.tsx",
+      "apps/web/src/components/NotificationsBell.tsx",
+      "apps/web/src/components/PortalSwitcher.tsx",
+      "apps/web/src/components/PreArrivalDossier.tsx",
+      "apps/web/src/components/ReportButton.tsx",
+      "apps/web/src/components/ZoneBoundaryEditor.tsx",
+      "apps/web/src/components/access/AccessBasisChip.tsx",
+      "apps/web/src/components/access/WhyCanISeeThisDrawer.tsx",
+      "apps/web/src/components/freedom-camping/FCTaskFlow.tsx",
+      "apps/web/src/context/AuthContext.tsx",
+      "apps/web/src/hooks/useActiveShift.ts",
+      "apps/web/src/hooks/useEnabledModules.ts",
+      "apps/web/src/hooks/useInactivityDetection.ts",
+      "apps/web/src/hooks/useManDownDetection.ts",
+      "apps/web/src/hooks/useOrganization.ts",
+      "apps/web/src/hooks/useWelfareCheckin.ts",
+      "apps/web/src/lib/accessBasis.ts",
+      "apps/web/src/lib/basemap.ts",
+      "apps/web/src/lib/bobBeaconContext.ts",
+      "apps/web/src/lib/canonicalSiteEntry.ts",
+      "apps/web/src/lib/canonicalZoneEntry.ts",
+      "apps/web/src/lib/env.ts",
+      "apps/web/src/lib/officerPinStatus.test.ts",
+      "apps/web/src/lib/officerPinStatus.ts",
+      "apps/web/src/lib/resolveOrCreateHouse.ts",
+      "apps/web/src/lib/supabase.ts",
+      "apps/web/src/main.tsx",
+      "apps/web/src/pages/AdminHubPage.tsx",
+      "apps/web/src/pages/AuthCallbackPage.tsx",
+      "apps/web/src/pages/CRMPage.tsx",
+      "apps/web/src/pages/DispatchConsolePage.tsx",
+      "apps/web/src/pages/FCEnforcementCommandCentre.tsx",
+      "apps/web/src/pages/FCNoticePrintPage.tsx",
+      "apps/web/src/pages/FCSCVImportPage.tsx",
+      "apps/web/src/pages/FieldOperationsPage.tsx",
+      "apps/web/src/pages/LiveMapPage.tsx",
+      "apps/web/src/pages/LivePatrolMonitorPage.tsx",
+      "apps/web/src/pages/LocationsPage.tsx",
+      "apps/web/src/pages/OfficerMapPage.tsx",
+      "apps/web/src/pages/PatrolPage.tsx",
+      "apps/web/src/pages/QuotesPage.tsx",
+      "apps/web/src/pages/RateRulesPage.tsx",
+      "apps/web/src/pages/ReportsHubPage.tsx",
+      "apps/web/src/pages/RosterPage.tsx",
+      "apps/web/src/pages/Site360Page.tsx",
+      "apps/web/src/pages/TestDataEntryPage.tsx",
+      "apps/web/src/pages/WelfareAlertsPage.tsx",
+      "apps/web/src/pages/crm/CrmBranchPicker.tsx",
+      "apps/web/src/pages/modules/NoiseControlPage.tsx",
+      "apps/web/src/pages/modules/ParkingEnforcementPage.tsx",
+      "apps/web/src/pages/modules/TestDataEntryPage.tsx",
+      "apps/web/src/shells/AdminShell.tsx",
+      "apps/web/src/shells/ClientShell.tsx",
+      "apps/web/src/shells/OfficerShell.tsx",
+      "apps/web/src/shells/ScanShell.tsx"
+    ]
+  }
+}

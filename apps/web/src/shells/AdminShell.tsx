@@ -421,7 +421,7 @@ const AdminShell: React.FC = () => {
               )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <UniversalSearch onNavigate={navigateToPage} />
+              <UniversalSearch onNavigate={(page: string, query?: string) => navigateToPage(page as AdminPage)} />
               <NotificationsBell onOpenBob={() => setBobOpen(true)} />
               <PortalSwitcher />
               {profile?.displayName && (

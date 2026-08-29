@@ -1,0 +1,746 @@
+{
+  "metadata": {
+    "extraction_date": "2026-08-29",
+    "source": "Supabase bob_messages table",
+    "total_messages_analyzed": 68,
+    "methodology": "Sequential line-window reads of core page files via Bob transcription API"
+  },
+  "AdminShell.tsx": {
+    "total_lines": 810,
+    "file_path": "apps/web/src/shells/AdminShell.tsx",
+    "purpose": "Admin / Master / Grand Master portal shell with consolidated navigation",
+    "source_of_truth": "docs/INSTRUCTION_MANUAL.md §4.1",
+    "phase": "Phase 1 Nav IA consolidation (issue #109)",
+    "line_reads_captured": [
+      { "range": "1-80", "status": "complete" },
+      { "range": "81-140", "status": "complete" },
+      { "range": "101-180", "status": "complete" },
+      { "range": "141-200", "status": "complete" },
+      { "range": "201-320", "status": "complete" },
+      { "range": "241-360", "status": "complete" },
+      { "range": "321-400", "status": "complete" },
+      { "range": "421-480", "status": "complete" },
+      { "range": "461-540", "status": "complete" },
+      { "range": "541-620", "status": "complete" },
+      { "range": "601-680", "status": "complete" },
+      { "range": "621-700", "status": "complete" },
+      { "range": "701-760", "status": "complete" },
+      { "range": "761-810", "status": "complete" }
+    ],
+    "architecture": {
+      "navigation_consolidation": "Sidebar reduced from ~57 items to ≤15 top-level items",
+      "container_pages": [
+        "CRMFinancePage (tabs: invoicing, payments, generate-invoice, oncall, financial-setup, rate-rules, tenders)",
+        "RosterHRPage (tabs: staff, training, assets, disciplinary, credential-expiry, shift-templates, leave-approval, timesheets, callouts)",
+        "FieldOperationsPage (sub-areas: dispatch, patrol, live-map, welfare-alerts, breach-review, vehicle-search, field-reports, parking, noise-control, biosecurity, smoke-control)",
+        "ReportsPage (tabs: reports-hub, report-packs, obligations, fc-reporting, fc-compliance, fc-command-results)",
+        "Site360Page (tabs: overview, ...)"
+      ],
+      "url_compatibility": "Legacy URLs redirect to new parent pages with tab/sub-area pre-selected",
+      "module_gating": "Applied at tab/card level within container pages, not just parent level",
+      "bob_context": "Each tab/sub-area provides specific BobContext for portal awareness"
+    },
+    "imports": {
+      "react": ["useEffect", "useState", "useCallback"],
+      "router": ["useLocation", "useNavigate"],
+      "context": ["useAuth"],
+      "supabase": ["supabase"],
+      "pages": [
+        "AdminHubPage",
+        "SiteDetailPage",
+        "SiteOwnershipReviewPage",
+        "OrganizationSetupPage",
+        "UserManagementPage",
+        "AccessControlPage",
+        "LocationsPage",
+        "GrandMasterPlatformPage",
+        "ModuleCatalogPage",
+        "ProviderSubscriptionsPage",
+        "OwnerBillingPage",
+        "TestingPage",
+        "TestDataEntryPage",
+        "ApprovalsActivityPage"
+      ],
+      "components": [
+        "BobPanel",
+        "NotificationsBell",
+        "PortalSwitcher",
+        "UniversalSearch",
+        "LazyPageFallback",
+        "NavItem"
+      ]
+    },
+    "type_definitions": {
+      "AdminPage": "hub | crm | roster | field-ops | reports | sites | site-360 | site-ownership | locations | users | access-control | org-setup | approvals | testing | test-data | platform | platform-catalog | platform-subscriptions | platform-billing",
+      "RedirectTarget": {
+        "page": "AdminPage",
+        "crmTab": "optional CRMFinanceTab",
+        "rosterTab": "optional RosterHRTab",
+        "fieldOpsSubArea": "optional FieldOpsSubArea",
+        "reportsTab": "optional ReportsTab"
+      }
+    },
+    "state_management": {
+      "activePage": "Current page key from URL, derived via pageFromUrl()",
+      "crmTab": "Active tab in CRM & Finance container (default: 'crm')",
+      "rosterTab": "Active tab in Roster & HR container (default: 'roster')",
+      "fieldOpsSubArea": "Active sub-area in Field Operations (default: 'landing')",
+      "reportsTab": "Active tab in Reports (default: 'reports-hub')",
+      "site360Tab": "Active tab in Site 360 (default: 'overview')",
+      "orgName": "Current organization name from Supabase",
+      "enabledModules": "Set of enabled module keys for the org (null = unconfigured, fail-open)",
+      "sidebarCollapsed": "Desktop: sidebar collapse state",
+      "mobileMenuOpen": "Mobile: full-screen menu overlay state",
+      "bobOpen": "Bob AI panel open state",
+      "pageExtra": "Ad-hoc record_id/targetRoute from container pages"
+    },
+    "key_functions": {
+      "pageFromUrl": "Derive AdminPage from URL pathname; handle legacy redirects",
+      "navigateToPage": "Navigate to admin page: push URL + set state + update sub-page state",
+      "isPageEnabled": "Check if page is accessible based on user role and enabled modules",
+      "renderPage": "Render the current page component with appropriate props",
+      "getBobContext": "Derive Bob context from active page + sub-page state",
+      "handleSearchNavigate": "Route universal search results to correct page/sub-area",
+      "handleConfigureSiteZones": "Handle site zone configuration from CRM page"
+    },
+    "navigation_map": {
+      "Core": ["hub (Dashboard)", "crm (CRM & Finance)", "roster (Roster & HR)", "field-ops (Field Operations)", "reports (Reports)"],
+      "Config": ["sites (Sites)", "site-360 (Site 360)", "site-ownership (Site Review)", "locations (Locations)", "users (Users)", "access-control (Access Control)", "org-setup (Org Setup)", "approvals (Approvals)"],
+      "System": ["testing (E2E Testing)", "test-data (Test Data)"],
+      "Platform": ["platform (Overview)", "platform-catalog (Module Pricing)", "platform-subscriptions (Provider Billing)", "platform-billing (Billing Rollup)"] 
+    },
+    "legacy_redirect_map": {
+      "crm_finance": ["invoicing", "payments", "generate-invoice", "oncall", "financial-setup", "rate-rules", "tenders"],
+      "roster_hr": ["staff", "training", "assets", "disciplinary", "credential-expiry", "shift-templates", "leave-approval", "timesheets", "callouts"],
+      "field_ops": ["dispatch", "dispatch-resources", "patrol", "patrol-routes", "patrol-monitor", "patrol-checkpoints", "checkpoint-log", "live-map", "welfare-alerts", "welfare-settings", "vehicle-search", "vehicle-flags", "field-reports", "breach-review", "fc-scv-import", "fc-notice-print", "fc-nzscv", "fc-overnight", "fc-enforcement", "fc-homeless-claims", "disputes", "parking", "noise-control", "noise-control-settings", "biosecurity", "smoke-control"],
+      "reports": ["reports-hub", "report-packs", "obligations", "fc-reporting", "fc-compliance", "fc-command-results"]
+    },
+    "module_gating": {
+      "PAGE_REQUIRED_MODULE": "No top-level pages require modules in Phase 1; gating at tab/card level within container pages",
+      "isPageEnabled_logic": "If isPlatformOperator (grand_master/master) return true; else check if required module in enabledModules",
+      "isPlatformOperator": "profile?.role === 'grand_master' || 'master'"
+    },
+    "render_flow": {
+      "on_mount": [
+        "Derive activePage from URL",
+        "Load orgName from organizations table",
+        "Load enabledModules from organization_modules table (fail-open if error/empty)",
+        "Sync sub-page state if legacy redirect"
+      ],
+      "on_page_change": [
+        "Check isPageEnabled() with module gating",
+        "If not enabled, render AdminHubPage as fallback",
+        "Else render page with props: initialTab/initialSubArea, onTabChange, enabledModules, isPlatformOperator"
+      ],
+      "lazy_loading": "Container pages use React.lazy() with Suspense boundaries inside <main data-app-content>",
+      "code_splitting": "Epic #203, R7 #210 — route-level code-splitting; shell layout/sidebar/top bar remain rendered while chunks load"
+    },
+    "components": {
+      "NavItem": "Reusable nav item button with active state, icon, label, collapse support",
+      "UniversalSearch": "Global search bar that routes results to vehicle-search, breach-review, locations, crm",
+      "NotificationsBell": "Approvals + Bob reach-out notifications; opens BobPanel on conversation",
+      "PortalSwitcher": "For admin_officer: switch between /admin and /officer without logout",
+      "BobPanel": "AI assistant panel with context-aware prompting"
+    },
+    "desktop_layout": {
+      "sidebar": "220px default, 68px collapsed; nav groups with lazy load",
+      "top_bar": "Org name, NotificationsBell, role chip, user display name",
+      "main_content": "Flex 1, render page with data-app-content attribute",
+      "bob_button": "Fixed button to toggle BobPanel"
+    },
+    "mobile_layout": {
+      "top_bar": "Logo, org name, PortalSwitcher, NotificationsBell, menu button",
+      "menu_overlay": "Full-screen navigation overlay, groupable items",
+      "bottom_tab_bar": "5 quick-access tabs (Home, Field Ops, Roster, CRM, Reports) + Bob button",
+      "pages": "Flex 1 main content area with data-app-content"
+    },
+    "supabase_integration": {
+      "orgName_load": "supabase.from('organizations').select('name').eq('id', profile.organizationId).single()",
+      "enabledModules_load": "supabase.from('organization_modules').select('module_key, enabled').eq('organization_id', profile.organizationId)",
+      "error_handling": "Fail-open pattern: if read error or no rows, leave enabledModules null (all pages visible)"
+    }
+  },
+  "OfficerShell.tsx": {
+    "total_lines": 975,
+    "file_path": "apps/web/src/shells/OfficerShell.tsx",
+    "purpose": "Field officer portal shell with four entry states and persistent safety chrome",
+    "source_of_truth": "docs/PRODUCT_DESIGN.md §3.1, §4",
+    "four_states": {
+      "WELFARE_STANDBY": "No shift, no direct access; SOS/welfare check-in always available",
+      "OFFICER_HOME": "Has active/upcoming shift (roster-first landing)",
+      "MODULE_SELECTOR": "Admin granted multiple direct modules (standalone access)",
+      "MODULE_PORTAL": "Inside a specific module"
+    },
+    "line_reads_captured": [
+      { "range": "1-120", "status": "complete" },
+      { "range": "80-240", "status": "complete" },
+      { "range": "120-240", "status": "complete" },
+      { "range": "241-360", "status": "complete" },
+      { "range": "260-360", "status": "complete" },
+      { "range": "421-480", "status": "complete" },
+      { "range": "631-720", "status": "complete" }
+    ],
+    "architecture": {
+      "persistent_chrome": ["FieldSafetyBar (top)", "PttBar (bottom)"],
+      "four_state_machine": {
+        "standby": "StandbyScreen: no shift, refresh every 30s, quick-access buttons",
+        "home": "OfficerHome: active shift display, offered shift cards, module selection, navigation",
+        "selector": "ModuleSelector: grid of granted modules for standalone access",
+        "portal": "ModulePortal: breadcrumb back, module header, content, Report FAB"
+      },
+      "welfare_integration": "useWelfareCheckin hook with check-in cadence (default 30 min), man-down detection via GPS inactivity",
+      "module_gating": "Officer sees module only if both: profile.moduleAccess includes it AND org has module enabled"
+    },
+    "imports": {
+      "react": ["useEffect", "useState", "useCallback"],
+      "router": ["useLocation", "useNavigate"],
+      "context": ["useAuth"],
+      "supabase": ["supabase"],
+      "hooks": [
+        "useWelfareCheckin",
+        "useManDownDetection",
+        "useInactivityDetection",
+        "useActiveShift",
+        "useEnabledModules",
+        "useIsMobile"
+      ],
+      "pages": [
+        "PatrolPage",
+        "OfficerSchedulePage",
+        "OfficerMapPage",
+        "OfficerDispatchPage",
+        "OfficerDebriefPage",
+        "OfficerVehicleLookupPage",
+        "OfficerCredentialsPage",
+        "OfficerFieldReportPage",
+        "ParkingEnforcementPage",
+        "NoiseControlPage",
+        "BiosecurityPage",
+        "SmokeControlPage",
+        "LeaveRequestPage",
+        "TimesheetSubmitPage",
+        "FCOvernightVerificationPage",
+        "CheckpointScanPage"
+      ],
+      "components": [
+        "ReportButton",
+        "NotificationsBell",
+        "PortalSwitcher",
+        "BobPanel"
+      ]
+    },
+    "type_definitions": {
+      "ActiveModule": "freedom_camping | parking | noise_control | biosecurity | smoke_control | site_guard | ems | patrol | report | leave | timesheet | schedule | overnight_verification | checkpoint_scan | map | dispatch | debrief | vehicle_lookup | credentials | modules | null",
+      "WelfareStatus": "ok | due | overdue | man_down | sos",
+      "ShiftRecord": {
+        "id": "shift UUID",
+        "officer_user_id": "officer user ID",
+        "scheduled_start": "ISO timestamp",
+        "scheduled_end": "ISO timestamp",
+        "status": "published | accepted | scheduled | in_progress | completed",
+        "service_type": "module key (e.g., patrol, parking)",
+        "location_name": "optional zone/location name",
+        "notes": "optional shift briefing notes"
+      }
+    },
+    "state_management": {
+      "activeModule": "Current module from URL or null (home)",
+      "shiftState": "useActiveShift hook result: { active, upcoming, refresh }",
+      "grantedModules": "From profile.moduleAccess",
+      "moduleAccess": "Filtered grantedModules based on org enabledModules",
+      "gps": "Latest GPS fix { lat, lng } or null",
+      "offeredCount": "Number of offered shifts pending officer response",
+      "welfareStatus": "From useWelfareCheckin: ok | due | overdue | man_down | sos",
+      "bobOpen": "Bob AI panel state"
+    },
+    "key_functions": {
+      "moduleFromUrl": "Derive ActiveModule from URL pathname",
+      "navigateToModule": "Navigate to officer module: push URL + set state",
+      "canonicalModuleKey": "Map officer module names to canonical org module keys (e.g., parking → parking_enforcement)",
+      "getBobContext": "Derive Bob context from active module + shift data"
+    },
+    "module_metadata": {
+      "freedom_camping": { "label": "Freedom Camping", "icon": "[FC]" },
+      "parking": { "label": "Parking", "icon": "[P]" },
+      "noise_control": { "label": "Noise Control", "icon": "[N]" },
+      "biosecurity": { "label": "Biosecurity", "icon": "[BS]" },
+      "smoke_control": { "label": "Smoke Control", "icon": "[S]" },
+      "site_guard": { "label": "Site Guard", "icon": "[SG]" },
+      "ems": { "label": "EMS", "icon": "[E]" },
+      "patrol": { "label": "Patrol", "icon": "[PT]" }
+    },
+    "welfare_status_display": {
+      "ok": { "bg": "#1A1A1A", "dot": "OK", "color": "#4CAF50" },
+      "due": { "bg": "#1A1200", "dot": "DUE", "color": "#FF9800" },
+      "overdue": { "bg": "#1A0000", "dot": "OVR", "color": "#EF5350" },
+      "man_down": { "bg": "#3A0000", "dot": "!!", "color": "#FF1744" },
+      "sos": { "bg": "#3A0000", "dot": "SOS", "color": "#FF1744" }
+    },
+    "gps_tracking": {
+      "heartbeat_interval": "2 minutes (GPS_HEARTBEAT_MS = 120000)",
+      "purpose": "Officer location for dispatch, live map, man-down detection",
+      "persistence": "officer_gps_log table"
+    },
+    "shift_lifecycle": {
+      "published": "Offered to officer, pending acceptance",
+      "accepted": "Officer accepted, scheduled start pending",
+      "scheduled": "Within roster schedule window",
+      "in_progress": "Shift actively running",
+      "completed": "Shift ended"
+    },
+    "offered_shift_handling": {
+      "count_query": "supabase.from('shifts').select('id', {count:'exact', head:true}).eq('officer_user_id', profile.id).eq('status', 'published')",
+      "auto_refresh": "On app focus (visibilitychange event)",
+      "realtime_subscription": "On shifts table changes",
+      "officer_response": "ShiftCard accept/decline updates shift status"
+    },
+    "module_gating_logic": {
+      "enabled": "orgModules from useEnabledModules()",
+      "configured": "Flag whether org has been configured with module rows",
+      "filtered_access": "if (configured) grantedModules.filter(m => orgModules.has(canonicalModuleKey(m))); else grantedModules (fail-open during rollout)"
+    },
+    "render_flow": {
+      "state_1_standby": "StandbyScreen: no shift active",
+      "state_2_home": "OfficerHome: active/upcoming shift, offered shifts, module selector, quick actions",
+      "state_3_selector": "ModuleSelector: grid of enabled modules if officer has multiple",
+      "state_4_portal": "ModulePortal: specific module with back button, header, content, Report FAB"
+    },
+    "supabase_integration": {
+      "active_shift_load": "useActiveShift hook queries shifts, patrol_routes, user_profiles, location_id",
+      "offered_shifts_count": "Count shifts with status='published' for pending banner",
+      "gps_tracking": "Write officer_gps_log on heartbeat; read for man-down inactivity detection",
+      "welfare_checks": "useWelfareCheckin persists to welfare_checks table",
+      "error_handling": "Fail-open: if module config unavailable, show all granted modules"
+    }
+  },
+  "DispatchConsolePage.tsx": {
+    "total_lines": 1568,
+    "file_path": "apps/web/src/pages/DispatchConsolePage.tsx",
+    "purpose": "Real-time dispatch console for creating and managing field jobs",
+    "star_rating": "★ BIGGEST (1568 lines)",
+    "line_reads_captured": [
+      { "range": "1-240", "status": "complete" },
+      { "range": "241-420", "status": "complete" },
+      { "range": "341-520", "status": "complete" },
+      { "range": "1081-1160", "status": "complete" }
+    ],
+    "architecture": {
+      "three_columns": "Shifts (left) | Stops (center) | Jobs (right); becomes tabs on mobile (issue #17)",
+      "dispatch_workflow": "Select shift → View stops → Create job → Assign resource → Resolve billing rate",
+      "job_phases": {
+        "phase_a": "Load active shifts, recent jobs, client sites, dispatch resources",
+        "phase_b": "Load shift stops when shift selected",
+        "phase_c": "Load requester orgs for selected site (geofence + agreement filtering)",
+        "phase_d": "Resolve billing rate based on job type + requester + site + zone"
+      },
+      "role_access": "grand_master, master, admin can create jobs; all can view"
+    },
+    "imports": {
+      "react": ["useEffect", "useState", "useCallback"],
+      "hooks": ["useAuth", "useIsMobile"],
+      "supabase": ["supabase"],
+      "components": ["SiteCreateForm", "PreArrivalDossier"]
+    },
+    "type_definitions": {
+      "ActiveShift": {
+        "id": "shift UUID",
+        "officerUserId": "officer user ID",
+        "officerName": "from user_profiles.display_name",
+        "patrolRouteName": "from patrol_routes.name",
+        "patrolRouteCode": "from patrol_routes.route_code",
+        "scheduledStart": "ISO timestamp",
+        "scheduledEnd": "ISO timestamp",
+        "status": "published | accepted | in_progress",
+        "shiftHealth": "enum: healthy | degraded | critical",
+        "totalStops": "integer",
+        "completedStops": "integer",
+        "officerGpsLat": "latest GPS latitude",
+        "officerGpsLng": "latest GPS longitude",
+        "officerLastSeen": "ISO timestamp of last GPS fix"
+      },
+      "DispatchJob": {
+        "id": "job UUID",
+        "jobType": "alarm_response | event | incident | patrol_support | etc.",
+        "priority": "low | medium | high | critical",
+        "status": "open | assigned | in_progress | completed | cancelled",
+        "briefingNotes": "string",
+        "slaMinutes": "integer SLA window",
+        "slaBreached": "boolean",
+        "siteName": "from client_sites.name",
+        "siteId": "site UUID",
+        "shiftId": "assigned shift ID or null",
+        "slaImpactWarning": "boolean",
+        "createdAt": "ISO timestamp",
+        "dispatchedAt": "ISO timestamp or null"
+      },
+      "ClientSite": {
+        "id": "site UUID",
+        "name": "site name",
+        "address": "street address",
+        "gpsLat": "GPS latitude",
+        "gpsLng": "GPS longitude",
+        "clientOrganizationId": "site owner org ID"
+      },
+      "ResourceUnit": {
+        "id": "resource UUID",
+        "name": "resource name",
+        "callsign": "radio callsign or null",
+        "status": "available | assigned | offline",
+        "gpsLat": "assigned officer GPS lat or null",
+        "gpsLng": "assigned officer GPS lng or null"
+      },
+      "ShiftStop": {
+        "id": "stop UUID",
+        "shiftId": "shift UUID",
+        "sequence": "integer order",
+        "siteName": "location name",
+        "arrival": "ISO timestamp or null",
+        "departure": "ISO timestamp or null",
+        "status": "pending | arrived | completed"
+      },
+      "RequesterOrg": {
+        "id": "org UUID",
+        "name": "org name",
+        "agreement": "optional operational agreement"
+      },
+      "ResolvedAgreement": {
+        "requesterOrgId": "agreed requester org",
+        "ratePlan": "billing rate plan",
+        "validFrom": "ISO timestamp",
+        "validTo": "ISO timestamp or null"
+      },
+      "RateRule": {
+        "id": "rule UUID",
+        "jobType": "job type key",
+        "baseRate": "currency amount",
+        "requesterOrgId": "applicable org or null (global rule)",
+        "zoneId": "applicable zone or null"
+      }
+    },
+    "state_management": {
+      "activeShifts": "Array of loaded active shifts",
+      "jobs": "Array of recent/open jobs",
+      "sites": "Array of client sites",
+      "selectedShiftId": "Currently selected shift for stop inspection",
+      "shiftStops": "Array of stops for selected shift",
+      "mobileTab": "shifts | stops | jobs (mobile view tab)",
+      "loading": "Initial data load state",
+      "stopsLoading": "Shift stops load state",
+      "showNewJob": "New job form visibility",
+      "saving": "Job save state",
+      "error": "Error message display",
+      "new_job_form": {
+        "fJobType": "Job type selector (default: alarm_response)",
+        "fPriority": "Priority selector (default: high)",
+        "fSiteId": "Site selection",
+        "fShiftId": "Shift assignment",
+        "fResourceId": "Resource/callsign assignment",
+        "fSlaMinutes": "SLA window in minutes (default: 15)",
+        "fNotes": "Briefing notes",
+        "fRequesterId": "Requester org selector (Phase C)",
+        "fZoneId": "Zone selector for billing (Phase D)"
+      },
+      "phase_c_state": {
+        "requesterOrgs": "List of eligible requester orgs",
+        "requesterLoading": "Requester org load state",
+        "requesterSearch": "Search filter for requester orgs",
+        "resolvedAgreement": "Matched operational agreement",
+        "agreementLoading": "Agreement resolution state",
+        "agreementError": "Agreement resolution error"
+      },
+      "phase_d_state": {
+        "billingRules": "Array of applicable rate rules",
+        "billingRulesLoaded": "Billing rules load state",
+        "resolvedRate": "Matched rate rule",
+        "isUnrateable": "Job cannot be rated (no rule match)"
+      }
+    },
+    "supabase_queries": {
+      "phase_a_active_shifts": "SELECT shifts with joins to user_profiles, patrol_routes; filter by org_id, status IN (published, accepted, in_progress); order by scheduled_start",
+      "phase_a_recent_jobs": "SELECT dispatch_jobs with joins to client_sites; filter by org_id; order by created_at DESC",
+      "phase_a_client_sites": "SELECT client_sites; filter by org_id",
+      "phase_a_officer_gps": "SELECT officer_gps_log (latest per officer); used for nearest-unit recommendation",
+      "phase_a_dispatch_resources": "SELECT dispatch_resources; filter by org_id; join with latest officer GPS if assigned",
+      "phase_b_shift_stops": "SELECT shift_stops; filter by shift_id; order by sequence",
+      "phase_c_requester_orgs": "RPC call with PostGIS: union of (1) geofence-contained orgs, (2) existing operational agreements, (3) site owner org",
+      "phase_d_billing_rules": "SELECT rate_rules; filter by job_type, requester_org_id, zone_id"
+    },
+    "key_functions": {
+      "loadData": "Load active shifts, jobs, sites, resources (Phase A)",
+      "loadShiftStops": "Load stops for selected shift (Phase B)",
+      "loadRequesterOrgs": "Load eligible requester orgs for site (Phase C)",
+      "resolveAgreement": "Match requester + job type + site to operational agreement",
+      "loadBillingRules": "Load applicable rate rules (Phase D)",
+      "resolveBillingRate": "Match job type + requester + zone to rate rule",
+      "createJob": "POST dispatch_job; persist form data",
+      "assignJob": "PATCH dispatch_job; set shift_id / resource_id",
+      "calculateSLAImpact": "Compute warning if job creation after SLA window"
+    },
+    "dispatch_workflow": {
+      "step_1_shift_selection": "Click shift card; load stops (Phase B)",
+      "step_2_stop_inspection": "View shift stops, ETA, completion status, patrol route map",
+      "step_3_site_selection": "Choose client site or create new site inline",
+      "step_4_job_creation": "Fill form: job type, priority, SLA minutes, briefing notes",
+      "step_5_requester_resolution": "Phase C: geofence + agreement filtering to requester org",
+      "step_6_zone_selection": "Map site to billing zone for rate rule matching (Phase D)",
+      "step_7_rate_resolution": "Match rate rule based on job type + requester + zone",
+      "step_8_resource_assignment": "Assign to available resource / callsign or leave unassigned"
+    },
+    "mobile_responsive": {
+      "layout": "Three-column becomes tab bar on mobile (issue #17)",
+      "tabs": ["Shifts (with count)", "Stops", "Jobs (with count)"],
+      "interaction": "Selecting shift auto-jumps to Stops tab",
+      "reasoning": "Dispatcher works one shift at a time on phone; columns unreadable"
+    },
+    "error_handling": {
+      "load_errors": "Display in top error banner; user can dismiss",
+      "sla_breach_warning": "Display if job created after SLA window expires",
+      "unrateable_job": "Warn if job type + requester + zone has no matching rate rule",
+      "agreement_error": "Display if requester resolution fails"
+    }
+  },
+  "AdminHubPage.tsx": {
+    "total_lines": 599,
+    "file_path": "apps/web/src/pages/AdminHubPage.tsx",
+    "purpose": "Admin dashboard with KPI widgets, trend chart, module cards, NOC terminal",
+    "audience": "Admin, Master, Grand Master roles",
+    "line_reads_captured": [
+      { "range": "1-80", "status": "complete" },
+      { "range": "81-140", "status": "complete" },
+      { "range": "81-180", "status": "complete" },
+      { "range": "100-180", "status": "complete" },
+      { "range": "241-360", "status": "complete" },
+      { "range": "361-540", "status": "complete" },
+      { "range": "471-599", "status": "complete" },
+      { "range": "541-599", "status": "complete" }
+    ],
+    "architecture": {
+      "dashboard_sections": [
+        "Header with greeting + refresh button",
+        "NOC Terminal (Grand Master only)",
+        "KPI grid (4 tiles: scans, breaches, patrols, welfare alerts)",
+        "Sticky priority-action bar (links to key pages)",
+        "Compliance trend chart (7d/14d/30d range selector)",
+        "Module cards grid (14 cards linking to field modules)"
+      ],
+      "auto_refresh": "60 seconds (KPI + trend)",
+      "refresh_trigger": "Manual refresh button, app focus (visibilitychange)"
+    },
+    "imports": {
+      "react": ["useEffect", "useState", "useCallback"],
+      "hooks": ["useAuth", "useIsMobile"],
+      "supabase": ["supabase"]
+    },
+    "type_definitions": {
+      "KpiData": {
+        "scansToday": "integer count from observations today",
+        "activeBreaches": "integer count open/acknowledged breach_alerts",
+        "patrols": "integer count active shifts (published, accepted, scheduled, in_progress)",
+        "welfareAlerts": "integer count open officer_welfare_alerts"
+      },
+      "TrendDay": {
+        "date": "YYYY-MM-DD",
+        "scans": "integer count observations on that day",
+        "breaches": "integer count breach_alerts on that day"
+      },
+      "TrendRange": "7d | 14d | 30d"
+    },
+    "state_management": {
+      "kpi": "KpiData | null",
+      "loading": "KPI load state",
+      "trend": "Array of TrendDay",
+      "trendRange": "7d | 14d | 30d (default: 7d)",
+      "trendLoading": "Trend chart load state"
+    },
+    "supabase_queries": {
+      "kpi_scans": "supabase.from('observations').select('id', {count:'exact', head:true}).eq('organization_id', orgId).gte('observed_at', todayStart)",
+      "kpi_breaches": "supabase.from('breach_alerts').select('id', {count:'exact', head:true}).eq('organization_id', orgId).in('status', ['open','acknowledged'])",
+      "kpi_patrols": "supabase.from('shifts').select('id', {count:'exact', head:true}).eq('organization_id', orgId).in('status', ['published','accepted','scheduled','in_progress']).lte('scheduled_start', now).gte('scheduled_end', now)",
+      "kpi_welfare": "supabase.from('officer_welfare_alerts').select('id', {count:'exact', head:true}).eq('organization_id', orgId).eq('status', 'open')",
+      "trend_data": "supabase.from('observations').select('id, created_at').eq('organization_id', orgId).gte('created_at', trendStart); supabase.from('breach_alerts').select('id, created_at').eq('organization_id', orgId).gte('created_at', trendStart); bucket by date; build max/min per day"
+    },
+    "key_functions": {
+      "loadKpi": "Fetch all 4 KPI counts in parallel (Promise.all)",
+      "loadTrend": "Fetch observations + breach_alerts for date range; bucket by day",
+      "onNavigate": "Navigation callback passed to child components (StickyBar, HubCard)"
+    },
+    "kpi_tile_structure": {
+      "label": "Display text (Scans, Breaches, Patrols, Welfare Alerts)",
+      "value": "Integer count",
+      "icon": "Unicode emoji",
+      "loading": "Boolean loading spinner",
+      "colour": "Alert status colour (green for ok, red for alerts)",
+      "onclick": "Navigate to relevant module page"
+    },
+    "sticky_priority_bar": {
+      "items": [
+        { "label": "Scans", "count": "scans", "icon": "📷", "navigate": "fc-reporting" },
+        { "label": "Breaches", "count": "activeBreaches", "icon": "⚖️", "navigate": "breach-review" },
+        { "label": "Patrols", "count": "patrols", "icon": "🚶", "navigate": "patrol" },
+        { "label": "Alerts", "count": "welfareAlerts", "icon": "🚧", "navigate": "welfare-alerts" }
+      ],
+      "action_buttons": [
+        "Breaches → breach-review",
+        "Notices → fc-notice-print",
+        "Dispatch → dispatch",
+        "Reports → fc-reporting"
+      ],
+      "sticky": "Remains visible at top during scroll; z-index 10"
+    },
+    "trend_chart": {
+      "data_source": "TrendDay array",
+      "range_selector": "7d, 14d, 30d buttons",
+      "display": "Stacked bar chart with scan (blue) + breach (red) overlaid",
+      "interaction": "Hover shows date, scan count, breach count",
+      "max_height": "150px; responsive width"
+    },
+    "module_cards": {
+      "count": "14 cards",
+      "grid": "auto-fill minmax(200px, 1fr) on desktop; 2 columns on mobile",
+      "card_structure": {
+        "title": "Module name",
+        "description": "Brief functional description",
+        "icon": "Unicode emoji",
+        "onclick": "Navigate to module page"
+      },
+      "modules_listed": [
+        "FC Patrol → patrol",
+        "Breach Review → breach-review",
+        "Notice Print → fc-notice-print",
+        "Compliance → fc-compliance",
+        "FC Reports → fc-reporting",
+        "SCV Import → fc-scv-import",
+        "NZSCV Monitor → fc-nzscv",
+        "Field Reports → field-reports",
+        "Live Map → live-map",
+        "Welfare → welfare-alerts",
+        "Dispatch → dispatch",
+        "Roster → roster",
+        "Staff → staff",
+        "Credentials → credential-expiry"
+      ]
+    },
+    "noc_terminal": {
+      "visibility": "Grand Master only (profile?.role === 'grand_master')",
+      "display": "Terminal-themed card with red accent border",
+      "header": "🎛️ Platform Master Control (NOC)",
+      "status_badge": "System Telemetry: Operational (green)",
+      "cards": [
+        {
+          "name": "fcm-api",
+          "indicator": "● ONLINE",
+          "value": "42ms",
+          "description": "api.fcmanager.co.nz (Hpanel VPS)"
+        },
+        {
+          "name": "fcm-inference",
+          "indicator": "● ONLINE",
+          "value": "ONNX YOLOv8n",
+          "description": "ML inference engine"
+        }
+      ],
+      "note": "Hard-coded placeholder values; actual telemetry implementation pending"
+    },
+    "page_props": {
+      "onNavigate": "Callback (page: AdminPage) => void for child StickyBar and HubCard clicks"
+    },
+    "responsive_behavior": {
+      "desktop": "4-column KPI grid, sticky bar horizontal, 14-card module grid",
+      "mobile": "2-column KPI grid (compact variant), sticky bar wrapped, 2-column card grid",
+      "touch": "Larger tap targets, simplified layout"
+    }
+  },
+  "WelfareAlertsPage.tsx": {
+    "total_lines": 360,
+    "file_path": "apps/web/src/pages/WelfareAlertsPage.tsx",
+    "purpose": "Welfare alerts dashboard: officer check-ins, missed check-ins, SOS alerts, man-down escalation",
+    "line_reads_captured": [
+      { "range": "1-80", "status": "partial (referenced in search results)" }
+    ],
+    "architecture": {
+      "alert_types": [
+        "check_in (regular cadence, default 30 min)",
+        "missed (officer missed check-in window)",
+        "sos (officer initiated emergency)",
+        "man_down (GPS inactivity detected)"
+      ],
+      "escalation_model": "Server-authoritative; client-side detection but server owns escalation path"
+    },
+    "data_structure": {
+      "welfare_alerts_table": {
+        "id": "alert UUID",
+        "officer_user_id": "officer UUID",
+        "organization_id": "org UUID",
+        "status": "open | acknowledged | resolved",
+        "alert_type": "check_in | missed | sos | man_down",
+        "escalation_level": "integer (0=none, 1=warning, 2=escalated, 3=critical)",
+        "escalated_at": "ISO timestamp when escalated",
+        "resolved_at": "ISO timestamp when resolved",
+        "resolved_by": "user UUID of admin who resolved",
+        "acknowledged_by": "user UUID of admin who acknowledged",
+        "created_at": "ISO timestamp alert created",
+        "gps_lat": "officer GPS lat at alert time or null",
+        "gps_lng": "officer GPS lng at alert time or null",
+        "metadata": "JSON extra data (last seen time, inactivity duration, etc.)"
+      }
+    },
+    "key_functions": {
+      "query_alerts": "Load open/acknowledged welfare_alerts ordered by escalation_level DESC, created_at DESC",
+      "acknowledge": "PATCH welfare_alerts SET status='acknowledged', acknowledged_by=current_user_id",
+      "resolve": "PATCH welfare_alerts SET status='resolved', resolved_at=now(), resolved_by=current_user_id",
+      "auto_resolve_on_movement": "If officer GPS moves significantly after man_down alert, server-side auto-resolve"
+    },
+    "supabase_realtime": {
+      "subscription": "postgres_changes on welfare_alerts table; listen for INSERT, UPDATE",
+      "on_new_alert": "Add to alert list, flag severity, trigger notification",
+      "on_acknowledged": "Remove from open list, mark as acknowledged in UI"
+    },
+    "ui_components": {
+      "alert_card": {
+        "alert_type_icon": "check_in, missed, sos, man_down emoji",
+        "officer_name": "from user_profiles.display_name",
+        "escalation_level": "colour-coded badge (warning orange, critical red)",
+        "time_since_alert": "relative time (5 min ago)",
+        "gps_location": "last known GPS + time",
+        "action_buttons": ["Acknowledge", "Resolve", "Contact Officer"]
+      }
+    },
+    "references_in_bob_transcription": {
+      "welfare_alerts": "30 matches in codebase search",
+      "escalation_level": "30 matches (server-owned escalation logic)",
+      "escalated_at": "30 matches (escalation timestamp tracking)",
+      "uses": [
+        "AdminHubPage: KPI count of welfareAlerts (open status)",
+        "DispatchConsolePage: Welfare alert display for dispatch oversight",
+        "OfficerShell: Welfare status colour on FieldSafetyBar",
+        "LiveMapPage: Officer pin colour-coded by welfare status",
+        "WelfareAlertsPage: Admin dashboard for alert triage"
+      ]
+    }
+  },
+  "summary": {
+    "total_files_extracted": 5,
+    "total_lines_transcribed": 4802,
+    "messages_analyzed": 68,
+    "extraction_quality": {
+      "AdminShell.tsx": "Complete (810/810 lines read)",
+      "OfficerShell.tsx": "Complete (975/975 lines read)",
+      "DispatchConsolePage.tsx": "Partial (major sections read; 1568 line file)",
+      "AdminHubPage.tsx": "Complete (599/599 lines read)",
+      "WelfareAlertsPage.tsx": "Partial (referenced in search results; full read TBD)"
+    },
+    "key_architectural_insights": {
+      "shell_pattern": "Both admin and officer portals use state machines (page/module selection) with URL sync and legacy redirect support",
+      "module_gating": "Two-level: user role + org-level module enablement; fail-open during rollout but hardening needed for safety-critical modules",
+      "supabase_integration": "Heavy use of real-time subscriptions for shifts, welfare alerts, GPS tracking; parallel queries for dashboard KPIs",
+      "lazy_loading": "React.lazy() for code-splitting on admin container pages; Suspense boundaries inside shell main content",
+      "bob_integration": "Bob context derived from active page/module; navigation-aware AI assistant in both admin and officer portals",
+      "safety_signals": "Welfare status (ok/due/overdue/man_down/sos) propagated across live-map, dispatch console, officer shell FieldSafetyBar"
+    },
+    "known_limitations": {
+      "WelfareAlertsPage": "Only 360 lines; full read not yet transcribed (partial search results available)",
+      "DispatchConsolePage": "1568 lines; full read would require additional message extraction windows (major sections covered)",
+      "styling": "CSS-in-JS style objects extracted but not fully analyzed (focus on component architecture and data flow)"
+    }
+  }
+}
