@@ -1013,7 +1013,6 @@ serve(async (req)=>{
         const breachType = parkingCompliance.is_repeat ? 'parking_repeat_overstay' : 'parking_overstay';
         const { data: breachData, error: breachInsertErr } = await supabase.from('breach_alerts').insert({
           organization_id: orgId,
-          observation_id: chalkRecordId,
           zone_id: zoneId,
           plate_number: plateNumber,
           breach_type: breachType,
@@ -1048,7 +1047,6 @@ serve(async (req)=>{
         const breachType = flag === 'expired_rego' ? 'expired_rego' : flag === 'expired_wof' ? 'expired_wof' : 'expired_cof';
         const { error: vcBreachErr } = await supabase.from('breach_alerts').insert({
           organization_id: orgId,
-          observation_id: chalkRecordId,
           zone_id: zoneId,
           plate_number: plateNumber,
           breach_type: breachType,
