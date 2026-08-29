@@ -40,6 +40,20 @@ interface NoticeTemplate {
   authorising_act: string;
 }
 
+interface GeofenceConfigRow {
+  id: string;
+  config_key: string;
+  config_value: number;
+  zone_type: string | null;
+}
+
+// public.get_org_geofence_config()'s own comment: zone-type override -> org-wide -> these platform defaults.
+const GEOFENCE_KEYS: { key: string; label: string; platformDefault: number }[] = [
+  { key: 'site_provisional_radius_m', label: 'Site provisional radius (m)', platformDefault: 50 },
+  { key: 'zone_provisional_radius_m', label: 'Zone provisional radius (m)', platformDefault: 100 },
+  { key: 'checkpoint_radius_m', label: 'Checkpoint radius (m)', platformDefault: 5 },
+];
+
 const ENFORCEMENT_MODES = ['admin_first', 'officer_direct', 'hybrid'];
 
 const OrganizationSetupPage: React.FC = () => {
@@ -47,11 +61,14 @@ const OrganizationSetupPage: React.FC = () => {
   const [org, setOrg] = useState<OrgProfile | null>(null);
   const [modules, setModules] = useState<ModuleRow[]>([]);
   const [templates, setTemplates] = useState<NoticeTemplate[]>([]);
+  const [geofenceConfig, setGeofenceConfig] = useState<GeofenceConfigRow[]>([]);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [overrideForm, setOverrideForm] = useState({ config_key: GEOFENCE_KEYS[0].key, zone_type: '', config_value: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ATLAS READS: organizations, organization_modules, notice_templates
+  // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config
   const loadAll = useCallback(async () => {
     const orgId = profile?.organizationId;
     if (!orgId) return;
@@ -60,7 +77,7 @@ const OrganizationSetupPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [orgRes, modulesRes, templatesRes] = await Promise.all([
+      const [orgRes, modulesRes, templatesRes, geofenceRes] = await Promise.all([
         supabase
           .from('organizations')
           .select(
@@ -73,15 +90,21 @@ const OrganizationSetupPage: React.FC = () => {
           .from('notice_templates')
           .select('id, notice_type, version, is_active, authorising_act')
           .eq('organization_id', orgId),
+        supabase
+          .from('org_geofence_config')
+          .select('id, config_key, config_value, zone_type')
+          .eq('organization_id', orgId),
       ]);
 
       if (orgRes.error) throw orgRes.error;
       if (modulesRes.error) throw modulesRes.error;
       if (templatesRes.error) throw templatesRes.error;
+      if (geofenceRes.error) throw geofenceRes.error;
 
       setOrg(orgRes.data as OrgProfile);
       setModules((modulesRes.data as ModuleRow[]) || []);
       setTemplates((templatesRes.data as NoticeTemplate[]) || []);
+      setGeofenceConfig((geofenceRes.data as GeofenceConfigRow[]) || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load organisation setup');
     } finally {
@@ -133,6 +156,61 @@ const OrganizationSetupPage: React.FC = () => {
       setModules(modules.map((m) => (m.id === mod.id ? { ...m, enabled: !m.enabled } : m)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update module');
+    }
+  };
+
+  // Manual find-then-update/insert rather than upsert(onConflict): the
+  // org_geofence_config unique constraint is (organization_id, config_key,
+  // zone_type), but Postgres treats every NULL zone_type as distinct from
+  // every other NULL for uniqueness purposes -- an upsert would silently
+  // insert a duplicate org-wide row instead of updating the existing one.
+  const saveGeofenceValue = async (configKey: string, zoneType: string | null, value: number) => {
+    if (!org || Number.isNaN(value)) return;
+    try {
+      setSavingKey(`${configKey}:${zoneType ?? ''}`);
+      setError(null);
+
+      const existing = geofenceConfig.find((g) => g.config_key === configKey && (g.zone_type ?? null) === zoneType);
+
+      if (existing) {
+        // ATLAS WRITES: org_geofence_config
+        const { error } = await supabase.from('org_geofence_config').update({ config_value: value }).eq('id', existing.id);
+        if (error) throw error;
+        setGeofenceConfig(geofenceConfig.map((g) => (g.id === existing.id ? { ...g, config_value: value } : g)));
+      } else {
+        // ATLAS WRITES: org_geofence_config
+        const { data, error } = await supabase
+          .from('org_geofence_config')
+          .insert([{ organization_id: org.id, config_key: configKey, config_value: value, zone_type: zoneType }])
+          .select('id, config_key, config_value, zone_type')
+          .single();
+        if (error) throw error;
+        setGeofenceConfig([...geofenceConfig, data as GeofenceConfigRow]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save geofence config');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleAddOverride = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = Number(overrideForm.config_value);
+    if (!overrideForm.zone_type.trim() || Number.isNaN(value)) return;
+    await saveGeofenceValue(overrideForm.config_key, overrideForm.zone_type.trim(), value);
+    setOverrideForm({ config_key: GEOFENCE_KEYS[0].key, zone_type: '', config_value: '' });
+  };
+
+  const handleDeleteOverride = async (id: string) => {
+    try {
+      setError(null);
+      // ATLAS WRITES: org_geofence_config
+      const { error } = await supabase.from('org_geofence_config').delete().eq('id', id);
+      if (error) throw error;
+      setGeofenceConfig(geofenceConfig.filter((g) => g.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove override');
     }
   };
 
@@ -284,6 +362,110 @@ const OrganizationSetupPage: React.FC = () => {
             ))
           )}
         </div>
+      </section>
+
+      <section className="reports-section">
+        <h2>Geofence Configuration</h2>
+        <p className="contact-meta">
+          Provisional detection radii, read by get_org_geofence_config() with zone-type override → org-wide → platform
+          default fallback.
+        </p>
+        <div className="contacts-list" style={{ marginTop: '8px' }}>
+          {GEOFENCE_KEYS.map((k) => {
+            const existing = geofenceConfig.find((g) => g.config_key === k.key && g.zone_type === null);
+            return (
+              <div key={k.key} className="contact-card">
+                <div className="contact-header">
+                  <h3>{k.label}</h3>
+                </div>
+                <div className="contact-details" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="number"
+                    min={0}
+                    defaultValue={existing?.config_value ?? k.platformDefault}
+                    style={{ width: '100px' }}
+                    onBlur={(e) => {
+                      const value = Number(e.target.value);
+                      if (!Number.isNaN(value) && value !== (existing?.config_value ?? k.platformDefault)) {
+                        saveGeofenceValue(k.key, null, value);
+                      }
+                    }}
+                  />
+                  <span className="contact-meta">
+                    {existing ? 'org-wide override' : `platform default (${k.platformDefault})`}
+                    {savingKey === `${k.key}:` ? ' · saving…' : ''}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <h3 style={{ marginTop: '16px', fontSize: '14px' }}>Per-Zone-Type Overrides</h3>
+        <div className="contacts-list" style={{ marginTop: '8px' }}>
+          {geofenceConfig.filter((g) => g.zone_type !== null).length === 0 ? (
+            <div className="empty-state">
+              <p>No zone-type-specific overrides.</p>
+            </div>
+          ) : (
+            geofenceConfig
+              .filter((g) => g.zone_type !== null)
+              .map((g) => (
+                <div key={g.id} className="contact-card">
+                  <div className="contact-header">
+                    <h3>
+                      {g.config_key} · {g.zone_type}
+                    </h3>
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDeleteOverride(g.id)}>
+                      Remove
+                    </button>
+                  </div>
+                  <p className="contact-meta">{g.config_value}m</p>
+                </div>
+              ))
+          )}
+        </div>
+
+        <form className="settings-form" onSubmit={handleAddOverride} style={{ marginTop: '12px' }}>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Config Key</label>
+              <select
+                value={overrideForm.config_key}
+                onChange={(e) => setOverrideForm({ ...overrideForm, config_key: e.target.value })}
+              >
+                {GEOFENCE_KEYS.map((k) => (
+                  <option key={k.key} value={k.key}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Zone Type</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. freedom_camping"
+                value={overrideForm.zone_type}
+                onChange={(e) => setOverrideForm({ ...overrideForm, zone_type: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Value (m)</label>
+              <input
+                type="number"
+                min={0}
+                required
+                value={overrideForm.config_value}
+                onChange={(e) => setOverrideForm({ ...overrideForm, config_value: e.target.value })}
+              />
+            </div>
+          </div>
+          <button type="submit" className="btn btn-secondary btn-sm">
+            Add Override
+          </button>
+        </form>
       </section>
     </div>
   );

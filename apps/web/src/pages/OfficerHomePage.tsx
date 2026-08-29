@@ -68,13 +68,23 @@ function useOpenShifts(organizationId: string | null | undefined) {
       try {
         setClaimingId(requestId);
         setError(null);
-        const { error: err } = await supabase
+        // .select() + empty-result check matters here: a bare .update() returns
+        // no error even when the .eq('status','open') guard matches zero rows
+        // (i.e. someone else already claimed it) -- without this check the UI
+        // would silently report success on a claim that never actually happened.
+        const { data, error: err } = await supabase
           .from('shift_coverage_requests')
           .update({ status: 'claimed', claimed_by: officerId, claimed_at: new Date().toISOString() })
           .eq('id', requestId)
-          .eq('status', 'open');
+          .eq('status', 'open')
+          .select('id');
 
         if (err) throw err;
+        if (!data || data.length === 0) {
+          setError('This shift was already claimed by someone else.');
+          setOpenShifts((prev) => prev.filter((s) => s.id !== requestId));
+          return;
+        }
         setOpenShifts((prev) => prev.filter((s) => s.id !== requestId));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to claim shift');
