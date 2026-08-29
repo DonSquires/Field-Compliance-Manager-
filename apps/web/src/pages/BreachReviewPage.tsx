@@ -52,7 +52,7 @@ const ACTION_OPTIONS: { type: ActionType; label: string; btnClass: string }[] = 
 const BreachReviewPage: React.FC = () => {
   const { profile } = useAuth();
   const [alerts, setAlerts] = useState<BreachAlert[]>([]);
-  const [statusFilter, setStatusFilter] = useState<'open' | 'actioned' | 'all'>('open');
+  const [statusFilter, setStatusFilter] = useState<'open' | 'acknowledged' | 'actioned' | 'dismissed' | 'resolved' | 'exempt_homeless' | 'all'>('open');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [activeActionAlertId, setActiveActionAlertId] = useState<string | null>(null);
   const [actionNotes, setActionNotes] = useState('');
@@ -207,18 +207,42 @@ const BreachReviewPage: React.FC = () => {
 
       {/* KPI Triage summary & filter controls */}
       <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             className={`btn btn-sm ${statusFilter === 'open' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('open')}
           >
-            Open Queue ({statusFilter === 'open' ? alerts.length : openCount})
+            Open ({alerts.filter(a => a.status === 'open').length})
+          </button>
+          <button
+            className={`btn btn-sm ${statusFilter === 'acknowledged' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setStatusFilter('acknowledged')}
+          >
+            Acknowledged ({alerts.filter(a => a.status === 'acknowledged').length})
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'actioned' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('actioned')}
           >
-            Actioned
+            Actioned ({alerts.filter(a => a.status === 'actioned').length})
+          </button>
+          <button
+            className={`btn btn-sm ${statusFilter === 'dismissed' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setStatusFilter('dismissed')}
+          >
+            Dismissed ({alerts.filter(a => a.status === 'dismissed').length})
+          </button>
+          <button
+            className={`btn btn-sm ${statusFilter === 'resolved' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setStatusFilter('resolved')}
+          >
+            Resolved ({alerts.filter(a => a.status === 'resolved').length})
+          </button>
+          <button
+            className={`btn btn-sm ${statusFilter === 'exempt_homeless' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setStatusFilter('exempt_homeless')}
+          >
+            Exempt - Homeless ({alerts.filter(a => a.status === 'exempt_homeless').length})
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
@@ -289,8 +313,8 @@ const BreachReviewPage: React.FC = () => {
                     {alert.is_scv === true && (
                       <span className="badge badge-info">SCV CERTIFIED</span>
                     )}
-                    <span className={`badge ${alert.status === 'open' ? 'badge-danger' : alert.status === 'actioned' ? 'badge-success' : 'badge-info'}`}>
-                      {alert.status.toUpperCase()}
+                    <span className={`badge ${alert.status === 'open' ? 'badge-danger' : alert.status === 'acknowledged' || alert.status === 'actioned' ? 'badge-warning' : alert.status === 'resolved' || alert.status === 'dismissed' ? 'badge-success' : 'badge-info'}`}>
+                      {alert.status === 'exempt_homeless' ? 'EXEMPT - HOMELESS' : alert.status.toUpperCase()}
                     </span>
                   </div>
                 </div>
@@ -374,6 +398,62 @@ const BreachReviewPage: React.FC = () => {
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Actioned alerts: mark as resolved or exempt_homeless */}
+                {alert.status === 'actioned' && (
+                  <div style={{ marginTop: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '10px' }}>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      <button
+                        className="btn btn-sm btn-success"
+                        disabled={busyId === alert.id}
+                        onClick={async () => {
+                          if (!profile?.id) return;
+                          setBusyId(alert.id);
+                          try {
+                            const { error: err } = await supabase
+                              .from('breach_alerts')
+                              .update({ status: 'resolved', actioned_by: profile.id, actioned_at: new Date().toISOString() })
+                              .eq('id', alert.id);
+                            if (err) throw err;
+                            setAlerts((prev) =>
+                              prev.map((a) => (a.id === alert.id ? { ...a, status: 'resolved' } : a))
+                            );
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : 'Failed to mark as resolved');
+                          } finally {
+                            setBusyId(null);
+                          }
+                        }}
+                      >
+                        ✓ Mark Resolved
+                      </button>
+                      <button
+                        className="btn btn-sm btn-secondary"
+                        disabled={busyId === alert.id}
+                        onClick={async () => {
+                          if (!profile?.id) return;
+                          setBusyId(alert.id);
+                          try {
+                            const { error: err } = await supabase
+                              .from('breach_alerts')
+                              .update({ status: 'exempt_homeless', actioned_by: profile.id, actioned_at: new Date().toISOString() })
+                              .eq('id', alert.id);
+                            if (err) throw err;
+                            setAlerts((prev) =>
+                              prev.map((a) => (a.id === alert.id ? { ...a, status: 'exempt_homeless' } : a))
+                            );
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : 'Failed to mark as exempt');
+                          } finally {
+                            setBusyId(null);
+                          }
+                        }}
+                      >
+                        🏠 Mark Exempt - Homeless
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
