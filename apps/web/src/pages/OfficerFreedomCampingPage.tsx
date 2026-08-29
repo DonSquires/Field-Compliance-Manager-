@@ -15,6 +15,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { formatComplianceReason } from '../lib/freedomCampingStatus';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -43,11 +44,6 @@ interface ComplianceVerdict {
   scv_required: boolean;
   is_scv: boolean;
 }
-
-const REASON_LABEL: Record<string, string> = {
-  consecutive_night_limit_exceeded: 'Consecutive night limit exceeded',
-  monthly_limit_exceeded: 'Monthly night limit exceeded',
-};
 
 const OfficerFreedomCampingPage: React.FC = () => {
   const { profile } = useAuth();
@@ -252,7 +248,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
                 {verdict.nights_this_month} night(s) this month
                 {verdict.limit_monthly !== null ? ` (limit ${verdict.limit_monthly})` : ''}
               </p>
-              {verdict.reason && <p className="contact-meta">{REASON_LABEL[verdict.reason] ?? verdict.reason}</p>}
+              {verdict.reason && <p className="contact-meta">{formatComplianceReason(verdict.reason)}</p>}
             </div>
           )}
 
@@ -277,7 +273,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
                 </span>
               </div>
               <div className="contact-details">
-                {o.compliance_reason && <p>{o.compliance_reason}</p>}
+                {o.compliance_reason && <p>{formatComplianceReason(o.compliance_reason)}</p>}
                 <p className="contact-meta">
                   {o.nights_this_zone ?? 0} night(s) this zone · {new Date(o.observed_at).toLocaleString()}
                 </p>

@@ -304,10 +304,10 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           .eq('organization_id', profile.organizationId)
           .in('status', ['published', 'accepted', 'scheduled', 'in_progress']),
         supabase
-          .from('officer_welfare_alerts')
+          .from('welfare_alerts')
           .select('id', { count: 'exact', head: true })
           .eq('organization_id', profile.organizationId)
-          .eq('status', 'open'),
+          .eq('status', 'pending'),
       ]);
 
       setKpi({

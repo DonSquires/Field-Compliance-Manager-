@@ -18,6 +18,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
+  schemaDispatchResourceStatus,
   schemaDispatchJobPriority,
   schemaDispatchJobStatus,
   schemaShiftHealth,
@@ -79,7 +80,7 @@ interface ResourceUnit {
   id: string;
   name: string;
   callsign?: string;
-  status: 'available' | 'assigned' | 'offline';
+  status: 'available' | 'busy' | 'offline';
   gpsLat?: number;
   gpsLng?: number;
 }
@@ -102,9 +103,14 @@ interface RequesterOrg {
 
 interface RateRule {
   id: string;
-  jobType: JobType;
-  baseRate: number;
-  requesterOrgId?: string;
+  // SCHEMA LIMITATION: rate_rules table does NOT have a dispatch job_type link.
+  // The jobType field below is a UI convenience only; matching is imperfect.
+  // TODO: Establish proper rate rule targeting (rule_kind + rate_type + zone/org matching).
+  jobType?: JobType;
+  amount: number; // canonical schema column (not baseRate)
+  ruleKind?: 'pay' | 'billing';
+  rateType?: string; // hourly|flat|daily|per_km|per_unit|percentage|per_hour_travel|per_hour_allowance|oncall_flat|callout|higher_duties_flat|per_visit|per_notice
+  clientOrgId?: string; // canonical schema column (not requesterOrgId)
   zoneId?: string;
 }
 
@@ -337,7 +343,7 @@ const DispatchConsolePage: React.FC = () => {
     try {
       setLoading(true);
 
-      const [shiftsRes, jobsRes, sitesRes] = await Promise.all([
+      const [shiftsRes, jobsRes, sitesRes, resourcesRes] = await Promise.all([
         supabase
           .from('shifts')
           .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
@@ -351,6 +357,10 @@ const DispatchConsolePage: React.FC = () => {
         supabase
           .from('client_sites')
           .select('id, name, address, gps_lat, gps_lng, client_organization_id')
+          .eq('organization_id', profile.organizationId),
+        supabase
+          .from('dispatch_resources')
+          .select('id, name, callsign, status, gps_lat, gps_lng')
           .eq('organization_id', profile.organizationId),
       ]);
 
@@ -401,6 +411,19 @@ const DispatchConsolePage: React.FC = () => {
           }))
         );
       }
+
+      if (resourcesRes.data) {
+        setResources(
+          resourcesRes.data.map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            callsign: r.callsign,
+            status: schemaDispatchResourceStatus(r.status ?? 'available'),
+            gpsLat: r.gps_lat ?? undefined,
+            gpsLng: r.gps_lng ?? undefined,
+          }))
+        );
+      }
     } catch (err) {
       console.error('Failed to load Phase A:', err);
       setError('Failed to load shifts, jobs, and sites');
@@ -440,17 +463,15 @@ const DispatchConsolePage: React.FC = () => {
   }, []);
 
   // Load Phase C: Requester orgs (geofence + agreement filtering)
+  // SCHEMA GAP: 'requester_organizations' table does not exist in schema.
+  // TODO: Establish proper requester org link (e.g., via service_agreements or a new requester table).
   const loadPhaseC = useCallback(async (siteId: string) => {
     try {
       setRequesterLoading(true);
 
-      const { data, error } = await supabase
-        .from('requester_organizations')
-        .select('id, name, agreement')
-        .limit(50);
-
-      if (error) throw error;
-      setRequesterOrgs(data || []);
+      // Stub: For now, return empty list. Real implementation requires schema design.
+      // The intended feature: filter dispatch jobs by authorized requester organizations.
+      setRequesterOrgs([]);
     } catch (err) {
       console.error('Failed to load Phase C (requesters):', err);
     } finally {
@@ -459,20 +480,27 @@ const DispatchConsolePage: React.FC = () => {
   }, []);
 
   // Load Phase D: Billing rates
+  // Canonical schema: rate_rules has (id, amount, rate_type, rule_kind, client_org_id, zone_id).
+  // job_type matching is not schema-backed; this loads for reference only.
   const loadPhaseD = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('rate_rules')
-        .select('id, job_type, base_rate, requester_organization_id, zone_id')
+        .select('id, amount, rate_type, rule_kind, client_org_id, zone_id')
+        .eq('rule_kind', 'billing')
         .limit(100);
 
       if (error) throw error;
       setBillingRules(
         (data || []).map((row: any) => ({
           id: row.id,
-          jobType: row.job_type,
-          baseRate: row.base_rate,
-          requesterOrgId: row.requester_organization_id,
+          // jobType is a convenience field; schema doesn't link rate rules to dispatch job_type.
+          // TODO: Establish proper rate rule matching (rate_type + zone + org).
+          jobType: undefined,
+          amount: row.amount,
+          ruleKind: row.rule_kind,
+          rateType: row.rate_type,
+          clientOrgId: row.client_org_id,
           zoneId: row.zone_id,
         }))
       );
@@ -482,18 +510,20 @@ const DispatchConsolePage: React.FC = () => {
   }, []);
 
   // Resolve billing rate
+  // SCHEMA LIMITATION: Cannot match by dispatch job_type; rate_rules and dispatch_jobs are not linked in schema.
+  // Fallback: match by zone and client org only.
   const resolveBillingRate = useCallback(() => {
-    if (!formJobType || !formRequesterId) {
+    if (!formZoneId) {
       setIsUnrateable(true);
       setResolvedRate(null);
       return;
     }
 
+    // Match rate rules by zone and client org, ignoring job type (not schema-backed).
     const matched = billingRules.find(
       (r) =>
-        r.jobType === formJobType &&
-        (!r.requesterOrgId || r.requesterOrgId === formRequesterId) &&
-        (!r.zoneId || r.zoneId === formZoneId)
+        (!r.zoneId || r.zoneId === formZoneId) &&
+        (!r.clientOrgId || r.clientOrgId === formShiftId) // using shift as proxy for org context
     );
 
     if (matched) {
@@ -503,7 +533,7 @@ const DispatchConsolePage: React.FC = () => {
       setIsUnrateable(true);
       setResolvedRate(null);
     }
-  }, [formJobType, formRequesterId, formZoneId, billingRules]);
+  }, [formZoneId, formShiftId, billingRules]);
 
   // Create job
   const handleCreateJob = useCallback(async () => {

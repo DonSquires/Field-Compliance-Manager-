@@ -7,6 +7,8 @@ export const ACTIVE_DISPATCH_JOB_STATUSES = [
   'on_scene',
 ] as const;
 
+export type DispatchResourceStatus = 'available' | 'busy' | 'offline';
+
 export type ShiftHealthStatus = 'on_track' | 'at_risk' | 'critical' | 'breached';
 
 export function schemaDispatchJobStatus(status: string): string {
@@ -38,6 +40,17 @@ export function schemaDispatchJobPriority(priority: string): string {
   };
 
   return canonical[priority] ?? priority;
+}
+
+export function schemaDispatchResourceStatus(status: string): DispatchResourceStatus {
+  const canonical: Record<string, DispatchResourceStatus> = {
+    available: 'available',
+    busy: 'busy',
+    assigned: 'busy',
+    offline: 'offline',
+  };
+
+  return canonical[status] ?? (status as DispatchResourceStatus);
 }
 
 export function schemaShiftHealth(health: string): ShiftHealthStatus {

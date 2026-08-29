@@ -3,6 +3,7 @@ import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   schemaDispatchJobPriority,
   schemaDispatchJobStatus,
+  schemaDispatchResourceStatus,
   schemaShiftHealth,
   shiftHealthBadge,
 } from './dispatchStatus';
@@ -38,5 +39,12 @@ describe('dispatch status schema mapping', () => {
     expect(shiftHealthBadge('on_track')).toMatchObject({ label: 'On Track', tone: 'healthy' });
     expect(shiftHealthBadge('at_risk')).toMatchObject({ label: 'At Risk', tone: 'degraded' });
     expect(shiftHealthBadge('breached')).toMatchObject({ label: 'Breached', tone: 'critical' });
+  });
+
+  it('normalizes dispatch resource states to the canonical schema enum', () => {
+    expect(schemaDispatchResourceStatus('available')).toBe('available');
+    expect(schemaDispatchResourceStatus('assigned')).toBe('busy');
+    expect(schemaDispatchResourceStatus('busy')).toBe('busy');
+    expect(schemaDispatchResourceStatus('offline')).toBe('offline');
   });
 });

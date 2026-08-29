@@ -14,10 +14,11 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { schemaWelfareAlertStatus, type WelfareAlertStatus } from '../lib/welfareAlertStatus';
 import { supabase } from '../lib/supabase';
 
 type AlertType = 'check_in' | 'missed' | 'sos' | 'man_down';
-type AlertStatus = 'open' | 'acknowledged' | 'resolved';
+type AlertStatus = WelfareAlertStatus;
 
 interface WelfareAlert {
   id: string;
@@ -30,9 +31,11 @@ interface WelfareAlert {
   resolved_at: string | null;
   resolved_by: string | null;
   acknowledged_by: string | null;
-  created_at: string;
+  acknowledged_at: string | null;
+  triggered_at: string;
   gps_lat: number | null;
   gps_lng: number | null;
+  notes: string | null;
   metadata: Record<string, any> | null;
   officer?: {
     id: string;
@@ -66,7 +69,7 @@ const StatusBadge: React.FC<{
   escalationLevel: number;
 }> = ({ status, escalationLevel }) => {
   const statusColors: Record<AlertStatus, string> = {
-    open: '#EF5350',
+    pending: '#EF5350',
     acknowledged: '#FF9800',
     resolved: '#4CAF50',
   };
@@ -83,7 +86,7 @@ const StatusBadge: React.FC<{
         color: 'white',
       }}
     >
-      {status === 'open' ? 'Open' : status === 'acknowledged' ? 'Acknowledged' : 'Resolved'}
+      {status === 'pending' ? 'Pending' : status === 'acknowledged' ? 'Acknowledged' : 'Resolved'}
     </div>
   );
 };
@@ -152,7 +155,7 @@ const AlertCard: React.FC<{
         <div>
           <span style={{ color: 'var(--color-text-secondary)' }}>Triggered</span>
           <div style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
-            {timeAgo(alert.created_at)}
+            {timeAgo(alert.triggered_at)}
           </div>
         </div>
         <div>
@@ -193,7 +196,7 @@ const AlertCard: React.FC<{
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        {alert.status === 'open' && (
+        {alert.status === 'pending' && (
           <button
             onClick={() => onAcknowledge(alert.id)}
             disabled={loading}
@@ -261,7 +264,7 @@ const WelfareAlertsPage: React.FC = () => {
   const [alerts, setAlerts] = useState<WelfareAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | AlertStatus>('all');
+  const [filter, setFilter] = useState<'all' | AlertStatus>('pending');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   // Load alerts
@@ -271,7 +274,7 @@ const WelfareAlertsPage: React.FC = () => {
     try {
       setLoading(true);
       let query = supabase
-        .from('officer_welfare_alerts')
+        .from('welfare_alerts')
         .select('*, officer:officer_user_id(id, display_name)')
         .eq('organization_id', profile.organizationId);
 
@@ -281,11 +284,14 @@ const WelfareAlertsPage: React.FC = () => {
 
       const { data, error } = await query
         .order('escalation_level', { ascending: false })
-        .order('created_at', { ascending: false })
+        .order('triggered_at', { ascending: false })
         .limit(100);
 
       if (error) throw error;
-      setAlerts(data || []);
+      setAlerts((data || []).map((alert: any) => ({
+        ...alert,
+        status: schemaWelfareAlertStatus(alert.status ?? 'pending'),
+      })));
     } catch (err) {
       console.error('Failed to load alerts:', err);
     } finally {
@@ -301,10 +307,11 @@ const WelfareAlertsPage: React.FC = () => {
       try {
         setActionLoading(id);
         const { error } = await supabase
-          .from('officer_welfare_alerts')
+          .from('welfare_alerts')
           .update({
             status: 'acknowledged',
             acknowledged_by: profile.id,
+            acknowledged_at: new Date().toISOString(),
           })
           .eq('id', id);
 
@@ -327,7 +334,7 @@ const WelfareAlertsPage: React.FC = () => {
       try {
         setActionLoading(id);
         const { error } = await supabase
-          .from('officer_welfare_alerts')
+          .from('welfare_alerts')
           .update({
             status: 'resolved',
             resolved_at: new Date().toISOString(),
@@ -369,7 +376,7 @@ const WelfareAlertsPage: React.FC = () => {
         {
           event: '*',
           schema: 'public',
-          table: 'officer_welfare_alerts',
+          table: 'welfare_alerts',
           filter: `organization_id=eq.${profile.organizationId}`,
         },
         () => {
@@ -394,7 +401,7 @@ const WelfareAlertsPage: React.FC = () => {
     return alerts.filter((a) => a.status === filter);
   }, [alerts, filter]);
 
-  const openCount = alerts.filter((a) => a.status === 'open').length;
+  const openCount = alerts.filter((a) => a.status === 'pending').length;
   const acknowledgedCount = alerts.filter((a) => a.status === 'acknowledged').length;
   const resolvedCount = alerts.filter((a) => a.status === 'resolved').length;
 
@@ -446,11 +453,11 @@ const WelfareAlertsPage: React.FC = () => {
           All ({alerts.length})
         </button>
         <button
-          onClick={() => setFilter('open')}
+          onClick={() => setFilter('pending')}
           style={{
             padding: '8px 16px',
-            backgroundColor: filter === 'open' ? '#EF5350' : 'transparent',
-            color: filter === 'open' ? 'white' : '#EF5350',
+            backgroundColor: filter === 'pending' ? '#EF5350' : 'transparent',
+            color: filter === 'pending' ? 'white' : '#EF5350',
             border: 'none',
             borderRadius: '4px',
             cursor: 'pointer',
