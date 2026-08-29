@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobStatus } from './dispatchStatus';
+import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobPriority, schemaDispatchJobStatus } from './dispatchStatus';
 
 describe('dispatch status schema mapping', () => {
   it('maps legacy UI statuses to the canonical database lifecycle', () => {
@@ -14,5 +14,12 @@ describe('dispatch status schema mapping', () => {
     expect(ACTIVE_DISPATCH_JOB_STATUSES).toContain('en_route');
     expect(ACTIVE_DISPATCH_JOB_STATUSES).not.toContain('open');
     expect(ACTIVE_DISPATCH_JOB_STATUSES).not.toContain('in_progress');
+  });
+
+  it('maps legacy UI priorities to the canonical database enum', () => {
+    expect(schemaDispatchJobPriority('medium')).toBe('normal');
+    expect(schemaDispatchJobPriority('critical')).toBe('urgent');
+    expect(schemaDispatchJobPriority('high')).toBe('high');
+    expect(schemaDispatchJobPriority('urgent')).toBe('urgent');
   });
 });

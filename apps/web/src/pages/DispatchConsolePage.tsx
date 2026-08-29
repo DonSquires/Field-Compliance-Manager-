@@ -16,13 +16,13 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobStatus } from '../lib/dispatchStatus';
+import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobPriority, schemaDispatchJobStatus } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { supabase } from '../lib/supabase';
 
 // Type definitions
 type JobType = 'alarm_response' | 'event' | 'incident' | 'patrol_support' | 'welfare_check';
-type JobPriority = 'low' | 'medium' | 'high' | 'critical';
+type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
 type JobStatus = 'pending' | 'pending_approval' | 'dispatched' | 'acknowledged' | 'en_route' | 'on_scene' | 'completed' | 'cancelled';
 type ShiftStatus = 'scheduled' | 'published' | 'accepted' | 'declined' | 'in_progress' | 'completed' | 'cancelled';
 type StopStatus = 'pending' | 'en_route' | 'on_scene' | 'completed' | 'skipped' | 'cancelled';
@@ -113,9 +113,9 @@ const JOB_TYPES: { id: JobType; label: string; icon: string }[] = [
 
 const PRIORITIES: { id: JobPriority; label: string; color: string }[] = [
   { id: 'low', label: 'Low', color: '#4CAF50' },
-  { id: 'medium', label: 'Medium', color: '#FF9800' },
+  { id: 'normal', label: 'Normal', color: '#FF9800' },
   { id: 'high', label: 'High', color: '#FF6F00' },
-  { id: 'critical', label: 'Critical', color: '#EF5350' },
+  { id: 'urgent', label: 'Urgent', color: '#EF5350' },
 ];
 
 // Component: Shift Card
@@ -512,7 +512,7 @@ const DispatchConsolePage: React.FC = () => {
         .insert({
           organization_id: profile.organizationId,
           job_type: formJobType,
-          priority: formPriority,
+          priority: schemaDispatchJobPriority(formPriority),
           status: schemaDispatchJobStatus('open'),
           client_site_id: formSiteId,
           shift_id: formShiftId || null,

@@ -24,3 +24,16 @@ export function schemaDispatchJobStatus(status: string): string {
 
   return canonical[status] ?? status;
 }
+
+export function schemaDispatchJobPriority(priority: string): string {
+  const canonical: Record<string, string> = {
+    low: 'low',
+    medium: 'normal',
+    normal: 'normal',
+    high: 'high',
+    critical: 'urgent',
+    urgent: 'urgent',
+  };
+
+  return canonical[priority] ?? priority;
+}
