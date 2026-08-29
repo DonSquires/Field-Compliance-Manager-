@@ -11,6 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { evaluateCheckpointVisit } from '../lib/checkpointVisit';
 import './PageStyles.css';
 
 interface Shift {
@@ -33,6 +34,7 @@ interface Checkpoint {
   qr_code?: string | null;
   gps_lat?: number | null;
   gps_lng?: number | null;
+  radius_meters?: number | null;
   sequence?: number;
 }
 
@@ -42,6 +44,8 @@ interface CheckpointVisit {
   visited_at: string;
   scan_method?: string;
   notes?: string | null;
+  gps_distance_from_checkpoint?: number | null;
+  within_radius?: boolean | null;
 }
 
 interface PatrolSession {
@@ -76,7 +80,7 @@ const PatrolPage: React.FC = () => {
         if (shift.patrol_route_id) {
           const { data: routeCheckpoints } = await supabase
             .from('patrol_route_checkpoints')
-            .select('id, name, description, gps_lat, gps_lng, qr_code_data, sequence_order')
+            .select('id, name, description, gps_lat, gps_lng, qr_code_data, geofence_radius_meters, sequence_order')
             .eq('patrol_route_id', shift.patrol_route_id)
             .order('sequence_order', { ascending: true });
 
@@ -88,6 +92,7 @@ const PatrolPage: React.FC = () => {
               qr_code: c.qr_code_data,
               gps_lat: c.gps_lat,
               gps_lng: c.gps_lng,
+              radius_meters: c.geofence_radius_meters,
               sequence: c.sequence_order,
             }));
           }
@@ -97,7 +102,7 @@ const PatrolPage: React.FC = () => {
         if (shift.zone_id) {
           const { data: zoneCheckpoints } = await supabase
             .from('patrol_checkpoints')
-            .select('id, name, description, qr_code, gps_lat, gps_lng')
+            .select('id, name, description, qr_code, gps_lat, gps_lng, radius_meters')
             .eq('organization_id', profile.organizationId)
             .eq('zone_id', shift.zone_id)
             .eq('active', true)
@@ -111,7 +116,7 @@ const PatrolPage: React.FC = () => {
         // Priority 3: Organization-wide active checkpoints
         const { data: orgCheckpoints } = await supabase
           .from('patrol_checkpoints')
-          .select('id, name, description, qr_code, gps_lat, gps_lng')
+          .select('id, name, description, qr_code, gps_lat, gps_lng, radius_meters')
           .eq('organization_id', profile.organizationId)
           .eq('active', true)
           .order('name', { ascending: true })
@@ -299,6 +304,7 @@ const PatrolPage: React.FC = () => {
 
       let lat: number | null = null;
       let lng: number | null = null;
+      let gpsPrecisionMetres: number | null = null;
 
       // Attempt GPS capture if browser geolocation available
       if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
@@ -308,10 +314,33 @@ const PatrolPage: React.FC = () => {
           });
           lat = pos.coords.latitude;
           lng = pos.coords.longitude;
+          gpsPrecisionMetres = pos.coords.accuracy ?? null;
         } catch {
           // GPS optional for manual visit confirmation
         }
       }
+
+      const checkpoint = session.checkpoints.find((item) => item.id === checkpointId);
+      const evaluation = evaluateCheckpointVisit({
+        checkpointLat: checkpoint?.gps_lat ?? null,
+        checkpointLng: checkpoint?.gps_lng ?? null,
+        officerLat: lat,
+        officerLng: lng,
+        checkpointRadiusMetres: checkpoint?.radius_meters ?? 0,
+        gpsPrecisionMetres,
+        allowManualFallback: true,
+      });
+
+      const recordedNotes = [
+        visitNotes.trim(),
+        evaluation.reason === 'gps_missing_manual_allowed'
+          ? 'Manual visit approved: GPS unavailable and manual fallback was allowed.'
+          : evaluation.reason === 'gps_inaccurate'
+            ? 'GPS not accepted: position accuracy was worse than the checkpoint radius.'
+            : evaluation.reason === 'gps_outside_radius'
+              ? `GPS outside checkpoint radius (${evaluation.distanceMetres?.toFixed(1) ?? 'n/a'} m).`
+              : undefined,
+      ].filter(Boolean).join(' ') || null;
 
       // ATLAS WRITES: patrol_checkpoint_visits
       const { data, error: visitErr } = await supabase
@@ -322,16 +351,26 @@ const PatrolPage: React.FC = () => {
             patrol_id: session.id,
             checkpoint_id: checkpointId,
             officer_user_id: profile.id,
-            scan_method: 'manual_code',
+            scan_method: evaluation.mode === 'manual' ? 'manual_code' : 'gps',
             gps_lat: lat,
             gps_lng: lng,
-            notes: visitNotes.trim() || null,
+            gps_distance_from_checkpoint: evaluation.distanceMetres,
+            within_radius: evaluation.withinRadius,
+            notes: recordedNotes,
           },
         ])
         .select('id, checkpoint_id, visited_at, scan_method, notes')
         .single();
 
       if (visitErr) throw visitErr;
+
+      if (!evaluation.accepted) {
+        throw new Error(
+          evaluation.reason === 'gps_inaccurate'
+            ? 'GPS accuracy is too poor for this checkpoint.'
+            : 'GPS position is outside the checkpoint radius.'
+        );
+      }
 
       setSession({
         ...session,
