@@ -1,11 +1,7 @@
 /**
- * useActiveShift.ts — Get officer's current active shift
+ * useActiveShift.ts — Get officer's current live shift from the schema
  *
- * Returns the current shift record for an officer, including:
- * - Shift timing and type
- * - Assigned stops (zones/sites)
- * - Vehicle allocation
- * - Patrol route
+ * Canonical source is the shifts table, not the dispatch_jobs table.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -28,11 +24,11 @@ export interface ActiveShift {
   shift_date: string;
   start_time: string;
   end_time: string;
-  shift_type: 'patrol' | 'static' | 'mobile' | 'rostered';
+  shift_type: 'patrol' | 'static' | 'mobile' | 'rostered' | string;
   vehicle_id?: string;
   route_id?: string;
   stops: ShiftStop[];
-  status: 'scheduled' | 'started' | 'paused' | 'completed';
+  status: 'scheduled' | 'published' | 'accepted' | 'declined' | 'in_progress' | 'completed' | 'cancelled';
   created_at: string;
   updated_at: string;
 }
@@ -49,40 +45,43 @@ export function useActiveShift(userId: string, organizationId: string) {
     setError(null);
 
     try {
-      // Get today's shift
-      const today = new Date().toISOString().split('T')[0];
-      const now = new Date();
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
 
       const { data, error: err } = await supabase
-        .from('dispatch_jobs')
+        .from('shifts')
         .select(`
           id,
           organization_id,
           officer_user_id,
-          job_date,
-          job_start_time,
-          job_end_time,
-          job_type,
-          vehicle_id,
-          route_id,
+          service_type,
+          scheduled_start,
+          scheduled_end,
           status,
+          patrol_route_id,
+          zone_id,
           created_at,
           updated_at,
-          dispatch_stops (
+          shift_stops (
             id,
-            job_id,
+            shift_id,
             zone_id,
-            client_site_id,
-            sequence,
-            scheduled_arrival,
-            scheduled_departure
+            site_id,
+            stop_order,
+            actual_arrived_at,
+            actual_departed_at
           )
         `)
         .eq('officer_user_id', userId)
         .eq('organization_id', organizationId)
-        .eq('job_date', today)
-        .eq('status', 'started')
-        .single();
+        .gte('scheduled_start', todayStart.toISOString())
+        .lte('scheduled_start', todayEnd.toISOString())
+        .in('status', ['accepted', 'in_progress'])
+        .order('scheduled_start', { ascending: false })
+        .maybeSingle();
 
       if (err && err.code !== 'PGRST116') {
         throw err;
@@ -93,23 +92,23 @@ export function useActiveShift(userId: string, organizationId: string) {
           id: data.id,
           organization_id: data.organization_id,
           officer_user_id: data.officer_user_id,
-          shift_date: data.job_date,
-          start_time: data.job_start_time,
-          end_time: data.job_end_time,
-          shift_type: data.job_type,
-          vehicle_id: data.vehicle_id,
-          route_id: data.route_id,
+          shift_date: data.scheduled_start,
+          start_time: data.scheduled_start,
+          end_time: data.scheduled_end,
+          shift_type: data.service_type ?? 'patrol',
+          vehicle_id: undefined,
+          route_id: data.patrol_route_id,
           status: data.status,
           created_at: data.created_at,
           updated_at: data.updated_at,
-          stops: (data.dispatch_stops || []).map((stop: any) => ({
+          stops: (data.shift_stops || []).map((stop: any) => ({
             id: stop.id,
-            shift_id: stop.job_id,
+            shift_id: stop.shift_id,
             zone_id: stop.zone_id,
-            client_site_id: stop.client_site_id,
-            seq: stop.sequence,
-            arrival_time: stop.scheduled_arrival,
-            departure_time: stop.scheduled_departure,
+            client_site_id: stop.site_id,
+            seq: stop.stop_order,
+            arrival_time: stop.actual_arrived_at,
+            departure_time: stop.actual_departed_at,
           })),
         };
         setShift(shift);
@@ -124,16 +123,14 @@ export function useActiveShift(userId: string, organizationId: string) {
     }
   }, [userId, organizationId]);
 
-  // Fetch on mount and set up polling
   useEffect(() => {
     fetchActiveShift();
-    const interval = setInterval(fetchActiveShift, 30000); // Poll every 30 seconds
+    const interval = setInterval(fetchActiveShift, 30000);
     return () => clearInterval(interval);
   }, [fetchActiveShift]);
 
   const getCurrentZone = useCallback(() => {
     if (!shift || !shift.stops.length) return null;
-    // Return the first stop's zone (simplified - could check GPS to find actual current stop)
     return shift.stops[0].zone_id || shift.stops[0].client_site_id;
   }, [shift]);
 

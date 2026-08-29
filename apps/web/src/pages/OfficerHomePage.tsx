@@ -122,7 +122,11 @@ export function OfficerHomePage() {
     const start = shift.start_time.slice(0, 5);
     const end = shift.end_time.slice(0, 5);
     const status =
-      shift.status === 'started' ? '🔴 Active' : shift.status === 'scheduled' ? '⏳ Upcoming' : '✅ Completed';
+      shift.status === 'in_progress'
+        ? '🔴 Active'
+        : shift.status === 'scheduled' || shift.status === 'published' || shift.status === 'accepted'
+          ? '⏳ Upcoming'
+          : '✅ Completed';
     return {
       status: `${status} • ${start}–${end}`,
       details: shift.shift_type ? `${shift.shift_type.toUpperCase()}` : '',

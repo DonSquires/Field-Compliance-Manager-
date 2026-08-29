@@ -16,13 +16,14 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobStatus } from '../lib/dispatchStatus';
 import { supabase } from '../lib/supabase';
 
 // Type definitions
 type JobType = 'alarm_response' | 'event' | 'incident' | 'patrol_support' | 'welfare_check';
 type JobPriority = 'low' | 'medium' | 'high' | 'critical';
-type JobStatus = 'open' | 'assigned' | 'in_progress' | 'completed' | 'cancelled';
-type ShiftStatus = 'published' | 'accepted' | 'in_progress';
+type JobStatus = 'pending' | 'pending_approval' | 'dispatched' | 'acknowledged' | 'en_route' | 'on_scene' | 'completed' | 'cancelled';
+type ShiftStatus = 'scheduled' | 'published' | 'accepted' | 'declined' | 'in_progress' | 'completed' | 'cancelled';
 type StopStatus = 'pending' | 'arrived' | 'completed';
 type MobileTab = 'shifts' | 'stops' | 'jobs';
 
@@ -334,7 +335,7 @@ const DispatchConsolePage: React.FC = () => {
           .from('dispatch_jobs')
           .select('*, site:client_site_id(name)')
           .eq('organization_id', profile.organizationId)
-          .in('status', ['open', 'assigned', 'in_progress']),
+          .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]),
         supabase
           .from('client_sites')
           .select('id, name, address, gps_lat, gps_lng, client_organization_id')
@@ -511,7 +512,7 @@ const DispatchConsolePage: React.FC = () => {
           organization_id: profile.organizationId,
           job_type: formJobType,
           priority: formPriority,
-          status: 'open',
+          status: schemaDispatchJobStatus('open'),
           client_site_id: formSiteId,
           shift_id: formShiftId || null,
           briefing_notes: formNotes,

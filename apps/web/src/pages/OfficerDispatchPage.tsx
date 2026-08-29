@@ -8,6 +8,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -23,12 +24,16 @@ interface DispatchJob {
 
 const NEXT_STATUS: Record<string, string> = {
   pending: 'en_route',
+  acknowledged: 'en_route',
+  dispatched: 'en_route',
   en_route: 'on_scene',
   on_scene: 'completed',
 };
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Acknowledge & En Route',
+  acknowledged: 'Acknowledge & En Route',
+  dispatched: 'Acknowledge & En Route',
   en_route: 'Mark On Scene',
   on_scene: 'Mark Completed',
 };
@@ -66,7 +71,7 @@ const OfficerDispatchPage: React.FC = () => {
         .from('dispatch_jobs')
         .select('id, job_type, priority, status, briefing_notes, sla_respond_by, created_at')
         .in('shift_id', shiftIds)
-        .not('status', 'in', '(completed,cancelled)')
+        .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[])
         .order('priority', { ascending: false })
         .order('created_at', { ascending: true });
 
