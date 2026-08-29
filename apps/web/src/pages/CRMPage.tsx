@@ -89,14 +89,32 @@ const CRMPage: React.FC = () => {
         .single();
       if (ownErr) throw ownErr;
 
-      // crm_account_list view: organizations + live site_count + primary_contact_name
+      // SCHEMA FIX: crm_account_list view does not exist.
+      // Query organizations directly; site_count loaded separately.
       const { data: accounts, error: acctErr } = await supabase
-        .from('crm_account_list')
-        .select('*')
+        .from('organizations')
+        .select('id, name, organization_type, active, parent_organization_id')
         .eq('parent_organization_id', orgId);
       if (acctErr) throw acctErr;
 
-      const rows = (accounts ?? []) as AccountRow[];
+      // Load site counts for each account
+      const accountsWithCounts: AccountRow[] = [];
+      for (const acct of (accounts ?? [])) {
+        const { count } = await supabase
+          .from('client_sites')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', acct.id);
+        accountsWithCounts.push({
+          id: acct.id,
+          name: acct.name,
+          organization_type: acct.organization_type,
+          active: acct.active,
+          site_count: count ?? 0,
+          primary_contact_name: null, // TODO: implement via crm_contacts join if needed
+        });
+      }
+
+      const rows = accountsWithCounts;
       const clients = rows.filter((r) => r.organization_type === 'client');
       const branches = rows.filter((r) => r.organization_type === 'branch');
 
