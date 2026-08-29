@@ -7,6 +7,8 @@ export const ACTIVE_DISPATCH_JOB_STATUSES = [
   'on_scene',
 ] as const;
 
+export type ShiftHealthStatus = 'on_track' | 'at_risk' | 'critical' | 'breached';
+
 export function schemaDispatchJobStatus(status: string): string {
   const canonical: Record<string, string> = {
     open: 'pending',
@@ -36,4 +38,30 @@ export function schemaDispatchJobPriority(priority: string): string {
   };
 
   return canonical[priority] ?? priority;
+}
+
+export function schemaShiftHealth(health: string): ShiftHealthStatus {
+  const canonical: Record<string, ShiftHealthStatus> = {
+    healthy: 'on_track',
+    on_track: 'on_track',
+    degraded: 'at_risk',
+    at_risk: 'at_risk',
+    warning: 'at_risk',
+    critical: 'critical',
+    breached: 'breached',
+  };
+
+  return canonical[health] ?? (health as ShiftHealthStatus);
+}
+
+export function shiftHealthBadge(health: string): { label: string; tone: 'healthy' | 'degraded' | 'critical' } {
+  const normalized = schemaShiftHealth(health);
+  const lookups: Record<string, { label: string; tone: 'healthy' | 'degraded' | 'critical' }> = {
+    on_track: { label: 'On Track', tone: 'healthy' },
+    at_risk: { label: 'At Risk', tone: 'degraded' },
+    critical: { label: 'Critical', tone: 'critical' },
+    breached: { label: 'Breached', tone: 'critical' },
+  };
+
+  return lookups[normalized] ?? { label: normalized.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()), tone: 'degraded' };
 }

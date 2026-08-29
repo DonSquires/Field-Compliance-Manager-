@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobPriority, schemaDispatchJobStatus } from './dispatchStatus';
+import {
+  ACTIVE_DISPATCH_JOB_STATUSES,
+  schemaDispatchJobPriority,
+  schemaDispatchJobStatus,
+  schemaShiftHealth,
+  shiftHealthBadge,
+} from './dispatchStatus';
 
 describe('dispatch status schema mapping', () => {
   it('maps legacy UI statuses to the canonical database lifecycle', () => {
@@ -21,5 +27,16 @@ describe('dispatch status schema mapping', () => {
     expect(schemaDispatchJobPriority('critical')).toBe('urgent');
     expect(schemaDispatchJobPriority('high')).toBe('high');
     expect(schemaDispatchJobPriority('urgent')).toBe('urgent');
+  });
+
+  it('normalizes shift health to canonical schema values and safe UI badges', () => {
+    expect(schemaShiftHealth('healthy')).toBe('on_track');
+    expect(schemaShiftHealth('degraded')).toBe('at_risk');
+    expect(schemaShiftHealth('critical')).toBe('critical');
+    expect(schemaShiftHealth('on_track')).toBe('on_track');
+
+    expect(shiftHealthBadge('on_track')).toMatchObject({ label: 'On Track', tone: 'healthy' });
+    expect(shiftHealthBadge('at_risk')).toMatchObject({ label: 'At Risk', tone: 'degraded' });
+    expect(shiftHealthBadge('breached')).toMatchObject({ label: 'Breached', tone: 'critical' });
   });
 });

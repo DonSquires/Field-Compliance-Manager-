@@ -16,7 +16,13 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ACTIVE_DISPATCH_JOB_STATUSES, schemaDispatchJobPriority, schemaDispatchJobStatus } from '../lib/dispatchStatus';
+import {
+  ACTIVE_DISPATCH_JOB_STATUSES,
+  schemaDispatchJobPriority,
+  schemaDispatchJobStatus,
+  schemaShiftHealth,
+  shiftHealthBadge,
+} from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { supabase } from '../lib/supabase';
 
@@ -37,7 +43,7 @@ interface ActiveShift {
   scheduledStart: string;
   scheduledEnd: string;
   status: ShiftStatus;
-  shiftHealth: 'healthy' | 'degraded' | 'critical';
+  shiftHealth: 'on_track' | 'at_risk' | 'critical' | 'breached';
   totalStops: number;
   completedStops: number;
   officerGpsLat?: number;
@@ -147,18 +153,23 @@ const ShiftCard: React.FC<{
       <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
         {shift.officerName}
       </div>
-      <div
-        style={{
-          fontSize: '11px',
-          fontWeight: 600,
-          color: shift.shiftHealth === 'healthy' ? '#4CAF50' : shift.shiftHealth === 'degraded' ? '#FF9800' : '#EF5350',
-          padding: '2px 6px',
-          backgroundColor: shift.shiftHealth === 'healthy' ? '#1B5E20' : shift.shiftHealth === 'degraded' ? '#1A1200' : '#3A0000',
-          borderRadius: '3px',
-        }}
-      >
-        {shift.shiftHealth.toUpperCase()}
-      </div>
+      {(() => {
+        const badge = shiftHealthBadge(shift.shiftHealth);
+        return (
+          <div
+            style={{
+              fontSize: '11px',
+              fontWeight: 600,
+              color: badge.tone === 'healthy' ? '#4CAF50' : badge.tone === 'degraded' ? '#FF9800' : '#EF5350',
+              padding: '2px 6px',
+              backgroundColor: badge.tone === 'healthy' ? '#1B5E20' : badge.tone === 'degraded' ? '#1A1200' : '#3A0000',
+              borderRadius: '3px',
+            }}
+          >
+            {badge.label.toUpperCase()}
+          </div>
+        );
+      })()}
     </div>
     <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
       {shift.patrolRouteName && `Route: ${shift.patrolRouteName}`}
@@ -353,11 +364,9 @@ const DispatchConsolePage: React.FC = () => {
           scheduledStart: s.scheduled_start,
           scheduledEnd: s.scheduled_end,
           status: s.status,
-          // shifts.shift_health has no confirmed writer anywhere in the build
-          // (Atlas: only 'references' edges, no 'writes') -- it sits at its
-          // schema default forever. Read the real column rather than fabricate
-          // one, but do not present it as a live-computed signal.
-          shiftHealth: s.shift_health ?? 'on_track',
+          // shifts.shift_health is a schema-backed enum; map legacy UI labels into
+          // the canonical values before rendering a badge.
+          shiftHealth: schemaShiftHealth(s.shift_health ?? 'on_track'),
           totalStops: s.total_stops ?? 0,
           completedStops: s.completed_stops ?? 0,
         }));
