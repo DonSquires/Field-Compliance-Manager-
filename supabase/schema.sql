@@ -3926,6 +3926,37 @@ $$;
 ALTER FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") RETURNS "public"."officer_field_reports"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_report public.officer_field_reports%rowtype;
+begin
+  if v_actor_id is null then raise exception 'Authentication required'; end if;
+  if nullif(trim(p_review_notes), '') is null then raise exception 'Review notes are required'; end if;
+  select * into v_report from public.officer_field_reports where id = p_report_id for update;
+  if not found then raise exception 'Field report not found'; end if;
+  if not public.is_admin_for_org(v_report.organization_id) then raise exception 'Not authorised to review this field report'; end if;
+  if v_report.status <> p_expected_status then raise exception 'Field report changed from expected status % to %', p_expected_status, v_report.status; end if;
+  if v_report.status <> 'submitted' then raise exception 'Only submitted field reports can be reviewed'; end if;
+  update public.officer_field_reports
+  set status = 'reviewed', reviewed_by = v_actor_id, reviewed_at = clock_timestamp(),
+      review_notes = trim(p_review_notes), updated_at = clock_timestamp()
+  where id = p_report_id returning * into v_report;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_report.organization_id, v_actor_id, 'officer_field_report_reviewed', 'officer_field_reports', v_report.id,
+    jsonb_build_object('officer_id', v_report.officer_id, 'severity', v_report.severity, 'review_notes', v_report.review_notes));
+  return v_report;
+end;
+$$;
+
+ALTER FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") IS 'Race-checks and records the submitted-to-reviewed field report transition with required supervisor notes and audit provenance.';
+
+
 CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
@@ -25046,6 +25077,12 @@ GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "service_role";
 
 GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "authenticated";

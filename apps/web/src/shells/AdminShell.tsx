@@ -75,10 +75,10 @@ const OfficerActivityTimelinePage = React.lazy(() => import('../pages/OfficerAct
 const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
 const VehicleSearchPage = React.lazy(() => import('../pages/VehicleSearchPage'));
 const FieldReportsPage = React.lazy(() => import('../pages/FieldReportsPage'));
+const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPage'));
 const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightPage'));
 const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
-const ComingSoonPage = React.lazy(() => import('../pages/ComingSoonPage'));
 
 type AdminPage =
   | 'hub' | 'relationships' | 'crm' | 'roster' | 'field-ops' | 'reports' | 'sites' | 'site-360'
@@ -352,6 +352,8 @@ const AdminShell: React.FC = () => {
         return <ReportsHubPage />;
       case 'field-ops':
         switch (fieldOpsSubArea) {
+          case 'landing':
+            return <FieldOperationsPage onNavigate={navigateToFieldOps} />;
           case 'dispatch':
             return <DispatchConsolePage />;
           case 'patrol':
@@ -377,7 +379,7 @@ const AdminShell: React.FC = () => {
           case 'biosecurity':
             return <BiosecurityOversightPage />;
           default:
-            return <ComingSoonPage title="Field Operations" />;
+            return <FieldOperationsPage onNavigate={navigateToFieldOps} />;
         }
       case 'sites':
         return <SiteDetailPage />;
@@ -402,7 +404,7 @@ const AdminShell: React.FC = () => {
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateFromHub]);
+  }, [activePage, fieldOpsSubArea, navigateFromHub, navigateToFieldOps]);
 
   if (!isMobile) {
     return (
