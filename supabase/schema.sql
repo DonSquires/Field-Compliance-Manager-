@@ -3890,6 +3890,77 @@ $$;
 ALTER FUNCTION "public"."officer_gps_log_set_point"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision DEFAULT NULL::double precision, "p_heading" double precision DEFAULT NULL::double precision, "p_speed_kmh" double precision DEFAULT NULL::double precision, "p_activity_type" "text" DEFAULT 'gps_update'::"text", "p_shift_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_org_id uuid;
+  v_existing officer_gps_log%rowtype;
+  v_created officer_gps_log%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  select organization_id into v_org_id from user_profiles
+  where id = v_user_id and deactivated_at is null and role in ('officer', 'scan_operator');
+  if v_org_id is null then raise exception 'Active officer profile not found'; end if;
+  if p_client_event_id is null then raise exception 'client_event_id is required'; end if;
+  if p_recorded_at is null or p_recorded_at > now() + interval '5 minutes' or p_recorded_at < now() - interval '24 hours' then raise exception 'recorded_at is outside the accepted capture window'; end if;
+  if p_gps_lat not between -90 and 90 or p_gps_lng not between -180 and 180 then raise exception 'Invalid GPS coordinates'; end if;
+  if p_accuracy_meters is not null and p_accuracy_meters < 0 then raise exception 'GPS accuracy cannot be negative'; end if;
+  if p_activity_type not in ('gps_update', 'shift_start', 'shift_end', 'scan', 'welfare_checkin', 'sos', 'checkpoint_scan') then raise exception 'Unsupported breadcrumb activity type'; end if;
+  if p_shift_id is not null and not exists (select 1 from shifts where id = p_shift_id and organization_id = v_org_id and officer_user_id = v_user_id) then raise exception 'Shift does not belong to the authenticated officer'; end if;
+  select * into v_existing from officer_gps_log where organization_id = v_org_id and officer_id = v_user_id and client_event_id = p_client_event_id;
+  if found then return query select v_existing.id, false, v_existing.created_at; return; end if;
+  begin
+    insert into officer_gps_log (organization_id, officer_id, client_event_id, recorded_at, gps_lat, gps_lng, accuracy_meters, heading, speed_kmh, activity_type, shift_id)
+    values (v_org_id, v_user_id, p_client_event_id, p_recorded_at, p_gps_lat, p_gps_lng, p_accuracy_meters, p_heading, p_speed_kmh, p_activity_type, p_shift_id)
+    returning * into v_created;
+  exception when unique_violation then
+    select * into v_created from officer_gps_log where organization_id = v_org_id and officer_id = v_user_id and client_event_id = p_client_event_id;
+    return query select v_created.id, false, v_created.created_at; return;
+  end;
+  return query select v_created.id, true, v_created.created_at;
+end;
+$$;
+
+ALTER FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER SET "search_path" TO 'public'
+    AS $$
+declare v_org_id uuid;
+begin
+  select organization_id into v_org_id from user_profiles where id = p_officer_id;
+  if v_org_id is null then return; end if;
+  if auth.uid() <> p_officer_id and not is_admin_for_org(v_org_id) then raise exception 'Not authorised to view this officer timeline'; end if;
+  if p_from is null or p_to is null or p_from >= p_to or p_to - p_from > interval '31 days' then raise exception 'Timeline range must be between 1 second and 31 days'; end if;
+  return query
+  with events as (
+    select 'gps:' || g.id::text, 'gps_' || g.activity_type, g.recorded_at, g.created_at, 'officer_gps_log'::text, g.id, g.gps_lat, g.gps_lng, g.shift_id, null::uuid, g.detected_zone_id, case when g.activity_type = 'gps_update' then 'GPS heartbeat' else replace(g.activity_type, '_', ' ') end, jsonb_build_object('accuracy_meters', g.accuracy_meters, 'heading', g.heading, 'speed_kmh', g.speed_kmh, 'client_event_id', g.client_event_id)
+    from officer_gps_log g where g.organization_id = v_org_id and g.officer_id = p_officer_id and g.recorded_at between p_from and p_to
+    union all
+    select 'welfare_check:' || w.id::text, 'welfare_check', w.checked_in_at, w.checked_in_at, 'welfare_checks', w.id, w.gps_lat, w.gps_lng, w.shift_id, null::uuid, null::uuid, 'Welfare check-in: ' || w.status, jsonb_build_object('status', w.status, 'notes', w.notes)
+    from welfare_checks w where w.organization_id = v_org_id and w.officer_user_id = p_officer_id and w.checked_in_at between p_from and p_to
+    union all
+    select 'observation:' || o.id::text, 'observation', o.observed_at, o.created_at, 'observations', o.id, o.gps_lat, o.gps_lng, null::uuid, o.site_id, o.zone_id, 'Vehicle observation ' || o.plate_number, jsonb_build_object('module_key', o.module_key, 'compliance_status', o.compliance_status, 'plate_number', o.plate_number)
+    from observations o where o.organization_id = v_org_id and o.officer_id = p_officer_id and o.observed_at between p_from and p_to
+    union all
+    select 'checkpoint:' || v.id::text, 'checkpoint_visit', v.visited_at, v.visited_at, 'patrol_checkpoint_visits', v.id, v.gps_lat, v.gps_lng, p.shift_id, null::uuid, null::uuid, 'Patrol checkpoint visit', jsonb_build_object('checkpoint_id', v.checkpoint_id, 'scan_method', v.scan_method, 'within_radius', v.within_radius, 'notes', v.notes)
+    from patrol_checkpoint_visits v join patrols p on p.id = v.patrol_id where v.organization_id = v_org_id and v.officer_user_id = p_officer_id and v.visited_at between p_from and p_to
+    union all
+    select 'report:' || r.id::text, 'field_report', r.reported_at, r.created_at, 'officer_field_reports', r.id, r.gps_lat, r.gps_lng, r.shift_id, r.site_id, r.zone_id, r.title, jsonb_build_object('report_type', r.report_type, 'severity', r.severity, 'status', r.status, 'immediate_action', r.immediate_action)
+    from officer_field_reports r where r.organization_id = v_org_id and r.officer_id = p_officer_id and r.reported_at between p_from and p_to
+    union all
+    select 'stop_action:' || a.id::text, 'shift_stop_action', a.performed_at, a.created_at, 'shift_stop_actions', a.id, a.gps_lat, a.gps_lng, a.shift_id, null::uuid, null::uuid, replace(a.action_type, '_', ' '), jsonb_build_object('outcome', a.outcome, 'notes', a.notes, 'result_table', a.result_table, 'result_record_id', a.result_record_id)
+    from shift_stop_actions a join shifts s on s.id = a.shift_id where a.organization_id = v_org_id and s.officer_user_id = p_officer_id and a.performed_at between p_from and p_to
+  ) select * from events order by event_at desc limit least(greatest(coalesce(p_limit, 1000), 1), 5000);
+end;
+$$;
+
+ALTER FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."org_access_allowed"("target_org_id" "uuid") RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -11199,6 +11270,9 @@ CREATE TABLE IF NOT EXISTS "public"."officer_gps_log" (
     "heading" double precision,
     "speed_kmh" double precision,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "client_event_id" "uuid",
+    "recorded_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "shift_id" "uuid",
     CONSTRAINT "officer_gps_log_activity_type_check" CHECK (("activity_type" = ANY (ARRAY['gps_update'::"text", 'shift_start'::"text", 'shift_end'::"text", 'scan'::"text", 'welfare_checkin'::"text", 'sos'::"text", 'checkpoint_scan'::"text"])))
 );
 
@@ -11207,6 +11281,10 @@ ALTER TABLE "public"."officer_gps_log" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."officer_gps_log" IS 'GPS heartbeat from officers. Used for live map, welfare, zone detection, and patrol audit.';
+
+COMMENT ON COLUMN "public"."officer_gps_log"."recorded_at" IS 'Device capture timestamp. created_at is server receipt time; the pair preserves offline/retry provenance.';
+
+COMMENT ON COLUMN "public"."officer_gps_log"."client_event_id" IS 'Device-generated idempotency key for retry-safe breadcrumb capture.';
 
 
 
@@ -16191,6 +16269,9 @@ CREATE INDEX "idx_officer_gps_log_org_time" ON "public"."officer_gps_log" USING 
 CREATE INDEX "idx_officer_gps_log_point" ON "public"."officer_gps_log" USING "gist" ("gps_point");
 
 
+CREATE UNIQUE INDEX "idx_officer_gps_log_client_event" ON "public"."officer_gps_log" USING "btree" ("organization_id", "officer_id", "client_event_id") WHERE ("client_event_id" IS NOT NULL);
+
+
 
 CREATE INDEX "idx_onboarding_invites_agreement" ON "public"."onboarding_invites" USING "btree" ("service_agreement_id") WHERE ("service_agreement_id" IS NOT NULL);
 
@@ -18813,6 +18894,10 @@ ALTER TABLE ONLY "public"."officer_gps_log"
 
 ALTER TABLE ONLY "public"."officer_gps_log"
     ADD CONSTRAINT "officer_gps_log_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id");
+
+
+ALTER TABLE ONLY "public"."officer_gps_log"
+  ADD CONSTRAINT "officer_gps_log_shift_id_fkey" FOREIGN KEY ("shift_id") REFERENCES "public"."shifts"("id") ON DELETE SET NULL;
 
 
 
@@ -22904,7 +22989,9 @@ ALTER TABLE "public"."officer_field_reports" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."officer_gps_log" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "officer_gps_log_insert" ON "public"."officer_gps_log" FOR INSERT WITH CHECK ("public"."org_access_allowed"("organization_id"));
+CREATE POLICY "officer_gps_log_insert" ON "public"."officer_gps_log" FOR INSERT TO "authenticated" WITH CHECK ((("officer_id" = "auth"."uid"()) AND "public"."org_access_allowed"("organization_id") AND (EXISTS ( SELECT 1
+   FROM "public"."user_profiles"
+  WHERE (("user_profiles"."id" = "auth"."uid"()) AND ("user_profiles"."deactivated_at" IS NULL) AND ("user_profiles"."role" = ANY (ARRAY['officer'::"text", 'scan_operator'::"text"])))))));
 
 
 
@@ -24850,6 +24937,14 @@ GRANT ALL ON FUNCTION "public"."observations_set_gps_point"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "anon";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "service_role";
+
+
+GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "service_role";
+
+
+GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
 
 
 

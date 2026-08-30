@@ -18,7 +18,7 @@
  * - Responsive mobile-first design
  */
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -54,6 +54,12 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
+import {
+  buildOfficerBreadcrumb,
+  captureOfficerBreadcrumb,
+  flushOfficerBreadcrumbs,
+  isBreadcrumbDue,
+} from '../lib/officerBreadcrumb';
 import './OfficerShell.css';
 
 const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
@@ -151,6 +157,8 @@ const OfficerShell: React.FC = () => {
   const [offeredCount, setOfferedCount] = useState(0);
   const [bobOpen, setBobOpen] = useState(false);
   const [grantedModules, setGrantedModules] = useState<string[]>([]);
+  const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
+  const lastBreadcrumbAtRef = useRef<number | null>(null);
 
   // Derive active module from URL
   const moduleFromUrl = useCallback((pathname: string): ActiveModule => {
@@ -185,14 +193,39 @@ const OfficerShell: React.FC = () => {
   }, [enabledModules]);
 
   useEffect(() => {
-    if (safety.detectionState !== 'active' || typeof navigator === 'undefined' || !navigator.geolocation) return;
+    if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;
     const watchId = navigator.geolocation.watchPosition(
-      (position) => safety.recordMovement(position.coords.latitude, position.coords.longitude),
+      (position) => {
+        safety.recordMovement(position.coords.latitude, position.coords.longitude);
+        const capturedAt = Date.now();
+        if (!isBreadcrumbDue(lastBreadcrumbAtRef.current, capturedAt)) return;
+        lastBreadcrumbAtRef.current = capturedAt;
+        void captureOfficerBreadcrumb(buildOfficerBreadcrumb(position, activeShift?.id)).then((result) => {
+          setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
+        });
+      },
       () => undefined,
       { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
     );
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [safety.detectionState, safety.recordMovement]);
+  }, [activeShift?.id, profile?.id, safety.recordMovement]);
+
+  useEffect(() => {
+    if (!profile?.id || typeof window === 'undefined') return;
+    let active = true;
+    const flush = () => {
+      void flushOfficerBreadcrumbs().then((result) => {
+        if (!active) return;
+        setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
+      });
+    };
+    flush();
+    window.addEventListener('online', flush);
+    return () => {
+      active = false;
+      window.removeEventListener('online', flush);
+    };
+  }, [profile?.id]);
 
   // Load offered shift count
   useEffect(() => {
@@ -363,6 +396,11 @@ const OfficerShell: React.FC = () => {
         {safety.writeStatus === 'error' && safety.lastError && (
           <div role="alert" className="officer-shell-safety-error">
             Safety action not confirmed: {safety.lastError}
+          </div>
+        )}
+        {breadcrumbIssue && (
+          <div role="status" className="officer-shell-evidence-warning">
+            Location evidence not confirmed. {breadcrumbIssue.pendingCount} {breadcrumbIssue.pendingCount === 1 ? 'record is' : 'records are'} queued for retry. {breadcrumbIssue.error}
           </div>
         )}
         {(officerState === 'standby' || officerState === 'home') && (

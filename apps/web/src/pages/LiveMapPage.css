@@ -1,0 +1,63 @@
+.live-ops-page { width: 100%; max-width: 1180px; margin: 0 auto; padding: 24px 24px 64px; }
+.live-ops-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.live-ops-heading > div > span { color: #7dd3c7; font-size: 9px; font-weight: 850; text-transform: uppercase; }
+.live-ops-heading h1 { margin: 3px 0 0; font-size: 25px; letter-spacing: 0; }
+.live-ops-heading p { margin: 5px 0 0; color: #8497a8; font-size: 11px; }
+.live-ops-heading > button { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 11px; border: 1px solid #344a5b; border-radius: 6px; color: #aebfcc; background: #101c29; cursor: pointer; font-size: 10px; font-weight: 750; }
+
+.live-ops-message { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; padding: 10px 11px; border: 1px solid #705d1d; border-radius: 6px; color: #ffe09a; background: #2b250e; font-size: 9px; line-height: 1.45; }
+.live-ops-message.is-error { color: #ffc6c6; border-color: #844141; background: #31191c; }
+.live-ops-message > div { display: grid; gap: 3px; }
+
+.live-ops-summary { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #2b3d50; border-radius: 7px; background: #0a1522; }
+.live-ops-summary > div { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; padding: 12px 14px; }
+.live-ops-summary > div + div { border-left: 1px solid #2b3d50; }
+.live-ops-summary span { color: #8094a5; font-size: 8px; text-transform: uppercase; }
+.live-ops-summary strong { font-size: 14px; }
+.live-ops-summary .status-alerting svg, .live-ops-summary .status-alerting strong { color: #ff8585; }
+.live-ops-summary .status-overdue svg, .live-ops-summary .status-overdue strong { color: #efad69; }
+.live-ops-summary .status-due svg, .live-ops-summary .status-due strong { color: #e6c567; }
+.live-ops-summary .status-ok svg, .live-ops-summary .status-ok strong { color: #72d6a2; }
+
+.live-ops-meta { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0 8px; color: #758b9b; font-size: 9px; }
+.live-ops-list { display: grid; gap: 6px; }
+.live-officer-row { display: grid; grid-template-columns: auto minmax(150px, 1fr) minmax(150px, .7fr) auto auto; align-items: center; gap: 11px; min-height: 65px; padding: 8px 10px; border: 1px solid #293d4e; border-left: 3px solid #6d8292; border-radius: 6px; background: #0d1926; }
+.live-officer-row.status-alerting { border-left-color: #ef6f6f; background: #1c151c; }
+.live-officer-row.status-overdue { border-left-color: #e99662; }
+.live-officer-row.status-due { border-left-color: #dfbd5f; }
+.live-officer-row.status-ok { border-left-color: #66c896; }
+.live-officer-row.status-offline { border-left-color: #5d6871; opacity: .78; }
+.live-officer-marker { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; color: #86cfc3; background: #102a29; }
+.live-officer-row > div { display: grid; min-width: 0; gap: 3px; }
+.live-officer-row strong, .live-officer-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-officer-row > div > strong { font-size: 10px; }
+.live-officer-row > div > small { color: #788fa0; font-size: 8px; text-transform: capitalize; }
+.live-gps-fact > span { color: #6f8798; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.live-gps-fact > strong { font-size: 9px; }
+.live-safety-status { min-width: 95px; padding: 5px 8px; border: 1px solid #3d4e5c; border-radius: 999px; color: #9bafbd; background: #111e2a; font-size: 8px; font-weight: 850; text-align: center; white-space: nowrap; }
+.live-safety-status.status-alerting { color: #ffaaaa; border-color: #844141; background: #31191c; }
+.live-safety-status.status-overdue { color: #f3bb84; border-color: #79502c; background: #291c12; }
+.live-safety-status.status-due { color: #ead07b; border-color: #6a5a27; background: #28230f; }
+.live-safety-status.status-ok { color: #82d9b1; border-color: #35614d; background: #0d291f; }
+.live-safety-status.status-offline, .live-safety-status.status-unknown { color: #9babb7; }
+.live-officer-row > a { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #314758; border-radius: 5px; color: #8fa5b4; background: #101d2a; }
+.live-position-unavailable { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #3d4650; border-radius: 5px; color: #707c85; background: #121a22; }
+.live-ops-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 220px; border: 1px solid #2b3d50; border-radius: 7px; color: #738899; background: #0a1522; font-size: 10px; }
+
+@media (max-width: 760px) {
+  .live-ops-page { padding: 18px 12px 48px; }
+  .live-ops-summary { grid-template-columns: 1fr 1fr; }
+  .live-ops-summary > div:nth-child(3) { border-top: 1px solid #2b3d50; border-left: 0; }
+  .live-ops-summary > div:nth-child(4) { border-top: 1px solid #2b3d50; }
+  .live-officer-row { grid-template-columns: auto 1fr auto; }
+  .live-gps-fact { grid-column: 2; grid-row: 2; }
+  .live-safety-status { grid-column: 3; grid-row: 1; }
+  .live-officer-row > a { grid-column: 3; grid-row: 2; }
+}
+
+@media (max-width: 480px) {
+  .live-ops-heading { align-items: flex-start; }
+  .live-ops-heading h1 { font-size: 21px; }
+  .live-ops-heading p { max-width: 220px; }
+  .live-ops-meta { flex-direction: column; gap: 3px; }
+}

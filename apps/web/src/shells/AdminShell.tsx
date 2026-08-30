@@ -71,6 +71,7 @@ const DispatchConsolePage = React.lazy(() => import('../pages/DispatchConsolePag
 const WelfareAlertsPage = React.lazy(() => import('../pages/WelfareAlertsPage'));
 const SmokeControlPage = React.lazy(() => import('../pages/modules/SmokeControlPage'));
 const LiveMapPage = React.lazy(() => import('../pages/LiveMapPage'));
+const OfficerActivityTimelinePage = React.lazy(() => import('../pages/OfficerActivityTimelinePage'));
 const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
 const VehicleSearchPage = React.lazy(() => import('../pages/VehicleSearchPage'));
 const FieldReportsPage = React.lazy(() => import('../pages/FieldReportsPage'));
@@ -87,7 +88,7 @@ type AdminPage =
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
-type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
@@ -95,7 +96,7 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 ]);
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
-  'landing', 'dispatch', 'patrol', 'live-map', 'welfare-alerts', 'breach-review', 'vehicle-search',
+  'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
   'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
 ]);
 
@@ -118,6 +119,7 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
   'dispatch': { page: 'field-ops', fieldOpsSubArea: 'dispatch' },
   'patrol': { page: 'field-ops', fieldOpsSubArea: 'patrol' },
   'live_map': { page: 'field-ops', fieldOpsSubArea: 'live-map' },
+  'officer_activity': { page: 'field-ops', fieldOpsSubArea: 'officer-activity' },
   'welfare_alerts': { page: 'field-ops', fieldOpsSubArea: 'welfare-alerts' },
   'breach_review': { page: 'field-ops', fieldOpsSubArea: 'breach-review' },
   'field_reports': { page: 'field-ops', fieldOpsSubArea: 'field-reports' },
@@ -360,6 +362,8 @@ const AdminShell: React.FC = () => {
             return <SmokeControlPage />;
           case 'live-map':
             return <LiveMapPage />;
+          case 'officer-activity':
+            return <OfficerActivityTimelinePage />;
           case 'breach-review':
             return <BreachReviewPage />;
           case 'vehicle-search':
