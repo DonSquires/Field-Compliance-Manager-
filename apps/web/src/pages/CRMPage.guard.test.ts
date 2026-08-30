@@ -25,4 +25,11 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('Client unit charge');
     expect(page).not.toMatch(/\.from\(["']quote_lines["']\)\.insert/);
   });
+
+  it('sends and accepts or declines only through the governed lifecycle RPC', () => {
+    expect(page).toMatch(/\.rpc\(["']manage_crm_quote["']/);
+    expect(page).toContain('Confirm acceptance');
+    expect(page).toContain('Decline reason');
+    expect(page).not.toMatch(/\.rpc\(["']accept_quote["']/);
+  });
 });

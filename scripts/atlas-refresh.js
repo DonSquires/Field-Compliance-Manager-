@@ -18,7 +18,8 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260830136000_govern_hr_workflows.sql',
   'supabase/migrations/20260830137000_govern_staff_readiness.sql',
   'supabase/migrations/20260830138000_govern_crm_quote_creation.sql',
-  'supabase/migrations/20260830139000_govern_crm_quote_lines.sql'
+  'supabase/migrations/20260830139000_govern_crm_quote_lines.sql',
+  'supabase/migrations/20260830140000_govern_crm_quote_lifecycle.sql'
 ];
 
 function uniqueBy(items, keyOf) {

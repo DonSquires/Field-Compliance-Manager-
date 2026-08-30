@@ -43,6 +43,10 @@ test('managed Atlas refresh derives real component and RPC flow edges', () => {
   assert.equal(hasEdge('add_crm_quote_line', 'quote_lines', 'writes'), true);
   assert.equal(hasEdge('add_crm_quote_line', 'quotes', 'writes'), true);
   assert.equal(hasEdge('add_crm_quote_line', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('pages/CRMPage', 'manage_crm_quote', 'calls'), true);
+  assert.equal(hasEdge('manage_crm_quote', 'quote_lines', 'reads'), true);
+  assert.equal(hasEdge('manage_crm_quote', 'quotes', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_quote', 'accept_quote', 'calls'), true);
 });
 
 test('managed Atlas refresh includes capability nodes without inferring exercise', () => {

@@ -57,7 +57,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
   let hrTimesheetStatus = 'submitted';
   let anaWorkReady = true;
   const hrCoverage = [{ id: '14141414-1414-4414-8414-141414141414', shift_date: '2026-09-05', start_time: '18:00:00', end_time: '23:00:00', required_staff_count: 2, urgency: 'high', status: 'open', notes: 'Event perimeter', site: null }];
-  const crmQuotes: Array<{ client_org_id: string; status: string; created_at: string }> = [];
+  const crmQuotes: Array<{ id: string; client_org_id: string; status: string; created_at: string; title: string }> = [];
   const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
   const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
   const workUnits = [
@@ -165,6 +165,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'set_staff_work_readiness') { anaWorkReady = JSON.parse(request.postData() ?? '{}').p_work_ready; await route.fulfill(fulfillJson({ id: OFFICER_ID, work_ready: anaWorkReady })); return; }
     if (table === 'create_crm_draft_quote') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '44444444-4444-4444-8444-444444444449', client_org_id: payload.p_client_org_id, status: 'draft', created_at: '2026-08-30T09:30:00.000Z', title: payload.p_title }; crmQuotes.unshift(row); await route.fulfill(fulfillJson(row)); return; }
     if (table === 'add_crm_quote_line') { await route.fulfill(fulfillJson([{ line_id: '45454545-4545-4545-8545-454545454545', quote_id: '44444444-4444-4444-8444-444444444449', total_cost: 280, subtotal_charge: 420, discount_amount: 0, gst_amount: 63, total_charge: 483, created: true }])); return; }
+    if (table === 'manage_crm_quote') { const payload = JSON.parse(request.postData() ?? '{}'); const quote = crmQuotes.find((item) => item.id === payload.p_quote_id); if (quote) quote.status = payload.p_action === 'send' ? 'sent' : payload.p_action === 'accept' ? 'accepted' : 'declined'; await route.fulfill(fulfillJson([{ quote_id: payload.p_quote_id, quote_status: quote?.status, service_agreement_id: payload.p_action === 'accept' ? '46464646-4646-4646-8646-464646464646' : null }])); return; }
     await route.fulfill(fulfillJson([]));
   });
 }

@@ -105,6 +105,8 @@ const CRMPage: React.FC = () => {
     totalCost: number;
     totalCharge: number;
   } | null>(null);
+  const [quoteAction, setQuoteAction] = useState<'send' | 'accept' | 'decline' | null>(null);
+  const [quoteActionReason, setQuoteActionReason] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const quoteRequestId = useRef(crypto.randomUUID());
   const lineRequestId = useRef(crypto.randomUUID());
@@ -354,6 +356,31 @@ const CRMPage: React.FC = () => {
     setQuoteSaving(false);
   };
 
+  const manageQuote = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!pricingQuote || !quoteAction) return;
+    setQuoteSaving(true);
+    setState((current) => ({ ...current, error: null }));
+    const { data, error } = await supabase.rpc('manage_crm_quote', {
+      p_quote_id: pricingQuote.id,
+      p_expected_status: pricingQuote.status,
+      p_action: quoteAction,
+      p_reason: quoteAction === 'decline' ? quoteActionReason.trim() : null,
+    });
+    const receipt = Array.isArray(data) ? data[0] : data;
+    if (error || !receipt) {
+      setState((current) => ({ ...current, error: error?.message ?? 'Quote lifecycle receipt was not confirmed.' }));
+    } else {
+      const nextStatus = String(receipt.quote_status);
+      setNotice(quoteAction === 'send' ? `${pricingQuote.title} sent for acceptance.` : quoteAction === 'accept' ? `${pricingQuote.title} accepted and linked to its service agreement.` : `${pricingQuote.title} declined with reason retained.`);
+      if (quoteAction === 'send') setPricingQuote({ ...pricingQuote, status: nextStatus }); else setPricingQuote(null);
+      setQuoteAction(null);
+      setQuoteActionReason('');
+      await loadCrm();
+    }
+    setQuoteSaving(false);
+  };
+
   const pricingDialog = pricingQuote ? (
     <div className="crm-quote-backdrop">
       <form
@@ -495,20 +522,22 @@ const CRMPage: React.FC = () => {
           >
             Done
           </button>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={
-              quoteSaving ||
-              !lineForm.description.trim() ||
-              !lineForm.unitCost ||
-              !lineForm.unitCharge ||
-              (lineForm.kind === 'module' && !lineForm.moduleKey.trim())
-            }
-          >
-            {quoteSaving ? 'Adding' : 'Add pricing line'}
-          </button>
+          {pricingQuote.status === 'draft' && <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={
+                quoteSaving ||
+                !lineForm.description.trim() ||
+                !lineForm.unitCost ||
+                !lineForm.unitCharge ||
+                (lineForm.kind === 'module' && !lineForm.moduleKey.trim())
+              }
+            >
+              {quoteSaving ? 'Adding' : 'Add pricing line'}
+            </button>}
         </footer>
+        {pricingQuote.status === 'draft' && pricingReceipt && <button type="button" className="btn btn-primary crm-quote-lifecycle" onClick={() => setQuoteAction('send')}>Send quote</button>}
+        {pricingQuote.status === 'sent' && <div className="crm-quote-lifecycle-actions"><button type="button" className="btn btn-secondary" onClick={() => { setQuoteActionReason(''); setQuoteAction('decline'); }}>Decline</button><button type="button" className="btn btn-primary" onClick={() => setQuoteAction('accept')}>Accept quote</button></div>}
       </form>
     </div>
   ) : null;
@@ -795,6 +824,7 @@ const CRMPage: React.FC = () => {
         </div>
       )}
       {pricingDialog}
+      {pricingQuote && quoteAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog crm-lifecycle-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-lifecycle-title" onSubmit={manageQuote}><header><div><span>Quote lifecycle</span><h2 id="crm-lifecycle-title">{quoteAction === 'send' ? 'Send quote?' : quoteAction === 'accept' ? 'Accept quote?' : 'Decline quote?'}</h2></div><button type="button" onClick={() => setQuoteAction(null)} aria-label="Close quote action">×</button></header><p>{quoteAction === 'send' ? 'The server will recheck labour pricing, positive totals, validity, and achieved margin before sending.' : quoteAction === 'accept' ? 'Acceptance creates or links the operational service agreement and writes canonical commercial settings.' : 'The quote will close as declined and the reason will remain in its audit history.'}</p>{quoteAction === 'decline' && <label><span>Decline reason</span><textarea rows={4} required value={quoteActionReason} onChange={(event) => setQuoteActionReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setQuoteAction(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (quoteAction === 'decline' && !quoteActionReason.trim())}>{quoteSaving ? 'Saving' : quoteAction === 'send' ? 'Confirm send' : quoteAction === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></footer></form></div>}
     </div>
   );
 };
