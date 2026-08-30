@@ -3986,6 +3986,56 @@ ALTER FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "
 COMMENT ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) IS 'Returns the authorized officer evidence timeline and atomically audits each successful access.';
 
 
+CREATE OR REPLACE FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 5000) RETURNS TABLE("export_id" "uuid", "generated_at" timestamp with time zone, "sha256" "text", "event_count" integer, "package_text" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'extensions'
+    AS $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_org_id uuid;
+  v_officer_name text;
+  v_export_id uuid := gen_random_uuid();
+  v_generated_at timestamptz := clock_timestamp();
+  v_events jsonb;
+  v_payload jsonb;
+  v_package_text text;
+  v_sha256 text;
+  v_event_count integer;
+  v_effective_limit integer := least(greatest(coalesce(p_limit, 5000), 1), 5000);
+begin
+  if v_actor_id is null then raise exception 'Authentication required'; end if;
+  select organization_id, display_name into v_org_id, v_officer_name from public.user_profiles where id = p_officer_id;
+  if v_org_id is null then raise exception 'Officer profile not found'; end if;
+  if not public.is_admin_for_org(v_org_id) then raise exception 'Not authorised to export this officer timeline'; end if;
+  if p_from is null or p_to is null or p_from >= p_to or p_to - p_from > interval '31 days' then raise exception 'Export range must be between 1 second and 31 days'; end if;
+  select coalesce(jsonb_agg(to_jsonb(t) order by t.event_at, t.event_key), '[]'::jsonb) into v_events
+  from public.get_officer_activity_timeline_unlogged(p_officer_id, p_from, p_to, v_effective_limit) t;
+  v_event_count := jsonb_array_length(v_events);
+  v_payload := jsonb_build_object(
+    'schema_version', 1, 'export_id', v_export_id, 'generated_at', v_generated_at,
+    'generated_by', v_actor_id, 'organization_id', v_org_id,
+    'officer', jsonb_build_object('id', p_officer_id, 'display_name', v_officer_name),
+    'period', jsonb_build_object('from', p_from, 'to', p_to),
+    'event_count', v_event_count, 'events', v_events);
+  v_package_text := v_payload::text;
+  v_sha256 := pg_catalog.encode(extensions.digest(pg_catalog.convert_to(v_package_text, 'UTF8'), 'sha256'), 'hex');
+  insert into public.officer_activity_evidence_exports (
+    id, organization_id, officer_user_id, generated_by, period_from, period_to, event_count, payload, sha256, generated_at
+  ) values (
+    v_export_id, v_org_id, p_officer_id, v_actor_id, p_from, p_to, v_event_count, v_payload, v_sha256, v_generated_at
+  );
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_org_id, v_actor_id, 'officer_activity_evidence_exported', 'officer_activity_evidence_exports', v_export_id,
+    jsonb_build_object('officer_user_id', p_officer_id, 'from', p_from, 'to', p_to, 'event_count', v_event_count, 'sha256', v_sha256));
+  return query select v_export_id, v_generated_at, v_sha256, v_event_count, v_package_text;
+end;
+$$;
+
+ALTER FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) IS 'Creates an immutable canonical officer timeline snapshot, hashes its exact returned JSON bytes, and audits issuance.';
+
+
 CREATE OR REPLACE FUNCTION "public"."org_access_allowed"("target_org_id" "uuid") RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -11312,6 +11362,27 @@ COMMENT ON COLUMN "public"."officer_gps_log"."recorded_at" IS 'Device capture ti
 COMMENT ON COLUMN "public"."officer_gps_log"."client_event_id" IS 'Device-generated idempotency key for retry-safe breadcrumb capture.';
 
 
+CREATE TABLE IF NOT EXISTS "public"."officer_activity_evidence_exports" (
+  "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL PRIMARY KEY,
+  "organization_id" "uuid" NOT NULL REFERENCES "public"."organizations"("id") ON DELETE RESTRICT,
+  "officer_user_id" "uuid" NOT NULL REFERENCES "public"."user_profiles"("id") ON DELETE RESTRICT,
+  "generated_by" "uuid" NOT NULL REFERENCES "public"."user_profiles"("id") ON DELETE RESTRICT,
+  "period_from" timestamp with time zone NOT NULL,
+  "period_to" timestamp with time zone NOT NULL,
+  "event_count" integer NOT NULL,
+  "payload" "jsonb" NOT NULL,
+  "sha256" "text" NOT NULL,
+  "generated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+  CONSTRAINT "officer_activity_evidence_exports_period_check" CHECK (("period_from" < "period_to")),
+  CONSTRAINT "officer_activity_evidence_exports_event_count_check" CHECK (("event_count" >= 0)),
+  CONSTRAINT "officer_activity_evidence_exports_sha256_check" CHECK (("sha256" ~ '^[0-9a-f]{64}$'::"text"))
+);
+
+ALTER TABLE "public"."officer_activity_evidence_exports" OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."officer_activity_evidence_exports" IS 'Append-only canonical snapshots issued from the officer investigation timeline. Normal application roles have no update or delete policy.';
+
+
 
 CREATE TABLE IF NOT EXISTS "public"."officer_welfare_settings" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
@@ -16295,6 +16366,9 @@ CREATE INDEX "idx_officer_gps_log_point" ON "public"."officer_gps_log" USING "gi
 
 
 CREATE UNIQUE INDEX "idx_officer_gps_log_client_event" ON "public"."officer_gps_log" USING "btree" ("organization_id", "officer_id", "client_event_id") WHERE ("client_event_id" IS NOT NULL);
+
+
+CREATE INDEX "idx_officer_activity_evidence_exports_subject" ON "public"."officer_activity_evidence_exports" USING "btree" ("organization_id", "officer_user_id", "generated_at" DESC);
 
 
 
@@ -23014,6 +23088,12 @@ ALTER TABLE "public"."officer_field_reports" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."officer_gps_log" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."officer_activity_evidence_exports" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "officer_activity_evidence_exports_select" ON "public"."officer_activity_evidence_exports" FOR SELECT TO "authenticated" USING ("public"."is_admin_for_org"("organization_id"));
+
+
 CREATE POLICY "officer_gps_log_insert" ON "public"."officer_gps_log" FOR INSERT TO "authenticated" WITH CHECK ((("officer_id" = "auth"."uid"()) AND "public"."org_access_allowed"("organization_id") AND (EXISTS ( SELECT 1
    FROM "public"."user_profiles"
   WHERE (("user_profiles"."id" = "auth"."uid"()) AND ("user_profiles"."deactivated_at" IS NULL) AND ("user_profiles"."role" = ANY (ARRAY['officer'::"text", 'scan_operator'::"text"])))))));
@@ -24972,6 +25052,12 @@ GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "u
 GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
 
 
+REVOKE ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "anon";
+GRANT ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
+
+
 REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "anon";
 REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "authenticated";
@@ -26167,6 +26253,12 @@ GRANT ALL ON TABLE "public"."officer_gps_log" TO "anon";
 GRANT ALL ON TABLE "public"."officer_gps_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."officer_gps_log" TO "service_role";
 
+
+REVOKE ALL ON TABLE "public"."officer_activity_evidence_exports" FROM PUBLIC;
+REVOKE ALL ON TABLE "public"."officer_activity_evidence_exports" FROM "anon";
+REVOKE ALL ON TABLE "public"."officer_activity_evidence_exports" FROM "authenticated";
+GRANT SELECT ON TABLE "public"."officer_activity_evidence_exports" TO "authenticated";
+GRANT ALL ON TABLE "public"."officer_activity_evidence_exports" TO "service_role";
 
 
 GRANT ALL ON TABLE "public"."officer_welfare_settings" TO "anon";

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarRange, Clock3, ExternalLink, FileSearch, MapPin, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CalendarRange, Clock3, Download, ExternalLink, FileSearch, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { buildEvidenceExportFilename, downloadEvidencePackage } from '../lib/officerEvidenceExport';
 import { supabase } from '../lib/supabase';
 import './OfficerActivityTimelinePage.css';
 
@@ -25,6 +26,14 @@ interface TimelineEvent {
   zone_id: string | null;
   summary: string;
   details: Record<string, unknown> | null;
+}
+
+interface EvidenceExportRow {
+  export_id: string;
+  generated_at: string;
+  sha256: string;
+  event_count: number;
+  package_text: string;
 }
 
 function toLocalInput(date: Date): string {
@@ -52,6 +61,10 @@ const OfficerActivityTimelinePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasRun, setHasRun] = useState(false);
+  const [loadedQuery, setLoadedQuery] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportReceipt, setExportReceipt] = useState<{ exportId: string; generatedAt: string; sha256: string; eventCount: number } | null>(null);
 
   useEffect(() => {
     const loadOfficers = async () => {
@@ -94,14 +107,43 @@ const OfficerActivityTimelinePage: React.FC = () => {
     if (timelineError) {
       setError(timelineError.message);
       setEvents([]);
+      setLoadedQuery('');
     } else {
       setEvents((data as TimelineEvent[]) ?? []);
+      setLoadedQuery(`${officerId}|${fromIso}|${toIso}`);
+      setExportReceipt(null);
     }
     setLoading(false);
   }, [from, officerId, to]);
 
   const selectedOfficer = officers.find((officer) => officer.id === officerId);
   const sourceCount = useMemo(() => new Set(events.map((event) => event.source_table)).size, [events]);
+  const currentQuery = officerId && from && to ? `${officerId}|${new Date(from).toISOString()}|${new Date(to).toISOString()}` : '';
+  const canExport = Boolean(hasRun && !error && loadedQuery === currentQuery && officerId);
+
+  const exportEvidence = useCallback(async () => {
+    if (!canExport) return;
+    setExporting(true);
+    setExportError(null);
+    const { data, error: exportRpcError } = await supabase.rpc('generate_officer_activity_evidence_export', {
+      p_officer_id: officerId,
+      p_from: new Date(from).toISOString(),
+      p_to: new Date(to).toISOString(),
+      p_limit: 5000,
+    });
+    const receipt = (data as EvidenceExportRow[] | null)?.[0];
+    if (exportRpcError || !receipt) {
+      setExportError(exportRpcError?.message ?? 'The evidence package was not returned.');
+      setExporting(false);
+      return;
+    }
+    downloadEvidencePackage(
+      receipt.package_text,
+      buildEvidenceExportFilename(selectedOfficer?.display_name || selectedOfficer?.email || 'officer', receipt.generated_at, receipt.export_id),
+    );
+    setExportReceipt({ exportId: receipt.export_id, generatedAt: receipt.generated_at, sha256: receipt.sha256, eventCount: receipt.event_count });
+    setExporting(false);
+  }, [canExport, from, officerId, selectedOfficer?.display_name, selectedOfficer?.email, to]);
 
   return (
     <div className="evidence-page">
@@ -118,10 +160,20 @@ const OfficerActivityTimelinePage: React.FC = () => {
       </section>
 
       {error && <div className="evidence-message is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><div><strong>Timeline unavailable</strong><span>{error}</span></div></div>}
+      {exportError && <div className="evidence-message is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><div><strong>Evidence export not issued</strong><span>{exportError}</span></div></div>}
 
       {hasRun && !error && (
         <section className="evidence-summary" aria-label="Timeline summary">
           <div><strong>{events.length}</strong><span>recorded events</span></div><div><strong>{sourceCount}</strong><span>canonical sources</span></div><div><strong>{selectedOfficer?.display_name || selectedOfficer?.email || 'Officer'}</strong><span>investigation subject</span></div>
+          <button type="button" onClick={() => void exportEvidence()} disabled={!canExport || exporting} title={canExport ? 'Issue a hashed evidence package' : 'Rebuild the timeline before exporting'}><Download size={17} aria-hidden="true" />{exporting ? 'Issuing package' : 'Export evidence'}</button>
+        </section>
+      )}
+
+      {exportReceipt && (
+        <section className="evidence-receipt" aria-label="Evidence export receipt">
+          <ShieldCheck size={21} aria-hidden="true" />
+          <div><strong>Evidence package issued</strong><span>{exportReceipt.eventCount} events · {formatTime(exportReceipt.generatedAt)}</span></div>
+          <dl><div><dt>Export ID</dt><dd>{exportReceipt.exportId}</dd></div><div><dt>SHA-256</dt><dd>{exportReceipt.sha256}</dd></div></dl>
         </section>
       )}
 
