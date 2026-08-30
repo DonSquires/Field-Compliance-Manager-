@@ -19,6 +19,9 @@ test('roster Atlas refresh derives real component and RPC flow edges', () => {
   assert.equal(hasEdge('staff_has_roster_availability_conflict', 'staff_availability', 'reads'), true);
   assert.equal(hasEdge('enforce_roster_slot_availability', 'staff_has_roster_availability_conflict', 'calls'), true);
   assert.equal(hasEdge('roster_slots', 'enforce_roster_slot_availability', 'triggers'), true);
+  assert.equal(hasEdge('pages/RosterOperationsPage', 'organization_calendar_settings', 'reads'), true);
+  assert.equal(hasEdge('pages/RosterOperationsPage', 'set_organization_calendar_region', 'calls'), true);
+  assert.equal(hasEdge('set_organization_calendar_region', 'organization_calendar_settings', 'writes'), true);
 });
 
 test('roster Atlas refresh includes capability nodes without inferring exercise', () => {

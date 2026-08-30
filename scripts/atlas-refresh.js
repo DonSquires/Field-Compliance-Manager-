@@ -9,7 +9,8 @@ const ROSTER_SOURCES = [
   'supabase/migrations/20260830130000_roster_slot_response.sql',
   'supabase/migrations/20260830131000_manage_roster_slot.sql',
   'supabase/migrations/20260830132000_reassign_roster_slot.sql',
-  'supabase/migrations/20260830133000_enforce_roster_availability.sql'
+  'supabase/migrations/20260830133000_enforce_roster_availability.sql',
+  'supabase/migrations/20260830134000_organization_calendar_settings.sql'
 ];
 
 function uniqueBy(items, keyOf) {

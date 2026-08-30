@@ -27217,3 +27217,20 @@ begin if new.status not in('declined','cancelled') and public.staff_has_roster_a
 CREATE TRIGGER "trg_enforce_roster_slot_availability" BEFORE INSERT OR UPDATE OF staff_id,scheduled_start,scheduled_end,status ON "public"."roster_slots" FOR EACH ROW EXECUTE FUNCTION "public"."enforce_roster_slot_availability"();
 REVOKE ALL ON FUNCTION "public"."staff_has_roster_availability_conflict"(uuid,timestamptz,timestamptz),"public"."enforce_roster_slot_availability"() FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."staff_has_roster_availability_conflict"(uuid,timestamptz,timestamptz),"public"."enforce_roster_slot_availability"() TO "service_role";
+
+
+CREATE TABLE "public"."organization_calendar_settings" (
+  "organization_id" uuid PRIMARY KEY REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "country_code" text NOT NULL DEFAULT 'NZ',"region_code" text,"updated_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"updated_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "organization_calendar_country_check" CHECK(country_code='NZ'),
+  CONSTRAINT "organization_calendar_region_check" CHECK(region_code IS NULL OR region_code IN('AUK','BOP','CAN','CIT','GIS','HKB','MBH','MWT','NSN','NTL','OTA','STL','TAS','TKI','WKO','WGN','WTC'))
+);
+ALTER TABLE "public"."organization_calendar_settings" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "organization_calendar_settings_select" ON "public"."organization_calendar_settings" FOR SELECT TO "authenticated" USING("public"."org_access_allowed"(organization_id));
+REVOKE ALL ON TABLE "public"."organization_calendar_settings" FROM PUBLIC,"anon","authenticated";
+GRANT SELECT ON TABLE "public"."organization_calendar_settings" TO "authenticated";
+GRANT ALL ON TABLE "public"."organization_calendar_settings" TO "service_role";
+CREATE FUNCTION "public"."set_organization_calendar_region"(p_organization_id uuid,p_region_code text) RETURNS public.organization_calendar_settings LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_row public.organization_calendar_settings%rowtype;v_region text:=nullif(upper(trim(coalesce(p_region_code,''))), '');begin if not public.is_admin_for_org(p_organization_id) then raise exception 'Not authorised to configure this organization calendar';end if;if v_region is not null and v_region not in('AUK','BOP','CAN','CIT','GIS','HKB','MBH','MWT','NSN','NTL','OTA','STL','TAS','TKI','WKO','WGN','WTC') then raise exception 'Unsupported New Zealand holiday region';end if;insert into public.organization_calendar_settings(organization_id,region_code,updated_by) values(p_organization_id,v_region,v_actor) on conflict(organization_id) do update set region_code=excluded.region_code,updated_by=v_actor,updated_at=clock_timestamp() returning * into v_row;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(p_organization_id,v_actor,'organization_calendar_region_set','organization_calendar_settings',p_organization_id,jsonb_build_object('country_code','NZ','region_code',v_region));return v_row;end;$$;
+REVOKE ALL ON FUNCTION "public"."set_organization_calendar_region"(uuid,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."set_organization_calendar_region"(uuid,text) TO "authenticated","service_role";

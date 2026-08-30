@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "holidays:generate": "node scripts/generate-nz-holidays.cjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
@@ -26,6 +27,7 @@
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "date-holidays": "^3.36.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.6",

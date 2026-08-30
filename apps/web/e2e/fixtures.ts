@@ -52,6 +52,7 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
 export async function installSupabaseFixtures(page: Page): Promise<void> {
   let adminSlotStatus = 'published';
   let adminSlotStaffId = OFFICER_ID;
+  let holidayRegion = 'AUK';
   const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
   const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
   const workUnits = [
@@ -108,6 +109,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       await route.fulfill(fulfillJson([{ staff_id: SECOND_OFFICER_ID, day_of_week: null, specific_date: '2026-08-26', available_from: null, available_to: null, all_day: true, availability_type: 'unavailable' }]));
       return;
     }
+    if (table === 'organization_calendar_settings') { await route.fulfill(fulfillJson([{ region_code: holidayRegion }])); return; }
     if (table === 'shifts') {
       await route.fulfill(fulfillJson([{ id: '12121212-1212-4212-8212-121212121212', officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-25T20:00:00.000Z', scheduled_end: '2026-08-26T04:00:00.000Z', status: 'published', shift_health: null, total_stops: 8, notes: 'North district' }, { id: '13131313-1313-4313-8313-131313131313', officer_user_id: OFFICER_ID, service_type: 'site_guard', scheduled_start: '2026-08-27T08:00:00.000Z', scheduled_end: '2026-08-27T16:00:00.000Z', status: 'in_progress', shift_health: 'on_track', total_stops: 1, notes: null }]));
       return;
@@ -141,6 +143,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'materialize_roster_slot') { await route.fulfill(fulfillJson([{ slot_id: '30303030-3030-4030-8030-303030303030', shift_id: '31313131-3131-4131-8131-313131313131', created: true }])); return; }
     if (table === 'manage_roster_slot') { adminSlotStatus = 'cancelled'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'cancelled', shift_id: null, shift_status: null }])); return; }
     if (table === 'reassign_roster_slot') { adminSlotStaffId = SECOND_OFFICER_ID; adminSlotStatus = 'published'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'published', staff_id: SECOND_OFFICER_ID, shift_id: null, shift_status: null }])); return; }
+    if (table === 'set_organization_calendar_region') { holidayRegion = JSON.parse(request.postData() ?? '{}').p_region_code ?? ''; await route.fulfill(fulfillJson({ organization_id: ORG_ID, country_code: 'NZ', region_code: holidayRegion })); return; }
     await route.fulfill(fulfillJson([]));
   });
 }
