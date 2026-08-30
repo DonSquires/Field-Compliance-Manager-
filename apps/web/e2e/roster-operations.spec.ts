@@ -7,6 +7,7 @@ test('enterprise roster week board is operational and visually stable', async ({
  const errors=monitorBrowserErrors(page); await signInAsAdmin(page,'/admin/roster');
  await expect(page.getByRole('heading',{name:'Roster',exact:true})).toBeVisible();
  await expect(page.getByText('Ana Ngata',{exact:true})).toBeVisible(); await expect(page.getByText('Jordan Lee',{exact:true})).toBeVisible();
+ await expect(page.getByText('Roster Administration',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  const board=page.locator('.roster-board'); if((page.viewportSize()?.width??0)<600){await board.scrollIntoViewIfNeeded();await expect(page).toHaveScreenshot('roster-week-board.png');}else await expect(board).toHaveScreenshot('roster-week-board.png');
  await page.getByRole('button',{name:/08:00 am site guard/i}).click(); await expect(page.getByText('Assignment',{exact:true})).toBeVisible(); await expect(page.getByText('on_track',{exact:true})).toBeVisible(); await page.locator('.roster-inspector header button').click();
