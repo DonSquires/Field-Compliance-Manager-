@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ROSTER_SOURCES = [
+const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterOperationsPage.tsx',
   'apps/web/src/pages/OfficerSchedulePage.tsx',
   'apps/web/src/pages/RosterHRPage.tsx',
@@ -17,7 +17,8 @@ const ROSTER_SOURCES = [
   'supabase/migrations/20260830135000_roster_commercial_readiness.sql',
   'supabase/migrations/20260830136000_govern_hr_workflows.sql',
   'supabase/migrations/20260830137000_govern_staff_readiness.sql',
-  'supabase/migrations/20260830138000_govern_crm_quote_creation.sql'
+  'supabase/migrations/20260830138000_govern_crm_quote_creation.sql',
+  'supabase/migrations/20260830139000_govern_crm_quote_lines.sql'
 ];
 
 function uniqueBy(items, keyOf) {
@@ -40,13 +41,18 @@ function schemaInventory(rootDir) {
 function collectComponentEdges(sourceFile, content) {
   const sourceName = componentName(sourceFile);
   const edges = [];
-  for (const match of content.matchAll(/supabase\.from\(['"]([^'"]+)['"]\)/g)) {
+  for (const match of content.matchAll(/supabase\s*\.\s*from\(['"]([^'"]+)['"]\)/g)) {
     edges.push({ source_type: 'component', source_name: sourceName, target_type: 'table', target_name: match[1], edge_kind: 'reads', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase table query in component' });
   }
-  for (const match of content.matchAll(/supabase\.rpc\(['"]([^'"]+)['"]/g)) {
+  for (const match of content.matchAll(/supabase\s*\.\s*rpc\(['"]([^'"]+)['"]/g)) {
     edges.push({ source_type: 'component', source_name: sourceName, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in component' });
   }
   return edges;
+}
+
+function staleGeneratedEdgeIds(existingEdges, generatedEdges) {
+  const generatedKeys = new Set(generatedEdges.map((edge) => [edge.source_type, edge.source_name, edge.target_type, edge.target_name, edge.edge_kind, edge.source_file].join('|')));
+  return existingEdges.filter((edge) => edge.refresh_source === 'ci_generator' && edge.retirement_status === 'live' && !generatedKeys.has([edge.source_type, edge.source_name, edge.target_type, edge.target_name, edge.edge_kind, edge.source_file].join('|'))).map((edge) => edge.id);
 }
 
 function collectRpcEdges(sourceFile, content, inventory) {
@@ -75,10 +81,10 @@ function collectRpcEdges(sourceFile, content, inventory) {
   return edges;
 }
 
-function collectRosterAtlas(rootDir = process.cwd()) {
+function collectManagedAtlas(rootDir = process.cwd()) {
   const inventory = schemaInventory(rootDir);
   const edges = [];
-  for (const sourceFile of ROSTER_SOURCES) {
+  for (const sourceFile of MANAGED_SOURCES) {
     const content = fs.readFileSync(path.join(rootDir, sourceFile), 'utf8');
     edges.push(...(sourceFile.endsWith('.tsx') ? collectComponentEdges(sourceFile, content) : collectRpcEdges(sourceFile, content, inventory)));
   }
@@ -87,7 +93,7 @@ function collectRosterAtlas(rootDir = process.cwd()) {
     ...(['table', 'rpc'].includes(edge.source_type) ? [{ entity_type: edge.source_type, entity_name: edge.source_name }] : []),
     ...(['table', 'rpc'].includes(edge.target_type) ? [{ entity_type: edge.target_type, entity_name: edge.target_name }] : [])
   ]), (node) => `${node.entity_type}|${node.entity_name}`);
-  return { scope: 'roster', sources: ROSTER_SOURCES, nodes, edges: dedupedEdges };
+  return { scope: 'managed_app', sources: MANAGED_SOURCES, nodes, edges: dedupedEdges };
 }
 
 async function requestJson(url, key, pathname, options = {}) {
@@ -100,11 +106,18 @@ async function requestJson(url, key, pathname, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-async function syncRosterAtlas(atlas, env = process.env) {
+async function syncManagedAtlas(atlas, env = process.env) {
   const url = env.SUPABASE_URL;
   const key = env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   const now = new Date().toISOString();
+  for (const sourceFile of atlas.sources) {
+    const existing = await requestJson(url, key, `bob_app_map_edges?source_file=eq.${encodeURIComponent(sourceFile)}&refresh_source=eq.ci_generator&select=id,source_type,source_name,target_type,target_name,edge_kind,source_file,refresh_source,retirement_status`);
+    const generated = atlas.edges.filter((edge) => edge.source_file === sourceFile);
+    for (const edgeId of staleGeneratedEdgeIds(existing, generated)) {
+      await requestJson(url, key, `bob_app_map_edges?id=eq.${edgeId}&refresh_source=eq.ci_generator`, { method: 'PATCH', body: JSON.stringify({ retirement_status: 'legacy', last_refreshed_at: now, updated_at: now }) });
+    }
+  }
   for (const node of atlas.nodes) {
     const filter = `entity_type=eq.${encodeURIComponent(node.entity_type)}&entity_name=eq.${encodeURIComponent(node.entity_name)}&select=id,refresh_source`;
     const existing = await requestJson(url, key, `bob_capability_map?${filter}`);
@@ -127,15 +140,15 @@ async function syncRosterAtlas(atlas, env = process.env) {
 
 async function main() {
   const rootDir = path.resolve(__dirname, '..');
-  const atlas = collectRosterAtlas(rootDir);
+  const atlas = collectManagedAtlas(rootDir);
   if (!process.argv.includes('--apply')) {
     console.log(JSON.stringify({ mode: 'dry-run', ...atlas }, null, 2));
     return;
   }
-  const result = await syncRosterAtlas(atlas);
-  console.log(`Atlas roster refresh applied: ${result.nodes} nodes, ${result.edges} edges`);
+  const result = await syncManagedAtlas(atlas);
+  console.log(`Atlas managed refresh applied: ${result.nodes} nodes, ${result.edges} edges`);
 }
 
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
 
-module.exports = { collectRosterAtlas, syncRosterAtlas };
+module.exports = { collectComponentEdges, collectManagedAtlas, staleGeneratedEdgeIds, syncManagedAtlas };

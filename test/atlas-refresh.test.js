@@ -1,14 +1,14 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
-const { collectRosterAtlas } = require('../scripts/atlas-refresh');
+const { collectComponentEdges, collectManagedAtlas, staleGeneratedEdgeIds } = require('../scripts/atlas-refresh');
 const refreshSource = require('node:fs').readFileSync(path.resolve(__dirname, '../scripts/atlas-refresh.js'), 'utf8');
 
-test('roster Atlas refresh derives real component and RPC flow edges', () => {
-  const atlas = collectRosterAtlas(path.resolve(__dirname, '..'));
+test('managed Atlas refresh derives real component and RPC flow edges', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
   const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
 
-  assert.equal(atlas.scope, 'roster');
+  assert.equal(atlas.scope, 'managed_app');
   assert.equal(hasEdge('pages/RosterOperationsPage', 'roster_slots', 'reads'), true);
   assert.equal(hasEdge('pages/RosterOperationsPage', 'reassign_roster_slot', 'calls'), true);
   assert.equal(hasEdge('reassign_roster_slot', 'roster_slots', 'reads'), true);
@@ -39,12 +39,39 @@ test('roster Atlas refresh derives real component and RPC flow edges', () => {
   assert.equal(hasEdge('pages/CRMPage', 'quotes', 'reads'), true);
   assert.equal(hasEdge('pages/CRMPage', 'create_crm_draft_quote', 'calls'), true);
   assert.equal(hasEdge('create_crm_draft_quote', 'quotes', 'writes'), true);
+  assert.equal(hasEdge('pages/CRMPage', 'add_crm_quote_line', 'calls'), true);
+  assert.equal(hasEdge('add_crm_quote_line', 'quote_lines', 'writes'), true);
+  assert.equal(hasEdge('add_crm_quote_line', 'quotes', 'writes'), true);
+  assert.equal(hasEdge('add_crm_quote_line', 'client_sites', 'reads'), true);
 });
 
-test('roster Atlas refresh includes capability nodes without inferring exercise', () => {
-  const atlas = collectRosterAtlas(path.resolve(__dirname, '..'));
+test('managed Atlas refresh includes capability nodes without inferring exercise', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
   assert.ok(atlas.nodes.some((node) => node.entity_type === 'table' && node.entity_name === 'roster_slots'));
   assert.ok(atlas.nodes.some((node) => node.entity_type === 'rpc' && node.entity_name === 'reassign_roster_slot'));
   assert.equal(atlas.nodes.some((node) => Object.hasOwn(node, 'exercised')), false);
   assert.match(refreshSource, /refresh_source !== 'ci_generator'/);
+});
+
+test('component extraction tolerates formatted multiline Supabase chains', () => {
+  const edges = collectComponentEdges('apps/web/src/pages/ExamplePage.tsx', `
+    const rows = supabase
+      .from('crm_contacts')
+      .select('*');
+    await supabase
+      .rpc('create_crm_draft_quote', { p_title: 'Example' });
+  `);
+  assert.ok(edges.some((edge) => edge.target_name === 'crm_contacts' && edge.edge_kind === 'reads'));
+  assert.ok(edges.some((edge) => edge.target_name === 'create_crm_draft_quote' && edge.edge_kind === 'calls'));
+});
+
+test('stale edge retirement is scoped to live CI-generated identities', () => {
+  const base = { source_type: 'component', source_name: 'pages/CRMPage', target_type: 'table', source_file: 'apps/web/src/pages/CRMPage.tsx', retirement_status: 'live' };
+  const existing = [
+    { ...base, id: 'keep', target_name: 'quotes', edge_kind: 'reads', refresh_source: 'ci_generator' },
+    { ...base, id: 'stale', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'ci_generator' },
+    { ...base, id: 'manual', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'manual_seed' },
+  ];
+  const generated = [{ ...base, target_name: 'quotes', edge_kind: 'reads' }];
+  assert.deepEqual(staleGeneratedEdgeIds(existing, generated), ['stale']);
 });

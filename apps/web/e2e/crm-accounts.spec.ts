@@ -13,6 +13,11 @@ test('CRM account context and governed quote creation are operational', async ({
   await expect(dialog.getByLabel('Quote title')).toHaveValue('Civic Events Limited service proposal');
   await dialog.getByLabel('Target margin %').fill('24'); await dialog.getByLabel('Commercial notes').fill('Initial static guarding proposal.');
   await expect(dialog).toHaveScreenshot('crm-draft-quote.png'); await dialog.getByRole('button', { name: 'Create draft quote' }).click();
-  await expect(page.getByText('Draft quote created for Civic Events Limited.')).toBeVisible();
-  await expect(page.getByText('Quote: draft')).toBeVisible(); expect(errors, errors.join('\n')).toEqual([]);
+  await expect(page.getByText('Draft quote created for Civic Events Limited. Add explicit pricing lines before review.')).toBeVisible();
+  const pricing = page.getByRole('dialog', { name: 'Price Civic Events Limited service proposal' });
+  await expect(pricing.getByLabel('Client site')).toHaveValue('42424242-4242-4242-8242-424242424242');
+  await pricing.getByLabel('Quantity').fill('8'); await pricing.getByLabel('Provider unit cost').fill('35'); await pricing.getByLabel('Client unit charge').fill('52.5');
+  await expect(pricing).toHaveScreenshot('crm-quote-pricing.png'); await pricing.getByRole('button', { name: 'Add pricing line' }).click();
+  await expect(pricing.getByText('Total cost $280.00')).toBeVisible(); await expect(pricing.getByText('Total charge $483.00')).toBeVisible();
+  await pricing.getByRole('button', { name: 'Done' }).click(); await expect(page.getByText('Quote: draft')).toBeVisible(); expect(errors, errors.join('\n')).toEqual([]);
 });
