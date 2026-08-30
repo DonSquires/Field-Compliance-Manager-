@@ -15,10 +15,11 @@
  *    counterpart not part of the branch hierarchy)
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './CRMPage.css';
 
 interface Organization {
   id: string;
@@ -44,6 +45,7 @@ interface AccountRow {
   active: boolean;
   site_count: number;
   primary_contact_name: string | null;
+  latest_quote_status: string | null;
 }
 
 interface AgreementRow extends ServiceAgreement {
@@ -73,6 +75,11 @@ const CRMPage: React.FC = () => {
     error: null,
   });
   const [branchFilter, setBranchFilter] = useState<string>('all');
+  const [quoteClient, setQuoteClient] = useState<AccountRow | null>(null);
+  const [quoteForm, setQuoteForm] = useState({ title: '', targetMargin: '20', validUntil: '', notes: '' });
+  const [quoteSaving, setQuoteSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const quoteRequestId = useRef(crypto.randomUUID());
 
   // ATLAS READS: organizations, crm_account_list (view), service_agreements
   const loadCrm = useCallback(async () => {
@@ -97,22 +104,25 @@ const CRMPage: React.FC = () => {
         .eq('parent_organization_id', orgId);
       if (acctErr) throw acctErr;
 
-      // Load site counts for each account
-      const accountsWithCounts: AccountRow[] = [];
-      for (const acct of (accounts ?? [])) {
-        const { count } = await supabase
-          .from('client_sites')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', acct.id);
-        accountsWithCounts.push({
+      const accountIds = (accounts ?? []).map((account) => account.id);
+      const [sitesRes, contactsRes, quotesRes] = accountIds.length ? await Promise.all([
+        supabase.from('client_sites').select('id,organization_id').in('organization_id', accountIds),
+        supabase.from('crm_contacts').select('organization_id,first_name,last_name,is_primary').in('organization_id', accountIds).eq('is_primary', true),
+        supabase.from('quotes').select('client_org_id,status,created_at').eq('provider_org_id', orgId).in('client_org_id', accountIds).order('created_at', { ascending: false }),
+      ]) : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
+      if (sitesRes.error) throw sitesRes.error;if (contactsRes.error) throw contactsRes.error;if (quotesRes.error) throw quotesRes.error;
+      const siteCounts = new Map<string, number>();for (const site of sitesRes.data ?? []) siteCounts.set(site.organization_id, (siteCounts.get(site.organization_id) ?? 0) + 1);
+      const primaryContacts = new Map((contactsRes.data ?? []).map((contact) => [contact.organization_id, `${contact.first_name} ${contact.last_name}`.trim()]));
+      const latestQuotes = new Map<string, string>();for (const quote of quotesRes.data ?? []) if (quote.client_org_id && !latestQuotes.has(quote.client_org_id)) latestQuotes.set(quote.client_org_id, quote.status);
+      const accountsWithCounts: AccountRow[] = (accounts ?? []).map((acct) => ({
           id: acct.id,
           name: acct.name,
           organization_type: acct.organization_type,
           active: acct.active,
-          site_count: count ?? 0,
-          primary_contact_name: null, // TODO: implement via crm_contacts join if needed
-        });
-      }
+          site_count: siteCounts.get(acct.id) ?? 0,
+          primary_contact_name: primaryContacts.get(acct.id) ?? null,
+          latest_quote_status: latestQuotes.get(acct.id) ?? null,
+        }));
 
       const rows = accountsWithCounts;
       const clients = rows.filter((r) => r.organization_type === 'client');
@@ -181,6 +191,17 @@ const CRMPage: React.FC = () => {
     loadCrm();
   }, [loadCrm]);
 
+  const openQuote = (client: AccountRow) => {
+    const validUntil = new Date();validUntil.setDate(validUntil.getDate() + 30);
+    quoteRequestId.current = crypto.randomUUID();setQuoteClient(client);setQuoteForm({ title: `${client.name} service proposal`, targetMargin: '20', validUntil: validUntil.toISOString().slice(0, 10), notes: '' });setNotice(null);
+  };
+
+  const createQuote = async (event: React.FormEvent) => {
+    event.preventDefault();if (!quoteClient) return;setQuoteSaving(true);setState((current) => ({ ...current, error: null }));
+    const { data, error } = await supabase.rpc('create_crm_draft_quote', { p_client_request_id: quoteRequestId.current, p_client_org_id: quoteClient.id, p_title: quoteForm.title.trim(), p_target_margin_pct: Number(quoteForm.targetMargin), p_valid_until: quoteForm.validUntil || null, p_notes: quoteForm.notes.trim() || null });
+    if (error || !data) setState((current) => ({ ...current, error: error?.message ?? 'Draft quote receipt was not confirmed.' }));else { setNotice(`Draft quote created for ${quoteClient.name}.`);setQuoteClient(null);quoteRequestId.current = crypto.randomUUID();await loadCrm(); }setQuoteSaving(false);
+  };
+
   if (state.loading) {
     return (
       <div className="page-container">
@@ -215,6 +236,7 @@ const CRMPage: React.FC = () => {
           {state.error}
         </div>
       )}
+      {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
       <div className="crm-branch-filter">
         <label>Branch</label>
@@ -257,6 +279,7 @@ const CRMPage: React.FC = () => {
                     {client.active ? 'Active' : 'Inactive'} · {client.site_count} site
                     {client.site_count === 1 ? '' : 's'}
                   </p>
+                  <div className="crm-account-actions"><span>Quote: {client.latest_quote_status ?? 'none'}</span><button type="button" className="btn btn-sm btn-primary" onClick={() => openQuote(client)}>New quote</button></div>
                 </div>
               </div>
             ))
@@ -338,6 +361,7 @@ const CRMPage: React.FC = () => {
           )}
         </div>
       </section>
+      {quoteClient && <div className="crm-quote-backdrop"><form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-quote-title" onSubmit={createQuote}><header><div><span>Commercial proposal</span><h2 id="crm-quote-title">New quote for {quoteClient.name}</h2></div><button type="button" onClick={() => setQuoteClient(null)} aria-label="Close quote">×</button></header><p>Create the governed quote shell first. Labour, travel, module, and platform-fee lines remain explicit follow-up pricing work.</p><label><span>Quote title</span><input required value={quoteForm.title} onChange={(event) => setQuoteForm({ ...quoteForm, title: event.target.value })} /></label><div><label><span>Target margin %</span><input type="number" min="0" max="99.99" step="0.01" required value={quoteForm.targetMargin} onChange={(event) => setQuoteForm({ ...quoteForm, targetMargin: event.target.value })} /></label><label><span>Valid until</span><input type="date" value={quoteForm.validUntil} onChange={(event) => setQuoteForm({ ...quoteForm, validUntil: event.target.value })} /></label></div><label><span>Commercial notes</span><textarea rows={4} value={quoteForm.notes} onChange={(event) => setQuoteForm({ ...quoteForm, notes: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setQuoteClient(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || !quoteForm.title.trim()}>{quoteSaving ? 'Creating' : 'Create draft quote'}</button></footer></form></div>}
     </div>
   );
 };

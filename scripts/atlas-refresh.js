@@ -6,6 +6,7 @@ const ROSTER_SOURCES = [
   'apps/web/src/pages/OfficerSchedulePage.tsx',
   'apps/web/src/pages/RosterHRPage.tsx',
   'apps/web/src/pages/OfficerLeavePage.tsx',
+  'apps/web/src/pages/CRMPage.tsx',
   'supabase/migrations/20260830128000_roster_work_units.sql',
   'supabase/migrations/20260830129000_materialize_roster_slots.sql',
   'supabase/migrations/20260830130000_roster_slot_response.sql',
@@ -15,7 +16,8 @@ const ROSTER_SOURCES = [
   'supabase/migrations/20260830134000_organization_calendar_settings.sql',
   'supabase/migrations/20260830135000_roster_commercial_readiness.sql',
   'supabase/migrations/20260830136000_govern_hr_workflows.sql',
-  'supabase/migrations/20260830137000_govern_staff_readiness.sql'
+  'supabase/migrations/20260830137000_govern_staff_readiness.sql',
+  'supabase/migrations/20260830138000_govern_crm_quote_creation.sql'
 ];
 
 function uniqueBy(items, keyOf) {

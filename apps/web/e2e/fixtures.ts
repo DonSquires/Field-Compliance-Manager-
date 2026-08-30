@@ -57,6 +57,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
   let hrTimesheetStatus = 'submitted';
   let anaWorkReady = true;
   const hrCoverage = [{ id: '14141414-1414-4414-8414-141414141414', shift_date: '2026-09-05', start_time: '18:00:00', end_time: '23:00:00', required_staff_count: 2, urgency: 'high', status: 'open', notes: 'Event perimeter', site: null }];
+  const crmQuotes: Array<{ client_org_id: string; status: string; created_at: string }> = [];
   const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
   const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
   const workUnits = [
@@ -94,9 +95,13 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'organizations') {
-      await route.fulfill(fulfillJson({ name: 'Harbour Compliance Services' }));
+      const accountQuery = url.searchParams.has('parent_organization_id');
+      await route.fulfill(fulfillJson(accountQuery ? [{ id: '40404040-4040-4040-8040-404040404040', name: 'Civic Events Limited', organization_type: 'client', active: true, parent_organization_id: ORG_ID }, { id: '41414141-4141-4141-8141-414141414141', name: 'Northern Branch', organization_type: 'branch', active: true, parent_organization_id: ORG_ID }] : { id: ORG_ID, name: 'Harbour Compliance Services', organization_type: 'service_provider', parent_organization_id: null, active: true }));
       return;
     }
+    if (table === 'crm_contacts') { await route.fulfill(fulfillJson([{ organization_id: '40404040-4040-4040-8040-404040404040', first_name: 'Mere', last_name: 'Wilson', is_primary: true }])); return; }
+    if (table === 'quotes') { await route.fulfill(fulfillJson(crmQuotes)); return; }
+    if (table === 'service_agreements') { await route.fulfill(fulfillJson([])); return; }
     if (table === 'officer_field_reports') {
       await route.fulfill(fulfillJson(reports));
       return;
@@ -141,7 +146,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'patrol_routes') { await route.fulfill(fulfillJson([{ id: '19191919-1919-4919-8919-191919191919', name: 'North District Patrol' }])); return; }
     if (table === 'service_agreement_locations') { await route.fulfill(fulfillJson([{ id: '21212121-2121-4121-8121-212121212121', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '25252525-2525-4525-8525-252525252525', zone_id: null }])); return; }
     if (table === 'service_agreement_modules') { await route.fulfill(fulfillJson([{ id: '22222222-2222-4222-8222-222222222229', service_agreement_id: '24242424-2424-4424-8424-242424242424', module_key: 'static_guarding' }])); return; }
-    if (table === 'client_sites') { await route.fulfill(fulfillJson([{ id: '25252525-2525-4525-8525-252525252525', name: 'Civic Centre' }])); return; }
+    if (table === 'client_sites') { const crmQuery = (url.searchParams.get('select') ?? '').includes('organization_id'); await route.fulfill(fulfillJson(crmQuery ? [{ id: '42424242-4242-4242-8242-424242424242', organization_id: '40404040-4040-4040-8040-404040404040' }, { id: '43434343-4343-4343-8343-434343434343', organization_id: '40404040-4040-4040-8040-404040404040' }] : [{ id: '25252525-2525-4525-8525-252525252525', name: 'Civic Centre' }])); return; }
     if (table === 'location_zones') { await route.fulfill(fulfillJson([])); return; }
     if (table === 'organization_workplaces') { await route.fulfill(fulfillJson(workplaces)); return; }
     if (table === 'teams') { await route.fulfill(fulfillJson([{ id: '26262626-2626-4626-8626-262626262626', name: 'Operations Support' }])); return; }
@@ -158,6 +163,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'review_timesheet') { hrTimesheetStatus = JSON.parse(request.postData() ?? '{}').p_decision; await route.fulfill(fulfillJson({ id: '38383838-3838-4838-8838-383838383838', status: hrTimesheetStatus })); return; }
     if (table === 'create_shift_coverage_request') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '39393939-3939-4939-8939-393939393939', shift_date: payload.p_shift_date, start_time: payload.p_start_time, end_time: payload.p_end_time, required_staff_count: payload.p_required_staff_count, urgency: payload.p_urgency, status: 'open', notes: payload.p_notes }; hrCoverage.unshift(row); await route.fulfill(fulfillJson(row)); return; }
     if (table === 'set_staff_work_readiness') { anaWorkReady = JSON.parse(request.postData() ?? '{}').p_work_ready; await route.fulfill(fulfillJson({ id: OFFICER_ID, work_ready: anaWorkReady })); return; }
+    if (table === 'create_crm_draft_quote') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '44444444-4444-4444-8444-444444444449', client_org_id: payload.p_client_org_id, status: 'draft', created_at: '2026-08-30T09:30:00.000Z', title: payload.p_title }; crmQuotes.unshift(row); await route.fulfill(fulfillJson(row)); return; }
     await route.fulfill(fulfillJson([]));
   });
 }
