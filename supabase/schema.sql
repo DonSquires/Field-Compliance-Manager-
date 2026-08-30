@@ -13800,6 +13800,7 @@ CREATE TABLE IF NOT EXISTS "public"."timesheets" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "submitted_at" timestamp with time zone,
     "payroll_export_batch_id" "uuid",
+    "client_event_id" "uuid",
     CONSTRAINT "timesheets_status_check" CHECK (("status" = ANY (ARRAY['draft'::"text", 'submitted'::"text", 'approved'::"text", 'rejected'::"text", 'paid'::"text"])))
 );
 
@@ -17039,6 +17040,9 @@ CREATE INDEX "idx_staff_profiles_external_refs" ON "public"."staff_profiles" USI
 
 
 CREATE INDEX "idx_staff_profiles_user_id" ON "public"."staff_profiles" USING "btree" ("user_id");
+
+
+CREATE UNIQUE INDEX "idx_timesheets_client_event" ON "public"."timesheets" USING "btree" ("organization_id", "staff_id", "client_event_id") WHERE ("client_event_id" IS NOT NULL);
 
 
 
@@ -24492,13 +24496,7 @@ CREATE POLICY "tenders_update" ON "public"."tenders" FOR UPDATE USING (("public"
 ALTER TABLE "public"."timesheets" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "timesheets_insert" ON "public"."timesheets" FOR INSERT WITH CHECK ("public"."org_access_allowed"("organization_id"));
-
-
-
-CREATE POLICY "timesheets_officer_insert" ON "public"."timesheets" FOR INSERT WITH CHECK (("staff_id" IN ( SELECT "sp"."id"
-   FROM "public"."staff_profiles" "sp"
-  WHERE ("sp"."user_id" = "auth"."uid"()))));
+CREATE POLICY "timesheets_admin_insert" ON "public"."timesheets" FOR INSERT TO "authenticated" WITH CHECK ("public"."is_admin_for_org"("organization_id"));
 
 
 
@@ -24512,7 +24510,7 @@ CREATE POLICY "timesheets_select" ON "public"."timesheets" FOR SELECT USING ("pu
 
 
 
-CREATE POLICY "timesheets_update" ON "public"."timesheets" FOR UPDATE USING ("public"."org_access_allowed"("organization_id")) WITH CHECK ("public"."org_access_allowed"("organization_id"));
+CREATE POLICY "timesheets_admin_update" ON "public"."timesheets" FOR UPDATE TO "authenticated" USING ("public"."is_admin_for_org"("organization_id")) WITH CHECK ("public"."is_admin_for_org"("organization_id"));
 
 
 

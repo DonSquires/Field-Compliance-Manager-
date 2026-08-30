@@ -1,0 +1,3 @@
+import { readFileSync } from 'node:fs';import { resolve } from 'node:path';import { describe,expect,it } from 'vitest';
+const source=readFileSync(resolve(process.cwd(),'src/pages/OfficerTimesheetPage.tsx'),'utf8');
+describe('officer timesheet UI',()=>{it('uses the governed submission RPC',()=>{expect(source).toContain("supabase.rpc('submit_officer_timesheet'");expect(source).not.toContain(".from('timesheets').insert");});it('retains retry identity and checks receipt',()=>{expect(source).toContain('p_client_event_id: eventIdRef.current');expect(source).toContain('receipt was not confirmed');});});
