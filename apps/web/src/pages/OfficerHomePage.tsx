@@ -21,6 +21,7 @@ import { useAuth } from '../context/AuthContext';
 import type { ActiveShift } from '../hooks/useActiveShift';
 import type { UseOfficerSafetyApi } from '../hooks/useOfficerSafety';
 import { getDetectionStatusMessage } from '../lib/safetyStatusMessage';
+import { claimShiftCoverage } from '../lib/shiftCoverage';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -115,24 +116,12 @@ function useOpenShifts(organizationId: string | null | undefined) {
     void load();
   }, [load]);
 
-  const claim = useCallback(async (requestId: string, officerId: string) => {
+  const claim = useCallback(async (requestId: string) => {
     try {
       setClaimingId(requestId);
       setError(null);
       setNotice(null);
-      const { data, error: updateError } = await supabase
-        .from('shift_coverage_requests')
-        .update({ status: 'claimed', claimed_by: officerId, claimed_at: new Date().toISOString() })
-        .eq('id', requestId)
-        .eq('status', 'open')
-        .select('id');
-
-      if (updateError) throw updateError;
-      if (!data?.length) {
-        setError('This shift was already claimed by another officer.');
-        setOpenShifts((current) => current.filter((shift) => shift.id !== requestId));
-        return;
-      }
+      await claimShiftCoverage(requestId);
       setOpenShifts((current) => current.filter((shift) => shift.id !== requestId));
       setNotice('Shift claimed. Your roster will update when the assignment is confirmed.');
     } catch (claimError) {
@@ -270,7 +259,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
                 <div className="officer-open-date"><strong>{new Date(`${openShift.shift_date}T00:00:00`).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric' })}</strong><span>{openShift.start_time.slice(0, 5)} - {openShift.end_time.slice(0, 5)}</span></div>
                 <div className="officer-open-detail"><strong>{openShift.site_name ?? 'Location to be confirmed'}</strong><span>{openShift.required_staff_count} officer{openShift.required_staff_count === 1 ? '' : 's'} needed{openShift.notes ? ` · ${openShift.notes}` : ''}</span></div>
                 <span className="officer-urgency">{openShift.urgency}</span>
-                <button type="button" disabled={claimingId === openShift.id || !profile?.id} onClick={() => profile?.id && void claim(openShift.id, profile.id)}>{claimingId === openShift.id ? 'Claiming' : 'Claim shift'}</button>
+                <button type="button" disabled={claimingId === openShift.id || !profile?.id} onClick={() => profile?.id && void claim(openShift.id)}>{claimingId === openShift.id ? 'Claiming' : 'Claim shift'}</button>
               </article>
             ))}
           </div>

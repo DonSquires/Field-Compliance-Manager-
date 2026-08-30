@@ -3327,6 +3327,31 @@ ALTER FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job
 COMMENT ON FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job_id" "uuid", "p_site_id" "uuid", "p_module_key" "text", "p_sla_respond_by" timestamp with time zone, "p_officer_gps_lat" double precision, "p_officer_gps_lng" double precision) IS 'Inserts an adhoc dispatch job as a shift stop and invalidates the solve cache. Called by apps/api dispatch engine.';
 
 
+CREATE OR REPLACE FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text" DEFAULT 'open'::"text") RETURNS "public"."shift_coverage_requests"
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_user_id uuid := auth.uid(); v_profile public.user_profiles%rowtype; v_request public.shift_coverage_requests%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  select * into v_profile from public.user_profiles where id = v_user_id and deactivated_at is null and role in ('officer', 'admin_officer');
+  if not found then raise exception 'Active officer profile required'; end if;
+  select * into v_request from public.shift_coverage_requests where id = p_request_id for update;
+  if not found then raise exception 'Coverage request not found'; end if;
+  if v_request.organization_id <> v_profile.organization_id then raise exception 'Coverage request is outside the officer organization'; end if;
+  if v_request.status <> p_expected_status then raise exception 'Coverage request changed from expected status % to %', p_expected_status, v_request.status; end if;
+  if v_request.status <> 'open' then raise exception 'Coverage request is no longer open'; end if;
+  if v_request.shift_date < current_date then raise exception 'Past coverage cannot be claimed'; end if;
+  update public.shift_coverage_requests set status = 'claimed', claimed_by = v_user_id, claimed_at = clock_timestamp() where id = p_request_id returning * into v_request;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_request.organization_id, v_user_id, 'shift_coverage_claimed', 'shift_coverage_requests', v_request.id, jsonb_build_object('shift_date', v_request.shift_date, 'start_time', v_request.start_time, 'site_id', v_request.site_id));
+  return v_request;
+end;
+$$;
+
+ALTER FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") IS 'Atomically claims open coverage for the authenticated active officer and records audit provenance.';
+
+
 
 CREATE OR REPLACE FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid" DEFAULT NULL::"uuid", "p_briefing_notes" "text" DEFAULT NULL::"text", "p_shift_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" "uuid", "created" boolean, "status" "text", "sla_respond_by" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER
@@ -24975,6 +25000,12 @@ GRANT ALL ON FUNCTION "public"."has_location_access"("p_site_id" "uuid", "p_zone
 GRANT ALL ON FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job_id" "uuid", "p_site_id" "uuid", "p_module_key" "text", "p_sla_respond_by" timestamp with time zone, "p_officer_gps_lat" double precision, "p_officer_gps_lng" double precision) TO "anon";
 GRANT ALL ON FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job_id" "uuid", "p_site_id" "uuid", "p_module_key" "text", "p_sla_respond_by" timestamp with time zone, "p_officer_gps_lat" double precision, "p_officer_gps_lng" double precision) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job_id" "uuid", "p_site_id" "uuid", "p_module_key" "text", "p_sla_respond_by" timestamp with time zone, "p_officer_gps_lat" double precision, "p_officer_gps_lng" double precision) TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") TO "authenticated";

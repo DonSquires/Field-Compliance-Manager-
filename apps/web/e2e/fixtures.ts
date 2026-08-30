@@ -15,6 +15,8 @@ const user = {
   created_at: '2026-08-01T00:00:00.000Z',
 };
 
+const officerUser = { ...user, id: OFFICER_ID, email: 'ana@fcm.test' };
+
 const reports = [
   {
     id: '44444444-4444-4444-8444-444444444444', organization_id: ORG_ID, officer_id: OFFICER_ID,
@@ -88,9 +90,56 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
   });
 }
 
+export async function installOfficerScheduleFixtures(page: Page): Promise<void> {
+  await page.route('**/auth/v1/token?grant_type=password', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'officer-e2e-token', refresh_token: 'officer-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: officerUser }) });
+  });
+  await page.route('**/auth/v1/user', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(officerUser) }));
+  await page.route('**/rest/v1/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const resource = url.pathname.split('/').at(-1);
+    const select = url.searchParams.get('select') ?? '';
+    if (resource === 'user_profiles') {
+      await route.fulfill(fulfillJson([{ id: OFFICER_ID, display_name: 'Ana Ngata', email: officerUser.email, role: 'officer', organization_id: ORG_ID }]));
+      return;
+    }
+    if (resource === 'shifts') {
+      if (select.includes('shift_stops')) {
+        await route.fulfill(fulfillJson([]));
+        return;
+      }
+      await route.fulfill(fulfillJson([
+        { id: '66666666-6666-4666-8666-666666666666', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: 'accepted', notes: 'North district patrol', shift_health: null, total_stops: 8 },
+        { id: '77777777-7777-4777-8777-777777777777', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'site_guard', scheduled_start: '2026-09-02T18:00:00.000Z', scheduled_end: '2026-09-03T02:00:00.000Z', status: 'published', notes: null, shift_health: null, total_stops: 1 },
+      ]));
+      return;
+    }
+    if (resource === 'shift_coverage_requests') {
+      await route.fulfill(fulfillJson([
+        { id: '88888888-8888-4888-8888-888888888888', shift_date: '2026-09-01', start_time: '18:00:00', end_time: '23:00:00', required_staff_count: 2, urgency: 'high', notes: 'Event perimeter support', site: [{ name: 'Civic Events Centre' }] },
+      ]));
+      return;
+    }
+    if (resource === 'claim_shift_coverage') {
+      await route.fulfill(fulfillJson({ id: '88888888-8888-4888-8888-888888888888', status: 'claimed', claimed_by: OFFICER_ID }));
+      return;
+    }
+    await route.fulfill(fulfillJson([]));
+  });
+}
+
 export async function signInAsAdmin(page: Page, destination = '/admin/field-ops?area=landing'): Promise<void> {
   await page.goto(destination);
   await page.getByLabel('Email address').fill(user.email);
+  await page.getByLabel('Password').fill('playwright-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden();
+}
+
+export async function signInAsOfficer(page: Page, destination = '/officer/schedule'): Promise<void> {
+  await page.goto(destination);
+  await page.getByLabel('Email address').fill(officerUser.email);
   await page.getByLabel('Password').fill('playwright-password');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden();
