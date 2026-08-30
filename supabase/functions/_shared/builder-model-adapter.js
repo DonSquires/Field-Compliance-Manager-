@@ -65,6 +65,8 @@ function buildModelRunRequest({
 
   const route = routeBuilderModel({ workloadKind, containsRestrictedData });
   const requestBody = {
+    provider: route.provider,
+    model_name: modelName,
     builder_mode: builderMode,
     workload_kind: workloadKind,
     prompt_version: promptVersion,

@@ -19,10 +19,12 @@ function validateSecurityReport(report, patchBytes, manifestBytes) {
 }
 
 async function claimSecurityReview(supabase, input) {
-  const { data, error } = await supabase.rpc('builder_claim_security_review', {
+  const { error: recoveryError } = await supabase.rpc('builder_recover_expired_security_review');
+  if (recoveryError) throw new Error('security review lease recovery failed');
+  const { data, error } = await supabase.rpc('builder_claim_aggregate_security_review', {
     _job_id: input.jobId,
     _security_step_id: input.securityStepId,
-    _frontend_worker_run_id: input.frontendWorkerRunId,
+    _implementation_worker_run_ids: input.implementationWorkerRunIds,
     _runner_id: input.runnerId,
     _expected_target_sha: input.targetSha,
     _timeout_seconds: input.timeoutSeconds
@@ -87,6 +89,8 @@ async function runSecurityReview({
   supabase,
   job,
   securityStep,
+  implementationWorkerRunId,
+  implementationWorkerRunIds,
   frontendWorkerRunId,
   sourceDir,
   workerImage,
@@ -102,6 +106,8 @@ async function runSecurityReview({
 }) {
   if (!job?.id || !job?.organization_id || !job?.target_sha) throw new Error('commit-pinned job identity is required');
   if (!securityStep?.id || securityStep.step_id !== 'security_review') throw new Error('security review step is required');
+  const workerRunIds = implementationWorkerRunIds || [implementationWorkerRunId || frontendWorkerRunId].filter(Boolean);
+  if (workerRunIds.length === 0 || workerRunIds.length > 2) throw new Error('one or two implementation worker runs are required');
   let lease;
   let heartbeatTimer;
   let heartbeatError = null;
@@ -111,17 +117,31 @@ async function runSecurityReview({
     lease = await claim(supabase, {
       jobId: job.id,
       securityStepId: securityStep.id,
-      frontendWorkerRunId,
+      implementationWorkerRunIds: workerRunIds,
       runnerId,
       targetSha: job.target_sha,
       timeoutSeconds
     });
-    const [patch, manifest] = await Promise.all([
-      loadArtifact(supabase, lease.patch_artifact_id, job.id, 'code_implementation'),
-      loadArtifact(supabase, lease.manifest_artifact_id, job.id, 'changed_file_manifest')
+    const patchIds = lease.patch_artifact_ids || [lease.patch_artifact_id].filter(Boolean);
+    const manifestIds = lease.manifest_artifact_ids || [lease.manifest_artifact_id].filter(Boolean);
+    if (patchIds.length !== workerRunIds.length || manifestIds.length !== workerRunIds.length) {
+      throw new Error('aggregate security evidence is incomplete');
+    }
+    const [patches, manifests] = await Promise.all([
+      Promise.all(patchIds.map(id => loadArtifact(supabase, id, job.id, 'code_implementation'))),
+      Promise.all(manifestIds.map(id => loadArtifact(supabase, id, job.id, 'changed_file_manifest')))
     ]);
-    fs.writeFileSync(path.join(artifactDir, 'validated.patch'), patch.bytes, { mode: 0o644 });
-    fs.writeFileSync(path.join(artifactDir, 'changed-files.json'), manifest.bytes, { mode: 0o644 });
+    const patchBytes = patches.length === 1
+      ? patches[0].bytes
+      : Buffer.from(`${patches.map(item => item.bytes.toString('utf8').trimEnd()).join('\n')}\n`);
+    const manifestRows = manifests.flatMap(item => JSON.parse(item.bytes.toString('utf8')));
+    const manifestPaths = manifestRows.map(item => item?.path).filter(Boolean);
+    if (new Set(manifestPaths).size !== manifestPaths.length) throw new Error('aggregate security evidence changes the same file more than once');
+    const manifestBytes = manifests.length === 1
+      ? manifests[0].bytes
+      : Buffer.from(`${JSON.stringify(manifestRows, null, 2)}\n`);
+    fs.writeFileSync(path.join(artifactDir, 'validated.patch'), patchBytes, { mode: 0o644 });
+    fs.writeFileSync(path.join(artifactDir, 'changed-files.json'), manifestBytes, { mode: 0o644 });
     heartbeatTimer = setInterval(() => heartbeat(supabase, lease).catch(error => { heartbeatError = error; }), 30000);
     heartbeatTimer.unref?.();
     const execution = await execute({
@@ -133,7 +153,7 @@ async function runSecurityReview({
     if (heartbeatError) throw new Error('security review lost its lease heartbeat');
     const reportPath = path.join(artifactDir, 'security-review.json');
     if (!fs.existsSync(reportPath)) throw new Error('security worker produced no report');
-    const report = validateSecurityReport(JSON.parse(fs.readFileSync(reportPath, 'utf8')), patch.bytes, manifest.bytes);
+    const report = validateSecurityReport(JSON.parse(fs.readFileSync(reportPath, 'utf8')), patchBytes, manifestBytes);
     const artifact = await register(supabase, lease, reportPath);
     const completedJob = await finish(supabase, lease, artifact.id, report.counts);
     return { success: report.passed, report, artifact, job: completedJob, worker_run_id: lease.run_id, execution_status: execution.status };

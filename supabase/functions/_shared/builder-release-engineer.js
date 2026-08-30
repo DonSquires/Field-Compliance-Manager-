@@ -5,20 +5,22 @@ const {
   contentMetadata
 } = require('./builder-model-adapter');
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
+const { isAllowedBackendPath } = require('./builder-backend-engineer');
 
 const RELEASE_ENGINEER_PROMPT_VERSION = 'release-engineer-v1';
 
 function deriveReleaseImpact(changedFiles) {
   if (!Array.isArray(changedFiles) || changedFiles.length === 0) throw new Error('changed files are required');
   for (const file of changedFiles) {
-    if (typeof file !== 'string' || !file.startsWith('apps/web/')) {
-      throw new Error(`release file is outside approved frontend scope: ${file}`);
+    if (typeof file !== 'string' || (!file.startsWith('apps/web/') && !isAllowedBackendPath(file))) {
+      throw new Error(`release file is outside approved implementation scope: ${file}`);
     }
   }
+  const schema = changedFiles.some(file => file.startsWith('supabase/migrations/'));
   return {
-    schema: false,
-    authentication: changedFiles.some(file => file.includes('/context/AuthContext.') || file.includes('/lib/supabase.')),
-    authorization: changedFiles.some(file => file.includes('/routing/') || file.includes('/components/access/') || file.endsWith('/SafetyGate.tsx')),
+    schema,
+    authentication: changedFiles.some(file => file.includes('/context/AuthContext.') || file.includes('/lib/supabase.') || /(?:auth|identity)/i.test(file)),
+    authorization: changedFiles.some(file => file.includes('/routing/') || file.includes('/components/access/') || file.endsWith('/SafetyGate.tsx') || /(?:policy|rls|permission|role)/i.test(file)),
     dependencies: changedFiles.some(file => /(?:package\.json|lock\.yaml|package-lock\.json|yarn\.lock)$/.test(file)),
     environment: changedFiles.some(file => /(?:^|\/)\.env(?:\.|$)/.test(file)),
     infrastructure: false
@@ -50,32 +52,73 @@ function parseReleasePackage(content, evidence) {
   return { ...release, changed_files: actualFiles };
 }
 
+function artifactList(value) {
+  return Array.isArray(value) ? value : value ? [value] : [];
+}
+
+function mergeImplementationEvidence(manifests, verifications) {
+  if (manifests.length === 0 || manifests.length !== verifications.length) {
+    throw new Error('implementation evidence sets are incomplete');
+  }
+  const changedFiles = manifests.flatMap(manifest => manifest.map(item => item?.path).filter(Boolean));
+  if (new Set(changedFiles).size !== changedFiles.length) {
+    throw new Error('implementation evidence changes the same file more than once');
+  }
+  if (verifications.some(verification => verification?.succeeded !== true)) {
+    throw new Error('implementation verification evidence did not pass');
+  }
+  return { changedFiles: [...changedFiles].sort(), verification: verifications.length === 1 ? verifications[0] : verifications };
+}
+
 async function loadReleaseEvidence({ supabase, job, artifacts }) {
-  const [patch, manifest, buildLogs, securityReview, codeReview] = await Promise.all([
-    downloadVerifiedArtifact(supabase, artifacts.patch.id, job.id, 'code_implementation'),
-    downloadVerifiedArtifact(supabase, artifacts.manifest.id, job.id, 'changed_file_manifest'),
-    downloadVerifiedArtifact(supabase, artifacts.buildLogs.id, job.id, 'build_logs'),
+  const patchArtifacts = artifactList(artifacts.patch);
+  const manifestArtifacts = artifactList(artifacts.manifest);
+  const buildLogArtifacts = artifactList(artifacts.buildLogs);
+  if (patchArtifacts.length === 0 || patchArtifacts.length > 2
+      || patchArtifacts.length !== manifestArtifacts.length || patchArtifacts.length !== buildLogArtifacts.length) {
+    throw new Error('one or two complete implementation artifact sets are required');
+  }
+  const [patches, manifests, buildLogs, securityReview, codeReview] = await Promise.all([
+    Promise.all(patchArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'code_implementation'))),
+    Promise.all(manifestArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'changed_file_manifest'))),
+    Promise.all(buildLogArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'build_logs'))),
     downloadVerifiedArtifact(supabase, artifacts.securityReview.id, job.id, 'security_review'),
     artifacts.codeReview
       ? downloadVerifiedArtifact(supabase, artifacts.codeReview.id, job.id, 'code_review')
       : Promise.resolve(null)
   ]);
-  let changedManifest;
-  let verification;
+  let changedManifests;
+  let verifications;
   let security;
+  let independentReview = null;
   try {
-    changedManifest = JSON.parse(manifest.bytes.toString('utf8'));
-    verification = JSON.parse(buildLogs.bytes.toString('utf8'));
+    changedManifests = manifests.map(manifest => JSON.parse(manifest.bytes.toString('utf8')));
+    verifications = buildLogs.map(log => JSON.parse(log.bytes.toString('utf8')));
     security = JSON.parse(securityReview.bytes.toString('utf8'));
+    independentReview = codeReview ? JSON.parse(codeReview.bytes.toString('utf8')) : null;
   } catch {
     throw new Error('release evidence contains malformed JSON');
   }
-  const changedFiles = changedManifest.map(item => item?.path).filter(Boolean);
-  if (!verification.succeeded) throw new Error('frontend verification evidence did not pass');
+  const implementation = mergeImplementationEvidence(changedManifests, verifications);
   if (!security.passed || security.counts?.critical !== 0 || security.counts?.high !== 0) {
     throw new Error('clean security review evidence is required');
   }
-  return { patch, codeReview, changedFiles, verification, security, impact: deriveReleaseImpact(changedFiles) };
+  if (job.code_review_mode === 'independent_ai'
+      && (!independentReview || independentReview.verdict !== 'passed')) {
+    throw new Error('passed independent code review evidence is required');
+  }
+  if (Array.isArray(security.reviewed_files)
+      && JSON.stringify([...security.reviewed_files].sort()) !== JSON.stringify(implementation.changedFiles)) {
+    throw new Error('security review files do not match implementation evidence');
+  }
+  return {
+    patches,
+    codeReview: independentReview,
+    changedFiles: implementation.changedFiles,
+    verification: implementation.verification,
+    security,
+    impact: deriveReleaseImpact(implementation.changedFiles)
+  };
 }
 
 async function startReleasePreparation(supabase, jobId, stepId, securityWorkerRunId) {
@@ -180,9 +223,9 @@ async function runReleaseEngineer({
   const started = await startRelease(supabase, job.id, step.id, securityWorkerRunId);
   if (!started.success) return { ok: false, status: 409, error: started.error };
   const artifactIds = [
-    artifacts.patch.id,
-    artifacts.manifest.id,
-    artifacts.buildLogs.id,
+    ...artifactList(artifacts.patch).map(artifact => artifact.id),
+    ...artifactList(artifacts.manifest).map(artifact => artifact.id),
+    ...artifactList(artifacts.buildLogs).map(artifact => artifact.id),
     artifacts.securityReview.id,
     ...(artifacts.codeReview ? [artifacts.codeReview.id] : [])
   ];
@@ -197,7 +240,8 @@ async function runReleaseEngineer({
     changed_files: evidence.changedFiles,
     impact: evidence.impact,
     verification: evidence.verification,
-    security: evidence.security
+    security: evidence.security,
+    code_review: evidence.codeReview
   });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
@@ -247,6 +291,8 @@ module.exports = {
   RELEASE_ENGINEER_PROMPT_VERSION,
   deriveReleaseImpact,
   parseReleasePackage,
+  artifactList,
+  mergeImplementationEvidence,
   loadReleaseEvidence,
   startReleasePreparation,
   registerReleaseArtifact,

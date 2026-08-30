@@ -6,6 +6,7 @@ const WORKER_PROFILES = Object.freeze({
   build: Object.freeze(['npm', 'run', 'build']),
   lint: Object.freeze(['npm', 'run', 'lint']),
   'frontend-verify': Object.freeze(['node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
+  'backend-verify': Object.freeze(['node', '/opt/bob/backend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
   'security-review': Object.freeze(['node', '/opt/bob/security-worker.js', '/artifacts/validated.patch', '/artifacts/changed-files.json', '/artifacts/security-review.json'])
 });
 
@@ -31,7 +32,9 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g'
     `--pids-limit=${pidsLimit}`,
     '--tmpfs=/tmp:rw,noexec,nosuid,size=64m',
   ];
-  if (profile === 'frontend-verify') args.push('--tmpfs=/work:rw,exec,nosuid,size=1024m');
+  if (profile === 'frontend-verify' || profile === 'backend-verify') {
+    args.push('--tmpfs=/work:rw,exec,nosuid,size=1024m');
+  }
   args.push(
     '--mount', `type=bind,src=${sourceDir},dst=/workspace,readonly`,
     '--mount', `type=bind,src=${artifactDir},dst=/artifacts`,

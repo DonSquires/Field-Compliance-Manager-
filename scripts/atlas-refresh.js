@@ -254,6 +254,7 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
   for (const existing of existingCapabilities) {
     if (existing.refresh_source === 'ci_generator'
         && String(existing.notes || '').startsWith(OWNER_MARKER)
+        && existing.retirement_status !== 'legacy'
         && !generatedCapabilityKeys.has(capabilityKey(existing))) {
       plan.capabilityRetireIds.push(existing.id);
     }
@@ -265,15 +266,22 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
       plan.skippedManualEdges += 1;
       continue;
     }
-    if (!existing || !fieldsMatch(existing, edge, [
+    const desired = {
+      ...edge,
+      caller_context: existing && !String(existing.caller_context || '').startsWith(OWNER_MARKER)
+        ? existing.caller_context
+        : edge.caller_context
+    };
+    if (!existing || !fieldsMatch(existing, desired, [
       'evidence_class', 'retirement_status', 'migration_name', 'caller_context', 'refresh_source'
     ])) {
-      plan.edgeUpserts.push(edge);
+      plan.edgeUpserts.push(desired);
     }
   }
   for (const existing of existingEdges) {
     if (existing.refresh_source === 'ci_generator'
         && String(existing.caller_context || '').startsWith(OWNER_MARKER)
+        && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);
     }

@@ -2,10 +2,12 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 const { createWorkflowClient } = require('./supabase-workflow-client');
 const { createAssessment } = require('./assessment-manifest');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
+const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
 
 const port = Number(process.env.PORT || 8080);
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
@@ -24,6 +26,17 @@ const workflowClient = createWorkflowClient({
   mode: process.env.BOB_WORKFLOW_MODE || 'local'
 });
 const modelGatewayConfig = createModelGatewayConfig();
+const builderSupabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  })
+  : null;
+const builderGateway = {
+  gatewayUrl: process.env.BOB_MODEL_GATEWAY_URL || `http://127.0.0.1:${port}`,
+  apiToken: modelGatewayToken
+};
+const builderWorkerImage = process.env.BOB_WORKER_IMAGE || '';
+const builderRunnerId = process.env.BOB_BUILDER_RUNNER_ID || 'bob-builder-runtime';
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
@@ -85,6 +98,26 @@ function modelGatewayAuthorized(req) {
 
 function repositoryAllowed(repository) {
   return Boolean(repository) && allowedRepositories.has(repository);
+}
+
+function boundedStringArray(value, maximum = 100) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean))].slice(0, maximum);
+}
+
+function builderRuntimeContext(body) {
+  return {
+    sourceDir: assessmentRoot,
+    workerImage: builderWorkerImage,
+    runnerId: builderRunnerId,
+    reviewerModelName: typeof body.reviewerModelName === 'string' ? body.reviewerModelName.slice(0, 200) : null,
+    frontendFiles: boundedStringArray(body.frontendFiles, 30),
+    backendFiles: boundedStringArray(body.backendFiles, 40),
+    constraints: boundedStringArray(body.constraints, 100),
+    requestedFromUsers: boundedStringArray(body.requestedFromUsers, 100),
+    repositoryContext: body.repositoryContext && typeof body.repositoryContext === 'object' ? body.repositoryContext : {},
+    designContext: body.designContext && typeof body.designContext === 'object' ? body.designContext : {}
+  };
 }
 
 function webhookValid(req, rawBody) {
@@ -154,6 +187,72 @@ async function route(req, res, body) {
     if (!body.repository) return json(res, 400, { error: 'repository is required' });
     if (!repositoryAllowed(body.repository)) return json(res, 403, { error: 'repository is not allowed' });
     return json(res, 201, await createJob(body, 'admin'));
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/bob/builder/jobs') {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    if (!body.repository || !repositoryAllowed(body.repository)) return json(res, 403, { error: 'repository is not allowed' });
+    if (!body.organizationId || !body.projectId || !body.title || !body.taskDescription || !body.targetSha) {
+      return json(res, 400, { error: 'organizationId, projectId, title, taskDescription, and targetSha are required' });
+    }
+    const { data, error } = await builderSupabase.rpc('builder_create_job', {
+      _organization_id: body.organizationId,
+      _project_id: body.projectId,
+      _title: body.title,
+      _task_description: body.taskDescription,
+      _target_sha: body.targetSha,
+      _branch_name: body.branchName || 'main',
+      _description: body.description || null,
+      _frontend_required: body.frontendRequired !== false,
+      _backend_required: body.backendRequired === true,
+      _code_review_mode: body.codeReviewMode || 'none',
+      _task_run_id: body.taskRunId || null
+    });
+    if (error || !data?.id) return json(res, 409, { error: 'Builder job could not be created' });
+    return json(res, 201, data);
+  }
+
+  const builderMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)(?:\/(advance|run))?$/);
+  if (builderMatch && req.method === 'GET' && !builderMatch[2]) {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    try {
+      return json(res, 200, await loadBuilderRuntimeSnapshot(builderSupabase, builderMatch[1]));
+    } catch {
+      return json(res, 404, { error: 'Builder job not found' });
+    }
+  }
+  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'advance') {
+    if (!builderSupabase || !modelGatewayToken || !builderWorkerImage) {
+      return json(res, 503, { error: 'Builder runtime is unavailable' });
+    }
+    try {
+      const outcome = await advanceBuilderJob({
+        supabase: builderSupabase,
+        gateway: builderGateway,
+        jobId: builderMatch[1],
+        context: builderRuntimeContext(body)
+      });
+      return json(res, outcome.advanced ? 202 : 200, outcome);
+    } catch {
+      return json(res, 409, { error: 'Builder job could not advance' });
+    }
+  }
+  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'run') {
+    if (!builderSupabase || !modelGatewayToken || !builderWorkerImage) {
+      return json(res, 503, { error: 'Builder runtime is unavailable' });
+    }
+    try {
+      const outcome = await runBuilderUntilPause({
+        supabase: builderSupabase,
+        gateway: builderGateway,
+        jobId: builderMatch[1],
+        context: builderRuntimeContext(body),
+        maxActions: body.maxActions
+      });
+      return json(res, 200, outcome);
+    } catch {
+      return json(res, 409, { error: 'Builder runtime could not continue' });
+    }
   }
 
   const match = url.pathname.match(/^\/jobs\/([^/]+)(?:\/(approve|cancel))?$/);

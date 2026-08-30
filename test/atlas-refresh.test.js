@@ -75,7 +75,8 @@ test('Atlas refresh plan preserves manual truth and retires only owned stale row
   };
   const existingCapabilities = [
     { id: 'manual-cap', entity_type: 'table', entity_name: 'alpha', refresh_source: 'manual_seed', exercised: true },
-    { id: 'stale-cap', entity_type: 'rpc', entity_name: 'old_rpc', refresh_source: 'ci_generator', notes: OWNER_MARKER }
+    { id: 'stale-cap', entity_type: 'rpc', entity_name: 'old_rpc', refresh_source: 'ci_generator', notes: OWNER_MARKER },
+    { id: 'retired-cap', entity_type: 'rpc', entity_name: 'retired_rpc', refresh_source: 'ci_generator', notes: OWNER_MARKER, retirement_status: 'legacy' }
   ];
   const existingEdges = [
     { id: 'manual-edge', ...manifest.edges[0], refresh_source: 'manual_seed' },
@@ -88,6 +89,11 @@ test('Atlas refresh plan preserves manual truth and retires only owned stale row
       id: 'legacy-generator', source_type: 'component', source_name: 'pages/Legacy', target_type: 'table',
       target_name: 'if', edge_kind: 'references', source_file: 'apps/web/src/pages/Legacy.tsx',
       refresh_source: 'ci_generator', caller_context: 'raw reference to if'
+    },
+    {
+      id: 'retired-edge', source_type: 'component', source_name: 'pages/Retired', target_type: 'table',
+      target_name: 'retired_table', edge_kind: 'reads', source_file: 'apps/web/src/pages/Retired.tsx',
+      refresh_source: 'ci_generator', caller_context: `${OWNER_MARKER} retired`, retirement_status: 'legacy'
     }
   ];
 
@@ -145,6 +151,24 @@ test('Atlas refresh plan is a no-op when owned rows already match', () => {
   assert.equal(plan.capabilityUpserts.length, 0);
   assert.equal(plan.edgeUpserts.length, 0);
   assert.equal(plan.capabilityRetireIds.length, 0);
+  assert.equal(plan.edgeRetireIds.length, 0);
+});
+
+test('Atlas refresh preserves caller context owned by another generator', () => {
+  const edge = {
+    id: 'edge-1', source_type: 'component', source_name: 'pages/TestPage', target_type: 'table',
+    target_name: 'alpha', edge_kind: 'reads', evidence_class: 'live-code', retirement_status: 'live',
+    source_file: 'apps/web/src/pages/TestPage.tsx', migration_name: null,
+    caller_context: 'Supabase table query in component', refresh_source: 'ci_generator'
+  };
+  const manifest = {
+    capabilities: [],
+    edges: [{ ...edge, id: undefined, caller_context: `${OWNER_MARKER} .from('alpha')` }]
+  };
+
+  const plan = buildRefreshPlan(manifest, [], [edge]);
+
+  assert.equal(plan.edgeUpserts.length, 0);
   assert.equal(plan.edgeRetireIds.length, 0);
 });
 

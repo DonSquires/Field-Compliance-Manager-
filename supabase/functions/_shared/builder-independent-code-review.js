@@ -6,6 +6,10 @@ const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff'
 
 const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v1';
 
+function artifactList(value) {
+  return Array.isArray(value) ? value : value ? [value] : [];
+}
+
 function parseIndependentCodeReview(content) {
   if (typeof content !== 'string' || !content.trim()) throw new Error('independent code review is empty');
   let report;
@@ -29,16 +33,23 @@ function parseIndependentCodeReview(content) {
 }
 
 async function loadCodeReviewEvidence({ supabase, job, artifacts }) {
-  const [patch, manifest, buildLogs, security] = await Promise.all([
-    downloadVerifiedArtifact(supabase, artifacts.patch.id, job.id, 'code_implementation'),
-    downloadVerifiedArtifact(supabase, artifacts.manifest.id, job.id, 'changed_file_manifest'),
-    downloadVerifiedArtifact(supabase, artifacts.buildLogs.id, job.id, 'build_logs'),
+  const patchArtifacts = artifactList(artifacts.patch);
+  const manifestArtifacts = artifactList(artifacts.manifest);
+  const buildLogArtifacts = artifactList(artifacts.buildLogs);
+  if (patchArtifacts.length === 0 || patchArtifacts.length > 2
+      || patchArtifacts.length !== manifestArtifacts.length || patchArtifacts.length !== buildLogArtifacts.length) {
+    throw new Error('one or two complete implementation artifact sets are required');
+  }
+  const [patches, manifests, buildLogs, security] = await Promise.all([
+    Promise.all(patchArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'code_implementation'))),
+    Promise.all(manifestArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'changed_file_manifest'))),
+    Promise.all(buildLogArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'build_logs'))),
     downloadVerifiedArtifact(supabase, artifacts.security.id, job.id, 'security_review')
   ]);
   return {
-    patch: patch.bytes.toString('utf8'),
-    manifest: JSON.parse(manifest.bytes.toString('utf8')),
-    buildLogs: JSON.parse(buildLogs.bytes.toString('utf8')),
+    patches: patches.map(patch => patch.bytes.toString('utf8')),
+    manifests: manifests.map(manifest => JSON.parse(manifest.bytes.toString('utf8'))),
+    buildLogs: buildLogs.map(log => JSON.parse(log.bytes.toString('utf8'))),
     security: JSON.parse(security.bytes.toString('utf8'))
   };
 }
@@ -66,6 +77,15 @@ async function completeIndependentCodeReview(supabase, input) {
   return { success: true, job: data };
 }
 
+async function abortIndependentCodeReview(supabase, jobId, stepId, reason) {
+  const { error } = await supabase.rpc('builder_abort_independent_code_review', {
+    _job_id: jobId,
+    _step_id: stepId,
+    _reason: reason
+  });
+  return { success: !error };
+}
+
 async function runIndependentCodeReview({
   supabase,
   gateway,
@@ -76,14 +96,20 @@ async function runIndependentCodeReview({
   loadEvidence = loadCodeReviewEvidence,
   startReview = startCodeReview,
   executeModelRun = executeBuilderModelRun,
-  completeReview = completeIndependentCodeReview
+  completeReview = completeIndependentCodeReview,
+  abortReview = abortIndependentCodeReview
 }) {
   if (!job?.id || !job?.organization_id || !job?.target_sha || job.code_review_mode !== 'independent_ai') {
     throw new Error('independent AI review job is required');
   }
   if (!step?.id || step.step_id !== 'code_review' || step.builder_mode !== 'code_reviewer') throw new Error('code review step is required');
   if (!reviewerModelName) throw new Error('independent reviewer model is required');
-  const artifactIds = [artifacts.patch.id, artifacts.manifest.id, artifacts.buildLogs.id, artifacts.security.id];
+  const artifactIds = [
+    ...artifactList(artifacts.patch).map(artifact => artifact.id),
+    ...artifactList(artifacts.manifest).map(artifact => artifact.id),
+    ...artifactList(artifacts.buildLogs).map(artifact => artifact.id),
+    artifacts.security.id
+  ];
   const started = await startReview(supabase, job.id, step.id, artifactIds);
   if (!started.success) return { ok: false, status: 409, error: started.error };
   const evidence = await loadEvidence({ supabase, job, artifacts });
@@ -106,7 +132,10 @@ async function runIndependentCodeReview({
     outputSchema: { type: 'object', required: ['verdict', 'summary', 'findings', 'test_gaps', 'residual_risks'] }
   });
   const result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseIndependentCodeReview });
-  if (!result.ok) return { ...result, review: null };
+  if (!result.ok) {
+    await abortReview(supabase, job.id, step.id, result.error || 'Independent reviewer failed');
+    return { ...result, review: null };
+  }
   const completion = await completeReview(supabase, {
     jobId: job.id,
     stepId: step.id,
@@ -114,15 +143,20 @@ async function runIndependentCodeReview({
     artifactId: result.artifact.id,
     verdict: result.validated_output.verdict
   });
-  if (!completion.success) return { ...result, ok: false, status: 503, error: completion.error };
+  if (!completion.success) {
+    await abortReview(supabase, job.id, step.id, completion.error);
+    return { ...result, ok: false, status: 503, error: completion.error };
+  }
   return { ...result, review: result.validated_output, job: completion.job };
 }
 
 module.exports = {
   INDEPENDENT_CODE_REVIEW_PROMPT_VERSION,
+  artifactList,
   parseIndependentCodeReview,
   loadCodeReviewEvidence,
   startCodeReview,
   completeIndependentCodeReview,
+  abortIndependentCodeReview,
   runIndependentCodeReview
 };

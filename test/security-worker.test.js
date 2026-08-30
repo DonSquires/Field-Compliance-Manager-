@@ -45,6 +45,30 @@ test('security reviewer passes an ordinary typed UI change', () => {
   });
   assert.equal(report.passed, true);
   assert.deepEqual(report.counts, { critical: 0, high: 0, medium: 0, low: 0 });
+  assert.equal(report.review_scope, 'frontend');
+});
+
+test('security reviewer accepts bounded backend schema changes but records mandatory human review', () => {
+  const file = 'supabase/migrations/20260830000000_example.sql';
+  const report = reviewPatch({
+    patchText: patch('CREATE TABLE public.example (id uuid PRIMARY KEY);', file),
+    manifest: [{ path: file }]
+  });
+  assert.equal(report.passed, true);
+  assert.equal(report.review_scope, 'backend');
+  assert.equal(report.backend_risk.requires_human_approval, true);
+  assert.ok(report.findings.some(finding => finding.rule_id === 'backend-human-approval-required'));
+});
+
+test('security reviewer applies both policy sets to aggregate frontend and backend patches', () => {
+  const mixed = `${patch('export const value = 2;')}\n${patch('SELECT 1;', 'supabase/migrations/20260830000000_example.sql')}`;
+  const report = reviewPatch({
+    patchText: mixed,
+    manifest: [{ path: 'apps/web/src/example.ts' }, { path: 'supabase/migrations/20260830000000_example.sql' }]
+  });
+  assert.equal(report.passed, true);
+  assert.equal(report.review_scope, 'frontend_and_backend');
+  assert.equal(report.backend_risk.schema_change, true);
 });
 
 test('security reviewer rejects a manifest that does not match the patch', () => {

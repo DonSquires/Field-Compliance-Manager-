@@ -22,8 +22,14 @@ test('atlas, oracle, caddie, conductor, endpoint, db, and UI/UX calibration stay
   assert.ok(status.modules.includes('gitlab_read_boundary'));
   assert.ok(status.modules.includes('repo_read_progress'));
   assert.ok(status.modules.includes('frontend_patch_worker'));
+  assert.ok(status.modules.includes('backend_engineer'));
+  assert.ok(status.modules.includes('backend_patch_worker'));
+  assert.ok(status.modules.includes('backend_database_verifier'));
   assert.ok(status.modules.includes('independent_security_worker'));
+  assert.ok(status.modules.includes('aggregate_builder_review'));
+  assert.ok(status.modules.includes('builder_runtime_coordinator'));
   assert.ok(status.modules.includes('release_preparation'));
+  assert.ok(status.modules.includes('optional_code_review'));
   assert.ok(status.modules.includes('officer_safety_system'));
   assert.ok(status.modules.includes('safety_gating'));
   assert.ok(status.modules.includes('officer_pin_status'));
@@ -48,8 +54,14 @@ test('calibration update writes a fresh status artifact across all surfaces', ()
     'supabase/functions/bob-repo-search/index.ts': 'GITLAB_READ_TOKEN\nGITLAB_TOKEN\nGITLAB_WRITE_TOKEN\nGITLAB_ALLOWED_PROJECTS\nwrite_bob_chat\ntrackReadProgress',
     'supabase/migrations/20260828010000_bob_repo_read_progress.sql': 'bob_repo_read_progress\nmax_line_read\nconversation_id',
     'frontend-worker.js': 'validatePatchText\ngit apply\nchanged-files.json\nverification.json\nredactLog',
+    'supabase/functions/_shared/builder-backend-engineer.js': 'collectBackendSourceContext\nclassifyBackendChangeRisk\nparseBackendProposal\nrollback_notes\nrequires_human_approval',
+    'backend-worker.js': 'executeBackendPatch\nstatic_backend_patch\nmigration_execution\nchanged-files.json\nbackend-verification.json',
+    'backend-database-verifier.js': 'executeBackendDatabaseVerification\npublic.ecr.aws/supabase/postgres\nnetwork=none\ncanonical_schema\ncandidate_migrations',
     'security-worker.js': 'reviewPatch\ncredential-material\nprotected-surface-change\npatch_sha256\nmanifest_sha256',
+    'builder-security-handoff.js': 'builder_claim_aggregate_security_review\nimplementationWorkerRunIds\naggregate security evidence\nbuilder_recover_expired_security_review',
+    'builder-runtime-coordinator.js': 'planBuilderAction\nadvanceBuilderJob\nrunBuilderUntilPause\nwaiting_for_human\naction_limit',
     'supabase/functions/_shared/builder-release-engineer.js': 'deriveReleaseImpact\nrollback_steps\ndeployment_enabled\napproval',
+    'supabase/functions/_shared/builder-independent-code-review.js': 'parseIndependentCodeReview\nreviewerModelName\nabortIndependentCodeReview\nno approval',
     'apps/web/src/hooks/useOfficerSafety.ts': 'recordMovement\nacknowledgeAlert\ndetectionState\nactiveAlert',
     'apps/web/src/components/SafetyGate.tsx': 'getModuleAccessMessage\nsafetyRelevant',
     'apps/web/src/lib/officerPinStatus.ts': 'gpsAgeMs\nsafetyStatus\nalerting',

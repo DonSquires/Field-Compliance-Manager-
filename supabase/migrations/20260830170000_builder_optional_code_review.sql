@@ -42,6 +42,9 @@ BEGIN
   SELECT * INTO _job FROM public.builder_jobs WHERE id = _job_id FOR UPDATE;
   IF _job.id IS NULL OR _job.status <> 'intake' THEN RAISE EXCEPTION 'Code review policy can only be set during intake'; END IF;
   IF NOT public.can_approve_action(_uid, _job.organization_id) THEN RAISE EXCEPTION 'User cannot configure this job'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.builder_job_steps WHERE job_id = _job.id AND step_id = 'code_review' AND builder_mode = 'code_reviewer') THEN
+    RAISE EXCEPTION 'Code review step is missing';
+  END IF;
   UPDATE public.builder_jobs SET code_review_mode = _mode,
     code_review_status = CASE WHEN _mode = 'none' THEN 'not_required' ELSE 'pending' END, updated_at = now()
   WHERE id = _job.id RETURNING * INTO _job;
@@ -69,15 +72,29 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.builder_job_steps WHERE job_id = _job.id AND step_id = 'security_review' AND status = 'completed') THEN
     RAISE EXCEPTION 'Independent security review must complete first';
   END IF;
-  IF COALESCE(cardinality(_reviewed_artifact_ids), 0) < 4 OR (
-    SELECT count(*) FROM public.builder_artifacts WHERE job_id = _job.id AND id = ANY(_reviewed_artifact_ids) AND status = 'final'
-  ) <> cardinality(_reviewed_artifact_ids) THEN RAISE EXCEPTION 'Code review evidence snapshot is incomplete'; END IF;
-
   IF _job.code_review_mode = 'none' THEN
     UPDATE public.builder_job_steps SET status = 'skipped', completed_at = now(), result_summary = 'Optional code review not requested', updated_at = now() WHERE id = _step.id;
     UPDATE public.builder_jobs SET code_review_status = 'not_required', updated_at = now() WHERE id = _job.id;
+    INSERT INTO public.builder_audit_events (organization_id, job_id, event_type, actor_type, new_value, change_summary)
+    VALUES (_job.organization_id, _job.id, 'step_completed', 'builder_mode',
+      jsonb_build_object('step_id', 'code_review', 'status', 'skipped', 'target_sha', _job.target_sha),
+      'Optional code review skipped by configured policy');
     RETURN jsonb_build_object('mode', 'none', 'status', 'skipped');
-  ELSIF _job.code_review_mode = 'human' THEN
+  END IF;
+
+  IF _step.status <> 'pending' THEN RAISE EXCEPTION 'Code review step is not pending'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM unnest(ARRAY['code_implementation','changed_file_manifest','build_logs','security_review']) required_type
+    WHERE NOT EXISTS (
+      SELECT 1 FROM public.builder_artifacts artifact
+      WHERE artifact.job_id = _job.id AND artifact.id = ANY(_reviewed_artifact_ids)
+        AND artifact.artifact_type = required_type AND artifact.status = 'final'
+    )
+  ) OR (
+    SELECT count(*) FROM public.builder_artifacts WHERE job_id = _job.id AND id = ANY(_reviewed_artifact_ids) AND status = 'final'
+  ) <> cardinality(_reviewed_artifact_ids) THEN RAISE EXCEPTION 'Code review evidence snapshot is incomplete'; END IF;
+
+  IF _job.code_review_mode = 'human' THEN
     UPDATE public.builder_job_steps SET status = 'blocked', blocked_reason = 'Waiting for human code review', input_context = jsonb_build_object('reviewed_artifact_ids', _reviewed_artifact_ids), updated_at = now() WHERE id = _step.id;
     INSERT INTO public.builder_approvals (organization_id, job_id, approval_type, triggered_at_status, status,
       requested_from_users, requested_target_sha, reviewed_artifact_ids)
@@ -94,6 +111,10 @@ BEGIN
       input_context = jsonb_build_object('reviewed_artifact_ids', _reviewed_artifact_ids, 'target_sha', _job.target_sha), updated_at = now()
     WHERE id = _step.id;
     UPDATE public.builder_jobs SET code_review_status = 'pending', updated_at = now() WHERE id = _job.id;
+    INSERT INTO public.builder_audit_events (organization_id, job_id, event_type, actor_type, new_value, change_summary, related_artifact_ids)
+    VALUES (_job.organization_id, _job.id, 'step_started', 'builder_mode',
+      jsonb_build_object('step_id', 'code_review', 'mode', 'independent_ai', 'target_sha', _job.target_sha),
+      'Independent AI code review started', _reviewed_artifact_ids);
     RETURN jsonb_build_object('mode', 'independent_ai', 'status', 'running');
   END IF;
   RAISE EXCEPTION 'Unsupported code review policy state';
@@ -139,7 +160,7 @@ CREATE OR REPLACE FUNCTION public.builder_complete_independent_code_review(
 )
 RETURNS public.builder_jobs
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $$
-DECLARE _job public.builder_jobs%rowtype; _step public.builder_job_steps%rowtype; reviewer_run public.builder_model_runs%rowtype; author_run public.builder_model_runs%rowtype; _passed boolean;
+DECLARE _job public.builder_jobs%rowtype; _step public.builder_job_steps%rowtype; reviewer_run public.builder_model_runs%rowtype; author_run public.builder_model_runs%rowtype; _passed boolean; _expected_inputs uuid[];
 BEGIN
   IF auth.role() <> 'service_role' THEN RAISE EXCEPTION 'Service identity required'; END IF;
   IF _verdict NOT IN ('passed', 'blocked') THEN RAISE EXCEPTION 'Independent review verdict is invalid'; END IF;
@@ -152,8 +173,16 @@ BEGIN
   ORDER BY model_run.completed_at DESC LIMIT 1;
   IF _job.id IS NULL OR _job.status <> 'security_review' OR _job.code_review_mode <> 'independent_ai' THEN RAISE EXCEPTION 'Independent code review is not configured'; END IF;
   IF _step.id IS NULL OR _step.status <> 'running' OR _step.builder_mode <> 'code_reviewer' THEN RAISE EXCEPTION 'Independent code review step is not running'; END IF;
+  SELECT COALESCE(array_agg(value::uuid), '{}') INTO _expected_inputs
+  FROM jsonb_array_elements_text(COALESCE(_step.input_context->'reviewed_artifact_ids', '[]'::jsonb)) value;
   IF reviewer_run.id IS NULL OR reviewer_run.status <> 'completed' OR NOT (_review_artifact_id = ANY(reviewer_run.output_artifact_ids)) THEN RAISE EXCEPTION 'Independent reviewer model evidence is incomplete'; END IF;
-  IF author_run.id IS NULL OR reviewer_run.model_name = author_run.model_name THEN RAISE EXCEPTION 'Independent reviewer must use a different model identity'; END IF;
+  IF cardinality(_expected_inputs) < 4 OR NOT (reviewer_run.input_artifact_ids @> _expected_inputs)
+     OR cardinality(reviewer_run.input_artifact_ids) <> cardinality(_expected_inputs) THEN
+    RAISE EXCEPTION 'Independent reviewer inputs do not match the approved evidence snapshot';
+  END IF;
+  IF author_run.id IS NULL OR (reviewer_run.provider = author_run.provider AND reviewer_run.model_name = author_run.model_name) THEN
+    RAISE EXCEPTION 'Independent reviewer must use a different provider or model identity';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM public.builder_artifacts WHERE id = _review_artifact_id AND job_id = _job.id AND step_id = _step.id AND artifact_type = 'code_review' AND status = 'final') THEN
     RAISE EXCEPTION 'Independent code review artifact is invalid';
   END IF;
@@ -186,6 +215,25 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.builder_require_human_code_review_evidence()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $$
+DECLARE _required_types text[] := ARRAY['code_implementation','changed_file_manifest','build_logs','security_review'];
+BEGIN
+  IF NEW.approval_type <> 'implementation_review' THEN RETURN NEW; END IF;
+  IF EXISTS (SELECT 1 FROM unnest(_required_types) required_type WHERE NOT EXISTS (
+    SELECT 1 FROM public.builder_artifacts artifact
+    WHERE artifact.job_id = NEW.job_id AND artifact.id = ANY(NEW.reviewed_artifact_ids)
+      AND artifact.artifact_type = required_type AND artifact.status = 'final'
+  )) THEN RAISE EXCEPTION 'Human code review requires the complete verified artifact set'; END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS builder_human_code_review_evidence_gate ON public.builder_approvals;
+CREATE TRIGGER builder_human_code_review_evidence_gate
+BEFORE INSERT OR UPDATE OF reviewed_artifact_ids, approval_type ON public.builder_approvals
+FOR EACH ROW EXECUTE FUNCTION public.builder_require_human_code_review_evidence();
+
 DROP TRIGGER IF EXISTS builder_release_review_policy_gate ON public.builder_job_steps;
 CREATE TRIGGER builder_release_review_policy_gate BEFORE UPDATE OF status ON public.builder_job_steps
 FOR EACH ROW EXECUTE FUNCTION public.builder_enforce_release_review_policy();
@@ -213,3 +261,5 @@ GRANT EXECUTE ON FUNCTION public.builder_start_code_review(uuid,uuid,uuid[],uuid
 GRANT EXECUTE ON FUNCTION public.builder_complete_independent_code_review(uuid,uuid,uuid,uuid,text) TO service_role;
 REVOKE EXECUTE ON FUNCTION public.builder_decide_human_code_review(uuid,text,text) FROM PUBLIC,anon,service_role;
 GRANT EXECUTE ON FUNCTION public.builder_decide_human_code_review(uuid,text,text) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.builder_require_human_code_review_evidence() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.builder_require_human_code_review_evidence() TO service_role;

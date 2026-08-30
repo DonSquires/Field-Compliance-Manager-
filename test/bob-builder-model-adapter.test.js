@@ -51,6 +51,12 @@ test('model run request changes idempotency key when prompt changes', () => {
   assert.notEqual(first.idempotency_key, second.idempotency_key);
 });
 
+test('model run request changes idempotency key when reviewer model changes', () => {
+  const first = makeRequest({ modelName: 'reviewer-a' });
+  const second = makeRequest({ modelName: 'reviewer-b' });
+  assert.notEqual(first.idempotency_key, second.idempotency_key);
+});
+
 test('model gateway uses the canonical authenticated control-plane endpoint', async () => {
   let captured;
   const result = await callModelGateway({

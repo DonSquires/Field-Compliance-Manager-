@@ -11,6 +11,7 @@
     "pretest": "npm run calibrate"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
     "ws": "^8.21.0"
   },
   "devDependencies": {

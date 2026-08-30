@@ -126,6 +126,15 @@ test('builder model route requires its dedicated bearer token', async () => {
   assert.deepEqual(allowed.body, { error: 'unsupported model provider' });
 });
 
+test('Builder runtime routes require the admin token and fixed server configuration', async () => {
+  const denied = await request('POST', '/api/bob/builder/jobs', {});
+  assert.equal(denied.response.status, 401);
+  const deniedAdvance = await request('POST', '/api/bob/builder/jobs/job-1/advance', {});
+  assert.equal(deniedAdvance.response.status, 401);
+  const deniedRun = await request('POST', '/api/bob/builder/jobs/job-1/run', {});
+  assert.equal(deniedRun.response.status, 401);
+});
+
 test('job creation rejects repositories outside the allowlist', async () => {
   const { response, body } = await request('POST', '/jobs', { repository: 'untrusted/app' }, {
     authorization: `Bearer ${adminToken}`

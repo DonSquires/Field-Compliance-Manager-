@@ -13,6 +13,9 @@ test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('frontend-verify'), [
     'node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts'
   ]);
+  assert.deepEqual(workerCommand('backend-verify'), [
+    'node', '/opt/bob/backend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts'
+  ]);
   assert.deepEqual(workerCommand('security-review'), [
     'node', '/opt/bob/security-worker.js', '/artifacts/validated.patch',
     '/artifacts/changed-files.json', '/artifacts/security-review.json'
@@ -48,6 +51,20 @@ test('frontend verification executes only in disposable tmpfs while source remai
   assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=64m'));
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
   assert.equal(args.some(value => value.includes('docker.sock')), false);
+});
+
+test('backend verification executes only in disposable tmpfs without network or Docker authority', () => {
+  const args = dockerArguments({
+    image: 'fcm/bob-worker:test',
+    sourceDir: '/tmp/source',
+    artifactDir: '/tmp/artifacts',
+    profile: 'backend-verify'
+  });
+  assert.ok(args.includes('--network=none'));
+  assert.ok(args.includes('--tmpfs=/work:rw,exec,nosuid,size=1024m'));
+  assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
+  assert.equal(args.some(value => value.includes('docker.sock')), false);
+  assert.equal(args.some(value => value.includes('SUPABASE_SERVICE_ROLE_KEY')), false);
 });
 
 test('frontend patch validation rejects traversal, binary, and oversized patches', () => {

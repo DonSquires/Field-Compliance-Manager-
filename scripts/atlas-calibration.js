@@ -57,14 +57,44 @@ const REQUIREMENTS = [
     requiredMarkers: ['validatePatchText', 'git apply', 'changed-files.json', 'verification.json', 'redactLog']
   },
   {
+    name: 'backend_engineer',
+    file: 'supabase/functions/_shared/builder-backend-engineer.js',
+    requiredMarkers: ['collectBackendSourceContext', 'classifyBackendChangeRisk', 'parseBackendProposal', 'rollback_notes', 'requires_human_approval']
+  },
+  {
+    name: 'backend_patch_worker',
+    file: 'backend-worker.js',
+    requiredMarkers: ['executeBackendPatch', 'static_backend_patch', 'migration_execution', 'changed-files.json', 'backend-verification.json']
+  },
+  {
+    name: 'backend_database_verifier',
+    file: 'backend-database-verifier.js',
+    requiredMarkers: ['executeBackendDatabaseVerification', 'public.ecr.aws/supabase/postgres', 'network=none', 'canonical_schema', 'candidate_migrations']
+  },
+  {
     name: 'independent_security_worker',
     file: 'security-worker.js',
     requiredMarkers: ['reviewPatch', 'credential-material', 'protected-surface-change', 'patch_sha256', 'manifest_sha256']
   },
   {
+    name: 'aggregate_builder_review',
+    file: 'builder-security-handoff.js',
+    requiredMarkers: ['builder_claim_aggregate_security_review', 'implementationWorkerRunIds', 'aggregate security evidence', 'builder_recover_expired_security_review']
+  },
+  {
+    name: 'builder_runtime_coordinator',
+    file: 'builder-runtime-coordinator.js',
+    requiredMarkers: ['planBuilderAction', 'advanceBuilderJob', 'runBuilderUntilPause', 'waiting_for_human', 'action_limit']
+  },
+  {
     name: 'release_preparation',
     file: 'supabase/functions/_shared/builder-release-engineer.js',
     requiredMarkers: ['deriveReleaseImpact', 'rollback_steps', 'deployment_enabled', 'approval']
+  },
+  {
+    name: 'optional_code_review',
+    file: 'supabase/functions/_shared/builder-independent-code-review.js',
+    requiredMarkers: ['parseIndependentCodeReview', 'reviewerModelName', 'abortIndependentCodeReview', 'no approval']
   },
   {
     name: 'officer_safety_system',

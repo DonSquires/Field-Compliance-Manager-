@@ -6,6 +6,10 @@ const {
   validatePatchText,
   PROTECTED_FRONTEND_PATHS
 } = require('./frontend-worker');
+const {
+  changedFilesFromPatch: changedBackendFilesFromPatch,
+  classifyBackendChangeRisk
+} = require('./supabase/functions/_shared/builder-backend-engineer');
 
 const MAX_REPORT_BYTES = 512 * 1024;
 const RULES = [
@@ -13,7 +17,7 @@ const RULES = [
     id: 'credential-material',
     severity: 'critical',
     pattern: /(?:BEGIN [A-Z ]*PRIVATE KEY|SUPABASE_SERVICE_ROLE_KEY\s*[:=]|(?:api[_-]?key|token|password|secret)\s*[:=]\s*['"][^'"]{8,}|\bsk-[A-Za-z0-9_-]{16,})/i,
-    message: 'Possible credential material added to frontend source'
+    message: 'Possible credential material added to source'
   },
   {
     id: 'dynamic-code-execution',
@@ -69,6 +73,18 @@ function addedLinesByFile(patchText) {
   return added;
 }
 
+function filterPatchByScope(patchText, predicate) {
+  const starts = [...patchText.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)];
+  return starts
+    .filter(match => predicate(match[2].trim()))
+    .map((match, index) => {
+      const originalIndex = starts.indexOf(match);
+      const end = starts[originalIndex + 1]?.index ?? patchText.length;
+      return patchText.slice(match.index, end).trimEnd();
+    })
+    .join('\n');
+}
+
 function reviewPatch({ patchText, manifest }) {
   const patchFiles = changedFilesFromPatch(patchText);
   const manifestFiles = [...new Set((manifest || []).map(item => item?.path).filter(Boolean))].sort();
@@ -77,10 +93,30 @@ function reviewPatch({ patchText, manifest }) {
   }
 
   const findings = [];
-  try {
-    validatePatchText(patchText);
-  } catch (error) {
-    if (!String(error.message).includes('protected frontend changes require separate approval')) throw error;
+  const frontendFiles = patchFiles.filter(file => file.startsWith('apps/web/'));
+  const backendFiles = patchFiles.filter(file => !file.startsWith('apps/web/'));
+  let backendRisk = null;
+  if (frontendFiles.length > 0) {
+    const frontendPatch = filterPatchByScope(patchText, file => file.startsWith('apps/web/'));
+    try {
+      validatePatchText(frontendPatch);
+    } catch (error) {
+      if (!String(error.message).includes('protected frontend changes require separate approval')) throw error;
+    }
+  }
+  if (backendFiles.length > 0) {
+    const backendPatch = filterPatchByScope(patchText, file => !file.startsWith('apps/web/'));
+    changedBackendFilesFromPatch(backendPatch);
+    backendRisk = classifyBackendChangeRisk(backendPatch, backendFiles);
+    for (const reason of backendRisk.approval_reasons) {
+      findings.push({
+        rule_id: 'backend-human-approval-required',
+        severity: 'medium',
+        file: null,
+        line: null,
+        message: `Backend change requires human approval: ${reason}`
+      });
+    }
   }
   for (const file of patchFiles) {
     if (PROTECTED_FRONTEND_PATHS.some(pattern => pattern.test(file))) {
@@ -113,7 +149,11 @@ function reviewPatch({ patchText, manifest }) {
     passed: counts.critical === 0 && counts.high === 0,
     counts,
     findings,
-    reviewed_files: patchFiles
+    reviewed_files: patchFiles,
+    review_scope: frontendFiles.length > 0 && backendFiles.length > 0
+      ? 'frontend_and_backend'
+      : frontendFiles.length > 0 ? 'frontend' : 'backend',
+    backend_risk: backendRisk
   };
 }
 
@@ -154,6 +194,7 @@ if (require.main === module) {
 module.exports = {
   RULES,
   addedLinesByFile,
+  filterPatchByScope,
   reviewPatch,
   executeSecurityReview
 };
