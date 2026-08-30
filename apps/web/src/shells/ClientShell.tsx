@@ -1,191 +1,121 @@
-/**
- * ClientShell.tsx — Client portal shell
- *
- * Provides the client-facing interface for viewing field compliance reports,
- * observations, and incident summaries related to their sites.
- *
- * Roles: client_admin, client_officer, client_viewer
- */
-
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Building2, ChevronLeft, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, Menu, ScanLine, Shield, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ProfessionalNav } from '../components/ProfessionalNav';
-import { ProfessionalHeader } from '../components/ProfessionalHeader';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { ClientPortalPage as ClientPortalContent } from '../pages/ClientPortalPage';
+import { getClientPortalPages, isClientPortalPage, type ClientPortalPage } from '../lib/clientPortalAccess';
+import { resolveNotificationDestination } from '../lib/notificationNavigation';
+import './ClientShell.css';
+
+const NAVIGATION: Array<{ id: ClientPortalPage; label: string; icon: LucideIcon }> = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'sites', label: 'Sites and zones', icon: Building2 },
+  { id: 'observations', label: 'Observations', icon: Eye },
+  { id: 'reports', label: 'Reports', icon: FileText },
+  { id: 'scan', label: 'Scan access', icon: ScanLine },
+];
 
 export function ClientShell() {
   const { profile, signOut } = useAuth();
+  const relationships = useServiceRelationships();
   const navigate = useNavigate();
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  if (!profile) {
-    return <div style={{ padding: 32, textAlign: 'center' }}>Loading...</div>;
-  }
+  const routeSegment = location.pathname.split('/').filter(Boolean)[1];
+  const activePage: ClientPortalPage = isClientPortalPage(routeSegment) ? routeSegment : 'overview';
+  const agreement = relationships.selectedAgreement;
+  const allowedPages = useMemo(() => getClientPortalPages(agreement ? {
+    mode: agreement.client_portal_access_mode as 'transparency_only' | 'full_modules' | 'scan_only' | null,
+    reportsEnabled: agreement.client_portal_reports_enabled,
+  } : null), [agreement]);
+
+  useEffect(() => {
+    if (routeSegment && !isClientPortalPage(routeSegment)) navigate('/client', { replace: true });
+  }, [navigate, routeSegment]);
+
+  useEffect(() => {
+    if (!relationships.loading && !allowedPages.has(activePage)) navigate('/client', { replace: true });
+  }, [activePage, allowedPages, navigate, relationships.loading]);
+
+  if (!profile) return <div className="client-shell-loading">Loading client portal</div>;
+
+  const availableNavigation = NAVIGATION.filter((item) => allowedPages.has(item.id));
+
+  const openPage = (page: ClientPortalPage) => {
+    navigate(page === 'overview' ? '/client' : `/client/${page}`);
+    setMobileOpen(false);
+  };
+
+  const navigateFromNotification = (notification: NotificationRecord) => {
+    const destination = resolveNotificationDestination(profile.role, notification);
+    if (!destination || destination.kind !== 'client_page' || !isClientPortalPage(destination.page)) return false;
+    if (!allowedPages.has(destination.page)) return false;
+    openPage(destination.page);
+    return true;
+  };
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
   };
 
+  const navigation = (
+    <>
+      <button type="button" className="client-shell-brand" onClick={() => openPage('overview')} title="Client portal home">
+        <span><Shield size={20} aria-hidden="true" /></span>
+        {!collapsed && <div><strong>Field Compliance</strong><small>Client portal</small></div>}
+      </button>
+
+      <nav className="client-shell-nav" aria-label="Client portal">
+        {availableNavigation.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button type="button" key={item.id} className={activePage === item.id ? 'is-active' : ''} onClick={() => openPage(item.id)} title={collapsed ? item.label : undefined}>
+              <Icon size={19} aria-hidden="true" />
+              {!collapsed && <span>{item.label}</span>}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="client-shell-sidebar-footer">
+        {!collapsed && agreement && <div className="client-shell-agreement"><span>Selected service</span><strong>{agreement.name}</strong></div>}
+        <button type="button" onClick={() => void handleSignOut()} title="Sign out"><LogOut size={18} aria-hidden="true" />{!collapsed && <span>Sign out</span>}</button>
+      </div>
+    </>
+  );
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--color-bg-primary)' }}>
-      {/* Professional Header */}
-      <ProfessionalHeader
-        title="Client Portal"
-        subtitle="View your compliance reports and field observations"
-        actions={[
-          {
-            label: 'Profile',
-            onClick: () => navigate('/client/profile'),
-            variant: 'secondary',
-          },
-        ]}
-        userDisplayName={profile.displayName}
-        onLogout={() => setShowLogoutConfirm(true)}
-      />
+    <div className="client-shell">
+      <aside className={`client-shell-sidebar ${collapsed ? 'is-collapsed' : ''}`}>
+        {navigation}
+        <button type="button" className="client-collapse-button" onClick={() => setCollapsed((value) => !value)} title={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
+          {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+        </button>
+      </aside>
 
-      {/* Main Layout with Sidebar */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Professional Navigation */}
-        <ProfessionalNav
-          sections={[
-            {
-              title: 'Dashboard',
-              items: [
-                { id: 'dashboard', label: 'Overview', path: '/client', status: 'active' },
-                { id: 'sites', label: 'My Sites', path: '/client/sites', status: 'none' },
-              ],
-            },
-            {
-              title: 'Compliance Data',
-              items: [
-                { id: 'observations', label: 'Observations', path: '/client/observations', status: 'alerts' },
-                { id: 'incidents', label: 'Incidents', path: '/client/incidents', status: 'pending' },
-                { id: 'breaches', label: 'Breaches', path: '/client/breaches', status: 'none' },
-              ],
-            },
-            {
-              title: 'Reporting',
-              items: [
-                { id: 'reports', label: 'Reports', path: '/client/reports', status: 'none' },
-                { id: 'export', label: 'Export Data', path: '/client/export', status: 'none' },
-                { id: 'schedules', label: 'Report Schedule', path: '/client/schedules', status: 'none' },
-              ],
-            },
-          ]}
-          currentPath={window.location.pathname}
-          onNavigate={(path) => navigate(path)}
-        />
+      {mobileOpen && <button type="button" className="client-mobile-scrim" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
+      <aside className={`client-mobile-drawer ${mobileOpen ? 'is-open' : ''}`}>
+        <button type="button" className="client-mobile-close" onClick={() => setMobileOpen(false)} title="Close navigation"><X size={19} /><span className="sr-only">Close navigation</span></button>
+        {navigation}
+      </aside>
 
-        {/* Main Content Area */}
-        <main style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: 'var(--space-8)', maxWidth: '1280px', margin: '0 auto', width: '100%' }}>
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '60vh',
-              gap: 'var(--space-4)',
-            }}>
-              <div style={{ fontSize: '64px' }}>👋</div>
-              <div style={{ fontSize: '28px', fontWeight: 'var(--font-bold)', color: 'var(--color-text-primary)' }}>
-                Welcome, {profile.displayName}
-              </div>
-              <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-secondary)', textAlign: 'center', maxWidth: '400px' }}>
-                Select an option from the menu to view your compliance reports, observations, and field data.
-              </p>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)', marginTop: 'var(--space-8)', width: '100%' }}>
-                <div className="card" style={{ borderLeft: `4px solid var(--color-primary)` }}>
-                  <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--font-bold)', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>
-                    Active Sites
-                  </div>
-                  <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--font-bold)', color: 'var(--color-primary)' }}>
-                    3
-                  </div>
-                </div>
-
-                <div className="card" style={{ borderLeft: `4px solid var(--color-warning)` }}>
-                  <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--font-bold)', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>
-                    Observations
-                  </div>
-                  <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--font-bold)', color: 'var(--color-warning)' }}>
-                    24
-                  </div>
-                </div>
-
-                <div className="card" style={{ borderLeft: `4px solid var(--color-error)` }}>
-                  <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--font-bold)', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>
-                    Action Items
-                  </div>
-                  <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--font-bold)', color: 'var(--color-error)' }}>
-                    2
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <div className="client-shell-main">
+        <header className="client-shell-topbar">
+          <button type="button" className="client-mobile-menu" onClick={() => setMobileOpen(true)} title="Open navigation"><Menu size={20} /><span className="sr-only">Open navigation</span></button>
+          <div><strong>{agreement?.client_name ?? 'Client portal'}</strong><small>{agreement?.provider_name ? `Service by ${agreement.provider_name}` : 'Service relationship loading'}</small></div>
+          <NotificationCenter onNavigate={navigateFromNotification} />
+          <span className="client-role-badge">{profile.role.replace('client_', '')}</span>
+        </header>
+        <main className="client-shell-content" data-app-content>
+          <ClientPortalContent page={activePage} />
         </main>
       </div>
-
-      {/* Logout Confirmation Modal */}
-      {showLogoutConfirm && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div style={{
-            backgroundColor: 'var(--color-bg-primary)',
-            borderRadius: 'var(--radius-lg)',
-            padding: 'var(--space-8)',
-            maxWidth: '400px',
-            boxShadow: 'var(--shadow-lg)',
-          }}>
-            <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 'var(--font-bold)', marginBottom: 'var(--space-4)' }}>
-              Sign out?
-            </h2>
-            <p style={{ margin: '0 0 var(--space-6) 0', color: 'var(--color-text-secondary)' }}>
-              Are you sure you want to sign out?
-            </p>
-            <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setShowLogoutConfirm(false)}
-                style={{
-                  padding: 'var(--space-2) var(--space-4)',
-                  backgroundColor: 'transparent',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--color-text-primary)',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSignOut}
-                style={{
-                  padding: 'var(--space-2) var(--space-4)',
-                  backgroundColor: 'var(--color-error)',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'white',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                }}
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

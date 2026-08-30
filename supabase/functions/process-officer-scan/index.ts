@@ -701,7 +701,34 @@ serve(async (req)=>{
     const officerId = profile.id;
     // Step 2: Parse input
     const body = await req.json();
-    const { plate_number: rawPlate, image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
+    const { plate_number: rawPlate, image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
+    if (!['freedom_camping', 'parking_enforcement'].includes(moduleKey)) return json({
+      error: 'Unsupported scan module'
+    }, 400);
+    if (profile.role === 'scan_operator') {
+      const { data: agreements, error: agreementsError } = await supabase.from('service_agreements').select('id').or(`provider_organization_id.eq.${orgId},client_organization_id.eq.${orgId}`);
+      if (agreementsError) return json({
+        error: 'Standalone scan access could not be verified'
+      }, 503);
+      const agreementIds = (agreements ?? []).map((agreement)=>agreement.id);
+      if (!agreementIds.length) return json({
+        error: 'Standalone scan access is not enabled for this organisation'
+      }, 403);
+      const { data: moduleAccess, error: moduleAccessError } = await supabase.from('service_agreement_modules').select('id').in('service_agreement_id', agreementIds).eq('module_key', moduleKey).eq('enabled', true).eq('standalone_scan_enabled', true).limit(1);
+      if (moduleAccessError) return json({
+        error: 'Standalone scan access could not be verified'
+      }, 503);
+      if (!moduleAccess?.length) return json({
+        error: 'Standalone scan access is not enabled for this module'
+      }, 403);
+    }
+    const capturedDate = capturedAt ? new Date(capturedAt) : new Date();
+    if (Number.isNaN(capturedDate.getTime())) return json({
+      error: 'captured_at must be a valid ISO timestamp'
+    }, 400);
+    if (capturedDate.getTime() > Date.now() + 5 * 60 * 1000) return json({
+      error: 'captured_at cannot be in the future'
+    }, 400);
     // Steps 3 & 4: ALPR + full inference in parallel (same photo, two calls)
     let alprResult = null;
     let inferResult = null;
@@ -1183,7 +1210,7 @@ serve(async (req)=>{
     // BRANCHED on verificationMode (0191):
     //   two_photo_verified       → classifyOvernightWindow (local-midnight split)
     //   single_daily_observation → peekSingleDailyObservation (calendar-day adjacency)
-    const observedAt = new Date().toISOString();
+    const observedAt = capturedDate.toISOString();
     console.log(`[scan] verificationMode=${verificationMode}`);
     let windowPeek = {
       scanWindow: null,

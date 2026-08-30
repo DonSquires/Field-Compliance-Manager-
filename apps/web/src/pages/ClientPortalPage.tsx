@@ -1,0 +1,316 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  Building2,
+  CalendarRange,
+  CheckCircle2,
+  ClipboardList,
+  Eye,
+  FileText,
+  MapPin,
+  RefreshCw,
+  ScanLine,
+  ShieldCheck,
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import type { ClientPortalPage } from '../lib/clientPortalAccess';
+import { getClientPortalPages } from '../lib/clientPortalAccess';
+import { formatComplianceReason } from '../lib/freedomCampingStatus';
+import { supabase } from '../lib/supabase';
+import './ClientPortalPage.css';
+
+interface ClientObservation {
+  id: string;
+  plate_number: string;
+  module_key: string;
+  compliance_status: 'compliant' | 'at_risk' | 'breach' | 'breach_exempt' | 'unknown' | null;
+  compliance_reason: string | null;
+  observed_at: string;
+  site_id: string | null;
+  zone_id: string | null;
+}
+
+interface MonthlyReportPack {
+  id: string;
+  template_code: string;
+  period_start: string;
+  period_end: string;
+  status: 'draft' | 'generated' | 'sent' | 'failed';
+  generated_at: string | null;
+  sent_at: string | null;
+  delivery_error: string | null;
+}
+
+export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
+  const { profile } = useAuth();
+  const relationships = useServiceRelationships();
+  const [observations, setObservations] = useState<ClientObservation[]>([]);
+  const [reports, setReports] = useState<MonthlyReportPack[]>([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+  const [recordsError, setRecordsError] = useState<string | null>(null);
+
+  const agreement = relationships.selectedAgreement;
+  const allowedPages = useMemo(() => getClientPortalPages(agreement ? {
+    mode: agreement.client_portal_access_mode as 'transparency_only' | 'full_modules' | 'scan_only' | null,
+    reportsEnabled: agreement.client_portal_reports_enabled,
+  } : null), [agreement]);
+
+  const loadRecords = useCallback(async () => {
+    if (!profile?.organizationId || !agreement) {
+      setObservations([]);
+      setReports([]);
+      return;
+    }
+
+    setLoadingRecords(true);
+    setRecordsError(null);
+    try {
+      const observationPromise = allowedPages.has('observations')
+        ? (() => {
+            const siteIds = relationships.selectedAgreementSites.map((site) => site.id);
+            const zoneIds = relationships.selectedAgreementZones.map((zone) => zone.id);
+            const locationFilters = [
+              siteIds.length ? `site_id.in.(${siteIds.join(',')})` : null,
+              zoneIds.length ? `zone_id.in.(${zoneIds.join(',')})` : null,
+            ].filter(Boolean).join(',');
+
+            if (!locationFilters) return Promise.resolve({ data: [], error: null });
+            return supabase
+              .from('observations')
+              .select('id, plate_number, module_key, compliance_status, compliance_reason, observed_at, site_id, zone_id')
+              .eq('client_org_id', profile.organizationId)
+              .or(locationFilters)
+              .order('observed_at', { ascending: false })
+              .limit(100);
+          })()
+        : Promise.resolve({ data: [], error: null });
+
+      const reportPromise = allowedPages.has('reports')
+        ? supabase
+            .from('monthly_report_packs')
+            .select('id, template_code, period_start, period_end, status, generated_at, sent_at, delivery_error')
+            .eq('service_agreement_id', agreement.id)
+            .order('period_end', { ascending: false })
+            .limit(24)
+        : Promise.resolve({ data: [], error: null });
+
+      const [observationResponse, reportResponse] = await Promise.all([observationPromise, reportPromise]);
+      if (observationResponse.error) throw observationResponse.error;
+      if (reportResponse.error) throw reportResponse.error;
+      setObservations((observationResponse.data as ClientObservation[]) ?? []);
+      setReports((reportResponse.data as MonthlyReportPack[]) ?? []);
+    } catch (error) {
+      setRecordsError(error instanceof Error ? error.message : 'Client records could not be loaded.');
+      setObservations([]);
+      setReports([]);
+    } finally {
+      setLoadingRecords(false);
+    }
+  }, [agreement, allowedPages, profile?.organizationId, relationships.selectedAgreementSites, relationships.selectedAgreementZones]);
+
+  useEffect(() => {
+    void loadRecords();
+  }, [loadRecords]);
+
+  if (relationships.loading) {
+    return <div className="client-page-state"><RefreshCw className="is-spinning" size={22} aria-hidden="true" /> Loading service access</div>;
+  }
+
+  if (relationships.error) {
+    return (
+      <div className="client-page-state is-error" role="alert">
+        <AlertTriangle size={23} aria-hidden="true" />
+        <strong>Service access could not be verified</strong>
+        <span>{relationships.error}</span>
+        <button type="button" onClick={() => void relationships.refetch()}>Try again</button>
+      </div>
+    );
+  }
+
+  if (!agreement) {
+    return (
+      <div className="client-page-state">
+        <ShieldCheck size={24} aria-hidden="true" />
+        <strong>No active service relationship</strong>
+        <span>Your organisation is signed in, but no service agreement is available for this portal.</span>
+      </div>
+    );
+  }
+
+  if (!allowedPages.has(page)) {
+    return (
+      <div className="client-page-state">
+        <ShieldCheck size={24} aria-hidden="true" />
+        <strong>This view is not included in the selected agreement</strong>
+        <span>Portal access is controlled by the service agreement, not by the menu or URL.</span>
+      </div>
+    );
+  }
+
+  const providerName = agreement.provider_name ?? 'Service provider';
+  const statusCounts = observations.reduce<Record<string, number>>((counts, observation) => {
+    const status = observation.compliance_status ?? 'unknown';
+    counts[status] = (counts[status] ?? 0) + 1;
+    return counts;
+  }, {});
+
+  return (
+    <div className="client-portal-page">
+      <header className="client-page-heading">
+        <div>
+          <span className="client-kicker">{providerName}</span>
+          <h1>{pageTitle(page)}</h1>
+          <p>{pageDescription(page)}</p>
+        </div>
+        <div className="client-heading-actions">
+          {relationships.agreements.length > 1 && (
+            <label>
+              <span className="sr-only">Service agreement</span>
+              <select value={agreement.id} onChange={(event) => relationships.selectAgreement(event.target.value)}>
+                {relationships.agreements.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+          )}
+          <button type="button" onClick={() => void loadRecords()} disabled={loadingRecords} title="Refresh client records">
+            <RefreshCw size={17} className={loadingRecords ? 'is-spinning' : ''} aria-hidden="true" />
+            <span className="sr-only">Refresh client records</span>
+          </button>
+        </div>
+      </header>
+
+      {recordsError && <div className="client-inline-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /> {recordsError}</div>}
+
+      {page === 'overview' && (
+        <>
+          <section className="client-agreement-band">
+            <div><span>Service agreement</span><strong>{agreement.name}</strong></div>
+            <div><span>Portal access</span><strong>{agreement.client_portal_access_mode?.replace(/_/g, ' ') ?? 'Not configured'}</strong></div>
+            <div><span>Locations</span><strong>{relationships.selectedAgreementSites.length + relationships.selectedAgreementZones.length}</strong></div>
+            <div><span>Reports</span><strong>{agreement.client_portal_reports_enabled ? 'Enabled' : 'Not enabled'}</strong></div>
+          </section>
+
+          <div className="client-overview-grid">
+            <section className="client-overview-panel">
+              <div className="client-panel-heading"><div><span className="client-kicker">Activity</span><h2>Recent field evidence</h2></div><Eye size={21} aria-hidden="true" /></div>
+              {!allowedPages.has('observations') ? (
+                <p className="client-panel-note">Observation-level access is not included in this agreement. Generated reports remain available when enabled.</p>
+              ) : loadingRecords ? (
+                <div className="client-compact-state">Loading observations</div>
+              ) : observations.length === 0 ? (
+                <div className="client-compact-state">No observations are linked to this agreement yet.</div>
+              ) : (
+                <div className="client-status-summary">
+                  <StatusCount label="Compliant" value={statusCounts.compliant ?? 0} tone="success" />
+                  <StatusCount label="At risk" value={statusCounts.at_risk ?? 0} tone="warning" />
+                  <StatusCount label="Breaches" value={statusCounts.breach ?? 0} tone="danger" />
+                  <StatusCount label="Review" value={statusCounts.unknown ?? 0} tone="neutral" />
+                </div>
+              )}
+            </section>
+
+            <section className="client-overview-panel">
+              <div className="client-panel-heading"><div><span className="client-kicker">Reporting</span><h2>Latest report pack</h2></div><FileText size={21} aria-hidden="true" /></div>
+              {!agreement.client_portal_reports_enabled ? (
+                <p className="client-panel-note">Monthly report packs are not enabled for this agreement.</p>
+              ) : loadingRecords ? (
+                <div className="client-compact-state">Loading reports</div>
+              ) : reports.length === 0 ? (
+                <div className="client-compact-state">No report pack has been generated yet.</div>
+              ) : (
+                <ReportRow report={reports[0]} />
+              )}
+            </section>
+          </div>
+
+          <section className="client-location-preview">
+            <div className="client-panel-heading"><div><span className="client-kicker">Service footprint</span><h2>Covered locations</h2></div><Building2 size={21} aria-hidden="true" /></div>
+            <LocationGrid sites={relationships.selectedAgreementSites.slice(0, 4)} zones={relationships.selectedAgreementZones.slice(0, 4)} />
+          </section>
+        </>
+      )}
+
+      {page === 'sites' && (
+        <section className="client-list-section">
+          <LocationGrid sites={relationships.selectedAgreementSites} zones={relationships.selectedAgreementZones} />
+        </section>
+      )}
+
+      {page === 'observations' && (
+        <section className="client-list-section">
+          {loadingRecords ? <div className="client-compact-state">Loading observations</div> : observations.length === 0 ? <div className="client-compact-state">No observations are linked to this agreement.</div> : (
+            <div className="client-observation-list">
+              {observations.map((observation) => (
+                <article key={observation.id}>
+                  <span className={`client-status-mark status-${observation.compliance_status ?? 'unknown'}`} />
+                  <div><strong>{observation.plate_number}</strong><small>{observation.module_key.replace(/_/g, ' ')}</small></div>
+                  <div><strong>{formatComplianceReason(observation.compliance_reason) || (observation.compliance_status ?? 'Review required').replace(/_/g, ' ')}</strong><small>{locationName(observation, relationships.selectedAgreementSites, relationships.selectedAgreementZones)}</small></div>
+                  <time dateTime={observation.observed_at}>{new Date(observation.observed_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {page === 'reports' && (
+        <section className="client-list-section">
+          {loadingRecords ? <div className="client-compact-state">Loading report packs</div> : reports.length === 0 ? <div className="client-compact-state">No monthly report packs are available.</div> : (
+            <div className="client-report-list">{reports.map((report) => <ReportRow report={report} key={report.id} />)}</div>
+          )}
+        </section>
+      )}
+
+      {page === 'scan' && (
+        <div className="client-page-state client-scan-state">
+          <ScanLine size={28} aria-hidden="true" />
+          <strong>Client scan access is not yet rebuilt</strong>
+          <span>This agreement is configured for scan-only access. The scan interaction will remain unavailable until its edge-function contract is verified.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function pageTitle(page: ClientPortalPage): string {
+  return { overview: 'Service overview', sites: 'Sites and zones', observations: 'Field observations', reports: 'Monthly reports', scan: 'Scan access' }[page];
+}
+
+function pageDescription(page: ClientPortalPage): string {
+  return {
+    overview: 'A clear view of contracted field work and delivered records.',
+    sites: 'Locations included in the selected service agreement.',
+    observations: 'Field evidence shared with your organisation.',
+    reports: 'Generated reporting periods and delivery status.',
+    scan: 'Standalone scan access for this service agreement.',
+  }[page];
+}
+
+function StatusCount({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return <div className={`client-status-count tone-${tone}`}><strong>{value}</strong><span>{label}</span></div>;
+}
+
+function LocationGrid({ sites, zones }: { sites: Array<{ id: string; name: string; address: string | null; site_type: string | null; active: boolean }>; zones: Array<{ id: string; name: string; zone_type: string | null; is_active: boolean }> }) {
+  if (!sites.length && !zones.length) return <div className="client-compact-state">No locations are linked to this agreement.</div>;
+  return (
+    <div className="client-location-grid">
+      {sites.map((site) => <article key={site.id}><span><Building2 size={18} /></span><div><strong>{site.name}</strong><small>{site.address ?? site.site_type?.replace(/_/g, ' ') ?? 'Site'}</small></div><em>{site.active ? 'Active' : 'Inactive'}</em></article>)}
+      {zones.map((zone) => <article key={zone.id}><span><MapPin size={18} /></span><div><strong>{zone.name}</strong><small>{zone.zone_type?.replace(/_/g, ' ') ?? 'Service zone'}</small></div><em>{zone.is_active ? 'Active' : 'Inactive'}</em></article>)}
+    </div>
+  );
+}
+
+function ReportRow({ report }: { report: MonthlyReportPack }) {
+  return (
+    <article className="client-report-row">
+      <span><CalendarRange size={19} /></span>
+      <div><strong>{new Date(`${report.period_start}T00:00:00`).toLocaleDateString('en-NZ', { month: 'long', year: 'numeric' })}</strong><small>{report.template_code.replace(/_/g, ' ')}</small></div>
+      <div><strong>{report.status}</strong><small>{report.sent_at ? `Sent ${new Date(report.sent_at).toLocaleDateString('en-NZ')}` : report.generated_at ? `Generated ${new Date(report.generated_at).toLocaleDateString('en-NZ')}` : 'Not generated'}</small></div>
+      {report.status === 'failed' ? <AlertTriangle size={18} className="is-danger" /> : <CheckCircle2 size={18} className="is-success" />}
+    </article>
+  );
+}
+
+function locationName(observation: ClientObservation, sites: Array<{ id: string; name: string }>, zones: Array<{ id: string; name: string }>): string {
+  return sites.find((site) => site.id === observation.site_id)?.name ?? zones.find((zone) => zone.id === observation.zone_id)?.name ?? 'Location not named';
+}

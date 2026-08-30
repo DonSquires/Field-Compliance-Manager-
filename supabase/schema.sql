@@ -3327,6 +3327,220 @@ ALTER FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job
 COMMENT ON FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job_id" "uuid", "p_site_id" "uuid", "p_module_key" "text", "p_sla_respond_by" timestamp with time zone, "p_officer_gps_lat" double precision, "p_officer_gps_lng" double precision) IS 'Inserts an adhoc dispatch job as a shift stop and invalidates the solve cache. Called by apps/api dispatch engine.';
 
 
+CREATE OR REPLACE FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text" DEFAULT 'open'::"text") RETURNS "public"."shift_coverage_requests"
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_user_id uuid := auth.uid(); v_profile public.user_profiles%rowtype; v_request public.shift_coverage_requests%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  select * into v_profile from public.user_profiles where id = v_user_id and deactivated_at is null and role in ('officer', 'admin_officer');
+  if not found then raise exception 'Active officer profile required'; end if;
+  select * into v_request from public.shift_coverage_requests where id = p_request_id for update;
+  if not found then raise exception 'Coverage request not found'; end if;
+  if v_request.organization_id <> v_profile.organization_id then raise exception 'Coverage request is outside the officer organization'; end if;
+  if v_request.status <> p_expected_status then raise exception 'Coverage request changed from expected status % to %', p_expected_status, v_request.status; end if;
+  if v_request.status <> 'open' then raise exception 'Coverage request is no longer open'; end if;
+  if v_request.shift_date < current_date then raise exception 'Past coverage cannot be claimed'; end if;
+  update public.shift_coverage_requests set status = 'claimed', claimed_by = v_user_id, claimed_at = clock_timestamp() where id = p_request_id returning * into v_request;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_request.organization_id, v_user_id, 'shift_coverage_claimed', 'shift_coverage_requests', v_request.id, jsonb_build_object('shift_date', v_request.shift_date, 'start_time', v_request.start_time, 'site_id', v_request.site_id));
+  return v_request;
+end;
+$$;
+
+ALTER FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") IS 'Atomically claims open coverage for the authenticated active officer and records audit provenance.';
+
+
+CREATE OR REPLACE FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid" DEFAULT NULL::"uuid", "p_zone_id" "uuid" DEFAULT NULL::"uuid", "p_patrol_route_id" "uuid" DEFAULT NULL::"uuid", "p_notes" "text" DEFAULT NULL::"text", "p_publish" boolean DEFAULT false) RETURNS "public"."shifts"
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_actor uuid:=auth.uid(); v_profile public.user_profiles%rowtype; v_staff public.staff_profiles%rowtype; v_shift public.shifts%rowtype;
+begin
+  if v_actor is null then raise exception 'Authentication required'; end if;
+  select * into v_profile from public.user_profiles where id=p_officer_user_id and deactivated_at is null;
+  if not found or v_profile.organization_id is null then raise exception 'Active officer profile not found'; end if;
+  if not public.is_admin_for_org(v_profile.organization_id) then raise exception 'Not authorised to roster this officer'; end if;
+  if v_profile.role not in ('officer','admin_officer') then raise exception 'Selected user is not rosterable as an officer'; end if;
+  select * into v_staff from public.staff_profiles where (id=p_officer_user_id or user_id=p_officer_user_id) and organization_id=v_profile.organization_id limit 1;
+  if not found or not v_staff.work_ready then raise exception 'Officer is not work ready'; end if;
+  if p_scheduled_start is null or p_scheduled_end is null or p_scheduled_start>=p_scheduled_end then raise exception 'Shift end must be after shift start'; end if;
+  if p_scheduled_start<now()-interval '5 minutes' or p_scheduled_end-p_scheduled_start>interval '24 hours' then raise exception 'Shift timing is outside the accepted range'; end if;
+  if nullif(trim(coalesce(p_service_type,'')),'') is null then raise exception 'Service type is required'; end if;
+  if exists(select 1 from public.leave_requests l where l.staff_id=v_staff.id and l.status='approved' and daterange(l.starts_on,l.ends_on,'[]') && daterange(p_scheduled_start::date,p_scheduled_end::date,'[]')) then raise exception 'Officer has approved leave during this shift'; end if;
+  if exists(select 1 from public.shifts s where s.officer_user_id=p_officer_user_id and s.status not in ('declined','cancelled') and s.scheduled_end>s.scheduled_start and s.scheduled_start<p_scheduled_end and s.scheduled_end>p_scheduled_start) then raise exception 'Officer already has an overlapping shift'; end if;
+  insert into public.shifts(organization_id,officer_user_id,service_type,location_id,zone_id,patrol_route_id,scheduled_start,scheduled_end,status,notes)
+  values(v_profile.organization_id,p_officer_user_id,trim(p_service_type),p_location_id,p_zone_id,p_patrol_route_id,p_scheduled_start,p_scheduled_end,case when p_publish then 'published' else 'scheduled' end,nullif(trim(coalesce(p_notes,'')),'')) returning * into v_shift;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+  values(v_profile.organization_id,v_actor,'roster_shift_created','shifts',v_shift.id,jsonb_build_object('officer_user_id',p_officer_user_id,'scheduled_start',p_scheduled_start,'scheduled_end',p_scheduled_end,'status',v_shift.status));
+  return v_shift;
+end;$$;
+
+ALTER FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) IS 'Creates an authorized roster shift after work-readiness, leave, timing, and overlap checks.';
+
+
+CREATE OR REPLACE FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean DEFAULT false, "p_equipment_issue_reported" boolean DEFAULT false, "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "submitted_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_user_id uuid := auth.uid(); v_shift public.shifts%rowtype; v_debrief public.shift_debriefs%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  if p_client_event_id is null then raise exception 'client_event_id is required'; end if;
+  if char_length(trim(coalesce(p_summary, ''))) not between 10 and 5000 then raise exception 'Debrief summary must be between 10 and 5000 characters'; end if;
+  if p_follow_up_required and nullif(trim(coalesce(p_follow_up_notes, '')), '') is null then raise exception 'Follow-up notes are required'; end if;
+  select s.* into v_shift from public.shifts s where s.id = p_shift_id for share;
+  if not found then raise exception 'Shift not found'; end if;
+  if v_shift.officer_user_id <> v_user_id then raise exception 'Shift does not belong to the authenticated officer'; end if;
+  if v_shift.status not in ('accepted', 'in_progress', 'completed') then raise exception 'Shift is not eligible for debrief'; end if;
+  select d.* into v_debrief from public.shift_debriefs d where d.organization_id = v_shift.organization_id and d.officer_user_id = v_user_id and d.client_event_id = p_client_event_id;
+  if found then return query select v_debrief.id, false, v_debrief.submitted_at; return; end if;
+  if exists (select 1 from public.shift_debriefs d where d.shift_id = p_shift_id) then raise exception 'A debrief has already been submitted for this shift'; end if;
+  insert into public.shift_debriefs (organization_id, shift_id, officer_user_id, client_event_id, summary, safety_incident_reported, equipment_issue_reported, follow_up_required, follow_up_notes)
+  values (v_shift.organization_id, p_shift_id, v_user_id, p_client_event_id, trim(p_summary), coalesce(p_safety_incident_reported, false), coalesce(p_equipment_issue_reported, false), coalesce(p_follow_up_required, false), nullif(trim(coalesce(p_follow_up_notes, '')), '')) returning * into v_debrief;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_shift.organization_id, v_user_id, 'shift_debrief_submitted', 'shift_debriefs', v_debrief.id, jsonb_build_object('shift_id', p_shift_id, 'safety_incident_reported', v_debrief.safety_incident_reported, 'equipment_issue_reported', v_debrief.equipment_issue_reported, 'follow_up_required', v_debrief.follow_up_required));
+  return query select v_debrief.id, true, v_debrief.submitted_at;
+end;
+$$;
+
+ALTER FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") IS 'Creates one retry-safe, self-owned, append-only handover per eligible shift and audits submission.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid" DEFAULT NULL::"uuid", "p_briefing_notes" "text" DEFAULT NULL::"text", "p_shift_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" "uuid", "created" boolean, "status" "text", "sla_respond_by" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_existing dispatch_jobs%rowtype;
+  v_created dispatch_jobs%rowtype;
+  v_resource dispatch_resources%rowtype;
+  v_shift shifts%rowtype;
+begin
+  if not public.is_admin_for_org(p_organization_id) then
+    raise exception 'Not authorised to create dispatch jobs for this organisation';
+  end if;
+
+  if p_sla_minutes is null or p_sla_minutes < 1 or p_sla_minutes > 1440 then
+    raise exception 'SLA minutes must be between 1 and 1440';
+  end if;
+
+  if not exists (
+    select 1
+    from service_agreements sa
+    join service_agreement_locations sal on sal.service_agreement_id = sa.id
+    join client_sites cs on cs.id = sal.site_id
+    where sa.id = p_service_agreement_id
+      and sa.provider_organization_id = p_organization_id
+      and sal.site_id = p_client_site_id
+      and sal.status = 'active'
+      and cs.active = true
+  ) then
+    raise exception 'Site is not active under this service agreement';
+  end if;
+
+  select * into v_existing
+  from dispatch_jobs
+  where organization_id = p_organization_id
+    and client_request_id = p_client_request_id;
+
+  if found then
+    return query select v_existing.id, false, v_existing.status, v_existing.sla_respond_by;
+    return;
+  end if;
+
+  if p_dispatch_resource_id is not null then
+    if p_shift_id is null then raise exception 'A shift is required when dispatching to a resource'; end if;
+    select * into v_resource from dispatch_resources
+    where id = p_dispatch_resource_id and organization_id = p_organization_id for update;
+    if not found or v_resource.status <> 'available' or v_resource.assigned_officer_id is null then
+      raise exception 'Dispatch resource is not available with an assigned officer';
+    end if;
+    select * into v_shift from shifts
+    where id = p_shift_id and organization_id = p_organization_id and status in ('accepted', 'in_progress') for share;
+    if not found or v_shift.officer_user_id <> v_resource.assigned_officer_id then
+      raise exception 'Shift officer does not match the selected dispatch resource';
+    end if;
+  end if;
+
+  begin
+    insert into dispatch_jobs (
+      organization_id, service_agreement_id, client_site_id, client_request_id,
+      dispatch_resource_id, job_type, priority, status, sla_minutes, sla_respond_by,
+      briefing_notes, shift_id, dispatched_at
+    ) values (
+      p_organization_id, p_service_agreement_id, p_client_site_id, p_client_request_id,
+      p_dispatch_resource_id, p_job_type, p_priority,
+      case when p_dispatch_resource_id is null then 'pending' else 'dispatched' end, p_sla_minutes,
+      now() + make_interval(mins => p_sla_minutes), nullif(trim(p_briefing_notes), ''),
+      p_shift_id, case when p_dispatch_resource_id is null then null else now() end
+    ) returning * into v_created;
+    if p_dispatch_resource_id is not null then
+      update dispatch_resources set status = 'busy' where id = p_dispatch_resource_id;
+    end if;
+  exception when unique_violation then
+    select * into v_created
+    from dispatch_jobs
+    where organization_id = p_organization_id
+      and client_request_id = p_client_request_id;
+    return query select v_created.id, false, v_created.status, v_created.sla_respond_by;
+    return;
+  end;
+
+  return query select v_created.id, true, v_created.status, v_created.sla_respond_by;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") IS 'Idempotent admin dispatch creation with optional atomic resource assignment and SLA ownership.';
+
+CREATE OR REPLACE FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "status" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
+    AS $$
+declare
+  v_job dispatch_jobs%rowtype;
+  v_allowed boolean := false;
+begin
+  select * into v_job from dispatch_jobs where dispatch_jobs.id = p_job_id for update;
+  if not found then raise exception 'Dispatch job not found'; end if;
+  if not is_admin_for_org(v_job.organization_id) and not exists (
+    select 1 from dispatch_resources dr where dr.id = v_job.dispatch_resource_id and dr.assigned_officer_id = auth.uid()
+  ) then raise exception 'Not authorised to update this dispatch job'; end if;
+  if v_job.status <> p_expected_status then raise exception 'Dispatch job changed from expected status'; end if;
+  v_allowed := case v_job.status
+    when 'pending' then p_next_status in ('dispatched', 'cancelled')
+    when 'dispatched' then p_next_status in ('acknowledged', 'en_route', 'cancelled')
+    when 'acknowledged' then p_next_status in ('en_route', 'cancelled')
+    when 'en_route' then p_next_status in ('on_scene', 'cancelled')
+    when 'on_scene' then p_next_status in ('completed', 'cancelled')
+    else false end;
+  if not v_allowed then raise exception 'Invalid dispatch transition'; end if;
+  if p_next_status in ('completed', 'cancelled') and nullif(trim(p_outcome_notes), '') is null then
+    raise exception 'Outcome notes are required for terminal dispatch transitions';
+  end if;
+  update dispatch_jobs set status = p_next_status,
+    acknowledged_at = case when p_next_status = 'acknowledged' then now() else acknowledged_at end,
+    en_route_at = case when p_next_status = 'en_route' then now() else en_route_at end,
+    on_scene_at = case when p_next_status = 'on_scene' then now() else on_scene_at end,
+    completed_at = case when p_next_status = 'completed' then now() else completed_at end,
+    outcome_notes = case when p_next_status in ('completed', 'cancelled') then nullif(trim(p_outcome_notes), '') else outcome_notes end
+  where dispatch_jobs.id = p_job_id;
+  if p_next_status in ('completed', 'cancelled') and v_job.dispatch_resource_id is not null and not exists (
+    select 1 from dispatch_jobs other where other.dispatch_resource_id = v_job.dispatch_resource_id
+      and other.id <> p_job_id and other.status in ('dispatched', 'acknowledged', 'en_route', 'on_scene')
+  ) then update dispatch_resources set status = 'available' where id = v_job.dispatch_resource_id; end if;
+  return query select p_job_id, p_next_status;
+end;
+$$;
+
+ALTER FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text") OWNER TO "postgres";
+
+
 
 CREATE OR REPLACE FUNCTION "public"."is_admin_for_org"("target_org_id" "uuid") RETURNS boolean
     LANGUAGE "sql" STABLE SECURITY DEFINER
@@ -3755,6 +3969,211 @@ $$;
 
 
 ALTER FUNCTION "public"."officer_gps_log_set_point"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision DEFAULT NULL::double precision, "p_heading" double precision DEFAULT NULL::double precision, "p_speed_kmh" double precision DEFAULT NULL::double precision, "p_activity_type" "text" DEFAULT 'gps_update'::"text", "p_shift_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_org_id uuid;
+  v_existing officer_gps_log%rowtype;
+  v_created officer_gps_log%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  select organization_id into v_org_id from user_profiles
+  where id = v_user_id and deactivated_at is null and role in ('officer', 'scan_operator');
+  if v_org_id is null then raise exception 'Active officer profile not found'; end if;
+  if p_client_event_id is null then raise exception 'client_event_id is required'; end if;
+  if p_recorded_at is null or p_recorded_at > now() + interval '5 minutes' or p_recorded_at < now() - interval '24 hours' then raise exception 'recorded_at is outside the accepted capture window'; end if;
+  if p_gps_lat not between -90 and 90 or p_gps_lng not between -180 and 180 then raise exception 'Invalid GPS coordinates'; end if;
+  if p_accuracy_meters is not null and p_accuracy_meters < 0 then raise exception 'GPS accuracy cannot be negative'; end if;
+  if p_activity_type not in ('gps_update', 'shift_start', 'shift_end', 'scan', 'welfare_checkin', 'sos', 'checkpoint_scan') then raise exception 'Unsupported breadcrumb activity type'; end if;
+  if p_shift_id is not null and not exists (select 1 from shifts where id = p_shift_id and organization_id = v_org_id and officer_user_id = v_user_id) then raise exception 'Shift does not belong to the authenticated officer'; end if;
+  select * into v_existing from officer_gps_log where organization_id = v_org_id and officer_id = v_user_id and client_event_id = p_client_event_id;
+  if found then return query select v_existing.id, false, v_existing.created_at; return; end if;
+  begin
+    insert into officer_gps_log (organization_id, officer_id, client_event_id, recorded_at, gps_lat, gps_lng, accuracy_meters, heading, speed_kmh, activity_type, shift_id)
+    values (v_org_id, v_user_id, p_client_event_id, p_recorded_at, p_gps_lat, p_gps_lng, p_accuracy_meters, p_heading, p_speed_kmh, p_activity_type, p_shift_id)
+    returning * into v_created;
+  exception when unique_violation then
+    select * into v_created from officer_gps_log where organization_id = v_org_id and officer_id = v_user_id and client_event_id = p_client_event_id;
+    return query select v_created.id, false, v_created.created_at; return;
+  end;
+  return query select v_created.id, true, v_created.created_at;
+end;
+$$;
+
+ALTER FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") RETURNS "public"."officer_field_reports"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_report public.officer_field_reports%rowtype;
+begin
+  if v_actor_id is null then raise exception 'Authentication required'; end if;
+  if nullif(trim(p_review_notes), '') is null then raise exception 'Review notes are required'; end if;
+  select * into v_report from public.officer_field_reports where id = p_report_id for update;
+  if not found then raise exception 'Field report not found'; end if;
+  if not public.is_admin_for_org(v_report.organization_id) then raise exception 'Not authorised to review this field report'; end if;
+  if v_report.status <> p_expected_status then raise exception 'Field report changed from expected status % to %', p_expected_status, v_report.status; end if;
+  if v_report.status <> 'submitted' then raise exception 'Only submitted field reports can be reviewed'; end if;
+  update public.officer_field_reports
+  set status = 'reviewed', reviewed_by = v_actor_id, reviewed_at = clock_timestamp(),
+      review_notes = trim(p_review_notes), updated_at = clock_timestamp()
+  where id = p_report_id returning * into v_report;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_report.organization_id, v_actor_id, 'officer_field_report_reviewed', 'officer_field_reports', v_report.id,
+    jsonb_build_object('officer_id', v_report.officer_id, 'severity', v_report.severity, 'review_notes', v_report.review_notes));
+  return v_report;
+end;
+$$;
+
+ALTER FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") IS 'Race-checks and records the submitted-to-reviewed field report transition with required supervisor notes and audit provenance.';
+
+
+CREATE OR REPLACE FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text" DEFAULT NULL::"text", "p_address" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision, "p_shift_id" "uuid" DEFAULT NULL::"uuid", "p_immediate_action" "text" DEFAULT NULL::"text", "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_user_id uuid := auth.uid(); v_org_id uuid; v_existing public.officer_field_reports%rowtype; v_report public.officer_field_reports%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  select p.organization_id into v_org_id from public.user_profiles p where p.id = v_user_id and p.deactivated_at is null and p.role in ('officer', 'admin_officer');
+  if v_org_id is null then raise exception 'Active officer profile required'; end if;
+  if p_client_event_id is null then raise exception 'client_event_id is required'; end if;
+  if p_reported_at is null or p_reported_at > now() + interval '5 minutes' or p_reported_at < now() - interval '24 hours' then raise exception 'reported_at is outside the accepted capture window'; end if;
+  if char_length(trim(coalesce(p_title, ''))) not between 5 and 200 then raise exception 'Title must be between 5 and 200 characters'; end if;
+  if char_length(trim(coalesce(p_description, ''))) not between 10 and 10000 then raise exception 'Description must be between 10 and 10000 characters'; end if;
+  if (p_gps_lat is null) <> (p_gps_lng is null) then raise exception 'Both GPS coordinates are required together'; end if;
+  if p_gps_lat is not null and (p_gps_lat not between -90 and 90 or p_gps_lng not between -180 and 180) then raise exception 'Invalid GPS coordinates'; end if;
+  if p_follow_up_required and nullif(trim(coalesce(p_follow_up_notes, '')), '') is null then raise exception 'Follow-up notes are required'; end if;
+  if p_shift_id is not null and not exists (select 1 from public.shifts s where s.id = p_shift_id and s.organization_id = v_org_id and s.officer_user_id = v_user_id) then raise exception 'Shift does not belong to the authenticated officer'; end if;
+  select r.* into v_existing from public.officer_field_reports r where r.organization_id = v_org_id and r.officer_id = v_user_id and r.client_event_id = p_client_event_id;
+  if found then return query select v_existing.id, false, v_existing.created_at; return; end if;
+  insert into public.officer_field_reports (organization_id, officer_id, client_event_id, reported_at, report_type, severity, status, title, description, location_name, address, gps_lat, gps_lng, shift_id, immediate_action, follow_up_required, follow_up_notes)
+  values (v_org_id, v_user_id, p_client_event_id, p_reported_at, p_report_type, p_severity, 'submitted', trim(p_title), trim(p_description), nullif(trim(coalesce(p_location_name, '')), ''), nullif(trim(coalesce(p_address, '')), ''), p_gps_lat, p_gps_lng, p_shift_id, nullif(trim(coalesce(p_immediate_action, '')), ''), coalesce(p_follow_up_required, false), nullif(trim(coalesce(p_follow_up_notes, '')), '')) returning * into v_report;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_org_id, v_user_id, 'officer_field_report_submitted', 'officer_field_reports', v_report.id, jsonb_build_object('report_type', v_report.report_type, 'severity', v_report.severity, 'shift_id', v_report.shift_id, 'follow_up_required', v_report.follow_up_required));
+  return query select v_report.id, true, v_report.created_at;
+end;
+$$;
+
+ALTER FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER SET "search_path" TO 'public'
+    AS $$
+declare v_org_id uuid;
+begin
+  select organization_id into v_org_id from user_profiles where id = p_officer_id;
+  if v_org_id is null then return; end if;
+  if auth.uid() <> p_officer_id and not is_admin_for_org(v_org_id) then raise exception 'Not authorised to view this officer timeline'; end if;
+  if p_from is null or p_to is null or p_from >= p_to or p_to - p_from > interval '31 days' then raise exception 'Timeline range must be between 1 second and 31 days'; end if;
+  return query
+  with events as (
+    select 'gps:' || g.id::text, 'gps_' || g.activity_type, g.recorded_at, g.created_at, 'officer_gps_log'::text, g.id, g.gps_lat, g.gps_lng, g.shift_id, null::uuid, g.detected_zone_id, case when g.activity_type = 'gps_update' then 'GPS heartbeat' else replace(g.activity_type, '_', ' ') end, jsonb_build_object('accuracy_meters', g.accuracy_meters, 'heading', g.heading, 'speed_kmh', g.speed_kmh, 'client_event_id', g.client_event_id)
+    from officer_gps_log g where g.organization_id = v_org_id and g.officer_id = p_officer_id and g.recorded_at between p_from and p_to
+    union all
+    select 'welfare_check:' || w.id::text, 'welfare_check', w.checked_in_at, w.checked_in_at, 'welfare_checks', w.id, w.gps_lat, w.gps_lng, w.shift_id, null::uuid, null::uuid, 'Welfare check-in: ' || w.status, jsonb_build_object('status', w.status, 'notes', w.notes)
+    from welfare_checks w where w.organization_id = v_org_id and w.officer_user_id = p_officer_id and w.checked_in_at between p_from and p_to
+    union all
+    select 'observation:' || o.id::text, 'observation', o.observed_at, o.created_at, 'observations', o.id, o.gps_lat, o.gps_lng, null::uuid, o.site_id, o.zone_id, 'Vehicle observation ' || o.plate_number, jsonb_build_object('module_key', o.module_key, 'compliance_status', o.compliance_status, 'plate_number', o.plate_number)
+    from observations o where o.organization_id = v_org_id and o.officer_id = p_officer_id and o.observed_at between p_from and p_to
+    union all
+    select 'checkpoint:' || v.id::text, 'checkpoint_visit', v.visited_at, v.visited_at, 'patrol_checkpoint_visits', v.id, v.gps_lat, v.gps_lng, p.shift_id, null::uuid, null::uuid, 'Patrol checkpoint visit', jsonb_build_object('checkpoint_id', v.checkpoint_id, 'scan_method', v.scan_method, 'within_radius', v.within_radius, 'notes', v.notes)
+    from patrol_checkpoint_visits v join patrols p on p.id = v.patrol_id where v.organization_id = v_org_id and v.officer_user_id = p_officer_id and v.visited_at between p_from and p_to
+    union all
+    select 'report:' || r.id::text, 'field_report', r.reported_at, r.created_at, 'officer_field_reports', r.id, r.gps_lat, r.gps_lng, r.shift_id, r.site_id, r.zone_id, r.title, jsonb_build_object('report_type', r.report_type, 'severity', r.severity, 'status', r.status, 'immediate_action', r.immediate_action)
+    from officer_field_reports r where r.organization_id = v_org_id and r.officer_id = p_officer_id and r.reported_at between p_from and p_to
+    union all
+    select 'stop_action:' || a.id::text, 'shift_stop_action', a.performed_at, a.created_at, 'shift_stop_actions', a.id, a.gps_lat, a.gps_lng, a.shift_id, null::uuid, null::uuid, replace(a.action_type, '_', ' '), jsonb_build_object('outcome', a.outcome, 'notes', a.notes, 'result_table', a.result_table, 'result_record_id', a.result_record_id)
+    from shift_stop_actions a join shifts s on s.id = a.shift_id where a.organization_id = v_org_id and s.officer_user_id = p_officer_id and a.performed_at between p_from and p_to
+  ) select * from events order by event_at desc limit least(greatest(coalesce(p_limit, 1000), 1), 5000);
+end;
+$$;
+
+ALTER FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_org_id uuid;
+  v_event_count integer;
+begin
+  return query select * from public.get_officer_activity_timeline_unlogged(p_officer_id, p_from, p_to, p_limit);
+  get diagnostics v_event_count = row_count;
+  select organization_id into v_org_id from public.user_profiles where id = p_officer_id;
+  if v_org_id is not null then
+    insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+    values (v_org_id, auth.uid(), 'officer_activity_timeline_viewed', 'user_profiles', p_officer_id,
+      jsonb_build_object('from', p_from, 'to', p_to, 'requested_limit', p_limit,
+        'effective_limit', least(greatest(coalesce(p_limit, 1000), 1), 5000), 'event_count', v_event_count));
+  end if;
+end;
+$$;
+
+ALTER FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) IS 'Returns the authorized officer evidence timeline and atomically audits each successful access.';
+
+
+CREATE OR REPLACE FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 5000) RETURNS TABLE("export_id" "uuid", "generated_at" timestamp with time zone, "sha256" "text", "event_count" integer, "package_text" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'extensions'
+    AS $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_org_id uuid;
+  v_officer_name text;
+  v_export_id uuid := gen_random_uuid();
+  v_generated_at timestamptz := clock_timestamp();
+  v_events jsonb;
+  v_payload jsonb;
+  v_package_text text;
+  v_sha256 text;
+  v_event_count integer;
+  v_effective_limit integer := least(greatest(coalesce(p_limit, 5000), 1), 5000);
+begin
+  if v_actor_id is null then raise exception 'Authentication required'; end if;
+  select organization_id, display_name into v_org_id, v_officer_name from public.user_profiles where id = p_officer_id;
+  if v_org_id is null then raise exception 'Officer profile not found'; end if;
+  if not public.is_admin_for_org(v_org_id) then raise exception 'Not authorised to export this officer timeline'; end if;
+  if p_from is null or p_to is null or p_from >= p_to or p_to - p_from > interval '31 days' then raise exception 'Export range must be between 1 second and 31 days'; end if;
+  select coalesce(jsonb_agg(to_jsonb(t) order by t.event_at, t.event_key), '[]'::jsonb) into v_events
+  from public.get_officer_activity_timeline_unlogged(p_officer_id, p_from, p_to, v_effective_limit) t;
+  v_event_count := jsonb_array_length(v_events);
+  v_payload := jsonb_build_object(
+    'schema_version', 1, 'export_id', v_export_id, 'generated_at', v_generated_at,
+    'generated_by', v_actor_id, 'organization_id', v_org_id,
+    'officer', jsonb_build_object('id', p_officer_id, 'display_name', v_officer_name),
+    'period', jsonb_build_object('from', p_from, 'to', p_to),
+    'event_count', v_event_count, 'events', v_events);
+  v_package_text := v_payload::text;
+  v_sha256 := pg_catalog.encode(extensions.digest(pg_catalog.convert_to(v_package_text, 'UTF8'), 'sha256'), 'hex');
+  insert into public.officer_activity_evidence_exports (
+    id, organization_id, officer_user_id, generated_by, period_from, period_to, event_count, payload, sha256, generated_at
+  ) values (
+    v_export_id, v_org_id, p_officer_id, v_actor_id, p_from, p_to, v_event_count, v_payload, v_sha256, v_generated_at
+  );
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_org_id, v_actor_id, 'officer_activity_evidence_exported', 'officer_activity_evidence_exports', v_export_id,
+    jsonb_build_object('officer_user_id', p_officer_id, 'from', p_from, 'to', p_to, 'event_count', v_event_count, 'sha256', v_sha256));
+  return query select v_export_id, v_generated_at, v_sha256, v_event_count, v_package_text;
+end;
+$$;
+
+ALTER FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) IS 'Creates an immutable canonical officer timeline snapshot, hashes its exact returned JSON bytes, and audits issuance.';
 
 
 CREATE OR REPLACE FUNCTION "public"."org_access_allowed"("target_org_id" "uuid") RETURNS boolean
@@ -8411,7 +8830,7 @@ CREATE TABLE IF NOT EXISTS "public"."user_profiles" (
     "photo_url" "text",
     "module_access" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "employer_organization_id" "uuid",
-    CONSTRAINT "user_profiles_role_check" CHECK (("role" = ANY (ARRAY['grand_master'::"text", 'master'::"text", 'admin'::"text", 'admin_officer'::"text", 'nzscv_monitor'::"text", 'officer'::"text", 'client_admin'::"text", 'client_officer'::"text", 'client_viewer'::"text"])))
+    CONSTRAINT "user_profiles_role_check" CHECK (("role" = ANY (ARRAY['grand_master'::"text", 'master'::"text", 'admin'::"text", 'admin_officer'::"text", 'nzscv_monitor'::"text", 'officer'::"text", 'scan_operator'::"text", 'client_admin'::"text", 'client_officer'::"text", 'client_viewer'::"text"])))
 );
 
 
@@ -8794,6 +9213,7 @@ CREATE TABLE IF NOT EXISTS "public"."dispatch_jobs" (
     "adhoc_inserted_at" timestamp with time zone,
     "insert_gps_lat" double precision,
     "insert_gps_lng" double precision,
+    "client_request_id" "uuid",
     CONSTRAINT "dispatch_jobs_priority_check" CHECK (("priority" = ANY (ARRAY['low'::"text", 'normal'::"text", 'high'::"text", 'urgent'::"text"]))),
     CONSTRAINT "dispatch_jobs_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'pending_approval'::"text", 'dispatched'::"text", 'acknowledged'::"text", 'en_route'::"text", 'on_scene'::"text", 'completed'::"text", 'cancelled'::"text"])))
 );
@@ -10719,7 +11139,7 @@ CREATE TABLE IF NOT EXISTS "public"."notifications" (
     "dedup_key" "text",
     "read_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'welfare'::"text", 'dispatch'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
+    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'welfare'::"text", 'dispatch'::"text", 'roster'::"text", 'open_job'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
     CONSTRAINT "notifications_recipient_chk" CHECK ((("recipient_user_id" IS NOT NULL) OR ("recipient_role" IS NOT NULL))),
     CONSTRAINT "notifications_severity_check" CHECK (("severity" = ANY (ARRAY['info'::"text", 'warning'::"text", 'critical'::"text"])))
 );
@@ -11042,6 +11462,7 @@ CREATE TABLE IF NOT EXISTS "public"."officer_field_reports" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "address" "text"
+    ,"client_event_id" "uuid"
 );
 
 
@@ -11065,6 +11486,9 @@ CREATE TABLE IF NOT EXISTS "public"."officer_gps_log" (
     "heading" double precision,
     "speed_kmh" double precision,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "client_event_id" "uuid",
+    "recorded_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "shift_id" "uuid",
     CONSTRAINT "officer_gps_log_activity_type_check" CHECK (("activity_type" = ANY (ARRAY['gps_update'::"text", 'shift_start'::"text", 'shift_end'::"text", 'scan'::"text", 'welfare_checkin'::"text", 'sos'::"text", 'checkpoint_scan'::"text"])))
 );
 
@@ -11073,6 +11497,31 @@ ALTER TABLE "public"."officer_gps_log" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."officer_gps_log" IS 'GPS heartbeat from officers. Used for live map, welfare, zone detection, and patrol audit.';
+
+COMMENT ON COLUMN "public"."officer_gps_log"."recorded_at" IS 'Device capture timestamp. created_at is server receipt time; the pair preserves offline/retry provenance.';
+
+COMMENT ON COLUMN "public"."officer_gps_log"."client_event_id" IS 'Device-generated idempotency key for retry-safe breadcrumb capture.';
+
+
+CREATE TABLE IF NOT EXISTS "public"."officer_activity_evidence_exports" (
+  "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL PRIMARY KEY,
+  "organization_id" "uuid" NOT NULL REFERENCES "public"."organizations"("id") ON DELETE RESTRICT,
+  "officer_user_id" "uuid" NOT NULL REFERENCES "public"."user_profiles"("id") ON DELETE RESTRICT,
+  "generated_by" "uuid" NOT NULL REFERENCES "public"."user_profiles"("id") ON DELETE RESTRICT,
+  "period_from" timestamp with time zone NOT NULL,
+  "period_to" timestamp with time zone NOT NULL,
+  "event_count" integer NOT NULL,
+  "payload" "jsonb" NOT NULL,
+  "sha256" "text" NOT NULL,
+  "generated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+  CONSTRAINT "officer_activity_evidence_exports_period_check" CHECK (("period_from" < "period_to")),
+  CONSTRAINT "officer_activity_evidence_exports_event_count_check" CHECK (("event_count" >= 0)),
+  CONSTRAINT "officer_activity_evidence_exports_sha256_check" CHECK (("sha256" ~ '^[0-9a-f]{64}$'::"text"))
+);
+
+ALTER TABLE "public"."officer_activity_evidence_exports" OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."officer_activity_evidence_exports" IS 'Append-only canonical snapshots issued from the officer investigation timeline. Normal application roles have no update or delete policy.';
 
 
 
@@ -12546,6 +12995,29 @@ ALTER TABLE "public"."shift_coverage_requests" OWNER TO "postgres";
 COMMENT ON TABLE "public"."shift_coverage_requests" IS 'Open shifts needing coverage. Staff can claim these. Supports credential-aware matching.';
 
 
+CREATE TABLE IF NOT EXISTS "public"."shift_debriefs" (
+  "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL PRIMARY KEY,
+  "organization_id" "uuid" NOT NULL REFERENCES "public"."organizations"("id") ON DELETE RESTRICT,
+  "shift_id" "uuid" NOT NULL REFERENCES "public"."shifts"("id") ON DELETE RESTRICT UNIQUE,
+  "officer_user_id" "uuid" NOT NULL REFERENCES "public"."user_profiles"("id") ON DELETE RESTRICT,
+  "client_event_id" "uuid" NOT NULL,
+  "summary" "text" NOT NULL,
+  "safety_incident_reported" boolean DEFAULT false NOT NULL,
+  "equipment_issue_reported" boolean DEFAULT false NOT NULL,
+  "follow_up_required" boolean DEFAULT false NOT NULL,
+  "follow_up_notes" "text",
+  "submitted_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+  "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+  CONSTRAINT "shift_debriefs_organization_id_officer_user_id_client_event_id_key" UNIQUE ("organization_id", "officer_user_id", "client_event_id"),
+  CONSTRAINT "shift_debriefs_summary_length_check" CHECK ((char_length("trim"("summary")) >= 10 AND char_length("trim"("summary")) <= 5000)),
+  CONSTRAINT "shift_debriefs_follow_up_check" CHECK (((NOT "follow_up_required") OR (NULLIF("trim"("follow_up_notes"), ''::"text") IS NOT NULL)))
+);
+
+ALTER TABLE "public"."shift_debriefs" OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."shift_debriefs" IS 'Append-only officer handover submitted after operational work. Shift completion remains a separate lifecycle truth.';
+
+
 
 CREATE TABLE IF NOT EXISTS "public"."shift_stop_actions" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
@@ -13356,6 +13828,7 @@ CREATE TABLE IF NOT EXISTS "public"."timesheets" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "submitted_at" timestamp with time zone,
     "payroll_export_batch_id" "uuid",
+    "client_event_id" "uuid",
     CONSTRAINT "timesheets_status_check" CHECK (("status" = ANY (ARRAY['draft'::"text", 'submitted'::"text", 'approved'::"text", 'rejected'::"text", 'paid'::"text"])))
 );
 
@@ -13602,7 +14075,8 @@ CREATE TABLE IF NOT EXISTS "public"."welfare_alerts" (
     "last_activity_at" timestamp with time zone,
     "gps_accuracy" double precision,
     "notes" "text",
-    CONSTRAINT "welfare_alerts_alert_type_check" CHECK (("alert_type" = ANY (ARRAY['overdue'::"text", 'man_down'::"text", 'sos'::"text", 'armed_danger'::"text", 'inactivity'::"text", 'gps_lost'::"text", 'missed'::"text", 'manual'::"text", 'investigation_overdue'::"text", 'check_in'::"text"])))
+    CONSTRAINT "welfare_alerts_alert_type_check" CHECK (("alert_type" = ANY (ARRAY['overdue'::"text", 'man_down'::"text", 'sos'::"text", 'armed_danger'::"text", 'inactivity'::"text", 'gps_lost'::"text", 'missed'::"text", 'manual'::"text", 'investigation_overdue'::"text", 'check_in'::"text"]))),
+    CONSTRAINT "welfare_alerts_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'acknowledged'::"text", 'resolved'::"text"])))
 );
 
 
@@ -15613,6 +16087,9 @@ CREATE INDEX "idx_dispatch_jobs_shift_id" ON "public"."dispatch_jobs" USING "btr
 CREATE INDEX "idx_dispatch_jobs_sla_respond_by" ON "public"."dispatch_jobs" USING "btree" ("sla_respond_by") WHERE ("sla_respond_by" IS NOT NULL);
 
 
+CREATE UNIQUE INDEX "idx_dispatch_jobs_client_request" ON "public"."dispatch_jobs" USING "btree" ("organization_id", "client_request_id") WHERE ("client_request_id" IS NOT NULL);
+
+
 
 CREATE INDEX "idx_dispatch_resources_officer" ON "public"."dispatch_resources" USING "btree" ("assigned_officer_id") WHERE ("assigned_officer_id" IS NOT NULL);
 
@@ -16045,12 +16522,21 @@ CREATE INDEX "idx_ocr_org" ON "public"."officer_command_requests" USING "btree" 
 CREATE INDEX "idx_officer_gps_log_officer" ON "public"."officer_gps_log" USING "btree" ("officer_id", "created_at" DESC);
 
 
+CREATE UNIQUE INDEX "idx_officer_field_reports_client_event" ON "public"."officer_field_reports" USING "btree" ("organization_id", "officer_id", "client_event_id") WHERE ("client_event_id" IS NOT NULL);
+
+
 
 CREATE INDEX "idx_officer_gps_log_org_time" ON "public"."officer_gps_log" USING "btree" ("organization_id", "created_at" DESC);
 
 
 
 CREATE INDEX "idx_officer_gps_log_point" ON "public"."officer_gps_log" USING "gist" ("gps_point");
+
+
+CREATE UNIQUE INDEX "idx_officer_gps_log_client_event" ON "public"."officer_gps_log" USING "btree" ("organization_id", "officer_id", "client_event_id") WHERE ("client_event_id" IS NOT NULL);
+
+
+CREATE INDEX "idx_officer_activity_evidence_exports_subject" ON "public"."officer_activity_evidence_exports" USING "btree" ("organization_id", "officer_user_id", "generated_at" DESC);
 
 
 
@@ -16417,6 +16903,9 @@ CREATE INDEX "idx_shift_coverage_status" ON "public"."shift_coverage_requests" U
 CREATE INDEX "idx_shift_coverage_urgency" ON "public"."shift_coverage_requests" USING "btree" ("urgency") WHERE ("urgency" = ANY (ARRAY['high'::"text", 'urgent'::"text"]));
 
 
+CREATE INDEX "idx_shift_debriefs_org_submitted" ON "public"."shift_debriefs" USING "btree" ("organization_id", "submitted_at" DESC);
+
+
 
 CREATE UNIQUE INDEX "idx_shift_stops_external_dispatch_id" ON "public"."shift_stops" USING "btree" ("organization_id", "external_dispatch_id") WHERE ("external_dispatch_id" IS NOT NULL);
 
@@ -16579,6 +17068,9 @@ CREATE INDEX "idx_staff_profiles_external_refs" ON "public"."staff_profiles" USI
 
 
 CREATE INDEX "idx_staff_profiles_user_id" ON "public"."staff_profiles" USING "btree" ("user_id");
+
+
+CREATE UNIQUE INDEX "idx_timesheets_client_event" ON "public"."timesheets" USING "btree" ("organization_id", "staff_id", "client_event_id") WHERE ("client_event_id" IS NOT NULL);
 
 
 
@@ -18675,6 +19167,10 @@ ALTER TABLE ONLY "public"."officer_gps_log"
 
 ALTER TABLE ONLY "public"."officer_gps_log"
     ADD CONSTRAINT "officer_gps_log_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id");
+
+
+ALTER TABLE ONLY "public"."officer_gps_log"
+  ADD CONSTRAINT "officer_gps_log_shift_id_fkey" FOREIGN KEY ("shift_id") REFERENCES "public"."shifts"("id") ON DELETE SET NULL;
 
 
 
@@ -22766,7 +23262,15 @@ ALTER TABLE "public"."officer_field_reports" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."officer_gps_log" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "officer_gps_log_insert" ON "public"."officer_gps_log" FOR INSERT WITH CHECK ("public"."org_access_allowed"("organization_id"));
+ALTER TABLE "public"."officer_activity_evidence_exports" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "officer_activity_evidence_exports_select" ON "public"."officer_activity_evidence_exports" FOR SELECT TO "authenticated" USING ("public"."is_admin_for_org"("organization_id"));
+
+
+CREATE POLICY "officer_gps_log_insert" ON "public"."officer_gps_log" FOR INSERT TO "authenticated" WITH CHECK ((("officer_id" = "auth"."uid"()) AND "public"."org_access_allowed"("organization_id") AND (EXISTS ( SELECT 1
+   FROM "public"."user_profiles"
+  WHERE (("user_profiles"."id" = "auth"."uid"()) AND ("user_profiles"."deactivated_at" IS NULL) AND ("user_profiles"."role" = ANY (ARRAY['officer'::"text", 'scan_operator'::"text"])))))));
 
 
 
@@ -23619,6 +24123,12 @@ CREATE POLICY "shift_coverage_insert" ON "public"."shift_coverage_requests" FOR 
 ALTER TABLE "public"."shift_coverage_requests" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."shift_debriefs" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "shift_debriefs_select" ON "public"."shift_debriefs" FOR SELECT TO "authenticated" USING ((("officer_user_id" = "auth"."uid"()) OR "public"."is_admin_for_org"("organization_id")));
+
+
 CREATE POLICY "shift_coverage_select" ON "public"."shift_coverage_requests" FOR SELECT USING ("public"."org_access_allowed"("organization_id"));
 
 
@@ -23701,7 +24211,7 @@ CREATE POLICY "shifts_select" ON "public"."shifts" FOR SELECT USING ("public"."o
 
 
 
-CREATE POLICY "shifts_update" ON "public"."shifts" FOR UPDATE USING ("public"."org_access_allowed"("organization_id")) WITH CHECK ("public"."org_access_allowed"("organization_id"));
+CREATE POLICY "shifts_admin_update" ON "public"."shifts" FOR UPDATE TO "authenticated" USING ("public"."is_admin_for_org"("organization_id")) WITH CHECK ("public"."is_admin_for_org"("organization_id"));
 
 
 
@@ -24014,13 +24524,7 @@ CREATE POLICY "tenders_update" ON "public"."tenders" FOR UPDATE USING (("public"
 ALTER TABLE "public"."timesheets" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "timesheets_insert" ON "public"."timesheets" FOR INSERT WITH CHECK ("public"."org_access_allowed"("organization_id"));
-
-
-
-CREATE POLICY "timesheets_officer_insert" ON "public"."timesheets" FOR INSERT WITH CHECK (("staff_id" IN ( SELECT "sp"."id"
-   FROM "public"."staff_profiles" "sp"
-  WHERE ("sp"."user_id" = "auth"."uid"()))));
+CREATE POLICY "timesheets_admin_insert" ON "public"."timesheets" FOR INSERT TO "authenticated" WITH CHECK ("public"."is_admin_for_org"("organization_id"));
 
 
 
@@ -24034,7 +24538,7 @@ CREATE POLICY "timesheets_select" ON "public"."timesheets" FOR SELECT USING ("pu
 
 
 
-CREATE POLICY "timesheets_update" ON "public"."timesheets" FOR UPDATE USING ("public"."org_access_allowed"("organization_id")) WITH CHECK ("public"."org_access_allowed"("organization_id"));
+CREATE POLICY "timesheets_admin_update" ON "public"."timesheets" FOR UPDATE TO "authenticated" USING ("public"."is_admin_for_org"("organization_id")) WITH CHECK ("public"."is_admin_for_org"("organization_id"));
 
 
 
@@ -24616,6 +25120,34 @@ GRANT ALL ON FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispa
 GRANT ALL ON FUNCTION "public"."insert_adhoc_stop"("p_shift_id" "uuid", "p_dispatch_job_id" "uuid", "p_site_id" "uuid", "p_module_key" "text", "p_sla_respond_by" timestamp with time zone, "p_officer_gps_lat" double precision, "p_officer_gps_lng" double precision) TO "service_role";
 
 
+REVOKE ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) FROM "anon";
+GRANT ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "service_role";
+
+
+GRANT ALL ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") TO "authenticated";
+
+
+GRANT ALL ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") TO "service_role";
+
+GRANT ALL ON FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text") TO "authenticated";
+
+GRANT ALL ON FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text") TO "service_role";
+
+
 
 GRANT ALL ON FUNCTION "public"."is_admin_for_org"("target_org_id" "uuid") TO "anon";
 GRANT ALL ON FUNCTION "public"."is_admin_for_org"("target_org_id" "uuid") TO "authenticated";
@@ -24702,6 +25234,38 @@ GRANT ALL ON FUNCTION "public"."observations_set_gps_point"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "anon";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "service_role";
+
+
+GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "service_role";
+
+
+GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "anon";
+GRANT ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."generate_officer_activity_evidence_export"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "anon";
+REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "authenticated";
+GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
 
 
 
@@ -25894,6 +26458,12 @@ GRANT ALL ON TABLE "public"."officer_gps_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."officer_gps_log" TO "service_role";
 
 
+REVOKE ALL ON TABLE "public"."officer_activity_evidence_exports" FROM PUBLIC;
+REVOKE ALL ON TABLE "public"."officer_activity_evidence_exports" FROM "anon";
+REVOKE ALL ON TABLE "public"."officer_activity_evidence_exports" FROM "authenticated";
+GRANT SELECT ON TABLE "public"."officer_activity_evidence_exports" TO "authenticated";
+GRANT ALL ON TABLE "public"."officer_activity_evidence_exports" TO "service_role";
+
 
 GRANT ALL ON TABLE "public"."officer_welfare_settings" TO "anon";
 GRANT ALL ON TABLE "public"."officer_welfare_settings" TO "authenticated";
@@ -26188,6 +26758,13 @@ GRANT ALL ON TABLE "public"."shift_coverage_requests" TO "authenticated";
 GRANT ALL ON TABLE "public"."shift_coverage_requests" TO "service_role";
 
 
+REVOKE ALL ON TABLE "public"."shift_debriefs" FROM PUBLIC;
+REVOKE ALL ON TABLE "public"."shift_debriefs" FROM "anon";
+REVOKE ALL ON TABLE "public"."shift_debriefs" FROM "authenticated";
+GRANT SELECT ON TABLE "public"."shift_debriefs" TO "authenticated";
+GRANT ALL ON TABLE "public"."shift_debriefs" TO "service_role";
+
+
 
 GRANT ALL ON TABLE "public"."shift_stop_actions" TO "anon";
 GRANT ALL ON TABLE "public"."shift_stop_actions" TO "authenticated";
@@ -26471,3 +27048,278 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
+
+
+CREATE TABLE "public"."organization_workplaces" (
+  "id" uuid DEFAULT gen_random_uuid() PRIMARY KEY, "organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "name" text NOT NULL, "address" text, "active" boolean DEFAULT true NOT NULL, "created_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,
+  "created_at" timestamptz DEFAULT now() NOT NULL, UNIQUE("organization_id","name")
+);
+CREATE TABLE "public"."cost_centres" (
+  "id" uuid DEFAULT gen_random_uuid() PRIMARY KEY, "organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "code" text NOT NULL, "name" text NOT NULL, "active" boolean DEFAULT true NOT NULL, "created_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,
+  "created_at" timestamptz DEFAULT now() NOT NULL, UNIQUE("organization_id","code")
+);
+CREATE TABLE "public"."roster_work_units" (
+  "id" uuid DEFAULT gen_random_uuid() PRIMARY KEY, "organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "name" text NOT NULL, "work_unit_type" text NOT NULL, "service_type" text NOT NULL, "active" boolean DEFAULT true NOT NULL,
+  "patrol_route_id" uuid REFERENCES "public"."patrol_routes"("id") ON DELETE RESTRICT,
+  "service_agreement_location_id" uuid REFERENCES "public"."service_agreement_locations"("id") ON DELETE RESTRICT,
+  "service_agreement_module_id" uuid REFERENCES "public"."service_agreement_modules"("id") ON DELETE RESTRICT,
+  "workplace_id" uuid REFERENCES "public"."organization_workplaces"("id") ON DELETE RESTRICT,
+  "team_id" uuid REFERENCES "public"."teams"("id") ON DELETE RESTRICT, "cost_centre_id" uuid REFERENCES "public"."cost_centres"("id") ON DELETE RESTRICT,
+  "created_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL, "created_at" timestamptz DEFAULT now() NOT NULL, "updated_at" timestamptz DEFAULT now() NOT NULL,
+  CONSTRAINT "roster_work_units_type_check" CHECK(work_unit_type IN('patrol','static','internal')),
+  CONSTRAINT "roster_work_units_exact_target_check" CHECK(
+    (work_unit_type='patrol' AND patrol_route_id IS NOT NULL AND service_agreement_location_id IS NULL AND service_agreement_module_id IS NULL AND workplace_id IS NULL AND team_id IS NULL AND cost_centre_id IS NULL)
+    OR (work_unit_type='static' AND patrol_route_id IS NULL AND service_agreement_location_id IS NOT NULL AND service_agreement_module_id IS NOT NULL AND workplace_id IS NULL AND team_id IS NULL AND cost_centre_id IS NULL)
+    OR (work_unit_type='internal' AND patrol_route_id IS NULL AND service_agreement_location_id IS NULL AND service_agreement_module_id IS NULL AND workplace_id IS NOT NULL)
+  ), UNIQUE("organization_id","name")
+);
+CREATE TABLE "public"."roster_slots" (
+  "id" uuid DEFAULT gen_random_uuid() PRIMARY KEY, "organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "work_unit_id" uuid NOT NULL REFERENCES "public"."roster_work_units"("id") ON DELETE RESTRICT, "staff_id" uuid NOT NULL REFERENCES "public"."staff_profiles"("id") ON DELETE RESTRICT,
+  "scheduled_start" timestamptz NOT NULL, "scheduled_end" timestamptz NOT NULL, "status" text DEFAULT 'draft' NOT NULL,
+  "linked_shift_id" uuid REFERENCES "public"."shifts"("id") ON DELETE SET NULL, "client_request_id" uuid NOT NULL, "notes" text,
+  "created_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL, "created_at" timestamptz DEFAULT now() NOT NULL,
+  CONSTRAINT "roster_slots_time_check" CHECK(scheduled_start<scheduled_end),
+  CONSTRAINT "roster_slots_status_check" CHECK(status IN('draft','published','accepted','declined','completed','cancelled')),
+  UNIQUE("organization_id","client_request_id")
+);
+CREATE INDEX "idx_roster_slots_period" ON "public"."roster_slots"("organization_id","scheduled_start","scheduled_end");
+CREATE INDEX "idx_roster_work_units_type" ON "public"."roster_work_units"("organization_id","work_unit_type") WHERE active;
+ALTER TABLE "public"."organization_workplaces" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."cost_centres" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."roster_work_units" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."roster_slots" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "organization_workplaces_select" ON "public"."organization_workplaces" FOR SELECT TO authenticated USING(public.org_access_allowed(organization_id));
+CREATE POLICY "cost_centres_select" ON "public"."cost_centres" FOR SELECT TO authenticated USING(public.org_access_allowed(organization_id));
+CREATE POLICY "roster_work_units_select" ON "public"."roster_work_units" FOR SELECT TO authenticated USING(public.org_access_allowed(organization_id));
+CREATE POLICY "roster_slots_select" ON "public"."roster_slots" FOR SELECT TO authenticated USING(public.org_access_allowed(organization_id));
+REVOKE ALL ON "public"."organization_workplaces","public"."cost_centres","public"."roster_work_units","public"."roster_slots" FROM PUBLIC,"anon","authenticated";
+GRANT SELECT ON "public"."organization_workplaces","public"."cost_centres","public"."roster_work_units","public"."roster_slots" TO "authenticated";
+GRANT ALL ON "public"."organization_workplaces","public"."cost_centres","public"."roster_work_units","public"."roster_slots" TO "service_role";
+
+CREATE FUNCTION "public"."create_organization_workplace"(p_name text,p_address text DEFAULT NULL) RETURNS "public"."organization_workplaces"
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$declare v_actor uuid:=auth.uid();v_org uuid;v_row public.organization_workplaces%rowtype;begin select up.organization_id into v_org from public.user_profiles up where up.id=v_actor and up.deactivated_at is null;if v_org is null or not public.is_admin_for_org(v_org) then raise exception 'Active roster administrator required';end if;if nullif(trim(coalesce(p_name,'')),'') is null then raise exception 'Workplace name is required';end if;insert into public.organization_workplaces(organization_id,name,address,created_by)values(v_org,trim(p_name),nullif(trim(coalesce(p_address,'')),''),v_actor)returning * into v_row;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_org,v_actor,'organization_workplace_created','organization_workplaces',v_row.id,jsonb_build_object('name',v_row.name));return v_row;end;$$;
+CREATE FUNCTION "public"."create_cost_centre"(p_code text,p_name text) RETURNS "public"."cost_centres"
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$declare v_actor uuid:=auth.uid();v_org uuid;v_row public.cost_centres%rowtype;begin select up.organization_id into v_org from public.user_profiles up where up.id=v_actor and up.deactivated_at is null;if v_org is null or not public.is_admin_for_org(v_org) then raise exception 'Active roster administrator required';end if;if nullif(trim(coalesce(p_code,'')),'') is null or nullif(trim(coalesce(p_name,'')),'') is null then raise exception 'Cost centre code and name are required';end if;insert into public.cost_centres(organization_id,code,name,created_by)values(v_org,upper(trim(p_code)),trim(p_name),v_actor)returning * into v_row;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_org,v_actor,'cost_centre_created','cost_centres',v_row.id,jsonb_build_object('code',v_row.code,'name',v_row.name));return v_row;end;$$;
+CREATE FUNCTION "public"."create_roster_work_unit"(p_name text,p_work_unit_type text,p_service_type text,p_patrol_route_id uuid DEFAULT NULL,p_service_agreement_location_id uuid DEFAULT NULL,p_service_agreement_module_id uuid DEFAULT NULL,p_workplace_id uuid DEFAULT NULL,p_team_id uuid DEFAULT NULL,p_cost_centre_id uuid DEFAULT NULL) RETURNS "public"."roster_work_units"
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$declare v_actor uuid:=auth.uid();v_org uuid;v_unit public.roster_work_units%rowtype;v_agreement uuid;begin select up.organization_id into v_org from public.user_profiles up where up.id=v_actor and up.deactivated_at is null;if v_org is null or not public.is_admin_for_org(v_org) then raise exception 'Active roster administrator required';end if;if nullif(trim(coalesce(p_name,'')),'') is null or nullif(trim(coalesce(p_service_type,'')),'') is null then raise exception 'Name and service type are required';end if;if p_work_unit_type='patrol' then if p_patrol_route_id is null or not exists(select 1 from public.patrol_routes r where r.id=p_patrol_route_id and r.organization_id=v_org and r.is_active) then raise exception 'Active patrol route in this organization required';end if;elsif p_work_unit_type='static' then select sal.service_agreement_id into v_agreement from public.service_agreement_locations sal join public.service_agreements sa on sa.id=sal.service_agreement_id and sa.provider_organization_id=v_org where sal.id=p_service_agreement_location_id and sal.status='active';if v_agreement is null or not exists(select 1 from public.service_agreement_modules sam where sam.id=p_service_agreement_module_id and sam.service_agreement_id=v_agreement and sam.enabled and sam.module_key='static_guarding') then raise exception 'Active static guarding agreement location and module required';end if;elsif p_work_unit_type='internal' then if p_workplace_id is null or not exists(select 1 from public.organization_workplaces w where w.id=p_workplace_id and w.organization_id=v_org and w.active) then raise exception 'Active provider workplace required';end if;if p_team_id is not null and not exists(select 1 from public.teams t where t.id=p_team_id and t.organization_id=v_org and t.status='active') then raise exception 'Active team in this organization required';end if;if p_cost_centre_id is not null and not exists(select 1 from public.cost_centres c where c.id=p_cost_centre_id and c.organization_id=v_org and c.active) then raise exception 'Active cost centre in this organization required';end if;else raise exception 'Unsupported work unit type';end if;insert into public.roster_work_units(organization_id,name,work_unit_type,service_type,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,created_by)values(v_org,trim(p_name),p_work_unit_type,trim(p_service_type),p_patrol_route_id,p_service_agreement_location_id,p_service_agreement_module_id,p_workplace_id,p_team_id,p_cost_centre_id,v_actor)returning * into v_unit;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_org,v_actor,'roster_work_unit_created','roster_work_units',v_unit.id,jsonb_build_object('work_unit_type',v_unit.work_unit_type,'service_type',v_unit.service_type));return v_unit;end;$$;
+CREATE FUNCTION "public"."create_roster_slot"(p_client_request_id uuid,p_work_unit_id uuid,p_staff_id uuid,p_scheduled_start timestamptz,p_scheduled_end timestamptz,p_publish boolean DEFAULT false,p_notes text DEFAULT NULL) RETURNS "public"."roster_slots"
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$declare v_actor uuid:=auth.uid();v_unit public.roster_work_units%rowtype;v_staff public.staff_profiles%rowtype;v_slot public.roster_slots%rowtype;begin select u.* into v_unit from public.roster_work_units u where u.id=p_work_unit_id and u.active;if not found or not public.is_admin_for_org(v_unit.organization_id) then raise exception 'Active authorized work unit required';end if;select sp.* into v_staff from public.staff_profiles sp where sp.id=p_staff_id and sp.organization_id=v_unit.organization_id;if not found or not v_staff.work_ready then raise exception 'Work-ready staff profile required';end if;if p_client_request_id is null then raise exception 'client_request_id is required';end if;if p_scheduled_start>=p_scheduled_end or p_scheduled_start<now()-interval '5 minutes' or p_scheduled_end-p_scheduled_start>interval '24 hours' then raise exception 'Slot timing is outside the accepted range';end if;select s.* into v_slot from public.roster_slots s where s.organization_id=v_unit.organization_id and s.client_request_id=p_client_request_id;if found then return v_slot;end if;if exists(select 1 from public.leave_requests l where l.staff_id=p_staff_id and l.status='approved' and daterange(l.starts_on,l.ends_on,'[]')&&daterange(p_scheduled_start::date,p_scheduled_end::date,'[]')) then raise exception 'Staff member has approved leave';end if;if exists(select 1 from public.roster_slots s where s.staff_id=p_staff_id and s.status not in('declined','cancelled') and s.scheduled_start<p_scheduled_end and s.scheduled_end>p_scheduled_start) then raise exception 'Staff member already has an overlapping roster slot';end if;insert into public.roster_slots(organization_id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,client_request_id,notes,created_by)values(v_unit.organization_id,v_unit.id,p_staff_id,p_scheduled_start,p_scheduled_end,case when p_publish then 'published' else 'draft' end,p_client_request_id,nullif(trim(coalesce(p_notes,'')),''),v_actor)returning * into v_slot;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_unit.organization_id,v_actor,'roster_slot_created','roster_slots',v_slot.id,jsonb_build_object('work_unit_id',v_unit.id,'work_unit_type',v_unit.work_unit_type,'staff_id',p_staff_id,'status',v_slot.status));return v_slot;end;$$;
+REVOKE ALL ON FUNCTION "public"."create_organization_workplace"(text,text),"public"."create_cost_centre"(text,text),"public"."create_roster_work_unit"(text,text,text,uuid,uuid,uuid,uuid,uuid,uuid),"public"."create_roster_slot"(uuid,uuid,uuid,timestamptz,timestamptz,boolean,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."create_organization_workplace"(text,text),"public"."create_cost_centre"(text,text),"public"."create_roster_work_unit"(text,text,text,uuid,uuid,uuid,uuid,uuid,uuid),"public"."create_roster_slot"(uuid,uuid,uuid,timestamptz,timestamptz,boolean,text) TO "authenticated","service_role";
+
+
+ALTER TABLE "public"."shifts" ADD COLUMN "roster_slot_id" uuid REFERENCES "public"."roster_slots"("id") ON DELETE SET NULL;
+ALTER TABLE "public"."shifts" ADD COLUMN "service_agreement_location_id" uuid REFERENCES "public"."service_agreement_locations"("id") ON DELETE SET NULL;
+ALTER TABLE "public"."shifts" ADD COLUMN "service_agreement_module_id" uuid REFERENCES "public"."service_agreement_modules"("id") ON DELETE SET NULL;
+CREATE UNIQUE INDEX "idx_shifts_roster_slot" ON "public"."shifts"("roster_slot_id") WHERE "roster_slot_id" IS NOT NULL;
+
+CREATE FUNCTION "public"."materialize_roster_slot"(p_slot_id uuid,p_expected_status text DEFAULT 'published')
+RETURNS TABLE(slot_id uuid,shift_id uuid,created boolean) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_slot public.roster_slots%rowtype;v_unit public.roster_work_units%rowtype;v_staff public.staff_profiles%rowtype;v_user uuid;v_shift public.shifts%rowtype;v_sal public.service_agreement_locations%rowtype;v_site_location uuid;v_stop uuid;
+begin
+  select s.* into v_slot from public.roster_slots s where s.id=p_slot_id for update;if not found then raise exception 'Roster slot not found';end if;
+  if not public.is_admin_for_org(v_slot.organization_id) then raise exception 'Not authorised to materialize this roster slot';end if;
+  if v_slot.status<>p_expected_status then raise exception 'Roster slot changed from expected status % to %',p_expected_status,v_slot.status;end if;
+  if v_slot.linked_shift_id is not null then return query select v_slot.id,v_slot.linked_shift_id,false;return;end if;
+  select u.* into v_unit from public.roster_work_units u where u.id=v_slot.work_unit_id and u.organization_id=v_slot.organization_id and u.active;if not found then raise exception 'Active work unit not found';end if;
+  if v_unit.work_unit_type='internal' then raise exception 'Internal roster slots do not materialize field shifts';end if;
+  select sp.* into v_staff from public.staff_profiles sp where sp.id=v_slot.staff_id and sp.organization_id=v_slot.organization_id and sp.work_ready;if not found then raise exception 'Work-ready staff profile required';end if;
+  v_user:=coalesce(v_staff.user_id,v_staff.id);if not exists(select 1 from public.user_profiles up where up.id=v_user and up.deactivated_at is null and up.role in('officer','admin_officer')) then raise exception 'Roster slot staff is not an active field officer';end if;
+  if v_unit.work_unit_type='patrol' then
+    select * into v_shift from public.create_roster_shift(v_user,v_unit.service_type,v_slot.scheduled_start,v_slot.scheduled_end,null,null,v_unit.patrol_route_id,v_slot.notes,true);
+    update public.shifts set roster_slot_id=v_slot.id where id=v_shift.id returning * into v_shift;
+    perform public.generate_shift_stops(v_shift.id,(v_slot.scheduled_start at time zone 'Pacific/Auckland')::date);
+  elsif v_unit.work_unit_type='static' then
+    select sal.* into v_sal from public.service_agreement_locations sal where sal.id=v_unit.service_agreement_location_id and sal.status='active';
+    if not found or not exists(select 1 from public.service_agreement_modules sam where sam.id=v_unit.service_agreement_module_id and sam.service_agreement_id=v_sal.service_agreement_id and sam.enabled and sam.module_key='static_guarding') then raise exception 'Static work unit contract is no longer active';end if;
+    if v_sal.site_id is not null then select cs.location_id into v_site_location from public.client_sites cs where cs.id=v_sal.site_id;end if;
+    select * into v_shift from public.create_roster_shift(v_user,v_unit.service_type,v_slot.scheduled_start,v_slot.scheduled_end,v_site_location,v_sal.zone_id,null,v_slot.notes,true);
+    update public.shifts set roster_slot_id=v_slot.id,service_agreement_location_id=v_unit.service_agreement_location_id,service_agreement_module_id=v_unit.service_agreement_module_id,total_stops=1,generated_at=clock_timestamp() where id=v_shift.id returning * into v_shift;
+    insert into public.shift_stops(organization_id,shift_id,site_id,zone_id,module_key,stop_order,visit_number,is_adhoc,sla_arrive_by,required_dwell_minutes,status,sla_status,officer_notes) values(v_slot.organization_id,v_shift.id,v_sal.site_id,v_sal.zone_id,'static_guarding',1,1,false,v_slot.scheduled_start,0,'pending','on_track',v_slot.notes) returning id into v_stop;
+    insert into public.shift_stop_modules(organization_id,shift_stop_id,module_key,is_required,service_agreement_module_id,service_agreement_location_id) values(v_slot.organization_id,v_stop,'static_guarding',true,v_unit.service_agreement_module_id,v_unit.service_agreement_location_id);
+  else raise exception 'Unsupported field work unit type';end if;
+  update public.roster_slots set linked_shift_id=v_shift.id where id=v_slot.id;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_slot.organization_id,v_actor,'roster_slot_materialized','roster_slots',v_slot.id,jsonb_build_object('work_unit_id',v_unit.id,'work_unit_type',v_unit.work_unit_type,'shift_id',v_shift.id));
+  return query select v_slot.id,v_shift.id,true;
+end;$$;
+REVOKE ALL ON FUNCTION "public"."materialize_roster_slot"(uuid,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."materialize_roster_slot"(uuid,text) TO "authenticated","service_role";
+
+
+DROP POLICY "roster_slots_select" ON "public"."roster_slots";
+CREATE POLICY "roster_slots_select" ON "public"."roster_slots" FOR SELECT TO "authenticated" USING(
+  public.is_admin_for_org(organization_id) OR EXISTS(
+    SELECT 1 FROM public.staff_profiles sp WHERE sp.id=roster_slots.staff_id AND (sp.user_id=auth.uid() OR sp.id=auth.uid())
+  )
+);
+CREATE FUNCTION "public"."respond_to_roster_slot"(p_slot_id uuid,p_expected_status text,p_response text,p_decline_reason text DEFAULT NULL)
+RETURNS TABLE(slot_id uuid,slot_status text,shift_id uuid,shift_status text) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_user uuid:=auth.uid();v_slot public.roster_slots%rowtype;v_staff public.staff_profiles%rowtype;v_next text;v_shift_status text;
+begin
+  if v_user is null then raise exception 'Authentication required';end if;
+  select s.* into v_slot from public.roster_slots s where s.id=p_slot_id for update;if not found then raise exception 'Roster slot not found';end if;
+  select sp.* into v_staff from public.staff_profiles sp where sp.id=v_slot.staff_id and (sp.user_id=v_user or sp.id=v_user);if not found then raise exception 'Roster slot does not belong to the authenticated staff member';end if;
+  if v_slot.status<>p_expected_status then raise exception 'Roster slot changed from expected status % to %',p_expected_status,v_slot.status;end if;
+  if v_slot.status<>'published' then raise exception 'Only published roster slots can be accepted or declined';end if;
+  if p_response='accept' then v_next:='accepted';elsif p_response='decline' then if nullif(trim(coalesce(p_decline_reason,'')),'') is null then raise exception 'Decline reason is required';end if;v_next:='declined';else raise exception 'Unsupported roster response';end if;
+  if v_slot.linked_shift_id is not null then select s.status into v_shift_status from public.shifts s where s.id=v_slot.linked_shift_id for update;if v_shift_status is null then raise exception 'Linked field shift not found';end if;if v_shift_status<>'published' then raise exception 'Linked field shift changed from expected status published to %',v_shift_status;end if;update public.shifts set status=v_next where id=v_slot.linked_shift_id returning status into v_shift_status;end if;
+  update public.roster_slots set status=v_next,notes=case when v_next='declined' then concat_ws(E'\n',nullif(notes,''),'Declined: '||trim(p_decline_reason)) else notes end where id=v_slot.id returning * into v_slot;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_slot.organization_id,v_user,case when v_next='accepted' then 'roster_slot_accepted' else 'roster_slot_declined' end,'roster_slots',v_slot.id,jsonb_build_object('linked_shift_id',v_slot.linked_shift_id,'decline_reason',case when v_next='declined' then trim(p_decline_reason) else null end));
+  return query select v_slot.id,v_slot.status,v_slot.linked_shift_id,v_shift_status;
+end;$$;
+REVOKE ALL ON FUNCTION "public"."respond_to_roster_slot"(uuid,text,text,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."respond_to_roster_slot"(uuid,text,text,text) TO "authenticated","service_role";
+
+
+CREATE FUNCTION "public"."manage_roster_slot"(p_slot_id uuid,p_expected_status text,p_action text,p_reason text DEFAULT NULL)
+RETURNS TABLE(slot_id uuid,slot_status text,shift_id uuid,shift_status text) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_slot public.roster_slots%rowtype;v_unit public.roster_work_units%rowtype;v_shift public.shifts%rowtype;v_materialized record;
+begin
+  select s.* into v_slot from public.roster_slots s where s.id=p_slot_id for update;if not found then raise exception 'Roster slot not found';end if;
+  if not public.is_admin_for_org(v_slot.organization_id) then raise exception 'Not authorised to manage this roster slot';end if;
+  if v_slot.status<>p_expected_status then raise exception 'Roster slot changed from expected status % to %',p_expected_status,v_slot.status;end if;
+  select u.* into v_unit from public.roster_work_units u where u.id=v_slot.work_unit_id;
+  if p_action='publish' then if v_slot.status<>'draft' then raise exception 'Only draft roster slots can be published';end if;update public.roster_slots rs set status='published' where rs.id=v_slot.id returning rs.* into v_slot;if v_unit.work_unit_type in('patrol','static') then select * into v_materialized from public.materialize_roster_slot(v_slot.id,'published');v_slot.linked_shift_id:=v_materialized.shift_id;end if;
+  elsif p_action='cancel' then if v_slot.status not in('draft','published','accepted') then raise exception 'This roster slot can no longer be cancelled';end if;if nullif(trim(coalesce(p_reason,'')),'') is null then raise exception 'Cancellation reason is required';end if;
+    if v_slot.linked_shift_id is not null then select s.* into v_shift from public.shifts s where s.id=v_slot.linked_shift_id for update;if not found then raise exception 'Linked field shift not found';end if;if v_shift.status not in('scheduled','published','accepted') or v_shift.actual_start is not null then raise exception 'Field shift has started or is no longer cancellable';end if;if exists(select 1 from public.patrols p where p.shift_id=v_shift.id and p.status='in_progress') then raise exception 'Active patrol prevents cancellation';end if;if exists(select 1 from public.dispatch_jobs d where d.shift_id=v_shift.id and d.status in('pending','pending_approval','dispatched','acknowledged','en_route','on_scene')) then raise exception 'Active dispatch work prevents cancellation';end if;if exists(select 1 from public.shift_stop_actions a where a.shift_id=v_shift.id) then raise exception 'Recorded field activity prevents cancellation';end if;update public.shift_stop_modules m set status='skipped',updated_at=clock_timestamp() from public.shift_stops st where m.shift_stop_id=st.id and st.shift_id=v_shift.id and m.status in('pending','in_progress');update public.shift_stops st set status='cancelled',updated_at=clock_timestamp() where st.shift_id=v_shift.id and st.status in('pending','en_route','on_scene');update public.shifts sh set status='cancelled',notes=concat_ws(E'\n',nullif(sh.notes,''),'Cancelled: '||trim(p_reason)) where sh.id=v_shift.id returning sh.* into v_shift;end if;
+    update public.roster_slots rs set status='cancelled',notes=concat_ws(E'\n',nullif(rs.notes,''),'Cancelled: '||trim(p_reason)) where rs.id=v_slot.id returning rs.* into v_slot;
+  else raise exception 'Unsupported roster slot action';end if;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_slot.organization_id,v_actor,case when p_action='publish' then 'roster_slot_published' else 'roster_slot_cancelled' end,'roster_slots',v_slot.id,jsonb_build_object('work_unit_type',v_unit.work_unit_type,'linked_shift_id',v_slot.linked_shift_id,'reason',case when p_action='cancel' then trim(p_reason) else null end));return query select v_slot.id,v_slot.status,v_slot.linked_shift_id,case when v_shift.id is null then null else v_shift.status end;
+end;$$;
+REVOKE ALL ON FUNCTION "public"."manage_roster_slot"(uuid,text,text,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."manage_roster_slot"(uuid,text,text,text) TO "authenticated","service_role";
+
+
+CREATE FUNCTION "public"."reassign_roster_slot"(p_slot_id uuid,p_expected_status text,p_new_staff_id uuid,p_reason text)
+RETURNS TABLE(slot_id uuid,slot_status text,staff_id uuid,shift_id uuid,shift_status text) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_slot public.roster_slots%rowtype;v_unit public.roster_work_units%rowtype;v_staff public.staff_profiles%rowtype;v_shift public.shifts%rowtype;v_old_staff_id uuid;v_new_status text;
+begin
+  select s.* into v_slot from public.roster_slots s where s.id=p_slot_id for update;if not found then raise exception 'Roster slot not found';end if;if not public.is_admin_for_org(v_slot.organization_id) then raise exception 'Not authorised to reassign this roster slot';end if;if v_slot.status<>p_expected_status then raise exception 'Roster slot changed from expected status % to %',p_expected_status,v_slot.status;end if;if v_slot.status not in('draft','published','accepted','declined') then raise exception 'This roster slot can no longer be reassigned';end if;if p_new_staff_id=v_slot.staff_id then raise exception 'Select a different staff member';end if;if nullif(trim(coalesce(p_reason,'')),'') is null then raise exception 'Reassignment reason is required';end if;
+  select u.* into v_unit from public.roster_work_units u where u.id=v_slot.work_unit_id and u.organization_id=v_slot.organization_id and u.active;if not found then raise exception 'Active work unit not found';end if;select sp.* into v_staff from public.staff_profiles sp where sp.id=p_new_staff_id and sp.organization_id=v_slot.organization_id and sp.work_ready;if not found then raise exception 'Work-ready staff profile required';end if;if v_staff.user_id is null or not exists(select 1 from public.user_profiles up where up.id=v_staff.user_id and up.organization_id=v_slot.organization_id and up.deactivated_at is null and up.role in('officer','admin_officer')) then raise exception 'Replacement staff is not an active roster officer';end if;
+  if exists(select 1 from public.leave_requests l where l.staff_id=p_new_staff_id and l.status='approved' and daterange(l.starts_on,l.ends_on,'[]')&&daterange(v_slot.scheduled_start::date,v_slot.scheduled_end::date,'[]')) then raise exception 'Replacement staff member has approved leave';end if;if exists(select 1 from public.roster_slots s where s.id<>v_slot.id and s.staff_id=p_new_staff_id and s.status not in('declined','cancelled') and s.scheduled_start<v_slot.scheduled_end and s.scheduled_end>v_slot.scheduled_start) then raise exception 'Replacement staff member has an overlapping roster slot';end if;if exists(select 1 from public.shifts s where s.id<>coalesce(v_slot.linked_shift_id,'00000000-0000-0000-0000-000000000000'::uuid) and s.officer_user_id=v_staff.user_id and s.status not in('declined','cancelled') and s.scheduled_start<v_slot.scheduled_end and s.scheduled_end>v_slot.scheduled_start) then raise exception 'Replacement officer has an overlapping field shift';end if;
+  if v_slot.linked_shift_id is not null then select s.* into v_shift from public.shifts s where s.id=v_slot.linked_shift_id for update;if not found then raise exception 'Linked field shift not found';end if;if v_shift.status not in('published','accepted','declined') or v_shift.actual_start is not null then raise exception 'Field shift has started or is no longer reassignable';end if;if exists(select 1 from public.patrols p where p.shift_id=v_shift.id and p.status='in_progress') then raise exception 'Active patrol prevents reassignment';end if;if exists(select 1 from public.dispatch_jobs d where d.shift_id=v_shift.id and d.status in('pending','pending_approval','dispatched','acknowledged','en_route','on_scene')) then raise exception 'Active dispatch work prevents reassignment';end if;if exists(select 1 from public.shift_stop_actions a where a.shift_id=v_shift.id) then raise exception 'Recorded field activity prevents reassignment';end if;update public.shifts sh set officer_user_id=v_staff.user_id,status='published',notes=concat_ws(E'\n',nullif(sh.notes,''),'Reassigned: '||trim(p_reason)) where sh.id=v_shift.id returning sh.* into v_shift;end if;
+  v_old_staff_id:=v_slot.staff_id;v_new_status:=case when v_slot.status='draft' then 'draft' else 'published' end;update public.roster_slots rs set staff_id=p_new_staff_id,status=v_new_status,notes=concat_ws(E'\n',nullif(rs.notes,''),'Reassigned: '||trim(p_reason)) where rs.id=v_slot.id returning rs.* into v_slot;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_slot.organization_id,v_actor,'roster_slot_reassigned','roster_slots',v_slot.id,jsonb_build_object('work_unit_id',v_unit.id,'old_staff_id',v_old_staff_id,'new_staff_id',p_new_staff_id,'linked_shift_id',v_slot.linked_shift_id,'reason',trim(p_reason)));return query select v_slot.id,v_slot.status,v_slot.staff_id,v_slot.linked_shift_id,case when v_shift.id is null then null else v_shift.status end;
+end;$$;
+REVOKE ALL ON FUNCTION "public"."reassign_roster_slot"(uuid,text,uuid,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."reassign_roster_slot"(uuid,text,uuid,text) TO "authenticated","service_role";
+
+
+CREATE FUNCTION "public"."staff_has_roster_availability_conflict"(p_staff_id uuid,p_scheduled_start timestamptz,p_scheduled_end timestamptz)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
+  select exists(select 1 from public.staff_availability a cross join lateral generate_series((p_scheduled_start at time zone 'Pacific/Auckland')::date,((p_scheduled_end-interval '1 microsecond') at time zone 'Pacific/Auckland')::date,interval '1 day') as roster_day where a.staff_id=p_staff_id and a.availability_type in('unavailable','leave') and (a.specific_date=roster_day::date or (a.specific_date is null and a.day_of_week=extract(isodow from roster_day)::integer)) and (a.all_day or a.available_from is null or a.available_to is null or tstzrange(p_scheduled_start,p_scheduled_end,'[)')&&tstzrange((roster_day::date+a.available_from) at time zone 'Pacific/Auckland',((roster_day::date+case when a.available_to>a.available_from then 0 else 1 end)+a.available_to) at time zone 'Pacific/Auckland','[)')));
+$$;
+CREATE FUNCTION "public"."enforce_roster_slot_availability"() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+begin if new.status not in('declined','cancelled') and public.staff_has_roster_availability_conflict(new.staff_id,new.scheduled_start,new.scheduled_end) then raise exception 'Staff member is unavailable during this roster slot';end if;return new;end;$$;
+CREATE TRIGGER "trg_enforce_roster_slot_availability" BEFORE INSERT OR UPDATE OF staff_id,scheduled_start,scheduled_end,status ON "public"."roster_slots" FOR EACH ROW EXECUTE FUNCTION "public"."enforce_roster_slot_availability"();
+REVOKE ALL ON FUNCTION "public"."staff_has_roster_availability_conflict"(uuid,timestamptz,timestamptz),"public"."enforce_roster_slot_availability"() FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."staff_has_roster_availability_conflict"(uuid,timestamptz,timestamptz),"public"."enforce_roster_slot_availability"() TO "service_role";
+
+
+CREATE TABLE "public"."organization_calendar_settings" (
+  "organization_id" uuid PRIMARY KEY REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "country_code" text NOT NULL DEFAULT 'NZ',"region_code" text,"updated_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"updated_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "organization_calendar_country_check" CHECK(country_code='NZ'),
+  CONSTRAINT "organization_calendar_region_check" CHECK(region_code IS NULL OR region_code IN('AUK','BOP','CAN','CIT','GIS','HKB','MBH','MWT','NSN','NTL','OTA','STL','TAS','TKI','WKO','WGN','WTC'))
+);
+ALTER TABLE "public"."organization_calendar_settings" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "organization_calendar_settings_select" ON "public"."organization_calendar_settings" FOR SELECT TO "authenticated" USING("public"."org_access_allowed"(organization_id));
+REVOKE ALL ON TABLE "public"."organization_calendar_settings" FROM PUBLIC,"anon","authenticated";
+GRANT SELECT ON TABLE "public"."organization_calendar_settings" TO "authenticated";
+GRANT ALL ON TABLE "public"."organization_calendar_settings" TO "service_role";
+CREATE FUNCTION "public"."set_organization_calendar_region"(p_organization_id uuid,p_region_code text) RETURNS public.organization_calendar_settings LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_row public.organization_calendar_settings%rowtype;v_region text:=nullif(upper(trim(coalesce(p_region_code,''))), '');begin if not public.is_admin_for_org(p_organization_id) then raise exception 'Not authorised to configure this organization calendar';end if;if v_region is not null and v_region not in('AUK','BOP','CAN','CIT','GIS','HKB','MBH','MWT','NSN','NTL','OTA','STL','TAS','TKI','WKO','WGN','WTC') then raise exception 'Unsupported New Zealand holiday region';end if;insert into public.organization_calendar_settings(organization_id,region_code,updated_by) values(p_organization_id,v_region,v_actor) on conflict(organization_id) do update set region_code=excluded.region_code,updated_by=v_actor,updated_at=clock_timestamp() returning * into v_row;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(p_organization_id,v_actor,'organization_calendar_region_set','organization_calendar_settings',p_organization_id,jsonb_build_object('country_code','NZ','region_code',v_region));return v_row;end;$$;
+REVOKE ALL ON FUNCTION "public"."set_organization_calendar_region"(uuid,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."set_organization_calendar_region"(uuid,text) TO "authenticated","service_role";
+
+
+CREATE FUNCTION "public"."roster_place_geofence_state"(p_site_id uuid,p_zone_id uuid) RETURNS text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_has_boundary boolean;v_verified boolean;begin select case when p_site_id is not null then exists(select 1 from public.client_sites s where s.id=p_site_id and s.boundary is not null) else exists(select 1 from public.location_zones z where z.id=p_zone_id and z.boundary is not null) end into v_has_boundary;if not v_has_boundary then return 'missing';end if;select coalesce((select h.verification_state='verified' from public.geofence_boundary_history h where h.entity_type=case when p_site_id is not null then 'client_site' else 'location_zone' end and h.entity_id=coalesce(p_site_id,p_zone_id) order by h.created_at desc limit 1),false) into v_verified;return case when v_verified then 'verified' else 'mapped_unverified' end;end;$$;
+CREATE FUNCTION "public"."roster_agreement_billing_ready"(p_agreement_id uuid,p_site_id uuid,p_zone_id uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
+select exists(select 1 from public.crm_commercial_settings c where c.service_agreement_id=p_agreement_id and coalesce(c.base_rate_per_hour,c.callout_rate_per_hour,c.travel_rate_per_km)>0) or exists(select 1 from public.site_financial_config f where f.service_agreement_id=p_agreement_id and f.active and (f.site_id=p_site_id or (p_zone_id is not null and f.zone_id=p_zone_id)) and coalesce(f.hourly_rate,f.per_visit_rate,f.flat_rate_monthly,f.per_notice_rate,f.callout_rate)>0);$$;
+CREATE FUNCTION "public"."get_roster_commercial_readiness"(p_organization_id uuid,p_from timestamptz,p_to timestamptz) RETURNS TABLE(slot_id uuid,pay_status text,billing_status text,quote_status text,geofence_status text,cost_centre_status text) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+begin if not public.is_admin_for_org(p_organization_id) then raise exception 'Not authorised to view roster commercial readiness';end if;if p_from is null or p_to is null or p_from>=p_to or p_to-p_from>interval '62 days' then raise exception 'Readiness window must be between 1 and 62 days';end if;return query select s.id,
+case when exists(select 1 from public.rate_rules r where r.organization_id=s.organization_id and r.rule_kind='pay' and r.active and (r.service_type is null or r.service_type=u.service_type) and (r.effective_from is null or r.effective_from<=s.scheduled_start::date) and (r.effective_to is null or r.effective_to>=s.scheduled_start::date)) then 'ready' else 'missing_rule' end,
+case when u.work_unit_type='internal' then 'not_applicable' when u.work_unit_type='static' and not exists(select 1 from public.service_agreement_locations l join public.service_agreements a on a.id=l.service_agreement_id join public.service_agreement_modules m on m.id=u.service_agreement_module_id and m.service_agreement_id=a.id and m.enabled where l.id=u.service_agreement_location_id and l.status='active' and a.agreement_type='operational' and (a.starts_on is null or a.starts_on<=s.scheduled_start::date) and (a.ends_on is null or a.ends_on>=s.scheduled_start::date)) then 'missing_contract' when u.work_unit_type='static' and public.roster_agreement_billing_ready((select l.service_agreement_id from public.service_agreement_locations l where l.id=u.service_agreement_location_id),(select l.site_id from public.service_agreement_locations l where l.id=u.service_agreement_location_id),(select l.zone_id from public.service_agreement_locations l where l.id=u.service_agreement_location_id)) then 'ready' when u.work_unit_type='static' then 'missing_rate' when s.linked_shift_id is null then 'pending_materialization' when not exists(select 1 from public.shift_stops st join public.shift_stop_modules sm on sm.shift_stop_id=st.id and sm.is_required where st.shift_id=s.linked_shift_id) or exists(select 1 from public.shift_stops st join public.shift_stop_modules sm on sm.shift_stop_id=st.id and sm.is_required where st.shift_id=s.linked_shift_id and (sm.service_agreement_location_id is null or sm.service_agreement_module_id is null)) then 'missing_attribution' when exists(select 1 from public.shift_stops st join public.shift_stop_modules sm on sm.shift_stop_id=st.id and sm.is_required join public.service_agreement_locations l on l.id=sm.service_agreement_location_id where st.shift_id=s.linked_shift_id and not public.roster_agreement_billing_ready(l.service_agreement_id,l.site_id,l.zone_id)) then 'missing_rate' else 'ready' end,
+case when u.work_unit_type='internal' then 'not_applicable' when u.work_unit_type='static' and exists(select 1 from public.service_agreement_locations l join public.quotes q on q.service_agreement_id=l.service_agreement_id and q.status='accepted' where l.id=u.service_agreement_location_id) then 'accepted' when u.work_unit_type='static' then 'missing' when s.linked_shift_id is null then 'pending_materialization' when exists(select 1 from public.shift_stops st join public.shift_stop_modules sm on sm.shift_stop_id=st.id and sm.is_required left join public.service_agreement_locations l on l.id=sm.service_agreement_location_id left join public.quotes q on q.service_agreement_id=l.service_agreement_id and q.status='accepted' where st.shift_id=s.linked_shift_id and q.id is null) then 'missing' else 'accepted' end,
+case when u.work_unit_type='internal' then 'not_applicable' when u.work_unit_type='static' then public.roster_place_geofence_state((select l.site_id from public.service_agreement_locations l where l.id=u.service_agreement_location_id),(select l.zone_id from public.service_agreement_locations l where l.id=u.service_agreement_location_id)) when s.linked_shift_id is null then 'pending_materialization' when not exists(select 1 from public.shift_stops st where st.shift_id=s.linked_shift_id) then 'pending_materialization' when exists(select 1 from public.shift_stops st where st.shift_id=s.linked_shift_id and public.roster_place_geofence_state(st.site_id,st.zone_id)='missing') then 'missing' when not exists(select 1 from public.shift_stops st where st.shift_id=s.linked_shift_id and public.roster_place_geofence_state(st.site_id,st.zone_id)<>'verified') then 'verified' else 'mapped_unverified' end,
+case when u.work_unit_type<>'internal' then 'not_applicable' when u.cost_centre_id is not null then 'ready' else 'missing' end from public.roster_slots s join public.roster_work_units u on u.id=s.work_unit_id where s.organization_id=p_organization_id and s.scheduled_start<p_to and s.scheduled_end>p_from and s.status<>'cancelled';end;$$;
+REVOKE ALL ON FUNCTION "public"."roster_place_geofence_state"(uuid,uuid),"public"."roster_agreement_billing_ready"(uuid,uuid,uuid),"public"."get_roster_commercial_readiness"(uuid,timestamptz,timestamptz) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."roster_place_geofence_state"(uuid,uuid),"public"."roster_agreement_billing_ready"(uuid,uuid,uuid) TO "service_role";
+GRANT EXECUTE ON FUNCTION "public"."get_roster_commercial_readiness"(uuid,timestamptz,timestamptz) TO "authenticated","service_role";
+
+
+ALTER TABLE "public"."leave_requests" ADD COLUMN IF NOT EXISTS "client_event_id" uuid,ADD COLUMN IF NOT EXISTS "decision_notes" text;
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_leave_requests_client_event" ON "public"."leave_requests"(organization_id,staff_id,client_event_id) WHERE client_event_id IS NOT NULL;
+ALTER TABLE "public"."timesheets" ADD COLUMN IF NOT EXISTS "review_notes" text;
+DROP POLICY IF EXISTS "leave_requests_insert" ON "public"."leave_requests";DROP POLICY IF EXISTS "leave_requests_update" ON "public"."leave_requests";DROP POLICY IF EXISTS "leave_requests_select" ON "public"."leave_requests";
+CREATE POLICY "leave_requests_select" ON "public"."leave_requests" FOR SELECT TO "authenticated" USING("public"."is_admin_for_org"(organization_id) OR EXISTS(SELECT 1 FROM "public"."staff_profiles" sp WHERE sp.id=leave_requests.staff_id AND (sp.user_id=auth.uid() OR sp.id=auth.uid())));
+REVOKE ALL ON TABLE "public"."leave_requests" FROM PUBLIC,"anon","authenticated";GRANT SELECT ON TABLE "public"."leave_requests" TO "authenticated";GRANT ALL ON TABLE "public"."leave_requests" TO "service_role";
+DROP POLICY IF EXISTS "timesheets_admin_insert" ON "public"."timesheets";DROP POLICY IF EXISTS "timesheets_admin_update" ON "public"."timesheets";DROP POLICY IF EXISTS "timesheets_select" ON "public"."timesheets";DROP POLICY IF EXISTS "timesheets_officer_self" ON "public"."timesheets";
+CREATE POLICY "timesheets_select" ON "public"."timesheets" FOR SELECT TO "authenticated" USING("public"."is_admin_for_org"(organization_id) OR EXISTS(SELECT 1 FROM "public"."staff_profiles" sp WHERE sp.id=timesheets.staff_id AND (sp.user_id=auth.uid() OR sp.id=auth.uid())));
+REVOKE ALL ON TABLE "public"."timesheets" FROM PUBLIC,"anon","authenticated";GRANT SELECT ON TABLE "public"."timesheets" TO "authenticated";GRANT ALL ON TABLE "public"."timesheets" TO "service_role";
+DROP POLICY IF EXISTS "shift_coverage_insert" ON "public"."shift_coverage_requests";DROP POLICY IF EXISTS "shift_coverage_update" ON "public"."shift_coverage_requests";REVOKE INSERT,UPDATE,DELETE ON TABLE "public"."shift_coverage_requests" FROM PUBLIC,"anon","authenticated";
+CREATE FUNCTION "public"."submit_officer_leave_request"(p_client_event_id uuid,p_leave_type text,p_starts_on date,p_ends_on date,p_reason text DEFAULT NULL) RETURNS TABLE(id uuid,created boolean,status text) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_user uuid:=auth.uid();v_staff public.staff_profiles%rowtype;v_leave public.leave_requests%rowtype;begin select sp.* into v_staff from public.staff_profiles sp join public.user_profiles up on up.id=v_user and up.deactivated_at is null where sp.organization_id=up.organization_id and (sp.user_id=v_user or sp.id=v_user) limit 1;if not found then raise exception 'Active staff profile required';end if;if p_client_event_id is null then raise exception 'client_event_id is required';end if;if p_leave_type not in('annual','sick','bereavement','parental','unpaid','other') then raise exception 'Unsupported leave type';end if;if p_starts_on is null or p_ends_on is null or p_starts_on>p_ends_on or p_ends_on-p_starts_on>366 then raise exception 'Leave period is outside the accepted range';end if;select l.* into v_leave from public.leave_requests l where l.organization_id=v_staff.organization_id and l.staff_id=v_staff.id and l.client_event_id=p_client_event_id;if found then return query select v_leave.id,false,v_leave.status;return;end if;if exists(select 1 from public.leave_requests l where l.staff_id=v_staff.id and l.status in('pending','approved') and daterange(l.starts_on,l.ends_on,'[]')&&daterange(p_starts_on,p_ends_on,'[]')) then raise exception 'An active leave request already overlaps this period';end if;insert into public.leave_requests(organization_id,staff_id,leave_type,starts_on,ends_on,status,reason,client_event_id) values(v_staff.organization_id,v_staff.id,p_leave_type,p_starts_on,p_ends_on,'pending',nullif(trim(coalesce(p_reason,'')),''),p_client_event_id) returning * into v_leave;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_staff.organization_id,v_user,'leave_request_submitted','leave_requests',v_leave.id,jsonb_build_object('staff_id',v_staff.id,'leave_type',p_leave_type,'starts_on',p_starts_on,'ends_on',p_ends_on));return query select v_leave.id,true,v_leave.status;end;$$;
+CREATE FUNCTION "public"."review_leave_request"(p_request_id uuid,p_expected_status text,p_decision text,p_review_notes text DEFAULT NULL) RETURNS public.leave_requests LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_leave public.leave_requests%rowtype;v_notes text:=nullif(trim(coalesce(p_review_notes,'')),'');begin select l.* into v_leave from public.leave_requests l where l.id=p_request_id for update;if not found then raise exception 'Leave request not found';end if;if not public.is_admin_for_org(v_leave.organization_id) then raise exception 'Not authorised to review this leave request';end if;if v_leave.status<>p_expected_status then raise exception 'Leave request changed from expected status % to %',p_expected_status,v_leave.status;end if;if v_leave.status<>'pending' or p_decision not in('approved','declined') then raise exception 'Unsupported leave decision';end if;if p_decision='declined' and v_notes is null then raise exception 'Review notes are required to decline leave';end if;if p_decision='approved' and exists(select 1 from public.roster_slots s where s.staff_id=v_leave.staff_id and s.status not in('declined','cancelled') and daterange((s.scheduled_start at time zone 'Pacific/Auckland')::date,(s.scheduled_end at time zone 'Pacific/Auckland')::date,'[]')&&daterange(v_leave.starts_on,v_leave.ends_on,'[]')) then raise exception 'Active roster slots overlap this leave request';end if;update public.leave_requests set status=p_decision,approved_by=v_actor,approved_at=clock_timestamp(),decision_notes=v_notes where id=v_leave.id returning * into v_leave;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_leave.organization_id,v_actor,case when p_decision='approved' then 'leave_request_approved' else 'leave_request_declined' end,'leave_requests',v_leave.id,jsonb_build_object('staff_id',v_leave.staff_id,'starts_on',v_leave.starts_on,'ends_on',v_leave.ends_on,'review_notes',v_notes));return v_leave;end;$$;
+CREATE FUNCTION "public"."review_timesheet"(p_timesheet_id uuid,p_expected_status text,p_decision text,p_review_notes text DEFAULT NULL) RETURNS public.timesheets LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_sheet public.timesheets%rowtype;v_notes text:=nullif(trim(coalesce(p_review_notes,'')),'');begin select t.* into v_sheet from public.timesheets t where t.id=p_timesheet_id for update;if not found then raise exception 'Timesheet not found';end if;if not public.is_admin_for_org(v_sheet.organization_id) then raise exception 'Not authorised to review this timesheet';end if;if v_sheet.status<>p_expected_status then raise exception 'Timesheet changed from expected status % to %',p_expected_status,v_sheet.status;end if;if v_sheet.status<>'submitted' or p_decision not in('approved','rejected') then raise exception 'Unsupported timesheet decision';end if;if p_decision='rejected' and v_notes is null then raise exception 'Review notes are required to reject a timesheet';end if;if v_sheet.actual_hours is null then raise exception 'Actual hours are required before review';end if;update public.timesheets set status=p_decision,approved_by=v_actor,approved_at=clock_timestamp(),review_notes=v_notes where id=v_sheet.id returning * into v_sheet;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_sheet.organization_id,v_actor,case when p_decision='approved' then 'timesheet_approved' else 'timesheet_rejected' end,'timesheets',v_sheet.id,jsonb_build_object('staff_id',v_sheet.staff_id,'period_start',v_sheet.period_start,'period_end',v_sheet.period_end,'actual_hours',v_sheet.actual_hours,'overtime_hours',v_sheet.overtime_hours,'review_notes',v_notes));return v_sheet;end;$$;
+CREATE FUNCTION "public"."create_shift_coverage_request"(p_organization_id uuid,p_shift_date date,p_start_time time,p_end_time time,p_required_staff_count integer DEFAULT 1,p_urgency text DEFAULT 'normal',p_notes text DEFAULT NULL) RETURNS public.shift_coverage_requests LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_row public.shift_coverage_requests%rowtype;begin if not public.is_admin_for_org(p_organization_id) then raise exception 'Not authorised to create coverage requests';end if;if p_shift_date<current_date or p_start_time is null or p_end_time is null or p_start_time=p_end_time then raise exception 'Coverage timing is invalid';end if;if p_required_staff_count not between 1 and 50 then raise exception 'Required staff count is outside the accepted range';end if;if p_urgency not in('low','normal','high','urgent') then raise exception 'Unsupported coverage urgency';end if;insert into public.shift_coverage_requests(organization_id,shift_date,start_time,end_time,required_staff_count,urgency,notes,created_by)values(p_organization_id,p_shift_date,p_start_time,p_end_time,p_required_staff_count,p_urgency,nullif(trim(coalesce(p_notes,'')),''),v_actor)returning * into v_row;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(p_organization_id,v_actor,'shift_coverage_request_created','shift_coverage_requests',v_row.id,jsonb_build_object('shift_date',p_shift_date,'start_time',p_start_time,'end_time',p_end_time,'required_staff_count',p_required_staff_count,'urgency',p_urgency));return v_row;end;$$;
+REVOKE ALL ON FUNCTION "public"."submit_officer_leave_request"(uuid,text,date,date,text),"public"."review_leave_request"(uuid,text,text,text),"public"."review_timesheet"(uuid,text,text,text),"public"."create_shift_coverage_request"(uuid,date,time,time,integer,text,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."submit_officer_leave_request"(uuid,text,date,date,text),"public"."review_leave_request"(uuid,text,text,text),"public"."review_timesheet"(uuid,text,text,text),"public"."create_shift_coverage_request"(uuid,date,time,time,integer,text,text) TO "authenticated","service_role";
+
+
+ALTER TABLE "public"."staff_profiles" ADD COLUMN IF NOT EXISTS "work_ready_reviewed_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,ADD COLUMN IF NOT EXISTS "work_ready_reviewed_at" timestamptz,ADD COLUMN IF NOT EXISTS "work_ready_review_notes" text;
+DROP POLICY IF EXISTS "staff_profiles_update" ON "public"."staff_profiles";REVOKE INSERT,UPDATE,DELETE ON TABLE "public"."staff_profiles" FROM PUBLIC,"anon","authenticated";
+CREATE FUNCTION "public"."get_staff_readiness_assessment"(p_organization_id uuid) RETURNS TABLE(staff_id uuid,user_id uuid,work_ready boolean,identity_status text,employment_status text,credential_status text,training_status text,blockers text[]) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+begin if not public.is_admin_for_org(p_organization_id) then raise exception 'Not authorised to assess staff readiness';end if;return query select sp.id,sp.user_id,sp.work_ready,case when up.id is null then 'unlinked' when up.deactivated_at is not null then 'deactivated' when up.role not in('officer','admin_officer') then 'not_field_role' else 'active' end,case when sp.start_date is not null and sp.start_date>current_date then 'not_started' when sp.end_date is not null and sp.end_date<current_date then 'ended' else 'current' end,case when up.role not in('officer','admin_officer') then 'not_applicable' when not exists(select 1 from public.staff_credentials c where c.staff_id=sp.id and c.verified and (c.expiry_date is null or c.expiry_date>=current_date)) then 'missing_valid' when exists(select 1 from public.staff_credentials c where c.staff_id=sp.id and (not c.verified or (c.expiry_date is not null and c.expiry_date<current_date))) then 'attention' else 'current' end,case when exists(select 1 from public.staff_training_records tr where tr.staff_id=sp.id and (tr.passed=false or (tr.expiry_date is not null and tr.expiry_date<current_date))) then 'attention' else 'clear' end,array_remove(array[case when up.id is null then 'Identity is not linked' when up.deactivated_at is not null then 'User access is deactivated' when up.role not in('officer','admin_officer') then 'User is not assigned a field role' end,case when sp.start_date is not null and sp.start_date>current_date then 'Employment has not started' when sp.end_date is not null and sp.end_date<current_date then 'Employment has ended' end,case when up.role in('officer','admin_officer') and not exists(select 1 from public.staff_credentials c where c.staff_id=sp.id and c.verified and (c.expiry_date is null or c.expiry_date>=current_date)) then 'No verified current credential' end],null)::text[] from public.staff_profiles sp left join public.user_profiles up on up.id=sp.user_id where sp.organization_id=p_organization_id;end;$$;
+CREATE FUNCTION "public"."set_staff_work_readiness"(p_staff_id uuid,p_expected_work_ready boolean,p_work_ready boolean,p_review_notes text) RETURNS public.staff_profiles LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_staff public.staff_profiles%rowtype;v_assessment record;v_notes text:=nullif(trim(coalesce(p_review_notes,'')),'');begin select sp.* into v_staff from public.staff_profiles sp where sp.id=p_staff_id for update;if not found then raise exception 'Staff profile not found';end if;if not public.is_admin_for_org(v_staff.organization_id) then raise exception 'Not authorised to change staff readiness';end if;if v_staff.work_ready<>p_expected_work_ready then raise exception 'Staff readiness changed from expected state';end if;if v_staff.work_ready=p_work_ready then raise exception 'Staff readiness is already in the requested state';end if;if v_notes is null then raise exception 'Readiness review notes are required';end if;if p_work_ready then select * into v_assessment from public.get_staff_readiness_assessment(v_staff.organization_id) a where a.staff_id=v_staff.id;if coalesce(array_length(v_assessment.blockers,1),0)>0 then raise exception 'Staff member is not work ready: %',array_to_string(v_assessment.blockers,'; ');end if;end if;update public.staff_profiles sp set work_ready=p_work_ready,work_ready_reviewed_by=v_actor,work_ready_reviewed_at=clock_timestamp(),work_ready_review_notes=v_notes where sp.id=v_staff.id returning sp.* into v_staff;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_staff.organization_id,v_actor,case when p_work_ready then 'staff_work_ready_enabled' else 'staff_work_ready_disabled' end,'staff_profiles',v_staff.id,jsonb_build_object('previous_work_ready',p_expected_work_ready,'work_ready',p_work_ready,'review_notes',v_notes));return v_staff;end;$$;
+REVOKE ALL ON FUNCTION "public"."get_staff_readiness_assessment"(uuid),"public"."set_staff_work_readiness"(uuid,boolean,boolean,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_staff_readiness_assessment"(uuid),"public"."set_staff_work_readiness"(uuid,boolean,boolean,text) TO "authenticated","service_role";
+
+
+ALTER TABLE "public"."quotes" ADD COLUMN IF NOT EXISTS "client_request_id" uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_quotes_client_request" ON "public"."quotes"(provider_org_id,client_request_id) WHERE client_request_id IS NOT NULL;
+REVOKE INSERT,UPDATE,DELETE ON TABLE "public"."quotes" FROM PUBLIC,"anon","authenticated";
+CREATE FUNCTION "public"."create_crm_draft_quote"(p_client_request_id uuid,p_client_org_id uuid,p_title text,p_target_margin_pct numeric DEFAULT 0,p_valid_until date DEFAULT NULL,p_notes text DEFAULT NULL) RETURNS public.quotes LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_quote public.quotes%rowtype;v_title text:=nullif(trim(coalesce(p_title,'')),'');begin select up.organization_id into v_provider from public.user_profiles up where up.id=v_actor and up.deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;if p_client_request_id is null then raise exception 'client_request_id is required';end if;if v_title is null then raise exception 'Quote title is required';end if;if p_target_margin_pct<0 or p_target_margin_pct>=100 then raise exception 'Target margin must be between zero and 100';end if;if p_valid_until is not null and p_valid_until<current_date then raise exception 'Quote validity date cannot be in the past';end if;if not exists(select 1 from public.organizations o where o.id=p_client_org_id and o.active and (o.parent_organization_id=v_provider or exists(select 1 from public.service_agreements a where a.agreement_type='operational' and ((a.provider_organization_id=v_provider and a.client_organization_id=o.id) or (a.client_organization_id=v_provider and a.provider_organization_id=o.id))))) then raise exception 'Active client or contracted organization required';end if;select q.* into v_quote from public.quotes q where q.provider_org_id=v_provider and q.client_request_id=p_client_request_id;if found then return v_quote;end if;insert into public.quotes(provider_org_id,client_org_id,title,status,currency,target_margin_pct,valid_until,notes,client_request_id,created_by,updated_by) values(v_provider,p_client_org_id,v_title,'draft','NZD',p_target_margin_pct,p_valid_until,nullif(trim(coalesce(p_notes,'')),''),p_client_request_id,v_actor,v_actor) returning * into v_quote;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_provider,v_actor,'crm_draft_quote_created','quotes',v_quote.id,jsonb_build_object('client_org_id',p_client_org_id,'title',v_title,'target_margin_pct',p_target_margin_pct,'valid_until',p_valid_until));return v_quote;end;$$;
+REVOKE ALL ON FUNCTION "public"."create_crm_draft_quote"(uuid,uuid,text,numeric,date,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."create_crm_draft_quote"(uuid,uuid,text,numeric,date,text) TO "authenticated","service_role";
+REVOKE ALL ON FUNCTION "public"."accept_quote"(uuid) FROM PUBLIC,"anon";
+
+
+ALTER TABLE "public"."quote_lines" ADD COLUMN IF NOT EXISTS "client_request_id" uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_quote_lines_client_request" ON "public"."quote_lines"(quote_id,client_request_id) WHERE client_request_id IS NOT NULL;
+REVOKE INSERT,UPDATE,DELETE ON TABLE "public"."quote_lines" FROM PUBLIC,"anon","authenticated";
+CREATE FUNCTION "public"."add_crm_quote_line"(p_client_request_id uuid,p_quote_id uuid,p_expected_status text,p_kind text,p_description text,p_quantity numeric,p_unit_cost numeric,p_unit_charge numeric,p_module_key text DEFAULT NULL,p_site_id uuid DEFAULT NULL) RETURNS TABLE(line_id uuid,quote_id uuid,total_cost numeric,subtotal_charge numeric,discount_amount numeric,gst_amount numeric,total_charge numeric,created boolean) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_quote public.quotes%rowtype;v_line public.quote_lines%rowtype;v_created boolean:=true;v_description text:=nullif(trim(coalesce(p_description,'')),'');begin select q.* into v_quote from public.quotes q where q.id=p_quote_id for update;if not found then raise exception 'Quote not found';end if;if not public.is_admin_for_org(v_quote.provider_org_id) then raise exception 'Not authorised to price this quote';end if;if v_quote.status<>p_expected_status then raise exception 'Quote changed from expected status % to %',p_expected_status,v_quote.status;end if;if v_quote.status<>'draft' then raise exception 'Only draft quotes can be priced';end if;if p_client_request_id is null then raise exception 'client_request_id is required';end if;if p_kind not in('labour','travel','overhead','module','custom') then raise exception 'Unsupported quote line kind';end if;if v_description is null then raise exception 'Line description is required';end if;if p_quantity is null or p_quantity<=0 or p_quantity>100000 or p_unit_cost is null or p_unit_cost<0 or p_unit_cost>1000000 or p_unit_charge is null or p_unit_charge<0 or p_unit_charge>1000000 then raise exception 'Quote line amounts are outside the accepted range';end if;if p_kind='module' and nullif(trim(coalesce(p_module_key,'')),'') is null then raise exception 'Module key is required for module lines';end if;if p_site_id is not null and not exists(select 1 from public.client_sites s where s.id=p_site_id and s.organization_id=v_quote.client_org_id) then raise exception 'Quote site must belong to the client organization';end if;select l.* into v_line from public.quote_lines l where l.quote_id=v_quote.id and l.client_request_id=p_client_request_id;if found then v_created:=false;else insert into public.quote_lines(quote_id,kind,description,quantity,unit_cost,unit_charge,module_key,site_id,line_order,client_request_id) values(v_quote.id,p_kind,v_description,p_quantity,p_unit_cost,p_unit_charge,nullif(trim(coalesce(p_module_key,'')),''),p_site_id,coalesce((select max(l.line_order)+1 from public.quote_lines l where l.quote_id=v_quote.id),0),p_client_request_id) returning * into v_line;end if;update public.quotes q set total_cost=totals.total_cost,subtotal_charge=totals.subtotal_charge,discount_amount=round(totals.subtotal_charge*q.discount_pct/100,2),gst_amount=round((totals.subtotal_charge-round(totals.subtotal_charge*q.discount_pct/100,2))*q.gst_rate,2),total_charge=round((totals.subtotal_charge-round(totals.subtotal_charge*q.discount_pct/100,2))*(1+q.gst_rate),2),updated_by=v_actor from (select coalesce(sum(l.quantity*l.unit_cost),0)::numeric(12,2) total_cost,coalesce(sum(l.quantity*l.unit_charge),0)::numeric(12,2) subtotal_charge from public.quote_lines l where l.quote_id=v_quote.id) totals where q.id=v_quote.id returning q.* into v_quote;if v_created then insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_quote.provider_org_id,v_actor,'crm_quote_line_added','quote_lines',v_line.id,jsonb_build_object('quote_id',v_quote.id,'kind',v_line.kind,'site_id',v_line.site_id,'module_key',v_line.module_key,'total_cost',v_quote.total_cost,'total_charge',v_quote.total_charge));end if;return query select v_line.id,v_quote.id,v_quote.total_cost,v_quote.subtotal_charge,v_quote.discount_amount,v_quote.gst_amount,v_quote.total_charge,v_created;end;$$;
+REVOKE ALL ON FUNCTION "public"."add_crm_quote_line"(uuid,uuid,text,text,text,numeric,numeric,numeric,text,uuid) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."add_crm_quote_line"(uuid,uuid,text,text,text,numeric,numeric,numeric,text,uuid) TO "authenticated","service_role";
+
+
+CREATE FUNCTION "public"."manage_crm_quote"(p_quote_id uuid,p_expected_status text,p_action text,p_reason text DEFAULT NULL) RETURNS TABLE(quote_id uuid,quote_status text,service_agreement_id uuid) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_quote public.quotes%rowtype;v_reason text:=nullif(trim(coalesce(p_reason,'')),'');v_margin numeric;v_agreement uuid;begin select q.* into v_quote from public.quotes q where q.id=p_quote_id for update;if not found then raise exception 'Quote not found';end if;if not public.is_admin_for_org(v_quote.provider_org_id) then raise exception 'Not authorised to manage this quote';end if;if v_quote.status<>p_expected_status then raise exception 'Quote changed from expected status % to %',p_expected_status,v_quote.status;end if;if p_action='send' then if v_quote.status<>'draft' then raise exception 'Only draft quotes can be sent';end if;if v_quote.valid_until is not null and v_quote.valid_until<current_date then raise exception 'Expired quotes cannot be sent';end if;if not exists(select 1 from public.quote_lines l where l.quote_id=v_quote.id and l.kind='labour' and l.quantity>0 and l.unit_charge>0) then raise exception 'At least one positively priced labour line is required';end if;if v_quote.subtotal_charge<=0 or v_quote.total_charge<=0 then raise exception 'Quote totals must be positive before sending';end if;v_margin:=case when v_quote.subtotal_charge=0 then 0 else (v_quote.subtotal_charge-v_quote.total_cost)*100/v_quote.subtotal_charge end;if v_margin<v_quote.target_margin_pct then raise exception 'Achieved margin % is below target %',round(v_margin,2),v_quote.target_margin_pct;end if;update public.quotes q set status='sent',updated_by=v_actor where q.id=v_quote.id returning q.* into v_quote;elsif p_action='accept' then if v_quote.status<>'sent' then raise exception 'Only sent quotes can be accepted';end if;if v_quote.valid_until is not null and v_quote.valid_until<current_date then raise exception 'Expired quotes cannot be accepted';end if;select public.accept_quote(v_quote.id) into v_agreement;select q.* into v_quote from public.quotes q where q.id=v_quote.id;elsif p_action='decline' then if v_quote.status<>'sent' then raise exception 'Only sent quotes can be declined';end if;if v_reason is null then raise exception 'Decline reason is required';end if;update public.quotes q set status='declined',notes=concat_ws(E'\n',nullif(q.notes,''),'Declined: '||v_reason),updated_by=v_actor where q.id=v_quote.id returning q.* into v_quote;else raise exception 'Unsupported quote action';end if;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_quote.provider_org_id,v_actor,case p_action when 'send' then 'crm_quote_sent' when 'accept' then 'crm_quote_accepted' else 'crm_quote_declined' end,'quotes',v_quote.id,jsonb_build_object('client_org_id',v_quote.client_org_id,'previous_status',p_expected_status,'status',v_quote.status,'service_agreement_id',v_quote.service_agreement_id,'reason',case when p_action='decline' then v_reason else null end));return query select v_quote.id,v_quote.status,v_quote.service_agreement_id;end;$$;
+REVOKE ALL ON FUNCTION "public"."accept_quote"(uuid) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."accept_quote"(uuid) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."manage_crm_quote"(uuid,text,text,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."manage_crm_quote"(uuid,text,text,text) TO "authenticated","service_role";
+
+
+CREATE FUNCTION "public"."manage_welfare_alert"(p_alert_id uuid,p_expected_status text,p_action text,p_notes text) RETURNS TABLE(alert_id uuid,alert_status text,acted_at timestamptz) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_alert public.welfare_alerts%rowtype;v_notes text:=nullif(trim(coalesce(p_notes,'')),'');v_is_admin boolean;v_now timestamptz:=clock_timestamp();begin if v_actor is null then raise exception 'Authentication required';end if;if v_notes is null then raise exception 'Welfare action notes are required';end if;select a.* into v_alert from public.welfare_alerts a where a.id=p_alert_id for update;if not found then raise exception 'Welfare alert not found';end if;v_is_admin:=public.is_admin_for_org(v_alert.organization_id);if p_action='acknowledge' then if not v_is_admin then raise exception 'Only an authorized supervisor can acknowledge this alert';end if;if v_alert.status<>p_expected_status or v_alert.status<>'pending' then raise exception 'Welfare alert changed from expected status % to %',p_expected_status,v_alert.status;end if;update public.welfare_alerts a set status='acknowledged',acknowledged_by=v_actor,acknowledged_at=v_now,acknowledgement_notes=v_notes where a.id=v_alert.id returning a.* into v_alert;elsif p_action='resolve' then if not v_is_admin and v_alert.officer_user_id<>v_actor then raise exception 'Not authorized to resolve this welfare alert';end if;if v_alert.status<>p_expected_status or v_alert.status not in('pending','acknowledged') then raise exception 'Welfare alert changed from expected status % to %',p_expected_status,v_alert.status;end if;update public.welfare_alerts a set status='resolved',resolved_by=v_actor,resolved_at=v_now,resolution_notes=v_notes where a.id=v_alert.id returning a.* into v_alert;else raise exception 'Unsupported welfare alert action';end if;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_alert.organization_id,v_actor,case when p_action='acknowledge' then 'welfare_alert_acknowledged' when v_is_admin then 'welfare_alert_resolved_by_supervisor' else 'welfare_alert_resolved_by_officer' end,'welfare_alerts',v_alert.id,jsonb_build_object('officer_user_id',v_alert.officer_user_id,'alert_type',v_alert.alert_type,'previous_status',p_expected_status,'status',v_alert.status,'notes',v_notes));return query select v_alert.id,v_alert.status,v_now;end;$$;
+DROP POLICY IF EXISTS "welfare_alerts_update" ON "public"."welfare_alerts";
+REVOKE UPDATE,DELETE ON TABLE "public"."welfare_alerts" FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."manage_welfare_alert"(uuid,text,text,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."manage_welfare_alert"(uuid,text,text,text) TO "authenticated","service_role";
+
+
+DROP POLICY IF EXISTS "officer_insert_field_reports" ON "public"."officer_field_reports";
+DROP POLICY IF EXISTS "officer_update_field_reports" ON "public"."officer_field_reports";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."officer_field_reports" FROM PUBLIC,"anon","authenticated";
+COMMENT ON TABLE "public"."officer_field_reports" IS 'Officer field evidence. Authenticated creation and review are owned by governed RPCs; direct client mutations are revoked.';

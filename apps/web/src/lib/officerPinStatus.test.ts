@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveOfficerPinStatus } from './officerPinStatus';
+import { deriveAdminSafetyStatus, deriveOfficerPinStatus } from './officerPinStatus';
 
 describe('deriveOfficerPinStatus', () => {
   it('shows alerting when a real welfare alert is active, even with fresh GPS', () => {
@@ -42,5 +42,24 @@ describe('deriveOfficerPinStatus', () => {
     expect(
       deriveOfficerPinStatus({ gpsAgeMs: 5 * 60 * 1000, safetyStatus: 'ok', gpsStaleThresholdMs: 60_000 }),
     ).toBe('offline');
+  });
+});
+
+describe('deriveAdminSafetyStatus', () => {
+  const nowMs = new Date('2026-08-30T08:00:00Z').getTime();
+
+  it('keeps active alerts authoritative even when settings are unavailable', () => {
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: true, welfareEnabled: null, lastCheckinAt: null, checkIntervalMinutes: null, nowMs })).toBe('alerting');
+  });
+
+  it('derives ok, due, and overdue only from verified settings and check-in time', () => {
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: '2026-08-30T07:40:00Z', checkIntervalMinutes: 30, nowMs })).toBe('ok');
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: '2026-08-30T07:34:00Z', checkIntervalMinutes: 30, nowMs })).toBe('due');
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: '2026-08-30T07:20:00Z', checkIntervalMinutes: 30, nowMs })).toBe('overdue');
+  });
+
+  it('returns unknown for missing or disabled settings instead of defaulting to ok', () => {
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: false, lastCheckinAt: '2026-08-30T07:50:00Z', checkIntervalMinutes: 30, nowMs })).toBeNull();
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: null, checkIntervalMinutes: 30, nowMs })).toBeNull();
   });
 });

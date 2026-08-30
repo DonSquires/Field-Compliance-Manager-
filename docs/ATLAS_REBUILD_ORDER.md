@@ -26,6 +26,11 @@ radius of any change. Screens are the last thing built, not the first.
    `target_name`/`edge_kind`) so you don't flip pre-existing production edges
    you didn't intend to touch. Sanity-check against an untouched page's
    baseline first.
+6. **Generated managed-application refresh.** Run `npm run atlas:refresh:dry-run` to inspect
+  source-derived roster, HR, and CRM nodes and edges, then `npm run
+  bob:refresh-capability-map` to apply them. The sync is additive, owns only
+  `ci_generator` evidence, skips authoritative `manual_seed` nodes, and never
+  infers `exercised` from static source.
 
 ### Automated refresh
 

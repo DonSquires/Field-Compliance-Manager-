@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useOfficerSafety } from './useOfficerSafety';
 
-vi.mock('../lib/supabase', () => ({ supabase: { from: vi.fn() } }));
+vi.mock('../lib/supabase', () => ({ supabase: { from: vi.fn(), rpc: vi.fn() } }));
 import { supabase } from '../lib/supabase';
 
 function mockTable(handlers: Record<string, (...args: unknown[]) => unknown>) {
@@ -32,6 +32,7 @@ describe('useOfficerSafety', () => {
             single: () => Promise.resolve({ data: { id: 'alert-1' }, error: null }),
           }),
         }),
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'acknowledged' }, error: null }) }) }),
       }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
@@ -53,7 +54,7 @@ describe('useOfficerSafety', () => {
   });
 
   it('acknowledgeAlert requires an explicit call and clears the alert only on a successful write', async () => {
-    let updateCalled = false;
+    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [{ alert_id: 'alert-2', alert_status: 'resolved' }], error: null });
     mockTable({
       welfare_alerts: () => ({
         insert: () => ({
@@ -61,10 +62,7 @@ describe('useOfficerSafety', () => {
             single: () => Promise.resolve({ data: { id: 'alert-2' }, error: null }),
           }),
         }),
-        update: () => {
-          updateCalled = true;
-          return { eq: () => Promise.resolve({ error: null }) };
-        },
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'acknowledged' }, error: null }) }) }),
       }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
@@ -77,12 +75,13 @@ describe('useOfficerSafety', () => {
       const ok = await result.current.acknowledgeAlert();
       expect(ok).toBe(true);
     });
-    expect(updateCalled).toBe(true);
+    expect(supabase.rpc).toHaveBeenCalledWith('manage_welfare_alert', expect.objectContaining({ p_alert_id: 'alert-2', p_expected_status: 'acknowledged', p_action: 'resolve' }));
     expect(result.current.activeAlert).toBeNull();
     expect(result.current.status).toBe('ok');
   });
 
   it('does not clear the active alert if the resolve write fails', async () => {
+    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: null, error: { message: 'network error' } });
     mockTable({
       welfare_alerts: () => ({
         insert: () => ({
@@ -90,7 +89,7 @@ describe('useOfficerSafety', () => {
             single: () => Promise.resolve({ data: { id: 'alert-3' }, error: null }),
           }),
         }),
-        update: () => ({ eq: () => Promise.resolve({ error: { message: 'network error' } }) }),
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
       }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
@@ -114,6 +113,7 @@ describe('useOfficerSafety', () => {
             single: () => Promise.resolve({ data: null, error: { message: 'insert failed' } }),
           }),
         }),
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
       }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
@@ -129,16 +129,13 @@ describe('useOfficerSafety', () => {
   it('checkIn checks errors on both writes and only clears an active alert on full success', async () => {
     let checksInsertCalled = false;
     let settingsUpsertCalled = false;
-    let alertsUpdateCalled = false;
+    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [{ alert_id: 'alert-4', alert_status: 'resolved' }], error: null });
     mockTable({
       welfare_alerts: () => ({
         insert: () => ({
           select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-4' }, error: null }) }),
         }),
-        update: () => {
-          alertsUpdateCalled = true;
-          return { eq: () => Promise.resolve({ error: null }) };
-        },
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
       }),
       welfare_checks: () => ({
         insert: () => {
@@ -164,12 +161,13 @@ describe('useOfficerSafety', () => {
     });
     expect(checksInsertCalled).toBe(true);
     expect(settingsUpsertCalled).toBe(true);
-    expect(alertsUpdateCalled).toBe(true); // check-in is a valid, explicit acknowledgement
+    expect(supabase.rpc).toHaveBeenCalledWith('manage_welfare_alert', expect.objectContaining({ p_alert_id: 'alert-4', p_action: 'resolve' }));
     expect(result.current.activeAlert).toBeNull();
     expect(result.current.status).toBe('ok');
   });
 
   it('checkIn keeps an active alert when its resolution write fails', async () => {
+    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: null, error: { message: 'alert update failed' } });
     mockTable({
       welfare_alerts: () => ({
         insert: () => ({
@@ -177,7 +175,7 @@ describe('useOfficerSafety', () => {
             single: () => Promise.resolve({ data: { id: 'alert-4b' }, error: null }),
           }),
         }),
-        update: () => ({ eq: () => Promise.resolve({ error: { message: 'alert update failed' } }) }),
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
       }),
       welfare_checks: () => ({
         insert: () => Promise.resolve({ error: null }),

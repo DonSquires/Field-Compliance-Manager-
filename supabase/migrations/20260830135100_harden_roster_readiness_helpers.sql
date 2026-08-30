@@ -1,0 +1,2 @@
+revoke all on function public.roster_place_geofence_state(uuid,uuid),public.roster_agreement_billing_ready(uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.roster_place_geofence_state(uuid,uuid),public.roster_agreement_billing_ready(uuid,uuid,uuid) to service_role;

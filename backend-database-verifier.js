@@ -19,19 +19,69 @@ function migrationTimestamp(file) {
   return Number(path.basename(file).match(/^(\d{14})_[a-z0-9_]+\.sql$/)?.[1] || 0);
 }
 
+function isPostSchemaMigration(file) {
+  const name = path.basename(file);
+  return /(?:builder_|bob_task_continuity|bob_repo_read_progress|workflow_run_leases)/.test(name);
+}
+
 function collectMigrationPlan(sourceDir, patchText) {
   const candidates = changedFilesFromPatch(patchText).filter(file => file.startsWith('supabase/migrations/'));
-  const baseline = fs.readdirSync(path.join(sourceDir, 'supabase/migrations'))
+  const repositoryMigrations = fs.readdirSync(path.join(sourceDir, 'supabase/migrations'))
     .filter(file => /^\d{14}_[a-z0-9_]+\.sql$/.test(file))
     .map(file => `supabase/migrations/${file}`)
     .sort();
-  const latestBaseline = Math.max(0, ...baseline.map(migrationTimestamp));
+  const baseline = repositoryMigrations.filter(isPostSchemaMigration);
+  const latestBaseline = Math.max(0, ...repositoryMigrations.map(migrationTimestamp));
   for (const candidate of candidates) {
     if (!migrationTimestamp(candidate) || migrationTimestamp(candidate) <= latestBaseline) {
       throw new Error(`candidate migration must be newer than the repository baseline: ${candidate}`);
     }
   }
-  return { baseline, candidates: [...new Set(candidates)].sort(), latest_baseline_timestamp: latestBaseline };
+  return {
+    baseline,
+    canonicalMigrationCount: repositoryMigrations.length - baseline.length,
+    candidates: [...new Set(candidates)].sort(),
+    latest_baseline_timestamp: latestBaseline
+  };
+}
+
+function prepareCanonicalSchema(schema) {
+  const tablePattern = /CREATE TABLE IF NOT EXISTS "public"\."([a-zA-Z0-9_]+)" \([\s\S]*?\n\);\n\n\nALTER TABLE "public"\."\1" OWNER TO "postgres";/g;
+  const candidates = [...schema.matchAll(tablePattern)].map(match => ({ name: match[1], block: match[0], index: match.index }));
+  const toHoist = candidates.filter(candidate => {
+    const beforeDefinition = schema.slice(0, candidate.index);
+    return beforeDefinition.includes(`RETURNS "public"."${candidate.name}"`)
+      || beforeDefinition.includes(`public.${candidate.name}%rowtype`)
+      || beforeDefinition.includes(`"public"."${candidate.name}"%rowtype`);
+  });
+  let normalized = schema;
+  for (const candidate of toHoist) {
+    normalized = normalized.replace(candidate.block, `-- ${candidate.name} definition hoisted for row-type dependency ordering`);
+  }
+  if (toHoist.length > 0) {
+    const firstFunction = normalized.search(/CREATE OR REPLACE FUNCTION "public"\./);
+    const insertionIndex = firstFunction < 0 ? 0 : firstFunction;
+    const blocks = toHoist.map(candidate => candidate.block).join('\n\n');
+    normalized = `${normalized.slice(0, insertionIndex)}${blocks}\n\n${normalized.slice(insertionIndex)}`;
+  }
+
+  const deferredForeignKeys = [];
+  normalized = normalized.replace(/CREATE TABLE IF NOT EXISTS "public"\."([a-zA-Z0-9_]+)" \([\s\S]*?\n\);/g, (tableBlock, tableName) => (
+    tableBlock.replace(/^(\s*)"([a-zA-Z0-9_]+)"([^\n]*?) REFERENCES "([a-zA-Z0-9_]+)"\."([a-zA-Z0-9_]+)"\("([a-zA-Z0-9_]+)"\)((?: ON (?:DELETE|UPDATE) (?:CASCADE|RESTRICT|SET NULL|NO ACTION))*)(.*)$/gm,
+      (_line, indent, columnName, definition, targetSchema, targetTable, targetColumn, actions, suffix) => {
+        const digest = crypto.createHash('sha256').update(`${tableName}:${columnName}:${targetSchema}:${targetTable}`).digest('hex').slice(0, 10);
+        deferredForeignKeys.push(`ALTER TABLE ONLY "public"."${tableName}" ADD CONSTRAINT "verify_${digest}_fkey" FOREIGN KEY ("${columnName}") REFERENCES "${targetSchema}"."${targetTable}"("${targetColumn}")${actions};`);
+        return `${indent}"${columnName}"${definition}${suffix}`;
+      })
+  ));
+  const quotedTrimCount = (normalized.match(/"trim"\(/g) || []).length;
+  normalized = normalized.replace(/"trim"\(/g, 'pg_catalog.btrim(');
+  return {
+    sql: `${normalized}\n\n${deferredForeignKeys.join('\n')}\n`,
+    normalizedTables: toHoist.map(candidate => candidate.name).sort(),
+    deferredForeignKeyCount: deferredForeignKeys.length,
+    normalizedQuotedTrimCount: quotedTrimCount
+  };
 }
 
 function commandResult(command, args, options = {}) {
@@ -100,6 +150,7 @@ function executeBackendDatabaseVerification({
       reason: 'Patch contains no database migrations.',
       image,
       baseline_migration_count: plan.baseline.length,
+      canonical_migration_count: plan.canonicalMigrationCount,
       candidate_migrations: []
     };
     writeEvidence(artifactDir, evidence);
@@ -109,6 +160,7 @@ function executeBackendDatabaseVerification({
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-database-verify-'));
   const containerName = `bob-db-verify-${crypto.randomUUID()}`;
   const stages = [];
+  const canonicalSchema = prepareCanonicalSchema(fs.readFileSync(path.join(sourceDir, 'supabase/schema.sql'), 'utf8'));
   let evidence;
   try {
     fs.cpSync(sourceDir, workDir, {
@@ -128,7 +180,7 @@ function executeBackendDatabaseVerification({
       if (!result.ok) throw new Error(`${name} failed`);
     };
     runStage('platform_bootstrap', BOOTSTRAP_SQL);
-    runStage('canonical_schema', fs.readFileSync(path.join(sourceDir, 'supabase/schema.sql'), 'utf8'));
+    runStage('canonical_schema', canonicalSchema.sql);
     for (const migration of plan.baseline) {
       runStage(`baseline:${path.basename(migration)}`, fs.readFileSync(path.join(sourceDir, migration), 'utf8'));
     }
@@ -140,7 +192,11 @@ function executeBackendDatabaseVerification({
       performed: true,
       image,
       baseline_schema_sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(sourceDir, 'supabase/schema.sql'))).digest('hex'),
+      normalized_schema_tables: canonicalSchema.normalizedTables,
+      deferred_schema_foreign_keys: canonicalSchema.deferredForeignKeyCount,
+      normalized_quoted_trim_calls: canonicalSchema.normalizedQuotedTrimCount,
       baseline_migration_count: plan.baseline.length,
+      canonical_migration_count: plan.canonicalMigrationCount,
       candidate_migrations: plan.candidates,
       stages
     };
@@ -150,6 +206,7 @@ function executeBackendDatabaseVerification({
       performed: true,
       image,
       baseline_migration_count: plan.baseline.length,
+      canonical_migration_count: plan.canonicalMigrationCount,
       candidate_migrations: plan.candidates,
       stages,
       error: error.message
@@ -182,7 +239,9 @@ if (require.main === module) {
 module.exports = {
   DATABASE_IMAGE,
   BOOTSTRAP_SQL,
+  isPostSchemaMigration,
   collectMigrationPlan,
+  prepareCanonicalSchema,
   executeBackendDatabaseVerification,
   waitForDatabase
 };

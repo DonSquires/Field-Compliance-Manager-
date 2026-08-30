@@ -25,18 +25,24 @@ export interface AppProfile {
 interface AuthContextValue {
   profile: AppProfile | null;
   hasSession: boolean;
+  recoveryMode: boolean;
   loading: boolean;
   error: string | null;
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
+  requestPasswordReset: (email: string) => Promise<{ error: string | null }>;
+  updatePassword: (password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue>({
   profile: null,
   hasSession: false,
+  recoveryMode: false,
   loading: true,
   error: null,
   signInWithPassword: async () => ({ error: 'Auth not initialised' }),
+  requestPasswordReset: async () => ({ error: 'Auth not initialised' }),
+  updatePassword: async () => ({ error: 'Auth not initialised' }),
   signOut: async () => undefined,
 });
 
@@ -62,6 +68,7 @@ async function loadProfile(userId: string): Promise<AppProfile | null> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AppProfile | null>(null);
   const [hasSession, setHasSession] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,7 +88,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     bootstrap();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
       if (!session?.user) {
         setHasSession(false);
         setProfile(null);
@@ -108,14 +116,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   };
 
+  const requestPasswordReset = async (email: string) => {
+    setError(null);
+    const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/` : undefined;
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    if (resetError) {
+      setError(resetError.message);
+      return { error: resetError.message };
+    }
+    return { error: null };
+  };
+
+  const updatePassword = async (password: string) => {
+    setError(null);
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError) {
+      setError(updateError.message);
+      return { error: updateError.message };
+    }
+    setRecoveryMode(false);
+    return { error: null };
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setHasSession(false);
+    setRecoveryMode(false);
     setProfile(null);
   };
 
   return (
-    <AuthContext.Provider value={{ profile, hasSession, loading, error, signInWithPassword, signOut }}>
+    <AuthContext.Provider value={{ profile, hasSession, recoveryMode, loading, error, signInWithPassword, requestPasswordReset, updatePassword, signOut }}>
       {children}
     </AuthContext.Provider>
   );

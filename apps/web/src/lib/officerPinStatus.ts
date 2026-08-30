@@ -43,3 +43,28 @@ export function deriveOfficerPinStatus({
   if (gpsAgeMs === null || gpsAgeMs > gpsStaleThresholdMs) return 'offline';
   return safetyStatus;
 }
+
+export interface AdminSafetyStatusInput {
+  hasActiveAlert: boolean;
+  welfareEnabled: boolean | null;
+  lastCheckinAt: string | null;
+  checkIntervalMinutes: number | null;
+  nowMs?: number;
+}
+
+export function deriveAdminSafetyStatus({
+  hasActiveAlert,
+  welfareEnabled,
+  lastCheckinAt,
+  checkIntervalMinutes,
+  nowMs = Date.now(),
+}: AdminSafetyStatusInput): SafetyStatus | null {
+  if (hasActiveAlert) return 'alerting';
+  if (welfareEnabled !== true || !lastCheckinAt || !checkIntervalMinutes) return null;
+
+  const elapsedMinutes = (nowMs - new Date(lastCheckinAt).getTime()) / 60_000;
+  if (!Number.isFinite(elapsedMinutes)) return null;
+  if (elapsedMinutes >= checkIntervalMinutes) return 'overdue';
+  if (checkIntervalMinutes - elapsedMinutes <= 5) return 'due';
+  return 'ok';
+}

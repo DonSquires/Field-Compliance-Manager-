@@ -6,7 +6,7 @@
  * approval is an admin/HR action (see RosterHRPage), not done here.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -26,6 +26,10 @@ const OfficerTimesheetPage: React.FC = () => {
   const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({ periodStart: '', periodEnd: '', actualHours: '', overtimeHours: '0', notes: '' });
+  const eventIdRef = useRef(crypto.randomUUID());
 
   // ATLAS READS: timesheets
   useEffect(() => {
@@ -38,7 +42,6 @@ const OfficerTimesheetPage: React.FC = () => {
         const { data, error: err } = await supabase
           .from('timesheets')
           .select('id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, status')
-          .eq('staff_id', profile.id)
           .order('period_start', { ascending: false });
 
         if (err) throw err;
@@ -52,6 +55,23 @@ const OfficerTimesheetPage: React.FC = () => {
 
     load();
   }, [profile?.id]);
+
+  const submitTimesheet = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true); setError(null); setNotice(null);
+    const { data, error: submitError } = await supabase.rpc('submit_officer_timesheet', {
+      p_client_event_id: eventIdRef.current,
+      p_period_start: form.periodStart,
+      p_period_end: form.periodEnd,
+      p_actual_hours: Number(form.actualHours),
+      p_overtime_hours: Number(form.overtimeHours || 0),
+      p_notes: form.notes.trim() || null,
+    });
+    const result = (data as Array<{ id: string }> | null)?.[0];
+    if (submitError || !result) setError(submitError?.message ?? 'Timesheet receipt was not confirmed. Your entries remain available for retry.');
+    else { setNotice(`Timesheet submitted · receipt ${result.id.slice(0, 8)}`); setForm({ periodStart: '', periodEnd: '', actualHours: '', overtimeHours: '0', notes: '' }); eventIdRef.current = crypto.randomUUID(); }
+    setSubmitting(false);
+  };
 
   if (loading) {
     return (
@@ -79,6 +99,16 @@ const OfficerTimesheetPage: React.FC = () => {
           {error}
         </div>
       )}
+
+      {notice && <div className="alert alert-success" role="status">{notice}</div>}
+
+      <form className="assessment-form" onSubmit={submitTimesheet}>
+        <h2>Submit timesheet</h2>
+        <div className="form-row"><div className="form-group"><label htmlFor="period-start">Period start</label><input id="period-start" type="date" required value={form.periodStart} onChange={(event) => setForm({ ...form, periodStart: event.target.value })} /></div><div className="form-group"><label htmlFor="period-end">Period end</label><input id="period-end" type="date" required value={form.periodEnd} onChange={(event) => setForm({ ...form, periodEnd: event.target.value })} /></div></div>
+        <div className="form-row"><div className="form-group"><label htmlFor="actual-hours">Actual hours</label><input id="actual-hours" type="number" min="0" max="744" step="0.25" required value={form.actualHours} onChange={(event) => setForm({ ...form, actualHours: event.target.value })} /></div><div className="form-group"><label htmlFor="overtime-hours">Overtime hours</label><input id="overtime-hours" type="number" min="0" max={form.actualHours || '0'} step="0.25" required value={form.overtimeHours} onChange={(event) => setForm({ ...form, overtimeHours: event.target.value })} /></div></div>
+        <div className="form-group"><label htmlFor="timesheet-notes">Notes</label><textarea id="timesheet-notes" rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Exceptions, allowances, or context for payroll review" /></div>
+        <button type="submit" className="btn btn-primary" disabled={submitting || !form.periodStart || !form.periodEnd || form.actualHours === ''}>{submitting ? 'Submitting' : 'Submit for approval'}</button>
+      </form>
 
       <div className="reports-table-wrapper">
         <table className="reports-table">

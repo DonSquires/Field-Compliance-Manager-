@@ -34,8 +34,34 @@ const taskContinuityMigration = readFileSync(
   resolve(process.cwd(), '../../supabase/migrations/20260828020000_bob_task_continuity.sql'),
   'utf8',
 );
+const createUserSource = readFileSync(
+  resolve(process.cwd(), '../../supabase/functions/create-user/index.ts'),
+  'utf8',
+);
+const resendInviteSource = readFileSync(
+  resolve(process.cwd(), '../../supabase/functions/resend-invite/index.ts'),
+  'utf8',
+);
 
 describe('Edge Function Schema Audit', () => {
+  it('prevents create-user callers from assigning roles above their own level', () => {
+    expect(createUserSource).toContain("import { roleLevel } from '../_shared/auth.ts'");
+    expect(createUserSource).toContain('roleLevel(role) > roleLevel(callerProfile.role)');
+    expect(createUserSource).toContain("'scan_operator'");
+  });
+
+  it('records successful invitation resends in the identity audit trail', () => {
+    expect(resendInviteSource).toContain("p_action_type: 'invite_resent'");
+    expect(resendInviteSource).toContain("rpc('log_user_management_action'");
+  });
+
+  it('enforces standalone module entitlement for scan operators', () => {
+    expect(processOfficerScanSource).toContain("profile.role === 'scan_operator'");
+    expect(processOfficerScanSource).toContain(".from('service_agreement_modules')");
+    expect(processOfficerScanSource).toContain(".eq('standalone_scan_enabled', true)");
+    expect(processOfficerScanSource).toContain("!['freedom_camping', 'parking_enforcement'].includes(moduleKey)");
+  });
+
   describe('breach_alerts writes', () => {
     it('process-officer-scan parking path writes valid breach_type enum values', () => {
       // Lines 1013-1020, 1048-1055: parking overstay/repeat and expired_rego/wof/cof inserts

@@ -10,6 +10,9 @@ export interface ServiceAgreementContextRow {
   provider_organization_id: string;
   client_organization_id: string;
   client_portal_access_mode: string | null;
+  client_portal_reports_enabled: boolean;
+  client_portal_finance_enabled: boolean;
+  allows_client_submission: boolean;
   enabled_modules: string[];
   created_at: string;
   provider_name: string | null;
@@ -114,7 +117,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       const { data: agreementRows, error: agreementsError } = await supabase
         .from('service_agreements')
         .select(
-          'id, name, agreement_type, invitation_status, provider_organization_id, client_organization_id, client_portal_access_mode, enabled_modules, created_at, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
+          'id, name, agreement_type, invitation_status, provider_organization_id, client_organization_id, client_portal_access_mode, client_portal_reports_enabled, client_portal_finance_enabled, allows_client_submission, enabled_modules, created_at, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
         )
         .or(`provider_organization_id.eq.${profile.organizationId},client_organization_id.eq.${profile.organizationId}`)
         .order('created_at', { ascending: false });
@@ -129,6 +132,9 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         provider_organization_id: agreement.provider_organization_id,
         client_organization_id: agreement.client_organization_id,
         client_portal_access_mode: agreement.client_portal_access_mode,
+        client_portal_reports_enabled: Boolean(agreement.client_portal_reports_enabled),
+        client_portal_finance_enabled: Boolean(agreement.client_portal_finance_enabled),
+        allows_client_submission: Boolean(agreement.allows_client_submission),
         enabled_modules: Array.isArray(agreement.enabled_modules) ? agreement.enabled_modules : [],
         created_at: agreement.created_at,
         provider_name: agreement.provider?.name ?? null,
@@ -145,7 +151,8 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         const { data: links, error: linksError } = await supabase
           .from('service_agreement_locations')
           .select('service_agreement_id, site_id, zone_id')
-          .in('service_agreement_id', agreementIds);
+          .in('service_agreement_id', agreementIds)
+          .eq('status', 'active');
 
         if (linksError) throw linksError;
 

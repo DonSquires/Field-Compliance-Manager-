@@ -6,6 +6,9 @@ const test = require('node:test');
 
 const {
   OWNER_MARKER,
+  collectComponentEdges,
+  collectManagedAtlas,
+  staleGeneratedEdgeIds,
   collectAtlasRefresh,
   buildRefreshPlan
 } = require('../scripts/atlas-refresh');
@@ -184,4 +187,53 @@ test('Atlas refresh is exposed as a post-test CI command', () => {
   assert.match(workflow, /npm run bob:refresh-capability-map/);
   const refreshSource = fs.readFileSync(path.join(root, 'scripts/atlas-refresh.js'), 'utf8');
   assert.match(refreshSource, /source_file,migration_name,caller_context/);
+});
+
+test('managed Atlas refresh derives governed component and RPC flow edges', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some(edge => (
+    edge.source_name === source && edge.target_name === target && edge.edge_kind === kind
+  ));
+  assert.equal(atlas.scope, 'managed_app');
+  assert.equal(hasEdge('pages/RosterOperationsPage', 'roster_slots', 'reads'), true);
+  assert.equal(hasEdge('pages/RosterOperationsPage', 'reassign_roster_slot', 'calls'), true);
+  assert.equal(hasEdge('reassign_roster_slot', 'roster_slots', 'writes'), true);
+  assert.equal(hasEdge('manage_roster_slot', 'materialize_roster_slot', 'calls'), true);
+  assert.equal(hasEdge('pages/CRMPage', 'create_crm_draft_quote', 'calls'), true);
+  assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'writes'), true);
+  assert.equal(hasEdge('submit_officer_field_report', 'officer_field_reports', 'writes'), true);
+});
+
+test('managed Atlas refresh includes capability nodes without inferring exercise', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  assert.ok(atlas.nodes.some(node => node.entity_type === 'table' && node.entity_name === 'roster_slots'));
+  assert.ok(atlas.nodes.some(node => node.entity_type === 'rpc' && node.entity_name === 'reassign_roster_slot'));
+  assert.equal(atlas.nodes.some(node => Object.hasOwn(node, 'exercised')), false);
+});
+
+test('component extraction tolerates formatted multiline Supabase chains', () => {
+  const edges = collectComponentEdges('apps/web/src/pages/ExamplePage.tsx', `
+    const rows = supabase
+      .from('crm_contacts')
+      .select('*');
+    await supabase
+      .rpc('create_crm_draft_quote', { p_title: 'Example' });
+    await supabase
+      .from('welfare_alerts')
+      .insert({ status: 'pending' });
+  `);
+  assert.ok(edges.some(edge => edge.target_name === 'crm_contacts' && edge.edge_kind === 'reads'));
+  assert.ok(edges.some(edge => edge.target_name === 'create_crm_draft_quote' && edge.edge_kind === 'calls'));
+  assert.ok(edges.some(edge => edge.target_name === 'welfare_alerts' && edge.edge_kind === 'writes'));
+});
+
+test('stale edge compatibility helper retires only live CI-generated identities', () => {
+  const base = { source_type: 'component', source_name: 'pages/CRMPage', target_type: 'table', source_file: 'apps/web/src/pages/CRMPage.tsx', retirement_status: 'live' };
+  const existing = [
+    { ...base, id: 'keep', target_name: 'quotes', edge_kind: 'reads', refresh_source: 'ci_generator' },
+    { ...base, id: 'stale', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'ci_generator' },
+    { ...base, id: 'manual', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'manual_seed' }
+  ];
+  const generated = [{ ...base, target_name: 'quotes', edge_kind: 'reads' }];
+  assert.deepEqual(staleGeneratedEdgeIds(existing, generated), ['stale']);
 });

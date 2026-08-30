@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   DATABASE_IMAGE,
   collectMigrationPlan,
+  prepareCanonicalSchema,
   executeBackendDatabaseVerification
 } = require('../backend-database-verifier');
 
@@ -16,7 +17,7 @@ function fixture(candidateTimestamp = '20260830190000') {
   fs.mkdirSync(path.join(sourceDir, 'supabase/migrations'), { recursive: true });
   fs.mkdirSync(artifactDir);
   fs.writeFileSync(path.join(sourceDir, 'supabase/schema.sql'), 'CREATE TABLE public.base (id integer);\n');
-  fs.writeFileSync(path.join(sourceDir, 'supabase/migrations/20260830181000_existing.sql'), 'SELECT 1;\n');
+  fs.writeFileSync(path.join(sourceDir, 'supabase/migrations/20260830181000_builder_existing.sql'), 'SELECT 1;\n');
   const candidate = `supabase/migrations/${candidateTimestamp}_candidate.sql`;
   const patch = [
     `diff --git a/${candidate} b/${candidate}`,
@@ -51,6 +52,53 @@ test('migration plan requires candidates newer than the baseline', () => {
   } finally {
     fs.rmSync(setup.root, { recursive: true, force: true });
   }
+});
+
+test('canonical schema preparation hoists row types before dependent functions', () => {
+  const schema = [
+    'CREATE SCHEMA IF NOT EXISTS "public";',
+    'CREATE OR REPLACE FUNCTION "public"."claim_shift_coverage"() RETURNS "public"."shift_coverage_requests" LANGUAGE sql AS $$ SELECT NULL; $$;',
+    'CREATE OR REPLACE FUNCTION "public"."read_shift"() RETURNS void LANGUAGE plpgsql AS $$ DECLARE value public.shifts%rowtype; BEGIN END; $$;',
+    'CREATE TABLE IF NOT EXISTS "public"."shift_coverage_requests" (',
+    '    "id" "uuid" NOT NULL',
+    ');',
+    '',
+    '',
+    'ALTER TABLE "public"."shift_coverage_requests" OWNER TO "postgres";',
+    'CREATE TABLE IF NOT EXISTS "public"."shifts" (',
+    '    "id" "uuid" NOT NULL',
+    ');',
+    '',
+    '',
+    'ALTER TABLE "public"."shifts" OWNER TO "postgres";'
+  ].join('\n');
+  const prepared = prepareCanonicalSchema(schema);
+  assert.deepEqual(prepared.normalizedTables, ['shift_coverage_requests', 'shifts']);
+  assert.ok(prepared.sql.lastIndexOf('CREATE TABLE', prepared.sql.indexOf('CREATE OR REPLACE FUNCTION')) >= 0);
+});
+
+test('canonical schema preparation defers inline foreign keys until primary keys exist', () => {
+  const schema = [
+    'CREATE TABLE IF NOT EXISTS "public"."child" (',
+    '  "id" "uuid" NOT NULL PRIMARY KEY,',
+    '  "organization_id" "uuid" NOT NULL REFERENCES "public"."organizations"("id") ON DELETE RESTRICT',
+    ');',
+    'CREATE TABLE IF NOT EXISTS "public"."organizations" (',
+    '  "id" "uuid" NOT NULL',
+    ');',
+    'ALTER TABLE "public"."organizations" OWNER TO "postgres";',
+    'ALTER TABLE ONLY "public"."organizations" ADD CONSTRAINT "organizations_pkey" PRIMARY KEY ("id");'
+  ].join('\n');
+  const prepared = prepareCanonicalSchema(schema);
+  assert.equal(prepared.deferredForeignKeyCount, 1);
+  assert.doesNotMatch(prepared.sql.split(');')[0], /REFERENCES/);
+  assert.match(prepared.sql, /ALTER TABLE ONLY "public"\."child" ADD CONSTRAINT "verify_[a-f0-9]+_fkey" FOREIGN KEY/);
+});
+
+test('canonical schema preparation normalizes quoted SQL trim syntax', () => {
+  const prepared = prepareCanonicalSchema('CHECK (char_length("trim"("summary")) > 0);');
+  assert.equal(prepared.normalizedQuotedTrimCount, 1);
+  assert.match(prepared.sql, /pg_catalog\.btrim\("summary"\)/);
 });
 
 test('database verifier loads baseline and candidate SQL with guaranteed cleanup', () => {

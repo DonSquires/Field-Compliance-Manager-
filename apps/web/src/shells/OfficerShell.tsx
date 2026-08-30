@@ -11,27 +11,56 @@
  * 4. MODULE_PORTAL: Inside a specific module
  *
  * Architecture:
- * - Persistent chrome: FieldSafetyBar (top), PttBar (bottom)
+ * - Persistent FCM chrome: safety header and field action bar
  * - Four-state machine for navigation
- * - Welfare integration with check-in cadence (default 30 min)
- * - Man-down detection via GPS inactivity
+ * - One unified welfare, SOS, and GPS-evidence state model
  * - Module gating based on profile + org enablement
  * - Responsive mobile-first design
  */
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  Activity,
+  BadgeCheck,
+  Bot,
+  CalendarDays,
+  Car,
+  ClipboardList,
+  Clock3,
+  FilePlus2,
+  FileText,
+  Grid3X3,
+  Map,
+  MapPin,
+  MessageSquare,
+  Moon,
+  Radio,
+  Route,
+  Shield,
+  Siren,
+  Tent,
+  UserRound,
+  Volume2,
+  Wind,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useWelfareCheckin } from '../hooks/useWelfareCheckin';
-import { useManDownDetection } from '../hooks/useManDownDetection';
 import { useActiveShift } from '../hooks/useActiveShift';
+import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
-import { NotificationsBell, PortalSwitcher, ReportButton } from '../components/stubs';
 import { BobPanel } from '../components/BobPanel';
-import { ProfessionalNav } from '../components/ProfessionalNav';
-import { ProfessionalHeader } from '../components/ProfessionalHeader';
+import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { resolveNotificationDestination } from '../lib/notificationNavigation';
+import {
+  buildOfficerBreadcrumb,
+  captureOfficerBreadcrumb,
+  flushOfficerBreadcrumbs,
+  isBreadcrumbDue,
+} from '../lib/officerBreadcrumb';
+import './OfficerShell.css';
 
 const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
 const SmokeControlPage = React.lazy(() => import('../pages/modules/SmokeControlPage'));
@@ -48,6 +77,9 @@ const OfficerFreedomCampingPage = React.lazy(() => import('../pages/OfficerFreed
 const OfficerOvernightVerificationPage = React.lazy(() => import('../pages/OfficerOvernightVerificationPage'));
 const ComingSoonPage = React.lazy(() => import('../pages/ComingSoonPage'));
 const OfficerMapPage = React.lazy(() => import('../pages/OfficerMapPage'));
+const OfficerHomePage = React.lazy(() => import('../pages/OfficerHomePage').then((module) => ({ default: module.OfficerHomePage })));
+const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePage'));
+const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
 
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
@@ -59,38 +91,27 @@ type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 
 type OfficerState = 'standby' | 'home' | 'selector' | 'portal';
 
-interface ShiftRecord {
-  id: string;
-  officer_user_id: string;
-  scheduled_start: string;
-  scheduled_end: string;
-  status: 'published' | 'accepted' | 'scheduled' | 'in_progress' | 'completed';
-  service_type: string;
-  location_name?: string;
-  notes?: string;
-}
-
 // Module metadata
-const MODULE_METADATA: Record<string, { label: string; icon: string }> = {
-  freedom_camping: { label: 'Freedom Camping', icon: '🏕️' },
-  parking: { label: 'Parking', icon: '🅿️' },
-  noise_control: { label: 'Noise Control', icon: '🔊' },
-  biosecurity: { label: 'Biosecurity', icon: '🦠' },
-  smoke_control: { label: 'Smoke Control', icon: '💨' },
-  site_guard: { label: 'Site Guard', icon: '🛡️' },
-  ems: { label: 'EMS', icon: '🚑' },
-  patrol: { label: 'Patrol', icon: '🚗' },
-  report: { label: 'Reports', icon: '📝' },
-  leave: { label: 'Leave', icon: '📅' },
-  timesheet: { label: 'Timesheet', icon: '⏱️' },
-  schedule: { label: 'Schedule', icon: '📋' },
-  overnight_verification: { label: 'Overnight', icon: '🌙' },
-  checkpoint_scan: { label: 'Checkpoints', icon: '📍' },
-  map: { label: 'Map', icon: '🗺️' },
-  dispatch: { label: 'Dispatch', icon: '📡' },
-  debrief: { label: 'Debrief', icon: '💬' },
-  vehicle_lookup: { label: 'Vehicle', icon: '🚙' },
-  credentials: { label: 'Credentials', icon: '🪪' },
+const MODULE_METADATA: Record<string, { label: string; icon: LucideIcon }> = {
+  freedom_camping: { label: 'Freedom Camping', icon: Tent },
+  parking: { label: 'Parking', icon: Car },
+  noise_control: { label: 'Noise Control', icon: Volume2 },
+  biosecurity: { label: 'Biosecurity', icon: Activity },
+  smoke_control: { label: 'Smoke Control', icon: Wind },
+  site_guard: { label: 'Site Guard', icon: Shield },
+  ems: { label: 'EMS', icon: Activity },
+  patrol: { label: 'Patrol', icon: Route },
+  report: { label: 'Reports', icon: FileText },
+  leave: { label: 'Leave', icon: CalendarDays },
+  timesheet: { label: 'Timesheet', icon: Clock3 },
+  schedule: { label: 'Schedule', icon: ClipboardList },
+  overnight_verification: { label: 'Overnight', icon: Moon },
+  checkpoint_scan: { label: 'Checkpoints', icon: MapPin },
+  map: { label: 'Map', icon: Map },
+  dispatch: { label: 'Dispatch', icon: Radio },
+  debrief: { label: 'Debrief', icon: MessageSquare },
+  vehicle_lookup: { label: 'Vehicle', icon: Car },
+  credentials: { label: 'Credentials', icon: BadgeCheck },
 };
 
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
@@ -102,48 +123,8 @@ const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; c
 };
 
 const LazyPageFallback: React.FC = () => (
-  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-    <div style={{ color: 'var(--color-text-secondary)' }}>Loading module...</div>
-  </div>
-);
-
-const StandbyScreen: React.FC<{ onNavigate: (module: ActiveModule) => void }> = ({ onNavigate }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '24px' }}>
-    <div style={{ fontSize: '48px' }}>⏸️</div>
-    <div style={{ fontSize: '24px', fontWeight: 600, color: 'var(--color-text-primary)' }}>No Active Shift</div>
-    <div style={{ color: 'var(--color-text-secondary)', textAlign: 'center', maxWidth: '300px' }}>
-      You don't currently have an active shift. Access modules or check your roster for upcoming assignments.
-    </div>
-    <div style={{ display: 'flex', gap: '12px' }}>
-      <button
-        onClick={() => onNavigate('schedule')}
-        style={{
-          padding: '12px 24px',
-          backgroundColor: 'var(--color-primary)',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          fontWeight: 500,
-        }}
-      >
-        View Schedule
-      </button>
-      <button
-        onClick={() => onNavigate('modules')}
-        style={{
-          padding: '12px 24px',
-          backgroundColor: 'transparent',
-          color: 'var(--color-primary)',
-          border: '1px solid var(--color-primary)',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          fontWeight: 500,
-        }}
-      >
-        Access Modules
-      </button>
-    </div>
+  <div className="officer-module-loading">
+    <div>Loading module...</div>
   </div>
 );
 
@@ -151,17 +132,35 @@ const OfficerShell: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile } = useAuth();
-  const { checkin, needsCheckin } = useWelfareCheckin(profile?.id ?? '');
-  const { isManDown } = useManDownDetection(profile?.id ?? '', { organizationId: profile?.organizationId ?? '' });
-  const { shift: activeShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
-  const { enabledModules } = useEnabledModules(profile?.organizationId ?? null);
+  const { shift: activeShift, isLoading: shiftLoading, error: shiftError } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
+  const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
+
+  const getGps = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
+    return new Promise<{ lat: number; lng: number } | null>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 8_000 },
+      );
+    });
+  }, []);
+
+  const safety = useOfficerSafety({
+    officerId: profile?.id ?? null,
+    organizationId: profile?.organizationId ?? null,
+    orgManDownEnabled: isModuleEnabled('welfare', { safetyRelevant: true }),
+    getGps,
+  });
 
   const [activeModule, setActiveModule] = useState<ActiveModule>(null);
   const [officerState, setOfficerState] = useState<OfficerState>('home');
   const [offeredCount, setOfferedCount] = useState(0);
   const [bobOpen, setBobOpen] = useState(false);
   const [grantedModules, setGrantedModules] = useState<string[]>([]);
+  const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
+  const lastBreadcrumbAtRef = useRef<number | null>(null);
 
   // Derive active module from URL
   const moduleFromUrl = useCallback((pathname: string): ActiveModule => {
@@ -195,18 +194,54 @@ const OfficerShell: React.FC = () => {
     setGrantedModules(Array.from(enabledModules));
   }, [enabledModules]);
 
+  useEffect(() => {
+    if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        safety.recordMovement(position.coords.latitude, position.coords.longitude);
+        const capturedAt = Date.now();
+        if (!isBreadcrumbDue(lastBreadcrumbAtRef.current, capturedAt)) return;
+        lastBreadcrumbAtRef.current = capturedAt;
+        void captureOfficerBreadcrumb(buildOfficerBreadcrumb(position, activeShift?.id)).then((result) => {
+          setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
+        });
+      },
+      () => undefined,
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [activeShift?.id, profile?.id, safety.recordMovement]);
+
+  useEffect(() => {
+    if (!profile?.id || typeof window === 'undefined') return;
+    let active = true;
+    const flush = () => {
+      void flushOfficerBreadcrumbs().then((result) => {
+        if (!active) return;
+        setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
+      });
+    };
+    flush();
+    window.addEventListener('online', flush);
+    return () => {
+      active = false;
+      window.removeEventListener('online', flush);
+    };
+  }, [profile?.id]);
+
   // Load offered shift count
   useEffect(() => {
     const loadOfferedCount = async () => {
       if (!profile?.id) return;
 
       try {
-        const { count } = await supabase
+        const { count, error } = await supabase
           .from('shifts')
           .select('id', { count: 'exact', head: true })
           .eq('officer_user_id', profile.id)
           .eq('status', 'published');
 
+        if (error) throw error;
         setOfferedCount(count || 0);
       } catch (err) {
         console.error('Failed to load offered shifts:', err);
@@ -220,7 +255,7 @@ const OfficerShell: React.FC = () => {
 
   // Navigate to module
   const navigateToModule = useCallback((module: ActiveModule) => {
-    if (module === 'modules' || module === null) {
+    if (module === null) {
       navigate('/officer');
       setActiveModule(null);
     } else {
@@ -229,14 +264,30 @@ const OfficerShell: React.FC = () => {
     }
   }, [navigate]);
 
+  const navigateFromNotification = useCallback((notification: NotificationRecord) => {
+    const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
+    if (!destination) return false;
+    if (destination.kind === 'bob') {
+      setBobOpen(true);
+      return true;
+    }
+    if (destination.kind === 'officer_module') {
+      navigateToModule(destination.module as ActiveModule);
+      return true;
+    }
+    return false;
+  }, [navigateToModule, profile?.role]);
+
   // Get welfare status
-  const currentWelfareStatus: WelfareStatus = isManDown
-    ? 'man_down'
-    : checkin?.status === 'escalated'
-      ? 'overdue'
-      : needsCheckin
-        ? 'due'
-        : 'ok';
+  const currentWelfareStatus: WelfareStatus = safety.activeAlert?.kind === 'sos'
+    ? 'sos'
+    : safety.activeAlert
+      ? 'man_down'
+      : safety.status === 'overdue'
+        ? 'overdue'
+        : safety.status === 'due'
+          ? 'due'
+          : 'ok';
   const welfareDisplay = WELFARE_STATUS_DISPLAY[currentWelfareStatus];
 
   // Get Bob context
@@ -249,13 +300,14 @@ const OfficerShell: React.FC = () => {
     agreement: selectedAgreement,
     site: selectedSite,
     zone: selectedZone,
-  }), [activeModule, officerState, activeShift, currentWelfareStatus, profile?.role, selectedAgreement, selectedSite, selectedZone]);
+    moduleGateStatus: moduleStatus,
+  }), [activeModule, officerState, activeShift, currentWelfareStatus, profile?.role, selectedAgreement, selectedSite, selectedZone, moduleStatus]);
 
   // Render module portal
   const renderModuleContent = useCallback(() => {
     switch (activeModule) {
       case 'schedule':
-        return <div style={{ padding: '16px' }}>📋 Schedule Module</div>;
+        return <OfficerSchedulePage />;
       case 'patrol':
       case 'checkpoint_scan':
         return <PatrolPage />;
@@ -288,39 +340,31 @@ const OfficerShell: React.FC = () => {
       case 'ems':
         return <OfficerFieldReportPage />;
       case 'debrief':
-        return <ComingSoonPage title="Debrief" />;
+        return <OfficerDebriefPage />;
       case 'map':
         return <OfficerMapPage />;
       case 'modules':
         return (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '12px', padding: '16px' }}>
-            {grantedModules.map((mod) => {
-              const meta = MODULE_METADATA[mod];
-              if (!meta) return null;
-              return (
-                <button
-                  key={mod}
-                  onClick={() => navigateToModule(mod as ActiveModule)}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '16px',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    gap: '8px',
-                    fontSize: '14px',
-                  }}
-                >
-                  <span style={{ fontSize: '24px' }}>{meta.icon}</span>
-                  <span>{meta.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          <section className="officer-module-directory">
+            <header><span>Field tools</span><h1>Enabled modules</h1><p>Tools available for your organisation and role.</p></header>
+            {grantedModules.length === 0 ? (
+              <div className="officer-module-empty">No enabled field modules are available.</div>
+            ) : (
+              <div className="officer-module-grid">
+                {grantedModules.map((mod) => {
+                  const meta = MODULE_METADATA[mod];
+                  if (!meta) return null;
+                  const Icon = meta.icon;
+                  return (
+                    <button key={mod} onClick={() => navigateToModule(mod as ActiveModule)}>
+                      <span><Icon size={21} /></span>
+                      <strong>{meta.label}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         );
       default:
         return <LazyPageFallback />;
@@ -328,164 +372,63 @@ const OfficerShell: React.FC = () => {
   }, [activeModule, grantedModules, navigateToModule]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--color-bg-primary)' }}>
-      {/* Professional Header */}
-      <ProfessionalHeader
-        title="Officer Operations"
-        subtitle={activeShift ? `${activeShift?.shift_type || 'Shift'} in progress` : 'No active shift'}
-        statusIndicator={{
-          status: isManDown ? 'offline' : (needsCheckin ? 'idle' : 'online'),
-          label: isManDown ? 'Man Down' : (needsCheckin ? 'Check-in Due' : 'OK'),
-        }}
-        userDisplayName={profile?.displayName}
-        notificationCount={offeredCount}
-        onNotifications={() => navigateToModule('schedule')}
-        actions={currentWelfareStatus !== 'ok' ? [
-          {
-            label: '🆘 SOS',
-            onClick: () => console.log('SOS triggered'),
-            variant: 'danger',
-          },
-        ] : undefined}
-      />
+    <div className="officer-shell">
+      <header className="officer-shell-header">
+        <button type="button" className="officer-shell-brand" onClick={() => navigateToModule(null)} title="Officer home">
+          <span><Shield size={19} aria-hidden="true" /></span>
+          <div><strong>Field Compliance Manager</strong><small>{activeShift ? `${activeShift.shift_type} shift` : 'Officer operations'}</small></div>
+        </button>
 
-      {/* Main Layout with Sidebar */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Professional Navigation Sidebar */}
-        <ProfessionalNav
-          sections={[
-            {
-              title: 'Active Shift',
-              items: activeShift ? [
-                {
-                  id: 'shift-home',
-                  label: 'Dashboard',
-                  path: '/officer',
-                  status: 'active',
-                },
-              ] : [],
-            },
-            {
-              title: 'Field Operations',
-              items: [
-                { id: 'freedom_camping', label: 'Freedom Camping', path: '/officer/freedom_camping', status: grantedModules.includes('freedom_camping') ? ('active' as const) : ('none' as const) },
-                { id: 'parking', label: 'Parking', path: '/officer/parking', status: grantedModules.includes('parking') ? ('active' as const) : ('none' as const) },
-                { id: 'noise_control', label: 'Noise Control', path: '/officer/noise_control', status: grantedModules.includes('noise_control') ? ('active' as const) : ('none' as const) },
-                { id: 'biosecurity', label: 'Biosecurity', path: '/officer/biosecurity', status: grantedModules.includes('biosecurity') ? ('active' as const) : ('none' as const) },
-                { id: 'smoke_control', label: 'Smoke Control', path: '/officer/smoke_control', status: grantedModules.includes('smoke_control') ? ('active' as const) : ('none' as const) },
-                { id: 'patrol', label: 'Patrol', path: '/officer/patrol', status: grantedModules.includes('patrol') ? ('active' as const) : ('none' as const) },
-              ].filter(item => grantedModules.includes(item.id)),
-            },
-            {
-              title: 'Site Operations',
-              items: [
-                { id: 'dispatch', label: 'Dispatch', path: '/officer/dispatch', status: grantedModules.includes('dispatch') ? ('active' as const) : ('none' as const) },
-                { id: 'vehicle_lookup', label: 'Vehicle Lookup', path: '/officer/vehicle_lookup', status: grantedModules.includes('vehicle_lookup') ? ('active' as const) : ('none' as const) },
-                { id: 'map', label: 'Map View', path: '/officer/map', status: grantedModules.includes('map') ? ('active' as const) : ('none' as const) },
-              ].filter(item => grantedModules.includes(item.id)),
-            },
-            {
-              title: 'Administration',
-              items: [
-                { id: 'timesheet', label: 'Timesheet', path: '/officer/timesheet', status: 'none' as const },
-                { id: 'leave', label: 'Leave', path: '/officer/leave', status: 'none' as const },
-                { id: 'credentials', label: 'Credentials', path: '/officer/credentials', status: 'none' as const },
-                { id: 'report', label: 'Field Reports', path: '/officer/report', status: offeredCount > 0 ? ('pending' as const) : ('none' as const) },
-              ],
-            },
-          ]}
-          currentPath={location.pathname}
-          onNavigate={(path) => navigate(path)}
-        />
-
-        {/* Main Content Area */}
-        <main style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          {officerState === 'standby' && <StandbyScreen onNavigate={navigateToModule} />}
-          {(officerState === 'home' || officerState === 'selector' || officerState === 'portal') && (
-            <React.Suspense fallback={<LazyPageFallback />}>
-              {renderModuleContent()}
-            </React.Suspense>
-          )}
-        </main>
-      </div>
-
-      {/* Safety Footer Chrome */}
-      <div
-        style={{
-          height: '52px',
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderTop: '1px solid var(--color-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingLeft: 'var(--space-4)',
-          paddingRight: 'var(--space-4)',
-          gap: 'var(--space-3)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          <span style={{
-            display: 'inline-flex',
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            backgroundColor: welfareDisplay.color,
-          }} />
-          {isManDown ? 'Man Down Detected' : needsCheckin ? 'Welfare Check-in Due' : 'Officer OK'}
-        </div>
-
-        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-          <button
-            onClick={() => navigateToModule('modules')}
-            style={{
-              padding: 'var(--space-2) var(--space-4)',
-              backgroundColor: 'transparent',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--color-text-primary)',
-              cursor: 'pointer',
-              fontWeight: 500,
-              fontSize: 'var(--text-sm)',
-            }}
-          >
-            All Modules
+        <div className="officer-shell-tools">
+          {offeredCount > 0 && <span className="officer-offer-count" title={`${offeredCount} offered shifts`}>{offeredCount}</span>}
+          <button type="button" className={`officer-safety-chip welfare-${currentWelfareStatus}`} onClick={() => void safety.checkIn()} disabled={safety.writeStatus === 'pending'} title="Check in now">
+            <span>{welfareDisplay.dot}</span><small>Safety</small>
           </button>
-
-          {ReportButton && (
-            <ReportButton
-              style={{
-                padding: 'var(--space-2) var(--space-4)',
-                backgroundColor: 'var(--color-primary)',
-                border: 'none',
-                borderRadius: 'var(--radius-sm)',
-                color: 'white',
-                cursor: 'pointer',
-                fontWeight: 500,
-                fontSize: 'var(--text-sm)',
-              }}
-            />
-          )}
-
-          <button
-            onClick={() => console.log('SOS triggered')}
-            style={{
-              padding: 'var(--space-2) var(--space-4)',
-              backgroundColor: 'var(--color-error)',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
-              color: 'white',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: 'var(--text-sm)',
-            }}
-            title="Emergency SOS"
-          >
-            🆘 SOS
+          <NotificationCenter onNavigate={navigateFromNotification} />
+          <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
+            <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
           </button>
+          <div className="officer-profile-chip" title={profile?.displayName ?? 'Officer'}>
+            <UserRound size={17} aria-hidden="true" /><span>{profile?.displayName?.split(' ')[0] ?? 'Officer'}</span>
+          </div>
         </div>
-      </div>
+      </header>
 
-      {/* Bob AI Panel */}
+      <main data-app-content className="officer-shell-content">
+        {safety.writeStatus === 'error' && safety.lastError && (
+          <div role="alert" className="officer-shell-safety-error">
+            Safety action not confirmed: {safety.lastError}
+          </div>
+        )}
+        {breadcrumbIssue && (
+          <div role="status" className="officer-shell-evidence-warning">
+            Location evidence not confirmed. {breadcrumbIssue.pendingCount} {breadcrumbIssue.pendingCount === 1 ? 'record is' : 'records are'} queued for retry. {breadcrumbIssue.error}
+          </div>
+        )}
+        {(officerState === 'standby' || officerState === 'home') && (
+          <React.Suspense fallback={<LazyPageFallback />}>
+            <OfficerHomePage shift={activeShift} shiftLoading={shiftLoading} shiftError={shiftError} safety={safety} onNavigate={navigateToModule} />
+          </React.Suspense>
+        )}
+        {(officerState === 'selector' || officerState === 'portal') && (
+          <React.Suspense fallback={<LazyPageFallback />}>
+            {renderModuleContent()}
+          </React.Suspense>
+        )}
+      </main>
+
+      <nav className="officer-action-bar" aria-label="Field actions">
+        <button type="button" onClick={() => navigateToModule('modules')} className={activeModule === 'modules' ? 'is-active' : ''}>
+          <Grid3X3 size={19} aria-hidden="true" /><span>Modules</span>
+        </button>
+        <button type="button" onClick={() => navigateToModule('report')} className={activeModule === 'report' ? 'is-active' : ''}>
+          <FilePlus2 size={19} aria-hidden="true" /><span>Report</span>
+        </button>
+        <button type="button" className="officer-sos-action" onClick={() => void safety.triggerSOS()} disabled={safety.writeStatus === 'pending' || safety.activeAlert?.kind === 'sos'}>
+          <Siren size={19} aria-hidden="true" /><span>{safety.activeAlert?.kind === 'sos' ? 'SOS active' : 'SOS'}</span>
+        </button>
+      </nav>
+
       <BobPanel
         open={bobOpen}
         onClose={() => setBobOpen(false)}

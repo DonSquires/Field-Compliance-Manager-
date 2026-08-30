@@ -4,6 +4,32 @@ const path = require('node:path');
 const OWNER_MARKER = '[repo-atlas-refresh:v1]';
 const BATCH_SIZE = 250;
 const MAX_RETIREMENTS = 100;
+const MANAGED_SOURCES = [
+  'apps/web/src/pages/RosterOperationsPage.tsx',
+  'apps/web/src/pages/OfficerSchedulePage.tsx',
+  'apps/web/src/pages/RosterHRPage.tsx',
+  'apps/web/src/pages/OfficerLeavePage.tsx',
+  'apps/web/src/pages/CRMPage.tsx',
+  'apps/web/src/pages/WelfareAlertsPage.tsx',
+  'apps/web/src/pages/OfficerFieldReportPage.tsx',
+  'apps/web/src/hooks/useOfficerSafety.ts',
+  'supabase/migrations/20260830128000_roster_work_units.sql',
+  'supabase/migrations/20260830129000_materialize_roster_slots.sql',
+  'supabase/migrations/20260830130500_roster_slot_response.sql',
+  'supabase/migrations/20260830131000_manage_roster_slot.sql',
+  'supabase/migrations/20260830132000_reassign_roster_slot.sql',
+  'supabase/migrations/20260830133000_enforce_roster_availability.sql',
+  'supabase/migrations/20260830134000_organization_calendar_settings.sql',
+  'supabase/migrations/20260830135000_roster_commercial_readiness.sql',
+  'supabase/migrations/20260830136000_govern_hr_workflows.sql',
+  'supabase/migrations/20260830137000_govern_staff_readiness.sql',
+  'supabase/migrations/20260830138000_govern_crm_quote_creation.sql',
+  'supabase/migrations/20260830139000_govern_crm_quote_lines.sql',
+  'supabase/migrations/20260830140000_govern_crm_quote_lifecycle.sql',
+  'supabase/migrations/20260830141000_govern_welfare_alert_transitions.sql',
+  'supabase/migrations/20260830125000_submit_officer_field_report.sql',
+  'supabase/migrations/20260830142000_harden_officer_field_report_submission.sql'
+];
 
 function walkFiles(rootDir, relativeDir) {
   const absoluteDir = path.join(rootDir, relativeDir);
@@ -51,6 +77,84 @@ function capabilityKey(capability) {
 
 function fieldsMatch(existing, desired, fields) {
   return fields.every(field => (existing[field] ?? null) === (desired[field] ?? null));
+}
+
+function uniqueBy(items, keyOf) {
+  return Array.from(new Map(items.map(item => [keyOf(item), item])).values());
+}
+
+function componentName(sourceFile) {
+  return sourceFile.replace(/^apps\/web\/src\//, '').replace(/\.(tsx?|jsx?)$/, '');
+}
+
+function collectComponentEdges(sourceFile, content) {
+  const sourceName = componentName(sourceFile);
+  const edges = [];
+  const tableCalls = Array.from(content.matchAll(/supabase\s*\.\s*from\(['"]([^'"]+)['"]\)/g));
+  for (const [index, match] of tableCalls.entries()) {
+    const chainEnd = content.indexOf(';', match.index);
+    const nextCall = tableCalls[index + 1]?.index ?? content.length;
+    const segmentEnd = chainEnd === -1 ? nextCall : Math.min(chainEnd, nextCall);
+    const chain = content.slice(match.index, segmentEnd);
+    const edgeKind = /\.\s*(?:insert|update|delete|upsert)\s*\(/.test(chain) ? 'writes' : 'reads';
+    edges.push({ source_type: 'component', source_name: sourceName, target_type: 'table', target_name: match[1], edge_kind: edgeKind, evidence_class: 'live-code', source_file: sourceFile, caller_context: `Supabase table ${edgeKind === 'writes' ? 'mutation' : 'query'} in component` });
+  }
+  for (const match of content.matchAll(/supabase\s*\.\s*rpc\(['"]([^'"]+)['"]/g)) {
+    edges.push({ source_type: 'component', source_name: sourceName, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in component' });
+  }
+  return edges;
+}
+
+function staleGeneratedEdgeIds(existingEdges, generatedEdges) {
+  const generatedKeys = new Set(generatedEdges.map(edge => edgeKey(edge)));
+  return existingEdges
+    .filter(edge => edge.refresh_source === 'ci_generator' && edge.retirement_status === 'live' && !generatedKeys.has(edgeKey(edge)))
+    .map(edge => edge.id);
+}
+
+function collectManagedRpcEdges(sourceFile, content, inventory) {
+  const edges = [];
+  const functionPattern = /create(?: or replace)? function public\.([a-zA-Z0-9_]+)[\s\S]*?as \$\$([\s\S]*?)\$\$;/gi;
+  for (const match of content.matchAll(functionPattern)) {
+    const sourceName = match[1];
+    const body = match[2];
+    const writes = new Set();
+    const reads = new Set();
+    for (const write of body.matchAll(/(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?([a-zA-Z0-9_]+)/gi)) {
+      if (inventory.tables.has(write[1])) writes.add(write[1]);
+    }
+    for (const read of body.matchAll(/(?:from|join)\s+(?:public\.)?([a-zA-Z0-9_]+)/gi)) {
+      if (inventory.tables.has(read[1])) reads.add(read[1]);
+    }
+    for (const table of writes) edges.push({ source_type: 'rpc', source_name: sourceName, target_type: 'table', target_name: table, edge_kind: 'writes', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'SQL mutation in RPC body' });
+    for (const table of reads) edges.push({ source_type: 'rpc', source_name: sourceName, target_type: 'table', target_name: table, edge_kind: 'reads', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'SQL query in RPC body' });
+    for (const call of body.matchAll(/public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
+      if (call[1] !== sourceName && inventory.rpcs.has(call[1])) edges.push({ source_type: 'rpc', source_name: sourceName, target_type: 'rpc', target_name: call[1], edge_kind: 'calls', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'SQL function call in RPC body' });
+    }
+  }
+  for (const trigger of content.matchAll(/create trigger\s+[a-zA-Z0-9_]+[\s\S]*?\s+on\s+public\.([a-zA-Z0-9_]+)[\s\S]*?execute function\s+public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
+    edges.push({ source_type: 'table', source_name: trigger[1], target_type: 'rpc', target_name: trigger[2], edge_kind: 'triggers', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'PostgreSQL trigger execution' });
+  }
+  return edges;
+}
+
+function collectManagedAtlas(rootDir = process.cwd()) {
+  const inventory = collectDdlEntities(rootDir);
+  const edges = [];
+  for (const sourceFile of MANAGED_SOURCES) {
+    const filePath = path.join(rootDir, sourceFile);
+    if (!fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, 'utf8');
+    edges.push(...(sourceFile.startsWith('apps/web/src/')
+      ? collectComponentEdges(sourceFile, content)
+      : collectManagedRpcEdges(sourceFile, content, inventory)));
+  }
+  const dedupedEdges = uniqueBy(edges, edgeKey);
+  const nodes = uniqueBy(dedupedEdges.flatMap(edge => [
+    ...(['table', 'rpc'].includes(edge.source_type) ? [{ entity_type: edge.source_type, entity_name: edge.source_name }] : []),
+    ...(['table', 'rpc'].includes(edge.target_type) ? [{ entity_type: edge.target_type, entity_name: edge.target_name }] : [])
+  ]), node => `${node.entity_type}|${node.entity_name}`);
+  return { scope: 'managed_app', sources: MANAGED_SOURCES, nodes, edges: dedupedEdges };
 }
 
 function collectDdlEntities(rootDir) {
@@ -396,6 +500,9 @@ if (require.main === module) {
 
 module.exports = {
   OWNER_MARKER,
+  collectComponentEdges,
+  collectManagedAtlas,
+  staleGeneratedEdgeIds,
   collectAtlasRefresh,
   buildRefreshPlan,
   applyAtlasRefresh
