@@ -64,3 +64,25 @@ test('report review dialog is usable without overlap', async ({ page }) => {
   await expect(dialog).toBeHidden();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('supervisor records acknowledgement and verified resolution through the governed welfare lifecycle', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/field-ops?area=welfare-alerts');
+  await expect(page.getByRole('heading', { name: 'Welfare response' })).toBeVisible();
+  await expect(page.getByText('Ana Ngata', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Acknowledge' }).click();
+  const acknowledgement = page.getByRole('dialog', { name: 'Acknowledge alert' });
+  await acknowledgement.getByLabel('Response plan').fill('Control room called Ana and dispatched the duty supervisor.');
+  await acknowledgement.getByRole('button', { name: 'Confirm acknowledgement' }).click();
+  await expect(page.getByRole('status')).toContainText('Alert acknowledged');
+  await expect(page.getByText('acknowledged', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Resolve' }).click();
+  const resolution = page.getByRole('dialog', { name: 'Resolve alert' });
+  await resolution.getByLabel('Verified safety outcome').fill('Duty supervisor made face-to-face contact and confirmed Ana was safe.');
+  await resolution.getByRole('button', { name: 'Confirm resolution' }).click();
+  await expect(page.getByRole('status')).toContainText('Alert resolved');
+  await expect(page.getByText('resolved', { exact: true }).first()).toBeVisible();
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});

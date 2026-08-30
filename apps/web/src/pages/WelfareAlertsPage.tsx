@@ -116,31 +116,14 @@ const WelfareAlertsPage: React.FC = () => {
 
   const submitAction = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!selected || !profile?.id || !action || !actionNotes.trim()) return;
+    if (!selected || !action || !actionNotes.trim()) return;
     setBusyId(selected.id);
     setError(null);
     setNotice(null);
     try {
-      const now = new Date().toISOString();
-      let query;
-      if (action === 'acknowledge') {
-        query = supabase
-          .from('welfare_alerts')
-          .update({ status: 'acknowledged', acknowledged_by: profile.id, acknowledged_at: now, acknowledgement_notes: actionNotes.trim() })
-          .eq('id', selected.id)
-          .eq('status', 'pending')
-          .select('id');
-      } else {
-        query = supabase
-          .from('welfare_alerts')
-          .update({ status: 'resolved', resolved_by: profile.id, resolved_at: now, resolution_notes: actionNotes.trim() })
-          .eq('id', selected.id)
-          .in('status', ['pending', 'acknowledged'])
-          .select('id');
-      }
-      const { data, error: updateError } = await query;
+      const { data, error: updateError } = await supabase.rpc('manage_welfare_alert', { p_alert_id: selected.id, p_expected_status: selected.status, p_action: action, p_notes: actionNotes.trim() });
       if (updateError) throw updateError;
-      if (!data?.length) throw new Error('This alert changed before your action was saved. Refresh and review its current state.');
+      if (!data) throw new Error('This alert changed before your action was saved. Refresh and review its current state.');
       setNotice(action === 'acknowledge' ? 'Alert acknowledged. Automatic escalation is paused while response is underway.' : 'Alert resolved with the recorded safety outcome.');
       setAction(null);
       setActionNotes('');

@@ -277,15 +277,18 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
     // valid positive acknowledgement — clearing any active alert IS allowed
     // here because the officer took a deliberate action, unlike raw movement.
     if (activeAlertRef.current) {
-      const { error: alertResolutionError } = await supabase
-        .from('welfare_alerts')
-        .update({
-          status: 'resolved',
-          resolved_by: officerId,
-          resolved_at: now.toISOString(),
-          resolution_notes: 'Resolved by officer check-in',
-        })
-        .eq('id', activeAlertRef.current.id);
+      const { data: currentAlert, error: alertReadError } = await supabase.from('welfare_alerts').select('status').eq('id', activeAlertRef.current.id).single();
+      if (alertReadError || !currentAlert || !['pending', 'acknowledged'].includes(currentAlert.status)) {
+        setWriteStatus('error');
+        setLastError(alertReadError?.message ?? 'The active alert is no longer available for resolution.');
+        return false;
+      }
+      const { error: alertResolutionError } = await supabase.rpc('manage_welfare_alert', {
+        p_alert_id: activeAlertRef.current.id,
+        p_expected_status: currentAlert.status,
+        p_action: 'resolve',
+        p_notes: 'Resolved by officer check-in',
+      });
       if (alertResolutionError) {
         setWriteStatus('error');
         setLastError(alertResolutionError.message);
@@ -307,15 +310,18 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
     const alert = activeAlertRef.current;
     if (!alert || !officerId) return false;
     setWriteStatus('pending');
-    const { error } = await supabase
-      .from('welfare_alerts')
-      .update({
-        status: 'resolved',
-        resolved_by: officerId,
-        resolved_at: new Date().toISOString(),
-        resolution_notes: 'Officer acknowledged and cleared the alert',
-      })
-      .eq('id', alert.id);
+    const { data: currentAlert, error: alertReadError } = await supabase.from('welfare_alerts').select('status').eq('id', alert.id).single();
+    if (alertReadError || !currentAlert || !['pending', 'acknowledged'].includes(currentAlert.status)) {
+      setWriteStatus('error');
+      setLastError(alertReadError?.message ?? 'The active alert is no longer available for resolution.');
+      return false;
+    }
+    const { error } = await supabase.rpc('manage_welfare_alert', {
+      p_alert_id: alert.id,
+      p_expected_status: currentAlert.status,
+      p_action: 'resolve',
+      p_notes: 'Officer acknowledged and cleared the alert',
+    });
     if (error) {
       setWriteStatus('error');
       setLastError(error.message);

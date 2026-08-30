@@ -11,11 +11,10 @@ describe('supervisor welfare response workbench', () => {
   });
 
   it('records distinct acknowledgement and resolution evidence', () => {
-    expect(source).toContain('acknowledgement_notes: actionNotes.trim()');
-    expect(source).toContain('resolution_notes: actionNotes.trim()');
-    expect(source).toContain(".eq('status', 'pending')");
-    expect(source).toContain(".in('status', ['pending', 'acknowledged'])");
-    expect(source).toContain(".select('id')");
+    expect(source).toContain("supabase.rpc('manage_welfare_alert'");
+    expect(source).toContain('p_expected_status: selected.status');
+    expect(source).toContain('p_notes: actionNotes.trim()');
+    expect(source).not.toContain(".from('welfare_alerts').update");
   });
 
   it('requires human notes and surfaces concurrent transition failures', () => {

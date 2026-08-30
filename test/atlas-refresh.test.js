@@ -47,6 +47,13 @@ test('managed Atlas refresh derives real component and RPC flow edges', () => {
   assert.equal(hasEdge('manage_crm_quote', 'quote_lines', 'reads'), true);
   assert.equal(hasEdge('manage_crm_quote', 'quotes', 'writes'), true);
   assert.equal(hasEdge('manage_crm_quote', 'accept_quote', 'calls'), true);
+  assert.equal(hasEdge('pages/WelfareAlertsPage', 'manage_welfare_alert', 'calls'), true);
+  assert.equal(hasEdge('hooks/useOfficerSafety', 'manage_welfare_alert', 'calls'), true);
+  assert.equal(hasEdge('hooks/useOfficerSafety', 'welfare_alerts', 'reads'), true);
+  assert.equal(hasEdge('hooks/useOfficerSafety', 'welfare_alerts', 'writes'), true);
+  assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'reads'), true);
+  assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'writes'), true);
+  assert.equal(hasEdge('manage_welfare_alert', 'audit_log', 'writes'), true);
 });
 
 test('managed Atlas refresh includes capability nodes without inferring exercise', () => {
@@ -64,9 +71,13 @@ test('component extraction tolerates formatted multiline Supabase chains', () =>
       .select('*');
     await supabase
       .rpc('create_crm_draft_quote', { p_title: 'Example' });
+    await supabase
+      .from('welfare_alerts')
+      .insert({ status: 'pending' });
   `);
   assert.ok(edges.some((edge) => edge.target_name === 'crm_contacts' && edge.edge_kind === 'reads'));
   assert.ok(edges.some((edge) => edge.target_name === 'create_crm_draft_quote' && edge.edge_kind === 'calls'));
+  assert.ok(edges.some((edge) => edge.target_name === 'welfare_alerts' && edge.edge_kind === 'writes'));
 });
 
 test('stale edge retirement is scoped to live CI-generated identities', () => {

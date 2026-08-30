@@ -7,6 +7,8 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterHRPage.tsx',
   'apps/web/src/pages/OfficerLeavePage.tsx',
   'apps/web/src/pages/CRMPage.tsx',
+  'apps/web/src/pages/WelfareAlertsPage.tsx',
+  'apps/web/src/hooks/useOfficerSafety.ts',
   'supabase/migrations/20260830128000_roster_work_units.sql',
   'supabase/migrations/20260830129000_materialize_roster_slots.sql',
   'supabase/migrations/20260830130000_roster_slot_response.sql',
@@ -19,7 +21,8 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260830137000_govern_staff_readiness.sql',
   'supabase/migrations/20260830138000_govern_crm_quote_creation.sql',
   'supabase/migrations/20260830139000_govern_crm_quote_lines.sql',
-  'supabase/migrations/20260830140000_govern_crm_quote_lifecycle.sql'
+  'supabase/migrations/20260830140000_govern_crm_quote_lifecycle.sql',
+  'supabase/migrations/20260830141000_govern_welfare_alert_transitions.sql'
 ];
 
 function uniqueBy(items, keyOf) {
@@ -42,8 +45,14 @@ function schemaInventory(rootDir) {
 function collectComponentEdges(sourceFile, content) {
   const sourceName = componentName(sourceFile);
   const edges = [];
-  for (const match of content.matchAll(/supabase\s*\.\s*from\(['"]([^'"]+)['"]\)/g)) {
-    edges.push({ source_type: 'component', source_name: sourceName, target_type: 'table', target_name: match[1], edge_kind: 'reads', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase table query in component' });
+  const tableCalls = Array.from(content.matchAll(/supabase\s*\.\s*from\(['"]([^'"]+)['"]\)/g));
+  for (const [index, match] of tableCalls.entries()) {
+    const chainEnd = content.indexOf(';', match.index);
+    const nextCall = tableCalls[index + 1]?.index ?? content.length;
+    const segmentEnd = chainEnd === -1 ? nextCall : Math.min(chainEnd, nextCall);
+    const chain = content.slice(match.index, segmentEnd);
+    const edgeKind = /\.\s*(?:insert|update|delete|upsert)\s*\(/.test(chain) ? 'writes' : 'reads';
+    edges.push({ source_type: 'component', source_name: sourceName, target_type: 'table', target_name: match[1], edge_kind: edgeKind, evidence_class: 'live-code', source_file: sourceFile, caller_context: `Supabase table ${edgeKind === 'writes' ? 'mutation' : 'query'} in component` });
   }
   for (const match of content.matchAll(/supabase\s*\.\s*rpc\(['"]([^'"]+)['"]/g)) {
     edges.push({ source_type: 'component', source_name: sourceName, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in component' });
@@ -87,7 +96,7 @@ function collectManagedAtlas(rootDir = process.cwd()) {
   const edges = [];
   for (const sourceFile of MANAGED_SOURCES) {
     const content = fs.readFileSync(path.join(rootDir, sourceFile), 'utf8');
-    edges.push(...(sourceFile.endsWith('.tsx') ? collectComponentEdges(sourceFile, content) : collectRpcEdges(sourceFile, content, inventory)));
+    edges.push(...(sourceFile.startsWith('apps/web/src/') ? collectComponentEdges(sourceFile, content) : collectRpcEdges(sourceFile, content, inventory)));
   }
   const dedupedEdges = uniqueBy(edges, (edge) => [edge.source_type, edge.source_name, edge.target_type, edge.target_name, edge.edge_kind, edge.source_file].join('|'));
   const nodes = uniqueBy(dedupedEdges.flatMap((edge) => [
