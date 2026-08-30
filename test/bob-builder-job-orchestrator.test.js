@@ -11,6 +11,7 @@ import {
   checkDependenciesMet,
   buildJobCheckpoint,
   getNextJobStatus,
+  getApprovalTypeForStatus,
   sanitizeBuilderEvidence
 } from '../supabase/functions/_shared/builder-job-orchestrator.js';
 
@@ -68,7 +69,7 @@ test('Builder job system: normalizeJobStep converts step to standard shape', () 
 test('Builder job system: getDefaultJobSteps returns ordered builder workflow', () => {
   const steps = getDefaultJobSteps();
 
-  assert.equal(steps.length, 7);
+  assert.equal(steps.length, 8);
   assert.equal(steps[0].step_id, 'product_analysis');
   assert.equal(steps[0].builder_mode, 'product_analyst');
   assert.equal(steps[1].step_id, 'ui_design');
@@ -77,7 +78,9 @@ test('Builder job system: getDefaultJobSteps returns ordered builder workflow', 
   assert.equal(steps[3].step_id, 'backend_implementation');
   assert.equal(steps[4].step_id, 'test_suite');
   assert.equal(steps[5].step_id, 'security_review');
-  assert.equal(steps[6].step_id, 'release_prep');
+  assert.equal(steps[6].step_id, 'code_review');
+  assert.equal(steps[6].builder_mode, 'code_reviewer');
+  assert.equal(steps[7].step_id, 'release_prep');
 });
 
 test('Builder job system: default workflow respects dependencies', () => {
@@ -95,6 +98,9 @@ test('Builder job system: default workflow respects dependencies', () => {
   const testStep = steps.find(s => s.step_id === 'test_suite');
   assert.ok(testStep.blocked_dependencies.includes('frontend_implementation'));
   assert.ok(testStep.blocked_dependencies.includes('backend_implementation'));
+
+  const releaseStep = steps.find(s => s.step_id === 'release_prep');
+  assert.ok(releaseStep.blocked_dependencies.includes('code_review'));
 });
 
 test('Builder job system: createBuilderJob initializes with intake status', () => {
@@ -113,8 +119,8 @@ test('Builder job system: createBuilderJob initializes with intake status', () =
   assert.equal(job.title, 'Add payment module');
   assert.equal(job.status, JOB_LIFECYCLE.INTAKE);
   assert.equal(job.current_step_index, 0);
-  assert.equal(job.total_steps, 7);
-  assert.ok(job.approval_required_at.includes('specification_ready'));
+  assert.equal(job.total_steps, 8);
+  assert.deepEqual(job.approval_required_at, ['specification_ready', 'approval_pending']);
 });
 
 test('Builder job system: createBuilderJob returns normalized steps', () => {
@@ -125,7 +131,7 @@ test('Builder job system: createBuilderJob returns normalized steps', () => {
     taskDescription: 'Test'
   });
 
-  assert.equal(steps.length, 7);
+  assert.equal(steps.length, 8);
   assert.equal(steps[0].step_id, 'product_analysis');
   assert.equal(steps[0].status, 'pending');
   assert.equal(steps[0].builder_mode, 'product_analyst');
@@ -234,19 +240,21 @@ test('Builder job system: buildJobCheckpoint fails closed with null job', () => 
 });
 
 test('Builder job system: getNextJobStatus progresses through workflow', () => {
-  const approval = ['specification_ready', 'design_ready', 'approval_pending'];
-
   // intake → analysis_pending
-  let next = getNextJobStatus(JOB_LIFECYCLE.INTAKE, 'N/A', approval);
+  let next = getNextJobStatus(JOB_LIFECYCLE.INTAKE);
   assert.equal(next, JOB_LIFECYCLE.ANALYSIS_PENDING);
 
-  // analysis_pending → specification_ready (hits approval gate)
-  next = getNextJobStatus(JOB_LIFECYCLE.ANALYSIS_PENDING, 'product_analysis', approval);
-  assert.equal(next, JOB_LIFECYCLE.APPROVAL_PENDING);
+  // analysis_pending → specification_ready, where the human gate is requested
+  next = getNextJobStatus(JOB_LIFECYCLE.ANALYSIS_PENDING);
+  assert.equal(next, JOB_LIFECYCLE.SPECIFICATION_READY);
+  assert.equal(getApprovalTypeForStatus(next), 'specification_review');
 
   // specification_ready → design_pending (after approval)
-  next = getNextJobStatus(JOB_LIFECYCLE.SPECIFICATION_READY, 'design_pending', approval);
+  next = getNextJobStatus(JOB_LIFECYCLE.SPECIFICATION_READY);
   assert.equal(next, JOB_LIFECYCLE.DESIGN_PENDING);
+
+  assert.equal(getApprovalTypeForStatus(JOB_LIFECYCLE.APPROVAL_PENDING), 'release_approval');
+  assert.equal(getApprovalTypeForStatus(JOB_LIFECYCLE.TESTING), null);
 });
 
 test('Builder job system: sanitizeBuilderEvidence strips secrets but keeps proof', () => {

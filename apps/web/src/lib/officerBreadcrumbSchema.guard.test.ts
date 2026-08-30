@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830110000_officer_breadcrumb_timeline.sql'), 'utf8');
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830111000_officer_breadcrumb_timeline.sql'), 'utf8');
 
 describe('officer breadcrumb evidence schema', () => {
   it('derives officer and organization identity from auth and deduplicates device events', () => {

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830100000_dispatch_resource_lifecycle.sql'), 'utf8');
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830092000_dispatch_resource_lifecycle.sql'), 'utf8');
 
 describe('dispatch resource lifecycle schema', () => {
   it('locks available resources and validates the rostered officer during assignment', () => {

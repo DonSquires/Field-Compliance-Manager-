@@ -4,12 +4,15 @@
     "assess": "node assessment-manifest.js",
     "runner": "node bob-runner.js",
     "calibrate": "node scripts/atlas-calibration.js",
-    "atlas:check": "npm run calibrate && node scripts/atlas-graph.js",
-    "bob:refresh-capability-map": "node scripts/atlas-refresh.js --apply",
+    "atlas:manifest": "node scripts/atlas-refresh.js",
+    "atlas:refresh": "node scripts/atlas-refresh.js --apply",
     "atlas:refresh:dry-run": "node scripts/atlas-refresh.js",
+    "bob:refresh-capability-map": "npm run atlas:refresh",
+    "atlas:check": "npm run calibrate && node scripts/atlas-graph.js && npm run atlas:manifest",
     "pretest": "npm run calibrate"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
     "ws": "^8.21.0"
   },
   "devDependencies": {

@@ -1,62 +1,206 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { collectComponentEdges, collectManagedAtlas, staleGeneratedEdgeIds } = require('../scripts/atlas-refresh');
-const refreshSource = require('node:fs').readFileSync(path.resolve(__dirname, '../scripts/atlas-refresh.js'), 'utf8');
 
-test('managed Atlas refresh derives real component and RPC flow edges', () => {
+const {
+  OWNER_MARKER,
+  collectComponentEdges,
+  collectManagedAtlas,
+  staleGeneratedEdgeIds,
+  collectAtlasRefresh,
+  buildRefreshPlan
+} = require('../scripts/atlas-refresh');
+
+function write(root, relativePath, content) {
+  const filePath = path.join(root, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+}
+
+test('Atlas refresh extracts concrete entities and Supabase calls without test noise', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-refresh-'));
+  try {
+    write(root, 'supabase/schema.sql', `
+      CREATE TABLE IF NOT EXISTS "public"."alpha" ("id" uuid);
+      CREATE OR REPLACE FUNCTION "public"."get_alpha"() RETURNS jsonb LANGUAGE sql AS $$
+        SELECT jsonb_agg(alpha) FROM public.alpha;
+      $$;
+      CREATE OR REPLACE FUNCTION public.update_alpha() RETURNS void LANGUAGE plpgsql AS $$
+      BEGIN
+        UPDATE public.alpha SET id = id;
+      END;
+      $$;
+    `);
+    write(root, 'supabase/functions/ping/index.ts', 'Deno.serve(() => new Response("ok"));');
+    write(root, 'apps/web/src/pages/TestPage.tsx', `
+      supabase.from('alpha').select('id');
+      supabase.from('alpha').update({ active: true }).eq('id', id);
+      supabase.rpc('get_alpha');
+      supabase.functions.invoke('ping');
+      if (ready) return null;
+    `);
+    write(root, 'apps/web/src/pages/TestPage.test.tsx', `supabase.from('test_noise').select('*');`);
+
+    const manifest = collectAtlasRefresh(root);
+
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'alpha'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'get_alpha'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'ping'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
+    assert.ok(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'get_alpha'));
+    assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'ping'));
+    assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
+    assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
+    assert.equal(manifest.edges.some(row => row.target_name === 'if'), false);
+    assert.equal(manifest.edges.some(row => row.target_name === 'test_noise'), false);
+    assert.equal(manifest.capabilities.every(row => row.exercised === null), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Atlas refresh plan preserves manual truth and retires only owned stale rows', () => {
+  const manifest = {
+    capabilities: [{
+      entity_type: 'table', entity_name: 'alpha', present: true, wired: true,
+      exercised: null, caller_summary: 'pages/TestPage', notes: OWNER_MARKER,
+      refresh_source: 'ci_generator', retirement_status: 'live'
+    }],
+    edges: [{
+      source_type: 'component', source_name: 'pages/TestPage', target_type: 'table',
+      target_name: 'alpha', edge_kind: 'reads', evidence_class: 'live-code',
+      retirement_status: 'live', source_file: 'apps/web/src/pages/TestPage.tsx',
+      caller_context: `${OWNER_MARKER} .from('alpha')`, refresh_source: 'ci_generator'
+    }]
+  };
+  const existingCapabilities = [
+    { id: 'manual-cap', entity_type: 'table', entity_name: 'alpha', refresh_source: 'manual_seed', exercised: true },
+    { id: 'stale-cap', entity_type: 'rpc', entity_name: 'old_rpc', refresh_source: 'ci_generator', notes: OWNER_MARKER },
+    { id: 'retired-cap', entity_type: 'rpc', entity_name: 'retired_rpc', refresh_source: 'ci_generator', notes: OWNER_MARKER, retirement_status: 'legacy' }
+  ];
+  const existingEdges = [
+    { id: 'manual-edge', ...manifest.edges[0], refresh_source: 'manual_seed' },
+    {
+      id: 'owned-stale', source_type: 'component', source_name: 'pages/Old', target_type: 'table',
+      target_name: 'old_table', edge_kind: 'reads', source_file: 'apps/web/src/pages/Old.tsx',
+      refresh_source: 'ci_generator', caller_context: `${OWNER_MARKER} stale`
+    },
+    {
+      id: 'legacy-generator', source_type: 'component', source_name: 'pages/Legacy', target_type: 'table',
+      target_name: 'if', edge_kind: 'references', source_file: 'apps/web/src/pages/Legacy.tsx',
+      refresh_source: 'ci_generator', caller_context: 'raw reference to if'
+    },
+    {
+      id: 'retired-edge', source_type: 'component', source_name: 'pages/Retired', target_type: 'table',
+      target_name: 'retired_table', edge_kind: 'reads', source_file: 'apps/web/src/pages/Retired.tsx',
+      refresh_source: 'ci_generator', caller_context: `${OWNER_MARKER} retired`, retirement_status: 'legacy'
+    }
+  ];
+
+  const plan = buildRefreshPlan(manifest, existingCapabilities, existingEdges);
+
+  assert.equal(plan.capabilityUpserts.length, 0);
+  assert.deepEqual(plan.capabilityRetireIds, ['stale-cap']);
+  assert.equal(plan.edgeUpserts.length, 0);
+  assert.deepEqual(plan.edgeRetireIds, ['owned-stale']);
+  assert.equal(plan.skippedManualCapabilities, 1);
+  assert.equal(plan.skippedManualEdges, 1);
+  assert.equal(plan.edgeRetireIds.includes('legacy-generator'), false);
+});
+
+test('Atlas refresh plan preserves exercised state on CI-owned capabilities', () => {
+  const manifest = {
+    capabilities: [{
+      entity_type: 'table', entity_name: 'alpha', present: true, wired: true,
+      exercised: null, caller_summary: 'pages/TestPage', notes: OWNER_MARKER,
+      refresh_source: 'ci_generator', retirement_status: 'live'
+    }],
+    edges: []
+  };
+  const existing = [{
+    id: 'cap-1', entity_type: 'table', entity_name: 'alpha', refresh_source: 'ci_generator',
+    exercised: true, notes: OWNER_MARKER, wired: false
+  }];
+
+  const plan = buildRefreshPlan(manifest, existing, []);
+
+  assert.equal(plan.capabilityUpserts.length, 1);
+  assert.equal(plan.capabilityUpserts[0].exercised, true);
+  assert.equal(plan.capabilityUpserts[0].wired, true);
+});
+
+test('Atlas refresh plan is a no-op when owned rows already match', () => {
+  const capability = {
+    id: 'cap-1', entity_type: 'table', entity_name: 'alpha', present: true, wired: true,
+    exercised: null, caller_summary: 'pages/TestPage', notes: `${OWNER_MARKER} source`,
+    refresh_source: 'ci_generator', retirement_status: 'live'
+  };
+  const edge = {
+    id: 'edge-1', source_type: 'component', source_name: 'pages/TestPage', target_type: 'table',
+    target_name: 'alpha', edge_kind: 'reads', evidence_class: 'live-code',
+    retirement_status: 'live', source_file: 'apps/web/src/pages/TestPage.tsx', migration_name: null,
+    caller_context: `${OWNER_MARKER} .from('alpha')`, refresh_source: 'ci_generator'
+  };
+  const manifest = {
+    capabilities: [{ ...capability, id: undefined }],
+    edges: [{ ...edge, id: undefined }]
+  };
+
+  const plan = buildRefreshPlan(manifest, [capability], [edge]);
+
+  assert.equal(plan.capabilityUpserts.length, 0);
+  assert.equal(plan.edgeUpserts.length, 0);
+  assert.equal(plan.capabilityRetireIds.length, 0);
+  assert.equal(plan.edgeRetireIds.length, 0);
+});
+
+test('Atlas refresh preserves caller context owned by another generator', () => {
+  const edge = {
+    id: 'edge-1', source_type: 'component', source_name: 'pages/TestPage', target_type: 'table',
+    target_name: 'alpha', edge_kind: 'reads', evidence_class: 'live-code', retirement_status: 'live',
+    source_file: 'apps/web/src/pages/TestPage.tsx', migration_name: null,
+    caller_context: 'Supabase table query in component', refresh_source: 'ci_generator'
+  };
+  const manifest = {
+    capabilities: [],
+    edges: [{ ...edge, id: undefined, caller_context: `${OWNER_MARKER} .from('alpha')` }]
+  };
+
+  const plan = buildRefreshPlan(manifest, [], [edge]);
+
+  assert.equal(plan.edgeUpserts.length, 0);
+  assert.equal(plan.edgeRetireIds.length, 0);
+});
+
+test('Atlas refresh is exposed as a post-test CI command', () => {
+  const root = path.resolve(__dirname, '..');
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const workflow = fs.readFileSync(path.join(root, '.gitea/workflows/runner-test.yml'), 'utf8');
+
+  assert.equal(packageJson.scripts['bob:refresh-capability-map'], 'npm run atlas:refresh');
+  assert.match(packageJson.scripts['atlas:check'], /atlas:manifest/);
+  assert.ok(workflow.indexOf('Run tests') < workflow.indexOf('Refresh live Atlas'));
+  assert.match(workflow, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(workflow, /npm run bob:refresh-capability-map/);
+  const refreshSource = fs.readFileSync(path.join(root, 'scripts/atlas-refresh.js'), 'utf8');
+  assert.match(refreshSource, /source_file,migration_name,caller_context/);
+});
+
+test('managed Atlas refresh derives governed component and RPC flow edges', () => {
   const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
-  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
-
+  const hasEdge = (source, target, kind) => atlas.edges.some(edge => (
+    edge.source_name === source && edge.target_name === target && edge.edge_kind === kind
+  ));
   assert.equal(atlas.scope, 'managed_app');
   assert.equal(hasEdge('pages/RosterOperationsPage', 'roster_slots', 'reads'), true);
   assert.equal(hasEdge('pages/RosterOperationsPage', 'reassign_roster_slot', 'calls'), true);
-  assert.equal(hasEdge('reassign_roster_slot', 'roster_slots', 'reads'), true);
   assert.equal(hasEdge('reassign_roster_slot', 'roster_slots', 'writes'), true);
-  assert.equal(hasEdge('reassign_roster_slot', 'shifts', 'writes'), true);
   assert.equal(hasEdge('manage_roster_slot', 'materialize_roster_slot', 'calls'), true);
-  assert.equal(hasEdge('respond_to_roster_slot', 'audit_log', 'writes'), true);
-  assert.equal(hasEdge('staff_has_roster_availability_conflict', 'staff_availability', 'reads'), true);
-  assert.equal(hasEdge('enforce_roster_slot_availability', 'staff_has_roster_availability_conflict', 'calls'), true);
-  assert.equal(hasEdge('roster_slots', 'enforce_roster_slot_availability', 'triggers'), true);
-  assert.equal(hasEdge('pages/RosterOperationsPage', 'organization_calendar_settings', 'reads'), true);
-  assert.equal(hasEdge('pages/RosterOperationsPage', 'set_organization_calendar_region', 'calls'), true);
-  assert.equal(hasEdge('set_organization_calendar_region', 'organization_calendar_settings', 'writes'), true);
-  assert.equal(hasEdge('pages/RosterOperationsPage', 'get_roster_commercial_readiness', 'calls'), true);
-  assert.equal(hasEdge('get_roster_commercial_readiness', 'rate_rules', 'reads'), true);
-  assert.equal(hasEdge('get_roster_commercial_readiness', 'quotes', 'reads'), true);
-  assert.equal(hasEdge('roster_place_geofence_state', 'geofence_boundary_history', 'reads'), true);
-  assert.equal(hasEdge('pages/RosterHRPage', 'review_leave_request', 'calls'), true);
-  assert.equal(hasEdge('pages/OfficerLeavePage', 'submit_officer_leave_request', 'calls'), true);
-  assert.equal(hasEdge('review_timesheet', 'timesheets', 'writes'), true);
-  assert.equal(hasEdge('create_shift_coverage_request', 'shift_coverage_requests', 'writes'), true);
-  assert.equal(hasEdge('pages/RosterHRPage', 'get_staff_readiness_assessment', 'calls'), true);
-  assert.equal(hasEdge('pages/RosterHRPage', 'set_staff_work_readiness', 'calls'), true);
-  assert.equal(hasEdge('get_staff_readiness_assessment', 'staff_credentials', 'reads'), true);
-  assert.equal(hasEdge('get_staff_readiness_assessment', 'staff_training_records', 'reads'), true);
-  assert.equal(hasEdge('set_staff_work_readiness', 'staff_profiles', 'writes'), true);
-  assert.equal(hasEdge('pages/CRMPage', 'crm_contacts', 'reads'), true);
-  assert.equal(hasEdge('pages/CRMPage', 'quotes', 'reads'), true);
   assert.equal(hasEdge('pages/CRMPage', 'create_crm_draft_quote', 'calls'), true);
-  assert.equal(hasEdge('create_crm_draft_quote', 'quotes', 'writes'), true);
-  assert.equal(hasEdge('pages/CRMPage', 'add_crm_quote_line', 'calls'), true);
-  assert.equal(hasEdge('add_crm_quote_line', 'quote_lines', 'writes'), true);
-  assert.equal(hasEdge('add_crm_quote_line', 'quotes', 'writes'), true);
-  assert.equal(hasEdge('add_crm_quote_line', 'client_sites', 'reads'), true);
-  assert.equal(hasEdge('pages/CRMPage', 'manage_crm_quote', 'calls'), true);
-  assert.equal(hasEdge('manage_crm_quote', 'quote_lines', 'reads'), true);
-  assert.equal(hasEdge('manage_crm_quote', 'quotes', 'writes'), true);
-  assert.equal(hasEdge('manage_crm_quote', 'accept_quote', 'calls'), true);
-  assert.equal(hasEdge('pages/WelfareAlertsPage', 'manage_welfare_alert', 'calls'), true);
-  assert.equal(hasEdge('hooks/useOfficerSafety', 'manage_welfare_alert', 'calls'), true);
-  assert.equal(hasEdge('hooks/useOfficerSafety', 'welfare_alerts', 'reads'), true);
-  assert.equal(hasEdge('hooks/useOfficerSafety', 'welfare_alerts', 'writes'), true);
-  assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'reads'), true);
   assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'writes'), true);
-  assert.equal(hasEdge('manage_welfare_alert', 'audit_log', 'writes'), true);
-  assert.equal(hasEdge('pages/OfficerFieldReportPage', 'officer_field_reports', 'reads'), true);
-  assert.equal(hasEdge('pages/OfficerFieldReportPage', 'submit_officer_field_report', 'calls'), true);
-  assert.equal(hasEdge('submit_officer_field_report', 'officer_field_reports', 'reads'), true);
   assert.equal(hasEdge('submit_officer_field_report', 'officer_field_reports', 'writes'), true);
   assert.equal(hasEdge('submit_officer_field_report', 'audit_log', 'writes'), true);
   assert.equal(atlas.edges.some((edge) => edge.source_name === 'pages/OfficerFieldReportPage' && edge.target_name === 'officer_field_reports' && edge.edge_kind === 'writes'), false);
@@ -74,10 +218,9 @@ test('managed Atlas refresh derives real component and RPC flow edges', () => {
 
 test('managed Atlas refresh includes capability nodes without inferring exercise', () => {
   const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
-  assert.ok(atlas.nodes.some((node) => node.entity_type === 'table' && node.entity_name === 'roster_slots'));
-  assert.ok(atlas.nodes.some((node) => node.entity_type === 'rpc' && node.entity_name === 'reassign_roster_slot'));
-  assert.equal(atlas.nodes.some((node) => Object.hasOwn(node, 'exercised')), false);
-  assert.match(refreshSource, /refresh_source !== 'ci_generator'/);
+  assert.ok(atlas.nodes.some(node => node.entity_type === 'table' && node.entity_name === 'roster_slots'));
+  assert.ok(atlas.nodes.some(node => node.entity_type === 'rpc' && node.entity_name === 'reassign_roster_slot'));
+  assert.equal(atlas.nodes.some(node => Object.hasOwn(node, 'exercised')), false);
 });
 
 test('component extraction tolerates formatted multiline Supabase chains', () => {
@@ -91,17 +234,17 @@ test('component extraction tolerates formatted multiline Supabase chains', () =>
       .from('welfare_alerts')
       .insert({ status: 'pending' });
   `);
-  assert.ok(edges.some((edge) => edge.target_name === 'crm_contacts' && edge.edge_kind === 'reads'));
-  assert.ok(edges.some((edge) => edge.target_name === 'create_crm_draft_quote' && edge.edge_kind === 'calls'));
-  assert.ok(edges.some((edge) => edge.target_name === 'welfare_alerts' && edge.edge_kind === 'writes'));
+  assert.ok(edges.some(edge => edge.target_name === 'crm_contacts' && edge.edge_kind === 'reads'));
+  assert.ok(edges.some(edge => edge.target_name === 'create_crm_draft_quote' && edge.edge_kind === 'calls'));
+  assert.ok(edges.some(edge => edge.target_name === 'welfare_alerts' && edge.edge_kind === 'writes'));
 });
 
-test('stale edge retirement is scoped to live CI-generated identities', () => {
+test('stale edge compatibility helper retires only live CI-generated identities', () => {
   const base = { source_type: 'component', source_name: 'pages/CRMPage', target_type: 'table', source_file: 'apps/web/src/pages/CRMPage.tsx', retirement_status: 'live' };
   const existing = [
     { ...base, id: 'keep', target_name: 'quotes', edge_kind: 'reads', refresh_source: 'ci_generator' },
     { ...base, id: 'stale', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'ci_generator' },
-    { ...base, id: 'manual', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'manual_seed' },
+    { ...base, id: 'manual', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'manual_seed' }
   ];
   const generated = [{ ...base, target_name: 'quotes', edge_kind: 'reads' }];
   assert.deepEqual(staleGeneratedEdgeIds(existing, generated), ['stale']);

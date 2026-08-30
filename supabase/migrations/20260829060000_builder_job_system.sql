@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.builder_projects (
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'suspended')),
 
   -- Audit trail
-  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS public.builder_jobs (
   error_count INT DEFAULT 0,
 
   -- Audit trail
-  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS public.builder_protected_variables (
   default_value TEXT, -- If not secret, can have a default
 
   -- Audit trail
-  created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   approved_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -432,6 +432,42 @@ CREATE INDEX idx_builder_worker_runs_step ON public.builder_worker_runs(step_id)
 CREATE INDEX idx_builder_worker_runs_status ON public.builder_worker_runs(status);
 
 -- ============================================================================
+-- BUILDER MODEL RUNS
+-- ============================================================================
+-- Provider-neutral provenance for every model invocation. Prompts and outputs
+-- live in artifacts; this table records references and operational metadata.
+CREATE TABLE IF NOT EXISTS public.builder_model_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  job_id UUID NOT NULL REFERENCES public.builder_jobs(id) ON DELETE CASCADE,
+  step_id UUID REFERENCES public.builder_job_steps(id) ON DELETE SET NULL,
+
+  provider TEXT NOT NULL CHECK (provider IN ('openai', 'ollama')),
+  model_name TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+
+  input_artifact_ids UUID[] NOT NULL DEFAULT '{}',
+  output_artifact_ids UUID[] NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (
+    status IN ('pending', 'running', 'completed', 'failed', 'timeout', 'cancelled')
+  ),
+  usage_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  error TEXT,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT builder_model_runs_idempotency_key_unique UNIQUE (idempotency_key)
+);
+
+CREATE INDEX idx_builder_model_runs_org ON public.builder_model_runs(organization_id);
+CREATE INDEX idx_builder_model_runs_job ON public.builder_model_runs(job_id);
+CREATE INDEX idx_builder_model_runs_step ON public.builder_model_runs(step_id);
+CREATE INDEX idx_builder_model_runs_status ON public.builder_model_runs(status);
+
+-- ============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ============================================================================
 -- All builder entities are organization-scoped
@@ -445,6 +481,7 @@ ALTER TABLE public.builder_approvals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.builder_audit_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.builder_protected_variables ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.builder_worker_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.builder_model_runs ENABLE ROW LEVEL SECURITY;
 
 -- Service role can do everything (bot/orchestrator access)
 CREATE POLICY builder_projects_service_role ON public.builder_projects
@@ -471,7 +508,8 @@ CREATE POLICY builder_protected_variables_service_role ON public.builder_protect
 CREATE POLICY builder_worker_runs_service_role ON public.builder_worker_runs
   FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
 
+CREATE POLICY builder_model_runs_service_role ON public.builder_model_runs
+  FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+
 -- Future: Organization members can view (not edit) their org's jobs
 -- (Role-based access control will be implemented in application layer)
-
-COMMIT;

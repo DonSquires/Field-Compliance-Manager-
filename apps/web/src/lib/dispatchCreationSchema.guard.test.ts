@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const schema = readFileSync(resolve(process.cwd(), '../../supabase/schema.sql'), 'utf8');
-const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830090000_create_dispatch_job_rpc.sql'), 'utf8');
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830091000_create_dispatch_job_rpc.sql'), 'utf8');
 
 describe('atomic dispatch creation schema', () => {
   it('deduplicates client retries and validates authority plus active contract location', () => {
