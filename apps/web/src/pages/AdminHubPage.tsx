@@ -1,575 +1,314 @@
-/**
- * AdminHubPage.tsx (599 lines)
- * Admin dashboard with KPI widgets, trend chart, module cards, NOC terminal
- *
- * Audience: Admin, Master, Grand Master roles
- *
- * Features:
- * - Header with greeting + refresh button
- * - NOC Terminal (Grand Master only)
- * - KPI grid (4 tiles: Active Shifts, Breach Alerts, On-Call, Approvals, NOC status)
- * - Sticky priority-action bar (links to key pages)
- * - Compliance trend chart (7d/14d/30d range selector)
- * - Module cards grid (14 cards linking to field modules)
- * - Real-time subscriptions to breach_alerts + welfare_alerts
- * - Responsive layout (4-col desktop, 2-col mobile)
- */
-
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Binoculars,
+  Car,
+  ClipboardCheck,
+  FileWarning,
+  HeartPulse,
+  Map,
+  Radio,
+  RefreshCw,
+  Route,
+  ShieldAlert,
+  Users,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-
-interface KpiData {
-  scansToday: number;
-  activeBreaches: number;
-  patrols: number;
-  welfareAlerts: number;
-}
-
-interface TrendDay {
-  date: string;
-  scans: number;
-  breaches: number;
-}
-
-type TrendRange = '7d' | '14d' | '30d';
+import './AdminHubPage.css';
 
 interface AdminHubPageProps {
   onNavigate?: (page: string) => void;
 }
 
-const MODULES = [
-  { id: 'fc-patrol', label: 'FC Patrol', icon: '🚗', navigate: 'patrol' },
-  { id: 'breach-review', label: 'Breach Review', icon: '⚖️', navigate: 'breach-review' },
-  { id: 'fc-notice-print', label: 'Notice Print', icon: '🖨️', navigate: 'fc-notice-print' },
-  { id: 'fc-compliance', label: 'Compliance', icon: '✅', navigate: 'fc-compliance' },
-  { id: 'fc-reports', label: 'FC Reports', icon: '📊', navigate: 'fc-reporting' },
-  { id: 'fc-scv-import', label: 'SCV Import', icon: '📥', navigate: 'fc-scv-import' },
-  { id: 'fc-nzscv', label: 'NZSCV Monitor', icon: '🔍', navigate: 'fc-nzscv' },
-  { id: 'field-reports', label: 'Field Reports', icon: '📝', navigate: 'field-reports' },
-  { id: 'live-map', label: 'Live Map', icon: '🗺️', navigate: 'live-map' },
-  { id: 'welfare-alerts', label: 'Welfare', icon: '🚧', navigate: 'welfare-alerts' },
-  { id: 'dispatch', label: 'Dispatch', icon: '📡', navigate: 'dispatch' },
-  { id: 'roster', label: 'Roster', icon: '👥', navigate: 'roster' },
-  { id: 'staff', label: 'Staff', icon: '👤', navigate: 'staff' },
-  { id: 'credentials', label: 'Credentials', icon: '🪪', navigate: 'credential-expiry' },
-];
+interface MetricState {
+  value: number | null;
+  error: string | null;
+}
 
-const KpiTile: React.FC<{
-  label: string;
-  value: number | string;
-  icon: string;
-  color: string;
-  loading: boolean;
-  onClick?: () => void;
-}> = ({ label, value, icon, color, loading, onClick }) => (
-  <button
-    onClick={onClick}
-    style={{
-      padding: '16px',
-      backgroundColor: 'var(--color-bg-secondary)',
-      border: '1px solid var(--color-border)',
-      borderRadius: '8px',
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'all 0.2s ease',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
-      alignItems: 'flex-start',
-    }}
-    onMouseEnter={(e) => onClick && (e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)')}
-    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)')}
-  >
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-      <span style={{ fontSize: '20px' }}>{icon}</span>
-      <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
-        {label}
-      </span>
-    </div>
-    <div style={{ fontSize: '28px', fontWeight: 700, color: color }}>
-      {loading ? '...' : value}
-    </div>
-  </button>
-);
+interface Metrics {
+  onDuty: MetricState;
+  activeDispatch: MetricState;
+  welfare: MetricState;
+  breaches: MetricState;
+  observations: MetricState;
+}
 
-const ModuleCard: React.FC<{
-  label: string;
-  icon: string;
-  onClick?: () => void;
-}> = ({ label, icon, onClick }) => (
-  <button
-    onClick={onClick}
-    style={{
-      padding: '20px',
-      backgroundColor: 'var(--color-bg-secondary)',
-      border: '1px solid var(--color-border)',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '12px',
-      transition: 'all 0.2s ease',
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)';
-      e.currentTarget.style.borderColor = 'var(--color-primary)';
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
-      e.currentTarget.style.borderColor = 'var(--color-border)';
-    }}
-  >
-    <span style={{ fontSize: '32px' }}>{icon}</span>
-    <span style={{ fontSize: '13px', fontWeight: 500, textAlign: 'center' }}>
-      {label}
-    </span>
-  </button>
-);
+type QueueKind = 'welfare' | 'dispatch' | 'breach' | 'report';
 
-const TrendChart: React.FC<{
-  data: TrendDay[];
-  range: TrendRange;
-  onRangeChange: (range: TrendRange) => void;
-}> = ({ data, range, onRangeChange }) => {
-  const maxValue = Math.max(...data.map((d) => Math.max(d.scans, d.breaches)), 1);
+interface QueueItem {
+  id: string;
+  kind: QueueKind;
+  title: string;
+  detail: string;
+  status: string;
+  priority: number;
+  occurredAt: string;
+  navigate: string;
+}
 
-  return (
-    <div style={{ padding: '20px', backgroundColor: 'var(--color-bg-secondary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          Compliance Trend
-        </h3>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {(['7d', '14d', '30d'] as TrendRange[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => onRangeChange(r)}
-              style={{
-                padding: '6px 12px',
-                fontSize: '12px',
-                backgroundColor: range === r ? 'var(--color-primary)' : 'transparent',
-                color: range === r ? 'white' : 'var(--color-text-secondary)',
-                border: '1px solid var(--color-border)',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontWeight: 500,
-              }}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ height: '150px', display: 'flex', alignItems: 'flex-end', gap: '4px' }}>
-        {data.map((day, idx) => (
-          <div
-            key={idx}
-            style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'flex-end',
-              gap: '2px',
-              height: '100%',
-            }}
-          >
-            <div
-              style={{
-                flex: 1,
-                height: `${(day.scans / maxValue) * 100}%`,
-                backgroundColor: '#3B82F6',
-                borderRadius: '2px',
-                minHeight: '4px',
-              }}
-              title={`${day.date}: ${day.scans} scans`}
-            />
-            <div
-              style={{
-                flex: 1,
-                height: `${(day.breaches / maxValue) * 100}%`,
-                backgroundColor: '#EF5350',
-                borderRadius: '2px',
-                minHeight: '4px',
-              }}
-              title={`${day.date}: ${day.breaches} breaches`}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'flex', gap: '16px', marginTop: '12px', fontSize: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', backgroundColor: '#3B82F6', borderRadius: '2px' }} />
-          <span>Scans</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', backgroundColor: '#EF5350', borderRadius: '2px' }} />
-          <span>Breaches</span>
-        </div>
-      </div>
-    </div>
-  );
+const EMPTY_METRICS: Metrics = {
+  onDuty: { value: null, error: null },
+  activeDispatch: { value: null, error: null },
+  welfare: { value: null, error: null },
+  breaches: { value: null, error: null },
+  observations: { value: null, error: null },
 };
 
-const NocTerminal: React.FC = () => (
-  <div
-    style={{
-      padding: '20px',
-      backgroundColor: '#1A0000',
-      border: '2px solid #EF5350',
-      borderRadius: '8px',
-      fontFamily: 'Courier New, monospace',
-    }}
-  >
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-      <span style={{ fontSize: '20px' }}>🎛️</span>
-      <span style={{ fontSize: '14px', fontWeight: 600, color: '#EF5350' }}>
-        Platform Master Control (NOC)
-      </span>
-    </div>
+function metricFrom(response: { count: number | null; error: { message: string } | null }): MetricState {
+  return response.error
+    ? { value: null, error: response.error.message }
+    : { value: response.count ?? 0, error: null };
+}
 
-    <div
-      style={{
-        padding: '8px 12px',
-        backgroundColor: '#0A0A0A',
-        borderRadius: '4px',
-        marginBottom: '12px',
-        fontSize: '12px',
-        color: '#4CAF50',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-      }}
-    >
-      <span>● ONLINE</span>
-      <span style={{ color: '#666' }}>System Telemetry: Operational</span>
-    </div>
-
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-      {[
-        { name: 'fcm-api', value: '42ms', desc: 'API (Hpanel VPS)' },
-        { name: 'fcm-inference', value: 'ONNX YOLOv8n', desc: 'ML Engine' },
-      ].map((item) => (
-        <div
-          key={item.name}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: '#0A0A0A',
-            borderRadius: '4px',
-            borderLeft: '2px solid #4CAF50',
-            fontSize: '11px',
-          }}
-        >
-          <div style={{ color: '#4CAF50', fontWeight: 600 }}>● {item.name}</div>
-          <div style={{ color: '#888', marginTop: '2px' }}>{item.value}</div>
-          <div style={{ color: '#666', fontSize: '10px', marginTop: '2px' }}>{item.desc}</div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+function relativeTime(value: string): string {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60_000));
+  if (minutes < 1) return 'Now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
 const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
-  const [kpi, setKpi] = useState<KpiData | null>(null);
+  const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [trend, setTrend] = useState<TrendDay[]>([]);
-  const [trendRange, setTrendRange] = useState<TrendRange>('7d');
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [queueWarnings, setQueueWarnings] = useState<string[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Load KPI data
-  const loadKpi = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     if (!profile?.organizationId) return;
+    setLoading(true);
+    setQueueWarnings([]);
+
+    const organizationId = profile.organizationId;
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
     try {
-      setLoading(true);
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-
-      const [scansRes, breachesRes, patrolsRes, welfareRes] = await Promise.all([
-        supabase
-          .from('observations')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', profile.organizationId)
-          .gte('observed_at', todayStart),
-        supabase
-          .from('breach_alerts')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', profile.organizationId)
-          .in('status', ['open', 'acknowledged']),
-        supabase
-          .from('shifts')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', profile.organizationId)
-          .in('status', ['published', 'accepted', 'scheduled', 'in_progress']),
-        supabase
-          .from('welfare_alerts')
-          .select('id', { count: 'exact', head: true })
-          .eq('organization_id', profile.organizationId)
-          .eq('status', 'pending'),
+      const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, welfareRows, dispatchRows, breachRows, reportRows] = await Promise.all([
+        supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
+        supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene']),
+        supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']),
+        supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']),
+        supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('observed_at', todayStart),
+        supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6),
+        supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene']).order('created_at', { ascending: false }).limit(6),
+        supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
+        supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
       ]);
 
-      setKpi({
-        scansToday: scansRes.count || 0,
-        activeBreaches: breachesRes.count || 0,
-        patrols: patrolsRes.count || 0,
-        welfareAlerts: welfareRes.count || 0,
+      setMetrics({
+        onDuty: metricFrom(onDuty),
+        activeDispatch: metricFrom(dispatchCount),
+        welfare: metricFrom(welfareCount),
+        breaches: metricFrom(breachCount),
+        observations: metricFrom(observationCount),
       });
-    } catch (err) {
-      console.error('Failed to load KPI:', err);
+
+      const warnings: string[] = [];
+      const items: QueueItem[] = [];
+
+      if (welfareRows.error) warnings.push(`Welfare alerts: ${welfareRows.error.message}`);
+      else {
+        for (const alert of welfareRows.data ?? []) {
+          items.push({
+            id: alert.id,
+            kind: 'welfare',
+            title: `${String(alert.alert_type).replace(/_/g, ' ')} alert`,
+            detail: `Officer ${String(alert.officer_user_id).slice(0, 8)} · escalation level ${alert.escalation_level}`,
+            status: alert.status,
+            priority: alert.alert_type === 'sos' ? 100 : 80 + Number(alert.escalation_level ?? 1),
+            occurredAt: alert.triggered_at,
+            navigate: 'welfare-alerts',
+          });
+        }
+      }
+
+      if (dispatchRows.error) warnings.push(`Dispatch jobs: ${dispatchRows.error.message}`);
+      else {
+        for (const job of dispatchRows.data ?? []) {
+          const deadline = job.sla_respond_by ? new Date(job.sla_respond_by).getTime() : null;
+          items.push({
+            id: job.id,
+            kind: 'dispatch',
+            title: String(job.job_type).replace(/_/g, ' '),
+            detail: deadline ? `${deadline < Date.now() ? 'SLA overdue' : 'SLA due'} ${new Date(job.sla_respond_by).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : 'No SLA deadline',
+            status: job.status,
+            priority: job.priority === 'urgent' ? 90 : job.priority === 'high' ? 70 : 40,
+            occurredAt: job.created_at,
+            navigate: 'dispatch',
+          });
+        }
+      }
+
+      if (breachRows.error) warnings.push(`Breach alerts: ${breachRows.error.message}`);
+      else {
+        for (const breach of breachRows.data ?? []) {
+          items.push({
+            id: breach.id,
+            kind: 'breach',
+            title: `${breach.plate_number} · ${String(breach.breach_type).replace(/_/g, ' ')}`,
+            detail: 'Compliance review required',
+            status: breach.status,
+            priority: 60,
+            occurredAt: breach.created_at,
+            navigate: 'breach-review',
+          });
+        }
+      }
+
+      if (reportRows.error) warnings.push(`Field reports: ${reportRows.error.message}`);
+      else {
+        for (const report of reportRows.data ?? []) {
+          items.push({
+            id: report.id,
+            kind: 'report',
+            title: report.title,
+            detail: `${String(report.severity)} severity · follow-up required`,
+            status: report.status,
+            priority: report.severity === 'critical' ? 95 : report.severity === 'high' ? 75 : 35,
+            occurredAt: report.reported_at,
+            navigate: 'field-reports',
+          });
+        }
+      }
+
+      setQueue(items.sort((left, right) => right.priority - left.priority || right.occurredAt.localeCompare(left.occurredAt)).slice(0, 12));
+      setQueueWarnings(warnings);
+      setLastUpdated(new Date());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Operations data could not be loaded.';
+      setMetrics(Object.fromEntries(Object.keys(EMPTY_METRICS).map((key) => [key, { value: null, error: message }])) as unknown as Metrics);
+      setQueue([]);
+      setQueueWarnings([message]);
     } finally {
       setLoading(false);
     }
   }, [profile?.organizationId]);
 
-  // Load trend data
-  const loadTrend = useCallback(async () => {
+  useEffect(() => {
+    void loadDashboard();
+    const interval = window.setInterval(() => void loadDashboard(), 60_000);
+    return () => window.clearInterval(interval);
+  }, [loadDashboard]);
+
+  useEffect(() => {
     if (!profile?.organizationId) return;
+    const organizationId = profile.organizationId;
+    const channel = supabase
+      .channel(`admin-hub-${organizationId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'welfare_alerts', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'breach_alerts', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_jobs', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [loadDashboard, profile?.organizationId]);
 
-    try {
-      const now = new Date();
-      const days = trendRange === '7d' ? 7 : trendRange === '14d' ? 14 : 30;
-      const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
-
-      const [scansRes, breachesRes] = await Promise.all([
-        supabase
-          .from('observations')
-          .select('id, created_at')
-          .eq('organization_id', profile.organizationId)
-          .gte('created_at', start),
-        supabase
-          .from('breach_alerts')
-          .select('id, created_at')
-          .eq('organization_id', profile.organizationId)
-          .gte('created_at', start),
-      ]);
-
-      const trendMap: Record<string, { scans: number; breaches: number }> = {};
-      for (let i = 0; i < days; i++) {
-        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const dateStr = d.toISOString().split('T')[0];
-        trendMap[dateStr] = { scans: 0, breaches: 0 };
-      }
-
-      scansRes.data?.forEach((item) => {
-        const dateStr = item.created_at?.split('T')[0];
-        if (dateStr && trendMap[dateStr]) trendMap[dateStr].scans++;
-      });
-
-      breachesRes.data?.forEach((item) => {
-        const dateStr = item.created_at?.split('T')[0];
-        if (dateStr && trendMap[dateStr]) trendMap[dateStr].breaches++;
-      });
-
-      const sorted = Object.entries(trendMap)
-        .sort(([a], [b]) => b.localeCompare(a))
-        .map(([date, data]) => ({ date, ...data }));
-
-      setTrend(sorted);
-    } catch (err) {
-      console.error('Failed to load trend:', err);
-    }
-  }, [profile?.organizationId, trendRange]);
-
-  // Track mobile viewport
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // Initial load
-  useEffect(() => {
-    loadKpi();
-    loadTrend();
-  }, [loadKpi, loadTrend]);
-
-  // Auto-refresh
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadKpi();
-      loadTrend();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [loadKpi, loadTrend]);
-
-  const isGrandMaster = profile?.role === 'grand_master';
+  const attentionCount = useMemo(
+    () => [metrics.welfare.value, metrics.breaches.value, metrics.activeDispatch.value].reduce<number>((sum, value) => sum + (value ?? 0), 0),
+    [metrics],
+  );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '24px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="admin-overview">
+      <header className="admin-overview-header">
         <div>
-          <h1 style={{ fontSize: '28px', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
-            Admin Hub
-          </h1>
-          <p style={{ fontSize: '14px', color: 'var(--color-text-secondary)', margin: '4px 0 0 0' }}>
-            Here's what's happening today
-          </p>
+          <span>Operations control</span>
+          <h1>Today at a glance</h1>
+          <p>{attentionCount > 0 ? `${attentionCount} active items across safety, dispatch, and compliance.` : 'No active safety, dispatch, or compliance items.'}</p>
         </div>
-        <button
-          onClick={() => {
-            loadKpi();
-            loadTrend();
-          }}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: 'var(--color-primary)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 500,
-            fontSize: '14px',
-          }}
-        >
-          🔄 Refresh
-        </button>
-      </div>
-
-      {/* NOC Terminal (Grand Master only) */}
-      {isGrandMaster && <NocTerminal />}
-
-      {/* KPI Grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-          gap: '12px',
-        }}
-      >
-        <KpiTile
-          label="Active Shifts"
-          value={kpi?.patrols || 0}
-          icon="🚗"
-          color="#3B82F6"
-          loading={loading}
-          onClick={() => onNavigate?.('patrol')}
-        />
-        <KpiTile
-          label="Breach Alerts"
-          value={kpi?.activeBreaches || 0}
-          icon="⚖️"
-          color={kpi && kpi.activeBreaches > 0 ? '#EF5350' : '#4CAF50'}
-          loading={loading}
-          onClick={() => onNavigate?.('breach-review')}
-        />
-        <KpiTile
-          label="Observations"
-          value={kpi?.scansToday || 0}
-          icon="📷"
-          color="#10B981"
-          loading={loading}
-          onClick={() => onNavigate?.('fc-reporting')}
-        />
-        <KpiTile
-          label="Welfare Alerts"
-          value={kpi?.welfareAlerts || 0}
-          icon="🚧"
-          color={kpi && kpi.welfareAlerts > 0 ? '#FF9800' : '#4CAF50'}
-          loading={loading}
-          onClick={() => onNavigate?.('welfare-alerts')}
-        />
-      </div>
-
-      {/* Sticky Priority Bar */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-          gap: '12px',
-        }}
-      >
-        <button
-          onClick={() => onNavigate?.('breach-review')}
-          style={{
-            padding: '12px',
-            backgroundColor: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border)',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 500,
-            color: 'var(--color-text-primary)',
-          }}
-        >
-          ⚖️ Breaches
-        </button>
-        <button
-          onClick={() => onNavigate?.('fc-notice-print')}
-          style={{
-            padding: '12px',
-            backgroundColor: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border)',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 500,
-            color: 'var(--color-text-primary)',
-          }}
-        >
-          🖨️ Notices
-        </button>
-        <button
-          onClick={() => onNavigate?.('dispatch')}
-          style={{
-            padding: '12px',
-            backgroundColor: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border)',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 500,
-            color: 'var(--color-text-primary)',
-          }}
-        >
-          📡 Dispatch
-        </button>
-        <button
-          onClick={() => onNavigate?.('fc-reporting')}
-          style={{
-            padding: '12px',
-            backgroundColor: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border)',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: 500,
-            color: 'var(--color-text-primary)',
-          }}
-        >
-          📊 Reports
-        </button>
-      </div>
-
-      {/* Trend Chart */}
-      <TrendChart data={trend} range={trendRange} onRangeChange={setTrendRange} />
-
-      {/* Module Cards Grid */}
-      <div>
-        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '12px', color: 'var(--color-text-primary)' }}>
-          Quick Access Modules
-        </h3>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-            gap: '12px',
-          }}
-        >
-          {MODULES.map((mod) => (
-            <ModuleCard
-              key={mod.id}
-              label={mod.label}
-              icon={mod.icon}
-              onClick={() => onNavigate?.(mod.navigate)}
-            />
-          ))}
+        <div className="admin-refresh-block">
+          {lastUpdated && <time dateTime={lastUpdated.toISOString()}>Updated {lastUpdated.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</time>}
+          <button type="button" onClick={() => void loadDashboard()} disabled={loading} title="Refresh operations overview">
+            <RefreshCw size={18} className={loading ? 'is-spinning' : ''} aria-hidden="true" />
+            <span>Refresh</span>
+          </button>
         </div>
+      </header>
+
+      <section className="admin-metric-grid" aria-label="Current operations metrics">
+        <Metric icon={Users} label="On duty now" metric={metrics.onDuty} tone="blue" onClick={() => onNavigate?.('roster')} />
+        <Metric icon={Radio} label="Active dispatch" metric={metrics.activeDispatch} tone="teal" onClick={() => onNavigate?.('dispatch')} />
+        <Metric icon={HeartPulse} label="Welfare alerts" metric={metrics.welfare} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+        <Metric icon={ShieldAlert} label="Open breaches" metric={metrics.breaches} tone="amber" onClick={() => onNavigate?.('breach-review')} />
+        <Metric icon={Binoculars} label="Observations today" metric={metrics.observations} tone="green" onClick={() => onNavigate?.('reports')} />
+      </section>
+
+      {queueWarnings.length > 0 && (
+        <div className="admin-data-warning" role="alert">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <div><strong>Some operational data is unavailable</strong><span>{queueWarnings.join(' · ')}</span></div>
+        </div>
+      )}
+
+      <div className="admin-overview-layout">
+        <section className="admin-priority-queue" aria-labelledby="priority-queue-heading">
+          <div className="admin-section-heading">
+            <div><span>Live work</span><h2 id="priority-queue-heading">Priority queue</h2></div>
+            <strong>{queue.length}</strong>
+          </div>
+
+          {!loading && queue.length === 0 && queueWarnings.length === 0 ? (
+            <div className="admin-queue-empty"><ClipboardCheck size={24} aria-hidden="true" /><strong>Queue clear</strong><span>No active items require review.</span></div>
+          ) : (
+            <div className="admin-queue-list">
+              {queue.map((item) => <QueueRow key={`${item.kind}-${item.id}`} item={item} onOpen={() => onNavigate?.(item.navigate)} />)}
+            </div>
+          )}
+        </section>
+
+        <aside className="admin-command-panel">
+          <div className="admin-section-heading"><div><span>Navigation</span><h2>Command areas</h2></div></div>
+          <CommandLink icon={Radio} label="Dispatch console" detail="Jobs, resources, and SLA state" onClick={() => onNavigate?.('dispatch')} />
+          <CommandLink icon={Map} label="Live operations map" detail="Officers, sites, and zones" onClick={() => onNavigate?.('live-map')} />
+          <CommandLink icon={Route} label="Patrol operations" detail="Shifts, routes, and checkpoints" onClick={() => onNavigate?.('patrol')} />
+          <CommandLink icon={FileWarning} label="Field reports" detail="Review and follow-up" onClick={() => onNavigate?.('field-reports')} />
+          <CommandLink icon={Car} label="Vehicle search" detail="Observation and compliance history" onClick={() => onNavigate?.('vehicle-search')} />
+        </aside>
       </div>
     </div>
   );
 };
+
+function Metric({ icon: Icon, label, metric, tone, onClick }: { icon: LucideIcon; label: string; metric: MetricState; tone: string; onClick: () => void }) {
+  const unavailable = metric.value === null;
+  return (
+    <button type="button" className={`admin-metric tone-${tone} ${unavailable ? 'is-unavailable' : ''}`} onClick={onClick} title={metric.error ?? undefined}>
+      <span className="admin-metric-icon"><Icon size={19} aria-hidden="true" /></span>
+      <span>{label}</span>
+      <strong>{unavailable ? 'Unavailable' : metric.value}</strong>
+      <ArrowRight size={16} aria-hidden="true" />
+    </button>
+  );
+}
+
+function QueueRow({ item, onOpen }: { item: QueueItem; onOpen: () => void }) {
+  const Icon = item.kind === 'welfare' ? HeartPulse : item.kind === 'dispatch' ? Radio : item.kind === 'breach' ? ShieldAlert : FileWarning;
+  return (
+    <button type="button" className={`admin-queue-row kind-${item.kind}`} onClick={onOpen}>
+      <span className="admin-queue-icon"><Icon size={18} aria-hidden="true" /></span>
+      <div><strong>{item.title}</strong><span>{item.detail}</span></div>
+      <span className="admin-queue-status">{item.status.replace(/_/g, ' ')}</span>
+      <time dateTime={item.occurredAt}>{relativeTime(item.occurredAt)}</time>
+      <ArrowRight size={16} aria-hidden="true" />
+    </button>
+  );
+}
+
+function CommandLink({ icon: Icon, label, detail, onClick }: { icon: LucideIcon; label: string; detail: string; onClick: () => void }) {
+  return (
+    <button type="button" className="admin-command-link" onClick={onClick}>
+      <span><Icon size={18} aria-hidden="true" /></span>
+      <div><strong>{label}</strong><small>{detail}</small></div>
+      <ArrowRight size={16} aria-hidden="true" />
+    </button>
+  );
+}
 
 export default AdminHubPage;

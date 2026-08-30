@@ -1,0 +1,26 @@
+import { describe, expect, it } from 'vitest';
+import { getClientPortalPages, isClientPortalPage } from './clientPortalAccess';
+
+describe('client portal agreement access', () => {
+  it('keeps transparency-only agreements limited to overview and enabled reports', () => {
+    expect([...getClientPortalPages({ mode: 'transparency_only', reportsEnabled: true })]).toEqual(['overview', 'reports']);
+  });
+
+  it('allows operational reads only for full-module agreements', () => {
+    const pages = getClientPortalPages({ mode: 'full_modules', reportsEnabled: false });
+    expect(pages.has('sites')).toBe(true);
+    expect(pages.has('observations')).toBe(true);
+    expect(pages.has('reports')).toBe(false);
+    expect(pages.has('scan')).toBe(false);
+  });
+
+  it('keeps scan-only access distinct from the operational portal', () => {
+    expect([...getClientPortalPages({ mode: 'scan_only', reportsEnabled: false })]).toEqual(['overview', 'scan']);
+  });
+
+  it('rejects unknown direct routes', () => {
+    expect(isClientPortalPage('sites')).toBe(true);
+    expect(isClientPortalPage('finance')).toBe(false);
+    expect(isClientPortalPage(undefined)).toBe(false);
+  });
+});

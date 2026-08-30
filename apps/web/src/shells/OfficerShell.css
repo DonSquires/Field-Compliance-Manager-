@@ -1,0 +1,355 @@
+.officer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+  background: var(--color-bg-primary);
+}
+
+.officer-shell-header {
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 58px;
+  gap: 16px;
+  min-width: 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: #09111e;
+}
+
+.officer-shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.officer-shell-brand > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border: 1px solid #2b5d58;
+  border-radius: 7px;
+  color: #7dd3c7;
+  background: #0d2526;
+}
+
+.officer-shell-brand > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.officer-shell-brand strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.officer-shell-brand small {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.officer-shell-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.officer-shell-icon,
+.officer-profile-chip,
+.officer-safety-chip {
+  min-height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  color: #d6e2ed;
+  background: #101b2a;
+}
+
+.officer-shell-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  cursor: pointer;
+}
+
+.officer-shell-icon:hover {
+  color: #7dd3c7;
+  border-color: #47716d;
+}
+
+.officer-profile-chip,
+.officer-safety-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+}
+
+.officer-profile-chip {
+  max-width: 120px;
+  color: #aabed1;
+  font-size: 11px;
+}
+
+.officer-profile-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.officer-safety-chip {
+  min-width: 74px;
+  border-color: #275f49;
+  color: #82d9b1;
+  background: #0b281f;
+  cursor: pointer;
+}
+
+.officer-safety-chip span {
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.officer-safety-chip small {
+  color: inherit;
+  font-size: 10px;
+}
+
+.officer-safety-chip.welfare-due {
+  color: #ffd166;
+  border-color: #6e5714;
+  background: #2c240d;
+}
+
+.officer-safety-chip.welfare-overdue,
+.officer-safety-chip.welfare-man_down,
+.officer-safety-chip.welfare-sos {
+  color: #ff8d8d;
+  border-color: #8f2e2e;
+  background: #351a1a;
+}
+
+.officer-offer-count {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #201800;
+  background: #ffd166;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.officer-shell-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.officer-shell-safety-error {
+  padding: 9px 16px;
+  color: #fecaca;
+  border-bottom: 1px solid #8f2e2e;
+  background: #351a1a;
+  font-size: 12px;
+}
+
+.officer-module-loading {
+  display: grid;
+  place-items: center;
+  min-height: 60vh;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.officer-action-bar {
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 1fr 1fr minmax(96px, 0.65fr);
+  flex: 0 0 64px;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+  background: #09111e;
+}
+
+.officer-action-bar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #2b3c50;
+  border-radius: 7px;
+  color: #b6c7d8;
+  background: #0f1a29;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.officer-action-bar button:hover,
+.officer-action-bar button.is-active {
+  color: #a7e8df;
+  border-color: #47716d;
+  background: #0d2526;
+}
+
+.officer-action-bar .officer-sos-action {
+  color: #fff0f0;
+  border-color: #a93f3f;
+  background: #a93434;
+}
+
+.officer-action-bar .officer-sos-action:hover:not(:disabled) {
+  color: white;
+  border-color: #d95959;
+  background: #bf3d3d;
+}
+
+.officer-action-bar .officer-sos-action:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.officer-module-directory {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 26px 24px 90px;
+}
+
+.officer-module-directory header span {
+  color: #7dd3c7;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.officer-module-directory header h1 {
+  margin: 3px 0 0;
+  font-size: 25px;
+  letter-spacing: 0;
+}
+
+.officer-module-directory header p {
+  margin: 5px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.officer-module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.officer-module-grid button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 62px;
+  padding: 10px 12px;
+  border: 1px solid #2b3c50;
+  border-radius: 7px;
+  color: #dce7f1;
+  background: #0d1827;
+  cursor: pointer;
+  text-align: left;
+}
+
+.officer-module-grid button:hover {
+  border-color: #568d87;
+  background: #0d2224;
+}
+
+.officer-module-grid button span {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 7px;
+  color: #7dd3c7;
+  background: #10292a;
+}
+
+.officer-module-grid button strong {
+  font-size: 12px;
+}
+
+.officer-module-empty {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  margin-top: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  background: #0a1220;
+  font-size: 12px;
+}
+
+@media (max-width: 620px) {
+  .officer-shell-header {
+    padding: 0 10px;
+  }
+
+  .officer-shell-brand strong {
+    max-width: 150px;
+  }
+
+  .officer-profile-chip {
+    display: none;
+  }
+
+  .officer-action-bar {
+    grid-template-columns: 1fr 1fr 88px;
+    padding-inline: 8px;
+  }
+
+  .officer-module-directory {
+    padding: 20px 14px 86px;
+  }
+}
+
+@media (max-width: 410px) {
+  .officer-shell-brand strong {
+    max-width: 112px;
+  }
+
+  .officer-safety-chip {
+    min-width: 38px;
+    padding-inline: 8px;
+  }
+
+  .officer-safety-chip small,
+  .officer-shell-brand small {
+    display: none;
+  }
+
+  .officer-action-bar button {
+    gap: 5px;
+  }
+}

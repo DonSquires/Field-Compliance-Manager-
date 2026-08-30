@@ -17,12 +17,36 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  Bot,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
+  CreditCard,
+  DollarSign,
+  FileBarChart,
+  FlaskConical,
+  Grid3X3,
+  KeyRound,
+  MapPin,
+  Menu,
+  Network,
+  Package,
+  Radio,
+  Search,
+  Settings,
+  Shield,
+  Users,
+  X,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
-import { NotificationsBell, PortalSwitcher, UniversalSearch } from '../components/stubs';
 import { BobPanel } from '../components/BobPanel';
+import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
 
@@ -64,6 +88,20 @@ type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | '
 type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
+const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
+  'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing',
+]);
+
+const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
+  'landing', 'dispatch', 'patrol', 'live-map', 'welfare-alerts', 'breach-review', 'vehicle-search',
+  'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
+]);
+
+function canAccessAdminPage(page: AdminPage, role: string | undefined): boolean {
+  if (!PLATFORM_ONLY_PAGES.has(page)) return true;
+  return role === 'grand_master' || role === 'master';
+}
+
 interface RedirectTarget {
   page: AdminPage;
   crmTab?: CRMTab;
@@ -90,76 +128,51 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
 
 const NAVIGATION_MAP = {
   'Core': [
-    { id: 'hub', label: 'Dashboard', icon: '📊' },
-    { id: 'relationships', label: 'Relationships', icon: '🔗' },
-    { id: 'crm', label: 'CRM & Finance', icon: '💰' },
-    { id: 'roster', label: 'Roster & HR', icon: '👥' },
-    { id: 'field-ops', label: 'Field Operations', icon: '🚗' },
-    { id: 'reports', label: 'Reports', icon: '📈' },
+    { id: 'hub', label: 'Overview', icon: Grid3X3 },
+    { id: 'relationships', label: 'Relationships', icon: Network },
+    { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
+    { id: 'roster', label: 'Roster & HR', icon: Users },
+    { id: 'field-ops', label: 'Field Operations', icon: Radio },
+    { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
   'Config': [
-    { id: 'sites', label: 'Sites', icon: '📍' },
-    { id: 'locations', label: 'Locations', icon: '🗺️' },
-    { id: 'users', label: 'Users', icon: '👤' },
-    { id: 'access-control', label: 'Access Control', icon: '🔐' },
-    { id: 'org-setup', label: 'Organization Setup', icon: '⚙️' },
-    { id: 'approvals', label: 'Approvals', icon: '✅' },
+    { id: 'sites', label: 'Sites', icon: Building2 },
+    { id: 'locations', label: 'Locations', icon: MapPin },
+    { id: 'users', label: 'Users', icon: Users },
+    { id: 'access-control', label: 'Access Control', icon: KeyRound },
+    { id: 'org-setup', label: 'Organization Setup', icon: Settings },
+    { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
   ],
   'System': [
-    { id: 'testing', label: 'E2E Testing', icon: '🧪' },
-    { id: 'test-data', label: 'Test Data', icon: '📝' },
+    { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
+    { id: 'test-data', label: 'Test Data', icon: Package },
   ],
   'Platform': [
-    { id: 'platform', label: 'Platform Overview', icon: '🌍' },
-    { id: 'platform-catalog', label: 'Module Pricing', icon: '📦' },
-    { id: 'platform-subscriptions', label: 'Provider Billing', icon: '💳' },
+    { id: 'platform', label: 'Platform Overview', icon: Shield },
+    { id: 'platform-catalog', label: 'Module Pricing', icon: Package },
+    { id: 'platform-subscriptions', label: 'Provider Billing', icon: CreditCard },
   ],
 };
 
 interface NavItemProps {
   id: string;
   label: string;
-  icon: string;
+  icon: LucideIcon;
   active: boolean;
   onClick: () => void;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ id, label, icon, active, onClick }) => {
+const NavItem: React.FC<NavItemProps> = ({ label, icon: Icon, active, onClick }) => {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        width: '100%',
-        padding: '8px 12px',
-        margin: '4px 0',
-        backgroundColor: active ? 'var(--color-bg-secondary)' : 'transparent',
-        border: 'none',
-        borderLeft: active ? '3px solid var(--color-primary)' : '3px solid transparent',
-        color: active ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-        cursor: 'pointer',
-        textAlign: 'left',
-        fontSize: '14px',
-        fontWeight: active ? 500 : 400,
-        transition: 'all 0.2s ease',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-      }}
-    >
-      <span>{icon}</span>
+    <button type="button" onClick={onClick} className={`admin-nav-item ${active ? 'is-active' : ''}`} title={label}>
+      <span><Icon size={17} aria-hidden="true" /></span>
       <span>{label}</span>
     </button>
   );
 };
 
 const LazyPageFallback: React.FC = () => (
-  <div style={{
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: '100vh',
-    color: 'var(--color-text-secondary)',
-  }}>
+  <div className="admin-page-loading">
     <div>Loading...</div>
   </div>
 );
@@ -183,6 +196,7 @@ const AdminShell: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bobOpen, setBobOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [accessNotice, setAccessNotice] = useState<string | null>(null);
 
   const pageFromUrl = useCallback((pathname: string): AdminPage => {
     const segments = pathname.split('/').filter(Boolean);
@@ -198,16 +212,32 @@ const AdminShell: React.FC = () => {
     const redirectTarget = LEGACY_REDIRECT_MAP[page];
 
     if (redirectTarget) {
+      if (!canAccessAdminPage(redirectTarget.page, profile?.role)) {
+        setAccessNotice('This area is restricted to platform operators.');
+        setActivePage('hub');
+        navigate('/admin/hub', { replace: true });
+        return;
+      }
       setActivePage(redirectTarget.page);
       if (redirectTarget.crmTab) setCrmTab(redirectTarget.crmTab);
       if (redirectTarget.rosterTab) setRosterTab(redirectTarget.rosterTab);
       if (redirectTarget.fieldOpsSubArea) setFieldOpsSubArea(redirectTarget.fieldOpsSubArea);
       if (redirectTarget.reportsTab) setReportsTab(redirectTarget.reportsTab);
-      navigate(`/admin/${redirectTarget.page}`);
+      const areaQuery = redirectTarget.fieldOpsSubArea ? `?area=${redirectTarget.fieldOpsSubArea}` : '';
+      navigate(`/admin/${redirectTarget.page}${areaQuery}`, { replace: true });
+    } else if (!canAccessAdminPage(page, profile?.role)) {
+      setAccessNotice('This area is restricted to platform operators.');
+      setActivePage('hub');
+      navigate('/admin/hub', { replace: true });
     } else {
+      setAccessNotice(null);
       setActivePage(page);
+      if (page === 'field-ops') {
+        const requestedArea = new URLSearchParams(location.search).get('area') as FieldOpsSubArea | null;
+        setFieldOpsSubArea(requestedArea && FIELD_OPS_AREAS.has(requestedArea) ? requestedArea : 'landing');
+      }
     }
-  }, [location.pathname, navigate, pageFromUrl]);
+  }, [location.pathname, location.search, navigate, pageFromUrl, profile?.role]);
 
   useEffect(() => {
     const loadOrgName = async () => {
@@ -241,13 +271,12 @@ const AdminShell: React.FC = () => {
   }, []);
 
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
-    const isPlatformOperator = profile?.role === 'grand_master' || profile?.role === 'master';
-    if (isPlatformOperator) return true;
-    return true;
+    return canAccessAdminPage(page, profile?.role);
   }, [profile?.role]);
 
   const navigateToPage = useCallback((page: AdminPage) => {
     if (!isPageEnabled(page)) {
+      setAccessNotice('This area is restricted to platform operators.');
       setActivePage('hub');
       navigate('/admin/hub');
       return;
@@ -257,6 +286,21 @@ const AdminShell: React.FC = () => {
     setMobileMenuOpen(false);
     navigate(`/admin/${page}`);
   }, [navigate, isPageEnabled]);
+
+  const navigateToFieldOps = useCallback((area: FieldOpsSubArea) => {
+    setFieldOpsSubArea(area);
+    setActivePage('field-ops');
+    setMobileMenuOpen(false);
+    navigate(`/admin/field-ops?area=${area}`);
+  }, [navigate]);
+
+  const navigateFromHub = useCallback((destination: string) => {
+    if (FIELD_OPS_AREAS.has(destination as FieldOpsSubArea)) {
+      navigateToFieldOps(destination as FieldOpsSubArea);
+      return;
+    }
+    navigateToPage(destination as AdminPage);
+  }, [navigateToFieldOps, navigateToPage]);
 
   const bobContext = useMemo(() => ({
     page: activePage,
@@ -277,7 +321,7 @@ const AdminShell: React.FC = () => {
   const renderPage = useCallback(() => {
     switch (activePage) {
       case 'hub':
-        return <AdminHubPage onNavigate={(page) => navigateToPage(page as AdminPage)} />;
+        return <AdminHubPage onNavigate={navigateFromHub} />;
       case 'relationships':
         return <RelationshipWorkspacePage />;
       case 'crm':
@@ -334,52 +378,24 @@ const AdminShell: React.FC = () => {
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateToPage]);
+  }, [activePage, fieldOpsSubArea, navigateFromHub]);
 
   if (!isMobile) {
     return (
-      <div style={{ display: 'flex', height: '100vh', backgroundColor: 'var(--color-bg-primary)' }}>
-        <aside
-          style={{
-            width: sidebarCollapsed ? '68px' : '220px',
-            backgroundColor: 'var(--color-bg-secondary)',
-            borderRight: '1px solid var(--color-border)',
-            overflowY: 'auto',
-            transition: 'width 0.2s ease',
-            paddingTop: '16px',
-          }}
-        >
-          <div style={{ padding: '0 12px', marginBottom: '16px' }}>
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              style={{
-                width: '100%',
-                padding: '8px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--color-text-primary)',
-              }}
-            >
-              {sidebarCollapsed ? '→' : '←'}
+      <div className="admin-shell admin-shell-desktop">
+        <aside className={`admin-sidebar ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
+          <div className="admin-sidebar-brand">
+            <span><Shield size={18} aria-hidden="true" /></span>
+            {!sidebarCollapsed && <div><strong>FCM</strong><small>Administration</small></div>}
+            <button type="button" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}>
+              {sidebarCollapsed ? <ChevronRight size={17} aria-hidden="true" /> : <ChevronLeft size={17} aria-hidden="true" />}
             </button>
           </div>
 
-          {Object.entries(NAVIGATION_MAP).map(([group, items]) => (
-            <div key={group} style={{ marginBottom: '24px' }}>
+          {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || canAccessAdminPage('platform', profile?.role)).map(([group, items]) => (
+            <div key={group} className="admin-nav-group">
               {!sidebarCollapsed && (
-                <div
-                  style={{
-                    padding: '8px 12px',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  {group}
-                </div>
+                <div className="admin-nav-group-label">{group}</div>
               )}
               {items.map((item) => (
                 <NavItem
@@ -395,51 +411,31 @@ const AdminShell: React.FC = () => {
           ))}
         </aside>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <header
-            style={{
-              height: '64px',
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderBottom: '1px solid var(--color-border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingLeft: '24px',
-              paddingRight: '24px',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                Field Compliance Manager · {orgName}
-              </div>
+        <div className="admin-shell-workspace">
+          <header className="admin-shell-header">
+            <div className="admin-shell-context">
+              <strong>{orgName || 'Field Compliance Manager'}</strong>
               {!relationshipLoading && (
-                <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                <span>
                   {selectedAgreement ? selectedAgreement.name : 'No agreement selected'}
                   {selectedSite ? ` · ${selectedSite.name}` : ''}
                   {selectedZone ? ` · ${selectedZone.name}` : ''}
-                </div>
+                </span>
               )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <UniversalSearch onNavigate={(page: string, query?: string) => navigateToPage(page as AdminPage)} />
-              <NotificationsBell onOpenBob={() => setBobOpen(true)} />
-              <PortalSwitcher />
-              {profile?.displayName && (
-                <div style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-                  {profile.displayName}
-                </div>
-              )}
+            <div className="admin-shell-tools">
+              <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
+                <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
+              </button>
+              <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
+                <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
+              </button>
+              <div className="admin-profile-chip">{profile?.displayName ?? profile?.role ?? 'Administrator'}</div>
             </div>
           </header>
 
-          <main
-            data-app-content
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: '24px',
-            }}
-          >
+          <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
+            {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
             <React.Suspense fallback={<LazyPageFallback />}>
               {renderPage()}
             </React.Suspense>
@@ -452,170 +448,69 @@ const AdminShell: React.FC = () => {
           context={bobContext}
         />
 
-        <button
-          onClick={() => setBobOpen(true)}
-          style={{
-            position: 'fixed',
-            bottom: '24px',
-            right: '24px',
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            backgroundColor: 'var(--color-primary)',
-            border: 'none',
-            color: 'white',
-            fontSize: '24px',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-            transition: 'transform 0.2s ease',
-            zIndex: 100,
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-        >
-          🤖
-        </button>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--color-bg-primary)' }}>
-      <header
-        style={{
-          height: '56px',
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderBottom: '1px solid var(--color-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingLeft: '16px',
-          paddingRight: '16px',
-        }}
-      >
-        <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          {orgName}
+    <div className="admin-shell admin-shell-mobile">
+      <header className="admin-mobile-header">
+        <div className="admin-mobile-brand">
+          <span><Shield size={17} aria-hidden="true" /></span><strong>{orgName || 'Field Compliance Manager'}</strong>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <NotificationsBell onOpenBob={() => setBobOpen(true)} />
-          <PortalSwitcher />
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '24px',
-              cursor: 'pointer',
-              color: 'var(--color-text-primary)',
-            }}
-          >
-            ☰
+        <div className="admin-shell-tools">
+          <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
+            <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
+          </button>
+          <button type="button" className="admin-shell-icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} title={mobileMenuOpen ? 'Close navigation' : 'Open navigation'}>
+            {mobileMenuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
+            <span className="sr-only">{mobileMenuOpen ? 'Close navigation' : 'Open navigation'}</span>
           </button>
         </div>
       </header>
 
       {mobileMenuOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            top: '56px',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 99,
-          }}
-          onClick={() => setMobileMenuOpen(false)}
-        >
-          <nav
-            style={{
-              backgroundColor: 'var(--color-bg-secondary)',
-              maxHeight: '80vh',
-              overflowY: 'auto',
-              paddingTop: '16px',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {Object.entries(NAVIGATION_MAP).map(([group, items]) => (
-              <div key={group}>
-                <div style={{ padding: '8px 16px', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>
-                  {group}
-                </div>
-                {items.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => navigateToPage(item.id as AdminPage)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 16px',
-                      background: activePage === item.id ? 'var(--color-bg-primary)' : 'transparent',
-                      border: 'none',
-                      color: activePage === item.id ? 'var(--color-primary)' : 'var(--color-text-primary)',
-                      textAlign: 'left',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {item.icon} {item.label}
-                  </button>
-                ))}
+        <div className="admin-mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
+          <nav className="admin-mobile-drawer" onClick={(e) => e.stopPropagation()}>
+            {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || canAccessAdminPage('platform', profile?.role)).map(([group, items]) => (
+              <div key={group} className="admin-mobile-nav-group">
+                <div>{group}</div>
+                {items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button key={item.id} onClick={() => navigateToPage(item.id as AdminPage)} className={`admin-mobile-nav-item ${activePage === item.id ? 'is-active' : ''}`}>
+                      <Icon size={17} aria-hidden="true" /><span>{item.label}</span>
+                    </button>
+                  );
+                })}
               </div>
             ))}
           </nav>
         </div>
       )}
 
-      <main
-        data-app-content
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '16px',
-        }}
-      >
+      <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
+        {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
         <React.Suspense fallback={<LazyPageFallback />}>
           {renderPage()}
         </React.Suspense>
       </main>
 
-      <nav
-        style={{
-          height: '64px',
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderTop: '1px solid var(--color-border)',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          gap: '8px',
-          padding: '8px',
-        }}
-      >
+      <nav className="admin-mobile-tabs" aria-label="Admin navigation">
         {[
-          { id: 'hub', label: 'Home', icon: '🏠' },
-          { id: 'field-ops', label: 'Field Ops', icon: '🚗' },
-          { id: 'roster', label: 'Roster', icon: '👥' },
-          { id: 'crm', label: 'CRM', icon: '💰' },
-          { id: 'reports', label: 'Reports', icon: '📈' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => navigateToPage(tab.id as AdminPage)}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              background: 'none',
-              border: 'none',
-              color: activePage === tab.id ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
-          >
-            <span style={{ fontSize: '20px' }}>{tab.icon}</span>
-            <span>{tab.label}</span>
-          </button>
-        ))}
+          { id: 'hub', label: 'Home', icon: Grid3X3 },
+          { id: 'field-ops', label: 'Field Ops', icon: Radio },
+          { id: 'roster', label: 'Roster', icon: Users },
+          { id: 'crm', label: 'CRM', icon: DollarSign },
+          { id: 'reports', label: 'Reports', icon: FileBarChart },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button key={tab.id} onClick={() => navigateToPage(tab.id as AdminPage)} className={activePage === tab.id ? 'is-active' : ''}>
+              <Icon size={19} aria-hidden="true" /><span>{tab.label}</span>
+            </button>
+          );
+        })}
       </nav>
 
       <BobPanel
@@ -624,26 +519,6 @@ const AdminShell: React.FC = () => {
         context={bobContext}
       />
 
-      <button
-        onClick={() => setBobOpen(true)}
-        style={{
-          position: 'fixed',
-          bottom: '80px',
-          right: '16px',
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          backgroundColor: 'var(--color-primary)',
-          border: 'none',
-          color: 'white',
-          fontSize: '20px',
-          cursor: 'pointer',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-          zIndex: 100,
-        }}
-      >
-        🤖
-      </button>
     </div>
   );
 };

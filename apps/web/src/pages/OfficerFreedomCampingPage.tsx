@@ -1,32 +1,43 @@
-/**
- * OfficerFreedomCampingPage.tsx (Officer module: 'freedom_camping')
- *
- * Canonical schema: observations (plate_number, is_compliant,
- * compliance_reason, nights_this_zone/month, zone_id, module_key). Recording
- * a vehicle scan against a governed zone is the core freedom-camping
- * compliance workflow — the observation IS the evidence record.
- *
- * Compliance verdict is computed server-side by calculate_vehicle_compliance
- * (Atlas-confirmed: real RPC, proven flow, currently only invoked by the
- * process-officer-scan edge function) rather than left to officer judgement —
- * the two independent counters (consecutive-night streak, monthly total) are
- * the actual product rule and cannot be guessed correctly by eye.
- */
-
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  Camera,
+  CheckCircle2,
+  Crosshair,
+  ImagePlus,
+  MapPin,
+  RefreshCw,
+  ShieldCheck,
+  Upload,
+  WifiOff,
+  X,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
+import {
+  buildOfficerScanPayload,
+  canSubmitOfficerScan,
+  getCurrentPosition,
+  imageFileToBase64,
+  isNetworkFailure,
+  listQueuedOfficerScans,
+  markQueuedOfficerScanAttempt,
+  normalizePlate,
+  OfficerScanResult,
+  queueOfficerScan,
+  removeQueuedOfficerScan,
+} from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
-interface Observation {
+interface ObservationSummary {
   id: string;
   plate_number: string;
-  is_compliant: boolean | null;
+  compliance_status: OfficerScanResult['compliance_status'] | null;
   compliance_reason: string | null;
   nights_this_zone: number | null;
-  nights_this_month: number | null;
   observed_at: string;
+  zone_id: string | null;
 }
 
 interface ZoneOption {
@@ -34,253 +45,402 @@ interface ZoneOption {
   name: string;
 }
 
-interface ComplianceVerdict {
-  is_compliant: boolean;
-  reason: string | null;
-  nights_this_zone: number;
-  nights_this_month: number;
-  limit_consecutive: number | null;
-  limit_monthly: number | null;
-  scv_required: boolean;
-  is_scv: boolean;
-}
+type LocationState =
+  | { status: 'locating'; latitude: null; longitude: null; accuracy: null; message: string }
+  | { status: 'ready'; latitude: number; longitude: number; accuracy: number; message: string }
+  | { status: 'unavailable'; latitude: null; longitude: null; accuracy: null; message: string };
+
+const INITIAL_LOCATION: LocationState = {
+  status: 'locating',
+  latitude: null,
+  longitude: null,
+  accuracy: null,
+  message: 'Acquiring location',
+};
+
+const STATUS_LABEL: Record<OfficerScanResult['compliance_status'], string> = {
+  compliant: 'Compliant',
+  at_risk: 'At risk',
+  breach: 'Breach',
+  breach_exempt: 'Enforcement exempt',
+  unknown: 'Review required',
+};
+
+const STATUS_MESSAGE: Record<OfficerScanResult['compliance_status'], string> = {
+  compliant: 'No compliance action required.',
+  at_risk: 'At the configured limit. The next verified night may breach.',
+  breach: 'A compliance breach has been recorded.',
+  breach_exempt: 'The breach is recorded, but enforcement is withheld.',
+  unknown: 'The evidence needs manual review before action is taken.',
+};
 
 const OfficerFreedomCampingPage: React.FC = () => {
   const { profile } = useAuth();
-  const [observations, setObservations] = useState<Observation[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [observations, setObservations] = useState<ObservationSummary[]>([]);
   const [zones, setZones] = useState<ZoneOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ plate_number: '', zone_id: '' });
-  const [verdict, setVerdict] = useState<ComplianceVerdict | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [checkError, setCheckError] = useState<string | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [plateNumber, setPlateNumber] = useState('');
+  const [zoneId, setZoneId] = useState('');
+  const [imageBase64, setImageBase64] = useState<string>();
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string>();
+  const [capturedAt, setCapturedAt] = useState<string>();
+  const [preparingImage, setPreparingImage] = useState(false);
+  const [location, setLocation] = useState<LocationState>(INITIAL_LOCATION);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [result, setResult] = useState<OfficerScanResult | null>(null);
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [queueMessage, setQueueMessage] = useState<string | null>(null);
 
-  // ATLAS READS: observations, location_zones
-  const loadData = useCallback(async () => {
-    const orgId = profile?.organizationId;
-    if (!orgId || !profile?.id) return;
-
+  const loadHistory = useCallback(async () => {
+    if (!profile?.id || !profile.organizationId) return;
     try {
-      setLoading(true);
-      setError(null);
-
-      const [obsRes, zonesRes] = await Promise.all([
+      setLoadingHistory(true);
+      setHistoryError(null);
+      const [observationsResponse, zonesResponse] = await Promise.all([
         supabase
           .from('observations')
-          .select('id, plate_number, is_compliant, compliance_reason, nights_this_zone, nights_this_month, observed_at')
+          .select('id, plate_number, compliance_status, compliance_reason, nights_this_zone, observed_at, zone_id')
           .eq('officer_id', profile.id)
           .eq('module_key', 'freedom_camping')
-          .order('observed_at', { ascending: false }),
-        supabase.from('location_zones').select('id, name').eq('organization_id', orgId).eq('module_key', 'freedom_camping'),
+          .order('observed_at', { ascending: false })
+          .limit(8),
+        supabase
+          .from('location_zones')
+          .select('id, name')
+          .eq('organization_id', profile.organizationId)
+          .eq('module_key', 'freedom_camping')
+          .order('name'),
       ]);
-
-      if (obsRes.error) throw obsRes.error;
-      if (zonesRes.error) throw zonesRes.error;
-
-      setObservations((obsRes.data as Observation[]) || []);
-      setZones((zonesRes.data as ZoneOption[]) || []);
-      if (zonesRes.data && zonesRes.data.length > 0 && !form.zone_id) {
-        setForm((f) => ({ ...f, zone_id: zonesRes.data[0].id }));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load observations');
+      if (observationsResponse.error) throw observationsResponse.error;
+      if (zonesResponse.error) throw zonesResponse.error;
+      setObservations((observationsResponse.data as ObservationSummary[]) ?? []);
+      setZones((zonesResponse.data as ZoneOption[]) ?? []);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Recent scans could not be loaded.');
     } finally {
-      setLoading(false);
+      setLoadingHistory(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.organizationId, profile?.id]);
+  }, [profile?.id, profile?.organizationId]);
+
+  const refreshQueueCount = useCallback(async () => {
+    try {
+      setQueuedCount((await listQueuedOfficerScans()).length);
+    } catch {
+      setQueueMessage('Offline storage is unavailable on this device.');
+    }
+  }, []);
+
+  const acquireLocation = useCallback(async () => {
+    setLocation(INITIAL_LOCATION);
+    try {
+      const position = await getCurrentPosition();
+      setLocation({
+        status: 'ready',
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        message: `Location ready · ±${Math.round(position.coords.accuracy)} m`,
+      });
+    } catch {
+      setLocation({
+        status: 'unavailable',
+        latitude: null,
+        longitude: null,
+        accuracy: null,
+        message: 'Location unavailable · choose a zone',
+      });
+    }
+  }, []);
+
+  const syncQueuedScans = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    setSyncing(true);
+    setQueueMessage(null);
+    try {
+      const queuedScans = await listQueuedOfficerScans();
+      let synced = 0;
+      for (const scan of queuedScans) {
+        const { error } = await supabase.functions.invoke('process-officer-scan', {
+          body: { ...scan.body, synced_at: new Date().toISOString() },
+        });
+        if (error) {
+          await markQueuedOfficerScanAttempt(scan);
+          continue;
+        }
+        await removeQueuedOfficerScan(scan.id);
+        synced += 1;
+      }
+      await refreshQueueCount();
+      if (synced > 0) {
+        setQueueMessage(`${synced} queued scan${synced === 1 ? '' : 's'} synced.`);
+        await loadHistory();
+      }
+    } catch (error) {
+      setQueueMessage(error instanceof Error ? error.message : 'Queued scans could not be synced.');
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadHistory, refreshQueueCount]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    void loadHistory();
+    void refreshQueueCount();
+    void acquireLocation();
+  }, [acquireLocation, loadHistory, refreshQueueCount]);
 
-  // ATLAS CALLS: calculate_vehicle_compliance (RPC) — the actual compliance
-  // engine (consecutive-night streak + monthly total, two independent
-  // counters). Confirmed callable by 'authenticated' role in schema.sql.
-  const handleCheckCompliance = async () => {
-    if (!profile?.organizationId || !form.plate_number.trim() || !form.zone_id) return;
+  useEffect(() => {
+    const handleOnline = () => void syncQueuedScans();
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [syncQueuedScans]);
 
+  useEffect(() => () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  }, [imagePreviewUrl]);
+
+  const payload = useMemo(() => buildOfficerScanPayload({
+    plateNumber,
+    imageBase64,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    zoneId,
+    capturedAt,
+  }), [capturedAt, imageBase64, location.latitude, location.longitude, plateNumber, zoneId]);
+
+  const clearCapture = useCallback(() => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImagePreviewUrl(undefined);
+    setImageBase64(undefined);
+    setCapturedAt(undefined);
+    setPlateNumber('');
+    setSubmitError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [imagePreviewUrl]);
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPreparingImage(true);
+    setSubmitError(null);
+    setResult(null);
     try {
-      setChecking(true);
-      setCheckError(null);
-      setVerdict(null);
-
-      const { data, error } = await supabase.rpc('calculate_vehicle_compliance', {
-        p_plate: form.plate_number.toUpperCase(),
-        p_zone_id: form.zone_id,
-        p_org_id: profile.organizationId,
-      });
-
-      if (error) throw error;
-      setVerdict(data as ComplianceVerdict);
-    } catch (err) {
-      setCheckError(err instanceof Error ? err.message : 'Failed to check compliance');
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(URL.createObjectURL(file));
+      setImageBase64(await imageFileToBase64(file));
+      setCapturedAt(new Date().toISOString());
+    } catch (error) {
+      setImagePreviewUrl(undefined);
+      setImageBase64(undefined);
+      setSubmitError(error instanceof Error ? error.message : 'The image could not be prepared.');
     } finally {
-      setChecking(false);
+      setPreparingImage(false);
     }
   };
 
-  // Any change to plate/zone invalidates a previously-computed verdict so a
-  // stale result can never be submitted against a different vehicle/zone.
-  const updateForm = (next: Partial<typeof form>) => {
-    setForm((f) => ({ ...f, ...next }));
-    setVerdict(null);
-    setCheckError(null);
-  };
+  const queueCurrentScan = useCallback(async () => {
+    await queueOfficerScan(payload);
+    await refreshQueueCount();
+    setQueueMessage('Scan saved on this device and queued for sync.');
+    clearCapture();
+  }, [clearCapture, payload, refreshQueueCount]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile?.id || !profile?.organizationId || !form.plate_number.trim() || !verdict) return;
-
+  const submitScan = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canSubmitOfficerScan(payload)) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    setResult(null);
     try {
-      // ATLAS WRITES: observations
-      const { data, error } = await supabase
-        .from('observations')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            officer_id: profile.id,
-            plate_number: form.plate_number.toUpperCase(),
-            zone_id: form.zone_id || null,
-            is_compliant: verdict.is_compliant,
-            compliance_reason: verdict.reason,
-            nights_this_zone: verdict.nights_this_zone,
-            nights_this_month: verdict.nights_this_month,
-            is_scv: verdict.is_scv,
-            module_key: 'freedom_camping',
-          },
-        ])
-        .select()
-        .single();
-
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await queueCurrentScan();
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke<OfficerScanResult>('process-officer-scan', { body: payload });
       if (error) throw error;
-      setObservations([data as Observation, ...observations]);
-      setForm({ plate_number: '', zone_id: form.zone_id });
-      setVerdict(null);
-      setShowForm(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to record observation');
+      if (!data?.observation_id) throw new Error('The scan completed without an observation record.');
+      setResult(data);
+      clearCapture();
+      await loadHistory();
+    } catch (error) {
+      if (isNetworkFailure(error)) {
+        try {
+          await queueCurrentScan();
+        } catch (queueError) {
+          setSubmitError(queueError instanceof Error ? queueError.message : 'The scan could not be queued.');
+        }
+      } else {
+        setSubmitError(error instanceof Error ? error.message : 'The scan could not be processed.');
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="page-container">
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading observations...</p>
-        </div>
-      </div>
-    );
-  }
+  const status = result?.compliance_status ?? 'unknown';
 
   return (
-    <div className="page-container">
-      <header className="page-header">
-        <h1>Freedom Camping</h1>
-        <p className="subtitle">{observations.length} observations recorded</p>
+    <div className="page-container fc-scan-page">
+      <header className="fc-scan-header">
+        <div>
+          <span className="fc-eyebrow">Freedom camping</span>
+          <h1>Vehicle scan</h1>
+        </div>
+        <div className={`fc-connection ${queuedCount > 0 ? 'has-queue' : ''}`}>
+          {queuedCount > 0 ? <WifiOff size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
+          <span>{queuedCount > 0 ? `${queuedCount} queued` : 'Ready'}</span>
+        </div>
       </header>
 
-      {error && (
-        <div className="alert alert-error" role="alert">
-          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
-            ×
+      {queuedCount > 0 && (
+        <div className="fc-queue-bar" role="status">
+          <div>
+            <strong>{queuedCount} scan{queuedCount === 1 ? '' : 's'} waiting</strong>
+            <span>Stored on this device</span>
+          </div>
+          <button type="button" className="fc-icon-button" onClick={() => void syncQueuedScans()} disabled={syncing} title="Sync queued scans">
+            <RefreshCw size={18} className={syncing ? 'is-spinning' : ''} aria-hidden="true" />
+            <span className="sr-only">Sync queued scans</span>
           </button>
-          {error}
         </div>
       )}
 
-      <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
-        {showForm ? 'Cancel' : '+ Record Observation'}
-      </button>
+      {queueMessage && <div className="fc-inline-message" role="status">{queueMessage}</div>}
 
-      {showForm && (
-        <form className="assessment-form" onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Plate Number</label>
-            <input
-              type="text"
-              required
-              value={form.plate_number}
-              onChange={(e) => updateForm({ plate_number: e.target.value.toUpperCase() })}
-            />
-          </div>
-          <div className="form-group">
-            <label>Zone</label>
-            <select value={form.zone_id} onChange={(e) => updateForm({ zone_id: e.target.value })}>
-              {zones.length === 0 && <option value="">No zones configured</option>}
-              {zones.map((z) => (
-                <option key={z.id} value={z.id}>
-                  {z.name}
-                </option>
-              ))}
-            </select>
-          </div>
+      <div className="fc-scan-layout">
+        <form className="fc-capture-panel" onSubmit={submitScan}>
+          <input ref={fileInputRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={handleFileChange} />
 
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={checking || !form.plate_number.trim() || !form.zone_id}
-            onClick={handleCheckCompliance}
-          >
-            {checking ? 'Checking…' : 'Check Compliance'}
-          </button>
-
-          {checkError && (
-            <div className="alert alert-error" role="alert">
-              {checkError}
+          {imagePreviewUrl ? (
+            <div className="fc-photo-preview">
+              <img src={imagePreviewUrl} alt="Vehicle evidence preview" />
+              <div className="fc-photo-shade" />
+              <span className="fc-photo-label"><CheckCircle2 size={15} aria-hidden="true" /> Evidence captured</span>
+              <button type="button" className="fc-remove-photo" onClick={clearCapture} title="Remove photo">
+                <X size={18} aria-hidden="true" />
+                <span className="sr-only">Remove photo</span>
+              </button>
             </div>
+          ) : (
+            <button type="button" className="fc-camera-target" onClick={() => fileInputRef.current?.click()} disabled={preparingImage}>
+              <span className="fc-camera-icon"><Camera size={30} strokeWidth={1.7} aria-hidden="true" /></span>
+              <strong>{preparingImage ? 'Preparing image' : 'Capture vehicle'}</strong>
+              <span>Rear camera</span>
+              <span className="fc-frame-corner fc-frame-top-left" />
+              <span className="fc-frame-corner fc-frame-top-right" />
+              <span className="fc-frame-corner fc-frame-bottom-left" />
+              <span className="fc-frame-corner fc-frame-bottom-right" />
+            </button>
           )}
 
-          {verdict && (
-            <div className="assessment-card">
-              <div className="assessment-header">
-                <span className={`badge ${verdict.is_compliant ? 'badge-success' : 'badge-danger'}`}>
-                  {verdict.is_compliant ? 'Compliant' : 'Breach'}
-                </span>
-                {verdict.is_scv && <span className="badge badge-info">SCV</span>}
+          <div className="fc-field-grid">
+            <label className="fc-field">
+              <span>Plate number <small>optional with photo</small></span>
+              <div className="fc-plate-input">
+                <input value={plateNumber} onChange={(event) => setPlateNumber(normalizePlate(event.target.value))} placeholder="ABC123" inputMode="text" autoCapitalize="characters" autoComplete="off" maxLength={10} />
               </div>
-              <p className="contact-meta">
-                {verdict.nights_this_zone} night(s) this zone
-                {verdict.limit_consecutive !== null ? ` (limit ${verdict.limit_consecutive})` : ''} ·{' '}
-                {verdict.nights_this_month} night(s) this month
-                {verdict.limit_monthly !== null ? ` (limit ${verdict.limit_monthly})` : ''}
-              </p>
-              {verdict.reason && <p className="contact-meta">{formatComplianceReason(verdict.reason)}</p>}
+            </label>
+
+            <label className="fc-field">
+              <span>Zone <small>{location.status === 'ready' ? 'auto-detected when blank' : 'required without GPS'}</small></span>
+              <div className="fc-select-wrap">
+                <MapPin size={17} aria-hidden="true" />
+                <select value={zoneId} onChange={(event) => setZoneId(event.target.value)}>
+                  <option value="">Automatic from GPS</option>
+                  {zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
+                </select>
+              </div>
+            </label>
+          </div>
+
+          <div className={`fc-location-row location-${location.status}`}>
+            <Crosshair size={17} aria-hidden="true" />
+            <span>{location.message}</span>
+            <button type="button" onClick={() => void acquireLocation()} disabled={location.status === 'locating'} title="Refresh location">
+              <RefreshCw size={16} className={location.status === 'locating' ? 'is-spinning' : ''} aria-hidden="true" />
+              <span className="sr-only">Refresh location</span>
+            </button>
+          </div>
+
+          {submitError && (
+            <div className="fc-error" role="alert">
+              <AlertTriangle size={18} aria-hidden="true" />
+              <span>{submitError}</span>
             </div>
           )}
 
-          <button type="submit" className="btn btn-primary btn-block" disabled={!verdict}>
-            Record Observation
+          <button className="fc-submit" type="submit" disabled={!canSubmitOfficerScan(payload) || preparingImage || submitting}>
+            {submitting ? <RefreshCw size={19} className="is-spinning" aria-hidden="true" /> : imageBase64 ? <Upload size={19} aria-hidden="true" /> : <ImagePlus size={19} aria-hidden="true" />}
+            {submitting ? 'Processing scan' : 'Process scan'}
           </button>
         </form>
-      )}
 
-      <div className="contacts-list" style={{ marginTop: '12px' }}>
-        {observations.length === 0 ? (
-          <div className="empty-state">
-            <p>No observations recorded yet.</p>
-          </div>
-        ) : (
-          observations.map((o) => (
-            <div key={o.id} className="contact-card">
-              <div className="contact-header">
-                <h3>{o.plate_number}</h3>
-                <span className={`status-badge status-${o.is_compliant ? 'active' : 'inactive'}`}>
-                  {o.is_compliant === null ? 'Unknown' : o.is_compliant ? 'Compliant' : 'Non-compliant'}
-                </span>
+        <aside className="fc-result-column">
+          {result ? (
+            <section className={`fc-verdict verdict-${status}`} aria-live="polite">
+              <div className="fc-verdict-topline">
+                <span>{STATUS_LABEL[status]}</span>
+                <span className="fc-source">{result.plate_source === 'alpr' ? 'ALPR' : 'MANUAL'}</span>
               </div>
-              <div className="contact-details">
-                {o.compliance_reason && <p>{formatComplianceReason(o.compliance_reason)}</p>}
-                <p className="contact-meta">
-                  {o.nights_this_zone ?? 0} night(s) this zone · {new Date(o.observed_at).toLocaleString()}
-                </p>
+              <div className="fc-result-plate">{result.plate_number}</div>
+              <p className="fc-verdict-message">{STATUS_MESSAGE[status]}</p>
+              {result.compliance_reason && <p className="fc-reason">{formatComplianceReason(result.compliance_reason)}</p>}
+
+              <dl className="fc-metrics">
+                <div><dt>Current streak</dt><dd>{result.nights_this_zone}<small>{result.limit_consecutive !== null ? ` / ${result.limit_consecutive}` : ''}</small></dd></div>
+                <div><dt>This month</dt><dd>{result.nights_this_month}<small>{result.limit_monthly !== null ? ` / ${result.limit_monthly}` : ''}</small></dd></div>
+              </dl>
+
+              <div className="fc-result-facts">
+                <span><MapPin size={15} aria-hidden="true" /> {result.zone_name ?? 'Outside a configured zone'}</span>
+                {result.is_scv && <span><ShieldCheck size={15} aria-hidden="true" /> Active SCV</span>}
+                {result.requires_morning_verification && <span><RefreshCw size={15} aria-hidden="true" /> Morning verification required</span>}
               </div>
+
+              {result.breach_write_error && (
+                <div className="fc-error" role="alert">
+                  <AlertTriangle size={18} aria-hidden="true" />
+                  <span>Observation saved, but the breach alert was not confirmed. Supervisor follow-up is required.</span>
+                </div>
+              )}
+
+              <button type="button" className="fc-new-scan" onClick={() => setResult(null)}><Camera size={17} aria-hidden="true" /> New scan</button>
+            </section>
+          ) : (
+            <section className="fc-awaiting-result">
+              <ShieldCheck size={24} aria-hidden="true" />
+              <div><strong>Awaiting scan</strong><span>Compliance status appears here after processing.</span></div>
+            </section>
+          )}
+
+          <section className="fc-recent">
+            <div className="fc-section-heading">
+              <div><span className="fc-eyebrow">This shift</span><h2>Recent scans</h2></div>
+              <button type="button" className="fc-icon-button" onClick={() => void loadHistory()} disabled={loadingHistory} title="Refresh recent scans">
+                <RefreshCw size={17} className={loadingHistory ? 'is-spinning' : ''} aria-hidden="true" />
+                <span className="sr-only">Refresh recent scans</span>
+              </button>
             </div>
-          ))
-        )}
+
+            {historyError && <div className="fc-inline-message is-error" role="alert">{historyError}</div>}
+            {!loadingHistory && observations.length === 0 && <p className="fc-empty">No scans recorded yet.</p>}
+            <div className="fc-recent-list">
+              {observations.map((observation) => {
+                const observationStatus = observation.compliance_status ?? 'unknown';
+                return (
+                  <div className="fc-recent-row" key={observation.id}>
+                    <span className={`fc-status-dot status-${observationStatus}`} aria-hidden="true" />
+                    <div><strong>{observation.plate_number}</strong><span>{formatComplianceReason(observation.compliance_reason) || STATUS_LABEL[observationStatus]}</span></div>
+                    <time dateTime={observation.observed_at}>{new Date(observation.observed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );

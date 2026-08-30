@@ -36,6 +36,13 @@ const taskContinuityMigration = readFileSync(
 );
 
 describe('Edge Function Schema Audit', () => {
+  it('enforces standalone module entitlement for scan operators', () => {
+    expect(processOfficerScanSource).toContain("profile.role === 'scan_operator'");
+    expect(processOfficerScanSource).toContain(".from('service_agreement_modules')");
+    expect(processOfficerScanSource).toContain(".eq('standalone_scan_enabled', true)");
+    expect(processOfficerScanSource).toContain("!['freedom_camping', 'parking_enforcement'].includes(moduleKey)");
+  });
+
   describe('breach_alerts writes', () => {
     it('process-officer-scan parking path writes valid breach_type enum values', () => {
       // Lines 1013-1020, 1048-1055: parking overstay/repeat and expired_rego/wof/cof inserts

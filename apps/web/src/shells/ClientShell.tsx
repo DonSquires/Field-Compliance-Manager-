@@ -1,209 +1,110 @@
-/**
- * ClientShell.tsx — Client portal shell
- *
- * Provides the client-facing interface for viewing field compliance reports,
- * observations, and incident summaries related to their sites.
- *
- * Roles: client_admin, client_officer, client_viewer
- */
-
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Building2, ChevronLeft, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, Menu, ScanLine, Shield, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { ClientPortalPage as ClientPortalContent } from '../pages/ClientPortalPage';
+import { getClientPortalPages, isClientPortalPage, type ClientPortalPage } from '../lib/clientPortalAccess';
+import './ClientShell.css';
+
+const NAVIGATION: Array<{ id: ClientPortalPage; label: string; icon: LucideIcon }> = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'sites', label: 'Sites and zones', icon: Building2 },
+  { id: 'observations', label: 'Observations', icon: Eye },
+  { id: 'reports', label: 'Reports', icon: FileText },
+  { id: 'scan', label: 'Scan access', icon: ScanLine },
+];
 
 export function ClientShell() {
   const { profile, signOut } = useAuth();
+  const relationships = useServiceRelationships();
   const navigate = useNavigate();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  if (!profile) {
-    return <div style={{ padding: 32, textAlign: 'center' }}>Loading...</div>;
-  }
+  const routeSegment = location.pathname.split('/').filter(Boolean)[1];
+  const activePage: ClientPortalPage = isClientPortalPage(routeSegment) ? routeSegment : 'overview';
+  const agreement = relationships.selectedAgreement;
+  const allowedPages = useMemo(() => getClientPortalPages(agreement ? {
+    mode: agreement.client_portal_access_mode as 'transparency_only' | 'full_modules' | 'scan_only' | null,
+    reportsEnabled: agreement.client_portal_reports_enabled,
+  } : null), [agreement]);
+
+  useEffect(() => {
+    if (routeSegment && !isClientPortalPage(routeSegment)) navigate('/client', { replace: true });
+  }, [navigate, routeSegment]);
+
+  useEffect(() => {
+    if (!relationships.loading && !allowedPages.has(activePage)) navigate('/client', { replace: true });
+  }, [activePage, allowedPages, navigate, relationships.loading]);
+
+  if (!profile) return <div className="client-shell-loading">Loading client portal</div>;
+
+  const availableNavigation = NAVIGATION.filter((item) => allowedPages.has(item.id));
+
+  const openPage = (page: ClientPortalPage) => {
+    navigate(page === 'overview' ? '/client' : `/client/${page}`);
+    setMobileOpen(false);
+  };
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
   };
 
+  const navigation = (
+    <>
+      <button type="button" className="client-shell-brand" onClick={() => openPage('overview')} title="Client portal home">
+        <span><Shield size={20} aria-hidden="true" /></span>
+        {!collapsed && <div><strong>Field Compliance</strong><small>Client portal</small></div>}
+      </button>
+
+      <nav className="client-shell-nav" aria-label="Client portal">
+        {availableNavigation.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button type="button" key={item.id} className={activePage === item.id ? 'is-active' : ''} onClick={() => openPage(item.id)} title={collapsed ? item.label : undefined}>
+              <Icon size={19} aria-hidden="true" />
+              {!collapsed && <span>{item.label}</span>}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="client-shell-sidebar-footer">
+        {!collapsed && agreement && <div className="client-shell-agreement"><span>Selected service</span><strong>{agreement.name}</strong></div>}
+        <button type="button" onClick={() => void handleSignOut()} title="Sign out"><LogOut size={18} aria-hidden="true" />{!collapsed && <span>Sign out</span>}</button>
+      </div>
+    </>
+  );
+
   return (
-    <div style={styles.root}>
-      {/* Sidebar */}
-      <aside style={styles.sidebar}>
-        <div style={styles.logo}>
-          <div style={styles.logoBg}>FC</div>
-        </div>
-
-        <nav style={styles.nav}>
-          <NavItem label="Dashboard" icon="📊" onClick={() => navigate('/client')} />
-          <NavItem label="My Sites" icon="📍" onClick={() => navigate('/client/sites')} />
-          <NavItem label="Observations" icon="👁️" onClick={() => navigate('/client/observations')} />
-          <NavItem label="Incidents" icon="⚠️" onClick={() => navigate('/client/incidents')} />
-          <NavItem label="Reports" icon="📋" onClick={() => navigate('/client/reports')} />
-        </nav>
-
-        <button onClick={handleSignOut} style={styles.signOutBtn}>
-          {sidebarCollapsed ? '⎋' : 'Sign out'}
+    <div className="client-shell">
+      <aside className={`client-shell-sidebar ${collapsed ? 'is-collapsed' : ''}`}>
+        {navigation}
+        <button type="button" className="client-collapse-button" onClick={() => setCollapsed((value) => !value)} title={collapsed ? 'Expand navigation' : 'Collapse navigation'}>
+          {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
         </button>
       </aside>
 
-      {/* Main content */}
-      <div style={styles.main}>
-        <header style={styles.topBar}>
-          <span style={styles.orgName}>Client Portal</span>
-          <span style={styles.userName}>{profile.displayName}</span>
-        </header>
+      {mobileOpen && <button type="button" className="client-mobile-scrim" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
+      <aside className={`client-mobile-drawer ${mobileOpen ? 'is-open' : ''}`}>
+        <button type="button" className="client-mobile-close" onClick={() => setMobileOpen(false)} title="Close navigation"><X size={19} /><span className="sr-only">Close navigation</span></button>
+        {navigation}
+      </aside>
 
-        <main style={styles.content}>
-          <div style={styles.placeholder}>
-            <div style={styles.placeholderIcon}>👋</div>
-            <div style={styles.placeholderTitle}>Welcome to Field Compliance</div>
-            <p style={styles.placeholderText}>
-              Select an option from the menu to view your compliance data.
-            </p>
-          </div>
+      <div className="client-shell-main">
+        <header className="client-shell-topbar">
+          <button type="button" className="client-mobile-menu" onClick={() => setMobileOpen(true)} title="Open navigation"><Menu size={20} /><span className="sr-only">Open navigation</span></button>
+          <div><strong>{agreement?.client_name ?? 'Client portal'}</strong><small>{agreement?.provider_name ? `Service by ${agreement.provider_name}` : 'Service relationship loading'}</small></div>
+          <span className="client-role-badge">{profile.role.replace('client_', '')}</span>
+        </header>
+        <main className="client-shell-content" data-app-content>
+          <ClientPortalContent page={activePage} />
         </main>
       </div>
     </div>
   );
 }
-
-function NavItem({ label, icon, onClick }: {
-  label: string;
-  icon: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={styles.navItem}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.background = 'rgba(158,158,158,0.1)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.background = 'transparent';
-      }}
-    >
-      <span style={styles.navIcon}>{icon}</span>
-      <span>{label}</span>
-    </button>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  root: {
-    display: 'flex',
-    height: '100vh',
-    background: 'var(--color-bg-primary)',
-    color: 'var(--color-text-primary)',
-  },
-  sidebar: {
-    width: 240,
-    background: 'var(--color-bg-surface)',
-    borderRight: '1px solid rgba(158,158,158,0.15)',
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '16px 0',
-  },
-  logo: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '16px',
-    marginBottom: '16px',
-  },
-  logoBg: {
-    width: 40,
-    height: 40,
-    background: '#1976d2',
-    borderRadius: 6,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 18,
-    fontWeight: 600,
-    color: 'white',
-  },
-  nav: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-    padding: '0 12px',
-  },
-  navItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '12px 16px',
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--color-text-primary)',
-    cursor: 'pointer',
-    fontSize: 14,
-    borderRadius: 6,
-    transition: 'background 200ms',
-    textAlign: 'left',
-  },
-  navIcon: {
-    fontSize: 18,
-    flexShrink: 0,
-  },
-  signOutBtn: {
-    margin: '12px',
-    padding: '10px',
-    background: 'transparent',
-    border: '1px solid rgba(158,158,158,0.2)',
-    borderRadius: 6,
-    color: 'var(--color-text-primary)',
-    cursor: 'pointer',
-    fontSize: 14,
-    transition: 'background 200ms',
-  },
-  main: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  topBar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 24px',
-    borderBottom: '1px solid rgba(158,158,158,0.15)',
-    background: 'var(--color-bg-surface)',
-  },
-  orgName: {
-    fontSize: 16,
-    fontWeight: 600,
-  },
-  userName: {
-    fontSize: 14,
-    color: 'var(--color-text-secondary)',
-  },
-  content: {
-    flex: 1,
-    padding: '24px',
-    overflow: 'auto',
-  },
-  placeholder: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 300,
-    textAlign: 'center',
-  },
-  placeholderIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  placeholderTitle: {
-    fontSize: 20,
-    fontWeight: 600,
-    marginBottom: 8,
-  },
-  placeholderText: {
-    color: 'var(--color-text-secondary)',
-    fontSize: 14,
-  },
-};

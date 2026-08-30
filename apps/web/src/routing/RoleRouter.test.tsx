@@ -22,7 +22,7 @@ describe('RoleRouter', () => {
     );
 
     expect(screen.getAllByText(/field compliance manager/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/admin hub/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/today at a glance/i).length).toBeGreaterThan(0);
   });
 
   it('renders the officer shell for officer roles', () => {
