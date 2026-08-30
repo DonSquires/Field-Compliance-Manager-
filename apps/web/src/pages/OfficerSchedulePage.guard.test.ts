@@ -22,4 +22,12 @@ describe('officer schedule workspace', () => {
     expect(home).toContain('await claimShiftCoverage(requestId)');
     expect(home).not.toContain(".update({ status: 'claimed'");
   });
+
+  it('merges self-owned slots and synchronizes assignment responses through the RPC', () => {
+    expect(page).toContain("from('staff_profiles')");
+    expect(page).toContain("from('roster_slots')");
+    expect(page).toContain('!slot.linked_shift_id');
+    expect(page).toContain("supabase.rpc('respond_to_roster_slot'");
+    expect(page).toContain('Decline reason');
+  });
 });

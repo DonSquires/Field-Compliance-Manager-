@@ -138,6 +138,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
 }
 
 export async function installOfficerScheduleFixtures(page: Page): Promise<void> {
+  let internalSlotStatus = 'published';
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'officer-e2e-token', refresh_token: 'officer-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: officerUser }) });
   });
@@ -149,6 +150,10 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
     const select = url.searchParams.get('select') ?? '';
     if (resource === 'user_profiles') {
       await route.fulfill(fulfillJson([{ id: OFFICER_ID, display_name: 'Ana Ngata', email: officerUser.email, role: 'officer', organization_id: ORG_ID }]));
+      return;
+    }
+    if (resource === 'staff_profiles') {
+      await route.fulfill(fulfillJson({ id: OFFICER_ID }));
       return;
     }
     if (resource === 'shifts') {
@@ -165,6 +170,20 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
     if (resource === 'shift_coverage_requests') {
       await route.fulfill(fulfillJson([
         { id: '88888888-8888-4888-8888-888888888888', shift_date: '2026-09-01', start_time: '18:00:00', end_time: '23:00:00', required_staff_count: 2, urgency: 'high', notes: 'Event perimeter support', site: [{ name: 'Civic Events Centre' }] },
+      ]));
+      return;
+    }
+    if (resource === 'roster_slots') {
+      await route.fulfill(fulfillJson([
+        { id: '33333333-3333-4333-8333-333333333334', work_unit_id: '44444444-4444-4444-8444-444444444445', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: 'published', linked_shift_id: '66666666-6666-4666-8666-666666666666', notes: null },
+        { id: '55555555-5555-4555-8555-555555555556', work_unit_id: '77777777-7777-4777-8777-777777777778', scheduled_start: '2026-09-03T21:00:00.000Z', scheduled_end: '2026-09-04T01:00:00.000Z', status: internalSlotStatus, linked_shift_id: null, notes: 'Monthly roster reconciliation' },
+      ]));
+      return;
+    }
+    if (resource === 'roster_work_units') {
+      await route.fulfill(fulfillJson([
+        { id: '44444444-4444-4444-8444-444444444445', name: 'North District Patrol', work_unit_type: 'patrol', service_type: 'patrol' },
+        { id: '77777777-7777-4777-8777-777777777778', name: 'Roster Administration', work_unit_type: 'internal', service_type: 'administration' },
       ]));
       return;
     }
@@ -186,6 +205,11 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
     }
     if (resource === 'submit_officer_field_report') {
       await route.fulfill(fulfillJson([{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', created: true, received_at: '2026-08-30T09:30:00.000Z' }]));
+      return;
+    }
+    if (resource === 'respond_to_roster_slot') {
+      internalSlotStatus = 'declined';
+      await route.fulfill(fulfillJson([{ slot_id: '55555555-5555-4555-8555-555555555556', slot_status: 'declined', shift_id: null, shift_status: null }]));
       return;
     }
     await route.fulfill(fulfillJson([]));

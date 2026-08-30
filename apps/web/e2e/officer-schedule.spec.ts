@@ -11,6 +11,15 @@ test('officer schedule and coverage claim are visually correct and operational',
   await signInAsOfficer(page);
   await expect(page.getByRole('heading', { name: 'My schedule' })).toBeVisible();
   await expect(page.getByText('North district patrol')).toBeVisible();
+  const internalAssignment = page.getByText('Roster Administration', { exact: true }).locator('..').locator('..');
+  await expect(internalAssignment).toBeVisible();
+  await internalAssignment.getByRole('button', { name: 'Decline' }).click();
+  const responseDialog = page.getByRole('dialog', { name: 'Decline assignment?' });
+  await expect(responseDialog.getByRole('button', { name: 'Confirm decline' })).toBeDisabled();
+  await responseDialog.getByLabel('Decline reason').fill('Unavailable due to approved training commitment.');
+  await expect(responseDialog).toHaveScreenshot('officer-schedule-decline-dialog.png');
+  await responseDialog.getByRole('button', { name: 'Confirm decline' }).click();
+  await expect(page.getByText('Assignment declined with your recorded reason.')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.locator('.officer-schedule')).toHaveScreenshot('officer-schedule-assigned.png');
 
