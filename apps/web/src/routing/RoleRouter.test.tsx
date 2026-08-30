@@ -10,9 +10,12 @@ describe('RoleRouter', () => {
       <AuthContext.Provider value={{
         profile: { id: 'u1', role: 'admin', organizationId: 'org-1', displayName: 'Admin User' },
         hasSession: true,
+        recoveryMode: false,
         loading: false,
         error: null,
         signInWithPassword: async () => ({ error: null }),
+        requestPasswordReset: async () => ({ error: null }),
+        updatePassword: async () => ({ error: null }),
         signOut: async () => undefined,
       }}>
         <MemoryRouter>
@@ -30,9 +33,12 @@ describe('RoleRouter', () => {
       <AuthContext.Provider value={{
         profile: { id: 'u2', role: 'officer', organizationId: 'org-1', displayName: 'Officer User' },
         hasSession: true,
+        recoveryMode: false,
         loading: false,
         error: null,
         signInWithPassword: async () => ({ error: null }),
+        requestPasswordReset: async () => ({ error: null }),
+        updatePassword: async () => ({ error: null }),
         signOut: async () => undefined,
       }}>
         <MemoryRouter>

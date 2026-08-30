@@ -4,8 +4,10 @@ import type { LucideIcon } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { ClientPortalPage as ClientPortalContent } from '../pages/ClientPortalPage';
 import { getClientPortalPages, isClientPortalPage, type ClientPortalPage } from '../lib/clientPortalAccess';
+import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import './ClientShell.css';
 
 const NAVIGATION: Array<{ id: ClientPortalPage; label: string; icon: LucideIcon }> = [
@@ -47,6 +49,14 @@ export function ClientShell() {
   const openPage = (page: ClientPortalPage) => {
     navigate(page === 'overview' ? '/client' : `/client/${page}`);
     setMobileOpen(false);
+  };
+
+  const navigateFromNotification = (notification: NotificationRecord) => {
+    const destination = resolveNotificationDestination(profile.role, notification);
+    if (!destination || destination.kind !== 'client_page' || !isClientPortalPage(destination.page)) return false;
+    if (!allowedPages.has(destination.page)) return false;
+    openPage(destination.page);
+    return true;
   };
 
   const handleSignOut = async () => {
@@ -99,6 +109,7 @@ export function ClientShell() {
         <header className="client-shell-topbar">
           <button type="button" className="client-mobile-menu" onClick={() => setMobileOpen(true)} title="Open navigation"><Menu size={20} /><span className="sr-only">Open navigation</span></button>
           <div><strong>{agreement?.client_name ?? 'Client portal'}</strong><small>{agreement?.provider_name ? `Service by ${agreement.provider_name}` : 'Service relationship loading'}</small></div>
+          <NotificationCenter onNavigate={navigateFromNotification} />
           <span className="client-role-badge">{profile.role.replace('client_', '')}</span>
         </header>
         <main className="client-shell-content" data-app-content>

@@ -15,6 +15,7 @@
  * Uses SUPABASE_SERVICE_ROLE_KEY to call the admin API server-side.
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { roleLevel } from '../_shared/auth.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const CORS = {
@@ -28,6 +29,7 @@ const ALLOWED_ROLES = [
   'admin_officer',
   'nzscv_monitor',
   'officer',
+  'scan_operator',
   'client_admin',
   'client_officer',
   'client_viewer'
@@ -81,6 +83,9 @@ serve(async (req)=>{
     if (!role || !ALLOWED_ROLES.includes(role)) return json({
       error: 'valid role is required'
     }, 400);
+    if (roleLevel(role) > roleLevel(callerProfile.role)) return json({
+      error: 'Forbidden: cannot assign a role above your own authority level'
+    }, 403);
     // Pre-authenticated path: validate password server-side
     if (preauthenticated) {
       if (!CAN_INVITE.includes(callerProfile.role)) {
@@ -110,6 +115,7 @@ serve(async (req)=>{
       admin_officer: 'Admin Officer',
       nzscv_monitor: 'NZSCV Monitor',
       officer: 'Officer',
+      scan_operator: 'Scan Operator',
       client_admin: 'Client Administrator',
       client_officer: 'Client Officer',
       client_viewer: 'Client Viewer'

@@ -5,6 +5,11 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
 
 describe('AdminShell access and routing boundaries', () => {
+  it('integrates tenant-scoped role-aware notifications', () => {
+    expect(source).toContain('<NotificationCenter onNavigate={navigateFromNotification} />');
+    expect(source).toContain('resolveNotificationDestination');
+  });
+
   it('restricts platform and testing pages to platform operators', () => {
     expect(source).toContain('PLATFORM_ONLY_PAGES');
     expect(source).toContain("role === 'grand_master' || role === 'master'");

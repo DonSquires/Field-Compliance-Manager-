@@ -6,6 +6,11 @@ const shellSource = readFileSync(resolve(process.cwd(), 'src/shells/ClientShell.
 const pageSource = readFileSync(resolve(process.cwd(), 'src/pages/ClientPortalPage.tsx'), 'utf8');
 
 describe('ClientShell agreement boundary', () => {
+  it('only opens notification destinations allowed by the selected agreement', () => {
+    expect(shellSource).toContain('<NotificationCenter onNavigate={navigateFromNotification} />');
+    expect(shellSource).toContain('allowedPages.has(destination.page)');
+  });
+
   it('uses the canonical agreement access policy for menus and direct routes', () => {
     expect(shellSource).toContain('getClientPortalPages');
     expect(shellSource).toContain('allowedPages.has(activePage)');

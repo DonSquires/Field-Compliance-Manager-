@@ -5,6 +5,11 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx'), 'utf8');
 
 describe('OfficerShell state routing', () => {
+  it('integrates role-aware notifications', () => {
+    expect(source).toContain('<NotificationCenter onNavigate={navigateFromNotification} />');
+    expect(source).toContain('resolveNotificationDestination');
+  });
+
   it('renders the officer home page for the home state', () => {
     expect(source).toContain("officerState === 'standby' || officerState === 'home'");
     expect(source).toContain('<OfficerHomePage shift={activeShift}');

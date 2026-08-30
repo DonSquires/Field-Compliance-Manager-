@@ -105,6 +105,19 @@ serve(async (req)=>{
         details: inviteError.message
       }, 400);
     }
+    const { error: auditError } = await adminClient.rpc('log_user_management_action', {
+      p_organization_id: targetProfile.organization_id,
+      p_target_user_id: user_id,
+      p_action_type: 'invite_resent',
+      p_performed_by: caller.id,
+      p_old_value: null,
+      p_new_value: null,
+      p_metadata: {
+        display_name: displayName,
+        role: targetProfile.role
+      }
+    });
+    if (auditError) console.error('[resend-invite] audit log failed:', auditError.message);
     console.log(`[resend-invite] resent invite to ${authUser.user.email}`);
     return json({
       success: true,

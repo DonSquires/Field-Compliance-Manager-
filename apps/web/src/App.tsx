@@ -5,7 +5,7 @@ import { RoleRouter } from './routing/RoleRouter';
 import LoginPage from './pages/LoginPage';
 
 function AuthGate() {
-  const { profile, hasSession, loading } = useAuth();
+  const { profile, hasSession, recoveryMode, loading } = useAuth();
 
   if (loading) {
     return (
@@ -15,7 +15,7 @@ function AuthGate() {
     );
   }
 
-  if (!hasSession) return <LoginPage />;
+  if (!hasSession || recoveryMode) return <LoginPage />;
 
   if (!profile) {
     return (

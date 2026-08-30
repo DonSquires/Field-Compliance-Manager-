@@ -1,16 +1,8 @@
-/**
- * ApprovalsActivityPage.tsx
- *
- * Governed writes queue: every Bob-proposed consequential action lives in
- * bob_agentic_actions and requires human approval before being applied.
- * Reads via the get_approvals_activity RPC (pre-joined org/user names,
- * can_decide flag); decisions are routed through bob-proposal-approver
- * (never a direct table write) so approval is a real gate, not decoration.
- */
-
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
+import { formatGovernedPayload } from '../lib/governedPayload';
 import { supabase } from '../lib/supabase';
-import './PageStyles.css';
+import './ApprovalsActivityPage.css';
 
 type ActionStatus = 'pending' | 'approved' | 'rejected' | 'applied' | 'failed';
 
@@ -23,167 +15,217 @@ interface ApprovalRow {
   context_table: string | null;
   context_summary: string | null;
   created_at: string;
-  proposed_payload: Record<string, any>;
+  applied_at: string | null;
+  approved_at: string | null;
+  proposed_payload: Record<string, unknown>;
+  amended_payload: Record<string, unknown> | null;
   org_name: string | null;
   triggered_by_name: string | null;
   user_name: string | null;
   approved_by_name: string | null;
   rejection_reason: string | null;
   error_message: string | null;
+  result_table: string | null;
+  result_record_id: string | null;
   can_decide: boolean;
 }
 
-const STATUS_FILTERS: { id: ActionStatus | 'all'; label: string }[] = [
-  { id: 'all', label: 'All' },
+const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
   { id: 'pending', label: 'Pending' },
   { id: 'approved', label: 'Approved' },
   { id: 'applied', label: 'Applied' },
   { id: 'rejected', label: 'Rejected' },
   { id: 'failed', label: 'Failed' },
+  { id: 'all', label: 'All activity' },
 ];
 
 const ApprovalsActivityPage: React.FC = () => {
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<ActionStatus | 'all'>('pending');
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
+  const [reasoning, setReasoning] = useState('');
+  const [applyAfterApprove, setApplyAfterApprove] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // ATLAS READS: get_approvals_activity (RPC over bob_agentic_actions)
   const loadActivity = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error: err } = await supabase.rpc('get_approvals_activity', {
+      const { data, error: queryError } = await supabase.rpc('get_approvals_activity', {
         p_limit: 100,
         p_offset: 0,
         p_statuses: filter === 'all' ? null : [filter],
         p_action_types: null,
       });
-
-      if (err) throw err;
-      setRows((data as ApprovalRow[]) || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load approvals');
+      if (queryError) throw queryError;
+      const activity = (data as ApprovalRow[]) ?? [];
+      setRows(activity);
+      setSelectedId((current) => current && activity.some((row) => row.id === current) ? current : activity[0]?.id ?? null);
+    } catch (loadError) {
+      setRows([]);
+      setSelectedId(null);
+      setError(loadError instanceof Error ? loadError.message : 'Governed actions could not be loaded.');
     } finally {
       setLoading(false);
     }
   }, [filter]);
 
   useEffect(() => {
-    loadActivity();
+    void loadActivity();
   }, [loadActivity]);
 
-  const handleDecision = async (row: ApprovalRow, decision: 'approve' | 'reject') => {
+  const visibleRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((row) => [row.action_type, row.context_summary, row.context_table, row.org_name, row.triggered_by_name]
+      .some((value) => value?.toLowerCase().includes(term)));
+  }, [rows, search]);
+
+  const selected = rows.find((row) => row.id === selectedId) ?? null;
+  const pendingCount = rows.filter((row) => row.status === 'pending').length;
+  const failedCount = rows.filter((row) => row.status === 'failed').length;
+  const decidableCount = rows.filter((row) => row.status === 'pending' && row.can_decide).length;
+
+  const openDecision = (nextDecision: 'approve' | 'reject') => {
+    setDecision(nextDecision);
+    setReasoning('');
+    setApplyAfterApprove(false);
+    setError(null);
+  };
+
+  const submitDecision = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selected || !decision || !reasoning.trim() || !selected.can_decide) return;
+    setBusyId(selected.id);
+    setError(null);
+    setNotice(null);
     try {
-      setBusyId(row.id);
-      setError(null);
-
-      // ATLAS CALLS: bob-proposal-approver
-      const { error: fnError } = await supabase.functions.invoke('bob-proposal-approver', {
-        body: { action_id: row.id, action: decision },
+      const { data, error: invokeError } = await supabase.functions.invoke('bob-proposal-approver', {
+        body: {
+          action_id: selected.id,
+          action: decision,
+          reasoning: reasoning.trim(),
+          apply: decision === 'approve' && applyAfterApprove,
+        },
       });
-
-      if (fnError) throw fnError;
+      if (invokeError) throw invokeError;
+      const response = data as { status?: string; applied?: boolean; apply_error?: string; note?: string } | null;
+      if (response?.apply_error) {
+        setNotice(`Approval recorded, but application failed: ${response.apply_error}`);
+      } else {
+        setNotice(response?.note ?? `Action ${decision === 'approve' ? 'approved' : 'rejected'} successfully.`);
+      }
+      setDecision(null);
+      setReasoning('');
       await loadActivity();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${decision} action`);
+    } catch (decisionError) {
+      setError(decisionError instanceof Error ? decisionError.message : `The ${decision} decision could not be recorded.`);
     } finally {
       setBusyId(null);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="page-container">
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading approvals...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="page-container">
-      <header className="page-header">
-        <h1>Approvals & Activity</h1>
-        <p className="subtitle">Human sign-off queue for Bob-proposed actions</p>
+    <div className="approvals-page">
+      <header className="approvals-heading">
+        <div><span>Governed operations</span><h1>Approvals and activity</h1><p>Review consequential actions before they enter the application.</p></div>
+        <button type="button" onClick={() => void loadActivity()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh</button>
       </header>
 
-      {error && (
-        <div className="alert alert-error" role="alert">
-          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
-            ×
-          </button>
-          {error}
+      <section className="approvals-summary" aria-label="Approval queue summary">
+        <div><Clock3 size={18} /><span>Pending in view</span><strong>{pendingCount}</strong></div>
+        <div><ShieldCheck size={18} /><span>You can decide</span><strong>{decidableCount}</strong></div>
+        <div><AlertTriangle size={18} /><span>Failed in view</span><strong>{failedCount}</strong></div>
+        <div><History size={18} /><span>Loaded activity</span><strong>{rows.length}</strong></div>
+      </section>
+
+      {error && <div className="approvals-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
+      {notice && <div className={`approvals-message ${notice.includes('failed') ? 'is-warning' : 'is-success'}`} role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
+
+      <div className="approvals-toolbar">
+        <div className="approvals-filters" role="tablist" aria-label="Action status">
+          {STATUS_FILTERS.map((item) => <button type="button" role="tab" aria-selected={filter === item.id} className={filter === item.id ? 'is-active' : ''} onClick={() => setFilter(item.id)} key={item.id}>{item.label}</button>)}
+        </div>
+        <label className="approvals-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search actions, organisations, or targets" /></label>
+      </div>
+
+      <div className="approvals-layout">
+        <section className="approvals-queue" aria-label="Governed action queue">
+          <div className="approvals-panel-heading"><div><span>Queue</span><h2>{filter === 'all' ? 'All governed activity' : `${filter} actions`}</h2></div><Filter size={18} /></div>
+          {loading ? <div className="approvals-empty"><RefreshCw size={20} className="is-spinning" /> Loading governed actions</div> : visibleRows.length === 0 ? <div className="approvals-empty"><FileCheck2 size={21} /> No actions match this view</div> : (
+            <div className="approvals-list">
+              {visibleRows.map((row) => (
+                <button type="button" className={`${selectedId === row.id ? 'is-selected' : ''} status-${row.status}`} onClick={() => setSelectedId(row.id)} key={row.id}>
+                  <span className="approvals-status-mark" />
+                  <div><strong>{formatActionType(row.action_type)}</strong><small>{row.context_summary ?? row.context_table ?? 'No context summary provided'}</small></div>
+                  <div><span>{row.org_name ?? 'Organisation unavailable'}</span><time dateTime={row.created_at}>{formatAge(row.created_at)}</time></div>
+                  <ChevronRight size={17} />
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <aside className="approvals-detail">
+          {!selected ? <div className="approvals-empty"><FileCheck2 size={22} /> Select an action to inspect</div> : (
+            <>
+              <div className="approvals-panel-heading"><div><span>Action review</span><h2>{formatActionType(selected.action_type)}</h2></div><span className={`approvals-status status-${selected.status}`}>{selected.status}</span></div>
+              <p className="approvals-context">{selected.context_summary ?? 'No context summary was provided for this action.'}</p>
+
+              <dl className="approvals-facts">
+                <div><dt>Organisation</dt><dd>{selected.org_name ?? 'Unavailable'}</dd></div>
+                <div><dt>Target</dt><dd>{selected.context_table ?? 'Not specified'}</dd></div>
+                <div><dt>Triggered by</dt><dd>{selected.triggered_by_name ?? selected.user_name ?? 'Unknown'}</dd></div>
+                <div><dt>Created</dt><dd>{new Date(selected.created_at).toLocaleString('en-NZ')}</dd></div>
+                <div><dt>Confidence signal</dt><dd>{selected.confidence_score == null ? 'Not supplied' : `${Math.round(selected.confidence_score * 100)}%`}</dd></div>
+                <div><dt>Decision authority</dt><dd>{selected.can_decide ? 'Confirmed' : 'Not available'}</dd></div>
+              </dl>
+
+              <section className="approvals-reasoning"><span>Proposal reasoning</span><p>{selected.bob_reasoning ?? 'No reasoning was recorded with this proposal.'}</p></section>
+              <details className="approvals-payload"><summary>Proposed payload</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>
+
+              {selected.rejection_reason && <div className="approvals-outcome is-rejected"><XCircle size={17} /><div><strong>Rejection reason</strong><span>{selected.rejection_reason}</span></div></div>}
+              {selected.error_message && <div className="approvals-outcome is-failed"><AlertTriangle size={17} /><div><strong>Application error</strong><span>{selected.error_message}</span></div></div>}
+              {selected.result_record_id && <div className="approvals-outcome is-applied"><CheckCircle2 size={17} /><div><strong>Applied result</strong><span>{selected.result_table ?? 'record'} · {selected.result_record_id}</span></div></div>}
+
+              {selected.status === 'pending' && (
+                selected.can_decide ? <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openDecision('reject')}><XCircle size={17} /> Reject</button><button type="button" className="is-approve" onClick={() => openDecision('approve')}><CheckCircle2 size={17} /> Review approval</button></div> : <div className="approvals-no-authority"><ShieldCheck size={17} /> This action is visible to you, but your current scope cannot decide it.</div>
+              )}
+            </>
+          )}
+        </aside>
+      </div>
+
+      {decision && selected && (
+        <div className="approvals-dialog-backdrop">
+          <form className="approvals-dialog" onSubmit={submitDecision} role="dialog" aria-modal="true" aria-labelledby="decision-title">
+            <div className="approvals-panel-heading"><div><span>Governed decision</span><h2 id="decision-title">{decision === 'approve' ? 'Approve action' : 'Reject action'}</h2></div><button type="button" onClick={() => setDecision(null)}><X size={18} /><span className="sr-only">Close</span></button></div>
+            <div className="approvals-decision-target"><strong>{formatActionType(selected.action_type)}</strong><span>{selected.org_name ?? 'Unknown organisation'} · {selected.context_table ?? 'No target specified'}</span></div>
+            <label><span>Decision reasoning</span><textarea required rows={4} value={reasoning} onChange={(event) => setReasoning(event.target.value)} placeholder={decision === 'approve' ? 'Why is this action appropriate and safe to approve?' : 'Why should this action not proceed?'} /></label>
+            {decision === 'approve' && <label className="approvals-apply-option"><input type="checkbox" checked={applyAfterApprove} onChange={(event) => setApplyAfterApprove(event.target.checked)} /><span><strong>Approve and apply immediately</strong><small>Approval and execution remain separate audited steps. Leave off to approve without applying.</small></span></label>}
+            <div className="approvals-dialog-actions"><button type="button" onClick={() => setDecision(null)}>Cancel</button><button type="submit" className={decision === 'approve' ? 'is-approve' : 'is-reject'} disabled={busyId === selected.id || !reasoning.trim()}>{busyId === selected.id ? 'Recording decision' : decision === 'approve' ? applyAfterApprove ? 'Approve and apply' : 'Approve' : 'Reject'}</button></div>
+          </form>
         </div>
       )}
-
-      <div className="crm-branch-filter">
-        {STATUS_FILTERS.map((f) => (
-          <button
-            key={f.id}
-            className={`btn btn-sm ${filter === f.id ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setFilter(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="contacts-list">
-        {rows.length === 0 ? (
-          <div className="empty-state">
-            <p>No actions in this filter.</p>
-          </div>
-        ) : (
-          rows.map((row) => (
-            <div key={row.id} className="contact-card">
-              <div className="contact-header">
-                <h3>{row.action_type}</h3>
-                <span className={`status-badge status-${row.status}`}>{row.status}</span>
-              </div>
-              <div className="contact-details">
-                {row.context_summary && <p>{row.context_summary}</p>}
-                {row.bob_reasoning && <p className="contact-meta">Bob's reasoning: {row.bob_reasoning}</p>}
-                <p className="contact-meta">
-                  Triggered by {row.triggered_by_name || row.user_name || 'unknown'} ·{' '}
-                  {new Date(row.created_at).toLocaleString()}
-                  {row.context_table ? ` · targets ${row.context_table}` : ''}
-                  {row.confidence_score != null ? ` · confidence ${Math.round(row.confidence_score * 100)}%` : ''}
-                </p>
-                {row.approved_by_name && (
-                  <p className="contact-meta">Decided by {row.approved_by_name}</p>
-                )}
-                {row.rejection_reason && <p className="contact-meta">Rejected: {row.rejection_reason}</p>}
-                {row.error_message && <p className="contact-meta">Error: {row.error_message}</p>}
-              </div>
-              {row.status === 'pending' && row.can_decide && (
-                <div className="assessment-actions">
-                  <button
-                    className="btn btn-sm btn-secondary"
-                    disabled={busyId === row.id}
-                    onClick={() => handleDecision(row, 'approve')}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    className="btn btn-sm btn-danger"
-                    disabled={busyId === row.id}
-                    onClick={() => handleDecision(row, 'reject')}
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
-            </div>
-          ))
-        )}
-      </div>
     </div>
   );
 };
+
+function formatActionType(value: string): string {
+  return value.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatAge(value: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000));
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
 export default ApprovalsActivityPage;

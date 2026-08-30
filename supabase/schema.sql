@@ -8411,7 +8411,7 @@ CREATE TABLE IF NOT EXISTS "public"."user_profiles" (
     "photo_url" "text",
     "module_access" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "employer_organization_id" "uuid",
-    CONSTRAINT "user_profiles_role_check" CHECK (("role" = ANY (ARRAY['grand_master'::"text", 'master'::"text", 'admin'::"text", 'admin_officer'::"text", 'nzscv_monitor'::"text", 'officer'::"text", 'client_admin'::"text", 'client_officer'::"text", 'client_viewer'::"text"])))
+    CONSTRAINT "user_profiles_role_check" CHECK (("role" = ANY (ARRAY['grand_master'::"text", 'master'::"text", 'admin'::"text", 'admin_officer'::"text", 'nzscv_monitor'::"text", 'officer'::"text", 'scan_operator'::"text", 'client_admin'::"text", 'client_officer'::"text", 'client_viewer'::"text"])))
 );
 
 
@@ -10719,7 +10719,7 @@ CREATE TABLE IF NOT EXISTS "public"."notifications" (
     "dedup_key" "text",
     "read_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'welfare'::"text", 'dispatch'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
+    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'welfare'::"text", 'dispatch'::"text", 'roster'::"text", 'open_job'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
     CONSTRAINT "notifications_recipient_chk" CHECK ((("recipient_user_id" IS NOT NULL) OR ("recipient_role" IS NOT NULL))),
     CONSTRAINT "notifications_severity_check" CHECK (("severity" = ANY (ARRAY['info'::"text", 'warning'::"text", 'critical'::"text"])))
 );
@@ -13602,7 +13602,8 @@ CREATE TABLE IF NOT EXISTS "public"."welfare_alerts" (
     "last_activity_at" timestamp with time zone,
     "gps_accuracy" double precision,
     "notes" "text",
-    CONSTRAINT "welfare_alerts_alert_type_check" CHECK (("alert_type" = ANY (ARRAY['overdue'::"text", 'man_down'::"text", 'sos'::"text", 'armed_danger'::"text", 'inactivity'::"text", 'gps_lost'::"text", 'missed'::"text", 'manual'::"text", 'investigation_overdue'::"text", 'check_in'::"text"])))
+    CONSTRAINT "welfare_alerts_alert_type_check" CHECK (("alert_type" = ANY (ARRAY['overdue'::"text", 'man_down'::"text", 'sos'::"text", 'armed_danger'::"text", 'inactivity'::"text", 'gps_lost'::"text", 'missed'::"text", 'manual'::"text", 'investigation_overdue'::"text", 'check_in'::"text"]))),
+    CONSTRAINT "welfare_alerts_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'acknowledged'::"text", 'resolved'::"text"])))
 );
 
 

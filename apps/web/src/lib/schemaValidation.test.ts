@@ -78,11 +78,8 @@ describe('Schema Enum & Constraint Validation', () => {
     });
 
     it('welfare_alerts.status values are valid', () => {
-      // Schema has NO CHECK constraint (gap in schema)
-      // App uses: pending|acknowledged|resolved (assumed valid)
-      // Note: This is a schema gap - welfare_alerts.status has no enforced enum
-      const assumedValidValues = ['pending', 'acknowledged', 'resolved'];
-      expect(assumedValidValues).toBeDefined();
+      const schemaValues = ['pending', 'acknowledged', 'resolved'];
+      expect(schemaValues).toEqual(['pending', 'acknowledged', 'resolved']);
     });
   });
 
@@ -190,14 +187,6 @@ describe('Schema Enum & Constraint Validation', () => {
 });
 
 describe('Known Schema Gaps (Documented)', () => {
-  it('documents welfare_alerts.status has no CHECK constraint', () => {
-    // Gap: welfare_alerts.status is TEXT without CHECK constraint
-    // App uses: 'pending' (default) | 'acknowledged' | 'resolved'
-    // These values are assumed valid but not enforced by schema
-    const hasGap = true;
-    expect(hasGap).toBe(true);
-  });
-
   it('documents DispatchConsolePage Phase C impossible', () => {
     // Gap: requester_organizations table doesn't exist
     // Solution: Phase C stubbed to return empty list

@@ -17,6 +17,8 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
   Bot,
   Building2,
@@ -302,6 +304,24 @@ const AdminShell: React.FC = () => {
     navigateToPage(destination as AdminPage);
   }, [navigateToFieldOps, navigateToPage]);
 
+  const navigateFromNotification = useCallback((notification: NotificationRecord) => {
+    const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
+    if (!destination) return false;
+    if (destination.kind === 'bob') {
+      setBobOpen(true);
+      return true;
+    }
+    if (destination.kind === 'admin_field_ops') {
+      navigateToFieldOps(destination.area as FieldOpsSubArea);
+      return true;
+    }
+    if (destination.kind === 'admin_page') {
+      navigateToPage(destination.page as AdminPage);
+      return true;
+    }
+    return false;
+  }, [navigateToFieldOps, navigateToPage, profile?.role]);
+
   const bobContext = useMemo(() => ({
     page: activePage,
     crmTab,
@@ -424,6 +444,7 @@ const AdminShell: React.FC = () => {
               )}
             </div>
             <div className="admin-shell-tools">
+              <NotificationCenter onNavigate={navigateFromNotification} />
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>
@@ -459,6 +480,7 @@ const AdminShell: React.FC = () => {
           <span><Shield size={17} aria-hidden="true" /></span><strong>{orgName || 'Field Compliance Manager'}</strong>
         </div>
         <div className="admin-shell-tools">
+          <NotificationCenter onNavigate={navigateFromNotification} />
           <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
             <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
           </button>

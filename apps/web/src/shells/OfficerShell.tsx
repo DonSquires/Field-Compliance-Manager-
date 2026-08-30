@@ -52,6 +52,8 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
+import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import './OfficerShell.css';
 
 const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
@@ -227,6 +229,20 @@ const OfficerShell: React.FC = () => {
     }
   }, [navigate]);
 
+  const navigateFromNotification = useCallback((notification: NotificationRecord) => {
+    const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
+    if (!destination) return false;
+    if (destination.kind === 'bob') {
+      setBobOpen(true);
+      return true;
+    }
+    if (destination.kind === 'officer_module') {
+      navigateToModule(destination.module as ActiveModule);
+      return true;
+    }
+    return false;
+  }, [navigateToModule, profile?.role]);
+
   // Get welfare status
   const currentWelfareStatus: WelfareStatus = safety.activeAlert?.kind === 'sos'
     ? 'sos'
@@ -333,6 +349,7 @@ const OfficerShell: React.FC = () => {
           <button type="button" className={`officer-safety-chip welfare-${currentWelfareStatus}`} onClick={() => void safety.checkIn()} disabled={safety.writeStatus === 'pending'} title="Check in now">
             <span>{welfareDisplay.dot}</span><small>Safety</small>
           </button>
+          <NotificationCenter onNavigate={navigateFromNotification} />
           <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
             <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
           </button>

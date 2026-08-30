@@ -1,293 +1,250 @@
-/**
- * UserManagementPage.tsx
- *
- * Canonical schema: user_profiles (identity/role, module_access,
- * deactivated_at/by). Provisioning and lifecycle actions are governed writes —
- * routed through edge functions (create-user, deactivate-user, delete-user,
- * resend-invite), not direct table writes, per the approval-required design
- * for consequential account changes.
- */
-
-import React, { useEffect, useState, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Filter, History, MailPlus, MoreHorizontal, RefreshCw, Search, ShieldCheck, UserCheck, UserMinus, Users, X } from 'lucide-react';
+import { useAuth, type AppRole } from '../context/AuthContext';
+import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { supabase } from '../lib/supabase';
-import './PageStyles.css';
+import './UserManagementPage.css';
 
 interface UserRow {
   id: string;
   display_name: string | null;
-  role: string;
+  role: AppRole;
   email: string | null;
   phone: string | null;
   module_access: string[];
   deactivated_at: string | null;
 }
 
-const ROLES = [
-  'grand_master',
-  'master',
-  'admin',
-  'admin_officer',
-  'nzscv_monitor',
-  'officer',
-  'client_admin',
-  'client_officer',
-  'client_viewer',
-];
+interface AuditRow {
+  id: string;
+  target_user_id: string;
+  action_type: string;
+  performed_by: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+type StatusFilter = 'all' | 'active' | 'deactivated';
+type LifecycleAction = 'deactivate' | 'reactivate';
 
 const UserManagementPage: React.FC = () => {
   const { profile } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [showInviteForm, setShowInviteForm] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ email: '', display_name: '', role: 'officer' });
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ email: '', displayName: '', role: 'officer' as AppRole });
+  const [lifecycle, setLifecycle] = useState<{ user: UserRow; action: LifecycleAction } | null>(null);
+  const [reason, setReason] = useState('');
 
-  // ATLAS READS: user_profiles
-  const loadUsers = useCallback(async () => {
-    const orgId = profile?.organizationId;
-    if (!orgId) return;
+  const assignableRoles = useMemo(() => getAssignableRoles(profile?.role ?? 'unknown'), [profile?.role]);
 
+  const loadIdentity = useCallback(async () => {
+    if (!profile?.organizationId) return;
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error: err } = await supabase
-        .from('user_profiles')
-        .select('id, display_name, role, email, phone, module_access, deactivated_at')
-        .eq('organization_id', orgId)
-        .order('display_name', { ascending: true });
-
-      if (err) throw err;
-      setUsers((data as UserRow[]) || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load users');
+      const [usersResponse, auditResponse] = await Promise.all([
+        supabase
+          .from('user_profiles')
+          .select('id, display_name, role, email, phone, module_access, deactivated_at')
+          .eq('organization_id', profile.organizationId)
+          .order('display_name', { ascending: true }),
+        supabase
+          .from('user_management_audit')
+          .select('id, target_user_id, action_type, performed_by, metadata, created_at')
+          .order('created_at', { ascending: false })
+          .limit(30),
+      ]);
+      if (usersResponse.error) throw usersResponse.error;
+      if (auditResponse.error) throw auditResponse.error;
+      setUsers((usersResponse.data as UserRow[]) ?? []);
+      setAuditRows((auditResponse.data as AuditRow[]) ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Identity records could not be loaded.');
     } finally {
       setLoading(false);
     }
   }, [profile?.organizationId]);
 
   useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
+    void loadIdentity();
+  }, [loadIdentity]);
 
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile?.organizationId) return;
+  const filteredUsers = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return users.filter((user) => {
+      const matchesStatus = statusFilter === 'all' || (statusFilter === 'active' ? !user.deactivated_at : Boolean(user.deactivated_at));
+      const matchesSearch = !term || [user.display_name, user.email, user.role].some((value) => value?.toLowerCase().includes(term));
+      return matchesStatus && matchesSearch;
+    });
+  }, [search, statusFilter, users]);
 
+  const inviteUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!profile?.organizationId || !assignableRoles.includes(inviteForm.role)) return;
+    setBusyId('invite');
+    setError(null);
+    setNotice(null);
     try {
-      setBusyId('invite');
-      setError(null);
-
-      // ATLAS CALLS: create-user
-      const { error: fnError } = await supabase.functions.invoke('create-user', {
+      const { error: invokeError } = await supabase.functions.invoke('create-user', {
         body: {
-          email: inviteForm.email,
-          display_name: inviteForm.display_name,
+          email: inviteForm.email.trim(),
+          display_name: inviteForm.displayName.trim(),
           role: inviteForm.role,
           organization_id: profile.organizationId,
         },
       });
-
-      if (fnError) throw fnError;
-
-      setInviteForm({ email: '', display_name: '', role: 'officer' });
-      setShowInviteForm(false);
-      await loadUsers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to invite user');
+      if (invokeError) throw invokeError;
+      setNotice(`Invitation sent to ${inviteForm.email.trim()}.`);
+      setInviteForm({ email: '', displayName: '', role: assignableRoles.includes('officer') ? 'officer' : assignableRoles[0] });
+      setShowInvite(false);
+      await loadIdentity();
+    } catch (inviteError) {
+      setError(inviteError instanceof Error ? inviteError.message : 'The invitation could not be sent.');
     } finally {
       setBusyId(null);
     }
   };
 
-  const handleDeactivateToggle = async (user: UserRow) => {
-    const action = user.deactivated_at ? 'reactivate' : 'deactivate';
-    if (!window.confirm(`${action === 'deactivate' ? 'Deactivate' : 'Reactivate'} ${user.display_name || user.email}?`)) {
+  const resendInvite = async (user: UserRow) => {
+    setBusyId(user.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: invokeError } = await supabase.functions.invoke('resend-invite', { body: { user_id: user.id } });
+      if (invokeError) throw invokeError;
+      setNotice(`Invitation resent to ${user.email ?? user.display_name ?? 'the selected user'}.`);
+      await loadIdentity();
+    } catch (resendError) {
+      setError(resendError instanceof Error ? resendError.message : 'The invitation could not be resent.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const submitLifecycle = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!lifecycle || lifecycle.user.id === profile?.id) return;
+    if (lifecycle.action === 'deactivate' && !reason.trim()) {
+      setError('A deactivation reason is required for the audit trail.');
       return;
     }
-
+    setBusyId(lifecycle.user.id);
+    setError(null);
+    setNotice(null);
     try {
-      setBusyId(user.id);
-      setError(null);
-
-      // ATLAS CALLS: deactivate-user
-      const { error: fnError } = await supabase.functions.invoke('deactivate-user', {
-        body: { user_id: user.id, action },
+      const { error: invokeError } = await supabase.functions.invoke('deactivate-user', {
+        body: { user_id: lifecycle.user.id, action: lifecycle.action, reason: reason.trim() || undefined },
       });
-
-      if (fnError) throw fnError;
-      await loadUsers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${action} user`);
+      if (invokeError) throw invokeError;
+      setNotice(`${lifecycle.user.display_name ?? lifecycle.user.email ?? 'User'} ${lifecycle.action === 'deactivate' ? 'deactivated' : 'reactivated'}.`);
+      setLifecycle(null);
+      setReason('');
+      await loadIdentity();
+    } catch (lifecycleError) {
+      setError(lifecycleError instanceof Error ? lifecycleError.message : `The account could not be ${lifecycle.action}d.`);
     } finally {
       setBusyId(null);
     }
   };
 
-  const handleResendInvite = async (user: UserRow) => {
-    try {
-      setBusyId(user.id);
-      setError(null);
-
-      // ATLAS CALLS: resend-invite
-      const { error: fnError } = await supabase.functions.invoke('resend-invite', {
-        body: { user_id: user.id },
-      });
-
-      if (fnError) throw fnError;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resend invite');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleDelete = async (user: UserRow) => {
-    if (!window.confirm(`Permanently delete ${user.display_name || user.email}? This cannot be undone.`)) return;
-
-    try {
-      setBusyId(user.id);
-      setError(null);
-
-      // ATLAS CALLS: delete-user
-      const { error: fnError } = await supabase.functions.invoke('delete-user', {
-        body: { user_id: user.id },
-      });
-
-      if (fnError) throw fnError;
-      setUsers(users.filter((u) => u.id !== user.id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete user');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="page-container">
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading users...</p>
-        </div>
-      </div>
-    );
-  }
+  const activeCount = users.filter((user) => !user.deactivated_at).length;
+  const deactivatedCount = users.length - activeCount;
 
   return (
-    <div className="page-container user-management-page">
-      <header className="page-header">
-        <h1>Users</h1>
-        <p className="subtitle">{users.length} accounts in this organisation</p>
+    <div className="identity-page">
+      <header className="identity-heading">
+        <div><span>Administration</span><h1>Identity and access</h1><p>Manage organisation accounts, roles, and lifecycle activity.</p></div>
+        <button type="button" className="identity-invite-button" onClick={() => setShowInvite((open) => !open)}><MailPlus size={17} /> Invite user</button>
       </header>
 
-      {error && (
-        <div className="alert alert-error" role="alert">
-          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
-            ×
-          </button>
-          {error}
-        </div>
-      )}
+      <section className="identity-summary" aria-label="Account summary">
+        <div><Users size={18} /><span>Total accounts</span><strong>{users.length}</strong></div>
+        <div><UserCheck size={18} /><span>Active</span><strong>{activeCount}</strong></div>
+        <div><UserMinus size={18} /><span>Deactivated</span><strong>{deactivatedCount}</strong></div>
+        <div><ShieldCheck size={18} /><span>Your authority</span><strong>{profile ? IDENTITY_ROLE_LABEL[profile.role] : 'Unknown'}</strong></div>
+      </section>
 
-      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', margin: '12px 0' }}>
-        <h2>All Users</h2>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowInviteForm(!showInviteForm)}>
-          {showInviteForm ? 'Cancel' : '+ Invite User'}
-        </button>
-      </div>
+      {error && <div className="identity-message is-error" role="alert"><AlertTriangle size={17} /> <span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
+      {notice && <div className="identity-message is-success" role="status"><CheckCircle2 size={17} /> <span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
 
-      {showInviteForm && (
-        <form className="new-contact-form" onSubmit={handleInvite}>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Display Name</label>
-              <input
-                type="text"
-                required
-                value={inviteForm.display_name}
-                onChange={(e) => setInviteForm({ ...inviteForm, display_name: e.target.value })}
-              />
-            </div>
-            <div className="form-group">
-              <label>Email</label>
-              <input
-                type="email"
-                required
-                value={inviteForm.email}
-                onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
-              />
-            </div>
+      {showInvite && (
+        <form className="identity-invite-form" onSubmit={inviteUser}>
+          <div className="identity-panel-heading"><div><span>Provision account</span><h2>Invite a user</h2></div><button type="button" onClick={() => setShowInvite(false)} title="Close invite form"><X size={18} /></button></div>
+          <div className="identity-form-grid">
+            <label><span>Display name</span><input required value={inviteForm.displayName} onChange={(event) => setInviteForm((form) => ({ ...form, displayName: event.target.value }))} /></label>
+            <label><span>Email address</span><input type="email" required value={inviteForm.email} onChange={(event) => setInviteForm((form) => ({ ...form, email: event.target.value }))} /></label>
+            <label><span>Role</span><select value={inviteForm.role} onChange={(event) => setInviteForm((form) => ({ ...form, role: event.target.value as AppRole }))}>{assignableRoles.map((role) => <option value={role} key={role}>{IDENTITY_ROLE_LABEL[role]}</option>)}</select></label>
           </div>
-          <div className="form-group">
-            <label>Role</label>
-            <select value={inviteForm.role} onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}>
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" className="btn btn-primary" disabled={busyId === 'invite'}>
-            {busyId === 'invite' ? 'Sending invite…' : 'Send Invite'}
-          </button>
+          <div className="identity-form-footer"><span>Only roles at or below your authority level are available.</span><button type="submit" disabled={busyId === 'invite'}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : <MailPlus size={16} />}{busyId === 'invite' ? 'Sending' : 'Send invitation'}</button></div>
         </form>
       )}
 
-      <div className="contacts-list">
-        {users.length === 0 ? (
-          <div className="empty-state">
-            <p>No users yet.</p>
+      <div className="identity-layout">
+        <section className="identity-directory">
+          <div className="identity-panel-heading"><div><span>Directory</span><h2>Organisation users</h2></div><button type="button" onClick={() => void loadIdentity()} disabled={loading} title="Refresh identity records"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></div>
+          <div className="identity-toolbar">
+            <label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, email, or role" /></label>
+            <label><Filter size={15} /><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="all">All statuses</option><option value="active">Active</option><option value="deactivated">Deactivated</option></select></label>
           </div>
-        ) : (
-          users.map((user) => (
-            <div key={user.id} className="contact-card">
-              <div className="contact-header">
-                <h3>{user.display_name || user.email || 'Unnamed'}</h3>
-                <span className="contact-type-badge">{user.role}</span>
-              </div>
-              <div className="contact-details">
-                <p>{user.email}</p>
-                {user.phone && <p>{user.phone}</p>}
-                <p className="contact-meta">
-                  {user.deactivated_at
-                    ? `Deactivated ${new Date(user.deactivated_at).toLocaleDateString()}`
-                    : 'Active'}
-                  {user.module_access.length > 0 ? ` · direct modules: ${user.module_access.join(', ')}` : ''}
-                </p>
-              </div>
-              <div className="contact-actions">
-                <button
-                  className="btn btn-sm btn-secondary"
-                  disabled={busyId === user.id}
-                  onClick={() => handleResendInvite(user)}
-                >
-                  Resend Invite
-                </button>
-                <button
-                  className="btn btn-sm btn-secondary"
-                  disabled={busyId === user.id}
-                  onClick={() => handleDeactivateToggle(user)}
-                >
-                  {user.deactivated_at ? 'Reactivate' : 'Deactivate'}
-                </button>
-                <button
-                  className="btn btn-sm btn-danger"
-                  disabled={busyId === user.id}
-                  onClick={() => handleDelete(user)}
-                >
-                  Delete
-                </button>
-              </div>
+
+          {loading ? <div className="identity-empty"><RefreshCw size={20} className="is-spinning" /> Loading accounts</div> : filteredUsers.length === 0 ? <div className="identity-empty"><Users size={20} /> No accounts match this view</div> : (
+            <div className="identity-user-list">
+              {filteredUsers.map((user) => {
+                const self = user.id === profile?.id;
+                return (
+                  <article key={user.id} className={user.deactivated_at ? 'is-deactivated' : ''}>
+                    <span className="identity-avatar">{(user.display_name ?? user.email ?? '?').slice(0, 2).toUpperCase()}</span>
+                    <div className="identity-user-primary"><strong>{user.display_name ?? 'Unnamed user'}{self && <em>You</em>}</strong><small>{user.email ?? 'No email recorded'}</small></div>
+                    <span className="identity-role">{IDENTITY_ROLE_LABEL[user.role] ?? user.role}</span>
+                    <span className={`identity-status ${user.deactivated_at ? 'is-off' : 'is-on'}`}>{user.deactivated_at ? 'Deactivated' : 'Active'}</span>
+                    <div className="identity-actions">
+                      <button type="button" disabled={busyId === user.id} onClick={() => void resendInvite(user)} title="Resend invitation"><MailPlus size={16} /></button>
+                      <button type="button" disabled={self || busyId === user.id} onClick={() => { setLifecycle({ user, action: user.deactivated_at ? 'reactivate' : 'deactivate' }); setReason(''); }} title={self ? 'You cannot change your own lifecycle state' : user.deactivated_at ? 'Reactivate account' : 'Deactivate account'}>{user.deactivated_at ? <UserCheck size={16} /> : <UserMinus size={16} />}</button>
+                      <button type="button" disabled title="Additional identity actions are not yet available"><MoreHorizontal size={16} /></button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-          ))
-        )}
+          )}
+        </section>
+
+        <aside className="identity-audit">
+          <div className="identity-panel-heading"><div><span>Audit trail</span><h2>Recent activity</h2></div><History size={19} /></div>
+          {auditRows.length === 0 ? <div className="identity-empty"><History size={20} /> No identity activity recorded</div> : (
+            <div className="identity-audit-list">{auditRows.map((row) => <AuditEvent row={row} users={users} key={row.id} />)}</div>
+          )}
+        </aside>
       </div>
+
+      {lifecycle && (
+        <div className="identity-dialog-backdrop" role="presentation">
+          <form className="identity-dialog" onSubmit={submitLifecycle} role="dialog" aria-modal="true" aria-labelledby="lifecycle-title">
+            <div className="identity-panel-heading"><div><span>Account lifecycle</span><h2 id="lifecycle-title">{lifecycle.action === 'deactivate' ? 'Deactivate account' : 'Reactivate account'}</h2></div><button type="button" onClick={() => setLifecycle(null)} title="Close"><X size={18} /></button></div>
+            <p>{lifecycle.action === 'deactivate' ? 'The account will lose application access. Existing records and audit history are retained.' : 'The account will regain access under its existing role and organisation scope.'}</p>
+            <strong>{lifecycle.user.display_name ?? lifecycle.user.email}</strong>
+            {lifecycle.action === 'deactivate' && <label><span>Reason for deactivation</span><textarea required rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Required for the audit trail" /></label>}
+            <div className="identity-dialog-actions"><button type="button" onClick={() => setLifecycle(null)}>Cancel</button><button type="submit" className={lifecycle.action === 'deactivate' ? 'is-danger' : 'is-primary'} disabled={busyId === lifecycle.user.id}>{busyId === lifecycle.user.id ? 'Saving' : lifecycle.action === 'deactivate' ? 'Deactivate account' : 'Reactivate account'}</button></div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };
+
+function AuditEvent({ row, users }: { row: AuditRow; users: UserRow[] }) {
+  const target = users.find((user) => user.id === row.target_user_id);
+  const actor = users.find((user) => user.id === row.performed_by);
+  return (
+    <article><span className="identity-audit-mark" /><div><strong>{row.action_type.replace(/_/g, ' ')}</strong><small>{target?.display_name ?? String(row.metadata?.display_name ?? 'User')} · by {actor?.display_name ?? 'Authorised administrator'}</small>{typeof row.metadata?.reason === 'string' && <p>{row.metadata.reason}</p>}</div><time dateTime={row.created_at}>{new Date(row.created_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time></article>
+  );
+}
 
 export default UserManagementPage;
