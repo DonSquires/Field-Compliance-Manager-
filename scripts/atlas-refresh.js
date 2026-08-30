@@ -8,7 +8,8 @@ const ROSTER_SOURCES = [
   'supabase/migrations/20260830129000_materialize_roster_slots.sql',
   'supabase/migrations/20260830130000_roster_slot_response.sql',
   'supabase/migrations/20260830131000_manage_roster_slot.sql',
-  'supabase/migrations/20260830132000_reassign_roster_slot.sql'
+  'supabase/migrations/20260830132000_reassign_roster_slot.sql',
+  'supabase/migrations/20260830133000_enforce_roster_availability.sql'
 ];
 
 function uniqueBy(items, keyOf) {
@@ -56,9 +57,12 @@ function collectRpcEdges(sourceFile, content, inventory) {
     }
     for (const table of writes) edges.push({ source_type: 'rpc', source_name: sourceName, target_type: 'table', target_name: table, edge_kind: 'writes', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'SQL mutation in RPC body' });
     for (const table of reads) edges.push({ source_type: 'rpc', source_name: sourceName, target_type: 'table', target_name: table, edge_kind: 'reads', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'SQL query in RPC body' });
-    for (const call of body.matchAll(/(?:perform\s+|from\s+)public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
+    for (const call of body.matchAll(/public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
       if (call[1] !== sourceName && inventory.rpcs.has(call[1])) edges.push({ source_type: 'rpc', source_name: sourceName, target_type: 'rpc', target_name: call[1], edge_kind: 'calls', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'SQL function call in RPC body' });
     }
+  }
+  for (const trigger of content.matchAll(/create trigger\s+[a-zA-Z0-9_]+[\s\S]*?\s+on\s+public\.([a-zA-Z0-9_]+)[\s\S]*?execute function\s+public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
+    edges.push({ source_type: 'table', source_name: trigger[1], target_type: 'rpc', target_name: trigger[2], edge_kind: 'triggers', evidence_class: 'live-schema', source_file: sourceFile, caller_context: 'PostgreSQL trigger execution' });
   }
   return edges;
 }
@@ -72,7 +76,7 @@ function collectRosterAtlas(rootDir = process.cwd()) {
   }
   const dedupedEdges = uniqueBy(edges, (edge) => [edge.source_type, edge.source_name, edge.target_type, edge.target_name, edge.edge_kind, edge.source_file].join('|'));
   const nodes = uniqueBy(dedupedEdges.flatMap((edge) => [
-    ...(edge.source_type === 'rpc' ? [{ entity_type: 'rpc', entity_name: edge.source_name }] : []),
+    ...(['table', 'rpc'].includes(edge.source_type) ? [{ entity_type: edge.source_type, entity_name: edge.source_name }] : []),
     ...(['table', 'rpc'].includes(edge.target_type) ? [{ entity_type: edge.target_type, entity_name: edge.target_name }] : [])
   ]), (node) => `${node.entity_type}|${node.entity_name}`);
   return { scope: 'roster', sources: ROSTER_SOURCES, nodes, edges: dedupedEdges };

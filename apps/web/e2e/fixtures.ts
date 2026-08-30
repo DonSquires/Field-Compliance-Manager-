@@ -104,6 +104,10 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       await route.fulfill(fulfillJson([{ staff_id: OFFICER_ID, expiry_date: '2027-06-01', verified: true }, { staff_id: SECOND_OFFICER_ID, expiry_date: '2026-09-10', verified: true }]));
       return;
     }
+    if (table === 'staff_availability') {
+      await route.fulfill(fulfillJson([{ staff_id: SECOND_OFFICER_ID, day_of_week: null, specific_date: '2026-08-26', available_from: null, available_to: null, all_day: true, availability_type: 'unavailable' }]));
+      return;
+    }
     if (table === 'shifts') {
       await route.fulfill(fulfillJson([{ id: '12121212-1212-4212-8212-121212121212', officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-25T20:00:00.000Z', scheduled_end: '2026-08-26T04:00:00.000Z', status: 'published', shift_health: null, total_stops: 8, notes: 'North district' }, { id: '13131313-1313-4313-8313-131313131313', officer_user_id: OFFICER_ID, service_type: 'site_guard', scheduled_start: '2026-08-27T08:00:00.000Z', scheduled_end: '2026-08-27T16:00:00.000Z', status: 'in_progress', shift_health: 'on_track', total_stops: 1, notes: null }]));
       return;
