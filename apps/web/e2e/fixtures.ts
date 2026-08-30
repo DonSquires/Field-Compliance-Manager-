@@ -51,6 +51,7 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
 
 export async function installSupabaseFixtures(page: Page): Promise<void> {
   let adminSlotStatus = 'published';
+  let adminSlotStaffId = OFFICER_ID;
   const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
   const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
   const workUnits = [
@@ -96,7 +97,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'staff_profiles') {
-      await route.fulfill(fulfillJson([{ id: OFFICER_ID, user_id: OFFICER_ID, employment_type: 'permanent', work_ready: true }, { id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, employment_type: 'casual', work_ready: false }]));
+      await route.fulfill(fulfillJson([{ id: OFFICER_ID, user_id: OFFICER_ID, employment_type: 'permanent', work_ready: true }, { id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, employment_type: 'casual', work_ready: true }]));
       return;
     }
     if (table === 'staff_credentials') {
@@ -120,7 +121,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'roster_work_units') { await route.fulfill(fulfillJson(workUnits)); return; }
-    if (table === 'roster_slots') { await route.fulfill(fulfillJson([{ id: '32323232-3232-4232-8232-323232323232', work_unit_id: '23232323-2323-4323-8323-232323232323', staff_id: OFFICER_ID, scheduled_start: '2026-08-28T21:00:00.000Z', scheduled_end: '2026-08-29T01:00:00.000Z', status: adminSlotStatus, linked_shift_id: null, notes: 'Roster administration' }])); return; }
+    if (table === 'roster_slots') { await route.fulfill(fulfillJson([{ id: '32323232-3232-4232-8232-323232323232', work_unit_id: '23232323-2323-4323-8323-232323232323', staff_id: adminSlotStaffId, scheduled_start: '2026-08-28T21:00:00.000Z', scheduled_end: '2026-08-29T01:00:00.000Z', status: adminSlotStatus, linked_shift_id: null, notes: 'Roster administration' }])); return; }
     if (table === 'patrol_routes') { await route.fulfill(fulfillJson([{ id: '19191919-1919-4919-8919-191919191919', name: 'North District Patrol' }])); return; }
     if (table === 'service_agreement_locations') { await route.fulfill(fulfillJson([{ id: '21212121-2121-4121-8121-212121212121', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '25252525-2525-4525-8525-252525252525', zone_id: null }])); return; }
     if (table === 'service_agreement_modules') { await route.fulfill(fulfillJson([{ id: '22222222-2222-4222-8222-222222222229', service_agreement_id: '24242424-2424-4424-8424-242424242424', module_key: 'static_guarding' }])); return; }
@@ -135,6 +136,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'create_roster_slot') { await route.fulfill(fulfillJson({ id: '30303030-3030-4030-8030-303030303030', status: 'published' })); return; }
     if (table === 'materialize_roster_slot') { await route.fulfill(fulfillJson([{ slot_id: '30303030-3030-4030-8030-303030303030', shift_id: '31313131-3131-4131-8131-313131313131', created: true }])); return; }
     if (table === 'manage_roster_slot') { adminSlotStatus = 'cancelled'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'cancelled', shift_id: null, shift_status: null }])); return; }
+    if (table === 'reassign_roster_slot') { adminSlotStaffId = SECOND_OFFICER_ID; adminSlotStatus = 'published'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'published', staff_id: SECOND_OFFICER_ID, shift_id: null, shift_status: null }])); return; }
     await route.fulfill(fulfillJson([]));
   });
 }
