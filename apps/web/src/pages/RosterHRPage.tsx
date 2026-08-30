@@ -11,6 +11,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './RosterHRPage.css';
 
 type RosterTab = 'staff' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets';
 
@@ -100,6 +101,10 @@ const RosterHRPage: React.FC = () => {
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
   const [showCoverageForm, setShowCoverageForm] = useState(false);
+  const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' } | null>(null);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [coverageForm, setCoverageForm] = useState({
     shift_date: '',
     start_time: '',
@@ -213,34 +218,13 @@ const RosterHRPage: React.FC = () => {
     loadAll();
   }, [loadAll]);
 
-  const handleLeaveDecision = async (id: string, status: 'approved' | 'declined') => {
-    if (!profile?.id) return;
-    try {
-      // ATLAS WRITES: leave_requests
-      const { error } = await supabase
-        .from('leave_requests')
-        .update({ status, approved_by: profile.id, approved_at: new Date().toISOString() })
-        .eq('id', id);
-      if (error) throw error;
-      setLeaveRequests(leaveRequests.map((l) => (l.id === id ? { ...l, status } : l)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update leave request');
-    }
-  };
-
-  const handleTimesheetDecision = async (id: string, status: 'approved' | 'rejected') => {
-    if (!profile?.id) return;
-    try {
-      // ATLAS WRITES: timesheets
-      const { error } = await supabase
-        .from('timesheets')
-        .update({ status, approved_by: profile.id, approved_at: new Date().toISOString() })
-        .eq('id', id);
-      if (error) throw error;
-      setTimesheets(timesheets.map((t) => (t.id === id ? { ...t, status } : t)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update timesheet');
-    }
+  const handleReview = async (event: React.FormEvent) => {
+    event.preventDefault();if (!review) return;setSaving(true);setError(null);setNotice(null);
+    const currentStatus = review.kind === 'leave' ? leaveRequests.find((item) => item.id === review.id)?.status : timesheets.find((item) => item.id === review.id)?.status;
+    const { error: reviewError } = review.kind === 'leave'
+      ? await supabase.rpc('review_leave_request', { p_request_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null })
+      : await supabase.rpc('review_timesheet', { p_timesheet_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null });
+    if (reviewError) setError(reviewError.message);else { setNotice(review.kind === 'leave' ? 'Leave decision confirmed and roster conflicts checked.' : 'Timesheet decision confirmed for payroll processing.');setReview(null);setReviewNotes('');await loadAll(); }setSaving(false);
   };
 
   const handleCreateCoverage = async (e: React.FormEvent) => {
@@ -249,23 +233,7 @@ const RosterHRPage: React.FC = () => {
     if (!coverageForm.shift_date || !coverageForm.start_time || !coverageForm.end_time) return;
 
     try {
-      // ATLAS WRITES: shift_coverage_requests (fires trg_notify_shift_coverage_open_created)
-      const { data, error } = await supabase
-        .from('shift_coverage_requests')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            shift_date: coverageForm.shift_date,
-            start_time: coverageForm.start_time,
-            end_time: coverageForm.end_time,
-            required_staff_count: Number(coverageForm.required_staff_count) || 1,
-            urgency: coverageForm.urgency,
-            notes: coverageForm.notes || null,
-            created_by: profile.id,
-          },
-        ])
-        .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes')
-        .single();
+      const { data, error } = await supabase.rpc('create_shift_coverage_request', { p_organization_id: profile.organizationId, p_shift_date: coverageForm.shift_date, p_start_time: coverageForm.start_time, p_end_time: coverageForm.end_time, p_required_staff_count: Number(coverageForm.required_staff_count) || 1, p_urgency: coverageForm.urgency, p_notes: coverageForm.notes.trim() || null });
 
       if (error) throw error;
       setCoverageRequests([{ ...(data as CoverageRequestRow), site_name: null }, ...coverageRequests]);
@@ -308,6 +276,7 @@ const RosterHRPage: React.FC = () => {
           {error}
         </div>
       )}
+      {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
       <div className="crm-branch-filter">
         {TABS.map((t) => (
@@ -404,8 +373,9 @@ const RosterHRPage: React.FC = () => {
             <form className="assessment-form" onSubmit={handleCreateCoverage}>
               <div className="form-row">
                 <div className="form-group">
-                  <label>Date</label>
+                  <label htmlFor="coverage-date">Date</label>
                   <input
+                    id="coverage-date"
                     type="date"
                     required
                     value={coverageForm.shift_date}
@@ -413,8 +383,9 @@ const RosterHRPage: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Required Staff</label>
+                  <label htmlFor="coverage-required-staff">Required Staff</label>
                   <input
+                    id="coverage-required-staff"
                     type="number"
                     min={1}
                     value={coverageForm.required_staff_count}
@@ -424,8 +395,9 @@ const RosterHRPage: React.FC = () => {
               </div>
               <div className="form-row">
                 <div className="form-group">
-                  <label>Start Time</label>
+                  <label htmlFor="coverage-start-time">Start Time</label>
                   <input
+                    id="coverage-start-time"
                     type="time"
                     required
                     value={coverageForm.start_time}
@@ -433,8 +405,9 @@ const RosterHRPage: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label>End Time</label>
+                  <label htmlFor="coverage-end-time">End Time</label>
                   <input
+                    id="coverage-end-time"
                     type="time"
                     required
                     value={coverageForm.end_time}
@@ -443,8 +416,8 @@ const RosterHRPage: React.FC = () => {
                 </div>
               </div>
               <div className="form-group">
-                <label>Urgency</label>
-                <select value={coverageForm.urgency} onChange={(e) => setCoverageForm({ ...coverageForm, urgency: e.target.value })}>
+                <label htmlFor="coverage-urgency">Urgency</label>
+                <select id="coverage-urgency" value={coverageForm.urgency} onChange={(e) => setCoverageForm({ ...coverageForm, urgency: e.target.value })}>
                   <option value="low">Low</option>
                   <option value="normal">Normal</option>
                   <option value="high">High</option>
@@ -452,8 +425,9 @@ const RosterHRPage: React.FC = () => {
                 </select>
               </div>
               <div className="form-group">
-                <label>Notes</label>
+                <label htmlFor="coverage-notes">Notes</label>
                 <textarea
+                  id="coverage-notes"
                   rows={2}
                   value={coverageForm.notes}
                   onChange={(e) => setCoverageForm({ ...coverageForm, notes: e.target.value })}
@@ -549,10 +523,10 @@ const RosterHRPage: React.FC = () => {
                   </div>
                   {l.status === 'pending' && (
                     <div className="assessment-actions">
-                      <button className="btn btn-sm btn-secondary" onClick={() => handleLeaveDecision(l.id, 'approved')}>
+                      <button className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes('');setReview({ kind: 'leave', id: l.id, decision: 'approved' }); }}>
                         Approve
                       </button>
-                      <button className="btn btn-sm btn-danger" onClick={() => handleLeaveDecision(l.id, 'declined')}>
+                      <button className="btn btn-sm btn-danger" onClick={() => { setReviewNotes('');setReview({ kind: 'leave', id: l.id, decision: 'declined' }); }}>
                         Decline
                       </button>
                     </div>
@@ -604,13 +578,13 @@ const RosterHRPage: React.FC = () => {
                           <>
                             <button
                               className="btn btn-sm btn-secondary"
-                              onClick={() => handleTimesheetDecision(t.id, 'approved')}
+                              onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'approved' }); }}
                             >
                               Approve
                             </button>{' '}
                             <button
                               className="btn btn-sm btn-danger"
-                              onClick={() => handleTimesheetDecision(t.id, 'rejected')}
+                              onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'rejected' }); }}
                             >
                               Reject
                             </button>
@@ -625,6 +599,7 @@ const RosterHRPage: React.FC = () => {
           </div>
         </section>
       )}
+      {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
     </div>
   );
 };

@@ -5,7 +5,7 @@
  * status). Officer-scoped self-service: submit and view own requests.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -28,6 +28,7 @@ const OfficerLeavePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ leave_type: 'annual' as LeaveType, starts_on: '', ends_on: '', reason: '' });
+  const eventIdRef = useRef(crypto.randomUUID());
 
   // ATLAS READS: leave_requests
   const loadRequests = useCallback(async () => {
@@ -39,7 +40,6 @@ const OfficerLeavePage: React.FC = () => {
       const { data, error: err } = await supabase
         .from('leave_requests')
         .select('id, leave_type, starts_on, ends_on, status, reason')
-        .eq('staff_id', profile.id)
         .order('starts_on', { ascending: false });
 
       if (err) throw err;
@@ -57,30 +57,22 @@ const OfficerLeavePage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.id || !profile?.organizationId) return;
+    if (!profile?.id) return;
 
     try {
-      // ATLAS WRITES: leave_requests
-      const { data, error } = await supabase
-        .from('leave_requests')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            staff_id: profile.id,
-            leave_type: form.leave_type,
-            starts_on: form.starts_on,
-            ends_on: form.ends_on,
-            reason: form.reason || null,
-            status: 'pending',
-          },
-        ])
-        .select()
-        .single();
+      const { data, error } = await supabase.rpc('submit_officer_leave_request', {
+        p_client_event_id: eventIdRef.current,
+        p_leave_type: form.leave_type,
+        p_starts_on: form.starts_on,
+        p_ends_on: form.ends_on,
+        p_reason: form.reason.trim() || null,
+      });
 
-      if (error) throw error;
-      setRequests([data as LeaveRequest, ...requests]);
+      if (error || !data) throw error ?? new Error('Leave request receipt was not confirmed');
+      eventIdRef.current = crypto.randomUUID();
       setForm({ leave_type: 'annual', starts_on: '', ends_on: '', reason: '' });
       setShowForm(false);
+      await loadRequests();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit leave request');
     }

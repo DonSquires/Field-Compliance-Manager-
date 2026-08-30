@@ -28,4 +28,10 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('navigate(`/admin/field-ops?area=${area}`)');
     expect(source).toContain('<AdminHubPage onNavigate={navigateFromHub} />');
   });
+
+  it('exposes governed people and HR separately from roster operations', () => {
+    expect(source).toContain("{ id: 'people-hr', label: 'People & HR'");
+    expect(source).toContain('return <RosterHRPage />');
+    expect(source).toContain("'roster_hr': { page: 'people-hr' }");
+  });
 });

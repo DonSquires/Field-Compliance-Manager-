@@ -53,6 +53,9 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
   let adminSlotStatus = 'published';
   let adminSlotStaffId = OFFICER_ID;
   let holidayRegion = 'AUK';
+  let hrLeaveStatus = 'pending';
+  let hrTimesheetStatus = 'submitted';
+  const hrCoverage = [{ id: '14141414-1414-4414-8414-141414141414', shift_date: '2026-09-05', start_time: '18:00:00', end_time: '23:00:00', required_staff_count: 2, urgency: 'high', status: 'open', notes: 'Event perimeter', site: null }];
   const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
   const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
   const workUnits = [
@@ -102,7 +105,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'staff_credentials') {
-      await route.fulfill(fulfillJson([{ staff_id: OFFICER_ID, expiry_date: '2027-06-01', verified: true }, { staff_id: SECOND_OFFICER_ID, expiry_date: '2026-09-10', verified: true }]));
+      await route.fulfill(fulfillJson([{ id: '34343434-3434-4434-8434-343434343434', staff_id: OFFICER_ID, credential_type: 'security_licence', credential_number: 'SL-2048', expiry_date: '2027-06-01', verified: true }, { id: '35353535-3535-4535-8535-353535353535', staff_id: SECOND_OFFICER_ID, credential_type: 'first_aid', credential_number: 'FA-1024', expiry_date: '2026-09-10', verified: true }]));
       return;
     }
     if (table === 'staff_availability') {
@@ -116,13 +119,16 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'leave_requests') {
-      await route.fulfill(fulfillJson([{ staff_id: SECOND_OFFICER_ID, starts_on: '2026-08-28', ends_on: '2026-08-29', status: 'approved' }]));
+      const rosterQuery = url.searchParams.get('status') === 'eq.approved';
+      await route.fulfill(fulfillJson(rosterQuery ? [{ staff_id: SECOND_OFFICER_ID, starts_on: '2026-08-28', ends_on: '2026-08-29', status: 'approved' }] : [{ id: '36363636-3636-4636-8636-363636363636', staff_id: OFFICER_ID, leave_type: 'annual', starts_on: '2026-09-14', ends_on: '2026-09-16', status: hrLeaveStatus, reason: 'Family commitment' }]));
       return;
     }
     if (table === 'shift_coverage_requests') {
-      await route.fulfill(fulfillJson([{ id: '14141414-1414-4414-8414-141414141414', shift_date: '2026-08-29', urgency: 'high', required_staff_count: 2 }]));
+      await route.fulfill(fulfillJson(hrCoverage));
       return;
     }
+    if (table === 'shift_templates') { await route.fulfill(fulfillJson([{ id: '37373737-3737-4737-8737-373737373737', name: 'Night Patrol', shift_type: 'patrol', start_time: '20:00:00', end_time: '04:00:00', recurrence_type: 'weekly', required_staff_count: 2, is_active: true }])); return; }
+    if (table === 'timesheets') { await route.fulfill(fulfillJson([{ id: '38383838-3838-4838-8838-383838383838', staff_id: OFFICER_ID, period_start: '2026-08-17', period_end: '2026-08-23', scheduled_hours: 40, actual_hours: 42, status: hrTimesheetStatus }])); return; }
     if (table === 'create_roster_shift') {
       await route.fulfill(fulfillJson({ id: '15151515-1515-4515-8515-151515151515', officer_user_id: OFFICER_ID, status: 'published' }));
       return;
@@ -145,6 +151,9 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'manage_roster_slot') { adminSlotStatus = 'cancelled'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'cancelled', shift_id: null, shift_status: null }])); return; }
     if (table === 'reassign_roster_slot') { adminSlotStaffId = SECOND_OFFICER_ID; adminSlotStatus = 'published'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'published', staff_id: SECOND_OFFICER_ID, shift_id: null, shift_status: null }])); return; }
     if (table === 'set_organization_calendar_region') { holidayRegion = JSON.parse(request.postData() ?? '{}').p_region_code ?? ''; await route.fulfill(fulfillJson({ organization_id: ORG_ID, country_code: 'NZ', region_code: holidayRegion })); return; }
+    if (table === 'review_leave_request') { hrLeaveStatus = JSON.parse(request.postData() ?? '{}').p_decision; await route.fulfill(fulfillJson({ id: '36363636-3636-4636-8636-363636363636', status: hrLeaveStatus })); return; }
+    if (table === 'review_timesheet') { hrTimesheetStatus = JSON.parse(request.postData() ?? '{}').p_decision; await route.fulfill(fulfillJson({ id: '38383838-3838-4838-8838-383838383838', status: hrTimesheetStatus })); return; }
+    if (table === 'create_shift_coverage_request') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '39393939-3939-4939-8939-393939393939', shift_date: payload.p_shift_date, start_time: payload.p_start_time, end_time: payload.p_end_time, required_staff_count: payload.p_required_staff_count, urgency: payload.p_urgency, status: 'open', notes: payload.p_notes }; hrCoverage.unshift(row); await route.fulfill(fulfillJson(row)); return; }
     await route.fulfill(fulfillJson([]));
   });
 }

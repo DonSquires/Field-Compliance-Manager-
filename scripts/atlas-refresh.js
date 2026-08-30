@@ -4,6 +4,8 @@ const path = require('node:path');
 const ROSTER_SOURCES = [
   'apps/web/src/pages/RosterOperationsPage.tsx',
   'apps/web/src/pages/OfficerSchedulePage.tsx',
+  'apps/web/src/pages/RosterHRPage.tsx',
+  'apps/web/src/pages/OfficerLeavePage.tsx',
   'supabase/migrations/20260830128000_roster_work_units.sql',
   'supabase/migrations/20260830129000_materialize_roster_slots.sql',
   'supabase/migrations/20260830130000_roster_slot_response.sql',
@@ -11,7 +13,8 @@ const ROSTER_SOURCES = [
   'supabase/migrations/20260830132000_reassign_roster_slot.sql',
   'supabase/migrations/20260830133000_enforce_roster_availability.sql',
   'supabase/migrations/20260830134000_organization_calendar_settings.sql',
-  'supabase/migrations/20260830135000_roster_commercial_readiness.sql'
+  'supabase/migrations/20260830135000_roster_commercial_readiness.sql',
+  'supabase/migrations/20260830136000_govern_hr_workflows.sql'
 ];
 
 function uniqueBy(items, keyOf) {
