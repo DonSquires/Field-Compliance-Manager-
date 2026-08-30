@@ -5,6 +5,8 @@
     "runner": "node bob-runner.js",
     "calibrate": "node scripts/atlas-calibration.js",
     "atlas:check": "npm run calibrate && node scripts/atlas-graph.js",
+    "bob:refresh-capability-map": "node scripts/atlas-refresh.js --apply",
+    "atlas:refresh:dry-run": "node scripts/atlas-refresh.js",
     "pretest": "npm run calibrate"
   },
   "dependencies": {
