@@ -2,6 +2,7 @@ import { expect, type Page } from '@playwright/test';
 
 const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
 const OFFICER_ID = '22222222-2222-4222-8222-222222222222';
+const SECOND_OFFICER_ID = '2f2f2f2f-2222-4222-8222-222222222222';
 const ORG_ID = '33333333-3333-4333-8333-333333333333';
 
 const user = {
@@ -74,7 +75,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       const select = url.searchParams.get('select') ?? '';
       const body = select.includes('organization_id')
         ? [{ id: ADMIN_ID, display_name: 'Morgan Reed', email: user.email, role: 'admin', organization_id: ORG_ID }]
-        : [{ id: ADMIN_ID, display_name: 'Morgan Reed', email: user.email }, { id: OFFICER_ID, display_name: 'Ana Ngata', email: 'ana@fcm.test' }];
+        : [{ id: OFFICER_ID, display_name: 'Ana Ngata', email: 'ana@fcm.test', role: 'officer' }, { id: SECOND_OFFICER_ID, display_name: 'Jordan Lee', email: 'jordan@fcm.test', role: 'officer' }];
       await route.fulfill(fulfillJson(body));
       return;
     }
@@ -84,6 +85,30 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     }
     if (table === 'officer_field_reports') {
       await route.fulfill(fulfillJson(reports));
+      return;
+    }
+    if (table === 'staff_profiles') {
+      await route.fulfill(fulfillJson([{ id: OFFICER_ID, user_id: OFFICER_ID, employment_type: 'permanent', work_ready: true }, { id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, employment_type: 'casual', work_ready: false }]));
+      return;
+    }
+    if (table === 'staff_credentials') {
+      await route.fulfill(fulfillJson([{ staff_id: OFFICER_ID, expiry_date: '2027-06-01', verified: true }, { staff_id: SECOND_OFFICER_ID, expiry_date: '2026-09-10', verified: true }]));
+      return;
+    }
+    if (table === 'shifts') {
+      await route.fulfill(fulfillJson([{ id: '12121212-1212-4212-8212-121212121212', officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-25T20:00:00.000Z', scheduled_end: '2026-08-26T04:00:00.000Z', status: 'published', shift_health: null, total_stops: 8, notes: 'North district' }, { id: '13131313-1313-4313-8313-131313131313', officer_user_id: OFFICER_ID, service_type: 'site_guard', scheduled_start: '2026-08-27T08:00:00.000Z', scheduled_end: '2026-08-27T16:00:00.000Z', status: 'in_progress', shift_health: 'on_track', total_stops: 1, notes: null }]));
+      return;
+    }
+    if (table === 'leave_requests') {
+      await route.fulfill(fulfillJson([{ staff_id: SECOND_OFFICER_ID, starts_on: '2026-08-28', ends_on: '2026-08-29', status: 'approved' }]));
+      return;
+    }
+    if (table === 'shift_coverage_requests') {
+      await route.fulfill(fulfillJson([{ id: '14141414-1414-4414-8414-141414141414', shift_date: '2026-08-29', urgency: 'high', required_staff_count: 2 }]));
+      return;
+    }
+    if (table === 'create_roster_shift') {
+      await route.fulfill(fulfillJson({ id: '15151515-1515-4515-8515-151515151515', officer_user_id: OFFICER_ID, status: 'published' }));
       return;
     }
     await route.fulfill(fulfillJson([]));

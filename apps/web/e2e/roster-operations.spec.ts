@@ -1,0 +1,15 @@
+import { expect, test } from '@playwright/test';
+import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
+
+test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
+
+test('enterprise roster week board is operational and visually stable', async ({ page }) => {
+ const errors=monitorBrowserErrors(page); await signInAsAdmin(page,'/admin/roster');
+ await expect(page.getByRole('heading',{name:'Roster',exact:true})).toBeVisible();
+ await expect(page.getByText('Ana Ngata',{exact:true})).toBeVisible(); await expect(page.getByText('Jordan Lee',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ const board=page.locator('.roster-board'); if((page.viewportSize()?.width??0)<600){await board.scrollIntoViewIfNeeded();await expect(page).toHaveScreenshot('roster-week-board.png');}else await expect(board).toHaveScreenshot('roster-week-board.png');
+ await page.getByRole('button',{name:/08:00 am site guard/i}).click(); await expect(page.getByText('Assignment',{exact:true})).toBeVisible(); await expect(page.getByText('on_track',{exact:true})).toBeVisible(); await page.locator('.roster-inspector header button').click();
+ await page.getByRole('button',{name:'risk'}).click(); await expect(page.getByText('Jordan Lee',{exact:true})).toBeVisible(); await expect(page.getByText('Ana Ngata',{exact:true})).toBeHidden();
+ await page.getByRole('button',{name:/Create shift/}).click(); const dialog=page.getByRole('dialog',{name:'Create shift'}); await expect(dialog).toBeVisible(); await dialog.getByLabel('Officer',{exact:true}).selectOption('22222222-2222-4222-8222-222222222222'); await dialog.getByLabel('Start',{exact:true}).fill('2026-08-30T10:00'); await dialog.getByLabel('End',{exact:true}).fill('2026-08-30T18:00'); await expect(dialog.getByText('Publish immediately')).toBeVisible(); await expect(dialog).toHaveScreenshot('roster-create-shift-dialog.png'); await dialog.getByRole('button',{name:'Create shift'}).click(); await expect(page.getByText('Shift published for Ana Ngata.')).toBeVisible(); expect(errors,errors.join('\n')).toEqual([]);
+});

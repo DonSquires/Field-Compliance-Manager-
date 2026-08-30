@@ -55,7 +55,7 @@ import AdminHubPage from '../pages/AdminHubPage';
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
-const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
+const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
 const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
@@ -400,7 +400,7 @@ const AdminShell: React.FC = () => {
       case 'approvals':
         return <ApprovalsActivityPage />;
       case 'roster':
-        return <RosterHRPage />;
+        return <RosterOperationsPage />;
       default:
         return <AdminHubPage />;
     }
