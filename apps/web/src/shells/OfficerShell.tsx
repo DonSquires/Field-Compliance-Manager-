@@ -30,6 +30,8 @@ import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { NotificationsBell, PortalSwitcher, ReportButton } from '../components/stubs';
 import { BobPanel } from '../components/BobPanel';
+import { ProfessionalNav } from '../components/ProfessionalNav';
+import { ProfessionalHeader } from '../components/ProfessionalHeader';
 
 const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
 const SmokeControlPage = React.lazy(() => import('../pages/modules/SmokeControlPage'));
@@ -327,149 +329,160 @@ const OfficerShell: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--color-bg-primary)' }}>
-      {/* FieldSafetyBar - Top Chrome */}
-      <header
-        style={{
-          height: '56px',
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderBottom: '1px solid var(--color-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingLeft: '16px',
-          paddingRight: '16px',
-          gap: '16px',
+      {/* Professional Header */}
+      <ProfessionalHeader
+        title="Officer Operations"
+        subtitle={activeShift ? `${activeShift?.shift_type || 'Shift'} in progress` : 'No active shift'}
+        statusIndicator={{
+          status: isManDown ? 'offline' : (needsCheckin ? 'idle' : 'online'),
+          label: isManDown ? 'Man Down' : (needsCheckin ? 'Check-in Due' : 'OK'),
         }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-          <div style={{ fontSize: '20px', fontWeight: 700 }}>👮</div>
-          <div style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>Officer Operations</div>
-          {activeShift && (
-            <div style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>
-              {activeShift?.shift_type || 'Shift'}
-            </div>
+        userDisplayName={profile?.displayName}
+        notificationCount={offeredCount}
+        onNotifications={() => navigateToModule('schedule')}
+        actions={currentWelfareStatus !== 'ok' ? [
+          {
+            label: '🆘 SOS',
+            onClick: () => console.log('SOS triggered'),
+            variant: 'danger',
+          },
+        ] : undefined}
+      />
+
+      {/* Main Layout with Sidebar */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* Professional Navigation Sidebar */}
+        <ProfessionalNav
+          sections={[
+            {
+              title: 'Active Shift',
+              items: activeShift ? [
+                {
+                  id: 'shift-home',
+                  label: 'Dashboard',
+                  path: '/officer',
+                  status: 'active',
+                },
+              ] : [],
+            },
+            {
+              title: 'Field Operations',
+              items: [
+                { id: 'freedom_camping', label: 'Freedom Camping', path: '/officer/freedom_camping', status: grantedModules.includes('freedom_camping') ? ('active' as const) : ('none' as const) },
+                { id: 'parking', label: 'Parking', path: '/officer/parking', status: grantedModules.includes('parking') ? ('active' as const) : ('none' as const) },
+                { id: 'noise_control', label: 'Noise Control', path: '/officer/noise_control', status: grantedModules.includes('noise_control') ? ('active' as const) : ('none' as const) },
+                { id: 'biosecurity', label: 'Biosecurity', path: '/officer/biosecurity', status: grantedModules.includes('biosecurity') ? ('active' as const) : ('none' as const) },
+                { id: 'smoke_control', label: 'Smoke Control', path: '/officer/smoke_control', status: grantedModules.includes('smoke_control') ? ('active' as const) : ('none' as const) },
+                { id: 'patrol', label: 'Patrol', path: '/officer/patrol', status: grantedModules.includes('patrol') ? ('active' as const) : ('none' as const) },
+              ].filter(item => grantedModules.includes(item.id)),
+            },
+            {
+              title: 'Site Operations',
+              items: [
+                { id: 'dispatch', label: 'Dispatch', path: '/officer/dispatch', status: grantedModules.includes('dispatch') ? ('active' as const) : ('none' as const) },
+                { id: 'vehicle_lookup', label: 'Vehicle Lookup', path: '/officer/vehicle_lookup', status: grantedModules.includes('vehicle_lookup') ? ('active' as const) : ('none' as const) },
+                { id: 'map', label: 'Map View', path: '/officer/map', status: grantedModules.includes('map') ? ('active' as const) : ('none' as const) },
+              ].filter(item => grantedModules.includes(item.id)),
+            },
+            {
+              title: 'Administration',
+              items: [
+                { id: 'timesheet', label: 'Timesheet', path: '/officer/timesheet', status: 'none' as const },
+                { id: 'leave', label: 'Leave', path: '/officer/leave', status: 'none' as const },
+                { id: 'credentials', label: 'Credentials', path: '/officer/credentials', status: 'none' as const },
+                { id: 'report', label: 'Field Reports', path: '/officer/report', status: offeredCount > 0 ? ('pending' as const) : ('none' as const) },
+              ],
+            },
+          ]}
+          currentPath={location.pathname}
+          onNavigate={(path) => navigate(path)}
+        />
+
+        {/* Main Content Area */}
+        <main style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {officerState === 'standby' && <StandbyScreen onNavigate={navigateToModule} />}
+          {(officerState === 'home' || officerState === 'selector' || officerState === 'portal') && (
+            <React.Suspense fallback={<LazyPageFallback />}>
+              {renderModuleContent()}
+            </React.Suspense>
           )}
-        </div>
+        </main>
+      </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Welfare Status Indicator */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 12px',
-              backgroundColor: welfareDisplay.bg,
-              borderRadius: '4px',
-              borderLeft: `3px solid ${welfareDisplay.color}`,
-            }}
-          >
-            <span style={{ fontSize: '12px', fontWeight: 600, color: welfareDisplay.color }}>
-              {welfareDisplay.dot}
-            </span>
-          </div>
-
-          {/* Offered Shifts Badge */}
-          {offeredCount > 0 && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '24px',
-                height: '24px',
-                borderRadius: '50%',
-                backgroundColor: '#FF9800',
-                color: 'white',
-                fontSize: '12px',
-                fontWeight: 600,
-              }}
-            >
-              {offeredCount}
-            </div>
-          )}
-
-          <NotificationsBell onOpenBob={() => setBobOpen(true)} />
-          <PortalSwitcher />
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main
-        data-app-content
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        {officerState === 'standby' && <StandbyScreen onNavigate={navigateToModule} />}
-        {(officerState === 'home' || officerState === 'selector' || officerState === 'portal') && (
-          <React.Suspense fallback={<LazyPageFallback />}>
-            {renderModuleContent()}
-          </React.Suspense>
-        )}
-      </main>
-
-      {/* PttBar - Bottom Chrome */}
+      {/* Safety Footer Chrome */}
       <div
         style={{
-          height: '64px',
+          height: '52px',
           backgroundColor: 'var(--color-bg-secondary)',
           borderTop: '1px solid var(--color-border)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          paddingLeft: '16px',
-          paddingRight: '16px',
-          gap: '12px',
+          paddingLeft: 'var(--space-4)',
+          paddingRight: 'var(--space-4)',
+          gap: 'var(--space-3)',
         }}
       >
-        <button
-          onClick={() => navigateToModule('modules')}
-          style={{
-            flex: 1,
-            padding: '12px',
-            backgroundColor: 'transparent',
-            border: '1px solid var(--color-border)',
-            borderRadius: '4px',
-            color: 'var(--color-text-primary)',
-            cursor: 'pointer',
-            fontWeight: 500,
-          }}
-        >
-          📡 Modules
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+          <span style={{
+            display: 'inline-flex',
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: welfareDisplay.color,
+          }} />
+          {isManDown ? 'Man Down Detected' : needsCheckin ? 'Welfare Check-in Due' : 'Officer OK'}
+        </div>
 
-        <ReportButton
-          style={{
-            flex: 1,
-            padding: '12px',
-            backgroundColor: 'var(--color-primary)',
-            border: 'none',
-            borderRadius: '4px',
-            color: 'white',
-            cursor: 'pointer',
-            fontWeight: 500,
-          }}
-        />
+        <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+          <button
+            onClick={() => navigateToModule('modules')}
+            style={{
+              padding: 'var(--space-2) var(--space-4)',
+              backgroundColor: 'transparent',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--color-text-primary)',
+              cursor: 'pointer',
+              fontWeight: 500,
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            All Modules
+          </button>
 
-        <button
-          style={{
-            padding: '12px',
-            backgroundColor: '#EF5350',
-            border: 'none',
-            borderRadius: '4px',
-            color: 'white',
-            cursor: 'pointer',
-            fontWeight: 500,
-            fontSize: '20px',
-          }}
-          title="SOS"
-        >
-          🆘
-        </button>
+          {ReportButton && (
+            <ReportButton
+              style={{
+                padding: 'var(--space-2) var(--space-4)',
+                backgroundColor: 'var(--color-primary)',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: 500,
+                fontSize: 'var(--text-sm)',
+              }}
+            />
+          )}
+
+          <button
+            onClick={() => console.log('SOS triggered')}
+            style={{
+              padding: 'var(--space-2) var(--space-4)',
+              backgroundColor: 'var(--color-error)',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: 'var(--text-sm)',
+            }}
+            title="Emergency SOS"
+          >
+            🆘 SOS
+          </button>
+        </div>
       </div>
 
       {/* Bob AI Panel */}
@@ -478,28 +491,6 @@ const OfficerShell: React.FC = () => {
         onClose={() => setBobOpen(false)}
         context={bobContext}
       />
-
-      {/* Floating SOS Button */}
-      <button
-        style={{
-          position: 'fixed',
-          bottom: '80px',
-          right: '16px',
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          backgroundColor: '#EF5350',
-          border: 'none',
-          color: 'white',
-          fontSize: '24px',
-          cursor: 'pointer',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-          zIndex: 100,
-        }}
-        title="SOS Alert"
-      >
-        🆘
-      </button>
     </div>
   );
 };

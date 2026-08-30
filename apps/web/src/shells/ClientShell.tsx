@@ -10,11 +10,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { ProfessionalNav } from '../components/ProfessionalNav';
+import { ProfessionalHeader } from '../components/ProfessionalHeader';
 
 export function ClientShell() {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   if (!profile) {
     return <div style={{ padding: 32, textAlign: 'center' }}>Loading...</div>;
@@ -26,184 +28,164 @@ export function ClientShell() {
   };
 
   return (
-    <div style={styles.root}>
-      {/* Sidebar */}
-      <aside style={styles.sidebar}>
-        <div style={styles.logo}>
-          <div style={styles.logoBg}>FC</div>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--color-bg-primary)' }}>
+      {/* Professional Header */}
+      <ProfessionalHeader
+        title="Client Portal"
+        subtitle="View your compliance reports and field observations"
+        actions={[
+          {
+            label: 'Profile',
+            onClick: () => navigate('/client/profile'),
+            variant: 'secondary',
+          },
+        ]}
+        userDisplayName={profile.displayName}
+        onLogout={() => setShowLogoutConfirm(true)}
+      />
 
-        <nav style={styles.nav}>
-          <NavItem label="Dashboard" icon="📊" onClick={() => navigate('/client')} />
-          <NavItem label="My Sites" icon="📍" onClick={() => navigate('/client/sites')} />
-          <NavItem label="Observations" icon="👁️" onClick={() => navigate('/client/observations')} />
-          <NavItem label="Incidents" icon="⚠️" onClick={() => navigate('/client/incidents')} />
-          <NavItem label="Reports" icon="📋" onClick={() => navigate('/client/reports')} />
-        </nav>
+      {/* Main Layout with Sidebar */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* Professional Navigation */}
+        <ProfessionalNav
+          sections={[
+            {
+              title: 'Dashboard',
+              items: [
+                { id: 'dashboard', label: 'Overview', path: '/client', status: 'active' },
+                { id: 'sites', label: 'My Sites', path: '/client/sites', status: 'none' },
+              ],
+            },
+            {
+              title: 'Compliance Data',
+              items: [
+                { id: 'observations', label: 'Observations', path: '/client/observations', status: 'alerts' },
+                { id: 'incidents', label: 'Incidents', path: '/client/incidents', status: 'pending' },
+                { id: 'breaches', label: 'Breaches', path: '/client/breaches', status: 'none' },
+              ],
+            },
+            {
+              title: 'Reporting',
+              items: [
+                { id: 'reports', label: 'Reports', path: '/client/reports', status: 'none' },
+                { id: 'export', label: 'Export Data', path: '/client/export', status: 'none' },
+                { id: 'schedules', label: 'Report Schedule', path: '/client/schedules', status: 'none' },
+              ],
+            },
+          ]}
+          currentPath={window.location.pathname}
+          onNavigate={(path) => navigate(path)}
+        />
 
-        <button onClick={handleSignOut} style={styles.signOutBtn}>
-          {sidebarCollapsed ? '⎋' : 'Sign out'}
-        </button>
-      </aside>
+        {/* Main Content Area */}
+        <main style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: 'var(--space-8)', maxWidth: '1280px', margin: '0 auto', width: '100%' }}>
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '60vh',
+              gap: 'var(--space-4)',
+            }}>
+              <div style={{ fontSize: '64px' }}>👋</div>
+              <div style={{ fontSize: '28px', fontWeight: 'var(--font-bold)', color: 'var(--color-text-primary)' }}>
+                Welcome, {profile.displayName}
+              </div>
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--color-text-secondary)', textAlign: 'center', maxWidth: '400px' }}>
+                Select an option from the menu to view your compliance reports, observations, and field data.
+              </p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)', marginTop: 'var(--space-8)', width: '100%' }}>
+                <div className="card" style={{ borderLeft: `4px solid var(--color-primary)` }}>
+                  <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--font-bold)', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>
+                    Active Sites
+                  </div>
+                  <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--font-bold)', color: 'var(--color-primary)' }}>
+                    3
+                  </div>
+                </div>
 
-      {/* Main content */}
-      <div style={styles.main}>
-        <header style={styles.topBar}>
-          <span style={styles.orgName}>Client Portal</span>
-          <span style={styles.userName}>{profile.displayName}</span>
-        </header>
+                <div className="card" style={{ borderLeft: `4px solid var(--color-warning)` }}>
+                  <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--font-bold)', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>
+                    Observations
+                  </div>
+                  <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--font-bold)', color: 'var(--color-warning)' }}>
+                    24
+                  </div>
+                </div>
 
-        <main style={styles.content}>
-          <div style={styles.placeholder}>
-            <div style={styles.placeholderIcon}>👋</div>
-            <div style={styles.placeholderTitle}>Welcome to Field Compliance</div>
-            <p style={styles.placeholderText}>
-              Select an option from the menu to view your compliance data.
-            </p>
+                <div className="card" style={{ borderLeft: `4px solid var(--color-error)` }}>
+                  <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--font-bold)', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-2)' }}>
+                    Action Items
+                  </div>
+                  <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--font-bold)', color: 'var(--color-error)' }}>
+                    2
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </main>
       </div>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: 'var(--color-bg-primary)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 'var(--space-8)',
+            maxWidth: '400px',
+            boxShadow: 'var(--shadow-lg)',
+          }}>
+            <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 'var(--font-bold)', marginBottom: 'var(--space-4)' }}>
+              Sign out?
+            </h2>
+            <p style={{ margin: '0 0 var(--space-6) 0', color: 'var(--color-text-secondary)' }}>
+              Are you sure you want to sign out?
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                style={{
+                  padding: 'var(--space-2) var(--space-4)',
+                  backgroundColor: 'transparent',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--color-text-primary)',
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSignOut}
+                style={{
+                  padding: 'var(--space-2) var(--space-4)',
+                  backgroundColor: 'var(--color-error)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-function NavItem({ label, icon, onClick }: {
-  label: string;
-  icon: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={styles.navItem}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.background = 'rgba(158,158,158,0.1)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.background = 'transparent';
-      }}
-    >
-      <span style={styles.navIcon}>{icon}</span>
-      <span>{label}</span>
-    </button>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  root: {
-    display: 'flex',
-    height: '100vh',
-    background: 'var(--color-bg-primary)',
-    color: 'var(--color-text-primary)',
-  },
-  sidebar: {
-    width: 240,
-    background: 'var(--color-bg-surface)',
-    borderRight: '1px solid rgba(158,158,158,0.15)',
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '16px 0',
-  },
-  logo: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '16px',
-    marginBottom: '16px',
-  },
-  logoBg: {
-    width: 40,
-    height: 40,
-    background: '#1976d2',
-    borderRadius: 6,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 18,
-    fontWeight: 600,
-    color: 'white',
-  },
-  nav: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-    padding: '0 12px',
-  },
-  navItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '12px 16px',
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--color-text-primary)',
-    cursor: 'pointer',
-    fontSize: 14,
-    borderRadius: 6,
-    transition: 'background 200ms',
-    textAlign: 'left',
-  },
-  navIcon: {
-    fontSize: 18,
-    flexShrink: 0,
-  },
-  signOutBtn: {
-    margin: '12px',
-    padding: '10px',
-    background: 'transparent',
-    border: '1px solid rgba(158,158,158,0.2)',
-    borderRadius: 6,
-    color: 'var(--color-text-primary)',
-    cursor: 'pointer',
-    fontSize: 14,
-    transition: 'background 200ms',
-  },
-  main: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  topBar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 24px',
-    borderBottom: '1px solid rgba(158,158,158,0.15)',
-    background: 'var(--color-bg-surface)',
-  },
-  orgName: {
-    fontSize: 16,
-    fontWeight: 600,
-  },
-  userName: {
-    fontSize: 14,
-    color: 'var(--color-text-secondary)',
-  },
-  content: {
-    flex: 1,
-    padding: '24px',
-    overflow: 'auto',
-  },
-  placeholder: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 300,
-    textAlign: 'center',
-  },
-  placeholderIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  placeholderTitle: {
-    fontSize: 20,
-    fontWeight: 600,
-    marginBottom: 8,
-  },
-  placeholderText: {
-    color: 'var(--color-text-secondary)',
-    fontSize: 14,
-  },
-};

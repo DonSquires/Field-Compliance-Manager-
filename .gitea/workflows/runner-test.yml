@@ -23,6 +23,16 @@ jobs:
         run: npm run atlas:check
       - name: Run tests
         run: npm test -- --test-reporter=spec
+      - name: Refresh live Atlas
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "Atlas refresh skipped: Supabase CI secrets are not configured"
+            exit 0
+          fi
+          npm run bob:refresh-capability-map
       - name: Confirm runner
         run: |
           echo "Gitea Actions runner is working"

@@ -23,6 +23,8 @@ import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { NotificationsBell, PortalSwitcher, UniversalSearch } from '../components/stubs';
 import { BobPanel } from '../components/BobPanel';
+import { ProfessionalNav } from '../components/ProfessionalNav';
+import { ProfessionalHeader } from '../components/ProfessionalHeader';
 
 import AdminHubPage from '../pages/AdminHubPage';
 
@@ -481,169 +483,85 @@ const AdminShell: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'var(--color-bg-primary)' }}>
-      <header
-        style={{
-          height: '56px',
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderBottom: '1px solid var(--color-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingLeft: '16px',
-          paddingRight: '16px',
-        }}
-      >
-        <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          {orgName}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <NotificationsBell onOpenBob={() => setBobOpen(true)} />
-          <PortalSwitcher />
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '24px',
-              cursor: 'pointer',
-              color: 'var(--color-text-primary)',
-            }}
-          >
-            ☰
-          </button>
-        </div>
-      </header>
+      {/* Professional Header */}
+      <ProfessionalHeader
+        title={orgName || 'Administration'}
+        subtitle={`${profile?.role?.charAt(0).toUpperCase()}${profile?.role?.slice(1).toLowerCase() || 'User'} Portal`}
+        actions={[
+          {
+            label: 'Add Module',
+            onClick: () => navigateToPage('platform-catalog'),
+            variant: 'primary',
+          },
+        ]}
+        userDisplayName={profile?.displayName}
+      />
 
-      {mobileMenuOpen && (
-        <div
+      {/* Main Layout with Sidebar */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* Professional Navigation */}
+        <ProfessionalNav
+          sections={[
+            {
+              title: 'Core Operations',
+              items: [
+                { id: 'hub', label: 'Dashboard', path: '/admin', status: 'active' },
+                { id: 'relationships', label: 'Relationships', path: '/admin/relationships', status: 'none' },
+                { id: 'crm', label: 'CRM & Finance', path: '/admin/crm', status: 'alerts' },
+                { id: 'roster', label: 'Roster & HR', path: '/admin/roster', status: 'pending' },
+                { id: 'field-ops', label: 'Field Operations', path: '/admin/field-ops', status: 'active' },
+              ],
+            },
+            {
+              title: 'Reports & Analytics',
+              items: [
+                { id: 'reports', label: 'Reports', path: '/admin/reports', status: 'none' },
+                { id: 'sites', label: 'Sites', path: '/admin/sites', status: 'none' },
+                { id: 'locations', label: 'Locations', path: '/admin/locations', status: 'none' },
+              ],
+            },
+            {
+              title: 'Configuration',
+              items: [
+                { id: 'users', label: 'User Management', path: '/admin/users', status: 'none' },
+                { id: 'access-control', label: 'Access Control', path: '/admin/access-control', status: 'none' },
+                { id: 'org-setup', label: 'Organization', path: '/admin/org-setup', status: 'none' },
+              ],
+            },
+            {
+              title: 'Platform',
+              items: [
+                { id: 'platform', label: 'Platform', path: '/admin/platform', status: 'none' },
+                { id: 'platform-billing', label: 'Billing', path: '/admin/platform-billing', status: 'none' },
+              ],
+            },
+          ]}
+          currentPath={location.pathname}
+          onNavigate={(path) => navigate(path)}
+        />
+
+        {/* Main Content Area */}
+        <main
+          data-app-content
           style={{
-            position: 'fixed',
-            top: '56px',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 99,
+            flex: 1,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
           }}
-          onClick={() => setMobileMenuOpen(false)}
         >
-          <nav
-            style={{
-              backgroundColor: 'var(--color-bg-secondary)',
-              maxHeight: '80vh',
-              overflowY: 'auto',
-              paddingTop: '16px',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {Object.entries(NAVIGATION_MAP).map(([group, items]) => (
-              <div key={group}>
-                <div style={{ padding: '8px 16px', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>
-                  {group}
-                </div>
-                {items.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => navigateToPage(item.id as AdminPage)}
-                    style={{
-                      width: '100%',
-                      padding: '12px 16px',
-                      background: activePage === item.id ? 'var(--color-bg-primary)' : 'transparent',
-                      border: 'none',
-                      color: activePage === item.id ? 'var(--color-primary)' : 'var(--color-text-primary)',
-                      textAlign: 'left',
-                      fontSize: '14px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {item.icon} {item.label}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </nav>
-        </div>
-      )}
+          <React.Suspense fallback={<LazyPageFallback />}>
+            {renderPage()}
+          </React.Suspense>
+        </main>
+      </div>
 
-      <main
-        data-app-content
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '16px',
-        }}
-      >
-        <React.Suspense fallback={<LazyPageFallback />}>
-          {renderPage()}
-        </React.Suspense>
-      </main>
-
-      <nav
-        style={{
-          height: '64px',
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderTop: '1px solid var(--color-border)',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          gap: '8px',
-          padding: '8px',
-        }}
-      >
-        {[
-          { id: 'hub', label: 'Home', icon: '🏠' },
-          { id: 'field-ops', label: 'Field Ops', icon: '🚗' },
-          { id: 'roster', label: 'Roster', icon: '👥' },
-          { id: 'crm', label: 'CRM', icon: '💰' },
-          { id: 'reports', label: 'Reports', icon: '📈' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => navigateToPage(tab.id as AdminPage)}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              background: 'none',
-              border: 'none',
-              color: activePage === tab.id ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
-          >
-            <span style={{ fontSize: '20px' }}>{tab.icon}</span>
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </nav>
-
+      {/* Bob AI Panel */}
       <BobPanel
         open={bobOpen}
         onClose={() => setBobOpen(false)}
         context={bobContext}
       />
-
-      <button
-        onClick={() => setBobOpen(true)}
-        style={{
-          position: 'fixed',
-          bottom: '80px',
-          right: '16px',
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          backgroundColor: 'var(--color-primary)',
-          border: 'none',
-          color: 'white',
-          fontSize: '20px',
-          cursor: 'pointer',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-          zIndex: 100,
-        }}
-      >
-        🤖
-      </button>
     </div>
   );
 };

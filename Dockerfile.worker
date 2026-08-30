@@ -1,7 +1,16 @@
 FROM node:22-alpine
 
+RUN apk add --no-cache git
+
 WORKDIR /opt/bob
 COPY assessment-manifest.js /opt/bob/assessment-manifest.js
+COPY frontend-worker.js /opt/bob/frontend-worker.js
+COPY security-worker.js /opt/bob/security-worker.js
+COPY apps/web/package.json apps/web/package-lock.json /opt/bob/web-package/
+RUN cd /opt/bob/web-package \
+	&& npm ci \
+	&& mv node_modules /opt/bob/web-node_modules \
+	&& rm -rf /opt/bob/web-package
 
 RUN addgroup -S bob && adduser -S bob -G bob
 USER bob

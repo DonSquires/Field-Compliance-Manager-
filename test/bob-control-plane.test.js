@@ -12,6 +12,7 @@ const port = 18080 + Math.floor(Math.random() * 1000);
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-control-plane-'));
 const adminToken = 'test-admin-token';
 const runnerToken = 'test-runner-token';
+const modelGatewayToken = 'test-model-gateway-token';
 const webhookSecret = 'test-webhook-secret';
 const baseUrl = `http://127.0.0.1:${port}`;
 let serverProcess;
@@ -33,6 +34,7 @@ test.before(async () => {
       PORT: String(port),
       BOB_ADMIN_TOKEN: adminToken,
       BOB_RUNNER_TOKEN: runnerToken,
+      BOB_MODEL_GATEWAY_TOKEN: modelGatewayToken,
       BOB_ASSESSMENT_ROOT: root,
       GITEA_WEBHOOK_SECRET: webhookSecret,
       BOB_ALLOWED_REPOSITORIES: 'example/app',
@@ -101,6 +103,27 @@ test('job routes require the admin bearer token', async () => {
   const { response, body } = await request('POST', '/jobs', { repository: 'example/app' });
   assert.equal(response.status, 401);
   assert.deepEqual(body, { error: 'unauthorized' });
+});
+
+test('builder model route requires its dedicated bearer token', async () => {
+  const input = {
+    provider: 'invalid',
+    builder_mode: 'product_analyst',
+    prompt_version: 'product-v1',
+    idempotency_key: 'job::step::hash',
+    system_prompt: 'System',
+    user_prompt: 'User'
+  };
+  const denied = await request('POST', '/api/bob/builder/model-run', input, {
+    authorization: `Bearer ${adminToken}`
+  });
+  assert.equal(denied.response.status, 401);
+
+  const allowed = await request('POST', '/api/bob/builder/model-run', input, {
+    authorization: `Bearer ${modelGatewayToken}`
+  });
+  assert.equal(allowed.response.status, 400);
+  assert.deepEqual(allowed.body, { error: 'unsupported model provider' });
 });
 
 test('job creation rejects repositories outside the allowlist', async () => {

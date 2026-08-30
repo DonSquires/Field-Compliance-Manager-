@@ -5,11 +5,13 @@ const path = require('path');
 const { createWorkflowClient } = require('./supabase-workflow-client');
 const { createAssessment } = require('./assessment-manifest');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
+const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
 
 const port = Number(process.env.PORT || 8080);
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
 const adminToken = process.env.BOB_ADMIN_TOKEN || '';
 const runnerToken = process.env.BOB_RUNNER_TOKEN || '';
+const modelGatewayToken = process.env.BOB_MODEL_GATEWAY_TOKEN || '';
 const assessmentRoot = process.env.BOB_ASSESSMENT_ROOT || '/app';
 const allowedRepositories = new Set((process.env.BOB_ALLOWED_REPOSITORIES || '')
   .split(',')
@@ -21,6 +23,7 @@ const workflowClient = createWorkflowClient({
   serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   mode: process.env.BOB_WORKFLOW_MODE || 'local'
 });
+const modelGatewayConfig = createModelGatewayConfig();
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
@@ -76,6 +79,10 @@ function runnerAuthorized(req) {
   return Boolean(runnerToken) && req.headers.authorization === `Bearer ${runnerToken}`;
 }
 
+function modelGatewayAuthorized(req) {
+  return Boolean(modelGatewayToken) && req.headers.authorization === `Bearer ${modelGatewayToken}`;
+}
+
 function repositoryAllowed(repository) {
   return Boolean(repository) && allowedRepositories.has(repository);
 }
@@ -129,6 +136,11 @@ async function createJob(input, actor) {
 async function route(req, res, body) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease) });
+  if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run') {
+    if (!modelGatewayAuthorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
+    const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig });
+    return json(res, result.status, result.body);
+  }
   if (req.method === 'GET' && url.pathname === '/assessment') {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
     const assessment = createAssessment(assessmentRoot);

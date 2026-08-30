@@ -131,7 +131,9 @@ const TrendChart: React.FC<{
   data: TrendDay[];
   range: TrendRange;
   onRangeChange: (range: TrendRange) => void;
-}> = ({ data, range, onRangeChange }) => {
+  loading: boolean;
+  error: string | null;
+}> = ({ data, range, onRangeChange, loading, error }) => {
   const maxValue = Math.max(...data.map((d) => Math.max(d.scans, d.breaches)), 1);
 
   return (
@@ -163,6 +165,8 @@ const TrendChart: React.FC<{
       </div>
 
       <div style={{ height: '150px', display: 'flex', alignItems: 'flex-end', gap: '4px' }}>
+        {loading && data.length === 0 && <span style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>Loading trend data...</span>}
+        {!loading && error && data.length === 0 && <span role="alert" style={{ color: '#EF5350', fontSize: '13px' }}>{error}</span>}
         {data.map((day, idx) => (
           <div
             key={idx}
@@ -208,6 +212,14 @@ const TrendChart: React.FC<{
           <span>Breaches</span>
         </div>
       </div>
+      {error && data.length > 0 && (
+        <p role="alert" style={{ margin: '12px 0 0', color: '#EF5350', fontSize: '12px' }}>
+          {error} Showing the last successfully loaded trend.
+        </p>
+      )}
+      <div style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+        {data.map((day) => `${day.date}: ${day.scans} scans and ${day.breaches} breaches.`).join(' ')}
+      </div>
     </div>
   );
 };
@@ -242,14 +254,14 @@ const NocTerminal: React.FC = () => (
         gap: '8px',
       }}
     >
-      <span>● ONLINE</span>
-      <span style={{ color: '#666' }}>System Telemetry: Operational</span>
+      <span style={{ color: '#FF9800' }}>● UNAVAILABLE</span>
+      <span style={{ color: '#888' }}>No live telemetry source is configured</span>
     </div>
 
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
       {[
-        { name: 'fcm-api', value: '42ms', desc: 'API (Hpanel VPS)' },
-        { name: 'fcm-inference', value: 'ONNX YOLOv8n', desc: 'ML Engine' },
+        { name: 'fcm-api', value: 'Not reported', desc: 'API telemetry unavailable' },
+        { name: 'fcm-inference', value: 'Not reported', desc: 'Inference telemetry unavailable' },
       ].map((item) => (
         <div
           key={item.name}
@@ -257,11 +269,11 @@ const NocTerminal: React.FC = () => (
             padding: '8px 12px',
             backgroundColor: '#0A0A0A',
             borderRadius: '4px',
-            borderLeft: '2px solid #4CAF50',
+            borderLeft: '2px solid #FF9800',
             fontSize: '11px',
           }}
         >
-          <div style={{ color: '#4CAF50', fontWeight: 600 }}>● {item.name}</div>
+          <div style={{ color: '#FF9800', fontWeight: 600 }}>● {item.name}</div>
           <div style={{ color: '#888', marginTop: '2px' }}>{item.value}</div>
           <div style={{ color: '#666', fontSize: '10px', marginTop: '2px' }}>{item.desc}</div>
         </div>
@@ -273,8 +285,13 @@ const NocTerminal: React.FC = () => (
 const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
   const [kpi, setKpi] = useState<KpiData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [kpiLoading, setKpiLoading] = useState(true);
+  const [kpiError, setKpiError] = useState<string | null>(null);
+  const [kpiUpdatedAt, setKpiUpdatedAt] = useState<string | null>(null);
   const [trend, setTrend] = useState<TrendDay[]>([]);
+  const [trendLoading, setTrendLoading] = useState(true);
+  const [trendError, setTrendError] = useState<string | null>(null);
+  const [trendUpdatedAt, setTrendUpdatedAt] = useState<string | null>(null);
   const [trendRange, setTrendRange] = useState<TrendRange>('7d');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
@@ -283,7 +300,8 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     if (!profile?.organizationId) return;
 
     try {
-      setLoading(true);
+      setKpiLoading(true);
+      setKpiError(null);
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
@@ -310,16 +328,21 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           .eq('status', 'pending'),
       ]);
 
+      const failedResponse = [scansRes, breachesRes, patrolsRes, welfareRes].find((response) => response.error);
+      if (failedResponse?.error) throw failedResponse.error;
+
       setKpi({
-        scansToday: scansRes.count || 0,
-        activeBreaches: breachesRes.count || 0,
-        patrols: patrolsRes.count || 0,
-        welfareAlerts: welfareRes.count || 0,
+        scansToday: scansRes.count ?? 0,
+        activeBreaches: breachesRes.count ?? 0,
+        patrols: patrolsRes.count ?? 0,
+        welfareAlerts: welfareRes.count ?? 0,
       });
+      setKpiUpdatedAt(new Date().toISOString());
     } catch (err) {
       console.error('Failed to load KPI:', err);
+      setKpiError('KPI data is currently unavailable.');
     } finally {
-      setLoading(false);
+      setKpiLoading(false);
     }
   }, [profile?.organizationId]);
 
@@ -328,6 +351,8 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     if (!profile?.organizationId) return;
 
     try {
+      setTrendLoading(true);
+      setTrendError(null);
       const now = new Date();
       const days = trendRange === '7d' ? 7 : trendRange === '14d' ? 14 : 30;
       const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -344,6 +369,9 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           .eq('organization_id', profile.organizationId)
           .gte('created_at', start),
       ]);
+
+      const failedResponse = [scansRes, breachesRes].find((response) => response.error);
+      if (failedResponse?.error) throw failedResponse.error;
 
       const trendMap: Record<string, { scans: number; breaches: number }> = {};
       for (let i = 0; i < days; i++) {
@@ -367,8 +395,12 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         .map(([date, data]) => ({ date, ...data }));
 
       setTrend(sorted);
+      setTrendUpdatedAt(new Date().toISOString());
     } catch (err) {
       console.error('Failed to load trend:', err);
+      setTrendError('Trend data is currently unavailable.');
+    } finally {
+      setTrendLoading(false);
     }
   }, [profile?.organizationId, trendRange]);
 
@@ -395,6 +427,10 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   }, [loadKpi, loadTrend]);
 
   const isGrandMaster = profile?.role === 'grand_master';
+  const refreshDashboard = useCallback(() => {
+    void Promise.all([loadKpi(), loadTrend()]);
+  }, [loadKpi, loadTrend]);
+  const dashboardUpdatedAt = [kpiUpdatedAt, trendUpdatedAt].filter(Boolean).sort().at(-1);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '24px' }}>
@@ -409,10 +445,8 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           </p>
         </div>
         <button
-          onClick={() => {
-            loadKpi();
-            loadTrend();
-          }}
+          onClick={refreshDashboard}
+          disabled={kpiLoading || trendLoading}
           style={{
             padding: '8px 16px',
             backgroundColor: 'var(--color-primary)',
@@ -424,7 +458,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             fontSize: '14px',
           }}
         >
-          🔄 Refresh
+          {kpiLoading || trendLoading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
@@ -441,37 +475,43 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       >
         <KpiTile
           label="Active Shifts"
-          value={kpi?.patrols || 0}
+          value={kpiError && !kpi ? 'Unavailable' : kpi?.patrols ?? 0}
           icon="🚗"
           color="#3B82F6"
-          loading={loading}
+          loading={kpiLoading}
           onClick={() => onNavigate?.('patrol')}
         />
         <KpiTile
           label="Breach Alerts"
-          value={kpi?.activeBreaches || 0}
+          value={kpiError && !kpi ? 'Unavailable' : kpi?.activeBreaches ?? 0}
           icon="⚖️"
           color={kpi && kpi.activeBreaches > 0 ? '#EF5350' : '#4CAF50'}
-          loading={loading}
+          loading={kpiLoading}
           onClick={() => onNavigate?.('breach-review')}
         />
         <KpiTile
           label="Observations"
-          value={kpi?.scansToday || 0}
+          value={kpiError && !kpi ? 'Unavailable' : kpi?.scansToday ?? 0}
           icon="📷"
           color="#10B981"
-          loading={loading}
+          loading={kpiLoading}
           onClick={() => onNavigate?.('fc-reporting')}
         />
         <KpiTile
           label="Welfare Alerts"
-          value={kpi?.welfareAlerts || 0}
+          value={kpiError && !kpi ? 'Unavailable' : kpi?.welfareAlerts ?? 0}
           icon="🚧"
           color={kpi && kpi.welfareAlerts > 0 ? '#FF9800' : '#4CAF50'}
-          loading={loading}
+          loading={kpiLoading}
           onClick={() => onNavigate?.('welfare-alerts')}
         />
       </div>
+
+      {(kpiError || dashboardUpdatedAt) && (
+        <p role={kpiError ? 'alert' : undefined} style={{ margin: '-12px 0 0', color: kpiError ? '#EF5350' : 'var(--color-text-secondary)', fontSize: '12px' }}>
+          {kpiError ? `${kpiError}${kpi ? ' Showing the last successfully loaded values.' : ''}` : `Last refreshed ${new Date(dashboardUpdatedAt!).toLocaleTimeString()}.`}
+        </p>
+      )}
 
       {/* Sticky Priority Bar */}
       <div
@@ -544,7 +584,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       </div>
 
       {/* Trend Chart */}
-      <TrendChart data={trend} range={trendRange} onRangeChange={setTrendRange} />
+      <TrendChart data={trend} range={trendRange} onRangeChange={setTrendRange} loading={trendLoading} error={trendError} />
 
       {/* Module Cards Grid */}
       <div>

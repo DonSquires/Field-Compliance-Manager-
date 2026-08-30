@@ -27,6 +27,25 @@ radius of any change. Screens are the last thing built, not the first.
    you didn't intend to touch. Sanity-check against an untouched page's
    baseline first.
 
+### Automated refresh
+
+- `npm run atlas:manifest` performs a local dry run and writes
+  `.bob/atlas-refresh-manifest.json`.
+- `npm run bob:refresh-capability-map` applies the manifest to the live Atlas
+  after tests pass. It requires `SUPABASE_URL` and
+  `SUPABASE_SERVICE_ROLE_KEY`.
+- The generator extracts concrete public tables/views/RPCs, Edge Functions,
+  direct Supabase calls, and SQL function reads/writes. Static evidence is
+  recorded as `live-code` or `live-schema`; it never sets `exercised=true`.
+- Manual seeds always win. Rows with `refresh_source=manual_seed` are skipped,
+  and existing `exercised` values are preserved.
+- Retirement is ownership-scoped. Only stale rows carrying
+  `[repo-atlas-refresh:v1]` can be changed to `legacy`; older generator rows
+  and manual rows are left untouched. More than 100 retirements fails closed
+  unless an operator explicitly passes `--allow-large-retirement`.
+- The Gitea main-branch workflow refreshes Atlas only after calibration and all
+  tests pass, and skips safely when its Supabase secrets are absent.
+
 ## Phase 1 — Canonical schema audit
 
 Goal: know the real spine before writing a line of UI code.

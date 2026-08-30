@@ -99,7 +99,6 @@ const JOB_LIFECYCLE = {
   ANALYSIS_PENDING: 'analysis_pending', // Waiting for product analyst
   SPECIFICATION_READY: 'specification_ready', // ← Approval gate here
   DESIGN_PENDING: 'design_pending', // Waiting for UX designer
-  DESIGN_READY: 'design_ready', // ← Approval gate here
   IMPLEMENTATION_PENDING: 'implementation_pending', // Waiting for frontend/backend
   BUILDING: 'building', // Active build in worker
   TESTING: 'testing', // Running test suite
@@ -117,6 +116,7 @@ const BUILDER_MODES = [
   'frontend_engineer',
   'backend_engineer',
   'qa_security_reviewer',
+  'code_reviewer',
   'release_engineer'
 ];
 
@@ -164,10 +164,16 @@ function getDefaultJobSteps() {
       blocked_dependencies: ['test_suite']
     },
     {
-      step_id: 'release_prep',
+      step_id: 'code_review',
       ordinal_position: 7,
-      builder_mode: 'release_engineer',
+      builder_mode: 'code_reviewer',
       blocked_dependencies: ['security_review']
+    },
+    {
+      step_id: 'release_prep',
+      ordinal_position: 8,
+      builder_mode: 'release_engineer',
+      blocked_dependencies: ['code_review']
     }
   ];
 }
@@ -199,7 +205,7 @@ function createBuilderJob({
     total_steps: defaultSteps.length,
     branch_name: branchName,
     target_sha: targetSha,
-    approval_required_at: ['specification_ready', 'design_ready', 'approval_pending']
+    approval_required_at: ['specification_ready', 'approval_pending']
   });
 
   if (!job) {
@@ -264,7 +270,7 @@ function checkDependenciesMet(step, allSteps) {
   }
 
   const completed = allSteps
-    .filter(s => s.status === 'completed')
+    .filter(s => s.status === 'completed' || s.status === 'skipped')
     .map(s => s.step_id);
 
   return step.blocked_dependencies.every(dep => completed.includes(dep));
@@ -315,13 +321,12 @@ function buildJobCheckpoint(job, steps) {
  * @param {Array<string>} approvalRequired - Steps requiring approval before progression
  * @returns {string} Next job status
  */
-function getNextJobStatus(currentStatus, completedStepId, approvalRequired = []) {
+function getNextJobStatus(currentStatus) {
   const STATUS_PROGRESSION = {
     [JOB_LIFECYCLE.INTAKE]: JOB_LIFECYCLE.ANALYSIS_PENDING,
     [JOB_LIFECYCLE.ANALYSIS_PENDING]: JOB_LIFECYCLE.SPECIFICATION_READY,
     [JOB_LIFECYCLE.SPECIFICATION_READY]: JOB_LIFECYCLE.DESIGN_PENDING,
-    [JOB_LIFECYCLE.DESIGN_PENDING]: JOB_LIFECYCLE.DESIGN_READY,
-    [JOB_LIFECYCLE.DESIGN_READY]: JOB_LIFECYCLE.IMPLEMENTATION_PENDING,
+    [JOB_LIFECYCLE.DESIGN_PENDING]: JOB_LIFECYCLE.IMPLEMENTATION_PENDING,
     [JOB_LIFECYCLE.IMPLEMENTATION_PENDING]: JOB_LIFECYCLE.BUILDING,
     [JOB_LIFECYCLE.BUILDING]: JOB_LIFECYCLE.TESTING,
     [JOB_LIFECYCLE.TESTING]: JOB_LIFECYCLE.SECURITY_REVIEW,
@@ -331,12 +336,13 @@ function getNextJobStatus(currentStatus, completedStepId, approvalRequired = [])
   const nextStatus = STATUS_PROGRESSION[currentStatus];
   if (!nextStatus) return currentStatus;
 
-  // If next status requires approval, return APPROVAL_PENDING instead
-  if (approvalRequired.includes(nextStatus)) {
-    return JOB_LIFECYCLE.APPROVAL_PENDING;
-  }
-
   return nextStatus;
+}
+
+function getApprovalTypeForStatus(status) {
+  if (status === JOB_LIFECYCLE.SPECIFICATION_READY) return 'specification_review';
+  if (status === JOB_LIFECYCLE.APPROVAL_PENDING) return 'release_approval';
+  return null;
 }
 
 /**
@@ -426,5 +432,6 @@ export {
   checkDependenciesMet,
   buildJobCheckpoint,
   getNextJobStatus,
+  getApprovalTypeForStatus,
   sanitizeBuilderEvidence
 };

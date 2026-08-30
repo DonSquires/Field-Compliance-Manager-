@@ -52,6 +52,21 @@ const REQUIREMENTS = [
     requiredMarkers: ['bob_repo_read_progress', 'max_line_read', 'conversation_id']
   },
   {
+    name: 'frontend_patch_worker',
+    file: 'frontend-worker.js',
+    requiredMarkers: ['validatePatchText', 'git apply', 'changed-files.json', 'verification.json', 'redactLog']
+  },
+  {
+    name: 'independent_security_worker',
+    file: 'security-worker.js',
+    requiredMarkers: ['reviewPatch', 'credential-material', 'protected-surface-change', 'patch_sha256', 'manifest_sha256']
+  },
+  {
+    name: 'release_preparation',
+    file: 'supabase/functions/_shared/builder-release-engineer.js',
+    requiredMarkers: ['deriveReleaseImpact', 'rollback_steps', 'deployment_enabled', 'approval']
+  },
+  {
     name: 'officer_safety_system',
     file: 'apps/web/src/hooks/useOfficerSafety.ts',
     requiredMarkers: ['recordMovement', 'acknowledgeAlert', 'detectionState', 'activeAlert']
