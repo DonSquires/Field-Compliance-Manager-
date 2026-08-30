@@ -54,6 +54,12 @@ test('managed Atlas refresh derives real component and RPC flow edges', () => {
   assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'reads'), true);
   assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'writes'), true);
   assert.equal(hasEdge('manage_welfare_alert', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('pages/OfficerFieldReportPage', 'officer_field_reports', 'reads'), true);
+  assert.equal(hasEdge('pages/OfficerFieldReportPage', 'submit_officer_field_report', 'calls'), true);
+  assert.equal(hasEdge('submit_officer_field_report', 'officer_field_reports', 'reads'), true);
+  assert.equal(hasEdge('submit_officer_field_report', 'officer_field_reports', 'writes'), true);
+  assert.equal(hasEdge('submit_officer_field_report', 'audit_log', 'writes'), true);
+  assert.equal(atlas.edges.some((edge) => edge.source_name === 'pages/OfficerFieldReportPage' && edge.target_name === 'officer_field_reports' && edge.edge_kind === 'writes'), false);
 });
 
 test('managed Atlas refresh includes capability nodes without inferring exercise', () => {

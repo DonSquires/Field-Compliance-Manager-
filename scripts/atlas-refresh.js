@@ -8,6 +8,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/OfficerLeavePage.tsx',
   'apps/web/src/pages/CRMPage.tsx',
   'apps/web/src/pages/WelfareAlertsPage.tsx',
+  'apps/web/src/pages/OfficerFieldReportPage.tsx',
   'apps/web/src/hooks/useOfficerSafety.ts',
   'supabase/migrations/20260830128000_roster_work_units.sql',
   'supabase/migrations/20260830129000_materialize_roster_slots.sql',
@@ -22,7 +23,9 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260830138000_govern_crm_quote_creation.sql',
   'supabase/migrations/20260830139000_govern_crm_quote_lines.sql',
   'supabase/migrations/20260830140000_govern_crm_quote_lifecycle.sql',
-  'supabase/migrations/20260830141000_govern_welfare_alert_transitions.sql'
+  'supabase/migrations/20260830141000_govern_welfare_alert_transitions.sql',
+  'supabase/migrations/20260830125000_submit_officer_field_report.sql',
+  'supabase/migrations/20260830142000_harden_officer_field_report_submission.sql'
 ];
 
 function uniqueBy(items, keyOf) {

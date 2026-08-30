@@ -27317,3 +27317,9 @@ DROP POLICY IF EXISTS "welfare_alerts_update" ON "public"."welfare_alerts";
 REVOKE UPDATE,DELETE ON TABLE "public"."welfare_alerts" FROM PUBLIC,"anon","authenticated";
 REVOKE ALL ON FUNCTION "public"."manage_welfare_alert"(uuid,text,text,text) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."manage_welfare_alert"(uuid,text,text,text) TO "authenticated","service_role";
+
+
+DROP POLICY IF EXISTS "officer_insert_field_reports" ON "public"."officer_field_reports";
+DROP POLICY IF EXISTS "officer_update_field_reports" ON "public"."officer_field_reports";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."officer_field_reports" FROM PUBLIC,"anon","authenticated";
+COMMENT ON TABLE "public"."officer_field_reports" IS 'Officer field evidence. Authenticated creation and review are owned by governed RPCs; direct client mutations are revoked.';

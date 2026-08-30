@@ -44,3 +44,22 @@ test('officer report capture is evidential, responsive, and server-confirmed', a
   await expect(page.getByText(/Report confirmed · receipt bbbbbbbb/)).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('an unconfirmed report receipt preserves evidence for retry', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await page.route('**/rest/v1/rpc/submit_officer_field_report', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+  });
+  await signInAsOfficer(page, '/officer/report');
+
+  await page.getByLabel('Title').fill('Damaged perimeter gate');
+  await page.getByLabel('Description').fill('The north perimeter gate would not latch after the final patrol check.');
+  await page.getByLabel('Immediate action taken').fill('Secured the gate with the approved temporary lock and notified dispatch.');
+  await page.getByRole('button', { name: 'Submit report' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('Report receipt was not confirmed');
+  await expect(page.getByLabel('Title')).toHaveValue('Damaged perimeter gate');
+  await expect(page.getByLabel('Description')).toHaveValue('The north perimeter gate would not latch after the final patrol check.');
+  await expect(page.getByRole('button', { name: 'Submit report' })).toBeEnabled();
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
