@@ -3926,7 +3926,7 @@ $$;
 ALTER FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
+CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
 declare v_org_id uuid;
@@ -3958,7 +3958,32 @@ begin
 end;
 $$;
 
+ALTER FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_org_id uuid;
+  v_event_count integer;
+begin
+  return query select * from public.get_officer_activity_timeline_unlogged(p_officer_id, p_from, p_to, p_limit);
+  get diagnostics v_event_count = row_count;
+  select organization_id into v_org_id from public.user_profiles where id = p_officer_id;
+  if v_org_id is not null then
+    insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+    values (v_org_id, auth.uid(), 'officer_activity_timeline_viewed', 'user_profiles', p_officer_id,
+      jsonb_build_object('from', p_from, 'to', p_to, 'requested_limit', p_limit,
+        'effective_limit', least(greatest(coalesce(p_limit, 1000), 1), 5000), 'event_count', v_event_count));
+  end if;
+end;
+$$;
+
 ALTER FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) IS 'Returns the authorized officer evidence timeline and atomically audits each successful access.';
 
 
 CREATE OR REPLACE FUNCTION "public"."org_access_allowed"("target_org_id" "uuid") RETURNS boolean
@@ -24945,6 +24970,12 @@ GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "
 
 GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "anon";
+REVOKE ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) FROM "authenticated";
+GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "service_role";
 
 
 
