@@ -19,16 +19,28 @@ source-derived Atlas edges, and live catalog privileges.
   labour pricing, positive totals, validity, and achieved margin. Acceptance is
   sent-only and is the sole authenticated gateway to `accept_quote`; decline
   requires a retained reason. All transitions are expected-state locked/audited.
+- Contact maintenance is governed by `manage_crm_contact`. Provider account
+  teams are authorized through child-account hierarchy or an accepted service
+  agreement. Create retries are stable, edits are expected-state checked,
+  deactivation preserves history, and primary/emergency roles are explicit.
+- `crm_account_activities` is the append-only human relationship timeline.
+  Calls, emails, meetings, notes, tasks, outcomes, and follow-up dates are
+  written through `create_crm_account_activity` with stable request identity.
+- Existing invoice headers are operational in Accounts Receivable through
+  `manage_crm_invoice`. Send, mark-paid, and void transitions are locked,
+  state-valid, and audited. Direct browser mutation of contacts, activity, and
+  invoices is revoked.
 
 ## Present but not active in CRM
 
 - Quote-line edit/delete is not exposed. Adding a mistaken line currently requires
   a separate governed correction workflow.
-- Invoicing, payments, tenders, rate rules, and generate-invoice remain type names
-  in legacy `CRMTab`; AdminShell does not route them through CRM.
-- RelationshipWorkspace reads service agreements but does not mutate them.
-- CRM contact maintenance is not exposed by active CRM; existing table policies
-  and any dormant writers need a separate lifecycle review before activation.
+- Invoice generation remains intentionally unavailable. The current schema has
+  invoice headers but no invoice-line or payment-allocation entity, so a
+  defensible amount cannot yet be generated from billing evidence.
+- Payment reconciliation is currently a controlled mark-paid transition, not a
+  bank-feed allocation workflow.
+- Tenders and rate-rule administration remain outside active CRM.
 
 ## Atlas correction
 
@@ -36,12 +48,12 @@ The managed refresh now recognizes formatted multiline Supabase chains and
 retires stale edges only when they are live `ci_generator` rows from the exact
 managed source file. It never retires `manual_seed`, `schema_fk`, or unrelated
 source evidence. The refresh moved old CRMPage invoice/contact/agreement write
-claims to `legacy`; active CRMPage terrain is limited to its real reads and two
-governed RPC calls.
+claims to `legacy`. Active terrain now includes the shared account workspace,
+relationship activity, invoice reads, and governed contact/activity/invoice RPCs.
 
 ## Recommended order
 
 1. Add governed quote-line correction while preserving immutable audit history.
-2. Build invoice generation from accepted agreement/rate evidence.
-3. Add payment allocation/reconciliation.
-4. Add governed contact lifecycle and account activity timeline.
+2. Add invoice lines and generation from accepted agreement/rate evidence.
+3. Add payment allocation and bank reconciliation.
+4. Add account ownership, task completion, and pipeline forecasting.

@@ -60,6 +60,16 @@ test('managed Atlas refresh derives real component and RPC flow edges', () => {
   assert.equal(hasEdge('submit_officer_field_report', 'officer_field_reports', 'writes'), true);
   assert.equal(hasEdge('submit_officer_field_report', 'audit_log', 'writes'), true);
   assert.equal(atlas.edges.some((edge) => edge.source_name === 'pages/OfficerFieldReportPage' && edge.target_name === 'officer_field_reports' && edge.edge_kind === 'writes'), false);
+  assert.equal(hasEdge('pages/CRMPage', 'invoices', 'reads'), true);
+  assert.equal(hasEdge('pages/CRMPage', 'manage_crm_invoice', 'calls'), true);
+  assert.equal(hasEdge('components/CrmAccountWorkspace', 'crm_contacts', 'reads'), true);
+  assert.equal(hasEdge('components/CrmAccountWorkspace', 'crm_account_activities', 'reads'), true);
+  assert.equal(hasEdge('components/CrmAccountWorkspace', 'manage_crm_contact', 'calls'), true);
+  assert.equal(hasEdge('components/CrmAccountWorkspace', 'create_crm_account_activity', 'calls'), true);
+  assert.equal(hasEdge('manage_crm_contact', 'crm_contacts', 'writes'), true);
+  assert.equal(hasEdge('create_crm_account_activity', 'crm_account_activities', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_invoice', 'invoices', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_invoice', 'audit_log', 'writes'), true);
 });
 
 test('managed Atlas refresh includes capability nodes without inferring exercise', () => {

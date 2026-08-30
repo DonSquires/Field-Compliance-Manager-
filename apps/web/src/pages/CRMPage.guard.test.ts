@@ -32,4 +32,11 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('Decline reason');
     expect(page).not.toMatch(/\.rpc\(["']accept_quote["']/);
   });
+
+  it('operates account relationships and invoice lifecycle through governed RPCs', () => {
+    expect(page).toContain('CrmAccountWorkspace');
+    expect(page).toMatch(/\.from\(["']invoices["']\)/);
+    expect(page).toMatch(/\.rpc\(["']manage_crm_invoice["']/);
+    expect(page).not.toMatch(/\.from\(["']invoices["']\)\.update/);
+  });
 });
