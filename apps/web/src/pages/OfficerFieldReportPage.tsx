@@ -1,235 +1,91 @@
-/**
- * OfficerFieldReportPage.tsx (Officer module: 'report')
- *
- * Canonical schema: officer_field_reports (report_type: incident|maintenance|
- * health_safety; severity: low|medium|high|critical; status: draft|submitted|
- * reviewed|closed). Officer-scoped: filtered to the signed-in officer.
- */
-
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin, RefreshCw, Send, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import './PageStyles.css';
+import './OfficerFieldReportPage.css';
 
 type ReportType = 'incident' | 'maintenance' | 'health_safety';
 type ReportSeverity = 'low' | 'medium' | 'high' | 'critical';
+interface ShiftOption { id: string; service_type: string; scheduled_start: string; status: string; }
+interface ReportRecord { id: string; report_type: ReportType; severity: ReportSeverity; status: string; title: string; description: string; location_name: string | null; reported_at: string; follow_up_required: boolean; }
+interface GpsState { status: 'idle' | 'locating' | 'captured' | 'unavailable'; lat: number | null; lng: number | null; accuracy: number | null; }
 
-interface FieldReport {
-  id: string;
-  report_type: ReportType;
-  severity: ReportSeverity;
-  status: string;
-  title: string;
-  description: string;
-  location_name: string | null;
-  follow_up_required: boolean;
-  created_at: string;
-}
+const initialForm = { reportType: 'incident' as ReportType, severity: 'medium' as ReportSeverity, shiftId: '', title: '', description: '', locationName: '', address: '', immediateAction: '', followUp: false, followUpNotes: '' };
 
 const OfficerFieldReportPage: React.FC = () => {
   const { profile } = useAuth();
-  const [reports, setReports] = useState<FieldReport[]>([]);
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [shifts, setShifts] = useState<ShiftOption[]>([]);
+  const [form, setForm] = useState(initialForm);
+  const [gps, setGps] = useState<GpsState>({ status: 'idle', lat: null, lng: null, accuracy: null });
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    report_type: 'incident' as ReportType,
-    severity: 'low' as ReportSeverity,
-    title: '',
-    description: '',
-    location_name: '',
-    follow_up_required: false,
-  });
+  const [receipt, setReceipt] = useState<{ id: string; receivedAt: string } | null>(null);
+  const eventIdRef = useRef(crypto.randomUUID());
+  const capturedAtRef = useRef(new Date().toISOString());
 
-  // ATLAS READS: officer_field_reports
-  const loadReports = useCallback(async () => {
-    if (!profile?.id) return;
+  const loadData = useCallback(async () => {
+    if (!profile?.id || !profile.organizationId) return;
+    setLoading(true); setError(null);
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const [reportResponse, shiftResponse] = await Promise.all([
+      supabase.from('officer_field_reports').select('id, report_type, severity, status, title, description, location_name, reported_at, follow_up_required').eq('officer_id', profile.id).order('reported_at', { ascending: false }).limit(20),
+      supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('organization_id', profile.organizationId).eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
+    ]);
+    setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts((shiftResponse.data as ShiftOption[]) ?? []);
+    setForm((current) => ({ ...current, shiftId: current.shiftId || (shiftResponse.data as ShiftOption[] | null)?.[0]?.id || '' }));
+    const failures = [reportResponse.error && `Reports: ${reportResponse.error.message}`, shiftResponse.error && `Shifts: ${shiftResponse.error.message}`].filter(Boolean);
+    if (failures.length) setError(failures.join(' · ')); setLoading(false);
+  }, [profile?.id, profile?.organizationId]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error: err } = await supabase
-        .from('officer_field_reports')
-        .select('id, report_type, severity, status, title, description, location_name, follow_up_required, created_at')
-        .eq('officer_id', profile.id)
-        .order('created_at', { ascending: false });
-
-      if (err) throw err;
-      setReports((data as FieldReport[]) || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load reports');
-    } finally {
-      setLoading(false);
-    }
-  }, [profile?.id]);
-
-  useEffect(() => {
-    loadReports();
-  }, [loadReports]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile?.id || !profile?.organizationId) return;
-
-    try {
-      // ATLAS WRITES: officer_field_reports
-      const { data, error } = await supabase
-        .from('officer_field_reports')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            officer_id: profile.id,
-            report_type: form.report_type,
-            severity: form.severity,
-            title: form.title,
-            description: form.description,
-            location_name: form.location_name || null,
-            follow_up_required: form.follow_up_required,
-            status: 'submitted',
-          },
-        ])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setReports([data as FieldReport, ...reports]);
-      setForm({
-        report_type: 'incident',
-        severity: 'low',
-        title: '',
-        description: '',
-        location_name: '',
-        follow_up_required: false,
-      });
-      setShowForm(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit report');
-    }
+  const acquireGps = () => {
+    if (!navigator.geolocation) { setGps({ status: 'unavailable', lat: null, lng: null, accuracy: null }); return; }
+    setGps({ status: 'locating', lat: null, lng: null, accuracy: null });
+    navigator.geolocation.getCurrentPosition(
+      (position) => setGps({ status: 'captured', lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy }),
+      () => setGps({ status: 'unavailable', lat: null, lng: null, accuracy: null }),
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 8_000 },
+    );
   };
 
-  if (loading) {
-    return (
-      <div className="page-container">
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading reports...</p>
-        </div>
-      </div>
-    );
-  }
+  const canSubmit = form.title.trim().length >= 5 && form.description.trim().length >= 10 && (!form.followUp || form.followUpNotes.trim().length > 0) && !submitting;
+  const submitReport = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!canSubmit) return;
+    setSubmitting(true); setError(null); setReceipt(null);
+    const { data, error: submitError } = await supabase.rpc('submit_officer_field_report', {
+      p_client_event_id: eventIdRef.current, p_reported_at: capturedAtRef.current, p_report_type: form.reportType, p_severity: form.severity,
+      p_title: form.title.trim(), p_description: form.description.trim(), p_location_name: form.locationName.trim() || null,
+      p_address: form.address.trim() || null, p_gps_lat: gps.lat, p_gps_lng: gps.lng, p_shift_id: form.shiftId || null,
+      p_immediate_action: form.immediateAction.trim() || null, p_follow_up_required: form.followUp,
+      p_follow_up_notes: form.followUp ? form.followUpNotes.trim() : null,
+    });
+    const result = (data as Array<{ id: string; received_at: string }> | null)?.[0];
+    if (submitError || !result) setError(submitError?.message ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
+    else { setReceipt({ id: result.id, receivedAt: result.received_at }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
+    setSubmitting(false);
+  };
 
-  return (
-    <div className="page-container">
-      <header className="page-header">
-        <h1>Field Reports</h1>
-        <p className="subtitle">{reports.length} reports submitted</p>
-      </header>
-
-      {error && (
-        <div className="alert alert-error" role="alert">
-          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
-            ×
-          </button>
-          {error}
-        </div>
-      )}
-
-      <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
-        {showForm ? 'Cancel' : '+ New Report'}
-      </button>
-
-      {showForm && (
-        <form className="assessment-form" onSubmit={handleSubmit}>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Type</label>
-              <select
-                value={form.report_type}
-                onChange={(e) => setForm({ ...form, report_type: e.target.value as ReportType })}
-              >
-                <option value="incident">Incident</option>
-                <option value="maintenance">Maintenance</option>
-                <option value="health_safety">Health & Safety</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Severity</label>
-              <select
-                value={form.severity}
-                onChange={(e) => setForm({ ...form, severity: e.target.value as ReportSeverity })}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </div>
-          </div>
-          <div className="form-group">
-            <label>Title</label>
-            <input type="text" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          </div>
-          <div className="form-group">
-            <label>Location</label>
-            <input
-              type="text"
-              value={form.location_name}
-              onChange={(e) => setForm({ ...form, location_name: e.target.value })}
-            />
-          </div>
-          <div className="form-group">
-            <label>Description</label>
-            <textarea
-              required
-              rows={4}
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-          </div>
-          <div className="form-group">
-            <label>
-              <input
-                type="checkbox"
-                checked={form.follow_up_required}
-                onChange={(e) => setForm({ ...form, follow_up_required: e.target.checked })}
-              />{' '}
-              Follow-up required
-            </label>
-          </div>
-          <button type="submit" className="btn btn-primary btn-block">
-            Submit Report
-          </button>
-        </form>
-      )}
-
-      <div className="contacts-list" style={{ marginTop: '12px' }}>
-        {reports.length === 0 ? (
-          <div className="empty-state">
-            <p>No reports submitted yet.</p>
-          </div>
-        ) : (
-          reports.map((r) => (
-            <div key={r.id} className="contact-card">
-              <div className="contact-header">
-                <h3>{r.title}</h3>
-                <span className={`severity-badge severity-${r.severity}`}>{r.severity}</span>
-              </div>
-              <div className="contact-details">
-                <p>{r.description}</p>
-                <p className="contact-meta">
-                  {r.report_type} · {r.location_name || 'no location'} ·{' '}
-                  {new Date(r.created_at).toLocaleString()}
-                </p>
-              </div>
-              <span className={`status-badge status-${r.status}`}>{r.status}</span>
-            </div>
-          ))
-        )}
-      </div>
+  return <div className="officer-report-page">
+    <header className="officer-report-header"><div><span>Field evidence</span><h1>Field report</h1><p>Submit operational, maintenance, or health and safety concerns.</p></div><button type="button" onClick={() => void loadData()} disabled={loading} title="Refresh reports"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
+    {error && <div className="officer-report-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
+    {receipt && <div className="officer-report-message is-success" role="status"><CheckCircle2 size={17} /><span>Report confirmed · receipt {receipt.id.slice(0, 8)} · {new Date(receipt.receivedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span><button type="button" onClick={() => setReceipt(null)} title="Dismiss"><X size={16} /></button></div>}
+    <div className="officer-report-layout">
+      <form className="officer-report-form" onSubmit={submitReport}><div className="officer-report-panel-heading"><div><span>New submission</span><h2>Report details</h2></div><ClipboardPlus size={20} /></div>
+        <div className="officer-report-grid"><label><span>Type</span><select value={form.reportType} onChange={(e) => setForm({ ...form, reportType: e.target.value as ReportType })}><option value="incident">Incident</option><option value="maintenance">Maintenance</option><option value="health_safety">Health & safety</option></select></label><label><span>Severity</span><select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value as ReportSeverity })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div>
+        <label><span>Related shift</span><select value={form.shiftId} onChange={(e) => setForm({ ...form, shiftId: e.target.value })}><option value="">No related shift</option>{shifts.map((shift) => <option value={shift.id} key={shift.id}>{new Date(shift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} · {shift.service_type.replaceAll('_', ' ')} · {shift.status}</option>)}</select></label>
+        <label><span>Title</span><input required minLength={5} maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Short operational summary" /></label>
+        <label><span>Description</span><textarea required minLength={10} maxLength={10000} rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What happened, who or what was affected, and current conditions" /></label>
+        <div className="officer-report-grid"><label><span>Location name</span><input value={form.locationName} onChange={(e) => setForm({ ...form, locationName: e.target.value })} placeholder="Site or area" /></label><label><span>Address</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street address" /></label></div>
+        <div className={`officer-report-gps state-${gps.status}`}><Crosshair size={18} /><div><strong>{gps.status === 'captured' ? 'GPS captured' : gps.status === 'locating' ? 'Locating' : gps.status === 'unavailable' ? 'GPS unavailable' : 'Add GPS evidence'}</strong><span>{gps.status === 'captured' ? `${gps.lat?.toFixed(5)}, ${gps.lng?.toFixed(5)} · ±${Math.round(gps.accuracy ?? 0)} m` : 'Optional. Reporting remains available if location services fail.'}</span></div><button type="button" onClick={acquireGps} disabled={gps.status === 'locating'}>{gps.status === 'captured' ? 'Refresh' : 'Capture'}</button></div>
+        <label><span>Immediate action taken</span><textarea rows={3} value={form.immediateAction} onChange={(e) => setForm({ ...form, immediateAction: e.target.value })} placeholder="Controls applied, notifications made, or area isolated" /></label>
+        <label className="officer-report-followup"><input type="checkbox" checked={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.checked })} /><span><CheckCircle2 size={17} /><b>Follow-up required</b><small>Route this submission into the supervisor follow-up queue</small></span></label>
+        {form.followUp && <label><span>Required follow-up</span><textarea required rows={3} value={form.followUpNotes} onChange={(e) => setForm({ ...form, followUpNotes: e.target.value })} placeholder="Action required, urgency, and owner if known" /></label>}
+        <div className="officer-report-submit"><span>Submission is timestamped and audited. Failed receipts retain this form for retry.</span><button type="submit" disabled={!canSubmit}>{submitting ? <><RefreshCw size={16} className="is-spinning" />Submitting</> : <><Send size={16} />Submit report</>}</button></div>
+      </form>
+      <aside className="officer-report-history"><div className="officer-report-panel-heading"><div><span>My records</span><h2>Recent reports</h2></div><strong>{reports.length}</strong></div>{loading ? <div className="officer-report-empty"><RefreshCw size={19} className="is-spinning" />Loading reports</div> : reports.length === 0 ? <div className="officer-report-empty"><FileText size={22} />No reports submitted yet</div> : <div className="officer-report-list">{reports.map((report) => <article className={`severity-${report.severity}`} key={report.id}><div><strong>{report.title}</strong><span>{report.status}</span></div><p>{report.description}</p><small><MapPin size={12} />{report.location_name || 'Location not named'} · {new Date(report.reported_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></article>)}</div>}</aside>
     </div>
-  );
+  </div>;
 };
-
 export default OfficerFieldReportPage;

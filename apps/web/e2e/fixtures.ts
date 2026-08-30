@@ -125,12 +125,20 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
       await route.fulfill(fulfillJson([]));
       return;
     }
+    if (resource === 'officer_field_reports') {
+      await route.fulfill(fulfillJson([{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', report_type: 'maintenance', severity: 'medium', status: 'submitted', title: 'Damaged perimeter sign', description: 'Sign mount is loose at the eastern vehicle entrance.', location_name: 'East Gate', reported_at: '2026-08-30T06:00:00.000Z', follow_up_required: true }]));
+      return;
+    }
     if (resource === 'claim_shift_coverage') {
       await route.fulfill(fulfillJson({ id: '88888888-8888-4888-8888-888888888888', status: 'claimed', claimed_by: OFFICER_ID }));
       return;
     }
     if (resource === 'submit_shift_debrief') {
       await route.fulfill(fulfillJson([{ id: '99999999-9999-4999-8999-999999999999', created: true, submitted_at: '2026-08-30T09:30:00.000Z' }]));
+      return;
+    }
+    if (resource === 'submit_officer_field_report') {
+      await route.fulfill(fulfillJson([{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', created: true, received_at: '2026-08-30T09:30:00.000Z' }]));
       return;
     }
     await route.fulfill(fulfillJson([]));

@@ -4010,6 +4010,34 @@ ALTER FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_e
 COMMENT ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") IS 'Race-checks and records the submitted-to-reviewed field report transition with required supervisor notes and audit provenance.';
 
 
+CREATE OR REPLACE FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text" DEFAULT NULL::"text", "p_address" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision, "p_shift_id" "uuid" DEFAULT NULL::"uuid", "p_immediate_action" "text" DEFAULT NULL::"text", "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_user_id uuid := auth.uid(); v_org_id uuid; v_existing public.officer_field_reports%rowtype; v_report public.officer_field_reports%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  select p.organization_id into v_org_id from public.user_profiles p where p.id = v_user_id and p.deactivated_at is null and p.role in ('officer', 'admin_officer');
+  if v_org_id is null then raise exception 'Active officer profile required'; end if;
+  if p_client_event_id is null then raise exception 'client_event_id is required'; end if;
+  if p_reported_at is null or p_reported_at > now() + interval '5 minutes' or p_reported_at < now() - interval '24 hours' then raise exception 'reported_at is outside the accepted capture window'; end if;
+  if char_length(trim(coalesce(p_title, ''))) not between 5 and 200 then raise exception 'Title must be between 5 and 200 characters'; end if;
+  if char_length(trim(coalesce(p_description, ''))) not between 10 and 10000 then raise exception 'Description must be between 10 and 10000 characters'; end if;
+  if (p_gps_lat is null) <> (p_gps_lng is null) then raise exception 'Both GPS coordinates are required together'; end if;
+  if p_gps_lat is not null and (p_gps_lat not between -90 and 90 or p_gps_lng not between -180 and 180) then raise exception 'Invalid GPS coordinates'; end if;
+  if p_follow_up_required and nullif(trim(coalesce(p_follow_up_notes, '')), '') is null then raise exception 'Follow-up notes are required'; end if;
+  if p_shift_id is not null and not exists (select 1 from public.shifts s where s.id = p_shift_id and s.organization_id = v_org_id and s.officer_user_id = v_user_id) then raise exception 'Shift does not belong to the authenticated officer'; end if;
+  select r.* into v_existing from public.officer_field_reports r where r.organization_id = v_org_id and r.officer_id = v_user_id and r.client_event_id = p_client_event_id;
+  if found then return query select v_existing.id, false, v_existing.created_at; return; end if;
+  insert into public.officer_field_reports (organization_id, officer_id, client_event_id, reported_at, report_type, severity, status, title, description, location_name, address, gps_lat, gps_lng, shift_id, immediate_action, follow_up_required, follow_up_notes)
+  values (v_org_id, v_user_id, p_client_event_id, p_reported_at, p_report_type, p_severity, 'submitted', trim(p_title), trim(p_description), nullif(trim(coalesce(p_location_name, '')), ''), nullif(trim(coalesce(p_address, '')), ''), p_gps_lat, p_gps_lng, p_shift_id, nullif(trim(coalesce(p_immediate_action, '')), ''), coalesce(p_follow_up_required, false), nullif(trim(coalesce(p_follow_up_notes, '')), '')) returning * into v_report;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_org_id, v_user_id, 'officer_field_report_submitted', 'officer_field_reports', v_report.id, jsonb_build_object('report_type', v_report.report_type, 'severity', v_report.severity, 'shift_id', v_report.shift_id, 'follow_up_required', v_report.follow_up_required));
+  return query select v_report.id, true, v_report.created_at;
+end;
+$$;
+
+ALTER FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."get_officer_activity_timeline_unlogged"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer DEFAULT 1000) RETURNS TABLE("event_key" "text", "event_type" "text", "event_at" timestamp with time zone, "received_at" timestamp with time zone, "source_table" "text", "source_id" "uuid", "gps_lat" double precision, "gps_lng" double precision, "shift_id" "uuid", "site_id" "uuid", "zone_id" "uuid", "summary" "text", "details" "jsonb")
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
@@ -11406,6 +11434,7 @@ CREATE TABLE IF NOT EXISTS "public"."officer_field_reports" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "address" "text"
+    ,"client_event_id" "uuid"
 );
 
 
@@ -16462,6 +16491,9 @@ CREATE INDEX "idx_ocr_org" ON "public"."officer_command_requests" USING "btree" 
 
 
 CREATE INDEX "idx_officer_gps_log_officer" ON "public"."officer_gps_log" USING "btree" ("officer_id", "created_at" DESC);
+
+
+CREATE UNIQUE INDEX "idx_officer_field_reports_client_event" ON "public"."officer_field_reports" USING "btree" ("organization_id", "officer_id", "client_event_id") WHERE ("client_event_id" IS NOT NULL);
 
 
 
@@ -25180,6 +25212,12 @@ REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uui
 REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") FROM "anon";
 GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."get_officer_activity_timeline"("p_officer_id" "uuid", "p_from" timestamp with time zone, "p_to" timestamp with time zone, "p_limit" integer) TO "authenticated";
