@@ -110,6 +110,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'organization_calendar_settings') { await route.fulfill(fulfillJson([{ region_code: holidayRegion }])); return; }
+    if (table === 'get_roster_commercial_readiness') { await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', pay_status: 'missing_rule', billing_status: 'not_applicable', quote_status: 'not_applicable', geofence_status: 'not_applicable', cost_centre_status: 'ready' }])); return; }
     if (table === 'shifts') {
       await route.fulfill(fulfillJson([{ id: '12121212-1212-4212-8212-121212121212', officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-25T20:00:00.000Z', scheduled_end: '2026-08-26T04:00:00.000Z', status: 'published', shift_health: null, total_stops: 8, notes: 'North district' }, { id: '13131313-1313-4313-8313-131313131313', officer_user_id: OFFICER_ID, service_type: 'site_guard', scheduled_start: '2026-08-27T08:00:00.000Z', scheduled_end: '2026-08-27T16:00:00.000Z', status: 'in_progress', shift_health: 'on_track', total_stops: 1, notes: null }]));
       return;
