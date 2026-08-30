@@ -36,6 +36,7 @@ import {
   Network,
   Package,
   Radio,
+  Route,
   Search,
   Settings,
   Shield,
@@ -56,6 +57,7 @@ import AdminHubPage from '../pages/AdminHubPage';
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
+const RosterTargetsPage = React.lazy(() => import('../pages/RosterTargetsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
 const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
@@ -81,7 +83,7 @@ const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControl
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
 
 type AdminPage =
-  | 'hub' | 'relationships' | 'crm' | 'roster' | 'field-ops' | 'reports' | 'sites' | 'site-360'
+  | 'hub' | 'relationships' | 'crm' | 'roster' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing';
@@ -136,6 +138,7 @@ const NAVIGATION_MAP = {
     { id: 'relationships', label: 'Relationships', icon: Network },
     { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
     { id: 'roster', label: 'Roster & HR', icon: Users },
+    { id: 'roster-targets', label: 'Work Units', icon: Route },
     { id: 'field-ops', label: 'Field Operations', icon: Radio },
     { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
@@ -401,6 +404,8 @@ const AdminShell: React.FC = () => {
         return <ApprovalsActivityPage />;
       case 'roster':
         return <RosterOperationsPage />;
+      case 'roster-targets':
+        return <RosterTargetsPage />;
       default:
         return <AdminHubPage />;
     }

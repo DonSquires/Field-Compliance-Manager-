@@ -50,6 +50,13 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
 }
 
 export async function installSupabaseFixtures(page: Page): Promise<void> {
+  const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
+  const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
+  const workUnits = [
+    { id: '18181818-1818-4818-8818-181818181818', name: 'North District Patrol', work_unit_type: 'patrol', service_type: 'patrol', active: true, patrol_route_id: '19191919-1919-4919-8919-191919191919', service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: null, team_id: null, cost_centre_id: null },
+    { id: '20202020-2020-4020-8020-202020202020', name: 'Civic Centre Static Post', work_unit_type: 'static', service_type: 'static_guarding', active: true, patrol_route_id: null, service_agreement_location_id: '21212121-2121-4121-8121-212121212121', service_agreement_module_id: '22222222-2222-4222-8222-222222222229', workplace_id: null, team_id: null, cost_centre_id: null },
+    { id: '23232323-2323-4323-8323-232323232323', name: 'Roster Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: workplaces[0].id, team_id: null, cost_centre_id: costCentres[0].id },
+  ];
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'e2e-access-token', refresh_token: 'e2e-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user }) });
   });
@@ -111,6 +118,18 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       await route.fulfill(fulfillJson({ id: '15151515-1515-4515-8515-151515151515', officer_user_id: OFFICER_ID, status: 'published' }));
       return;
     }
+    if (table === 'roster_work_units') { await route.fulfill(fulfillJson(workUnits)); return; }
+    if (table === 'patrol_routes') { await route.fulfill(fulfillJson([{ id: '19191919-1919-4919-8919-191919191919', name: 'North District Patrol' }])); return; }
+    if (table === 'service_agreement_locations') { await route.fulfill(fulfillJson([{ id: '21212121-2121-4121-8121-212121212121', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '25252525-2525-4525-8525-252525252525', zone_id: null }])); return; }
+    if (table === 'service_agreement_modules') { await route.fulfill(fulfillJson([{ id: '22222222-2222-4222-8222-222222222229', service_agreement_id: '24242424-2424-4424-8424-242424242424', module_key: 'static_guarding' }])); return; }
+    if (table === 'client_sites') { await route.fulfill(fulfillJson([{ id: '25252525-2525-4525-8525-252525252525', name: 'Civic Centre' }])); return; }
+    if (table === 'location_zones') { await route.fulfill(fulfillJson([])); return; }
+    if (table === 'organization_workplaces') { await route.fulfill(fulfillJson(workplaces)); return; }
+    if (table === 'teams') { await route.fulfill(fulfillJson([{ id: '26262626-2626-4626-8626-262626262626', name: 'Operations Support' }])); return; }
+    if (table === 'cost_centres') { await route.fulfill(fulfillJson(costCentres)); return; }
+    if (table === 'create_organization_workplace') { const row = { id: '27272727-2727-4727-8727-272727272727', name: 'Head Office' }; workplaces.push(row); await route.fulfill(fulfillJson(row)); return; }
+    if (table === 'create_cost_centre') { const row = { id: '28282828-2828-4828-8828-282828282828', code: 'ADMIN', name: 'Administration' }; costCentres.push(row); await route.fulfill(fulfillJson(row)); return; }
+    if (table === 'create_roster_work_unit') { const row = { id: '29292929-2929-4929-8929-292929292929', name: 'Head Office Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: '27272727-2727-4727-8727-272727272727', team_id: null, cost_centre_id: '28282828-2828-4828-8828-282828282828' }; workUnits.push(row); await route.fulfill(fulfillJson(row)); return; }
     await route.fulfill(fulfillJson([]));
   });
 }
