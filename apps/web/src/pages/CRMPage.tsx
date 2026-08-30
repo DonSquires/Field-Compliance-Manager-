@@ -18,6 +18,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
 import './PageStyles.css';
 import './CRMPage.css';
 
@@ -61,12 +62,24 @@ interface AgreementRow extends ServiceAgreement {
   counterparty_type: string;
 }
 
+interface InvoiceRow {
+  id: string;
+  invoice_number: string;
+  invoice_date: string;
+  due_date: string;
+  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'void';
+  total_amount: number;
+  currency: string;
+  client: { name: string } | null;
+}
+
 interface CrmState {
   ownOrg: Organization | null;
   clients: AccountRow[];
   branches: AccountRow[];
   platformSubscribers: AgreementRow[];
   contractedOrgs: AgreementRow[];
+  invoices: InvoiceRow[];
   loading: boolean;
   error: string | null;
 }
@@ -79,6 +92,7 @@ const CRMPage: React.FC = () => {
     branches: [],
     platformSubscribers: [],
     contractedOrgs: [],
+    invoices: [],
     loading: true,
     error: null,
   });
@@ -108,6 +122,9 @@ const CRMPage: React.FC = () => {
   const [quoteAction, setQuoteAction] = useState<'send' | 'accept' | 'decline' | null>(null);
   const [quoteActionReason, setQuoteActionReason] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
+  const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
+  const [invoiceReason, setInvoiceReason] = useState('');
   const quoteRequestId = useRef(crypto.randomUUID());
   const lineRequestId = useRef(crypto.randomUUID());
 
@@ -213,6 +230,8 @@ const CRMPage: React.FC = () => {
         )
         .eq('agreement_type', 'operational');
       if (opErr) throw opErr;
+      const { data: invoices, error: invoiceErr } = await supabase.from('invoices').select('id,invoice_number,invoice_date,due_date,status,total_amount,currency,client:client_organization_id(name)').eq('organization_id', orgId).order('due_date', { ascending: true }).limit(100);
+      if (invoiceErr) throw invoiceErr;
 
       const branchOrgIds = new Set(branches.map((b) => b.id));
 
@@ -248,6 +267,7 @@ const CRMPage: React.FC = () => {
         branches,
         platformSubscribers,
         contractedOrgs,
+        invoices: (invoices as unknown as InvoiceRow[]) ?? [],
         loading: false,
         error: null,
       });
@@ -378,6 +398,16 @@ const CRMPage: React.FC = () => {
       setQuoteActionReason('');
       await loadCrm();
     }
+    setQuoteSaving(false);
+  };
+
+  const manageInvoice = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!invoiceAction) return;
+    setQuoteSaving(true); setState((current) => ({ ...current, error: null }));
+    const { data, error } = await supabase.rpc('manage_crm_invoice', { p_invoice_id: invoiceAction.invoice.id, p_expected_status: invoiceAction.invoice.status, p_action: invoiceAction.action, p_reason: invoiceAction.action === 'void' ? invoiceReason.trim() : null });
+    if (error || !data) setState((current) => ({ ...current, error: error?.message ?? 'Invoice lifecycle receipt was not confirmed.' }));
+    else { setNotice(invoiceAction.action === 'send' ? `${invoiceAction.invoice.invoice_number} sent to accounts receivable.` : invoiceAction.action === 'mark_paid' ? `${invoiceAction.invoice.invoice_number} marked paid.` : `${invoiceAction.invoice.invoice_number} voided with its reason retained.`); setInvoiceAction(null); setInvoiceReason(''); await loadCrm(); }
     setQuoteSaving(false);
   };
 
@@ -554,11 +584,13 @@ const CRMPage: React.FC = () => {
   }
 
   const totalAccounts = state.clients.length + state.branches.length;
+  const openReceivables = state.invoices.filter((invoice) => invoice.status === 'sent' || invoice.status === 'overdue');
+  const receivableTotal = openReceivables.reduce((sum, invoice) => sum + Number(invoice.total_amount), 0);
 
   return (
     <div className="page-container crm-page">
       <header className="page-header">
-        <h1>CRM</h1>
+        <h1>CRM &amp; Finance</h1>
         <p className="subtitle">
           {totalAccounts} accounts · Client and service provider management
         </p>
@@ -607,6 +639,11 @@ const CRMPage: React.FC = () => {
         </section>
       )}
 
+      <section className="reports-section crm-finance-section">
+        <div className="crm-section-heading"><div><h2>Accounts receivable</h2><p className="subtitle">Invoice status, collection actions, and retained finance decisions.</p></div><div className="crm-finance-kpis"><span>Open <strong>{openReceivables.length}</strong></span><span>Receivable <strong>NZ${receivableTotal.toFixed(2)}</strong></span><span>Overdue <strong>{state.invoices.filter((invoice) => invoice.status === 'overdue').length}</strong></span></div></div>
+        {state.invoices.length === 0 ? <div className="empty-state"><p>No invoice headers exist yet. Invoice generation remains blocked until line-level billing evidence is implemented.</p></div> : <div className="crm-invoice-table" role="table" aria-label="Accounts receivable"><div className="crm-invoice-row is-header" role="row"><span>Invoice</span><span>Account</span><span>Due</span><span>Total</span><span>Status</span><span>Action</span></div>{state.invoices.map((invoice) => <div className="crm-invoice-row" role="row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.client?.name ?? 'Unknown account'}</span><time dateTime={invoice.due_date}>{new Date(`${invoice.due_date}T00:00:00`).toLocaleDateString('en-NZ')}</time><span>{invoice.currency} {Number(invoice.total_amount).toFixed(2)}</span><span className={`crm-invoice-status status-${invoice.status}`}>{invoice.status}</span><div>{invoice.status === 'draft' && <button type="button" onClick={() => setInvoiceAction({ invoice, action: 'send' })}>Send</button>}{(invoice.status === 'sent' || invoice.status === 'overdue') && <button type="button" onClick={() => setInvoiceAction({ invoice, action: 'mark_paid' })}>Mark paid</button>}{!['paid','void'].includes(invoice.status) && <button type="button" onClick={() => { setInvoiceReason(''); setInvoiceAction({ invoice, action: 'void' }); }}>Void</button>}</div></div>)}</div>}
+      </section>
+
       <section className="reports-section">
         <h2>Our Clients ({state.clients.length})</h2>
         <div className="contacts-list">
@@ -630,13 +667,7 @@ const CRMPage: React.FC = () => {
                   </p>
                   <div className="crm-account-actions">
                     <span>Quote: {client.latest_quote_status ?? 'none'}</span>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-primary"
-                      onClick={() => openQuote(client)}
-                    >
-                      New quote
-                    </button>
+                    <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setWorkspaceAccount({ id: client.id, name: client.name })}>Manage account</button><button type="button" className="btn btn-sm btn-primary" onClick={() => openQuote(client)}>New quote</button></div>
                   </div>
                 </div>
               </div>
@@ -666,6 +697,7 @@ const CRMPage: React.FC = () => {
                     {branch.site_count} site
                     {branch.site_count === 1 ? '' : 's'}
                   </p>
+                  <div className="crm-account-actions"><span>Internal branch</span><div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setWorkspaceAccount({ id: branch.id, name: branch.name })}>Manage account</button></div></div>
                 </div>
               </div>
             ))
@@ -824,6 +856,8 @@ const CRMPage: React.FC = () => {
         </div>
       )}
       {pricingDialog}
+      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} />}
+      {invoiceAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-invoice-action-title" onSubmit={manageInvoice}><header><div><span>Invoice lifecycle</span><h2 id="crm-invoice-action-title">{invoiceAction.action === 'send' ? 'Send invoice' : invoiceAction.action === 'mark_paid' ? 'Confirm payment' : 'Void invoice'}</h2></div><button type="button" onClick={() => setInvoiceAction(null)} aria-label="Close invoice action">×</button></header><p>{invoiceAction.invoice.invoice_number} · {invoiceAction.invoice.client?.name ?? 'Unknown account'} · {invoiceAction.invoice.currency} {Number(invoiceAction.invoice.total_amount).toFixed(2)}</p>{invoiceAction.action === 'void' && <label><span>Void reason</span><textarea required rows={4} value={invoiceReason} onChange={(event) => setInvoiceReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setInvoiceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (invoiceAction.action === 'void' && !invoiceReason.trim())}>{quoteSaving ? 'Saving' : 'Confirm action'}</button></footer></form></div>}
       {pricingQuote && quoteAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog crm-lifecycle-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-lifecycle-title" onSubmit={manageQuote}><header><div><span>Quote lifecycle</span><h2 id="crm-lifecycle-title">{quoteAction === 'send' ? 'Send quote?' : quoteAction === 'accept' ? 'Accept quote?' : 'Decline quote?'}</h2></div><button type="button" onClick={() => setQuoteAction(null)} aria-label="Close quote action">×</button></header><p>{quoteAction === 'send' ? 'The server will recheck labour pricing, positive totals, validity, and achieved margin before sending.' : quoteAction === 'accept' ? 'Acceptance creates or links the operational service agreement and writes canonical commercial settings.' : 'The quote will close as declined and the reason will remain in its audit history.'}</p>{quoteAction === 'decline' && <label><span>Decline reason</span><textarea rows={4} required value={quoteActionReason} onChange={(event) => setQuoteActionReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setQuoteAction(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (quoteAction === 'decline' && !quoteActionReason.trim())}>{quoteSaving ? 'Saving' : quoteAction === 'send' ? 'Confirm send' : quoteAction === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></footer></form></div>}
     </div>
   );

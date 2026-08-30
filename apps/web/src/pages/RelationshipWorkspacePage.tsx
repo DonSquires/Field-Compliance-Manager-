@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
 
 interface AgreementLocationLink {
   service_agreement_id: string;
@@ -32,6 +33,7 @@ interface RelationshipRecord {
   client_name: string;
   site_count: number;
   zone_count: number;
+  counterpart_id: string;
 }
 
 const RelationshipWorkspacePage: React.FC = () => {
@@ -39,6 +41,7 @@ const RelationshipWorkspacePage: React.FC = () => {
   const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
 
   const loadRelationships = useCallback(async () => {
     if (!profile?.organizationId) return;
@@ -264,11 +267,13 @@ const RelationshipWorkspacePage: React.FC = () => {
                     )}
                   </div>
                 </div>
+                {isProvider && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--color-border)' }}><button type="button" className="btn btn-primary" onClick={() => setWorkspaceAccount({ id: relationship.counterpart_id, name: counterpartName, agreementId: relationship.id })}>Manage relationship</button></div>}
               </div>
             );
           })}
         </div>
       )}
+      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} onClose={() => setWorkspaceAccount(null)} />}
     </div>
   );
 };
