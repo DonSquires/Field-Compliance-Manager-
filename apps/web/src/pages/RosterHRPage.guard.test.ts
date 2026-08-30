@@ -18,4 +18,11 @@ describe('governed HR administration', () => {
     expect(page).toContain('Review notes');
     expect(page).toContain('p_expected_status: currentStatus');
   });
+
+  it('loads derived readiness and changes it only through the governed RPC', () => {
+    expect(page).toContain("supabase.rpc('get_staff_readiness_assessment'");
+    expect(page).toContain("supabase.rpc('set_staff_work_readiness'");
+    expect(page).toContain('Readiness review notes');
+    expect(page).not.toContain(".from('staff_profiles').update");
+  });
 });

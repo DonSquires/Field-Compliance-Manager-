@@ -55,6 +55,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
   let holidayRegion = 'AUK';
   let hrLeaveStatus = 'pending';
   let hrTimesheetStatus = 'submitted';
+  let anaWorkReady = true;
   const hrCoverage = [{ id: '14141414-1414-4414-8414-141414141414', shift_date: '2026-09-05', start_time: '18:00:00', end_time: '23:00:00', required_staff_count: 2, urgency: 'high', status: 'open', notes: 'Event perimeter', site: null }];
   const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
   const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
@@ -101,9 +102,11 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'staff_profiles') {
-      await route.fulfill(fulfillJson([{ id: OFFICER_ID, user_id: OFFICER_ID, employment_type: 'permanent', work_ready: true }, { id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, employment_type: 'casual', work_ready: true }]));
+      const hrQuery = (url.searchParams.get('select') ?? '').includes('end_date');
+      await route.fulfill(fulfillJson([{ id: OFFICER_ID, user_id: OFFICER_ID, employment_type: 'permanent', start_date: '2025-02-03', end_date: null, work_ready: anaWorkReady }, { id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, employment_type: 'casual', start_date: '2026-03-01', end_date: null, work_ready: hrQuery ? false : true }]));
       return;
     }
+    if (table === 'get_staff_readiness_assessment') { await route.fulfill(fulfillJson([{ staff_id: OFFICER_ID, user_id: OFFICER_ID, work_ready: anaWorkReady, identity_status: 'active', employment_status: 'current', credential_status: 'current', training_status: 'attention', blockers: [] }, { staff_id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, work_ready: false, identity_status: 'active', employment_status: 'current', credential_status: 'missing_valid', training_status: 'clear', blockers: ['No verified current credential'] }])); return; }
     if (table === 'staff_credentials') {
       await route.fulfill(fulfillJson([{ id: '34343434-3434-4434-8434-343434343434', staff_id: OFFICER_ID, credential_type: 'security_licence', credential_number: 'SL-2048', expiry_date: '2027-06-01', verified: true }, { id: '35353535-3535-4535-8535-353535353535', staff_id: SECOND_OFFICER_ID, credential_type: 'first_aid', credential_number: 'FA-1024', expiry_date: '2026-09-10', verified: true }]));
       return;
@@ -154,6 +157,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'review_leave_request') { hrLeaveStatus = JSON.parse(request.postData() ?? '{}').p_decision; await route.fulfill(fulfillJson({ id: '36363636-3636-4636-8636-363636363636', status: hrLeaveStatus })); return; }
     if (table === 'review_timesheet') { hrTimesheetStatus = JSON.parse(request.postData() ?? '{}').p_decision; await route.fulfill(fulfillJson({ id: '38383838-3838-4838-8838-383838383838', status: hrTimesheetStatus })); return; }
     if (table === 'create_shift_coverage_request') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '39393939-3939-4939-8939-393939393939', shift_date: payload.p_shift_date, start_time: payload.p_start_time, end_time: payload.p_end_time, required_staff_count: payload.p_required_staff_count, urgency: payload.p_urgency, status: 'open', notes: payload.p_notes }; hrCoverage.unshift(row); await route.fulfill(fulfillJson(row)); return; }
+    if (table === 'set_staff_work_readiness') { anaWorkReady = JSON.parse(request.postData() ?? '{}').p_work_ready; await route.fulfill(fulfillJson({ id: OFFICER_ID, work_ready: anaWorkReady })); return; }
     await route.fulfill(fulfillJson([]));
   });
 }

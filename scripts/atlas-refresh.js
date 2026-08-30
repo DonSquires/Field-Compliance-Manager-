@@ -14,7 +14,8 @@ const ROSTER_SOURCES = [
   'supabase/migrations/20260830133000_enforce_roster_availability.sql',
   'supabase/migrations/20260830134000_organization_calendar_settings.sql',
   'supabase/migrations/20260830135000_roster_commercial_readiness.sql',
-  'supabase/migrations/20260830136000_govern_hr_workflows.sql'
+  'supabase/migrations/20260830136000_govern_hr_workflows.sql',
+  'supabase/migrations/20260830137000_govern_staff_readiness.sql'
 ];
 
 function uniqueBy(items, keyOf) {

@@ -7,6 +7,14 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/people-hr');
   await expect(page.getByRole('heading', { name: 'Roster & HR' })).toBeVisible();
   await expect(page.getByText('Ana Ngata', { exact: true })).toBeVisible();
+  await expect(page.getByText('No verified current credential')).toBeVisible();
+  await page.getByRole('button', { name: 'Remove work readiness' }).click();
+  const readinessDialog = page.getByRole('dialog', { name: 'Remove work readiness?' });
+  await expect(readinessDialog.getByRole('button', { name: 'Confirm readiness' })).toBeDisabled();
+  await readinessDialog.getByLabel('Readiness review notes').fill('Temporary restriction pending refresher training review.');
+  await expect(readinessDialog).toHaveScreenshot('hr-readiness-review.png');
+  await readinessDialog.getByRole('button', { name: 'Confirm readiness' }).click();
+  await expect(page.getByText('Ana Ngata readiness updated and audited.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Leave', exact: true }).click();
   await page.getByRole('button', { name: 'Decline' }).click();

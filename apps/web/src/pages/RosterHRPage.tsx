@@ -17,14 +17,18 @@ type RosterTab = 'staff' | 'credentials' | 'shift-templates' | 'coverage' | 'lea
 
 interface StaffRow {
   id: string;
+  staff_id: string | null;
   display_name: string | null;
   role: string;
   email: string | null;
   phone: string | null;
   employment_type: string | null;
   start_date: string | null;
+  end_date: string | null;
   work_ready: boolean | null;
 }
+
+interface ReadinessAssessment { staff_id: string; user_id: string | null; work_ready: boolean; identity_status: string; employment_status: string; credential_status: string; training_status: string; blockers: string[]; }
 
 interface CredentialRow {
   id: string;
@@ -94,6 +98,7 @@ const RosterHRPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [readinessAssessments, setReadinessAssessments] = useState<ReadinessAssessment[]>([]);
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplateRow[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
@@ -103,6 +108,8 @@ const RosterHRPage: React.FC = () => {
   const [showCoverageForm, setShowCoverageForm] = useState(false);
   const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' } | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
+  const [readinessReview, setReadinessReview] = useState<{ staffId: string; name: string; current: boolean; next: boolean } | null>(null);
+  const [readinessNotes, setReadinessNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [coverageForm, setCoverageForm] = useState({
@@ -124,7 +131,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes] =
+      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -132,7 +139,7 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId),
           supabase
             .from('staff_profiles')
-            .select('id, employment_type, start_date, work_ready')
+            .select('id, user_id, employment_type, start_date, end_date, work_ready')
             .eq('organization_id', orgId),
           supabase
             .from('staff_credentials')
@@ -161,6 +168,7 @@ const RosterHRPage: React.FC = () => {
             .eq('status', 'open')
             .order('urgency', { ascending: false })
             .order('shift_date', { ascending: true }),
+          supabase.rpc('get_staff_readiness_assessment', { p_organization_id: orgId }),
         ]);
 
       if (profilesRes.error) throw profilesRes.error;
@@ -170,16 +178,19 @@ const RosterHRPage: React.FC = () => {
       if (leaveRes.error) throw leaveRes.error;
       if (timesheetsRes.error) throw timesheetsRes.error;
       if (coverageRes.error) throw coverageRes.error;
+      if (readinessRes.error) throw readinessRes.error;
 
-      const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.id, s]));
+      const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.user_id ?? s.id, s]));
       const merged: StaffRow[] = (profilesRes.data || []).map((p: any) => ({
         id: p.id,
+        staff_id: staffProfileById.get(p.id)?.id ?? null,
         display_name: p.display_name,
         role: p.role,
         email: p.email,
         phone: p.phone,
         employment_type: staffProfileById.get(p.id)?.employment_type ?? null,
         start_date: staffProfileById.get(p.id)?.start_date ?? null,
+        end_date: staffProfileById.get(p.id)?.end_date ?? null,
         work_ready: staffProfileById.get(p.id)?.work_ready ?? null,
       }));
 
@@ -189,6 +200,7 @@ const RosterHRPage: React.FC = () => {
       });
 
       setStaff(merged);
+      setReadinessAssessments((readinessRes.data as ReadinessAssessment[]) || []);
       setStaffNames(names);
       setCredentials((credentialsRes.data as CredentialRow[]) || []);
       setShiftTemplates((templatesRes.data as ShiftTemplateRow[]) || []);
@@ -225,6 +237,12 @@ const RosterHRPage: React.FC = () => {
       ? await supabase.rpc('review_leave_request', { p_request_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null })
       : await supabase.rpc('review_timesheet', { p_timesheet_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null });
     if (reviewError) setError(reviewError.message);else { setNotice(review.kind === 'leave' ? 'Leave decision confirmed and roster conflicts checked.' : 'Timesheet decision confirmed for payroll processing.');setReview(null);setReviewNotes('');await loadAll(); }setSaving(false);
+  };
+
+  const handleReadinessReview = async (event: React.FormEvent) => {
+    event.preventDefault();if (!readinessReview || !readinessNotes.trim()) return;setSaving(true);setError(null);setNotice(null);
+    const { error: readinessError } = await supabase.rpc('set_staff_work_readiness', { p_staff_id: readinessReview.staffId, p_expected_work_ready: readinessReview.current, p_work_ready: readinessReview.next, p_review_notes: readinessNotes.trim() });
+    if (readinessError) setError(readinessError.message);else { setNotice(`${readinessReview.name} readiness updated and audited.`);setReadinessReview(null);setReadinessNotes('');await loadAll(); }setSaving(false);
   };
 
   const handleCreateCoverage = async (e: React.FormEvent) => {
@@ -312,6 +330,7 @@ const RosterHRPage: React.FC = () => {
                       {s.start_date ? ` · started ${new Date(s.start_date).toLocaleDateString()}` : ''}
                       {s.work_ready === false ? ' · NOT work ready' : ''}
                     </p>
+                    {s.staff_id && (() => { const assessment = readinessAssessments.find((item) => item.staff_id === s.staff_id); return assessment ? <div className="hr-readiness"><div><span>Identity</span><strong>{assessment.identity_status.replaceAll('_', ' ')}</strong></div><div><span>Employment</span><strong>{assessment.employment_status.replaceAll('_', ' ')}</strong></div><div><span>Credentials</span><strong>{assessment.credential_status.replaceAll('_', ' ')}</strong></div><div><span>Training advisory</span><strong>{assessment.training_status}</strong></div>{assessment.blockers.length > 0 && <p>{assessment.blockers.join(' · ')}</p>}<button type="button" className={`btn btn-sm ${assessment.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setReadinessNotes('');setReadinessReview({ staffId: assessment.staff_id, name: s.display_name || s.email || 'Staff member', current: assessment.work_ready, next: !assessment.work_ready }); }}>{assessment.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button></div> : null; })()}
                   </div>
                 </div>
               ))
@@ -600,6 +619,7 @@ const RosterHRPage: React.FC = () => {
         </section>
       )}
       {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
+      {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
     </div>
   );
 };
