@@ -121,8 +121,16 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
       ]));
       return;
     }
+    if (resource === 'shift_debriefs') {
+      await route.fulfill(fulfillJson([]));
+      return;
+    }
     if (resource === 'claim_shift_coverage') {
       await route.fulfill(fulfillJson({ id: '88888888-8888-4888-8888-888888888888', status: 'claimed', claimed_by: OFFICER_ID }));
+      return;
+    }
+    if (resource === 'submit_shift_debrief') {
+      await route.fulfill(fulfillJson([{ id: '99999999-9999-4999-8999-999999999999', created: true, submitted_at: '2026-08-30T09:30:00.000Z' }]));
       return;
     }
     await route.fulfill(fulfillJson([]));

@@ -1,0 +1,24 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const page = readFileSync(resolve(process.cwd(), 'src/pages/OfficerDebriefPage.tsx'), 'utf8');
+const shell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx'), 'utf8');
+
+describe('officer debrief workspace', () => {
+  it('replaces the exposed placeholder with a real handover page', () => {
+    expect(shell).toContain('return <OfficerDebriefPage />');
+    expect(shell).not.toContain('return <ComingSoonPage title="Debrief" />');
+  });
+  it('uses the governed RPC with stable retry identity and structured flags', () => {
+    expect(page).toContain("supabase.rpc('submit_shift_debrief'");
+    expect(page).toContain('p_client_event_id: eventIdRef.current');
+    expect(page).toContain('p_safety_incident_reported: safetyIncident');
+    expect(page).toContain('p_equipment_issue_reported: equipmentIssue');
+  });
+  it('requires follow-up context and states that completion is separate', () => {
+    expect(page).toContain('!followUp || followUpNotes.trim()');
+    expect(page).toContain('It does not complete the shift.');
+    expect(page).toContain('Recent debriefs');
+  });
+});

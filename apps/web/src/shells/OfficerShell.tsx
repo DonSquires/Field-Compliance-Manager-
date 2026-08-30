@@ -79,6 +79,7 @@ const ComingSoonPage = React.lazy(() => import('../pages/ComingSoonPage'));
 const OfficerMapPage = React.lazy(() => import('../pages/OfficerMapPage'));
 const OfficerHomePage = React.lazy(() => import('../pages/OfficerHomePage').then((module) => ({ default: module.OfficerHomePage })));
 const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePage'));
+const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
 
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
@@ -339,7 +340,7 @@ const OfficerShell: React.FC = () => {
       case 'ems':
         return <OfficerFieldReportPage />;
       case 'debrief':
-        return <ComingSoonPage title="Debrief" />;
+        return <OfficerDebriefPage />;
       case 'map':
         return <OfficerMapPage />;
       case 'modules':

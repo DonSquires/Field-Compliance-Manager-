@@ -3352,6 +3352,34 @@ ALTER FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expecte
 COMMENT ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") IS 'Atomically claims open coverage for the authenticated active officer and records audit provenance.';
 
 
+CREATE OR REPLACE FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean DEFAULT false, "p_equipment_issue_reported" boolean DEFAULT false, "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "submitted_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_user_id uuid := auth.uid(); v_shift public.shifts%rowtype; v_debrief public.shift_debriefs%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  if p_client_event_id is null then raise exception 'client_event_id is required'; end if;
+  if char_length(trim(coalesce(p_summary, ''))) not between 10 and 5000 then raise exception 'Debrief summary must be between 10 and 5000 characters'; end if;
+  if p_follow_up_required and nullif(trim(coalesce(p_follow_up_notes, '')), '') is null then raise exception 'Follow-up notes are required'; end if;
+  select s.* into v_shift from public.shifts s where s.id = p_shift_id for share;
+  if not found then raise exception 'Shift not found'; end if;
+  if v_shift.officer_user_id <> v_user_id then raise exception 'Shift does not belong to the authenticated officer'; end if;
+  if v_shift.status not in ('accepted', 'in_progress', 'completed') then raise exception 'Shift is not eligible for debrief'; end if;
+  select d.* into v_debrief from public.shift_debriefs d where d.organization_id = v_shift.organization_id and d.officer_user_id = v_user_id and d.client_event_id = p_client_event_id;
+  if found then return query select v_debrief.id, false, v_debrief.submitted_at; return; end if;
+  if exists (select 1 from public.shift_debriefs d where d.shift_id = p_shift_id) then raise exception 'A debrief has already been submitted for this shift'; end if;
+  insert into public.shift_debriefs (organization_id, shift_id, officer_user_id, client_event_id, summary, safety_incident_reported, equipment_issue_reported, follow_up_required, follow_up_notes)
+  values (v_shift.organization_id, p_shift_id, v_user_id, p_client_event_id, trim(p_summary), coalesce(p_safety_incident_reported, false), coalesce(p_equipment_issue_reported, false), coalesce(p_follow_up_required, false), nullif(trim(coalesce(p_follow_up_notes, '')), '')) returning * into v_debrief;
+  insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_shift.organization_id, v_user_id, 'shift_debrief_submitted', 'shift_debriefs', v_debrief.id, jsonb_build_object('shift_id', p_shift_id, 'safety_incident_reported', v_debrief.safety_incident_reported, 'equipment_issue_reported', v_debrief.equipment_issue_reported, 'follow_up_required', v_debrief.follow_up_required));
+  return query select v_debrief.id, true, v_debrief.submitted_at;
+end;
+$$;
+
+ALTER FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") IS 'Creates one retry-safe, self-owned, append-only handover per eligible shift and audits submission.';
+
+
 
 CREATE OR REPLACE FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid" DEFAULT NULL::"uuid", "p_briefing_notes" "text" DEFAULT NULL::"text", "p_shift_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" "uuid", "created" boolean, "status" "text", "sla_respond_by" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER
@@ -12910,6 +12938,29 @@ ALTER TABLE "public"."shift_coverage_requests" OWNER TO "postgres";
 COMMENT ON TABLE "public"."shift_coverage_requests" IS 'Open shifts needing coverage. Staff can claim these. Supports credential-aware matching.';
 
 
+CREATE TABLE IF NOT EXISTS "public"."shift_debriefs" (
+  "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL PRIMARY KEY,
+  "organization_id" "uuid" NOT NULL REFERENCES "public"."organizations"("id") ON DELETE RESTRICT,
+  "shift_id" "uuid" NOT NULL REFERENCES "public"."shifts"("id") ON DELETE RESTRICT UNIQUE,
+  "officer_user_id" "uuid" NOT NULL REFERENCES "public"."user_profiles"("id") ON DELETE RESTRICT,
+  "client_event_id" "uuid" NOT NULL,
+  "summary" "text" NOT NULL,
+  "safety_incident_reported" boolean DEFAULT false NOT NULL,
+  "equipment_issue_reported" boolean DEFAULT false NOT NULL,
+  "follow_up_required" boolean DEFAULT false NOT NULL,
+  "follow_up_notes" "text",
+  "submitted_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+  "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+  CONSTRAINT "shift_debriefs_organization_id_officer_user_id_client_event_id_key" UNIQUE ("organization_id", "officer_user_id", "client_event_id"),
+  CONSTRAINT "shift_debriefs_summary_length_check" CHECK ((char_length("trim"("summary")) >= 10 AND char_length("trim"("summary")) <= 5000)),
+  CONSTRAINT "shift_debriefs_follow_up_check" CHECK (((NOT "follow_up_required") OR (NULLIF("trim"("follow_up_notes"), ''::"text") IS NOT NULL)))
+);
+
+ALTER TABLE "public"."shift_debriefs" OWNER TO "postgres";
+
+COMMENT ON TABLE "public"."shift_debriefs" IS 'Append-only officer handover submitted after operational work. Shift completion remains a separate lifecycle truth.';
+
+
 
 CREATE TABLE IF NOT EXISTS "public"."shift_stop_actions" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
@@ -16789,6 +16840,9 @@ CREATE INDEX "idx_shift_coverage_status" ON "public"."shift_coverage_requests" U
 
 
 CREATE INDEX "idx_shift_coverage_urgency" ON "public"."shift_coverage_requests" USING "btree" ("urgency") WHERE ("urgency" = ANY (ARRAY['high'::"text", 'urgent'::"text"]));
+
+
+CREATE INDEX "idx_shift_debriefs_org_submitted" ON "public"."shift_debriefs" USING "btree" ("organization_id", "submitted_at" DESC);
 
 
 
@@ -24005,6 +24059,12 @@ CREATE POLICY "shift_coverage_insert" ON "public"."shift_coverage_requests" FOR 
 ALTER TABLE "public"."shift_coverage_requests" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."shift_debriefs" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "shift_debriefs_select" ON "public"."shift_debriefs" FOR SELECT TO "authenticated" USING ((("officer_user_id" = "auth"."uid"()) OR "public"."is_admin_for_org"("organization_id")));
+
+
 CREATE POLICY "shift_coverage_select" ON "public"."shift_coverage_requests" FOR SELECT USING ("public"."org_access_allowed"("organization_id"));
 
 
@@ -25006,6 +25066,12 @@ REVOKE ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p
 REVOKE ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") FROM "anon";
 GRANT ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."claim_shift_coverage"("p_request_id" "uuid", "p_expected_status" "text") TO "service_role";
+
+
+REVOKE ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") TO "authenticated";
@@ -26620,6 +26686,13 @@ GRANT ALL ON TABLE "public"."service_agreement_modules" TO "service_role";
 GRANT ALL ON TABLE "public"."shift_coverage_requests" TO "anon";
 GRANT ALL ON TABLE "public"."shift_coverage_requests" TO "authenticated";
 GRANT ALL ON TABLE "public"."shift_coverage_requests" TO "service_role";
+
+
+REVOKE ALL ON TABLE "public"."shift_debriefs" FROM PUBLIC;
+REVOKE ALL ON TABLE "public"."shift_debriefs" FROM "anon";
+REVOKE ALL ON TABLE "public"."shift_debriefs" FROM "authenticated";
+GRANT SELECT ON TABLE "public"."shift_debriefs" TO "authenticated";
+GRANT ALL ON TABLE "public"."shift_debriefs" TO "service_role";
 
 
 
