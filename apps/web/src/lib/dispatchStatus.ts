@@ -11,6 +11,18 @@ export type DispatchResourceStatus = 'available' | 'busy' | 'offline';
 
 export type ShiftHealthStatus = 'on_track' | 'at_risk' | 'critical' | 'breached';
 
+export const DISPATCH_STATUS_TRANSITIONS: Record<string, readonly string[]> = {
+  pending: ['dispatched', 'cancelled'],
+  dispatched: ['acknowledged', 'en_route', 'cancelled'],
+  acknowledged: ['en_route', 'cancelled'],
+  en_route: ['on_scene', 'cancelled'],
+  on_scene: ['completed', 'cancelled'],
+};
+
+export function canTransitionDispatchStatus(current: string, next: string): boolean {
+  return DISPATCH_STATUS_TRANSITIONS[current]?.includes(next) ?? false;
+}
+
 export function schemaDispatchJobStatus(status: string): string {
   const canonical: Record<string, string> = {
     open: 'pending',

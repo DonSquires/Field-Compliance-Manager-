@@ -151,7 +151,8 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         const { data: links, error: linksError } = await supabase
           .from('service_agreement_locations')
           .select('service_agreement_id, site_id, zone_id')
-          .in('service_agreement_id', agreementIds);
+          .in('service_agreement_id', agreementIds)
+          .eq('status', 'active');
 
         if (linksError) throw linksError;
 

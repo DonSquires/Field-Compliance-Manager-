@@ -3,19 +3,20 @@
  * Real-time dispatch console for creating and managing field jobs
  *
  * Architecture:
- * - 4-phase workflow: A(shifts/jobs/sites), B(shift stops), C(requester resolution), D(billing rates)
+ * - Workflow: A(shifts/jobs/resources), B(shift stops), C(agreement-owned sites), D(billing rates)
  * - Three-column layout: Shifts (left) | Stops (center) | Jobs (right); becomes tabs on mobile
  * - Shift card selection → load stops → inspect → create job
- * - Job creation form: type, priority, SLA, briefing, requester, zone, resource
- * - Geofence + agreement filtering (Phase C)
+ * - Job creation form: type, priority, SLA, briefing, and agreement-owned site
+ * - Active service-agreement location filtering
  * - Rate rule matching (Phase D)
  * - Mobile: 3-column layout → tab bar
- * - Supabase queries: active shifts, dispatch jobs, stops, requester orgs, rate rules
+ * - Supabase queries: active shifts, dispatch jobs, stops, resources, rate rules
  * - Error handling: SLA breach warnings, unrateable job warnings
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   schemaDispatchResourceStatus,
@@ -25,6 +26,7 @@ import {
   shiftHealthBadge,
 } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
+import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { supabase } from '../lib/supabase';
 
 // Type definitions
@@ -80,9 +82,8 @@ interface ResourceUnit {
   id: string;
   name: string;
   callsign?: string;
+  assignedOfficerId?: string;
   status: 'available' | 'busy' | 'offline';
-  gpsLat?: number;
-  gpsLng?: number;
 }
 
 interface ShiftStop {
@@ -93,25 +94,6 @@ interface ShiftStop {
   arrival?: string;
   departure?: string;
   status: StopStatus;
-}
-
-interface RequesterOrg {
-  id: string;
-  name: string;
-  agreement?: string;
-}
-
-interface RateRule {
-  id: string;
-  // SCHEMA LIMITATION: rate_rules table does NOT have a dispatch job_type link.
-  // The jobType field below is a UI convenience only; matching is imperfect.
-  // TODO: Establish proper rate rule targeting (rule_kind + rate_type + zone/org matching).
-  jobType?: JobType;
-  amount: number; // canonical schema column (not baseRate)
-  ruleKind?: 'pay' | 'billing';
-  rateType?: string; // hourly|flat|daily|per_km|per_unit|percentage|per_hour_travel|per_hour_allowance|oncall_flat|callout|higher_duties_flat|per_visit|per_notice
-  clientOrgId?: string; // canonical schema column (not requesterOrgId)
-  zoneId?: string;
 }
 
 // Job types dropdown
@@ -290,6 +272,12 @@ const JobCard: React.FC<{ job: DispatchJob }> = ({ job }) => {
 // Main Component
 const DispatchConsolePage: React.FC = () => {
   const { profile } = useAuth();
+  const {
+    selectedAgreement,
+    selectedAgreementSites,
+    loading: relationshipLoading,
+    error: relationshipError,
+  } = useServiceRelationships();
 
   // State: Phase A (Load initial data)
   const [activeShifts, setActiveShifts] = useState<ActiveShift[]>([]);
@@ -309,20 +297,17 @@ const DispatchConsolePage: React.FC = () => {
   const [formPriority, setFormPriority] = useState<JobPriority>('high');
   const [formSiteId, setFormSiteId] = useState<string>('');
   const [formShiftId, setFormShiftId] = useState<string>('');
+  const [formResourceId, setFormResourceId] = useState<string>('');
   const [formSlaMinutes, setFormSlaMinutes] = useState(15);
   const [formNotes, setFormNotes] = useState('');
-  const [formRequesterId, setFormRequesterId] = useState<string>('');
   const [formZoneId, setFormZoneId] = useState<string>('');
+  const [formRequestId, setFormRequestId] = useState(() => crypto.randomUUID());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // State: Phase C (Requester orgs)
-  const [requesterOrgs, setRequesterOrgs] = useState<RequesterOrg[]>([]);
-  const [requesterLoading, setRequesterLoading] = useState(false);
-
   // State: Phase D (Billing rates)
-  const [billingRules, setBillingRules] = useState<RateRule[]>([]);
-  const [resolvedRate, setResolvedRate] = useState<RateRule | null>(null);
+  const [billingRules, setBillingRules] = useState<DispatchBillingRule[]>([]);
+  const [resolvedRate, setResolvedRate] = useState<DispatchBillingRule | null>(null);
   const [isUnrateable, setIsUnrateable] = useState(false);
 
   // State: Mobile
@@ -336,14 +321,15 @@ const DispatchConsolePage: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Load Phase A: Active shifts, jobs, sites, resources
+  // Load Phase A: Active shifts, jobs, resources. Sites come from the selected
+  // service agreement so contract/location access has one canonical owner.
   const loadPhaseA = useCallback(async () => {
     if (!profile?.organizationId) return;
 
     try {
       setLoading(true);
 
-      const [shiftsRes, jobsRes, sitesRes, resourcesRes] = await Promise.all([
+      const [shiftsRes, jobsRes, resourcesRes] = await Promise.all([
         supabase
           .from('shifts')
           .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
@@ -355,14 +341,15 @@ const DispatchConsolePage: React.FC = () => {
           .eq('organization_id', profile.organizationId)
           .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]),
         supabase
-          .from('client_sites')
-          .select('id, name, address, gps_lat, gps_lng, client_organization_id')
-          .eq('organization_id', profile.organizationId),
-        supabase
           .from('dispatch_resources')
-          .select('id, name, callsign, status, gps_lat, gps_lng')
+          .select('id, name, callsign, status, assigned_officer_id')
           .eq('organization_id', profile.organizationId),
       ]);
+
+      const phaseErrors = [shiftsRes.error, jobsRes.error, resourcesRes.error].filter(Boolean);
+      if (phaseErrors.length) {
+        throw new Error(phaseErrors.map((phaseError) => phaseError?.message).join(' · '));
+      }
 
       if (shiftsRes.data) {
         const formatted: ActiveShift[] = shiftsRes.data.map((s: any) => ({
@@ -399,38 +386,37 @@ const DispatchConsolePage: React.FC = () => {
         setJobs(formatted);
       }
 
-      if (sitesRes.data) {
-        setSites(
-          sitesRes.data.map((s: any) => ({
-            id: s.id,
-            name: s.name,
-            address: s.address,
-            gpsLat: s.gps_lat,
-            gpsLng: s.gps_lng,
-            clientOrganizationId: s.client_organization_id,
-          }))
-        );
-      }
-
       if (resourcesRes.data) {
         setResources(
           resourcesRes.data.map((r: any) => ({
             id: r.id,
             name: r.name,
             callsign: r.callsign,
+            assignedOfficerId: r.assigned_officer_id ?? undefined,
             status: schemaDispatchResourceStatus(r.status ?? 'available'),
-            gpsLat: r.gps_lat ?? undefined,
-            gpsLng: r.gps_lng ?? undefined,
           }))
         );
       }
     } catch (err) {
       console.error('Failed to load Phase A:', err);
-      setError('Failed to load shifts, jobs, and sites');
+      setError(err instanceof Error ? err.message : 'Failed to load dispatch operations');
     } finally {
       setLoading(false);
     }
   }, [profile?.organizationId]);
+
+  useEffect(() => {
+    const activeAgreementSites = selectedAgreementSites.filter((site) => site.active);
+    setSites(activeAgreementSites.map((site) => ({
+      id: site.id,
+      name: site.name,
+      address: site.address ?? '',
+      gpsLat: 0,
+      gpsLng: 0,
+      clientOrganizationId: site.client_organization_id ?? '',
+    })));
+    setFormSiteId((current) => current && activeAgreementSites.some((site) => site.id === current) ? current : '');
+  }, [selectedAgreementSites]);
 
   // Load Phase B: Shift stops
   const loadPhaseB = useCallback(async (shiftId: string) => {
@@ -462,69 +448,56 @@ const DispatchConsolePage: React.FC = () => {
     }
   }, []);
 
-  // Load Phase C: Requester orgs (geofence + agreement filtering)
-  // SCHEMA GAP: 'requester_organizations' table does not exist in schema.
-  // TODO: Establish proper requester org link (e.g., via service_agreements or a new requester table).
-  const loadPhaseC = useCallback(async (siteId: string) => {
-    try {
-      setRequesterLoading(true);
-
-      // Stub: For now, return empty list. Real implementation requires schema design.
-      // The intended feature: filter dispatch jobs by authorized requester organizations.
-      setRequesterOrgs([]);
-    } catch (err) {
-      console.error('Failed to load Phase C (requesters):', err);
-    } finally {
-      setRequesterLoading(false);
-    }
-  }, []);
-
   // Load Phase D: Billing rates
-  // Canonical schema: rate_rules has (id, amount, rate_type, rule_kind, client_org_id, zone_id).
-  // job_type matching is not schema-backed; this loads for reference only.
+  // Canonical schema dimensions: client org, site/zone, job type, priority,
+  // and effective dates. The resolver prefers the most specific active rule.
   const loadPhaseD = useCallback(async () => {
+    if (!profile?.organizationId) return;
     try {
       const { data, error } = await supabase
         .from('rate_rules')
-        .select('id, amount, rate_type, rule_kind, client_org_id, zone_id')
+        .select('id, amount, rate_type, client_org_id, site_id, zone_id, job_type, priority, effective_from, effective_to')
+        .eq('organization_id', profile.organizationId)
         .eq('rule_kind', 'billing')
+        .eq('active', true)
+        .order('priority', { ascending: false })
         .limit(100);
 
       if (error) throw error;
       setBillingRules(
         (data || []).map((row: any) => ({
           id: row.id,
-          // jobType is a convenience field; schema doesn't link rate rules to dispatch job_type.
-          // TODO: Establish proper rate rule matching (rate_type + zone + org).
-          jobType: undefined,
-          amount: row.amount,
-          ruleKind: row.rule_kind,
+          amount: Number(row.amount),
           rateType: row.rate_type,
-          clientOrgId: row.client_org_id,
-          zoneId: row.zone_id,
+          clientOrgId: row.client_org_id ?? null,
+          siteId: row.site_id ?? null,
+          zoneId: row.zone_id ?? null,
+          jobType: row.job_type ?? null,
+          priority: Number(row.priority ?? 0),
+          effectiveFrom: row.effective_from ?? null,
+          effectiveTo: row.effective_to ?? null,
         }))
       );
     } catch (err) {
       console.error('Failed to load Phase D (rates):', err);
+      setBillingRules([]);
     }
-  }, []);
+  }, [profile?.organizationId]);
 
   // Resolve billing rate
-  // SCHEMA LIMITATION: Cannot match by dispatch job_type; rate_rules and dispatch_jobs are not linked in schema.
-  // Fallback: match by zone and client org only.
   const resolveBillingRate = useCallback(() => {
-    if (!formZoneId) {
+    if (!formSiteId || !selectedAgreement?.client_organization_id) {
       setIsUnrateable(true);
       setResolvedRate(null);
       return;
     }
 
-    // Match rate rules by zone and client org, ignoring job type (not schema-backed).
-    const matched = billingRules.find(
-      (r) =>
-        (!r.zoneId || r.zoneId === formZoneId) &&
-        (!r.clientOrgId || r.clientOrgId === formShiftId) // using shift as proxy for org context
-    );
+    const matched = resolveDispatchBillingRule(billingRules, {
+      clientOrgId: selectedAgreement.client_organization_id,
+      siteId: formSiteId,
+      zoneId: formZoneId || null,
+      jobType: formJobType,
+    });
 
     if (matched) {
       setResolvedRate(matched);
@@ -533,7 +506,11 @@ const DispatchConsolePage: React.FC = () => {
       setIsUnrateable(true);
       setResolvedRate(null);
     }
-  }, [formZoneId, formShiftId, billingRules]);
+  }, [formSiteId, formZoneId, formJobType, selectedAgreement?.client_organization_id, billingRules]);
+
+  useEffect(() => {
+    resolveBillingRate();
+  }, [resolveBillingRate]);
 
   // Create job
   const handleCreateJob = useCallback(async () => {
@@ -545,42 +522,64 @@ const DispatchConsolePage: React.FC = () => {
     try {
       setSaving(true);
       setError(null);
+      if (relationshipLoading) throw new Error('Service agreement access is still loading.');
+      if (relationshipError) throw new Error(`Service agreement access could not be verified: ${relationshipError}`);
+      if (!selectedAgreement) throw new Error('Select a service agreement before creating a dispatch job.');
 
       const { data, error } = await supabase
-        .from('dispatch_jobs')
-        .insert({
-          organization_id: profile.organizationId,
-          job_type: formJobType,
-          priority: schemaDispatchJobPriority(formPriority),
-          status: schemaDispatchJobStatus('open'),
-          client_site_id: formSiteId,
-          shift_id: formShiftId || null,
-          briefing_notes: formNotes,
-          sla_minutes: formSlaMinutes,
-          created_at: new Date().toISOString(),
-        })
-        .select();
+        .rpc('create_dispatch_job', {
+          p_organization_id: profile.organizationId,
+          p_service_agreement_id: selectedAgreement.id,
+          p_client_site_id: formSiteId,
+          p_client_request_id: formRequestId,
+          p_job_type: formJobType,
+          p_priority: schemaDispatchJobPriority(formPriority),
+          p_sla_minutes: formSlaMinutes,
+          p_dispatch_resource_id: formResourceId || null,
+          p_briefing_notes: formNotes || null,
+          p_shift_id: formShiftId || null,
+        });
 
       if (error) throw error;
+      if (!data?.length) throw new Error('The dispatch job was not confirmed after creation.');
 
       setShowNewJob(false);
       setFormJobType('alarm_response');
       setFormPriority('high');
       setFormSiteId('');
       setFormShiftId('');
+      setFormResourceId('');
       setFormSlaMinutes(15);
       setFormNotes('');
-      setFormRequesterId('');
       setFormZoneId('');
+      setFormRequestId(crypto.randomUUID());
 
       await loadPhaseA();
     } catch (err) {
       console.error('Failed to create job:', err);
-      setError('Failed to create job');
+      setError(err instanceof Error ? err.message : 'Failed to create job');
     } finally {
       setSaving(false);
     }
-  }, [profile?.organizationId, formJobType, formPriority, formSiteId, formShiftId, formSlaMinutes, formNotes, loadPhaseA]);
+  }, [profile?.organizationId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA]);
+
+  const assignResource = useCallback((resourceId: string) => {
+    setFormResourceId(resourceId);
+    if (!resourceId) {
+      setFormShiftId('');
+      return;
+    }
+    const resource = resources.find((item) => item.id === resourceId);
+    const matchingShift = activeShifts.find((shift) =>
+      shift.officerUserId === resource?.assignedOfficerId && ['accepted', 'in_progress'].includes(shift.status),
+    );
+    setFormShiftId(matchingShift?.id ?? '');
+  }, [activeShifts, resources]);
+
+  const assignableResources = useMemo(() => resources.filter((resource) =>
+    resource.status === 'available' && Boolean(resource.assignedOfficerId) && activeShifts.some((shift) =>
+      shift.officerUserId === resource.assignedOfficerId && ['accepted', 'in_progress'].includes(shift.status),
+    )), [activeShifts, resources]);
 
   // Initial load
   useEffect(() => {
@@ -598,14 +597,7 @@ const DispatchConsolePage: React.FC = () => {
     [loadPhaseB, isMobile]
   );
 
-  // Handle site selection (Phase C)
-  const handleSelectSite = useCallback(
-    (siteId: string) => {
-      setFormSiteId(siteId);
-      loadPhaseC(siteId);
-    },
-    [loadPhaseC]
-  );
+  const handleSelectSite = useCallback((siteId: string) => setFormSiteId(siteId), []);
 
   // Mobile: Shift + Stops + Jobs tabs
   if (isMobile) {
@@ -814,6 +806,14 @@ const DispatchConsolePage: React.FC = () => {
           >
             <div style={{ fontWeight: 600, fontSize: '13px' }}>Create New Job</div>
 
+            <div style={{ padding: '8px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', fontSize: '11px' }}>
+              <div style={{ color: 'var(--color-text-secondary)', marginBottom: '3px' }}>Service agreement</div>
+              <strong>{selectedAgreement?.name ?? 'No agreement selected'}</strong>
+              <div style={{ color: 'var(--color-text-secondary)', marginTop: '3px' }}>
+                Client: {selectedAgreement?.client_name ?? selectedAgreement?.client_organization_id ?? 'Unavailable'}
+              </div>
+            </div>
+
             {/* Job Type */}
             <div>
               <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
@@ -894,6 +894,31 @@ const DispatchConsolePage: React.FC = () => {
                   </option>
                 ))}
               </select>
+              {!relationshipLoading && sites.length === 0 && (
+                <div style={{ marginTop: '4px', color: '#FF9800', fontSize: '10px' }}>
+                  No active sites are linked to the selected agreement.
+                </div>
+              )}
+            </div>
+
+            {/* SLA Minutes */}
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
+                Dispatch Resource
+              </label>
+              <select
+                value={formResourceId}
+                onChange={(e) => assignResource(e.target.value)}
+                style={{ width: '100%', padding: '6px', marginTop: '4px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px' }}
+              >
+                <option value="">Leave in unassigned queue</option>
+                {assignableResources.map((resource) => (
+                  <option key={resource.id} value={resource.id}>
+                    {resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}
+                  </option>
+                ))}
+              </select>
+              {formResourceId && !formShiftId && <div style={{ marginTop: '4px', color: '#EF5350', fontSize: '10px' }}>No active matching shift is available for this resource.</div>}
             </div>
 
             {/* SLA Minutes */}
@@ -944,6 +969,11 @@ const DispatchConsolePage: React.FC = () => {
             </div>
 
             {/* Rate Warning */}
+            {resolvedRate && (
+              <div style={{ padding: '6px', backgroundColor: '#0F2A14', color: '#72D6A2', borderRadius: '3px', fontSize: '11px' }}>
+                Billing rule matched: ${resolvedRate.amount.toFixed(2)} · {resolvedRate.rateType.replace(/_/g, ' ')}
+              </div>
+            )}
             {isUnrateable && (
               <div
                 style={{
@@ -954,7 +984,7 @@ const DispatchConsolePage: React.FC = () => {
                   fontSize: '11px',
                 }}
               >
-                ⚠️ No applicable rate rule found
+                No applicable billing rule found. The job can be created, but billing requires review.
               </div>
             )}
 
@@ -962,7 +992,7 @@ const DispatchConsolePage: React.FC = () => {
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
                 onClick={handleCreateJob}
-                disabled={saving || !formSiteId}
+                disabled={saving || !formSiteId || (Boolean(formResourceId) && !formShiftId)}
                 style={{
                   flex: 1,
                   padding: '8px',

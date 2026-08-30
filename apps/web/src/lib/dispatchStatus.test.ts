@@ -6,6 +6,7 @@ import {
   schemaDispatchResourceStatus,
   schemaShiftHealth,
   shiftHealthBadge,
+  canTransitionDispatchStatus,
 } from './dispatchStatus';
 
 describe('dispatch status schema mapping', () => {
@@ -48,3 +49,11 @@ describe('dispatch status schema mapping', () => {
     expect(schemaDispatchResourceStatus('offline')).toBe('offline');
   });
 });
+  it('enforces forward dispatch lifecycle transitions', () => {
+    expect(canTransitionDispatchStatus('pending', 'dispatched')).toBe(true);
+    expect(canTransitionDispatchStatus('dispatched', 'en_route')).toBe(true);
+    expect(canTransitionDispatchStatus('en_route', 'on_scene')).toBe(true);
+    expect(canTransitionDispatchStatus('on_scene', 'completed')).toBe(true);
+    expect(canTransitionDispatchStatus('completed', 'en_route')).toBe(false);
+    expect(canTransitionDispatchStatus('pending', 'completed')).toBe(false);
+  });

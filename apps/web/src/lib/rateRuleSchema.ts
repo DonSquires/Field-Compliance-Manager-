@@ -7,13 +7,14 @@
  * - rule_kind: text enum (pay|billing)
  * - client_org_id: uuid (organization the rate applies to; NULL = wildcard)
  * - zone_id: uuid (optional zone targeting; NULL = wildcard)
- * - job_type: text (generic targeting dimension, but NOT the dispatch_jobs.job_type enum)
+ * - job_type: text targeting dimension used by dispatch billing resolution
  * - job_code: text (pay/billing code system identifier)
  *
  * Dispatch console issue (Phase D): was selecting non-existent columns
  * - base_rate (doesn't exist; real column is amount)
  * - requester_organization_id (doesn't exist; real column is client_org_id)
- * - job_type was being used as dispatch job filtering (schema doesn't support this link)
+ * Dispatch now resolves by client, site/zone, and job type with explicit
+ * wildcard support; no identifier is substituted across dimensions.
  */
 
 export type RateType =

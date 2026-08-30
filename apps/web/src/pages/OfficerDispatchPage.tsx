@@ -23,17 +23,15 @@ interface DispatchJob {
 }
 
 const NEXT_STATUS: Record<string, string> = {
-  pending: 'en_route',
   acknowledged: 'en_route',
-  dispatched: 'en_route',
+  dispatched: 'acknowledged',
   en_route: 'on_scene',
   on_scene: 'completed',
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  pending: 'Acknowledge & En Route',
-  acknowledged: 'Acknowledge & En Route',
-  dispatched: 'Acknowledge & En Route',
+  acknowledged: 'Start En Route',
+  dispatched: 'Acknowledge Job',
   en_route: 'Mark On Scene',
   on_scene: 'Mark Completed',
 };
@@ -44,6 +42,7 @@ const OfficerDispatchPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
 
   // ATLAS READS: dispatch_jobs (via shifts assigned to this officer)
   const loadJobs = useCallback(async () => {
@@ -93,27 +92,41 @@ const OfficerDispatchPage: React.FC = () => {
   const handleAdvanceStatus = async (job: DispatchJob) => {
     const nextStatus = NEXT_STATUS[job.status];
     if (!nextStatus) return;
+    const outcome = outcomeNotes[job.id]?.trim() ?? '';
+    if (nextStatus === 'completed' && !outcome) {
+      setError('Record the dispatch outcome before completing the job.');
+      return;
+    }
 
     try {
       setBusyId(job.id);
-      const timestampField =
-        nextStatus === 'en_route' ? 'en_route_at' : nextStatus === 'on_scene' ? 'on_scene_at' : 'completed_at';
+      setError(null);
 
-      // ATLAS WRITES: dispatch_jobs
-      const { error } = await supabase
-        .from('dispatch_jobs')
-        .update({ status: nextStatus, [timestampField]: new Date().toISOString() })
-        .eq('id', job.id);
+      // Server owns authorization, expected-state race checks, timestamps, and
+      // resource release on terminal transitions.
+      const { data, error } = await supabase.rpc('advance_dispatch_job_status', {
+        p_job_id: job.id,
+        p_expected_status: job.status,
+        p_next_status: nextStatus,
+        p_outcome_notes: nextStatus === 'completed' ? outcome : null,
+      });
 
       if (error) throw error;
+      if (!data?.length) throw new Error('The dispatch status change was not confirmed.');
 
       if (nextStatus === 'completed') {
         setJobs(jobs.filter((j) => j.id !== job.id));
+        setOutcomeNotes((current) => {
+          const next = { ...current };
+          delete next[job.id];
+          return next;
+        });
       } else {
         setJobs(jobs.map((j) => (j.id === job.id ? { ...j, status: nextStatus } : j)));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update job status');
+      await loadJobs();
     } finally {
       setBusyId(null);
     }
@@ -167,10 +180,22 @@ const OfficerDispatchPage: React.FC = () => {
                   {job.sla_respond_by ? ` · respond by ${new Date(job.sla_respond_by).toLocaleTimeString()}` : ''}
                 </p>
               </div>
+              {job.status === 'on_scene' && (
+                <div className="form-group" style={{ marginTop: '10px' }}>
+                  <label>Outcome notes</label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={outcomeNotes[job.id] ?? ''}
+                    onChange={(event) => setOutcomeNotes((current) => ({ ...current, [job.id]: event.target.value }))}
+                    placeholder="Record actions taken and the verified outcome"
+                  />
+                </div>
+              )}
               {NEXT_STATUS[job.status] && (
                 <button
                   className="btn btn-sm btn-primary"
-                  disabled={busyId === job.id}
+                  disabled={busyId === job.id || (job.status === 'on_scene' && !(outcomeNotes[job.id]?.trim()))}
                   onClick={() => handleAdvanceStatus(job)}
                 >
                   {STATUS_LABEL[job.status]}
