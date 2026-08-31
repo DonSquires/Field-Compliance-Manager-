@@ -64,6 +64,14 @@ interface AssessmentResult {
   reason: string;
 }
 
+interface SchedulerStatus {
+  running: boolean;
+  intervalMs: number;
+  source: string;
+  appUrls: string[];
+  lastUpdated: string;
+}
+
 function formatServiceLabel(service: string): string {
   const normalized = service.trim();
   if (!normalized) return 'Service';
@@ -93,6 +101,9 @@ const GrandMasterPlatformPage: React.FC = () => {
   const [browserCheck, setBrowserCheck] = useState<{ appUrl: string; status: string; title?: string; checks?: string[] } | null>(null);
   const [browserHistory, setBrowserHistory] = useState<BrowserHistoryEntry[]>([]);
   const [assessment, setAssessment] = useState<AssessmentResult | null>(null);
+  const [assessmentTrends, setAssessmentTrends] = useState<{ passRate: number; stepFailureRate: number; assessmentsInWindow: number; recentAssessments: Array<Record<string, any>> } | null>(null);
+  const [scheduledAssessments, setScheduledAssessments] = useState<Array<Record<string, any>>>([]);
+  const [schedulerStatus, setSchedulerStatus] = useState<SchedulerStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [browserLoading, setBrowserLoading] = useState(false);
   const [assessmentLoading, setAssessmentLoading] = useState(false);
@@ -161,10 +172,78 @@ const GrandMasterPlatformPage: React.FC = () => {
     }
   }, [browserCheck]);
 
+  const loadAssessmentTrends = useCallback(async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/assessment-trends', {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+        },
+      });
+      if (!response.ok) throw new Error(`Assessment trends unavailable (${response.status})`);
+      const data = await response.json();
+      setAssessmentTrends({
+        passRate: Number(data?.passRate ?? 0),
+        stepFailureRate: Number(data?.stepFailureRate ?? 0),
+        assessmentsInWindow: Number(data?.assessmentsInWindow ?? 0),
+        recentAssessments: Array.isArray(data?.recentAssessments) ? data.recentAssessments : []
+      });
+    } catch (err) {
+      setAssessmentTrends(null);
+    }
+  }, []);
+
+  const loadScheduledAssessments = useCallback(async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/scheduled-assessments', {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+        },
+      });
+      if (!response.ok) throw new Error(`Scheduled assessments unavailable (${response.status})`);
+      const data = await response.json();
+      setScheduledAssessments(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setScheduledAssessments([]);
+    }
+  }, []);
+
+  const loadSchedulerStatus = useCallback(async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/scheduled-assessment-status', {
+        headers: {
+          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+        },
+      });
+      if (!response.ok) throw new Error(`Scheduler status unavailable (${response.status})`);
+      const data = await response.json();
+      setSchedulerStatus({
+        running: Boolean(data?.running),
+        intervalMs: Number(data?.intervalMs ?? 0),
+        source: String(data?.source || 'local'),
+        appUrls: Array.isArray(data?.appUrls) ? data.appUrls.filter((item): item is string => typeof item === 'string') : [],
+        lastUpdated: String(data?.lastUpdated || new Date().toISOString()),
+      });
+    } catch (err) {
+      setSchedulerStatus(null);
+    }
+  }, []);
+
   useEffect(() => {
     loadPlatformData();
     loadBrowserHistory();
-  }, [loadPlatformData, loadBrowserHistory]);
+    loadAssessmentTrends();
+    loadScheduledAssessments();
+    loadSchedulerStatus();
+  }, [loadPlatformData, loadBrowserHistory, loadAssessmentTrends, loadScheduledAssessments, loadSchedulerStatus]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void loadAssessmentTrends();
+      void loadScheduledAssessments();
+      void loadSchedulerStatus();
+    }, 30000);
+    return () => window.clearInterval(intervalId);
+  }, [loadAssessmentTrends, loadScheduledAssessments, loadSchedulerStatus]);
 
   const runHealthCheck = async () => {
     try {
@@ -297,8 +376,18 @@ const GrandMasterPlatformPage: React.FC = () => {
   return (
     <div className="page-container">
       <header className="page-header">
-        <h1>Platform Overview</h1>
-        <p className="subtitle">{orgs.length} organisations across the platform</p>
+        <div>
+          <h1>Platform Overview</h1>
+          <p className="subtitle">{orgs.length} organisations across the platform</p>
+        </div>
+        <div className="ops-status-strip">
+          <span className={`live-pill ${schedulerStatus?.running ? 'is-live' : 'is-idle'}`}>
+            {schedulerStatus?.running ? 'Live scheduler' : 'Scheduler idle'}
+          </span>
+          {schedulerStatus && (
+            <span className="sync-meta">Updated {new Date(schedulerStatus.lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          )}
+        </div>
       </header>
 
       {error && (
@@ -358,6 +447,65 @@ const GrandMasterPlatformPage: React.FC = () => {
             </button>
           </div>
         </div>
+        {assessmentTrends && (
+          <div className="contact-card" style={{ marginTop: 12 }}>
+            <div className="contact-header">
+              <h3>Assessment trend</h3>
+              <span className="contact-type-badge">{assessmentTrends.assessmentsInWindow} runs</span>
+            </div>
+            <p className="contact-details">Pass rate: {assessmentTrends.passRate}%</p>
+            <p className="contact-details">Step failure rate: {assessmentTrends.stepFailureRate}%</p>
+            {assessmentTrends.recentAssessments.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                {assessmentTrends.recentAssessments.slice(0, 5).map((entry, index) => (
+                  <div key={entry.id || index} className="contact-details" style={{ marginBottom: 4 }}>
+                    {new Date(entry.startedAt || Date.now()).toLocaleDateString()}: {entry.status === 'passed' ? 'Passed' : 'Failed'}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {schedulerStatus && (
+          <div className="contact-card" style={{ marginTop: 12 }}>
+            <div className="contact-header">
+              <h3>Local scheduler status</h3>
+              <span className={`status-badge status-${schedulerStatus.running ? 'active' : 'inactive'}`}>
+                {schedulerStatus.running ? 'Running' : 'Idle'}
+              </span>
+            </div>
+            <p className="contact-details">Source: {schedulerStatus.source}</p>
+            <p className="contact-details">Interval: {Math.round(schedulerStatus.intervalMs / 1000)}s</p>
+            {schedulerStatus.appUrls.length > 0 && (
+              <p className="contact-details">Targets: {schedulerStatus.appUrls.join(', ')}</p>
+            )}
+            <p className="contact-meta">Last checked: {new Date(schedulerStatus.lastUpdated).toLocaleString()}</p>
+          </div>
+        )}
+
+        {scheduledAssessments.length > 0 && (
+          <div className="contact-card" style={{ marginTop: 12 }}>
+            <div className="contact-header">
+              <h3>Scheduled assessments</h3>
+              <span className="contact-type-badge">{scheduledAssessments.length}</span>
+            </div>
+            <div className="contacts-list" style={{ marginTop: 12 }}>
+              {scheduledAssessments.slice(0, 5).map((entry, index) => (
+                <div key={entry.id || index} className="contact-card">
+                  <div className="contact-header">
+                    <h3>{entry.jobId || 'scheduled'}</h3>
+                    <span className={`status-badge status-${entry.status === 'passed' ? 'active' : 'inactive'}`}>
+                      {entry.status}
+                    </span>
+                  </div>
+                  <p className="contact-details">Last run: {new Date(entry.startedAt || Date.now()).toLocaleString()}</p>
+                  {entry.appUrls && <p className="contact-details">URLs: {entry.appUrls.join(', ')}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {health && (
           <div className="contacts-list">
             {health.map((h, idx) => (

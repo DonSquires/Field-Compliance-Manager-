@@ -152,10 +152,23 @@ const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenB
   });
 
   const invoke = useCallback(async (body: Record<string, unknown>) => {
-    const { data, error: invokeError } = await supabase.functions.invoke('bob-builder-control-room', { body });
-    if (invokeError) throw invokeError;
-    if (data?.error) throw new Error(data.error);
-    return data;
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('bob-builder-control-room', { body });
+      if (invokeError) {
+        const message = String(invokeError.message || 'Failed to send a request to the Edge Function');
+        if (/Edge Function|Failed to send a request/i.test(message)) {
+          throw new Error('Builder control room is unavailable in this environment. The Bob Edge Function is not configured or reachable from this session.');
+        }
+        throw invokeError;
+      }
+      if (data?.error) throw new Error(data.error);
+      return data;
+    } catch (err) {
+      if (err instanceof Error && /Edge Function|Failed to send a request|Builder control room is unavailable/i.test(err.message)) {
+        throw new Error('Builder control room is unavailable in this environment. The Bob Edge Function is not configured or reachable from this session.');
+      }
+      throw err;
+    }
   }, []);
 
   const loadList = useCallback(async () => {
@@ -170,6 +183,9 @@ const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenB
       setForm(current => ({ ...current, projectId: current.projectId || nextProjects[0]?.id || '' }));
       setSelectedId(current => current && nextJobs.some(job => job.id === current) ? current : nextJobs[0]?.id ?? null);
     } catch (loadError) {
+      setProjects([]);
+      setJobs([]);
+      setSelectedId(null);
       setError(loadError instanceof Error ? loadError.message : 'Builder activity could not be loaded.');
     } finally {
       setLoading(false);

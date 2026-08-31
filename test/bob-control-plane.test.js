@@ -435,6 +435,65 @@ test('job assessment persists across server restart', async () => {
   assert.equal(persisted.status, created.body.status);
 });
 
+test('job assessment history and trend summaries are available', async () => {
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+  const jobId = crypto.randomUUID();
+
+  const first = await request('POST', `/api/bob/builder/jobs/${jobId}/assessment`, {
+    appUrl: 'http://127.0.0.1:4173'
+  }, adminHeaders);
+  assert.equal(first.response.status, 200);
+  assert.ok(first.body.id);
+
+  const history = await request('GET', `/api/bob/builder/jobs/${jobId}/assessments`, undefined, adminHeaders);
+  assert.equal(history.response.status, 200);
+  assert.ok(Array.isArray(history.body));
+  assert.ok(history.body.some(entry => entry.jobId === jobId));
+
+  const trends = await request('GET', '/api/bob/builder/assessment-trends', undefined, adminHeaders);
+  assert.equal(trends.response.status, 200);
+  assert.ok('passRate' in trends.body);
+  assert.ok(Array.isArray(trends.body.recentAssessments));
+});
+
+test('scheduled assessments can be triggered and listed', async () => {
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+  const triggered = await request('POST', '/api/bob/builder/scheduled-assessment', {
+    appUrls: ['http://127.0.0.1:4173']
+  }, adminHeaders);
+  assert.equal(triggered.response.status, 200);
+  assert.equal(triggered.body.jobId, 'scheduled');
+  assert.ok(['passed', 'failed'].includes(triggered.body.status));
+
+  const history = await request('GET', '/api/bob/builder/scheduled-assessments', undefined, adminHeaders);
+  assert.equal(history.response.status, 200);
+  assert.ok(Array.isArray(history.body));
+  assert.ok(history.body.some(entry => entry.jobId === 'scheduled'));
+});
+
+test('scheduled assessment loop can be started locally without GitHub', async () => {
+  process.env.BOB_STATE_DIR = stateDir;
+  delete require.cache[require.resolve('../bob-control-plane-server.js')];
+  const { startScheduledAssessmentLoop } = require('../bob-control-plane-server.js');
+  const timer = startScheduledAssessmentLoop({
+    intervalMs: 60000,
+    appUrls: ['http://127.0.0.1:4173'],
+    triggerImmediately: false,
+    run: async () => ({ status: 'passed', paused: false, steps: [], reason: 'local-scheduler-check' })
+  });
+  assert.ok(timer);
+  clearInterval(timer);
+});
+
+test('scheduled assessment loop exposes status without GitHub', async () => {
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+  const status = await request('GET', '/api/bob/builder/scheduled-assessment-status', undefined, adminHeaders);
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.running, true);
+  assert.ok(status.body.intervalMs > 0);
+  assert.equal(status.body.source, 'local');
+});
+
 test('job advance requires a passing assessment', async () => {
   const adminHeaders = { authorization: `Bearer ${adminToken}` };
   const jobId = crypto.randomUUID();

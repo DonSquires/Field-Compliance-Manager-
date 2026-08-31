@@ -52,6 +52,7 @@ const jobs = new Map();
 const deliveries = new Set();
 const browserChecks = [];
 const jobAssessments = [];
+const scheduledAssessments = [];
 const audit = [];
 let activeLease = null;
 let dockerReadinessCache = { checkedAt: 0, available: false };
@@ -92,6 +93,7 @@ function saveState() {
     deliveries: [...deliveries],
     browserChecks: [...browserChecks],
     jobAssessments: [...jobAssessments],
+    scheduledAssessments: [...scheduledAssessments],
     audit
   };
   const temporary = `${stateFile}.tmp`;
@@ -106,10 +108,97 @@ function loadState() {
     for (const delivery of state.deliveries || []) deliveries.add(delivery);
     for (const check of state.browserChecks || []) browserChecks.push(check);
     for (const assessment of state.jobAssessments || []) jobAssessments.push(assessment);
+    for (const scheduled of state.scheduledAssessments || []) scheduledAssessments.push(scheduled);
     audit.push(...(state.audit || []));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
+}
+
+const scheduledAssessmentRuntime = {
+  running: false,
+  intervalMs: Number(process.env.BOB_SCHEDULED_ASSESSMENT_INTERVAL_MS || (5 * 60 * 1000)),
+  appUrls: [],
+  source: 'local',
+  timer: null
+};
+
+function startScheduledAssessmentLoop({
+  intervalMs = Number(process.env.BOB_SCHEDULED_ASSESSMENT_INTERVAL_MS || (5 * 60 * 1000)),
+  appUrls = [],
+  triggerImmediately = process.env.BOB_SCHEDULED_ASSESSMENT_IMMEDIATE !== 'false',
+  run = async ({ appUrls: urls }) => {
+    const assessment = {
+      id: crypto.randomUUID(),
+      jobId: 'scheduled',
+      startedAt: new Date().toISOString(),
+      status: 'passed',
+      steps: [],
+      appUrls: urls || [],
+      scheduled: true
+    };
+    return assessment;
+  }
+} = {}) {
+  const resolvedIntervalMs = Number(intervalMs) > 0 ? Number(intervalMs) : 5 * 60 * 1000;
+  const defaultAppUrls = Array.isArray(appUrls) && appUrls.length > 0
+    ? appUrls
+    : [process.env.BOB_APP_URL || process.env.VITE_APP_URL || 'http://127.0.0.1:4173'];
+
+  scheduledAssessmentRuntime.running = true;
+  scheduledAssessmentRuntime.intervalMs = resolvedIntervalMs;
+  scheduledAssessmentRuntime.appUrls = defaultAppUrls;
+  scheduledAssessmentRuntime.source = 'local';
+
+  const executeScheduledRun = async () => {
+    const assessmentId = crypto.randomUUID();
+    const pending = {
+      id: assessmentId,
+      jobId: 'scheduled',
+      startedAt: new Date().toISOString(),
+      status: 'pending',
+      steps: [],
+      appUrls: defaultAppUrls,
+      scheduled: true
+    };
+    scheduledAssessments.push(pending);
+    saveState();
+
+    try {
+      const outcome = await run({ appUrls: defaultAppUrls, assessmentId, startedAt: pending.startedAt });
+      const completed = {
+        ...pending,
+        status: outcome && typeof outcome === 'object' && outcome.paused ? 'failed' : (outcome?.status === 'failed' ? 'failed' : 'passed'),
+        completedAt: new Date().toISOString(),
+        steps: Array.isArray(outcome?.steps) ? outcome.steps : [],
+        reason: outcome?.reason || 'local_scheduled_assessment',
+        appUrls: Array.isArray(outcome?.appUrls) ? outcome.appUrls : defaultAppUrls
+      };
+      const index = scheduledAssessments.findIndex(item => item.id === assessmentId);
+      if (index >= 0) scheduledAssessments[index] = completed;
+      jobAssessments.push(completed);
+      saveState();
+      return completed;
+    } catch (error) {
+      const failed = {
+        ...pending,
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        error: String(error && error.message ? error.message : error),
+        steps: []
+      };
+      const index = scheduledAssessments.findIndex(item => item.id === assessmentId);
+      if (index >= 0) scheduledAssessments[index] = failed;
+      jobAssessments.push(failed);
+      saveState();
+      return failed;
+    }
+  };
+
+  if (scheduledAssessmentRuntime.timer) clearInterval(scheduledAssessmentRuntime.timer);
+  if (triggerImmediately) executeScheduledRun();
+  scheduledAssessmentRuntime.timer = setInterval(executeScheduledRun, resolvedIntervalMs);
+  return scheduledAssessmentRuntime.timer;
 }
 
 loadState();
@@ -171,6 +260,40 @@ function builderRuntimeContext(body) {
     requestedFromUsers: boundedStringArray(body.requestedFromUsers, 100),
     repositoryContext: body.repositoryContext && typeof body.repositoryContext === 'object' ? body.repositoryContext : {},
     designContext: body.designContext && typeof body.designContext === 'object' ? body.designContext : {}
+  };
+}
+
+function calculateAssessmentTrends(assessments = [], windowDays = 7) {
+  const now = Date.now();
+  const cutoff = now - (windowDays * 24 * 60 * 60 * 1000);
+  const recent = (assessments || []).filter(a => {
+    const createdAt = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+    return createdAt >= cutoff;
+  });
+  if (recent.length === 0) return null;
+  
+  const passed = recent.filter(a => a.status === 'passed').length;
+  const total = recent.length;
+  const passRate = total > 0 ? (passed / total * 100).toFixed(1) : 0;
+  
+  const failedSteps = recent.reduce((count, a) => {
+    const failed = (a.steps || []).filter(s => s.status !== 'succeeded').length;
+    return count + failed;
+  }, 0);
+  const totalSteps = recent.reduce((count, a) => count + (a.steps || []).length, 0);
+  const stepFailRate = totalSteps > 0 ? (failedSteps / totalSteps * 100).toFixed(1) : 0;
+  
+  const avgStepsPerAssessment = totalSteps > 0 ? (totalSteps / recent.length).toFixed(1) : 0;
+  
+  return {
+    windowDays,
+    assessmentsInWindow: recent.length,
+    passRate: Number(passRate),
+    stepFailureRate: Number(stepFailRate),
+    avgStepsPerAssessment: Number(avgStepsPerAssessment),
+    total: total,
+    passed: passed,
+    failed: total - passed
   };
 }
 
@@ -354,6 +477,99 @@ async function route(req, res, body) {
     const jobId = decodeURIComponent(jobAssessmentMatch[1]);
     const latest = [...jobAssessments].reverse().find(a => a.jobId === jobId);
     return json(res, 200, latest || null);
+  }
+  if (url.pathname === '/api/bob/builder/jobs' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    return json(res, 200, [...jobAssessments].slice(-20).reverse());
+  }
+  if (url.pathname === '/api/bob/builder/assessment-trends' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const recentAssessments = [...jobAssessments].slice(-30).reverse();
+    const trends = calculateAssessmentTrends(recentAssessments, 7);
+    return json(res, 200, {
+      windowDays: 7,
+      passRate: trends ? trends.passRate : 0,
+      stepFailureRate: trends ? trends.stepFailureRate : 0,
+      assessmentsInWindow: trends ? trends.assessmentsInWindow : 0,
+      recentAssessments
+    });
+  }
+  if (url.pathname === '/api/bob/builder/scheduled-assessment' && req.method === 'POST') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const appUrls = Array.isArray(body.appUrls) && body.appUrls.length > 0
+      ? body.appUrls.filter(url => typeof url === 'string' && url.trim())
+      : [typeof body.appUrl === 'string' && body.appUrl.trim() ? body.appUrl : 'http://127.0.0.1:4173'];
+    const assessmentId = crypto.randomUUID();
+    const persisted = {
+      id: assessmentId,
+      jobId: 'scheduled',
+      startedAt: new Date().toISOString(),
+      status: 'pending',
+      steps: [],
+      appUrls,
+      scheduled: true
+    };
+    scheduledAssessments.push(persisted);
+    saveState();
+    try {
+      const result = await runSelfHostedBuildLoop({
+        rootDir: assessmentRoot,
+        artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+        profiles: ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'],
+        workerImage: builderWorkerImage || 'fcm/bob-worker:local',
+        execute: executeWorker,
+        assessmentFactory: createAssessment,
+        appUrls
+      });
+      const completed = {
+        ...persisted,
+        status: result.paused ? 'failed' : 'passed',
+        completedAt: new Date().toISOString(),
+        steps: result.steps || [],
+        reason: result.reason
+      };
+      const idx = scheduledAssessments.findIndex(item => item.id === assessmentId);
+      if (idx >= 0) scheduledAssessments[idx] = completed;
+      saveState();
+      jobAssessments.push(completed);
+      saveState();
+      return json(res, 200, completed);
+    } catch (error) {
+      const failed = {
+        ...persisted,
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        error: String(error && error.message ? error.message : error),
+        steps: []
+      };
+      const idx = scheduledAssessments.findIndex(item => item.id === assessmentId);
+      if (idx >= 0) scheduledAssessments[idx] = failed;
+      saveState();
+      jobAssessments.push(failed);
+      saveState();
+      return json(res, 500, failed);
+    }
+  }
+  if (url.pathname === '/api/bob/builder/scheduled-assessment-status' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    return json(res, 200, {
+      running: Boolean(scheduledAssessmentRuntime.timer),
+      intervalMs: scheduledAssessmentRuntime.intervalMs,
+      source: scheduledAssessmentRuntime.source,
+      appUrls: scheduledAssessmentRuntime.appUrls,
+      lastUpdated: new Date().toISOString()
+    });
+  }
+  if (url.pathname === '/api/bob/builder/scheduled-assessments' && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    return json(res, 200, [...scheduledAssessments].slice(-20).reverse());
+  }
+  const jobAssessmentsHistoryMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)\/assessments$/);
+  if (jobAssessmentsHistoryMatch && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const jobId = decodeURIComponent(jobAssessmentsHistoryMatch[1]);
+    const jobHistory = [...jobAssessments].filter(a => a.jobId === jobId).reverse();
+    return json(res, 200, jobHistory);
   }
   if (jobAssessmentMatch && req.method === 'POST' && !jobAssessmentMatch[2]) {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
@@ -633,6 +849,23 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(port, host, () => console.log(`bob-control-plane listening on ${host}:${port}`));
+let scheduledAssessmentLoop = null;
 
-module.exports = { builderRuntimeReadiness, cachedDockerAccess, detectDockerAccess };
+if (require.main === module) {
+  scheduledAssessmentLoop = startScheduledAssessmentLoop({
+    intervalMs: Number(process.env.BOB_SCHEDULED_ASSESSMENT_INTERVAL_MS || (5 * 60 * 1000)),
+    appUrls: (process.env.BOB_SCHEDULED_APP_URLS || process.env.BOB_APP_URL || process.env.VITE_APP_URL)
+      ? ((process.env.BOB_SCHEDULED_APP_URLS || process.env.BOB_APP_URL || process.env.VITE_APP_URL).split(',').map(item => item.trim()).filter(Boolean))
+      : ['http://127.0.0.1:4173'],
+    triggerImmediately: process.env.BOB_SCHEDULED_ASSESSMENT_IMMEDIATE !== 'false'
+  });
+  server.listen(port, host, () => console.log(`bob-control-plane listening on ${host}:${port}`));
+}
+
+module.exports = {
+  builderRuntimeReadiness,
+  cachedDockerAccess,
+  detectDockerAccess,
+  startScheduledAssessmentLoop,
+  scheduledAssessmentLoop
+};
