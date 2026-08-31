@@ -13,8 +13,11 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/UserManagementPage.tsx',
   'apps/web/src/pages/AccessControlPage.tsx',
   'apps/web/src/pages/CRMPage.tsx',
+  'apps/web/src/pages/SiteBoundaryReviewPage.tsx',
   'apps/web/src/pages/RelationshipWorkspacePage.tsx',
   'apps/web/src/components/CrmAccountWorkspace.tsx',
+  'apps/web/src/components/CrmAgreementSetupDialog.tsx',
+  'apps/web/src/components/CrmOperationalReadinessDialog.tsx',
   'apps/web/src/components/CrmOrganizationDialog.tsx',
   'apps/web/src/components/CrmSiteDialog.tsx',
   'apps/web/src/components/UserIdentityWorkspace.tsx',
@@ -40,7 +43,10 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260830143000_govern_crm_contacts_and_activities.sql',
   'supabase/migrations/20260830144000_govern_crm_organization_spine.sql',
   'supabase/migrations/20260830145000_govern_user_identity_access.sql',
-  'supabase/migrations/20260831080000_govern_crm_site_creation.sql'
+  'supabase/migrations/20260831080000_govern_crm_site_creation.sql',
+  'supabase/migrations/20260831081000_govern_crm_site_boundary_review.sql',
+  'supabase/migrations/20260831082000_govern_crm_agreement_setup.sql',
+  'supabase/migrations/20260831083000_crm_operational_readiness.sql'
 ];
 
 function walkFiles(rootDir, relativeDir) {

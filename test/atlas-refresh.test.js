@@ -70,6 +70,12 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('components/CrmOrganizationDialog', 'manage_crm_organization', 'calls'), true);
   assert.equal(hasEdge('components/CrmSiteDialog', 'find_crm_site_candidates', 'calls'), true);
   assert.equal(hasEdge('components/CrmSiteDialog', 'create_crm_site', 'calls'), true);
+  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'get_crm_site_boundary_queue', 'calls'), true);
+  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'get_boundary_history', 'calls'), true);
+  assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'manage_crm_site_boundary', 'calls'), true);
+  assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'get_crm_agreement_setup', 'calls'), true);
+  assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'manage_crm_agreement_setup', 'calls'), true);
+  assert.equal(hasEdge('components/CrmOperationalReadinessDialog', 'get_crm_operational_readiness', 'calls'), true);
   assert.equal(hasEdge('pages/CRMPage', 'get_crm_organization_readiness', 'calls'), true);
   assert.equal(hasEdge('manage_crm_organization', 'organizations', 'reads'), true);
   assert.equal(hasEdge('manage_crm_organization', 'organizations', 'writes'), true);
@@ -81,6 +87,21 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('find_crm_site_candidates', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('create_crm_site', 'client_sites', 'writes'), true);
   assert.equal(hasEdge('create_crm_site', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('get_crm_site_boundary_queue', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('get_crm_site_boundary_queue', 'organizations', 'reads'), true);
+  assert.equal(hasEdge('manage_crm_site_boundary', 'client_sites', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_site_boundary', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('get_crm_agreement_setup', 'service_agreement_locations', 'reads'), true);
+  assert.equal(hasEdge('get_crm_agreement_setup', 'service_agreement_modules', 'reads'), true);
+  assert.equal(hasEdge('manage_crm_agreement_setup', 'service_agreement_locations', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_agreement_setup', 'service_agreement_modules', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_agreement_setup', 'service_agreements', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_agreement_setup', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('get_crm_operational_readiness', 'service_agreement_locations', 'reads'), true);
+  assert.equal(hasEdge('get_crm_operational_readiness', 'crm_commercial_settings', 'reads'), true);
+  assert.equal(hasEdge('get_crm_operational_readiness', 'site_financial_config', 'reads'), true);
+  assert.equal(hasEdge('get_crm_operational_readiness', 'roster_work_units', 'reads'), true);
+  assert.equal(hasEdge('get_crm_operational_readiness', 'report_templates', 'reads'), true);
   assert.equal(atlas.edges.some((edge) => edge.source_name === 'components/CrmOrganizationDialog' && edge.edge_kind === 'writes'), false);
 });
 

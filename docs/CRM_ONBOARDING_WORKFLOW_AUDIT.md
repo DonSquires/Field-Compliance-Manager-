@@ -1,6 +1,6 @@
 # CRM Onboarding Workflow Audit
 
-Verified 2026-08-30 against the active AdminShell routes, current React pages,
+Verified 2026-08-31 against the active AdminShell routes, current React pages,
 `supabase/schema.sql`, and live Atlas. Bob's legacy-oriented recommendation is
 used here as a workflow hypothesis, not as evidence about the current UI.
 
@@ -27,6 +27,15 @@ used here as a workflow hypothesis, not as evidence about the current UI.
 - Provider profile changes in Organization Setup and account organization changes
   are both RPC-owned and audited. Direct authenticated organization mutation is
   revoked.
+- CRM site creation is candidate-first, retry-safe, and audited. New sites begin
+  with explicit provisional, unverified boundary provenance.
+- The Sites route is an operational boundary-review queue. It can establish
+  provisional point-radius evidence but does not claim visual polygon verification.
+- Accepted operational agreements now expose governed covered-site and module
+  setup. Direct authenticated writes to agreement locations and modules are revoked.
+- Agreement readiness now evaluates canonical coverage, authoritative boundary,
+  module, positive billing-rate, attributed work-unit, and reporting-template
+  evidence. Every blocker links to its existing owning workspace.
 
 ## Gaps Confirmed
 
@@ -34,14 +43,14 @@ used here as a workflow hypothesis, not as evidence about the current UI.
   prospect identity record.
 2. Candidate search and in-hierarchy exact-name rejection are live. Name search
   remains candidate evidence rather than a global uniqueness guarantee.
-3. Site `address_match_key` is indexed but not unique, so candidate review must
-   precede creation and ambiguous matches must remain visible.
-4. Existing agreement readiness does not require an active primary contact,
-   accepted agreement, enabled module, authoritative/provisionally acknowledged
-   boundary, operational work unit, or explicit activation decision.
-5. Organization and service-agreement tables still expose broad direct mutation
-   grants and overlapping policies. A human onboarding UI must not write them
-   directly.
+3. Site `address_match_key` is indexed but not globally unique. The governed
+  account-scoped candidate and creation flow serializes duplicate review.
+4. The lightweight account summary readiness does not include boundary or
+  reporting evidence. Accepted agreements use the detailed operational evaluator,
+  but neither view is yet an explicit activation decision.
+5. The agreement header remains quote-lifecycle owned. Covered-site and module
+  rows are RPC-owned, but remaining agreement profile fields still need a
+  deliberately scoped owner before additional UI controls are exposed.
 6. There is no single operational handoff view joining what was sold, covered
    places, contacts, modules, hazards, commercial readiness, and first actions.
 
@@ -95,12 +104,13 @@ sales/finance role boundary that the authorization schema cannot enforce.
 
 Implement these boundaries before exposing their corresponding UI actions:
 
-1. Extend live organization candidate search with governed site/address
-  candidate search.
+1. **Complete:** governed site/address candidate search and retry-safe creation.
 2. Add a resumable stage ledger attached to the existing retry-safe prospect.
-3. Add governed site, agreement, location-link, and module transitions.
-4. Extend live organization readiness with boundary/reporting evidence and
-  stage ownership.
+3. **Complete:** quote-owned agreement creation plus governed site boundary,
+  location-link, and module transitions.
+4. **Complete for accepted agreements:** operational readiness includes boundary,
+  commercial, work-unit, reporting, owner, and destination evidence. The account
+  summary RPC still remains a lighter qualification view.
 5. Add `activate_crm_account` with row locking, expected draft state, blocker checks,
    and audit provenance.
 
@@ -122,9 +132,9 @@ Implement these boundaries before exposing their corresponding UI actions:
 
 ## Delivery Order
 
-1. Draft ledger, scoped candidate search, and readiness RPC.
-2. Qualify lane using the existing governed account workspace for contacts.
-3. Governed site creation and boundary-review handoff.
-4. Governed agreement/location/module setup.
-5. Operational and commercial readiness integrations.
+1. **Partial:** scoped candidate search and readiness RPC are live; draft ledger remains.
+2. **Complete:** qualify lane uses the governed account workspace for contacts.
+3. **Complete:** governed site creation and boundary-review handoff.
+4. **Complete:** governed agreement/location/module setup.
+5. **Complete:** operational and commercial readiness integrations with owner handoffs.
 6. Activation gate, handoff summary, incomplete queue, and time-to-live metrics.

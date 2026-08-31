@@ -27604,3 +27604,126 @@ REVOKE INSERT ON TABLE "public"."client_sites" FROM PUBLIC,"anon","authenticated
 REVOKE ALL ON FUNCTION "public"."find_crm_site_candidates"(uuid,text,text) FROM PUBLIC,"anon","authenticated";
 REVOKE ALL ON FUNCTION "public"."create_crm_site"(uuid,uuid,text,text,text) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."find_crm_site_candidates"(uuid,text,text),"public"."create_crm_site"(uuid,uuid,text,text,text) TO "authenticated","service_role";
+
+CREATE FUNCTION "public"."get_crm_site_boundary_queue"()
+RETURNS TABLE(site_id uuid,account_organization_id uuid,account_name text,site_name text,address text,site_type text,active boolean,gps_lat double precision,gps_lng double precision,boundary_status text,boundary_verification text,boundary_verified_at timestamptz,has_boundary boolean)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;
+begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  return query select s.id,o.id,o.name,s.name,s.address,s.site_type,s.active,s.gps_lat,s.gps_lng,s.boundary_status,s.boundary_verification,s.boundary_verified_at,(s.boundary is not null)
+  from public.client_sites s join public.organizations o on o.id=s.client_organization_id
+  where public.crm_actor_can_manage_account(o.id)
+  order by case when s.boundary_verification='unverified' then 0 else 1 end,case when s.boundary_status='provisional' then 0 else 1 end,o.name,s.name;
+end;$$;
+
+CREATE FUNCTION "public"."manage_crm_site_boundary"(p_site_id uuid,p_action text,p_expected_verification text,p_center_lat double precision DEFAULT NULL,p_center_lng double precision DEFAULT NULL,p_radius_m double precision DEFAULT 50)
+RETURNS TABLE(site_id uuid,boundary_status text,boundary_verification text,gps_lat double precision,gps_lng double precision,boundary_verified_at timestamptz,area_m2 numeric)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_site public.client_sites%rowtype;v_area numeric:=null;
+begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  select s.* into v_site from public.client_sites s where s.id=p_site_id for update;
+  if not found then raise exception 'Site not found';end if;
+  if not public.crm_actor_can_manage_account(v_site.client_organization_id) then raise exception 'Not authorised to review this site boundary';end if;
+  if v_site.boundary_verification is distinct from p_expected_verification then raise exception 'Site boundary changed since it was opened';end if;
+  if p_action='set_provisional' then
+    if p_center_lat is null or p_center_lat not between -90 and 90 or p_center_lng is null or p_center_lng not between -180 and 180 then raise exception 'Valid latitude and longitude are required';end if;
+    if p_radius_m is null or p_radius_m<5 or p_radius_m>5000 then raise exception 'Boundary radius must be between 5 and 5000 metres';end if;
+    v_area:=public.set_site_geometry(v_site.id,null,p_center_lat,p_center_lng,p_radius_m,'point_radius',v_actor,'direct_edit');
+    update public.client_sites set gps_lat=p_center_lat,gps_lng=p_center_lng,boundary_status='provisional',boundary_verification='unverified',boundary_verified_by=null,boundary_verified_at=null where id=v_site.id returning * into v_site;
+  elsif p_action='verify' then
+    if v_site.boundary is null then raise exception 'A boundary must be established before verification';end if;
+    if not public.verify_boundary('client_site',v_site.id) then raise exception 'Boundary verification failed';end if;
+    select s.* into v_site from public.client_sites s where s.id=p_site_id;
+  else raise exception 'Unsupported site boundary action';end if;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+  values(v_provider,v_actor,'crm_site_boundary_'||p_action,'client_sites',v_site.id,jsonb_build_object('account_organization_id',v_site.client_organization_id,'boundary_status',v_site.boundary_status,'boundary_verification',v_site.boundary_verification,'gps_lat',v_site.gps_lat,'gps_lng',v_site.gps_lng,'area_m2',v_area));
+  return query select v_site.id,v_site.boundary_status,v_site.boundary_verification,v_site.gps_lat,v_site.gps_lng,v_site.boundary_verified_at,v_area;
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."get_crm_site_boundary_queue"() FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."manage_crm_site_boundary"(uuid,text,text,double precision,double precision,double precision) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_site_boundary_queue"(),"public"."manage_crm_site_boundary"(uuid,text,text,double precision,double precision,double precision) TO "authenticated","service_role";
+REVOKE ALL ON FUNCTION "public"."set_site_geometry"(uuid,jsonb,double precision,double precision,double precision,text,uuid,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."set_site_geometry"(uuid,jsonb,double precision,double precision,double precision,text,uuid,text) TO "service_role";
+
+CREATE FUNCTION "public"."get_crm_agreement_setup"(p_agreement_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_agreement public.service_agreements%rowtype;
+begin
+  select sa.* into v_agreement from public.service_agreements sa where sa.id=p_agreement_id;
+  if not found then raise exception 'Service agreement not found';end if;
+  if v_actor is null or not public.is_admin_for_org(v_agreement.provider_organization_id) then raise exception 'Provider administrator required';end if;
+  return jsonb_build_object(
+    'agreement',jsonb_build_object('id',v_agreement.id,'name',v_agreement.name,'client_organization_id',v_agreement.client_organization_id,'invitation_status',v_agreement.invitation_status,'enabled_modules',v_agreement.enabled_modules),
+    'sites',(select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'address',s.address,'boundary_status',s.boundary_status,'boundary_verification',s.boundary_verification,'linked',sal.id is not null,'link_status',sal.status) order by s.name),'[]'::jsonb) from public.client_sites s left join public.service_agreement_locations sal on sal.service_agreement_id=v_agreement.id and sal.site_id=s.id where s.client_organization_id=v_agreement.client_organization_id and s.active),
+    'modules',(select coalesce(jsonb_agg(jsonb_build_object('module_key',mc.module_key,'enabled',coalesce(sam.enabled,false),'sla_minutes',sam.sla_minutes,'allows_client_submission',coalesce(sam.allows_client_submission,false),'allows_auto_dispatch',coalesce(sam.allows_auto_dispatch,false)) order by mc.module_key),'[]'::jsonb) from public.module_catalog mc left join public.service_agreement_modules sam on sam.service_agreement_id=v_agreement.id and sam.module_key=mc.module_key where mc.active)
+  );
+end;$$;
+
+CREATE FUNCTION "public"."manage_crm_agreement_setup"(p_agreement_id uuid,p_expected_invitation_status text,p_action text,p_site_id uuid DEFAULT NULL,p_module_key text DEFAULT NULL,p_enabled boolean DEFAULT true,p_sla_minutes integer DEFAULT NULL,p_allows_client_submission boolean DEFAULT false,p_allows_auto_dispatch boolean DEFAULT false)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_agreement public.service_agreements%rowtype;v_link public.service_agreement_locations%rowtype;v_module public.service_agreement_modules%rowtype;
+begin
+  select sa.* into v_agreement from public.service_agreements sa where sa.id=p_agreement_id for update;
+  if not found then raise exception 'Service agreement not found';end if;
+  if v_actor is null or not public.is_admin_for_org(v_agreement.provider_organization_id) then raise exception 'Provider administrator required';end if;
+  if v_agreement.agreement_type<>'operational' or v_agreement.invitation_status<>'accepted' then raise exception 'Only accepted operational agreements can be configured';end if;
+  if v_agreement.invitation_status is distinct from p_expected_invitation_status then raise exception 'Service agreement changed since it was opened';end if;
+  if p_action in('link_site','unlink_site') then
+    if p_site_id is null or not exists(select 1 from public.client_sites s where s.id=p_site_id and s.client_organization_id=v_agreement.client_organization_id and s.active) then raise exception 'Active client site required';end if;
+    if p_action='link_site' then
+      insert into public.service_agreement_locations(service_agreement_id,site_id,status,created_by) values(v_agreement.id,p_site_id,'active',v_actor)
+      on conflict(service_agreement_id,site_id) do update set status='active',updated_at=clock_timestamp() returning * into v_link;
+    else
+      update public.service_agreement_locations set status='ended',updated_at=clock_timestamp() where service_agreement_id=v_agreement.id and site_id=p_site_id returning * into v_link;
+      if not found then raise exception 'Covered site link not found';end if;
+    end if;
+  elsif p_action='set_module' then
+    if p_module_key is null or not exists(select 1 from public.module_catalog mc where mc.module_key=p_module_key and mc.active) then raise exception 'Active module catalog entry required';end if;
+    if p_sla_minutes is not null and (p_sla_minutes<1 or p_sla_minutes>10080) then raise exception 'Module SLA must be between 1 and 10080 minutes';end if;
+    insert into public.service_agreement_modules(service_agreement_id,module_key,enabled,sla_minutes,allows_client_submission,allows_auto_dispatch)
+    values(v_agreement.id,p_module_key,coalesce(p_enabled,true),p_sla_minutes,p_allows_client_submission,p_allows_auto_dispatch)
+    on conflict(service_agreement_id,module_key) do update set enabled=excluded.enabled,sla_minutes=excluded.sla_minutes,allows_client_submission=excluded.allows_client_submission,allows_auto_dispatch=excluded.allows_auto_dispatch returning * into v_module;
+    update public.service_agreements set enabled_modules=coalesce((select array_agg(sam.module_key order by sam.module_key) from public.service_agreement_modules sam where sam.service_agreement_id=v_agreement.id and sam.enabled),'{}'::text[]) where id=v_agreement.id returning * into v_agreement;
+  else raise exception 'Unsupported agreement setup action';end if;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+  values(v_agreement.provider_organization_id,v_actor,'crm_agreement_'||p_action,'service_agreements',v_agreement.id,jsonb_build_object('site_id',p_site_id,'module_key',p_module_key,'enabled',p_enabled,'sla_minutes',p_sla_minutes));
+  return jsonb_build_object('agreement_id',v_agreement.id,'action',p_action,'site_link_id',v_link.id,'module_id',v_module.id,'enabled_modules',v_agreement.enabled_modules);
+end;$$;
+
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."service_agreement_locations" FROM PUBLIC,"anon","authenticated";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."service_agreement_modules" FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."get_crm_agreement_setup"(uuid) FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."manage_crm_agreement_setup"(uuid,text,text,uuid,text,boolean,integer,boolean,boolean) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_agreement_setup"(uuid),"public"."manage_crm_agreement_setup"(uuid,text,text,uuid,text,boolean,integer,boolean,boolean) TO "authenticated","service_role";
+
+CREATE FUNCTION "public"."get_crm_operational_readiness"(p_agreement_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_agreement public.service_agreements%rowtype;v_location_count integer;v_boundary_ready boolean;v_module_count integer;v_billing_ready boolean;v_work_unit_count integer;v_reporting_ready boolean;
+begin
+  select sa.* into v_agreement from public.service_agreements sa where sa.id=p_agreement_id;
+  if not found then raise exception 'Service agreement not found';end if;
+  if v_actor is null or not public.is_admin_for_org(v_agreement.provider_organization_id) then raise exception 'Provider administrator required';end if;
+  if v_agreement.agreement_type<>'operational' then raise exception 'Operational agreement required';end if;
+  select count(*) into v_location_count from public.service_agreement_locations sal where sal.service_agreement_id=v_agreement.id and sal.status='active';
+  select v_location_count>0 and not exists(select 1 from public.service_agreement_locations sal left join public.client_sites s on s.id=sal.site_id left join public.location_zones z on z.id=sal.zone_id where sal.service_agreement_id=v_agreement.id and sal.status='active' and ((sal.site_id is not null and (s.boundary is null or s.boundary_status<>'authoritative' or s.boundary_verification<>'verified')) or (sal.zone_id is not null and (z.boundary is null or not exists(select 1 from public.geofence_boundary_history h where h.entity_type='location_zone' and h.entity_id=z.id and h.verification_state='verified'))))) into v_boundary_ready;
+  select count(*) into v_module_count from public.service_agreement_modules sam where sam.service_agreement_id=v_agreement.id and sam.enabled;
+  select exists(select 1 from public.crm_commercial_settings c where c.service_agreement_id=v_agreement.id and coalesce(c.base_rate_per_hour,c.callout_rate_per_hour,c.travel_rate_per_km)>0) or exists(select 1 from public.site_financial_config f join public.service_agreement_locations sal on sal.service_agreement_id=f.service_agreement_id and (sal.site_id=f.site_id or sal.zone_id=f.zone_id) where f.service_agreement_id=v_agreement.id and f.active and sal.status='active' and coalesce(f.hourly_rate,f.per_visit_rate,f.flat_rate_monthly,f.per_notice_rate,f.callout_rate)>0) into v_billing_ready;
+  select count(*) into v_work_unit_count from public.roster_work_units wu join public.service_agreement_locations sal on sal.id=wu.service_agreement_location_id and sal.service_agreement_id=v_agreement.id and sal.status='active' join public.service_agreement_modules sam on sam.id=wu.service_agreement_module_id and sam.service_agreement_id=v_agreement.id and sam.enabled where wu.active;
+  select not v_agreement.client_portal_reports_enabled or (v_agreement.monthly_report_template_code is not null and exists(select 1 from public.report_templates rt where rt.organization_id=v_agreement.provider_organization_id and rt.template_code=v_agreement.monthly_report_template_code)) into v_reporting_ready;
+  return jsonb_build_object('agreement_id',v_agreement.id,'invitation_status',v_agreement.invitation_status,'ready',v_agreement.invitation_status='accepted' and v_location_count>0 and v_boundary_ready and v_module_count>0 and v_billing_ready and v_work_unit_count>0 and v_reporting_ready,'dimensions',jsonb_build_array(
+    jsonb_build_object('key','coverage','label','Covered places','status',case when v_location_count>0 then 'ready' else 'blocked' end,'detail',case when v_location_count>0 then v_location_count||' active location link'||case when v_location_count=1 then '' else 's' end else 'No active covered site or zone is linked' end,'owner','Account administration','destination','relationships'),
+    jsonb_build_object('key','boundary','label','Boundary evidence','status',case when v_boundary_ready then 'ready' else 'blocked' end,'detail',case when v_boundary_ready then 'All covered places have authoritative verified boundaries' else 'Every covered place needs authoritative verified geometry' end,'owner','Operations administration','destination','sites'),
+    jsonb_build_object('key','modules','label','Service scope','status',case when v_module_count>0 then 'ready' else 'blocked' end,'detail',case when v_module_count>0 then v_module_count||' enabled service module'||case when v_module_count=1 then '' else 's' end else 'No service module is enabled' end,'owner','Account administration','destination','relationships'),
+    jsonb_build_object('key','billing','label','Commercial rates','status',case when v_billing_ready then 'ready' else 'blocked' end,'detail',case when v_billing_ready then 'A positive agreement or covered-place rate is recorded' else 'No positive billable rate is recorded' end,'owner','Commercial administration','destination','crm'),
+    jsonb_build_object('key','operations','label','Operational work','status',case when v_work_unit_count>0 then 'ready' else 'blocked' end,'detail',case when v_work_unit_count>0 then v_work_unit_count||' active attributed work unit'||case when v_work_unit_count=1 then '' else 's' end else 'No active work unit is attributed to this agreement' end,'owner','Roster administration','destination','roster-targets'),
+    jsonb_build_object('key','reporting','label','Reporting delivery','status',case when v_reporting_ready then 'ready' else 'blocked' end,'detail',case when not v_agreement.client_portal_reports_enabled then 'Client report delivery is disabled by contract' when v_reporting_ready then 'The configured monthly template exists for the provider' else 'Client reporting is enabled without a valid monthly template' end,'owner','Reporting administration','destination','reports')
+  ));
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."get_crm_operational_readiness"(uuid) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_operational_readiness"(uuid) TO "authenticated","service_role";

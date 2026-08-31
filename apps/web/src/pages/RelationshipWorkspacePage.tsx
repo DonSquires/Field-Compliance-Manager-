@@ -12,6 +12,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
+import { CrmAgreementSetupDialog } from '../components/CrmAgreementSetupDialog';
+import { CrmOperationalReadinessDialog } from '../components/CrmOperationalReadinessDialog';
 
 interface AgreementLocationLink {
   service_agreement_id: string;
@@ -36,12 +38,14 @@ interface RelationshipRecord {
   counterpart_id: string;
 }
 
-const RelationshipWorkspacePage: React.FC = () => {
+const RelationshipWorkspacePage: React.FC<{ onNavigate?: (destination: string) => void }> = ({ onNavigate = () => undefined }) => {
   const { profile } = useAuth();
   const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
+  const [setupAgreement, setSetupAgreement] = useState<{ id: string; name: string; clientName: string; invitationStatus: string } | null>(null);
+  const [readinessAgreement, setReadinessAgreement] = useState<{ id: string; name: string; clientName: string } | null>(null);
 
   const loadRelationships = useCallback(async () => {
     if (!profile?.organizationId) return;
@@ -267,13 +271,15 @@ const RelationshipWorkspacePage: React.FC = () => {
                     )}
                   </div>
                 </div>
-                {isProvider && <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--color-border)' }}><button type="button" className="btn btn-primary" onClick={() => setWorkspaceAccount({ id: relationship.counterpart_id, name: counterpartName, agreementId: relationship.id })}>Manage relationship</button></div>}
+                {isProvider && <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--color-border)' }}><button type="button" className="btn btn-secondary" onClick={() => setWorkspaceAccount({ id: relationship.counterpart_id, name: counterpartName, agreementId: relationship.id })}>Manage relationship</button>{relationship.agreement_type === 'operational' && relationship.invitation_status === 'accepted' && <><button type="button" className="btn btn-secondary" onClick={() => setReadinessAgreement({ id: relationship.id, name: relationship.name, clientName: relationship.client_name })}>Review readiness</button><button type="button" className="btn btn-primary" onClick={() => setSetupAgreement({ id: relationship.id, name: relationship.name, clientName: relationship.client_name, invitationStatus: relationship.invitation_status })}>Configure agreement</button></>}</div>}
               </div>
             );
           })}
         </div>
       )}
       {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} onClose={() => setWorkspaceAccount(null)} />}
+      {setupAgreement && <CrmAgreementSetupDialog agreement={setupAgreement} onClose={() => { setSetupAgreement(null); void loadRelationships(); }} />}
+      {readinessAgreement && <CrmOperationalReadinessDialog agreement={readinessAgreement} onClose={() => setReadinessAgreement(null)} onNavigate={onNavigate} />}
     </div>
   );
 };

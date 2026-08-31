@@ -60,7 +60,7 @@ const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsP
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
 const RosterTargetsPage = React.lazy(() => import('../pages/RosterTargetsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
-const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
+const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryReviewPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
 const LocationsPage = React.lazy(() => import('../pages/LocationsPage'));
 const AccessControlPage = React.lazy(() => import('../pages/AccessControlPage'));
@@ -352,7 +352,7 @@ const AdminShell: React.FC = () => {
       case 'hub':
         return <AdminHubPage onNavigate={navigateFromHub} />;
       case 'relationships':
-        return <RelationshipWorkspacePage />;
+        return <RelationshipWorkspacePage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'crm':
         return <CRMPage />;
       case 'reports':
@@ -389,7 +389,7 @@ const AdminShell: React.FC = () => {
             return <FieldOperationsPage onNavigate={navigateToFieldOps} />;
         }
       case 'sites':
-        return <SiteDetailPage />;
+        return <SiteBoundaryReviewPage />;
       case 'org-setup':
         return <OrganizationSetupPage />;
       case 'users':
