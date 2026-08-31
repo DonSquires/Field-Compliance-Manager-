@@ -40,6 +40,7 @@ create table "public"."parking_chalk_records" (
   "vehicle_compliance_flags"     jsonb,
   "updated_at"                   timestamp with time zone not null default now(),
   "photo_urls"                   jsonb                    default '[]'::jsonb,
+  "geofence_context"             jsonb                    not null default '{}'::jsonb,
   constraint "parking_chalk_records_client_site_id_fkey" foreign key (client_site_id) references public.client_sites(id) on delete set null,
   constraint "parking_chalk_records_cof_status_check" check ((cof_status = ANY (ARRAY['current'::text, 'expired'::text, 'unknown'::text]))),
   constraint "parking_chalk_records_organization_id_fkey" foreign key (organization_id) references public.organizations(id) on delete cascade,
@@ -75,6 +76,11 @@ create trigger trg_parking_chalk_records_updated_at
   before update on public.parking_chalk_records
   for each row
   execute function public.parking_chalk_records_set_updated_at();
+
+create trigger trg_parking_chalk_preserve_geofence_context
+  before update of geofence_context on public.parking_chalk_records
+  for each row
+  execute function public.preserve_scan_geofence_context();
 
 create policy "bob_full_read" on "public"."parking_chalk_records"
   for select
@@ -114,6 +120,8 @@ comment on column "public"."parking_chalk_records"."embedding" is '384D MobileNe
 comment on column "public"."parking_chalk_records"."embedding_quality" is 'Quality score (0–1) of the embedding extraction. Low values indicate poor photo quality or obstructed view.';
 
 comment on column "public"."parking_chalk_records"."inference_provider" is 'Which inference provider produced the results: e.g. "local" (on-device ONNX) or "classify_photo" (server-side pipeline).';
+
+comment on column "public"."parking_chalk_records"."geofence_context" is 'Immutable-at-capture snapshot of resolve_context and is_zone_closed evidence used by the parking scan. Geometry answers where; rules and closure overlays answer what.';
 
 comment on column "public"."parking_chalk_records"."is_disabled_bay" is 'Whether the parking bay is a designated disabled bay, detected from road markings or signage by the inference pipeline.';
 

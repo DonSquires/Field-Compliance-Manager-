@@ -27,7 +27,7 @@ describe('location house map', () => {
   });
 
   it('resolves selected points through the canonical geofence spine', () => {
-    expect(source).toContain("supabase.rpc('resolve_context'");
+    expect(source).toContain("supabase.rpc('resolve_context_authorized'");
     expect(source).toContain("supabase.rpc('is_zone_closed'");
     expect(source).toContain('p_org_id: organizationId');
     expect(source).toContain('matched_zone_id');

@@ -65,6 +65,14 @@ on-site evidence, compliance attribution, routes, dispatch, reporting, and
 commercial readiness. LINZ preview geometry is discovery evidence only; it is
 not used by this resolver until it has passed persistence and verification.
 
+The canonical `resolve_context` function is service-role only because its
+organization argument controls a broad PostGIS and rule lookup. Authenticated
+browser tools must call `resolve_context_authorized`, which first requires
+`org_access_allowed(p_org_id)` and then delegates to the canonical resolver.
+Edge Functions may continue to call the service-only function after enforcing
+their own caller and tenant scope. Anonymous and direct authenticated execution
+of `resolve_context` is revoked.
+
 Closures are a downstream operational overlay, resolved by `is_zone_closed`.
 They do not change where the Zone is. They change what may happen there.
 

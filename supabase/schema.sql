@@ -27817,4 +27817,19 @@ $$;
 
 REVOKE ALL ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) TO "service_role";
+
+CREATE FUNCTION "public"."resolve_context_authorized"("p_lat" double precision,"p_lng" double precision,"p_org_id" uuid,"p_module_key" text DEFAULT NULL,"p_at" timestamptz DEFAULT now())
+RETURNS TABLE("in_operating_bounds" boolean,"out_of_bounds_district" text,"governing_jurisdiction_id" uuid,"governing_jurisdiction_name" text,"on_site" boolean,"site_id" uuid,"client_org_id" uuid,"matched_zone_id" uuid,"matched_module_key" text,"effective_rules" jsonb,"resolution_status" text,"governor_overlap_flag" boolean)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+begin
+  if auth.uid() is null or not public.org_access_allowed(p_org_id) then raise exception 'Geofence context access denied';end if;
+  return query select * from public.resolve_context(p_lat,p_lng,p_org_id,p_module_key,p_at);
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."resolve_context"(double precision,double precision,uuid,text,timestamptz) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."resolve_context"(double precision,double precision,uuid,text,timestamptz) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."resolve_context_authorized"(double precision,double precision,uuid,text,timestamptz) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."resolve_context_authorized"(double precision,double precision,uuid,text,timestamptz) TO "authenticated";
+
+COMMENT ON FUNCTION "public"."resolve_context_authorized"(double precision,double precision,uuid,text,timestamptz) IS 'Authenticated tenant-scoped wrapper for resolve_context. The underlying canonical resolver is service-role only; browser callers must pass org_access_allowed for p_org_id.';
 COMMENT ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) IS 'Service-only standalone Site resolver. Matches only active, valid, verified Site geometry within an already-authorized client organization scope; prefers polygon coverage over the configured on-site radius.';

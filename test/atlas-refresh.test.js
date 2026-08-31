@@ -79,7 +79,7 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_queue', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'manage_crm_onboarding_stage', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'activate_crm_account', 'calls'), true);
-  assert.equal(hasEdge('components/LocationHouseMap', 'resolve_context', 'calls'), true);
+  assert.equal(hasEdge('components/LocationHouseMap', 'resolve_context_authorized', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'is_zone_closed', 'calls'), true);
   assert.equal(hasEdge('pages/LocationsPage', 'locations', 'reads'), true);
   assert.equal(hasEdge('pages/LocationsPage', 'location_zones', 'reads'), true);
@@ -133,6 +133,7 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('resolve-point-context', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('resolve-point-context', 'location_zones', 'reads'), true);
   assert.equal(hasEdge('resolve_verified_site_context', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('resolve_context_authorized', 'resolve_context', 'calls'), true);
   assert.equal(hasEdge('observations', 'preserve_scan_geofence_context', 'triggers'), true);
   assert.equal(hasEdge('parking_chalk_records', 'preserve_scan_geofence_context', 'triggers'), true);
   assert.equal(hasEdge('is_zone_closed', 'zone_closures', 'reads'), true);

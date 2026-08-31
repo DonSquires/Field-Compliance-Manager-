@@ -114,7 +114,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
     let active = true;
     const resolvePoint = async () => {
       setProbing(true); setError(null);
-      const { data, error: resolveError } = await supabase.rpc('resolve_context', { p_lat: probePoint.lat, p_lng: probePoint.lng, p_org_id: organizationId, p_module_key: null });
+      const { data, error: resolveError } = await supabase.rpc('resolve_context_authorized', { p_lat: probePoint.lat, p_lng: probePoint.lng, p_org_id: organizationId, p_module_key: null });
       if (!active) return;
       const row = Array.isArray(data) ? data[0] : data;
       if (resolveError || !row) setError(resolveError?.message ?? 'The geofence spine returned no resolution evidence for this point.');

@@ -55,6 +55,7 @@ create table "public"."observations" (
   "exemption_reason"             text,
   "compliance_status"            text,
   "client_org_id"                uuid,
+  "geofence_context"             jsonb                       not null default '{}'::jsonb,
   "locked_at"                    timestamp with time zone,
   constraint "observations_compliance_status_check"
     check ((compliance_status = ANY (ARRAY['compliant'::text, 'at_risk'::text, 'breach'::text, 'breach_exempt'::text, 'unknown'::text]))),
@@ -118,6 +119,11 @@ create trigger trg_observations_post_lock_enforce
   for each row
   execute function public.tg_observations_enforce_lock();
 
+create trigger trg_observations_preserve_geofence_context
+  before update of geofence_context on public.observations
+  for each row
+  execute function public.preserve_scan_geofence_context();
+
 create policy "bob_full_read" on "public"."observations"
   for select
   to "authenticated"
@@ -154,6 +160,8 @@ comment on column "public"."observations"."enforcement_exempt" is 'True when enf
 comment on column "public"."observations"."exemption_reason" is 'Why enforcement_exempt is true, e.g. ''confirmed_homeless''. Null when enforcement_exempt is false. #74.';
 
 comment on column "public"."observations"."external_refs" is 'Generic external system reference IDs for this observation. Keys are source system names (e.g. vehicle_log, deputy, wilsar), values are objects of field->value pairs. Used by the governed batch-import pipeline for lineage and idempotency. E.g. {"vehicle_log": {"id": "14036", "title": "Bendigo"}}.';
+
+comment on column "public"."observations"."geofence_context" is 'Immutable-at-capture snapshot of resolve_context and is_zone_closed evidence used by the officer scan. Geometry answers where; rules and closure overlays answer what.';
 
 comment on column "public"."observations"."locked_at" is 'Set once when the observation capture is complete and the fact record is sealed. NULL = pending completion. NOT NULL = locked. Set by trigger on photo_captured_at transitioning from NULL to NOT NULL. Never updated after set.';
 

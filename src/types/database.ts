@@ -19155,6 +19155,29 @@ export type Database = {
           site_id: string
         }[]
       }
+      resolve_context_authorized: {
+        Args: {
+          p_at?: string
+          p_lat: number
+          p_lng: number
+          p_module_key?: string
+          p_org_id: string
+        }
+        Returns: {
+          client_org_id: string
+          effective_rules: Json
+          governing_jurisdiction_id: string
+          governing_jurisdiction_name: string
+          governor_overlap_flag: boolean
+          in_operating_bounds: boolean
+          matched_module_key: string
+          matched_zone_id: string
+          on_site: boolean
+          out_of_bounds_district: string
+          resolution_status: string
+          site_id: string
+        }[]
+      }
       resolve_verified_site_context: {
         Args: {
           p_client_org_ids: string[]
