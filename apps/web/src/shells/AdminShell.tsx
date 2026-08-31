@@ -56,6 +56,7 @@ import AdminHubPage from '../pages/AdminHubPage';
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
 const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
+const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHandoffsPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
@@ -88,7 +89,7 @@ const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControl
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
 
 type AdminPage =
-  | 'hub' | 'relationships' | 'onboarding' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -103,7 +104,7 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
-  'relationships', 'onboarding', 'crm', 'sites',
+  'relationships', 'onboarding', 'handoffs', 'crm', 'sites',
 ]);
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
@@ -147,6 +148,7 @@ const NAVIGATION_MAP = {
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
     { id: 'relationships', label: 'Relationships', icon: Network },
     { id: 'onboarding', label: 'Account Onboarding', icon: ClipboardCheck },
+    { id: 'handoffs', label: 'Activation Handoffs', icon: ClipboardCheck },
     { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
     { id: 'roster', label: 'Roster', icon: Users },
     { id: 'people-hr', label: 'People & HR', icon: Users },
@@ -366,6 +368,8 @@ const AdminShell: React.FC = () => {
         return <RelationshipWorkspacePage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'onboarding':
         return <AccountOnboardingPage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+      case 'handoffs':
+        return <ActivationHandoffsPage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'crm':
         return <CRMPage />;
       case 'reports':

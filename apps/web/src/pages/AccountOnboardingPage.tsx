@@ -61,6 +61,7 @@ export default function AccountOnboardingPage({
     [loadError, setLoadError] = useState<string | null>(null),
     [error, setError] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null),
+    [handoffReady, setHandoffReady] = useState(false),
     [confirming, setConfirming] = useState(false),
     [targetDate, setTargetDate] = useState(""),
     [assignees, setAssignees] = useState<Assignee[]>([]),
@@ -144,6 +145,7 @@ export default function AccountOnboardingPage({
       setNotice(
         `${selected.account_name} activated and removed from the incomplete queue.`,
       );
+      setHandoffReady(true);
       setConfirming(false);
       await loadQueue();
     }
@@ -223,7 +225,8 @@ export default function AccountOnboardingPage({
       {notice && (
         <div className="onboarding-message is-success" role="status">
           <CheckCircle2 size={16} />
-          {notice}
+          <span>{notice}</span>
+          {handoffReady && <button type="button" onClick={() => onNavigate("handoffs")}>Open activation handoff</button>}
         </div>
       )}
       <section className="onboarding-summary">

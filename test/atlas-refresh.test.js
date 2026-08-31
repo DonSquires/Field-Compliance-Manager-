@@ -86,6 +86,8 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_history', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'manage_crm_onboarding_workflow', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'activate_crm_account', 'calls'), true);
+  assert.equal(hasEdge('pages/ActivationHandoffsPage', 'get_crm_activation_handoffs', 'calls'), true);
+  assert.equal(hasEdge('pages/ActivationHandoffsPage', 'manage_crm_activation_handoff_task', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'resolve_context_authorized', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'is_zone_closed', 'calls'), true);
   assert.equal(hasEdge('pages/LocationsPage', 'locations', 'reads'), true);
@@ -129,6 +131,14 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('get_crm_onboarding_history', 'crm_onboarding_events', 'reads'), true);
   assert.equal(hasEdge('manage_crm_onboarding_workflow', 'crm_onboarding_ledgers', 'writes'), true);
   assert.equal(hasEdge('manage_crm_onboarding_workflow', 'crm_onboarding_events', 'writes'), true);
+  assert.equal(hasEdge('crm_onboarding_ledgers', 'seed_crm_activation_handoff', 'triggers'), true);
+  assert.equal(hasEdge('seed_crm_activation_handoff', 'crm_activation_handoffs', 'writes'), true);
+  assert.equal(hasEdge('seed_crm_activation_handoff', 'crm_activation_handoff_tasks', 'writes'), true);
+  assert.equal(hasEdge('get_crm_activation_handoffs', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('get_crm_activation_handoffs', 'roster_work_units', 'reads'), true);
+  assert.equal(hasEdge('get_crm_activation_handoffs', 'roster_slots', 'reads'), true);
+  assert.equal(hasEdge('manage_crm_activation_handoff_task', 'crm_activation_handoff_tasks', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_activation_handoff_task', 'crm_activation_handoffs', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'organizations', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'crm_onboarding_ledgers', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'audit_log', 'writes'), true);

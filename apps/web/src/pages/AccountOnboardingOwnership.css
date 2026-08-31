@@ -42,6 +42,20 @@
   background: #0b1821;
 }
 
+.onboarding-message > span {
+  flex: 1;
+}
+
+.onboarding-message > button {
+  min-height: 30px;
+  border: 1px solid #57a893;
+  border-radius: 4px;
+  color: #dffbf4;
+  background: #173b32;
+  font-size: 9px;
+  font-weight: 800;
+}
+
 .onboarding-history > header {
   padding: 12px 14px;
   border-bottom: 1px solid #29414e;

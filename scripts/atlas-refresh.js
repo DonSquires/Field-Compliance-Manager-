@@ -15,6 +15,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/CRMPage.tsx',
   'apps/web/src/pages/SiteBoundaryReviewPage.tsx',
   'apps/web/src/pages/AccountOnboardingPage.tsx',
+  'apps/web/src/pages/ActivationHandoffsPage.tsx',
   'apps/web/src/pages/LocationsPage.tsx',
   'apps/web/src/pages/SiteDetailPage.tsx',
   'apps/web/src/pages/ZoneDetailPage.tsx',
@@ -61,6 +62,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831088000_crm_boundary_visual_review.sql',
   'supabase/migrations/20260831089000_fix_boundary_history_ambiguity.sql',
   'supabase/migrations/20260831090000_crm_onboarding_ownership_history.sql',
+  'supabase/migrations/20260831091000_crm_activation_handoffs.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];

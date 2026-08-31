@@ -27,6 +27,8 @@ test('administrator resumes evidence-backed onboarding and activates a ready pro
   await confirmation.getByRole('button', { name: 'Confirm activation' }).click();
   await expect(page.getByRole('status')).toContainText('Ready Venue Trust activated and removed from the incomplete queue');
   await expect(page.getByRole('button', { name: /Ready Venue Trust/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open activation handoff' }).click();
+  await expect(page.getByRole('heading', { name: 'Activation handoffs' })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
 

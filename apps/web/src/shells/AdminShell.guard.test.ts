@@ -18,6 +18,7 @@ describe('AdminShell access and routing boundaries', () => {
 
   it('aligns CRM management pages with server administrator roles', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
+    expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'sites'");
     expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
     expect(source).toContain('items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role))');
   });

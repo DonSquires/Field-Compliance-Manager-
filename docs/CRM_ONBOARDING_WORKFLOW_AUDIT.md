@@ -56,10 +56,10 @@ used here as a workflow hypothesis, not as evidence about the current UI.
 5. The agreement header remains quote-lifecycle owned. Covered-site and module
   rows are RPC-owned, but remaining agreement profile fields still need a
   deliberately scoped owner before additional UI controls are exposed.
-6. Activation records the canonical account and agreement transition, but a
-  post-activation handoff view joining hazards and first actions is still absent.
-7. Named ownership and stage-note history are live. The remaining handoff gap is
-  a post-activation view joining first operational actions and hazards.
+6. Activation creates a governed handoff that joins current site access/safety
+  notes, attributed work units, and the first published roster action. Completion
+  tasks are version-checked, note-backed, and audited.
+7. Named ownership, stage-note history, and post-activation handoff are live.
 
 ## Target Workflow
 
@@ -150,4 +150,5 @@ Implement these boundaries before exposing their corresponding UI actions:
   metrics, stale-state recovery, and role-aligned navigation are live.
 7. **Complete:** provider-scoped named ownership, required stage notes,
   expected-version workflow updates, and immutable transition history.
-8. **Pending:** post-activation handoff summary joining hazards and first actions.
+8. **Complete:** activation-triggered site briefing, first-roster, and reporting
+  handoff tasks backed by live canonical evidence and audited task transitions.
