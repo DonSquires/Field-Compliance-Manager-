@@ -50,6 +50,7 @@ const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
 const deliveries = new Set();
+const browserChecks = [];
 const audit = [];
 let activeLease = null;
 let dockerReadinessCache = { checkedAt: 0, available: false };
@@ -88,6 +89,7 @@ function saveState() {
   const state = {
     jobs: [...jobs.values()],
     deliveries: [...deliveries],
+    browserChecks: [...browserChecks],
     audit
   };
   const temporary = `${stateFile}.tmp`;
@@ -100,6 +102,7 @@ function loadState() {
     const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
     for (const job of state.jobs || []) jobs.set(job.id, job);
     for (const delivery of state.deliveries || []) deliveries.add(delivery);
+    for (const check of state.browserChecks || []) browserChecks.push(check);
     audit.push(...(state.audit || []));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -286,13 +289,34 @@ async function route(req, res, body) {
     if (!appUrl || typeof appUrl !== 'string') {
       return json(res, 400, { error: 'appUrl is required' });
     }
+    const checkRecord = {
+      id: crypto.randomUUID(),
+      appUrl,
+      checkedAt: new Date().toISOString(),
+      status: 'pending',
+      testName: typeof body.testName === 'string' && body.testName.trim() ? body.testName.trim() : 'bob-hosted-browser-check'
+    };
+    browserChecks.push(checkRecord);
+    saveState();
     try {
       const result = await runVisualCheck({
         appUrl,
         sourceDir: assessmentRoot,
         artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
-        testName: typeof body.testName === 'string' && body.testName.trim() ? body.testName.trim() : 'bob-hosted-browser-check'
+        testName: checkRecord.testName
       });
+      const completed = {
+        ...checkRecord,
+        status: result.result.status || 'passed',
+        manifestPath: result.manifestPath,
+        screenshotPath: result.screenshotPath,
+        title: result.result.title,
+        checks: result.result.checks || [],
+        browserErrors: result.result.browserErrors || []
+      };
+      const index = browserChecks.findIndex(entry => entry.id === checkRecord.id);
+      if (index >= 0) browserChecks[index] = completed;
+      saveState();
       return json(res, 200, {
         mode: 'browser_check',
         appUrl,
@@ -301,6 +325,15 @@ async function route(req, res, body) {
         result: result.result
       });
     } catch (error) {
+      const failed = {
+        ...checkRecord,
+        status: 'failed',
+        error: String(error && error.message ? error.message : error),
+        checkedAt: new Date().toISOString()
+      };
+      const index = browserChecks.findIndex(entry => entry.id === checkRecord.id);
+      if (index >= 0) browserChecks[index] = failed;
+      saveState();
       return json(res, 500, {
         error: 'browser check failed',
         details: String(error && error.message ? error.message : error),

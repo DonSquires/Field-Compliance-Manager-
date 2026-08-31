@@ -197,6 +197,10 @@ test('browser checks can validate the live app URL through the control plane', a
   assert.equal(response.response.status, 500);
   assert.equal(response.body.error, 'browser check failed');
   assert.equal(response.body.appUrl, 'http://127.0.0.1:4173');
+
+  const persisted = JSON.parse(fs.readFileSync(path.join(stateDir, 'bob-state.json'), 'utf8'));
+  assert.ok(Array.isArray(persisted.browserChecks));
+  assert.ok(persisted.browserChecks.some(check => check.appUrl === 'http://127.0.0.1:4173' && check.status === 'failed'));
 });
 
 test('job creation rejects repositories outside the allowlist', async () => {
