@@ -16,6 +16,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/RelationshipWorkspacePage.tsx',
   'apps/web/src/components/CrmAccountWorkspace.tsx',
   'apps/web/src/components/CrmOrganizationDialog.tsx',
+  'apps/web/src/components/CrmSiteDialog.tsx',
   'apps/web/src/components/UserIdentityWorkspace.tsx',
   'apps/web/src/pages/WelfareAlertsPage.tsx',
   'apps/web/src/pages/OfficerFieldReportPage.tsx',
@@ -38,7 +39,8 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260830142000_harden_officer_field_report_submission.sql',
   'supabase/migrations/20260830143000_govern_crm_contacts_and_activities.sql',
   'supabase/migrations/20260830144000_govern_crm_organization_spine.sql',
-  'supabase/migrations/20260830145000_govern_user_identity_access.sql'
+  'supabase/migrations/20260830145000_govern_user_identity_access.sql',
+  'supabase/migrations/20260831080000_govern_crm_site_creation.sql'
 ];
 
 function walkFiles(rootDir, relativeDir) {

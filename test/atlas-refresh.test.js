@@ -68,6 +68,8 @@ test('managed organization spine routes human actions through governed RPCs', ()
 
   assert.equal(hasEdge('components/CrmOrganizationDialog', 'find_crm_organization_candidates', 'calls'), true);
   assert.equal(hasEdge('components/CrmOrganizationDialog', 'manage_crm_organization', 'calls'), true);
+  assert.equal(hasEdge('components/CrmSiteDialog', 'find_crm_site_candidates', 'calls'), true);
+  assert.equal(hasEdge('components/CrmSiteDialog', 'create_crm_site', 'calls'), true);
   assert.equal(hasEdge('pages/CRMPage', 'get_crm_organization_readiness', 'calls'), true);
   assert.equal(hasEdge('manage_crm_organization', 'organizations', 'reads'), true);
   assert.equal(hasEdge('manage_crm_organization', 'organizations', 'writes'), true);
@@ -76,6 +78,9 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('pages/OrganizationSetupPage', 'update_organization_profile', 'calls'), true);
   assert.equal(hasEdge('update_organization_profile', 'organizations', 'writes'), true);
   assert.equal(hasEdge('update_organization_profile', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('find_crm_site_candidates', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('create_crm_site', 'client_sites', 'writes'), true);
+  assert.equal(hasEdge('create_crm_site', 'audit_log', 'writes'), true);
   assert.equal(atlas.edges.some((edge) => edge.source_name === 'components/CrmOrganizationDialog' && edge.edge_kind === 'writes'), false);
 });
 

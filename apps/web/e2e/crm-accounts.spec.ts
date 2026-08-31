@@ -112,6 +112,19 @@ test('administrator creates and edits organizations through the human account sp
   const prospect = page.getByText('Harbour Arts Trust', { exact: true }).locator('..').locator('..');
   await expect(prospect.getByText('prospect · 0 sites')).toBeVisible();
   await expect(prospect.getByText('Add covered site')).toBeVisible();
+  await prospect.getByRole('button', { name: 'Add site' }).click();
+  const siteSearch = page.getByRole('dialog', { name: 'Find a site for Harbour Arts Trust' });
+  await siteSearch.getByLabel('Site name').fill('Harbour Arts Centre');
+  await siteSearch.getByLabel('Street address').fill('8 Haven Road, Nelson');
+  await siteSearch.getByRole('button', { name: 'Search sites' }).click();
+  await expect(siteSearch.getByText('No matching sites found')).toBeVisible();
+  await siteSearch.getByRole('button', { name: 'Create new site' }).click();
+  const siteCreate = page.getByRole('dialog', { name: 'Create site for Harbour Arts Trust' });
+  await expect(siteCreate.getByText(/provisional, unverified boundary/)).toBeVisible();
+  await siteCreate.getByRole('button', { name: 'Create site for boundary review' }).click();
+  await expect(page.getByRole('status')).toContainText('Harbour Arts Centre created with a provisional boundary');
+  await expect(prospect.getByText('prospect · 1 site')).toBeVisible();
+  await expect(prospect.getByText('Create service agreement')).toBeVisible();
 
   const civic = page.getByText('Civic Events Limited', { exact: true }).locator('..').locator('..');
   await civic.getByRole('button', { name: 'Edit organization' }).click();

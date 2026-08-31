@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
+import { CrmSiteDialog } from '../components/CrmSiteDialog';
 import './PageStyles.css';
 import './CRMPage.css';
 
@@ -138,6 +139,7 @@ const CRMPage: React.FC = () => {
   const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
   const [invoiceReason, setInvoiceReason] = useState('');
   const [organizationDialog, setOrganizationDialog] = useState<EditableCrmOrganization | 'create' | null>(null);
+  const [siteAccount, setSiteAccount] = useState<{ id: string; name: string } | null>(null);
   const quoteRequestId = useRef(crypto.randomUUID());
   const lineRequestId = useRef(crypto.randomUUID());
 
@@ -686,7 +688,7 @@ const CRMPage: React.FC = () => {
                   <div className={`crm-readiness ${client.blockers.length ? 'is-blocked' : 'is-ready'}`}><strong>{client.next_action}</strong><span>{client.blockers.length ? `${client.blockers.length} readiness ${client.blockers.length === 1 ? 'step' : 'steps'} remaining` : 'All current readiness evidence is complete'}</span></div>
                   <div className="crm-account-actions">
                     <span>Quote: {client.latest_quote_status ?? 'none'}</span>
-                    <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setOrganizationDialog(client)}>Edit organization</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => setWorkspaceAccount({ id: client.id, name: client.name })}>Manage account</button><button type="button" className="btn btn-sm btn-primary" onClick={() => openQuote(client)}>New quote</button></div>
+                    <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setOrganizationDialog(client)}>Edit organization</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => setWorkspaceAccount({ id: client.id, name: client.name })}>Manage account</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => setSiteAccount({ id: client.id, name: client.name })}>Add site</button><button type="button" className="btn btn-sm btn-primary" onClick={() => openQuote(client)}>New quote</button></div>
                   </div>
                 </div>
               </div>
@@ -877,6 +879,7 @@ const CRMPage: React.FC = () => {
       {pricingDialog}
       {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} />}
       {organizationDialog && <CrmOrganizationDialog organization={organizationDialog === 'create' ? null : organizationDialog} onClose={() => { setOrganizationDialog(null); void loadCrm(); }} onUpdated={(name) => { setOrganizationDialog(null); setNotice(`${name} organization details updated. Review its readiness steps next.`); void loadCrm(); }} onOpenAccount={(account) => { setOrganizationDialog(null); setWorkspaceAccount(account); }} />}
+      {siteAccount && <CrmSiteDialog account={siteAccount} onClose={() => setSiteAccount(null)} onCreated={(site) => { setSiteAccount(null); setNotice(`${site.name} created with a provisional boundary. Operations boundary review is required before activation.`); void loadCrm(); }} />}
       {invoiceAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-invoice-action-title" onSubmit={manageInvoice}><header><div><span>Invoice lifecycle</span><h2 id="crm-invoice-action-title">{invoiceAction.action === 'send' ? 'Send invoice' : invoiceAction.action === 'mark_paid' ? 'Confirm payment' : 'Void invoice'}</h2></div><button type="button" onClick={() => setInvoiceAction(null)} aria-label="Close invoice action">×</button></header><p>{invoiceAction.invoice.invoice_number} · {invoiceAction.invoice.client?.name ?? 'Unknown account'} · {invoiceAction.invoice.currency} {Number(invoiceAction.invoice.total_amount).toFixed(2)}</p>{invoiceAction.action === 'void' && <label><span>Void reason</span><textarea required rows={4} value={invoiceReason} onChange={(event) => setInvoiceReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setInvoiceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (invoiceAction.action === 'void' && !invoiceReason.trim())}>{quoteSaving ? 'Saving' : 'Confirm action'}</button></footer></form></div>}
       {pricingQuote && quoteAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog crm-lifecycle-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-lifecycle-title" onSubmit={manageQuote}><header><div><span>Quote lifecycle</span><h2 id="crm-lifecycle-title">{quoteAction === 'send' ? 'Send quote?' : quoteAction === 'accept' ? 'Accept quote?' : 'Decline quote?'}</h2></div><button type="button" onClick={() => setQuoteAction(null)} aria-label="Close quote action">×</button></header><p>{quoteAction === 'send' ? 'The server will recheck labour pricing, positive totals, validity, and achieved margin before sending.' : quoteAction === 'accept' ? 'Acceptance creates or links the operational service agreement and writes canonical commercial settings.' : 'The quote will close as declined and the reason will remain in its audit history.'}</p>{quoteAction === 'decline' && <label><span>Decline reason</span><textarea rows={4} required value={quoteActionReason} onChange={(event) => setQuoteActionReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setQuoteAction(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (quoteAction === 'decline' && !quoteActionReason.trim())}>{quoteSaving ? 'Saving' : quoteAction === 'send' ? 'Confirm send' : quoteAction === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></footer></form></div>}
     </div>
