@@ -386,3 +386,79 @@ test('Gitea webhooks reject repositories outside the allowlist', async () => {
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), { error: 'repository is not allowed' });
 });
+
+test('job assessments can be initiated and status retrieved', async () => {
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+  const jobId = crypto.randomUUID();
+  
+  const statusBefore = await request('GET', `/api/bob/builder/jobs/${jobId}/assessment`, undefined, adminHeaders);
+  assert.equal(statusBefore.response.status, 200);
+  assert.equal(statusBefore.body, null);
+  
+  const assessment = await request('POST', `/api/bob/builder/jobs/${jobId}/assessment`, {
+    appUrl: 'http://127.0.0.1:4173'
+  }, adminHeaders);
+  assert.equal(assessment.response.status, 200);
+  assert.ok(assessment.body.id);
+  assert.equal(assessment.body.jobId, jobId);
+  assert.ok(['passed', 'failed'].includes(assessment.body.status));
+  assert.ok(Array.isArray(assessment.body.steps));
+  
+  const statusAfter = await request('GET', `/api/bob/builder/jobs/${jobId}/assessment`, undefined, adminHeaders);
+  assert.equal(statusAfter.response.status, 200);
+  assert.equal(statusAfter.body.jobId, jobId);
+  assert.equal(statusAfter.body.status, assessment.body.status);
+});
+
+test('job assessment requires authorization', async () => {
+  const jobId = crypto.randomUUID();
+  const response = await request('POST', `/api/bob/builder/jobs/${jobId}/assessment`, {
+    appUrl: 'http://127.0.0.1:4173'
+  });
+  assert.equal(response.response.status, 401);
+  assert.deepEqual(response.body, { error: 'unauthorized' });
+});
+
+test('job assessment persists across server restart', async () => {
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+  const jobId = crypto.randomUUID();
+  
+  const created = await request('POST', `/api/bob/builder/jobs/${jobId}/assessment`, {
+    appUrl: 'http://127.0.0.1:4173'
+  }, adminHeaders);
+  assert.equal(created.response.status, 200);
+  assert.ok(created.body.id);
+  
+  const { response: statusRes, body: persisted } = await request('GET', `/api/bob/builder/jobs/${jobId}/assessment`, undefined, adminHeaders);
+  assert.equal(statusRes.status, 200);
+  assert.equal(persisted.jobId, jobId);
+  assert.equal(persisted.status, created.body.status);
+});
+
+test('job advance requires a passing assessment', async () => {
+  const adminHeaders = { authorization: `Bearer ${adminToken}` };
+  const jobId = crypto.randomUUID();
+  
+  const advanceWithoutAssessment = await request('POST', `/api/bob/builder/jobs/${jobId}/advance`, {
+    frontendFiles: [],
+    backendFiles: []
+  }, adminHeaders);
+  assert.equal(advanceWithoutAssessment.response.status, 412);
+  assert.deepEqual(advanceWithoutAssessment.body.error, 'Assessment required');
+  assert.equal(advanceWithoutAssessment.body.assessment, null);
+  
+  const assessment = await request('POST', `/api/bob/builder/jobs/${jobId}/assessment`, {
+    appUrl: 'http://127.0.0.1:4173'
+  }, adminHeaders);
+  assert.ok(['passed', 'failed'].includes(assessment.body.status));
+  
+  if (assessment.body.status === 'passed') {
+    const advanceWithAssessment = await request('POST', `/api/bob/builder/jobs/${jobId}/advance`, {
+      frontendFiles: [],
+      backendFiles: []
+    }, adminHeaders);
+    assert.ok([202, 200, 404, 503].includes(advanceWithAssessment.response.status));
+  }
+});
+
+

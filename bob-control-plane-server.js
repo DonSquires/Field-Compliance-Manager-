@@ -51,6 +51,7 @@ const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
 const deliveries = new Set();
 const browserChecks = [];
+const jobAssessments = [];
 const audit = [];
 let activeLease = null;
 let dockerReadinessCache = { checkedAt: 0, available: false };
@@ -90,6 +91,7 @@ function saveState() {
     jobs: [...jobs.values()],
     deliveries: [...deliveries],
     browserChecks: [...browserChecks],
+    jobAssessments: [...jobAssessments],
     audit
   };
   const temporary = `${stateFile}.tmp`;
@@ -103,6 +105,7 @@ function loadState() {
     for (const job of state.jobs || []) jobs.set(job.id, job);
     for (const delivery of state.deliveries || []) deliveries.add(delivery);
     for (const check of state.browserChecks || []) browserChecks.push(check);
+    for (const assessment of state.jobAssessments || []) jobAssessments.push(assessment);
     audit.push(...(state.audit || []));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -345,6 +348,62 @@ async function route(req, res, body) {
       });
     }
   }
+  const jobAssessmentMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)\/assessment(?:\/([^/]+))?$/);
+  if (jobAssessmentMatch && req.method === 'GET' && !jobAssessmentMatch[2]) {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const jobId = decodeURIComponent(jobAssessmentMatch[1]);
+    const latest = [...jobAssessments].reverse().find(a => a.jobId === jobId);
+    return json(res, 200, latest || null);
+  }
+  if (jobAssessmentMatch && req.method === 'POST' && !jobAssessmentMatch[2]) {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const jobId = decodeURIComponent(jobAssessmentMatch[1]);
+    const appUrl = body.appUrl || 'http://127.0.0.1:4173';
+    const assessmentId = crypto.randomUUID();
+    const assessment = {
+      id: assessmentId,
+      jobId,
+      startedAt: new Date().toISOString(),
+      status: 'pending',
+      steps: []
+    };
+    jobAssessments.push(assessment);
+    saveState();
+    try {
+      const result = await runSelfHostedBuildLoop({
+        rootDir: assessmentRoot,
+        artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+        profiles: ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'],
+        workerImage: builderWorkerImage || 'fcm/bob-worker:local',
+        execute: executeWorker,
+        assessmentFactory: createAssessment,
+        appUrl
+      });
+      const completed = {
+        ...assessment,
+        status: result.paused ? 'failed' : 'passed',
+        completedAt: new Date().toISOString(),
+        steps: result.steps || [],
+        reason: result.reason
+      };
+      const idx = jobAssessments.findIndex(a => a.id === assessmentId);
+      if (idx >= 0) jobAssessments[idx] = completed;
+      saveState();
+      return json(res, 200, completed);
+    } catch (error) {
+      const failed = {
+        ...assessment,
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        error: String(error && error.message ? error.message : error),
+        steps: []
+      };
+      const idx = jobAssessments.findIndex(a => a.id === assessmentId);
+      if (idx >= 0) jobAssessments[idx] = failed;
+      saveState();
+      return json(res, 500, failed);
+    }
+  }
   if (req.method === 'GET' && url.pathname === '/assessment') {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
     const assessment = createAssessment(assessmentRoot);
@@ -416,6 +475,15 @@ async function route(req, res, body) {
     }
   }
   if (builderMatch && req.method === 'POST' && builderMatch[2] === 'advance') {
+    const jobId = builderMatch[1];
+    const latestAssessment = [...jobAssessments].reverse().find(a => a.jobId === jobId);
+    if (!latestAssessment || latestAssessment.status !== 'passed') {
+      return json(res, 412, {
+        error: 'Assessment required',
+        message: 'A passing platform assessment is required before advancing this job',
+        assessment: latestAssessment || null
+      });
+    }
     if (!builderSupabase || !modelGatewayToken || !builderWorkerImage) {
       return json(res, 503, { error: 'Builder runtime is unavailable' });
     }
@@ -423,7 +491,7 @@ async function route(req, res, body) {
       const outcome = await advanceBuilderJob({
         supabase: builderSupabase,
         gateway: builderGateway,
-        jobId: builderMatch[1],
+        jobId,
         context: builderRuntimeContext(body)
       });
       return json(res, outcome.advanced ? 202 : 200, outcome);

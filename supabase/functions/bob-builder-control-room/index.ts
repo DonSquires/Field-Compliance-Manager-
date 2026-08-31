@@ -114,6 +114,23 @@ serve(async req => {
     return json(result.payload);
   }
 
+  if (action === 'job-assessment-status') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const jobId = typeof body.job_id === 'string' ? body.job_id : '';
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/assessment`, 'GET');
+    if (!result.ok) return json(null);
+    return json(result.payload);
+  }
+
+  if (action === 'job-assessment') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const jobId = typeof body.job_id === 'string' ? body.job_id : '';
+    const appUrl = typeof body.app_url === 'string' ? body.app_url : null;
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/assessment`, 'POST', { appUrl });
+    if (!result.ok) return json({ error: 'Job assessment could not be run' }, result.status);
+    return json(result.payload);
+  }
+
   if (action === 'list') {
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];
     let projectsQuery = admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo, name, status').eq('status', 'active').order('name');
