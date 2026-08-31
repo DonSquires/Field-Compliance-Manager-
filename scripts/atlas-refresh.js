@@ -56,6 +56,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831083000_crm_operational_readiness.sql',
   'supabase/migrations/20260831084000_crm_onboarding_activation.sql',
   'supabase/migrations/20260831085000_scan_geofence_context.sql',
+  'supabase/migrations/20260831086000_resolve_verified_site_context.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];

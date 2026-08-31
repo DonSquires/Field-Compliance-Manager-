@@ -20,6 +20,8 @@ test('point context verifies caller organization scope before privileged resolut
   assert.match(source, /if \(ctxErr\) return json\(\{[\s\S]*?Geofence context could not be resolved[\s\S]*?\}, 503\)/);
   assert.match(source, /if \(descendantsError\) return json\(\{[\s\S]*?Site organization scope could not be resolved/);
   assert.match(source, /if \(agreementsError\) return json\(\{[\s\S]*?Site agreement scope could not be resolved/);
-  assert.match(source, /if \(nearbySitesError\) return json\(\{[\s\S]*?Nearby Site context could not be resolved/);
+  assert.match(source, /admin\.rpc\('resolve_verified_site_context'/);
+  assert.match(source, /if \(siteContextError\) return json\(\{[\s\S]*?Verified Site context could not be resolved/);
+  assert.doesNotMatch(source, /haversineM/);
   assert.doesNotMatch(source, /Non-fatal: continue to reverse geocoding/);
 });

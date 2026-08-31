@@ -19155,6 +19155,20 @@ export type Database = {
           site_id: string
         }[]
       }
+      resolve_verified_site_context: {
+        Args: {
+          p_client_org_ids: string[]
+          p_lat: number
+          p_lng: number
+        }
+        Returns: {
+          client_organization_id: string
+          location_id: string | null
+          match_kind: string
+          site_id: string
+          site_name: string
+        }[]
+      }
       resolve_enforcement_mode: { Args: { p_zone_id: string }; Returns: string }
       resolve_location_visibility: {
         Args: { p_sal_id: string; p_viewing_org_id: string }

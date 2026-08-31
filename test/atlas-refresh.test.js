@@ -128,9 +128,11 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('process-officer-scan', 'observations', 'writes'), true);
   assert.equal(hasEdge('resolve-point-context', 'user_profiles', 'reads'), true);
   assert.equal(hasEdge('resolve-point-context', 'resolve_context', 'calls'), true);
+  assert.equal(hasEdge('resolve-point-context', 'resolve_verified_site_context', 'calls'), true);
   assert.equal(hasEdge('resolve-point-context', 'service_agreements', 'reads'), true);
   assert.equal(hasEdge('resolve-point-context', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('resolve-point-context', 'location_zones', 'reads'), true);
+  assert.equal(hasEdge('resolve_verified_site_context', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('observations', 'preserve_scan_geofence_context', 'triggers'), true);
   assert.equal(hasEdge('parking_chalk_records', 'preserve_scan_geofence_context', 'triggers'), true);
   assert.equal(hasEdge('is_zone_closed', 'zone_closures', 'reads'), true);

@@ -11,6 +11,8 @@
  *   zone_name: string | null,
  *   site_id: string | null,
  *   site_name: string | null,
+ *   location_id: string | null,     // canonical house when a standalone Site matches
+ *   site_match_kind: 'verified_boundary' | 'verified_onsite_radius' | null,
  *   rules_ref: string | null,       // jurisdiction_rule_set_id when in-zone
  *   address: string | null,         // reverse-geocoded street address (when not in zone)
  *   address_source: 'linz' | 'google' | null,
@@ -21,8 +23,8 @@
  * Flow:
  *   1. PostGIS point-in-polygon: call resolve_context() RPC (migration 0090)
  *      for zone detection against location_zones.boundary.
- *   2. If no zone match, check client_sites.boundary via a direct PostGIS
- *      SQL query (sites may exist without a corresponding zone row).
+ *   2. If no zone match, call resolve_verified_site_context() for active,
+ *      valid, verified Site geometry in the caller-authorized client scope.
  *   3. If neither zone nor site contains the point, reverse-geocode:
  *      a. LINZ Vector Query (authoritative NZ address, nearest within 200m)
  *         — same pattern as linz-lookup edge function.
@@ -50,14 +52,6 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
-// Haversine distance in metres between two lat/lng points.
-function haversineM(lat1, lng1, lat2, lng2) {
-  const R = 6_371_000; // Earth radius in metres
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -231,13 +225,12 @@ serve(async (req)=>{
         gps_lng: lng
       });
     }
-    // ── Step 2: client_sites proximity check ──
+    // ── Step 2: verified standalone Site resolution ──
     // Sites may exist without a corresponding zone row (e.g. contracted
     // sites with a boundary but no module geofence). The resolve_context
-    // RPC already handles zones with linked sites; this catches standalone
-    // sites by GPS proximity (within onsite_radius_meters of center_point).
-    // A full PostGIS ST_Contains on client_sites.boundary would require a
-    // dedicated RPC — deferred to the full geofence architecture wiring.
+    // RPC already handles zones with linked sites; this resolves standalone
+    // Sites from valid verified PostGIS geometry and the configured on-site
+    // radius. Raw browser/service centroids are not treated as map truth.
     //
     // SCOPING RULE (#153 fix): the caller passes the officer's provider org
     // id, but client_sites.client_organization_id belongs to CLIENT orgs.
@@ -278,38 +271,35 @@ serve(async (req)=>{
           ...agreementClientIds
         ])
       ];
-      const { data: nearbySites, error: nearbySitesError } = await admin.from('client_sites').select('id, name, gps_lat, gps_lng, onsite_radius_meters').in('client_organization_id', clientOrgIds).not('gps_lat', 'is', null).not('gps_lng', 'is', null).limit(100);
-      if (nearbySitesError) return json({
-        error: 'Nearby Site context could not be resolved'
+      const { data: siteRows, error: siteContextError } = await admin.rpc('resolve_verified_site_context', {
+        p_lat: lat,
+        p_lng: lng,
+        p_client_org_ids: clientOrgIds
+      });
+      if (siteContextError) return json({
+        error: 'Verified Site context could not be resolved'
       }, 503);
-      if (Array.isArray(nearbySites)) {
-        // Simple Haversine distance check against each site's center point
-        // and onsite_radius_meters (default 10m in the schema).
-        for (const site of nearbySites){
-          const sLat = Number(site.gps_lat);
-          const sLng = Number(site.gps_lng);
-          const radius = Number(site.onsite_radius_meters ?? 50);
-          if (!isFinite(sLat) || !isFinite(sLng)) continue;
-          const dist = haversineM(lat, lng, sLat, sLng);
-          if (dist <= radius) {
-            return json({
-              in_zone: false,
-              zone_id: null,
-              zone_name: null,
-              site_id: String(site.id),
-              site_name: String(site.name ?? ''),
-              rules_ref: null,
-              address: null,
-              address_source: null,
-              gps_lat: lat,
-              gps_lng: lng
-            });
-          }
-        }
+      const site = Array.isArray(siteRows) ? siteRows[0] : siteRows;
+      if (site) {
+        return json({
+          in_zone: false,
+          zone_id: null,
+          zone_name: null,
+          site_id: String(site.site_id),
+          site_name: String(site.site_name ?? ''),
+          location_id: site.location_id ? String(site.location_id) : null,
+          client_organization_id: site.client_organization_id ? String(site.client_organization_id) : null,
+          site_match_kind: String(site.match_kind ?? 'verified_boundary'),
+          rules_ref: null,
+          address: null,
+          address_source: null,
+          gps_lat: lat,
+          gps_lng: lng
+        });
       }
     } catch  {
       return json({
-        error: 'Nearby Site context could not be resolved'
+        error: 'Verified Site context could not be resolved'
       }, 503);
     }
     // ── Step 3: reverse geocode — LINZ first, Google fallback ──

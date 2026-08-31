@@ -103,7 +103,13 @@ Site reads occur.
 Canonical `resolve_context`, descendant-scope, agreement-scope, and nearby-Site
 query failures return an unavailable response rather than being reclassified as
 an ordinary spatial miss. Only a successful resolution with no verified Zone or
-nearby Site continues to LINZ-first, Google-fallback address resolution.
+verified Site continues to LINZ-first, Google-fallback address resolution.
+
+Standalone Sites without a Zone are resolved by the service-only
+`resolve_verified_site_context` RPC. It considers only active, valid, verified
+Site geometry inside the already-authorized client organization scope, prefers
+polygon coverage, and uses the configured on-site radius only as a secondary
+match. Raw centroid proximity is not map truth.
 
 Two older helpers still reference obsolete `zone_closures.active_from` and
 `active_to` columns. New work must use `status`, `effective_from`,

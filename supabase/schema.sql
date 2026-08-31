@@ -27796,3 +27796,25 @@ CREATE TRIGGER "trg_parking_chalk_preserve_geofence_context" BEFORE UPDATE OF "g
 
 REVOKE ALL ON FUNCTION "public"."preserve_scan_geofence_context"() FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."preserve_scan_geofence_context"() TO "service_role";
+
+CREATE FUNCTION "public"."resolve_verified_site_context"(p_lat double precision,p_lng double precision,p_client_org_ids uuid[])
+RETURNS TABLE(site_id uuid,site_name text,location_id uuid,client_organization_id uuid,match_kind text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
+  with point as(select st_setsrid(st_point(p_lng,p_lat),4326) geometry)
+  select s.id,s.name,s.location_id,s.client_organization_id,
+    case when st_covers(s.boundary,p.geometry) then 'verified_boundary' else 'verified_onsite_radius' end
+  from public.client_sites s cross join point p
+  where s.client_organization_id=any(coalesce(p_client_org_ids,'{}'::uuid[]))
+    and s.active
+    and s.boundary is not null
+    and s.boundary_verification='verified'
+    and st_isvalid(s.boundary)
+    and not st_isempty(s.boundary)
+    and (st_covers(s.boundary,p.geometry) or st_dwithin(coalesce(s.center_point,s.boundary)::geography,p.geometry::geography,coalesce(s.onsite_radius_meters,10)))
+  order by case when st_covers(s.boundary,p.geometry) then 0 else 1 end,st_area(s.boundary),s.name
+  limit 1;
+$$;
+
+REVOKE ALL ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) TO "service_role";
+COMMENT ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) IS 'Service-only standalone Site resolver. Matches only active, valid, verified Site geometry within an already-authorized client organization scope; prefers polygon coverage over the configured on-site radius.';
