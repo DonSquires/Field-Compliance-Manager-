@@ -55,12 +55,15 @@ import AdminHubPage from '../pages/AdminHubPage';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
+const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
 const RosterTargetsPage = React.lazy(() => import('../pages/RosterTargetsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
 const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryReviewPage'));
+const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
+const ZoneDetailPage = React.lazy(() => import('../pages/ZoneDetailPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
 const LocationsPage = React.lazy(() => import('../pages/LocationsPage'));
 const AccessControlPage = React.lazy(() => import('../pages/AccessControlPage'));
@@ -85,7 +88,7 @@ const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControl
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
 
 type AdminPage =
-  | 'hub' | 'relationships' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360'
+  | 'hub' | 'relationships' | 'onboarding' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -138,6 +141,7 @@ const NAVIGATION_MAP = {
   'Core': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
     { id: 'relationships', label: 'Relationships', icon: Network },
+    { id: 'onboarding', label: 'Account Onboarding', icon: ClipboardCheck },
     { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
     { id: 'roster', label: 'Roster', icon: Users },
     { id: 'people-hr', label: 'People & HR', icon: Users },
@@ -146,8 +150,10 @@ const NAVIGATION_MAP = {
     { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
   'Config': [
-    { id: 'sites', label: 'Sites', icon: Building2 },
     { id: 'locations', label: 'Locations', icon: MapPin },
+    { id: 'site-360', label: 'Sites', icon: Building2 },
+    { id: 'zones', label: 'Zones', icon: MapPin },
+    { id: 'sites', label: 'Boundary Review', icon: ClipboardCheck },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'access-control', label: 'Access Control', icon: KeyRound },
     { id: 'org-setup', label: 'Organization Setup', icon: Settings },
@@ -353,6 +359,8 @@ const AdminShell: React.FC = () => {
         return <AdminHubPage onNavigate={navigateFromHub} />;
       case 'relationships':
         return <RelationshipWorkspacePage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+      case 'onboarding':
+        return <AccountOnboardingPage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'crm':
         return <CRMPage />;
       case 'reports':
@@ -390,6 +398,10 @@ const AdminShell: React.FC = () => {
         }
       case 'sites':
         return <SiteBoundaryReviewPage />;
+      case 'site-360':
+        return <SiteDetailPage />;
+      case 'zones':
+        return <ZoneDetailPage />;
       case 'org-setup':
         return <OrganizationSetupPage />;
       case 'users':

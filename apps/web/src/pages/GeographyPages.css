@@ -1,0 +1,34 @@
+.geography-page .smoke-layout > *,
+.zone-detail-page .smoke-layout > * {
+  min-width: 0;
+}
+
+.geography-page .site-card,
+.zone-detail-page .site-card {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.geography-page .site-address,
+.zone-detail-page .site-address {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .geography-page.smoke-layout,
+  .geography-page .smoke-layout,
+  .zone-detail-page .smoke-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .geography-page .site-selector,
+  .zone-detail-page .site-selector {
+    width: 100%;
+  }
+
+  .geography-page .assessment-details,
+  .zone-detail-page .assessment-details {
+    width: 100%;
+    min-width: 0;
+  }
+}

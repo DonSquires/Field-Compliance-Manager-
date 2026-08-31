@@ -36,23 +36,26 @@ used here as a workflow hypothesis, not as evidence about the current UI.
 - Agreement readiness now evaluates canonical coverage, authoritative boundary,
   module, positive billing-rate, attributed work-unit, and reporting-template
   evidence. Every blocker links to its existing owning workspace.
+- Account Onboarding is now a durable target-live queue backed by a tenant-scoped
+  stage ledger. Review entry and activation are expected-state, blocker-checked,
+  row-locked, and audited server transitions.
 
 ## Gaps Confirmed
 
-1. No multi-stage, resumable onboarding record exists beyond the retry-safe
-  prospect identity record.
+1. The durable ledger covers qualification, configuration, review, and activation.
+  Detailed per-stage notes and assignment history are not yet modeled.
 2. Candidate search and in-hierarchy exact-name rejection are live. Name search
   remains candidate evidence rather than a global uniqueness guarantee.
 3. Site `address_match_key` is indexed but not globally unique. The governed
   account-scoped candidate and creation flow serializes duplicate review.
 4. The lightweight account summary readiness does not include boundary or
-  reporting evidence. Accepted agreements use the detailed operational evaluator,
-  but neither view is yet an explicit activation decision.
+  reporting evidence. Account Onboarding uses the detailed operational evaluator
+  as the canonical activation gate.
 5. The agreement header remains quote-lifecycle owned. Covered-site and module
   rows are RPC-owned, but remaining agreement profile fields still need a
   deliberately scoped owner before additional UI controls are exposed.
-6. There is no single operational handoff view joining what was sold, covered
-   places, contacts, modules, hazards, commercial readiness, and first actions.
+6. Activation records the canonical account and agreement transition, but a
+  post-activation handoff view joining hazards and first actions is still absent.
 
 ## Target Workflow
 
@@ -105,14 +108,14 @@ sales/finance role boundary that the authorization schema cannot enforce.
 Implement these boundaries before exposing their corresponding UI actions:
 
 1. **Complete:** governed site/address candidate search and retry-safe creation.
-2. Add a resumable stage ledger attached to the existing retry-safe prospect.
+2. **Complete:** resumable, versioned stage ledger attached to prospects.
 3. **Complete:** quote-owned agreement creation plus governed site boundary,
   location-link, and module transitions.
 4. **Complete for accepted agreements:** operational readiness includes boundary,
   commercial, work-unit, reporting, owner, and destination evidence. The account
   summary RPC still remains a lighter qualification view.
-5. Add `activate_crm_account` with row locking, expected draft state, blocker checks,
-   and audit provenance.
+5. **Complete:** `activate_crm_account` uses row locking, expected prospect and
+  ledger state, operational blocker checks, and audit provenance.
 
 ## Acceptance Criteria
 
@@ -132,9 +135,10 @@ Implement these boundaries before exposing their corresponding UI actions:
 
 ## Delivery Order
 
-1. **Partial:** scoped candidate search and readiness RPC are live; draft ledger remains.
+1. **Complete:** scoped candidate search, readiness RPC, and durable stage ledger are live.
 2. **Complete:** qualify lane uses the governed account workspace for contacts.
 3. **Complete:** governed site creation and boundary-review handoff.
 4. **Complete:** governed agreement/location/module setup.
 5. **Complete:** operational and commercial readiness integrations with owner handoffs.
-6. Activation gate, handoff summary, incomplete queue, and time-to-live metrics.
+6. **Partial:** activation gate, incomplete queue, target-live ordering, and age
+  metrics are live. Post-activation handoff summary remains.

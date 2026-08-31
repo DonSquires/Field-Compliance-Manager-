@@ -14,6 +14,11 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/AccessControlPage.tsx',
   'apps/web/src/pages/CRMPage.tsx',
   'apps/web/src/pages/SiteBoundaryReviewPage.tsx',
+  'apps/web/src/pages/AccountOnboardingPage.tsx',
+  'apps/web/src/pages/LocationsPage.tsx',
+  'apps/web/src/pages/SiteDetailPage.tsx',
+  'apps/web/src/pages/ZoneDetailPage.tsx',
+  'apps/web/src/components/LocationHouseMap.tsx',
   'apps/web/src/pages/RelationshipWorkspacePage.tsx',
   'apps/web/src/components/CrmAccountWorkspace.tsx',
   'apps/web/src/components/CrmAgreementSetupDialog.tsx',
@@ -46,7 +51,10 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831080000_govern_crm_site_creation.sql',
   'supabase/migrations/20260831081000_govern_crm_site_boundary_review.sql',
   'supabase/migrations/20260831082000_govern_crm_agreement_setup.sql',
-  'supabase/migrations/20260831083000_crm_operational_readiness.sql'
+  'supabase/migrations/20260831083000_crm_operational_readiness.sql',
+  'supabase/migrations/20260831084000_crm_onboarding_activation.sql',
+  'supabase/schemas/public/functions/resolve_context.sql',
+  'supabase/schemas/public/functions/is_zone_closed.sql'
 ];
 
 function walkFiles(rootDir, relativeDir) {
@@ -132,10 +140,10 @@ function staleGeneratedEdgeIds(existingEdges, generatedEdges) {
 
 function collectManagedRpcEdges(sourceFile, content, inventory) {
   const edges = [];
-  const functionPattern = /create(?: or replace)? function public\.([a-zA-Z0-9_]+)[\s\S]*?as \$\$([\s\S]*?)\$\$;/gi;
+  const functionPattern = /create(?: or replace)? function public\.([a-zA-Z0-9_]+)[\s\S]*?as \$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\2\$;/gi;
   for (const match of content.matchAll(functionPattern)) {
     const sourceName = match[1];
-    const body = match[2];
+    const body = match[3];
     const writes = new Set();
     const reads = new Set();
     for (const write of body.matchAll(/(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?([a-zA-Z0-9_]+)/gi)) {

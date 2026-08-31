@@ -27727,3 +27727,55 @@ end;$$;
 
 REVOKE ALL ON FUNCTION "public"."get_crm_operational_readiness"(uuid) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."get_crm_operational_readiness"(uuid) TO "authenticated","service_role";
+
+CREATE TABLE "public"."crm_onboarding_ledgers"(
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),"provider_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,"account_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "current_stage" text NOT NULL DEFAULT 'qualify',"status" text NOT NULL DEFAULT 'in_progress',"version" integer NOT NULL DEFAULT 1,"target_live_at" timestamptz NOT NULL DEFAULT(now()+interval '30 days'),"started_at" timestamptz NOT NULL DEFAULT now(),"updated_at" timestamptz NOT NULL DEFAULT now(),"activated_at" timestamptz,"activated_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,
+  CONSTRAINT "crm_onboarding_ledgers_stage_check" CHECK("current_stage" IN('qualify','configure','review','activated')),CONSTRAINT "crm_onboarding_ledgers_status_check" CHECK("status" IN('in_progress','blocked','ready','activated')),UNIQUE("provider_organization_id","account_organization_id")
+);
+ALTER TABLE "public"."crm_onboarding_ledgers" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "crm_onboarding_ledgers_select" ON "public"."crm_onboarding_ledgers" FOR SELECT TO "authenticated" USING(public.org_access_allowed(provider_organization_id));
+REVOKE ALL ON TABLE "public"."crm_onboarding_ledgers" FROM PUBLIC,"anon","authenticated";
+GRANT ALL ON TABLE "public"."crm_onboarding_ledgers" TO "service_role";
+
+CREATE FUNCTION "public"."seed_crm_onboarding_ledger"() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+begin if new.organization_type='client' and new.parent_organization_id is not null and new.status='prospect' then insert into public.crm_onboarding_ledgers(provider_organization_id,account_organization_id) values(new.parent_organization_id,new.id) on conflict do nothing;end if;return new;end;$$;
+CREATE TRIGGER "trg_seed_crm_onboarding_ledger" AFTER INSERT ON "public"."organizations" FOR EACH ROW EXECUTE FUNCTION "public"."seed_crm_onboarding_ledger"();
+INSERT INTO "public"."crm_onboarding_ledgers"("provider_organization_id","account_organization_id") SELECT o.parent_organization_id,o.id FROM "public"."organizations" o WHERE o.organization_type='client' AND o.parent_organization_id IS NOT NULL AND o.status='prospect' ON CONFLICT DO NOTHING;
+
+CREATE FUNCTION "public"."get_crm_onboarding_queue"()
+RETURNS TABLE(ledger_id uuid,account_organization_id uuid,account_name text,organization_status text,organization_updated_at timestamptz,current_stage text,ledger_status text,version integer,started_at timestamptz,target_live_at timestamptz,days_open integer,overdue boolean,has_primary_contact boolean,agreement_id uuid,agreement_name text,readiness jsonb)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;
+begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+return query select l.id,o.id,o.name,o.status,o.updated_at,l.current_stage,l.status,l.version,l.started_at,l.target_live_at,greatest(0,floor(extract(epoch from(now()-l.started_at))/86400)::integer),l.target_live_at<now(),exists(select 1 from public.crm_contacts c where c.organization_id=o.id and c.is_primary and c.deactivated_at is null),sa.id,sa.name,case when sa.id is null then null else public.get_crm_operational_readiness(sa.id) end
+from public.crm_onboarding_ledgers l join public.organizations o on o.id=l.account_organization_id left join lateral(select a.id,a.name from public.service_agreements a where a.provider_organization_id=l.provider_organization_id and a.client_organization_id=l.account_organization_id and a.agreement_type='operational' order by case when a.invitation_status='accepted' then 0 else 1 end,a.created_at desc limit 1)sa on true
+where l.provider_organization_id=v_provider and l.status<>'activated' order by l.target_live_at,l.started_at;
+end;$$;
+
+CREATE FUNCTION "public"."manage_crm_onboarding_stage"(p_account_organization_id uuid,p_expected_version integer,p_stage text,p_target_live_at timestamptz DEFAULT NULL)
+RETURNS "public"."crm_onboarding_ledgers" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_ledger public.crm_onboarding_ledgers%rowtype;v_rank integer;v_next_rank integer;v_agreement_id uuid;v_readiness jsonb;
+begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+select * into v_ledger from public.crm_onboarding_ledgers where provider_organization_id=v_provider and account_organization_id=p_account_organization_id for update;if not found then raise exception 'Onboarding ledger not found';end if;if v_ledger.version<>p_expected_version then raise exception 'Onboarding ledger changed since it was opened';end if;
+v_rank:=array_position(array['qualify','configure','review'],v_ledger.current_stage);v_next_rank:=array_position(array['qualify','configure','review'],p_stage);if v_next_rank is null or v_next_rank<v_rank or v_next_rank>v_rank+1 then raise exception 'Onboarding stage transition is not allowed';end if;
+if p_stage='review' then select sa.id into v_agreement_id from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=p_account_organization_id and sa.agreement_type='operational' and sa.invitation_status='accepted' order by sa.created_at desc limit 1;if v_agreement_id is null then raise exception 'Accepted operational agreement required before review';end if;if not exists(select 1 from public.crm_contacts c where c.organization_id=p_account_organization_id and c.is_primary and c.deactivated_at is null) then raise exception 'Active primary contact required before review';end if;v_readiness:=public.get_crm_operational_readiness(v_agreement_id);if not coalesce((v_readiness->>'ready')::boolean,false) then raise exception 'Operational readiness blockers remain before review';end if;end if;
+update public.crm_onboarding_ledgers set current_stage=p_stage,status=case when p_stage='review' then 'ready' else 'in_progress' end,target_live_at=coalesce(p_target_live_at,target_live_at),version=version+1,updated_at=clock_timestamp() where id=v_ledger.id returning * into v_ledger;
+insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_provider,v_actor,'crm_onboarding_stage_changed','crm_onboarding_ledgers',v_ledger.id,jsonb_build_object('account_organization_id',p_account_organization_id,'stage',p_stage,'version',v_ledger.version));return v_ledger;
+end;$$;
+
+CREATE FUNCTION "public"."activate_crm_account"(p_account_organization_id uuid,p_agreement_id uuid,p_expected_organization_updated_at timestamptz,p_expected_ledger_version integer)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_org public.organizations%rowtype;v_ledger public.crm_onboarding_ledgers%rowtype;v_agreement public.service_agreements%rowtype;v_readiness jsonb;
+begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+select * into v_org from public.organizations where id=p_account_organization_id for update;if not found or v_org.parent_organization_id is distinct from v_provider then raise exception 'Managed CRM account not found';end if;if v_org.status<>'prospect' or v_org.active then raise exception 'Only an inactive prospect can be activated';end if;if v_org.updated_at is distinct from p_expected_organization_updated_at then raise exception 'Organization changed since activation review';end if;
+select * into v_ledger from public.crm_onboarding_ledgers where provider_organization_id=v_provider and account_organization_id=v_org.id for update;if not found or v_ledger.version<>p_expected_ledger_version then raise exception 'Onboarding ledger changed since activation review';end if;if v_ledger.current_stage<>'review' then raise exception 'Onboarding must be in review before activation';end if;
+select * into v_agreement from public.service_agreements where id=p_agreement_id and provider_organization_id=v_provider and client_organization_id=v_org.id and agreement_type='operational' for update;if not found or v_agreement.invitation_status<>'accepted' then raise exception 'Accepted operational agreement required';end if;
+if not exists(select 1 from public.crm_contacts c where c.organization_id=v_org.id and c.is_primary and c.deactivated_at is null) then raise exception 'Active primary contact required';end if;v_readiness:=public.get_crm_operational_readiness(v_agreement.id);if not coalesce((v_readiness->>'ready')::boolean,false) then raise exception 'Operational readiness blockers remain';end if;
+update public.organizations set status='active',active=true,updated_at=clock_timestamp() where id=v_org.id returning * into v_org;update public.crm_onboarding_ledgers set current_stage='activated',status='activated',version=version+1,activated_at=clock_timestamp(),activated_by=v_actor,updated_at=clock_timestamp() where id=v_ledger.id returning * into v_ledger;
+insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_provider,v_actor,'crm_account_activated','organizations',v_org.id,jsonb_build_object('agreement_id',v_agreement.id,'ledger_id',v_ledger.id,'ledger_version',v_ledger.version));return jsonb_build_object('account_organization_id',v_org.id,'organization_status',v_org.status,'ledger_status',v_ledger.status,'activated_at',v_ledger.activated_at);
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."seed_crm_onboarding_ledger"(),"public"."get_crm_onboarding_queue"(),"public"."manage_crm_onboarding_stage"(uuid,integer,text,timestamptz),"public"."activate_crm_account"(uuid,uuid,timestamptz,integer) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_onboarding_queue"(),"public"."manage_crm_onboarding_stage"(uuid,integer,text,timestamptz),"public"."activate_crm_account"(uuid,uuid,timestamptz,integer) TO "authenticated","service_role";
+GRANT EXECUTE ON FUNCTION "public"."seed_crm_onboarding_ledger"() TO "service_role";

@@ -8,9 +8,12 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { LocationHouseMap, type HouseMapSite, type HouseMapZone } from '../components/LocationHouseMap';
 import './PageStyles.css';
+import './GeographyPages.css';
 
 interface LocationRow {
   id: string;
@@ -21,14 +24,14 @@ interface LocationRow {
   notes: string | null;
 }
 
-interface SiteFacet {
+interface SiteFacet extends HouseMapSite {
   id: string;
   name: string;
   site_type: string | null;
   active: boolean;
 }
 
-interface ZoneFacet {
+interface ZoneFacet extends HouseMapZone {
   id: string;
   name: string;
   zone_type: string;
@@ -48,6 +51,7 @@ interface ZoneClosure {
 }
 
 const LocationsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [selected, setSelected] = useState<LocationRow | null>(null);
@@ -94,10 +98,10 @@ const LocationsPage: React.FC = () => {
     try {
       // ATLAS READS: client_sites, location_zones
       const [sitesRes, zonesRes] = await Promise.all([
-        supabase.from('client_sites').select('id, name, site_type, active').eq('location_id', locationId),
+        supabase.from('client_sites').select('id, name, site_type, active, gps_lat, gps_lng, boundary, boundary_status, boundary_verification').eq('location_id', locationId),
         supabase
           .from('location_zones')
-          .select('id, name, zone_type, is_active, nightly_limit_consecutive, scv_required')
+          .select('id, name, zone_type, is_active, nightly_limit_consecutive, scv_required, boundary, center_point, boundary_status, boundary_verification')
           .eq('location_id', locationId),
       ]);
 
@@ -146,7 +150,7 @@ const LocationsPage: React.FC = () => {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container geography-page">
       <header className="page-header">
         <h1>Locations</h1>
         <p className="subtitle">{locations.length} locations · sites and zones grouped by physical place</p>
@@ -195,6 +199,8 @@ const LocationsPage: React.FC = () => {
 
             {selected.notes && <p className="contact-meta">{selected.notes}</p>}
 
+            <LocationHouseMap organizationId={profile?.organizationId ?? ''} house={{ name: selected.name, address: [selected.address, selected.suburb, selected.postcode].filter(Boolean).join(', ') || null }} sites={sites} zones={zones} />
+
             <section className="reports-section">
               <h3>Site Facet ({sites.length})</h3>
               {sites.length === 0 ? (
@@ -212,6 +218,7 @@ const LocationsPage: React.FC = () => {
                         </span>
                       </div>
                       {site.site_type && <p className="contact-meta">{site.site_type}</p>}
+                      <div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(`/admin/site-360?site=${site.id}`)}>Open site</button></div>
                     </div>
                   ))}
                 </div>
@@ -252,6 +259,7 @@ const LocationsPage: React.FC = () => {
                             ))}
                           </div>
                         )}
+                        <div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(`/admin/zones?zone=${zone.id}`)}>Open zone</button></div>
                       </div>
                     );
                   })}
