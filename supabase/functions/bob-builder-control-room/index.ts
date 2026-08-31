@@ -87,14 +87,18 @@ serve(async req => {
   const canAccessOrganization = (organizationId: string | null) => role === 'grand_master' || Boolean(organizationId && allowedOrganizations.has(organizationId));
 
   const audit = async (organizationId: string | null, result: string, jobId: string | null = null) => {
-    await admin.from('audit_log').insert({
-      organization_id: organizationId,
-      user_id: user.id,
-      action: FUNCTION_NAME,
-      entity_type: 'builder_job',
-      entity_id: jobId,
-      change_summary: JSON.stringify({ action, result }),
-    }).catch(() => {});
+    try {
+      await admin.from('audit_log').insert({
+        organization_id: organizationId,
+        user_id: user.id,
+        action: FUNCTION_NAME,
+        entity_type: 'builder_job',
+        entity_id: jobId,
+        change_summary: JSON.stringify({ action, result }),
+      });
+    } catch {
+      // Audit failure must not break read-only builder control-room actions.
+    }
   };
 
   if (action === 'browser-checks') {
