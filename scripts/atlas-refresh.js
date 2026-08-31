@@ -59,6 +59,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831086000_resolve_verified_site_context.sql',
   'supabase/migrations/20260831087000_authorize_resolve_context.sql',
   'supabase/migrations/20260831088000_crm_boundary_visual_review.sql',
+  'supabase/migrations/20260831089000_fix_boundary_history_ambiguity.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];

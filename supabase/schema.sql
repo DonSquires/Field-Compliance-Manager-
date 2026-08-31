@@ -2803,14 +2803,14 @@ BEGIN
       RAISE EXCEPTION 'get_boundary_history: access denied for organization %', p_entity_id;
     END IF;
   ELSIF p_entity_type = 'location_zone' THEN
-    SELECT organization_id INTO v_org_id
-      FROM public.location_zones WHERE id = p_entity_id;
+    SELECT z.organization_id INTO v_org_id
+      FROM public.location_zones z WHERE z.id = p_entity_id;
     IF NOT FOUND OR NOT org_access_allowed(v_org_id) THEN
       RAISE EXCEPTION 'get_boundary_history: access denied for location_zone %', p_entity_id;
     END IF;
   ELSIF p_entity_type = 'client_site' THEN
-    SELECT client_organization_id INTO v_org_id
-      FROM public.client_sites WHERE id = p_entity_id;
+    SELECT s.client_organization_id INTO v_org_id
+      FROM public.client_sites s WHERE s.id = p_entity_id;
     IF NOT FOUND OR NOT org_access_allowed(v_org_id) THEN
       RAISE EXCEPTION 'get_boundary_history: access denied for client_site %', p_entity_id;
     END IF;

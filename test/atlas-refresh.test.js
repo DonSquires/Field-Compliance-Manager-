@@ -99,6 +99,9 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('create_crm_site', 'audit_log', 'writes'), true);
   assert.equal(hasEdge('get_crm_site_boundary_queue', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('get_crm_site_boundary_queue', 'organizations', 'reads'), true);
+  assert.equal(hasEdge('get_boundary_history', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('get_boundary_history', 'location_zones', 'reads'), true);
+  assert.equal(hasEdge('get_boundary_history', 'geofence_boundary_history', 'reads'), true);
   assert.equal(hasEdge('manage_crm_site_boundary', 'client_sites', 'writes'), true);
   assert.equal(hasEdge('manage_crm_site_boundary', 'audit_log', 'writes'), true);
   assert.equal(hasEdge('get_crm_agreement_setup', 'service_agreement_locations', 'reads'), true);

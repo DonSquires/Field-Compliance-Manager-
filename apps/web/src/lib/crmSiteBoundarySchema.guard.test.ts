@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 const sql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260831081000_govern_crm_site_boundary_review.sql'), 'utf8');
 const visualReviewSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260831088000_crm_boundary_visual_review.sql'), 'utf8');
+const historyFixSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260831089000_fix_boundary_history_ambiguity.sql'), 'utf8');
 
 describe('governed CRM site boundary review', () => {
   it('lists only sites belonging to manageable CRM accounts', () => {
@@ -40,5 +41,11 @@ describe('governed CRM site boundary review', () => {
     expect(visualReviewSql).toContain('public.st_asgeojson(s.boundary)::jsonb');
     expect(visualReviewSql).toContain('public.crm_actor_can_manage_account(o.id)');
     expect(visualReviewSql).toContain('revoke all on function public.get_crm_site_boundary_queue()');
+  });
+
+  it('qualifies entity lookups that share boundary history output names', () => {
+    expect(historyFixSql).toContain('public.location_zones z where z.id=p_entity_id');
+    expect(historyFixSql).toContain('public.client_sites s where s.id=p_entity_id');
+    expect(historyFixSql).not.toMatch(/where id\s*=\s*p_entity_id/);
   });
 });
