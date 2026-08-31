@@ -16,6 +16,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/SiteBoundaryReviewPage.tsx',
   'apps/web/src/pages/AccountOnboardingPage.tsx',
   'apps/web/src/pages/ActivationHandoffsPage.tsx',
+  'apps/web/src/components/OperationalPlaceManager.tsx',
   'apps/web/src/pages/LocationsPage.tsx',
   'apps/web/src/pages/SiteDetailPage.tsx',
   'apps/web/src/pages/ZoneDetailPage.tsx',
@@ -65,6 +66,8 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831091000_crm_activation_handoffs.sql',
   'supabase/migrations/20260831092000_aam_e2e_seed.sql',
   'supabase/migrations/20260831093000_crm_operational_geography.sql',
+  'supabase/migrations/20260831094000_govern_operational_place_management.sql',
+  'supabase/migrations/20260831095000_operational_place_editor.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];
