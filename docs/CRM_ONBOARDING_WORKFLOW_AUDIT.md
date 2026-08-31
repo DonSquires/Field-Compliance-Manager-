@@ -44,7 +44,8 @@ used here as a workflow hypothesis, not as evidence about the current UI.
 ## Gaps Confirmed
 
 1. The durable ledger covers qualification, configuration, review, and activation.
-  Detailed per-stage notes and assignment history are not yet modeled.
+  It now records a named provider administrator, current stage note, target date,
+  expected-state version, and immutable transition history.
 2. Candidate search and in-hierarchy exact-name rejection are live. Name search
   remains candidate evidence rather than a global uniqueness guarantee.
 3. Site `address_match_key` is indexed but not globally unique. The governed
@@ -57,8 +58,8 @@ used here as a workflow hypothesis, not as evidence about the current UI.
   deliberately scoped owner before additional UI controls are exposed.
 6. Activation records the canonical account and agreement transition, but a
   post-activation handoff view joining hazards and first actions is still absent.
-7. Stage assignment history and per-stage notes are not yet modeled, so handover
-  accountability is visible by owning workspace rather than a named assignee.
+7. Named ownership and stage-note history are live. The remaining handoff gap is
+  a post-activation view joining first operational actions and hazards.
 
 ## Target Workflow
 
@@ -147,4 +148,6 @@ Implement these boundaries before exposing their corresponding UI actions:
 5. **Complete:** operational and commercial readiness integrations with owner handoffs.
 6. **Complete:** activation gate, incomplete queue, target-live ordering, age
   metrics, stale-state recovery, and role-aligned navigation are live.
-7. **Pending:** post-activation handoff summary and named stage assignment/history.
+7. **Complete:** provider-scoped named ownership, required stage notes,
+  expected-version workflow updates, and immutable transition history.
+8. **Pending:** post-activation handoff summary joining hazards and first actions.

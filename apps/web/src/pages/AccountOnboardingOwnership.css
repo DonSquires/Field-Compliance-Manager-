@@ -1,0 +1,137 @@
+.onboarding-controls {
+  align-items: end;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(150px, 0.6fr) minmax(260px, 1.4fr) auto;
+}
+
+.onboarding-controls select,
+.onboarding-controls textarea {
+  width: 100%;
+  border: 1px solid #36515f;
+  border-radius: 4px;
+  color: #e8f0f3;
+  background: #0b1922;
+  font: inherit;
+}
+
+.onboarding-controls select {
+  min-height: 38px;
+  padding: 0 9px;
+}
+
+.onboarding-controls textarea {
+  min-height: 64px;
+  padding: 8px 9px;
+  resize: vertical;
+}
+
+.onboarding-note-field {
+  grid-column: auto;
+}
+
+.onboarding-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.onboarding-history {
+  margin-top: 14px;
+  border: 1px solid #29414e;
+  border-radius: 6px;
+  background: #0b1821;
+}
+
+.onboarding-history > header {
+  padding: 12px 14px;
+  border-bottom: 1px solid #29414e;
+}
+
+.onboarding-history > header > div,
+.onboarding-history article {
+  display: flex;
+  gap: 10px;
+}
+
+.onboarding-history h3,
+.onboarding-history p {
+  margin: 0;
+}
+
+.onboarding-history h3 {
+  font-size: 12px;
+}
+
+.onboarding-history p,
+.onboarding-history small,
+.onboarding-history time {
+  color: #8fa4ae;
+  font-size: 9px;
+}
+
+.onboarding-history article {
+  align-items: flex-start;
+  padding: 11px 14px;
+  border-bottom: 1px solid rgba(41, 65, 78, 0.7);
+}
+
+.onboarding-history article:last-child {
+  border-bottom: 0;
+}
+
+.onboarding-history article > span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 4px;
+  color: #69c4af;
+  background: #153229;
+}
+
+.onboarding-history article > div {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+}
+
+.onboarding-history article time {
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .onboarding-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .onboarding-note-field,
+  .onboarding-controls > div {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .onboarding-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-controls > label,
+  .onboarding-controls > div {
+    grid-column: 1;
+  }
+
+  .onboarding-controls > div > button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .onboarding-history article {
+    flex-wrap: wrap;
+  }
+
+  .onboarding-history article time {
+    width: 100%;
+    padding-left: 38px;
+  }
+}

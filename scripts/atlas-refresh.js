@@ -60,6 +60,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831087000_authorize_resolve_context.sql',
   'supabase/migrations/20260831088000_crm_boundary_visual_review.sql',
   'supabase/migrations/20260831089000_fix_boundary_history_ambiguity.sql',
+  'supabase/migrations/20260831090000_crm_onboarding_ownership_history.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];
@@ -133,7 +134,7 @@ function collectComponentEdges(sourceFile, content) {
     const edgeKind = /\.\s*(?:insert|update|delete|upsert)\s*\(/.test(chain) ? 'writes' : 'reads';
     edges.push({ ...source, target_type: 'table', target_name: match[1], edge_kind: edgeKind, evidence_class: 'live-code', source_file: sourceFile, caller_context: `Supabase table ${edgeKind === 'writes' ? 'mutation' : 'query'} in source` });
   }
-  for (const match of content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*rpc\(['"]([^'"]+)['"]/g)) {
+  for (const match of content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*rpc\(\s*['"]([^'"]+)['"]/g)) {
     edges.push({ ...source, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in source' });
   }
   return edges;

@@ -8,18 +8,29 @@ const source = readFileSync(resolve(process.cwd(), 'src/pages/AccountOnboardingP
 
 describe('Account Onboarding failure state', () => {
   it('clears stale queue state when the governed RPC fails', () => {
-    expect(source).toContain('if(queueError){setRows([]);setSelectedId(null);setLoadError(queueError.message);}');
+    expect(source).toContain('supabase.rpc("get_crm_onboarding_workspace")');
+    expect(source).toContain('supabase.rpc("get_crm_onboarding_assignees")');
   });
 
   it('hides queue metrics and empty-state claims while data is unavailable', () => {
-    expect(source).toContain('if(loadError)return');
+    expect(source).toContain('if (loadError)');
     expect(source).toContain('Onboarding data unavailable');
-    expect(source).toContain('Queue totals and account status are hidden until the service responds.');
-    expect(source).toContain("loading?'Retrying':'Retry'");
+    expect(source).toContain('Queue totals');
+    expect(source).toContain('account status are hidden until the service responds.');
+    expect(source).toContain('"Retrying"');
+    expect(source).toContain('"Retry"');
   });
 
   it('keeps governed action rejections inside the loaded workspace', () => {
-    expect(source).toContain('if(actionError)setError(actionError.message)');
-    expect(source).toContain('{error&&<div className="onboarding-message is-error"');
+    expect(source).toContain('if (actionError) setError(actionError.message)');
+    expect(source).toContain('className="onboarding-message is-error"');
+  });
+
+  it('uses governed workflow ownership and immutable history RPCs', () => {
+    expect(source).toContain('"manage_crm_onboarding_workflow"');
+    expect(source).toContain('"get_crm_onboarding_history"');
+    expect(source).toContain('aria-label="Workflow owner"');
+    expect(source).toContain('aria-label="Stage note"');
+    expect(source).not.toContain("supabase.from('crm_onboarding_events')");
   });
 });

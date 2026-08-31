@@ -38,6 +38,10 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       supabase.from('alpha').select('id');
       supabase.from('alpha').update({ active: true }).eq('id', id);
       supabase.rpc('get_alpha');
+      supabase.rpc(
+        'update_alpha',
+        { id },
+      );
       supabase.functions.invoke('ping');
       if (ready) return null;
     `);
@@ -51,6 +55,7 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
     assert.ok(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'get_alpha'));
+    assert.ok(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'update_alpha'));
     assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'ping'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
@@ -76,8 +81,10 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'get_crm_agreement_setup', 'calls'), true);
   assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'manage_crm_agreement_setup', 'calls'), true);
   assert.equal(hasEdge('components/CrmOperationalReadinessDialog', 'get_crm_operational_readiness', 'calls'), true);
-  assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_queue', 'calls'), true);
-  assert.equal(hasEdge('pages/AccountOnboardingPage', 'manage_crm_onboarding_stage', 'calls'), true);
+  assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_workspace', 'calls'), true);
+  assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_assignees', 'calls'), true);
+  assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_history', 'calls'), true);
+  assert.equal(hasEdge('pages/AccountOnboardingPage', 'manage_crm_onboarding_workflow', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'activate_crm_account', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'resolve_context_authorized', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'is_zone_closed', 'calls'), true);
@@ -117,6 +124,11 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('get_crm_operational_readiness', 'report_templates', 'reads'), true);
   assert.equal(hasEdge('get_crm_onboarding_queue', 'crm_onboarding_ledgers', 'reads'), true);
   assert.equal(hasEdge('manage_crm_onboarding_stage', 'crm_onboarding_ledgers', 'writes'), true);
+  assert.equal(hasEdge('get_crm_onboarding_workspace', 'crm_onboarding_ledgers', 'reads'), true);
+  assert.equal(hasEdge('get_crm_onboarding_assignees', 'user_profiles', 'reads'), true);
+  assert.equal(hasEdge('get_crm_onboarding_history', 'crm_onboarding_events', 'reads'), true);
+  assert.equal(hasEdge('manage_crm_onboarding_workflow', 'crm_onboarding_ledgers', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_onboarding_workflow', 'crm_onboarding_events', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'organizations', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'crm_onboarding_ledgers', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'audit_log', 'writes'), true);
