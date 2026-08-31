@@ -203,6 +203,16 @@ test('browser checks can validate the live app URL through the control plane', a
   assert.ok(persisted.browserChecks.some(check => check.appUrl === 'http://127.0.0.1:4173' && check.status === 'failed'));
 });
 
+test('browser check history is available through the control plane API', async () => {
+  const response = await request('GET', '/api/bob/builder/browser-checks', undefined, {
+    authorization: `Bearer ${adminToken}`
+  });
+
+  assert.equal(response.response.status, 200);
+  assert.ok(Array.isArray(response.body));
+  assert.ok(response.body.some(check => check.appUrl === 'http://127.0.0.1:4173' && check.status === 'failed'));
+});
+
 test('job creation rejects repositories outside the allowlist', async () => {
   const { response, body } = await request('POST', '/jobs', { repository: 'untrusted/app' }, {
     authorization: `Bearer ${adminToken}`

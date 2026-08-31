@@ -283,6 +283,10 @@ async function route(req, res, body) {
     });
     return json(res, 200, result);
   }
+  if (req.method === 'GET' && url.pathname === '/api/bob/builder/browser-checks') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    return json(res, 200, [...browserChecks].slice(-20).reverse());
+  }
   if (req.method === 'POST' && url.pathname === '/api/bob/builder/browser-check') {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
     const appUrl = body.appUrl || body.url || process.env.BOB_APP_URL || process.env.VITE_APP_URL;
