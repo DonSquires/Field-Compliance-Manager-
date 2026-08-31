@@ -27606,17 +27606,19 @@ REVOKE ALL ON FUNCTION "public"."create_crm_site"(uuid,uuid,text,text,text) FROM
 GRANT EXECUTE ON FUNCTION "public"."find_crm_site_candidates"(uuid,text,text),"public"."create_crm_site"(uuid,uuid,text,text,text) TO "authenticated","service_role";
 
 CREATE FUNCTION "public"."get_crm_site_boundary_queue"()
-RETURNS TABLE(site_id uuid,account_organization_id uuid,account_name text,site_name text,address text,site_type text,active boolean,gps_lat double precision,gps_lng double precision,boundary_status text,boundary_verification text,boundary_verified_at timestamptz,has_boundary boolean)
+RETURNS TABLE(site_id uuid,account_organization_id uuid,account_name text,site_name text,address text,site_type text,active boolean,gps_lat double precision,gps_lng double precision,boundary_status text,boundary_verification text,boundary_verified_at timestamptz,has_boundary boolean,boundary_geojson jsonb)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
 declare v_actor uuid:=auth.uid();v_provider uuid;
 begin
   select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
   if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
-  return query select s.id,o.id,o.name,s.name,s.address,s.site_type,s.active,s.gps_lat,s.gps_lng,s.boundary_status,s.boundary_verification,s.boundary_verified_at,(s.boundary is not null)
+  return query select s.id,o.id,o.name,s.name,s.address,s.site_type,s.active,s.gps_lat,s.gps_lng,s.boundary_status,s.boundary_verification,s.boundary_verified_at,(s.boundary is not null),case when s.boundary is null then null else public.st_asgeojson(s.boundary)::jsonb end
   from public.client_sites s join public.organizations o on o.id=s.client_organization_id
   where public.crm_actor_can_manage_account(o.id)
   order by case when s.boundary_verification='unverified' then 0 else 1 end,case when s.boundary_status='provisional' then 0 else 1 end,o.name,s.name;
 end;$$;
+
+COMMENT ON FUNCTION "public"."get_crm_site_boundary_queue"() IS 'Returns manageable CRM sites with current boundary GeoJSON for governed visual review. Geometry remains scoped by crm_actor_can_manage_account.';
 
 CREATE FUNCTION "public"."manage_crm_site_boundary"(p_site_id uuid,p_action text,p_expected_verification text,p_center_lat double precision DEFAULT NULL,p_center_lng double precision DEFAULT NULL,p_radius_m double precision DEFAULT 50)
 RETURNS TABLE(site_id uuid,boundary_status text,boundary_verification text,gps_lat double precision,gps_lng double precision,boundary_verified_at timestamptz,area_m2 numeric)

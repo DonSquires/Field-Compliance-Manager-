@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { AlertTriangle, CheckCircle2, Clock3, ExternalLink, History, MapPin, RefreshCw, Ruler, Search, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import './SiteBoundaryReviewPage.css';
+import './SiteBoundaryVisualReview.css';
 
 interface BoundarySite {
   site_id: string;
@@ -17,6 +20,7 @@ interface BoundarySite {
   boundary_verification: 'verified' | 'unverified';
   boundary_verified_at: string | null;
   has_boundary: boolean;
+  boundary_geojson: GeoJSON.GeoJsonObject | null;
 }
 
 interface BoundaryHistory {
@@ -43,6 +47,9 @@ const SiteBoundaryReviewPage = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [visualReviewConfirmed, setVisualReviewConfirmed] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
 
   const selected = sites.find((site) => site.site_id === selectedId) ?? null;
 
@@ -71,7 +78,21 @@ const SiteBoundaryReviewPage = () => {
   useEffect(() => {
     if (!selected) return;
     setCoordinates({ latitude: selected.gps_lat?.toString() ?? '', longitude: selected.gps_lng?.toString() ?? '', radius: '50' });
+    setVisualReviewConfirmed(false);
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!mapContainerRef.current || !selected?.boundary_geojson) return;
+    mapRef.current?.remove();
+    const map = L.map(mapContainerRef.current, { zoomControl: true, attributionControl: true });
+    mapRef.current = map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    const boundary = L.geoJSON(selected.boundary_geojson, { style: { color: '#2fc4a7', weight: 3, fillColor: '#2fc4a7', fillOpacity: 0.16 } }).bindTooltip(selected.site_name).addTo(map);
+    const bounds = boundary.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.2), { maxZoom: 19 });
+    window.setTimeout(() => map.invalidateSize(), 0);
+    return () => { map.remove(); mapRef.current = null; };
+  }, [selected?.site_id, selected?.boundary_geojson, selected?.site_name]);
 
   const chooseSite = async (site: BoundarySite) => {
     setSelectedId(site.site_id); setError(null); setNotice(null);
@@ -93,6 +114,19 @@ const SiteBoundaryReviewPage = () => {
     });
     if (actionError) setError(actionError.message);
     else { setNotice(`${selected.site_name} now has a provisional point-radius boundary. Visual polygon review is still required.`); await loadQueue(selected.site_id); }
+    setSaving(false);
+  };
+
+  const verifyBoundary = async () => {
+    if (!selected?.has_boundary || !visualReviewConfirmed) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: actionError } = await supabase.rpc('manage_crm_site_boundary', {
+      p_site_id: selected.site_id,
+      p_action: 'verify',
+      p_expected_verification: selected.boundary_verification,
+    });
+    if (actionError) setError(actionError.message);
+    else { setNotice(`${selected.site_name} boundary verified from visual map review.`); await loadQueue(selected.site_id); }
     setSaving(false);
   };
 
@@ -124,7 +158,8 @@ const SiteBoundaryReviewPage = () => {
 
         <section className="boundary-action-panel"><div className="boundary-panel-heading"><div><MapPin size={18} /><span><strong>Provisional point boundary</strong><small>Set a temporary operating radius from confirmed coordinates.</small></span></div>{selected.gps_lat != null && selected.gps_lng != null && <a href={`https://www.google.com/maps?q=${selected.gps_lat},${selected.gps_lng}`} target="_blank" rel="noreferrer">Inspect point <ExternalLink size={14} /></a>}</div>
           <form onSubmit={establishProvisionalBoundary}><label><span>Latitude</span><input aria-label="Latitude" type="number" min="-90" max="90" step="any" required value={coordinates.latitude} onChange={(event) => setCoordinates({ ...coordinates, latitude: event.target.value })} /></label><label><span>Longitude</span><input aria-label="Longitude" type="number" min="-180" max="180" step="any" required value={coordinates.longitude} onChange={(event) => setCoordinates({ ...coordinates, longitude: event.target.value })} /></label><label><span>Radius (metres)</span><div><Ruler size={14} /><input aria-label="Radius in metres" type="number" min="5" max="5000" required value={coordinates.radius} onChange={(event) => setCoordinates({ ...coordinates, radius: event.target.value })} /></div></label><button type="submit" disabled={saving || !coordinates.latitude || !coordinates.longitude}>{saving ? 'Saving' : selected.has_boundary ? 'Replace provisional boundary' : 'Establish provisional boundary'}</button></form>
-          <div className="boundary-review-gate"><ShieldCheck size={18} /><div><strong>Verification requires visual polygon inspection</strong><span>This workspace does not render polygon geometry yet, so it cannot certify a boundary. Establishing a point-radius boundary records provisional evidence only.</span></div></div>
+          {selected.boundary_geojson ? <div className="boundary-map" ref={mapContainerRef} aria-label={`Boundary map for ${selected.site_name}`} /> : <div className="boundary-map-empty"><MapPin size={20} /><span><strong>No boundary to inspect</strong>Establish provisional geometry before visual review.</span></div>}
+          <div className="boundary-review-gate"><ShieldCheck size={18} /><div><strong>Visual verification</strong><span>Confirm the rendered boundary encloses the intended operating site before certifying it for runtime use.</span><label><input type="checkbox" checked={visualReviewConfirmed} onChange={(event) => setVisualReviewConfirmed(event.target.checked)} disabled={!selected.has_boundary || selected.boundary_verification === 'verified'} />I inspected the full boundary against the site address.</label></div><button type="button" onClick={() => void verifyBoundary()} disabled={saving || !visualReviewConfirmed || !selected.has_boundary || selected.boundary_verification === 'verified'}>{selected.boundary_verification === 'verified' ? 'Verified' : saving ? 'Verifying' : 'Verify boundary'}</button></div>
         </section>
 
         <section className="boundary-history"><div className="boundary-panel-heading"><div><History size={18} /><span><strong>Boundary history</strong><small>{history.length} recorded {history.length === 1 ? 'event' : 'events'}</small></span></div></div>{history.length ? <div>{history.map((event) => <article key={event.id}><span className={`boundary-history-icon is-${event.verification_state}`}>{event.verification_state === 'verified' ? <CheckCircle2 size={16} /> : <Clock3 size={16} />}</span><div><strong>{event.change_reason}</strong><span>{event.boundary_source ?? 'No source recorded'} · {event.changed_via.replaceAll('_', ' ')}</span></div><time dateTime={event.created_at}>v{event.version} · {new Date(event.created_at).toLocaleString('en-NZ')}</time></article>)}</div> : <div className="boundary-empty">No boundary events have been recorded for this site.</div>}</section>

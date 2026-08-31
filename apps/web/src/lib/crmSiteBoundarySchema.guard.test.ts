@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const sql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260831081000_govern_crm_site_boundary_review.sql'), 'utf8');
+const visualReviewSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260831088000_crm_boundary_visual_review.sql'), 'utf8');
 
 describe('governed CRM site boundary review', () => {
   it('lists only sites belonging to manageable CRM accounts', () => {
@@ -32,5 +33,12 @@ describe('governed CRM site boundary review', () => {
     expect(sql).toContain('revoke all on function public.set_site_geometry');
     expect(sql).toContain('grant execute on function public.set_site_geometry');
     expect(sql).toContain('to service_role');
+  });
+
+  it('returns current geometry only through the manageable-account queue', () => {
+    expect(visualReviewSql).toContain('boundary_geojson jsonb');
+    expect(visualReviewSql).toContain('public.st_asgeojson(s.boundary)::jsonb');
+    expect(visualReviewSql).toContain('public.crm_actor_can_manage_account(o.id)');
+    expect(visualReviewSql).toContain('revoke all on function public.get_crm_site_boundary_queue()');
   });
 });

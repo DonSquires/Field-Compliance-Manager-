@@ -1,0 +1,85 @@
+.boundary-map,
+.boundary-map-empty {
+  width: 100%;
+  min-height: 320px;
+  margin-top: 14px;
+  border: 1px solid rgba(132, 161, 157, 0.28);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #17201f;
+}
+
+.boundary-map {
+  isolation: isolate;
+}
+
+.boundary-map-empty {
+  display: grid;
+  place-content: center;
+  grid-template-columns: auto auto;
+  gap: 10px;
+  color: #9eb0ad;
+}
+
+.boundary-map-empty span {
+  display: grid;
+  gap: 3px;
+}
+
+.boundary-map-empty strong {
+  color: #e7efed;
+}
+
+.boundary-review-gate > div {
+  flex: 1;
+}
+
+.boundary-review-gate label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  color: #e7efed;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.boundary-review-gate label input {
+  margin-top: 2px;
+  accent-color: #2fc4a7;
+}
+
+.boundary-review-gate > button {
+  align-self: center;
+  min-width: 112px;
+  min-height: 36px;
+  border: 1px solid #2fc4a7;
+  border-radius: 4px;
+  color: #e0fbf4;
+  background: #1a4a3f;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.boundary-review-gate > button:disabled {
+  border-color: rgba(132, 161, 157, 0.28);
+  color: #758784;
+  background: #202b29;
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .boundary-map,
+  .boundary-map-empty {
+    min-height: 260px;
+  }
+
+  .boundary-review-gate {
+    flex-wrap: wrap;
+  }
+
+  .boundary-review-gate > button {
+    width: 100%;
+  }
+}
