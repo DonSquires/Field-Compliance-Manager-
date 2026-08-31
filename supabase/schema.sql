@@ -27779,3 +27779,20 @@ end;$$;
 REVOKE ALL ON FUNCTION "public"."seed_crm_onboarding_ledger"(),"public"."get_crm_onboarding_queue"(),"public"."manage_crm_onboarding_stage"(uuid,integer,text,timestamptz),"public"."activate_crm_account"(uuid,uuid,timestamptz,integer) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."get_crm_onboarding_queue"(),"public"."manage_crm_onboarding_stage"(uuid,integer,text,timestamptz),"public"."activate_crm_account"(uuid,uuid,timestamptz,integer) TO "authenticated","service_role";
 GRANT EXECUTE ON FUNCTION "public"."seed_crm_onboarding_ledger"() TO "service_role";
+
+ALTER TABLE "public"."observations" ADD COLUMN IF NOT EXISTS "geofence_context" jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE "public"."parking_chalk_records" ADD COLUMN IF NOT EXISTS "geofence_context" jsonb NOT NULL DEFAULT '{}'::jsonb;
+COMMENT ON COLUMN "public"."observations"."geofence_context" IS 'Immutable-at-capture snapshot of resolve_context and is_zone_closed evidence used by the officer scan. Geometry answers where; rules and closure overlays answer what.';
+COMMENT ON COLUMN "public"."parking_chalk_records"."geofence_context" IS 'Immutable-at-capture snapshot of resolve_context and is_zone_closed evidence used by the parking scan. Geometry answers where; rules and closure overlays answer what.';
+
+CREATE FUNCTION "public"."preserve_scan_geofence_context"() RETURNS trigger LANGUAGE plpgsql SET search_path=public AS $$
+begin
+  if old.geofence_context<>'{}'::jsonb and new.geofence_context is distinct from old.geofence_context then raise exception 'Captured geofence context is immutable';end if;
+  return new;
+end;$$;
+
+CREATE TRIGGER "trg_observations_preserve_geofence_context" BEFORE UPDATE OF "geofence_context" ON "public"."observations" FOR EACH ROW EXECUTE FUNCTION "public"."preserve_scan_geofence_context"();
+CREATE TRIGGER "trg_parking_chalk_preserve_geofence_context" BEFORE UPDATE OF "geofence_context" ON "public"."parking_chalk_records" FOR EACH ROW EXECUTE FUNCTION "public"."preserve_scan_geofence_context"();
+
+REVOKE ALL ON FUNCTION "public"."preserve_scan_geofence_context"() FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."preserve_scan_geofence_context"() TO "service_role";

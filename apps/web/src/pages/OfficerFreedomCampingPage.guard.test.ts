@@ -25,4 +25,10 @@ describe('Officer Freedom Camping interaction boundary', () => {
     expect(scanFunction).toContain('const observedAt = capturedDate.toISOString()');
     expect(source).toContain('synced_at: new Date().toISOString()');
   });
+
+  it('surfaces closure evidence without replacing the compliance verdict', () => {
+    expect(source).toContain('result.zone_closed');
+    expect(source).toContain('result.zone_closure?.closure_type');
+    expect(source).toContain('The compliance verdict remains rule-derived.');
+  });
 });

@@ -68,12 +68,42 @@ not used by this resolver until it has passed persistence and verification.
 Closures are a downstream operational overlay, resolved by `is_zone_closed`.
 They do not change where the Zone is. They change what may happen there.
 
-## Verified Gap
+## Officer Scan Evidence
 
-`process-officer-scan` calls `resolve_context`, but it does not currently call
-`is_zone_closed`. The administrative map inspector composes both results so the
-gap is visible, but scan enforcement must not be described as closure-aware
-until that production path consumes and acts on canonical closure evidence.
+`process-officer-scan` now calls `resolve_context` and, after every matched or
+manually selected Zone, calls `is_zone_closed`. Resolution and closure lookup
+errors fail closed. The capture-time result is persisted in `geofence_context`
+on freedom-camping observations and parking chalk records, and returned to the
+officer UI as an explicit warning.
+
+Closure evidence does not silently rewrite a freedom-camping or parking verdict.
+The boundary still answers where, the module rules derive their own verdict, and
+the closure remains a separately visible operational overlay until a governed
+module-specific closure policy defines a stronger action.
+
+Manual Zone selection is not a bypass around spatial governance. The scan
+requires the Zone to belong to the caller's organization, be active and
+verified, match the requested module, and be active under `_geofence_active_at`
+at capture time. The snapshot records that direct point-in-polygon resolution
+was not evaluated when a Zone was selected manually.
+
+Every scan requires either that governed manual Zone or a complete, finite,
+in-range GPS coordinate pair. The server rejects missing or partial spatial
+evidence before inference or persistence; it never records an unevaluated scan
+as implicitly inside operating bounds.
+
+## Point Context Access
+
+`resolve-point-context` supports officer reports and other GPS anchoring flows.
+Before using its service-role client, it binds the requested organization to the
+caller's active profile: home organization, explicit authorized organization, or
+grand-master scope. Cross-tenant organization IDs are rejected before PostGIS or
+Site reads occur.
+
+Canonical `resolve_context`, descendant-scope, agreement-scope, and nearby-Site
+query failures return an unavailable response rather than being reclassified as
+an ordinary spatial miss. Only a successful resolution with no verified Zone or
+nearby Site continues to LINZ-first, Google-fallback address resolution.
 
 Two older helpers still reference obsolete `zone_closures.active_from` and
 `active_to` columns. New work must use `status`, `effective_from`,

@@ -121,6 +121,18 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('resolve_context', 'location_zones', 'reads'), true);
   assert.equal(hasEdge('resolve_context', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('resolve_context', 'locations', 'reads'), true);
+  assert.equal(hasEdge('process-officer-scan', 'resolve_context', 'calls'), true);
+  assert.equal(hasEdge('process-officer-scan', 'is_zone_closed', 'calls'), true);
+  assert.equal(hasEdge('process-officer-scan', '_geofence_active_at', 'calls'), true);
+  assert.equal(hasEdge('process-officer-scan', 'parking_chalk_records', 'writes'), true);
+  assert.equal(hasEdge('process-officer-scan', 'observations', 'writes'), true);
+  assert.equal(hasEdge('resolve-point-context', 'user_profiles', 'reads'), true);
+  assert.equal(hasEdge('resolve-point-context', 'resolve_context', 'calls'), true);
+  assert.equal(hasEdge('resolve-point-context', 'service_agreements', 'reads'), true);
+  assert.equal(hasEdge('resolve-point-context', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('resolve-point-context', 'location_zones', 'reads'), true);
+  assert.equal(hasEdge('observations', 'preserve_scan_geofence_context', 'triggers'), true);
+  assert.equal(hasEdge('parking_chalk_records', 'preserve_scan_geofence_context', 'triggers'), true);
   assert.equal(hasEdge('is_zone_closed', 'zone_closures', 'reads'), true);
   assert.equal(atlas.edges.some((edge) => edge.source_name === 'components/CrmOrganizationDialog' && edge.edge_kind === 'writes'), false);
 });

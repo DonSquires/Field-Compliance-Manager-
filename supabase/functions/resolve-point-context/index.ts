@@ -180,10 +180,22 @@ serve(async (req)=>{
         error: 'organization_id is required'
       }, 400);
     }
-    // Service-role client for PostGIS queries. resolve_context is SECURITY
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { data: callerProfile, error: profileError } = await admin.from('user_profiles').select('role, organization_id, authorized_organization_ids, deactivated_at').eq('id', caller.id).maybeSingle();
+    if (profileError) return json({
+      error: 'Organization access could not be verified'
+    }, 503);
+    if (!callerProfile || callerProfile.deactivated_at) return json({
+      error: 'Active user profile required'
+    }, 403);
+    const authorizedOrganizations = Array.isArray(callerProfile.authorized_organization_ids) ? callerProfile.authorized_organization_ids.map(String) : [];
+    const organizationAllowed = callerProfile.role === 'grand_master' || String(callerProfile.organization_id ?? '') === orgId || authorizedOrganizations.includes(orgId);
+    if (!organizationAllowed) return json({
+      error: 'Forbidden: organization is outside your authorized scope'
+    }, 403);
+    // Service-role client for PostGIS queries after caller scope is verified. resolve_context is SECURITY
     // DEFINER with GRANT to authenticated, so the caller's own JWT would
     // work too, but service role avoids RLS overhead on the name lookups.
-    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     // ── Step 1: resolve_context() RPC — zone point-in-polygon ──
     // The RPC (migration 0090) does ST_Contains against location_zones.boundary
     // scoped to the org, returns zone + site + rules.
@@ -192,8 +204,11 @@ serve(async (req)=>{
       p_lng: lng,
       p_org_id: orgId
     });
+    if (ctxErr) return json({
+      error: 'Geofence context could not be resolved'
+    }, 503);
     const ctx = Array.isArray(ctxRows) ? ctxRows[0] : ctxRows;
-    if (!ctxErr && ctx && ctx.matched_zone_id) {
+    if (ctx && ctx.matched_zone_id) {
       // Point is inside a zone — resolve zone + site names
       let zoneName = null;
       let siteName = null;
@@ -240,13 +255,19 @@ serve(async (req)=>{
     try {
       // 2a: find client org ids via the ownership tree (descendants of the
       // provider org — includes client orgs parented under the provider).
-      const { data: descendantRows } = await admin.rpc('get_descendant_organizations', {
+      const { data: descendantRows, error: descendantsError } = await admin.rpc('get_descendant_organizations', {
         org_id: orgId
       });
+      if (descendantsError) return json({
+        error: 'Site organization scope could not be resolved'
+      }, 503);
       const descendantIds = Array.isArray(descendantRows) ? descendantRows.map((r)=>String(r)) : [];
       // 2b: find client org ids via active service agreements where the
       // provider is the calling org (catches clients not in the ownership tree).
-      const { data: agreementRows } = await admin.from('service_agreements').select('client_organization_id').eq('provider_organization_id', orgId);
+      const { data: agreementRows, error: agreementsError } = await admin.from('service_agreements').select('client_organization_id').eq('provider_organization_id', orgId);
+      if (agreementsError) return json({
+        error: 'Site agreement scope could not be resolved'
+      }, 503);
       const agreementClientIds = Array.isArray(agreementRows) ? agreementRows.map((r)=>String(r.client_organization_id)) : [];
       // Union of both sets (deduplicated), plus the provider org itself
       // (in case it owns sites directly — unusual but defensive).
@@ -257,7 +278,10 @@ serve(async (req)=>{
           ...agreementClientIds
         ])
       ];
-      const { data: nearbySites } = await admin.from('client_sites').select('id, name, gps_lat, gps_lng, onsite_radius_meters').in('client_organization_id', clientOrgIds).not('gps_lat', 'is', null).not('gps_lng', 'is', null).limit(100);
+      const { data: nearbySites, error: nearbySitesError } = await admin.from('client_sites').select('id, name, gps_lat, gps_lng, onsite_radius_meters').in('client_organization_id', clientOrgIds).not('gps_lat', 'is', null).not('gps_lng', 'is', null).limit(100);
+      if (nearbySitesError) return json({
+        error: 'Nearby Site context could not be resolved'
+      }, 503);
       if (Array.isArray(nearbySites)) {
         // Simple Haversine distance check against each site's center point
         // and onsite_radius_meters (default 10m in the schema).
@@ -284,7 +308,9 @@ serve(async (req)=>{
         }
       }
     } catch  {
-    // Non-fatal: continue to reverse geocoding
+      return json({
+        error: 'Nearby Site context could not be resolved'
+      }, 503);
     }
     // ── Step 3: reverse geocode — LINZ first, Google fallback ──
     let address = null;

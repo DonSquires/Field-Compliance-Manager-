@@ -9354,6 +9354,7 @@ export type Database = {
           enforcement_exempt: boolean
           exemption_reason: string | null
           external_refs: Json
+          geofence_context: Json
           gps_lat: number | null
           gps_lng: number | null
           gps_point: unknown
@@ -9413,6 +9414,7 @@ export type Database = {
           enforcement_exempt?: boolean
           exemption_reason?: string | null
           external_refs?: Json
+          geofence_context?: Json
           gps_lat?: number | null
           gps_lng?: number | null
           gps_point?: unknown
@@ -9472,6 +9474,7 @@ export type Database = {
           enforcement_exempt?: boolean
           exemption_reason?: string | null
           external_refs?: Json
+          geofence_context?: Json
           gps_lat?: number | null
           gps_lng?: number | null
           gps_point?: unknown
@@ -10720,6 +10723,7 @@ export type Database = {
           effective_time_limit_minutes: number | null
           embedding: string | null
           embedding_quality: number | null
+          geofence_context: Json
           id: string
           inference_provider: string | null
           infringement_number: string | null
@@ -10763,6 +10767,7 @@ export type Database = {
           effective_time_limit_minutes?: number | null
           embedding?: string | null
           embedding_quality?: number | null
+          geofence_context?: Json
           id?: string
           inference_provider?: string | null
           infringement_number?: string | null
@@ -10806,6 +10811,7 @@ export type Database = {
           effective_time_limit_minutes?: number | null
           embedding?: string | null
           embedding_quality?: number | null
+          geofence_context?: Json
           id?: string
           inference_provider?: string | null
           infringement_number?: string | null
