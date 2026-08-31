@@ -79,6 +79,22 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(atlas.edges.some((edge) => edge.source_name === 'components/CrmOrganizationDialog' && edge.edge_kind === 'writes'), false);
 });
 
+test('managed user spine routes identity and access through governed RPCs', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+
+  assert.equal(hasEdge('pages/UserManagementPage', 'get_user_spine_readiness', 'calls'), true);
+  assert.equal(hasEdge('components/UserIdentityWorkspace', 'manage_user_identity_access', 'calls'), true);
+  assert.equal(hasEdge('pages/AccessControlPage', 'manage_user_identity_access', 'calls'), true);
+  assert.equal(hasEdge('manage_user_identity_access', 'user_profiles', 'writes'), true);
+  assert.equal(hasEdge('manage_user_identity_access', 'preset_assignments', 'writes'), true);
+  assert.equal(hasEdge('manage_user_identity_access', 'staff_area_grants', 'writes'), true);
+  assert.equal(hasEdge('log_user_management_action', 'user_management_audit', 'writes'), true);
+  assert.equal(hasEdge('get_user_spine_readiness', 'staff_profiles', 'reads'), true);
+  assert.equal(hasEdge('get_user_spine_readiness', 'staff_credentials', 'reads'), true);
+  assert.equal(atlas.edges.some((edge) => ['components/UserIdentityWorkspace', 'pages/UserManagementPage', 'pages/AccessControlPage'].includes(edge.source_name) && ['user_profiles', 'preset_assignments', 'staff_area_grants'].includes(edge.target_name) && edge.edge_kind === 'writes'), false);
+});
+
 test('Atlas refresh plan preserves manual truth and retires only owned stale rows', () => {
   const manifest = {
     capabilities: [{
@@ -111,6 +127,16 @@ test('Atlas refresh plan preserves manual truth and retires only owned stale row
       refresh_source: 'ci_generator', caller_context: 'raw reference to if'
     },
     {
+      id: 'managed-pre-marker', source_type: 'component', source_name: 'pages/UserManagementPage', target_type: 'table',
+      target_name: 'user_profiles', edge_kind: 'writes', source_file: 'apps/web/src/pages/UserManagementPage.tsx',
+      refresh_source: 'ci_generator', caller_context: ".from('user_profiles').insert/update/upsert/delete"
+    },
+    {
+      id: 'unmanaged-pre-marker', source_type: 'component', source_name: 'pages/Unmanaged', target_type: 'table',
+      target_name: 'user_profiles', edge_kind: 'writes', source_file: 'apps/web/src/pages/Unmanaged.tsx',
+      refresh_source: 'ci_generator', caller_context: ".from('user_profiles').insert/update/upsert/delete"
+    },
+    {
       id: 'retired-edge', source_type: 'component', source_name: 'pages/Retired', target_type: 'table',
       target_name: 'retired_table', edge_kind: 'reads', source_file: 'apps/web/src/pages/Retired.tsx',
       refresh_source: 'ci_generator', caller_context: `${OWNER_MARKER} retired`, retirement_status: 'legacy'
@@ -122,10 +148,11 @@ test('Atlas refresh plan preserves manual truth and retires only owned stale row
   assert.equal(plan.capabilityUpserts.length, 0);
   assert.deepEqual(plan.capabilityRetireIds, ['stale-cap']);
   assert.equal(plan.edgeUpserts.length, 0);
-  assert.deepEqual(plan.edgeRetireIds, ['owned-stale']);
+  assert.deepEqual(plan.edgeRetireIds, ['owned-stale', 'managed-pre-marker']);
   assert.equal(plan.skippedManualCapabilities, 1);
   assert.equal(plan.skippedManualEdges, 1);
   assert.equal(plan.edgeRetireIds.includes('legacy-generator'), false);
+  assert.equal(plan.edgeRetireIds.includes('unmanaged-pre-marker'), false);
 });
 
 test('Atlas refresh plan preserves exercised state on CI-owned capabilities', () => {

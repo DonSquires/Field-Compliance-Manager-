@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Filter, History, MailPlus, MoreHorizontal,
 import { useAuth, type AppRole } from '../context/AuthContext';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { supabase } from '../lib/supabase';
+import { UserIdentityWorkspace, type ManagedUserIdentity, type UserAccessPreset, type UserPresetAssignment, type UserSpineReadiness } from '../components/UserIdentityWorkspace';
 import './UserManagementPage.css';
 
 interface UserRow {
@@ -13,6 +14,7 @@ interface UserRow {
   phone: string | null;
   module_access: string[];
   deactivated_at: string | null;
+  updated_at: string;
 }
 
 interface AuditRow {
@@ -38,9 +40,13 @@ const UserManagementPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showInvite, setShowInvite] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ email: '', displayName: '', role: 'officer' as AppRole });
+  const [inviteForm, setInviteForm] = useState({ email: '', displayName: '', role: 'officer' as AppRole, employmentType: 'permanent', presetKey: '' });
   const [lifecycle, setLifecycle] = useState<{ user: UserRow; action: LifecycleAction } | null>(null);
   const [reason, setReason] = useState('');
+  const [presets, setPresets] = useState<UserAccessPreset[]>([]);
+  const [assignments, setAssignments] = useState<UserPresetAssignment[]>([]);
+  const [readiness, setReadiness] = useState<UserSpineReadiness[]>([]);
+  const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
 
   const assignableRoles = useMemo(() => getAssignableRoles(profile?.role ?? 'unknown'), [profile?.role]);
 
@@ -49,10 +55,10 @@ const UserManagementPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [usersResponse, auditResponse] = await Promise.all([
+      const [usersResponse, auditResponse, presetResponse, assignmentResponse, readinessResponse] = await Promise.all([
         supabase
           .from('user_profiles')
-          .select('id, display_name, role, email, phone, module_access, deactivated_at')
+          .select('id, display_name, role, email, phone, module_access, deactivated_at, updated_at')
           .eq('organization_id', profile.organizationId)
           .order('display_name', { ascending: true }),
         supabase
@@ -60,11 +66,20 @@ const UserManagementPage: React.FC = () => {
           .select('id, target_user_id, action_type, performed_by, metadata, created_at')
           .order('created_at', { ascending: false })
           .limit(30),
+        supabase.from('access_presets').select('id,key,name,role').or(`organization_id.eq.${profile.organizationId},is_system.eq.true`),
+        supabase.from('preset_assignments').select('id,user_id,preset_id,status').eq('scope_org_id', profile.organizationId).eq('status', 'active'),
+        supabase.rpc('get_user_spine_readiness', { p_organization_id: profile.organizationId }),
       ]);
       if (usersResponse.error) throw usersResponse.error;
       if (auditResponse.error) throw auditResponse.error;
+      if (presetResponse.error) throw presetResponse.error;
+      if (assignmentResponse.error) throw assignmentResponse.error;
+      if (readinessResponse.error) throw readinessResponse.error;
       setUsers((usersResponse.data as UserRow[]) ?? []);
       setAuditRows((auditResponse.data as AuditRow[]) ?? []);
+      setPresets((presetResponse.data as UserAccessPreset[]) ?? []);
+      setAssignments((assignmentResponse.data as UserPresetAssignment[]) ?? []);
+      setReadiness((readinessResponse.data as UserSpineReadiness[]) ?? []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Identity records could not be loaded.');
     } finally {
@@ -98,11 +113,13 @@ const UserManagementPage: React.FC = () => {
           display_name: inviteForm.displayName.trim(),
           role: inviteForm.role,
           organization_id: profile.organizationId,
+          staff: ['officer', 'admin_officer'].includes(inviteForm.role) ? { employment_type: inviteForm.employmentType } : undefined,
+          access_preset_key: ['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) ? inviteForm.presetKey || undefined : undefined,
         },
       });
       if (invokeError) throw invokeError;
       setNotice(`Invitation sent to ${inviteForm.email.trim()}.`);
-      setInviteForm({ email: '', displayName: '', role: assignableRoles.includes('officer') ? 'officer' : assignableRoles[0] });
+      setInviteForm({ email: '', displayName: '', role: assignableRoles.includes('officer') ? 'officer' : assignableRoles[0], employmentType: 'permanent', presetKey: '' });
       setShowInvite(false);
       await loadIdentity();
     } catch (inviteError) {
@@ -181,6 +198,8 @@ const UserManagementPage: React.FC = () => {
             <label><span>Display name</span><input required value={inviteForm.displayName} onChange={(event) => setInviteForm((form) => ({ ...form, displayName: event.target.value }))} /></label>
             <label><span>Email address</span><input type="email" required value={inviteForm.email} onChange={(event) => setInviteForm((form) => ({ ...form, email: event.target.value }))} /></label>
             <label><span>Role</span><select value={inviteForm.role} onChange={(event) => setInviteForm((form) => ({ ...form, role: event.target.value as AppRole }))}>{assignableRoles.map((role) => <option value={role} key={role}>{IDENTITY_ROLE_LABEL[role]}</option>)}</select></label>
+            {['officer', 'admin_officer'].includes(inviteForm.role) && <label><span>Employment type</span><select value={inviteForm.employmentType} onChange={(event) => setInviteForm((form) => ({ ...form, employmentType: event.target.value }))}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option></select></label>}
+            {['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) && <label><span>Access preset</span><select value={inviteForm.presetKey} onChange={(event) => setInviteForm((form) => ({ ...form, presetKey: event.target.value }))}><option value="">Assign after invitation</option>{presets.map((preset) => <option value={preset.key} key={preset.id}>{preset.name}</option>)}</select></label>}
           </div>
           <div className="identity-form-footer"><span>Only roles at or below your authority level are available.</span><button type="submit" disabled={busyId === 'invite'}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : <MailPlus size={16} />}{busyId === 'invite' ? 'Sending' : 'Send invitation'}</button></div>
         </form>
@@ -207,7 +226,7 @@ const UserManagementPage: React.FC = () => {
                     <div className="identity-actions">
                       <button type="button" disabled={busyId === user.id} onClick={() => void resendInvite(user)} title="Resend invitation"><MailPlus size={16} /></button>
                       <button type="button" disabled={self || busyId === user.id} onClick={() => { setLifecycle({ user, action: user.deactivated_at ? 'reactivate' : 'deactivate' }); setReason(''); }} title={self ? 'You cannot change your own lifecycle state' : user.deactivated_at ? 'Reactivate account' : 'Deactivate account'}>{user.deactivated_at ? <UserCheck size={16} /> : <UserMinus size={16} />}</button>
-                      <button type="button" disabled title="Additional identity actions are not yet available"><MoreHorizontal size={16} /></button>
+                      <button type="button" onClick={() => setSelectedUser(user)} title="Manage identity and access"><MoreHorizontal size={16} /></button>
                     </div>
                   </article>
                 );
@@ -235,6 +254,7 @@ const UserManagementPage: React.FC = () => {
           </form>
         </div>
       )}
+      {selectedUser && <UserIdentityWorkspace user={selectedUser as ManagedUserIdentity} callerRole={profile?.role ?? 'unknown'} presets={presets} assignment={assignments.find((assignment) => assignment.user_id === selectedUser.id) ?? null} readiness={readiness.find((row) => row.user_id === selectedUser.id) ?? null} onClose={() => setSelectedUser(null)} onChanged={async () => { await loadIdentity(); }} />}
     </div>
   );
 };

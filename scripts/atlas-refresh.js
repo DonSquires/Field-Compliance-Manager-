@@ -10,10 +10,13 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterHRPage.tsx',
   'apps/web/src/pages/OfficerLeavePage.tsx',
   'apps/web/src/pages/OrganizationSetupPage.tsx',
+  'apps/web/src/pages/UserManagementPage.tsx',
+  'apps/web/src/pages/AccessControlPage.tsx',
   'apps/web/src/pages/CRMPage.tsx',
   'apps/web/src/pages/RelationshipWorkspacePage.tsx',
   'apps/web/src/components/CrmAccountWorkspace.tsx',
   'apps/web/src/components/CrmOrganizationDialog.tsx',
+  'apps/web/src/components/UserIdentityWorkspace.tsx',
   'apps/web/src/pages/WelfareAlertsPage.tsx',
   'apps/web/src/pages/OfficerFieldReportPage.tsx',
   'apps/web/src/hooks/useOfficerSafety.ts',
@@ -34,7 +37,8 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260830125000_submit_officer_field_report.sql',
   'supabase/migrations/20260830142000_harden_officer_field_report_submission.sql',
   'supabase/migrations/20260830143000_govern_crm_contacts_and_activities.sql',
-  'supabase/migrations/20260830144000_govern_crm_organization_spine.sql'
+  'supabase/migrations/20260830144000_govern_crm_organization_spine.sql',
+  'supabase/migrations/20260830145000_govern_user_identity_access.sql'
 ];
 
 function walkFiles(rootDir, relativeDir) {
@@ -389,8 +393,10 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     }
   }
   for (const existing of existingEdges) {
+    const legacyManagedContext = MANAGED_SOURCES.includes(existing.source_file)
+      && /^\.from\(['"][^'"]+['"]\)\.(?:insert|update|upsert|delete)/.test(String(existing.caller_context || ''));
     if (existing.refresh_source === 'ci_generator'
-        && String(existing.caller_context || '').startsWith(OWNER_MARKER)
+        && (String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext)
         && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);
