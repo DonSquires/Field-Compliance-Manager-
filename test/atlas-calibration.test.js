@@ -28,6 +28,7 @@ test('atlas, oracle, caddie, conductor, endpoint, db, and UI/UX calibration stay
   assert.ok(status.modules.includes('independent_security_worker'));
   assert.ok(status.modules.includes('aggregate_builder_review'));
   assert.ok(status.modules.includes('builder_runtime_coordinator'));
+  assert.ok(status.modules.includes('builder_control_room'));
   assert.ok(status.modules.includes('release_preparation'));
   assert.ok(status.modules.includes('optional_code_review'));
   assert.ok(status.modules.includes('officer_safety_system'));
@@ -60,6 +61,7 @@ test('calibration update writes a fresh status artifact across all surfaces', ()
     'security-worker.js': 'reviewPatch\ncredential-material\nprotected-surface-change\npatch_sha256\nmanifest_sha256',
     'builder-security-handoff.js': 'builder_claim_aggregate_security_review\nimplementationWorkerRunIds\naggregate security evidence\nbuilder_recover_expired_security_review',
     'builder-runtime-coordinator.js': 'planBuilderAction\nadvanceBuilderJob\nrunBuilderUntilPause\nwaiting_for_human\naction_limit',
+    'supabase/functions/bob-builder-control-room/index.ts': "CAN_BUILD\nadmin.rpc('builder_create_job'\ncanAccessOrganization\naction === 'advance' || action === 'run'\nsafeSnapshot",
     'supabase/functions/_shared/builder-release-engineer.js': 'deriveReleaseImpact\nrollback_steps\ndeployment_enabled\napproval',
     'supabase/functions/_shared/builder-independent-code-review.js': 'parseIndependentCodeReview\nreviewerModelName\nabortIndependentCodeReview\nno approval',
     'apps/web/src/hooks/useOfficerSafety.ts': 'recordMovement\nacknowledgeAlert\ndetectionState\nactiveAlert',

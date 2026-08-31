@@ -68,6 +68,7 @@ const OrganizationSetupPage = React.lazy(() => import('../pages/OrganizationSetu
 const ModuleCatalogPage = React.lazy(() => import('../pages/ModuleCatalogPage'));
 const GrandMasterPlatformPage = React.lazy(() => import('../pages/GrandMasterPlatformPage'));
 const ProviderBillingPage = React.lazy(() => import('../pages/ProviderBillingPage'));
+const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlRoomPage'));
 const ReportsHubPage = React.lazy(() => import('../pages/ReportsHubPage'));
 const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
 const DispatchConsolePage = React.lazy(() => import('../pages/DispatchConsolePage'));
@@ -87,7 +88,7 @@ type AdminPage =
   | 'hub' | 'relationships' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
-  | 'platform-subscriptions' | 'platform-billing';
+  | 'platform-subscriptions' | 'platform-billing' | 'builder';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
@@ -95,7 +96,7 @@ type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
-  'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing',
+  'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing', 'builder',
 ]);
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
@@ -158,6 +159,7 @@ const NAVIGATION_MAP = {
   ],
   'Platform': [
     { id: 'platform', label: 'Platform Overview', icon: Shield },
+    { id: 'builder', label: 'Builder', icon: Bot },
     { id: 'platform-catalog', label: 'Module Pricing', icon: Package },
     { id: 'platform-subscriptions', label: 'Provider Billing', icon: CreditCard },
   ],
@@ -398,6 +400,8 @@ const AdminShell: React.FC = () => {
         return <LocationsPage />;
       case 'platform':
         return <GrandMasterPlatformPage />;
+      case 'builder':
+        return <BuilderControlRoomPage />;
       case 'platform-catalog':
         return <ModuleCatalogPage />;
       case 'platform-subscriptions':
