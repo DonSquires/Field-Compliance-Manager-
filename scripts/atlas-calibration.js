@@ -87,6 +87,11 @@ const REQUIREMENTS = [
     requiredMarkers: ['planBuilderAction', 'advanceBuilderJob', 'runBuilderUntilPause', 'waiting_for_human', 'action_limit']
   },
   {
+    name: 'builder_control_room',
+    file: 'supabase/functions/bob-builder-control-room/index.ts',
+    requiredMarkers: ['CAN_BUILD', "admin.rpc('builder_create_job'", 'canAccessOrganization', "action === 'advance' || action === 'run'", 'safeSnapshot']
+  },
+  {
     name: 'release_preparation',
     file: 'supabase/functions/_shared/builder-release-engineer.js',
     requiredMarkers: ['deriveReleaseImpact', 'rollback_steps', 'deployment_enabled', 'approval']

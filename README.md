@@ -45,6 +45,8 @@ Bob's first operating mode is read-only assessment. He should map the allowliste
 
 The Builder runtime is separate from the legacy generic `/jobs` queue. An authenticated control-plane administrator can create a durable Builder job through `POST /api/bob/builder/jobs`, inspect it through `GET /api/bob/builder/jobs/:id`, advance exactly one verified action through `POST /api/bob/builder/jobs/:id/advance`, or run a bounded sequence through `POST /api/bob/builder/jobs/:id/run`. The bounded runner reloads Supabase state after every specialist action and stops on a human approval, active worker, blocked state, specialist failure, terminal state, or an eight-action ceiling. Source directory, worker image, runner identity, service credentials, and model-gateway credentials come only from protected server configuration, never from the request body.
 
+The platform-tier Admin portal exposes this workflow through the Builder control room. The browser calls only the authenticated `bob-builder-control-room` Edge Function and never receives a control-plane or service-role credential. That function derives the caller and role from Supabase Auth, limits projects and jobs to authorized organizations, creates and reads durable job state directly through scoped service operations, strips artifact locations and model output bodies, and audits each request. Only `advance` and `run` are relayed to the protected VPS because they require repository and worker access. Builder controls are restricted to `master` and `grand_master` roles and remain separate from human approval decisions.
+
 Generate a local read-only inventory with:
 
 ```bash
