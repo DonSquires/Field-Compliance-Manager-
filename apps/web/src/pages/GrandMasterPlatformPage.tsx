@@ -35,6 +35,35 @@ interface HealthCheckResult {
   [key: string]: any;
 }
 
+interface BrowserHistoryEntry {
+  id: string;
+  appUrl: string;
+  checkedAt: string;
+  status: string;
+  title?: string;
+  testName?: string;
+  checks?: string[];
+  error?: string;
+}
+
+interface AssessmentStep {
+  profile: string;
+  status: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+interface AssessmentResult {
+  mode: string;
+  readOnly: boolean;
+  assessment?: Record<string, any>;
+  plan?: Record<string, any>;
+  steps: AssessmentStep[];
+  paused: boolean;
+  reason: string;
+}
+
 function formatServiceLabel(service: string): string {
   const normalized = service.trim();
   if (!normalized) return 'Service';
@@ -62,8 +91,11 @@ const GrandMasterPlatformPage: React.FC = () => {
   const [notifications, setNotifications] = useState<PlatformNotification[]>([]);
   const [health, setHealth] = useState<HealthCheckResult[] | null>(null);
   const [browserCheck, setBrowserCheck] = useState<{ appUrl: string; status: string; title?: string; checks?: string[] } | null>(null);
+  const [browserHistory, setBrowserHistory] = useState<BrowserHistoryEntry[]>([]);
+  const [assessment, setAssessment] = useState<AssessmentResult | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [browserLoading, setBrowserLoading] = useState(false);
+  const [assessmentLoading, setAssessmentLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,9 +137,34 @@ const GrandMasterPlatformPage: React.FC = () => {
     }
   }, []);
 
+  const loadBrowserHistory = useCallback(async () => {
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('bob-builder-control-room', {
+        body: { action: 'browser-checks' },
+      });
+      if (fnError) throw fnError;
+      const nextHistory = Array.isArray(data)
+        ? data.filter((entry): entry is BrowserHistoryEntry => !!entry && typeof entry === 'object' && typeof (entry as BrowserHistoryEntry).appUrl === 'string')
+        : [];
+      setBrowserHistory(nextHistory);
+      if (!browserCheck && nextHistory.length > 0) {
+        const latest = nextHistory[0];
+        setBrowserCheck({
+          appUrl: latest.appUrl,
+          status: latest.status,
+          title: latest.title,
+          checks: Array.isArray(latest.checks) ? latest.checks.filter((item): item is string => typeof item === 'string') : undefined,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load browser check history');
+    }
+  }, [browserCheck]);
+
   useEffect(() => {
     loadPlatformData();
-  }, [loadPlatformData]);
+    loadBrowserHistory();
+  }, [loadPlatformData, loadBrowserHistory]);
 
   const runHealthCheck = async () => {
     try {
@@ -154,17 +211,60 @@ const GrandMasterPlatformPage: React.FC = () => {
       if (data?.error) throw new Error(String(data.error));
 
       const status = (data?.result && typeof data.result === 'object' ? (data.result as Record<string, unknown>) : {}) as Record<string, unknown>;
-      setBrowserCheck({
+      const nextCheck = {
         appUrl: String((data?.appUrl ?? appUrl) || appUrl),
         status: String(status.status ?? 'unknown'),
         title: typeof status.title === 'string' ? status.title : undefined,
         checks: Array.isArray(status.checks) ? status.checks.filter((item): item is string => typeof item === 'string') : undefined,
-      });
+      };
+      setBrowserCheck(nextCheck);
+      await loadBrowserHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run browser check');
       setBrowserCheck(null);
     } finally {
       setBrowserLoading(false);
+    }
+  };
+
+  const runPlatformAssessment = async () => {
+    try {
+      setAssessmentLoading(true);
+      setError(null);
+
+      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/self-hosted/loop', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+        },
+        body: JSON.stringify({
+          profiles: ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'],
+          dryRun: false,
+          appUrl: 'http://127.0.0.1:4173',
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data) throw new Error('Assessment failed');
+      if (data?.error) throw new Error(String(data.error));
+
+      const nextAssessment: AssessmentResult = {
+        mode: String(data.mode || 'self_hosted_bob'),
+        readOnly: Boolean(data.readOnly),
+        assessment: data.assessment || {},
+        plan: data.plan || {},
+        steps: Array.isArray(data.steps) ? data.steps.filter((step): step is AssessmentStep => !!step && typeof step === 'object') : [],
+        paused: Boolean(data.paused),
+        reason: String(data.reason || 'assessment_complete'),
+      };
+      setAssessment(nextAssessment);
+      await loadBrowserHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run platform assessment');
+      setAssessment(null);
+    } finally {
+      setAssessmentLoading(false);
     }
   };
 
@@ -247,6 +347,9 @@ const GrandMasterPlatformPage: React.FC = () => {
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <h2>Services Health</h2>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-success btn-sm" onClick={runPlatformAssessment} disabled={assessmentLoading}>
+              {assessmentLoading ? 'Assessing…' : 'Run Full Assessment'}
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={runBrowserCheck} disabled={browserLoading}>
               {browserLoading ? 'Running browser check…' : 'Run Browser Check'}
             </button>
@@ -288,6 +391,56 @@ const GrandMasterPlatformPage: React.FC = () => {
             {browserCheck.checks && browserCheck.checks.length > 0 && (
               <p className="contact-details">Checks: {browserCheck.checks.join(', ')}</p>
             )}
+          </div>
+        )}
+
+        {browserHistory.length > 0 && (
+          <div className="contact-card" style={{ marginTop: 12 }}>
+            <div className="contact-header">
+              <h3>Browser check history</h3>
+              <span className="contact-type-badge">{browserHistory.length}</span>
+            </div>
+            <div className="contacts-list" style={{ marginTop: 12 }}>
+              {browserHistory.slice(0, 5).map((entry) => (
+                <div key={entry.id} className="contact-card">
+                  <div className="contact-header">
+                    <h3>{entry.title || entry.testName || 'Browser check'}</h3>
+                    <span className={`status-badge status-${entry.status === 'passed' ? 'active' : 'inactive'}`}>
+                      {entry.status}
+                    </span>
+                  </div>
+                  <p className="contact-details">URL: {entry.appUrl}</p>
+                  <p className="contact-meta">{new Date(entry.checkedAt).toLocaleString()}</p>
+                  {entry.error && <p className="contact-details">Error: {entry.error}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {assessment && (
+          <div className="contact-card" style={{ marginTop: 12 }}>
+            <div className="contact-header">
+              <h3>Latest platform assessment</h3>
+              <span className={`status-badge status-${assessment.paused ? 'inactive' : 'active'}`}>
+                {assessment.paused ? 'Paused' : 'Complete'}
+              </span>
+            </div>
+            {assessment.reason && <p className="contact-details">Reason: {assessment.reason}</p>}
+            <div className="contacts-list" style={{ marginTop: 12 }}>
+              {assessment.steps.map((step, idx) => (
+                <div key={idx} className="contact-card">
+                  <div className="contact-header">
+                    <h3>{step.profile}</h3>
+                    <span className={`status-badge status-${step.status === 'succeeded' ? 'active' : 'inactive'}`}>
+                      {step.status}
+                    </span>
+                  </div>
+                  {step.exitCode !== 0 && <p className="contact-details">Exit code: {step.exitCode}</p>}
+                  {step.stderr && <p className="contact-details" style={{ color: '#d97706' }}>Error: {step.stderr.slice(0, 100)}</p>}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>

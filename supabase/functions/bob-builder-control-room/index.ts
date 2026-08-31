@@ -97,6 +97,23 @@ serve(async req => {
     }).catch(() => {});
   };
 
+  if (action === 'browser-checks') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = await relay('/api/bob/builder/browser-checks', 'GET');
+    if (!result.ok) return json({ error: 'Browser check history is unavailable' }, result.status);
+    return json(Array.isArray(result.payload) ? result.payload : []);
+  }
+
+  if (action === 'browser-check') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = await relay('/api/bob/builder/browser-check', 'POST', {
+      appUrl: body.appUrl || body.url || null,
+      testName: typeof body.testName === 'string' ? body.testName : 'live-app-check',
+    });
+    if (!result.ok) return json({ error: 'Browser check could not be run' }, result.status);
+    return json(result.payload);
+  }
+
   if (action === 'list') {
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];
     let projectsQuery = admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo, name, status').eq('status', 'active').order('name');

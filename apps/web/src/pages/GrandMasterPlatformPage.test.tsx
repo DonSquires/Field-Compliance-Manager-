@@ -91,6 +91,12 @@ describe('GrandMasterPlatformPage', () => {
     mockInvoke.mockImplementation(async (name: string, payload?: { body?: Record<string, unknown> }) => {
       if (name === 'check-services-health') return { data: { bob_control_plane: { status: 'online', service: 'bob-control-plane', builderReady: true } }, error: null };
       if (name === 'bob-builder-control-room') {
+        if (payload?.body?.action === 'browser-checks') {
+          return {
+            data: [{ id: 'check-1', appUrl: 'http://127.0.0.1:4173', checkedAt: '2026-08-31T00:00:00Z', status: 'passed', title: 'App Title', checks: ['page_load'] }],
+            error: null,
+          };
+        }
         return {
           data: {
             ok: true,
@@ -121,5 +127,82 @@ describe('GrandMasterPlatformPage', () => {
         appUrl: expect.any(String),
       }),
     });
+  });
+
+  it('loads persisted browser check history for the evidence trail', async () => {
+    mockInvoke.mockImplementation(async (name: string, payload?: { body?: Record<string, unknown> }) => {
+      if (name === 'check-services-health') return { data: { bob_control_plane: { status: 'online', service: 'bob-control-plane', builderReady: true } }, error: null };
+      if (name === 'bob-builder-control-room') {
+        if (payload?.body?.action === 'browser-checks') {
+          return {
+            data: [
+              { id: 'check-1', appUrl: 'http://127.0.0.1:4173', checkedAt: '2026-08-31T00:00:00Z', status: 'passed', title: 'App Title', checks: ['page_load'] },
+              { id: 'check-2', appUrl: 'http://127.0.0.1:4173/health', checkedAt: '2026-08-30T00:00:00Z', status: 'failed', error: 'snapshot mismatch' },
+            ],
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      }
+      return { data: null, error: null };
+    });
+
+    render(<GrandMasterPlatformPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Browser check history')).toBeTruthy();
+    });
+
+    expect(screen.getByText('App Title')).toBeTruthy();
+  });
+
+  it('runs a full platform assessment with all verification profiles', async () => {
+    const { fetch: originalFetch } = globalThis;
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url.includes('/api/bob/builder/self-hosted/loop')) {
+        return {
+          ok: true,
+          json: async () => ({
+            mode: 'self_hosted_bob',
+            readOnly: true,
+            paused: false,
+            reason: 'ready_for_human_approval',
+            steps: [
+              { profile: 'assessment', status: 'succeeded', exitCode: 0, stdout: 'ok', stderr: '' },
+              { profile: 'test', status: 'succeeded', exitCode: 0, stdout: 'ok', stderr: '' },
+              { profile: 'playwright-visual-check', status: 'succeeded', exitCode: 0, stdout: 'ok', stderr: '' },
+            ],
+          }),
+        } as any;
+      }
+      return originalFetch(url);
+    }) as any;
+
+    mockInvoke.mockImplementation(async (name: string, payload?: { body?: Record<string, unknown> }) => {
+      if (name === 'check-services-health') return { data: { bob_control_plane: { status: 'online' } }, error: null };
+      if (name === 'bob-builder-control-room') {
+        if (payload?.body?.action === 'browser-checks') {
+          return { data: [], error: null };
+        }
+      }
+      return { data: null, error: null };
+    });
+
+    render(<GrandMasterPlatformPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Platform Overview')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Full Assessment' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Latest platform assessment')).toBeTruthy();
+    });
+
+    expect(screen.getByText('assessment')).toBeTruthy();
+    expect(screen.getByText('test')).toBeTruthy();
+
+    globalThis.fetch = originalFetch;
   });
 });
