@@ -126,7 +126,8 @@ serve(async req => {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
     const jobId = typeof body.job_id === 'string' ? body.job_id : '';
     const appUrl = typeof body.app_url === 'string' ? body.app_url : null;
-    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/assessment`, 'POST', { appUrl });
+    const appUrls = Array.isArray(body.app_urls) ? body.app_urls.filter((u): u is string => typeof u === 'string') : [];
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/assessment`, 'POST', { appUrl, appUrls });
     if (!result.ok) return json({ error: 'Job assessment could not be run' }, result.status);
     return json(result.payload);
   }

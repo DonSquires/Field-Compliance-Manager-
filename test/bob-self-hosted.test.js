@@ -77,3 +77,31 @@ test('self-hosted browser checks receive the live app URL in the worker environm
   assert.deepEqual(seen, ['https://app.example.com']);
   await fs.rm(artifactDir, { recursive: true, force: true });
 });
+
+test('multi-target browser matrix validates multiple URLs in one assessment', async () => {
+  const artifactDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bob-self-hosted-matrix-'));
+  const seen = [];
+  const result = await runSelfHostedBuildLoop({
+    rootDir: '/workspace',
+    artifactDir,
+    profiles: ['playwright-visual-check'],
+    workerImage: 'fcm/bob-worker:test',
+    appUrls: ['https://app.example.com', 'https://app.example.com/health'],
+    execute: async options => {
+      seen.push(options.env?.BOB_APP_URL || null);
+      return { status: 'succeeded', exitCode: 0, profile: options.profile, stdout: 'ok', stderr: '' };
+    },
+    assessmentFactory: () => ({
+      fileCount: 1,
+      packages: [],
+      compose: [],
+      supabaseEdgeFunctions: []
+    })
+  });
+
+  assert.equal(result.steps.length, 2);
+  assert.ok(result.steps.some(s => s.profile === 'playwright-visual-check:https://app.example.com'));
+  assert.ok(result.steps.some(s => s.profile === 'playwright-visual-check:https://app.example.com/health'));
+  assert.deepEqual(seen, ['https://app.example.com', 'https://app.example.com/health']);
+  await fs.rm(artifactDir, { recursive: true, force: true });
+});

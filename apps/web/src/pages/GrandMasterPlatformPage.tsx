@@ -427,20 +427,71 @@ const GrandMasterPlatformPage: React.FC = () => {
               </span>
             </div>
             {assessment.reason && <p className="contact-details">Reason: {assessment.reason}</p>}
-            <div className="contacts-list" style={{ marginTop: 12 }}>
-              {assessment.steps.map((step, idx) => (
-                <div key={idx} className="contact-card">
-                  <div className="contact-header">
-                    <h3>{step.profile}</h3>
-                    <span className={`status-badge status-${step.status === 'succeeded' ? 'active' : 'inactive'}`}>
-                      {step.status}
-                    </span>
-                  </div>
-                  {step.exitCode !== 0 && <p className="contact-details">Exit code: {step.exitCode}</p>}
-                  {step.stderr && <p className="contact-details" style={{ color: '#d97706' }}>Error: {step.stderr.slice(0, 100)}</p>}
-                </div>
-              ))}
-            </div>
+            {assessment.steps && assessment.steps.length > 0 && (
+              <div style={{ marginTop: 12, overflowX: 'auto' }}>
+                {(() => {
+                  const hasUrls = assessment.steps.some(s => (s as any).appUrl);
+                  if (hasUrls) {
+                    const profiles = [...new Set(assessment.steps.map(s => {
+                      const p = (s as any).profile || '';
+                      return p.includes(':') ? p.split(':')[0] : p;
+                    }))];
+                    const urls = [...new Set(assessment.steps.map(s => (s as any).appUrl).filter(Boolean))];
+                    return (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #ddd' }}>
+                            <th style={{ padding: '8px', textAlign: 'left' }}>Profile</th>
+                            {urls.map(url => (
+                              <th key={url} style={{ padding: '8px', textAlign: 'center', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {String(url).replace(/^https?:\/\//, '').slice(0, 20)}...
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {profiles.map(profile => (
+                            <tr key={profile} style={{ borderBottom: '1px solid #eee' }}>
+                              <td style={{ padding: '8px', fontWeight: 500 }}>{profile}</td>
+                              {urls.map(url => {
+                                const step = assessment.steps.find(s => {
+                                  const p = (s as any).profile || '';
+                                  const prof = p.includes(':') ? p.split(':')[0] : p;
+                                  return prof === profile && (s as any).appUrl === url;
+                                }) as any;
+                                return (
+                                  <td key={`${profile}-${url}`} style={{ padding: '8px', textAlign: 'center' }}>
+                                    <span className={`status-badge status-${step?.status === 'succeeded' ? 'active' : 'inactive'}`}>
+                                      {step ? step.status : '—'}
+                                    </span>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    );
+                  }
+                  return (
+                    <div className="contacts-list" style={{ marginTop: 12 }}>
+                      {assessment.steps.map((step, idx) => (
+                        <div key={idx} className="contact-card">
+                          <div className="contact-header">
+                            <h3>{(step as any).profile}</h3>
+                            <span className={`status-badge status-${(step as any).status === 'succeeded' ? 'active' : 'inactive'}`}>
+                              {(step as any).status}
+                            </span>
+                          </div>
+                          {(step as any).exitCode !== 0 && <p className="contact-details">Exit code: {(step as any).exitCode}</p>}
+                          {(step as any).stderr && <p className="contact-details" style={{ color: '#d97706' }}>Error: {(step as any).stderr.slice(0, 100)}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         )}
       </section>

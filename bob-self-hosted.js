@@ -30,13 +30,14 @@ async function runSelfHostedBuildLoop({
   execute,
   assessmentFactory = createAssessment,
   maxRetries = 1,
-  appUrl = process.env.BOB_APP_URL || process.env.VITE_APP_URL || null
+  appUrl = process.env.BOB_APP_URL || process.env.VITE_APP_URL || null,
+  appUrls = []
 }) {
   const resolvedRoot = path.resolve(rootDir || process.cwd());
   const resolvedArtifacts = path.resolve(artifactDir || path.join(resolvedRoot, 'bob-artifacts'));
   const defaultProfiles = ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'];
   const selectedProfiles = Array.isArray(profiles) && profiles.length ? profiles : defaultProfiles;
-  const targetAppUrl = appUrl || process.env.BOB_APP_URL || process.env.VITE_APP_URL || null;
+  const targetAppUrls = Array.isArray(appUrls) && appUrls.length ? appUrls : (appUrl ? [appUrl] : []);
   const assessment = assessmentFactory(resolvedRoot);
   const plan = buildSelfHostedPlan(assessment, selectedProfiles);
   const steps = [];
@@ -44,56 +45,109 @@ async function runSelfHostedBuildLoop({
   await fs.mkdir(resolvedArtifacts, { recursive: true });
 
   for (const profile of selectedProfiles) {
-    let attempt = 0;
-    let outcome;
-    while (attempt <= maxRetries) {
-      outcome = await (execute || (async () => ({ status: 'succeeded', exitCode: 0, profile, stdout: 'ok', stderr: '' })))({
-        image: workerImage || 'fcm/bob-worker:local',
-        sourceDir: resolvedRoot,
-        artifactDir: resolvedArtifacts,
-        profile,
-        timeoutMs: Number(process.env.BOB_WORKER_TIMEOUT_MS || 10 * 60 * 1000),
-        memory: process.env.BOB_WORKER_MEMORY || '1g',
-        cpus: process.env.BOB_WORKER_CPUS || '1',
-        pidsLimit: Number(process.env.BOB_WORKER_PIDS_LIMIT || 128),
-        browserCheck: profile === 'playwright-visual-check',
-        appUrl: targetAppUrl,
-        env: profile === 'playwright-visual-check' && targetAppUrl
-          ? { BOB_APP_URL: targetAppUrl }
-          : undefined
-      });
+    if (profile === 'playwright-visual-check' && targetAppUrls.length > 0) {
+      for (const browserCheckUrl of targetAppUrls) {
+        let attempt = 0;
+        let outcome;
+        while (attempt <= maxRetries) {
+          outcome = await (execute || (async () => ({ status: 'succeeded', exitCode: 0, profile, stdout: 'ok', stderr: '' })))({
+            image: workerImage || 'fcm/bob-worker:local',
+            sourceDir: resolvedRoot,
+            artifactDir: resolvedArtifacts,
+            profile,
+            timeoutMs: Number(process.env.BOB_WORKER_TIMEOUT_MS || 10 * 60 * 1000),
+            memory: process.env.BOB_WORKER_MEMORY || '1g',
+            cpus: process.env.BOB_WORKER_CPUS || '1',
+            pidsLimit: Number(process.env.BOB_WORKER_PIDS_LIMIT || 128),
+            browserCheck: true,
+            appUrl: browserCheckUrl,
+            env: { BOB_APP_URL: browserCheckUrl }
+          });
 
-      if (outcome?.status === 'failed' || outcome?.exitCode !== 0) {
-        attempt += 1;
-        if (attempt <= maxRetries) {
-          continue;
+          if (outcome?.status === 'failed' || outcome?.exitCode !== 0) {
+            attempt += 1;
+            if (attempt <= maxRetries) {
+              continue;
+            }
+          }
+          break;
+        }
+
+        const terminalStatus = outcome?.status === 'failed' || outcome?.exitCode !== 0 ? 'failed' : 'succeeded';
+        steps.push({
+          profile: `${profile}:${browserCheckUrl}`,
+          status: terminalStatus,
+          exitCode: outcome?.exitCode ?? 0,
+          stdout: outcome?.stdout || '',
+          stderr: outcome?.stderr || '',
+          artifactDir: resolvedArtifacts,
+          appUrl: browserCheckUrl,
+          requestedBy: 'self_hosted_bob',
+          retriesUsed: Math.max(0, Number(outcome?.retriesUsed ?? 0))
+        });
+
+        if (terminalStatus === 'failed') {
+          return {
+            mode: 'self_hosted_bob',
+            readOnly: true,
+            assessment,
+            plan,
+            steps,
+            paused: true,
+            reason: `verification_failed:${profile}:${browserCheckUrl}`
+          };
         }
       }
-      break;
-    }
+    } else {
+      let attempt = 0;
+      let outcome;
+      while (attempt <= maxRetries) {
+        outcome = await (execute || (async () => ({ status: 'succeeded', exitCode: 0, profile, stdout: 'ok', stderr: '' })))({
+          image: workerImage || 'fcm/bob-worker:local',
+          sourceDir: resolvedRoot,
+          artifactDir: resolvedArtifacts,
+          profile,
+          timeoutMs: Number(process.env.BOB_WORKER_TIMEOUT_MS || 10 * 60 * 1000),
+          memory: process.env.BOB_WORKER_MEMORY || '1g',
+          cpus: process.env.BOB_WORKER_CPUS || '1',
+          pidsLimit: Number(process.env.BOB_WORKER_PIDS_LIMIT || 128),
+          browserCheck: false,
+          appUrl: null,
+          env: undefined
+        });
 
-    const terminalStatus = outcome?.status === 'failed' || outcome?.exitCode !== 0 ? 'failed' : 'succeeded';
-    steps.push({
-      profile,
-      status: terminalStatus,
-      exitCode: outcome?.exitCode ?? 0,
-      stdout: outcome?.stdout || '',
-      stderr: outcome?.stderr || '',
-      artifactDir: resolvedArtifacts,
-      requestedBy: 'self_hosted_bob',
-      retriesUsed: Math.max(0, Number(outcome?.retriesUsed ?? 0))
-    });
+        if (outcome?.status === 'failed' || outcome?.exitCode !== 0) {
+          attempt += 1;
+          if (attempt <= maxRetries) {
+            continue;
+          }
+        }
+        break;
+      }
 
-    if (terminalStatus === 'failed') {
-      return {
-        mode: 'self_hosted_bob',
-        readOnly: true,
-        assessment,
-        plan,
-        steps,
-        paused: true,
-        reason: `verification_failed:${profile}`
-      };
+      const terminalStatus = outcome?.status === 'failed' || outcome?.exitCode !== 0 ? 'failed' : 'succeeded';
+      steps.push({
+        profile,
+        status: terminalStatus,
+        exitCode: outcome?.exitCode ?? 0,
+        stdout: outcome?.stdout || '',
+        stderr: outcome?.stderr || '',
+        artifactDir: resolvedArtifacts,
+        requestedBy: 'self_hosted_bob',
+        retriesUsed: Math.max(0, Number(outcome?.retriesUsed ?? 0))
+      });
+
+      if (terminalStatus === 'failed') {
+        return {
+          mode: 'self_hosted_bob',
+          readOnly: true,
+          assessment,
+          plan,
+          steps,
+          paused: true,
+          reason: `verification_failed:${profile}`
+        };
+      }
     }
   }
 

@@ -359,13 +359,17 @@ async function route(req, res, body) {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
     const jobId = decodeURIComponent(jobAssessmentMatch[1]);
     const appUrl = body.appUrl || 'http://127.0.0.1:4173';
+    const appUrls = Array.isArray(body.appUrls) && body.appUrls.length > 0
+      ? body.appUrls.filter(url => typeof url === 'string' && url.trim())
+      : [appUrl];
     const assessmentId = crypto.randomUUID();
     const assessment = {
       id: assessmentId,
       jobId,
       startedAt: new Date().toISOString(),
       status: 'pending',
-      steps: []
+      steps: [],
+      appUrls
     };
     jobAssessments.push(assessment);
     saveState();
@@ -377,7 +381,7 @@ async function route(req, res, body) {
         workerImage: builderWorkerImage || 'fcm/bob-worker:local',
         execute: executeWorker,
         assessmentFactory: createAssessment,
-        appUrl
+        appUrls
       });
       const completed = {
         ...assessment,
