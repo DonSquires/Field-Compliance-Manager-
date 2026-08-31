@@ -70,3 +70,55 @@ test('relationships workspace opens the operational account record', async ({ pa
   await expect(workspace.getByText('Agreement handover note')).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('administrator creates and edits organizations through the human account spine', async ({ page }) => {
+  const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
+
+  await page.getByRole('button', { name: 'Add organization' }).click();
+  let dialog = page.getByRole('dialog', { name: 'Find or add an organization' });
+  await dialog.getByLabel('Organization name').fill('Civic Events');
+  await dialog.getByRole('button', { name: 'Search organizations' }).click();
+  await expect(dialog.getByText('Possible matches')).toBeVisible();
+  await expect(dialog.getByText('Civic Events Limited', { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/Managed account/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close organization dialog' }).click();
+
+  await page.getByRole('button', { name: 'Add organization' }).click();
+  dialog = page.getByRole('dialog', { name: 'Find or add an organization' });
+  await dialog.getByLabel('Organization name').fill('Harbour Arts Trust');
+  await dialog.getByRole('button', { name: 'Search organizations' }).click();
+  await expect(dialog.getByText('No matching organizations found')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Create new prospect' }).click();
+  const create = page.getByRole('dialog', { name: 'Create prospect' });
+  await create.getByLabel('General email').fill('operations@harbourarts.test');
+  await create.getByLabel('Billing email').fill('accounts@harbourarts.test');
+  await create.getByLabel('Billing address').fill('8 Haven Road, Nelson');
+  await create.getByLabel('Account context').fill('Prospective venue compliance and patrol account.');
+  await create.getByRole('button', { name: 'Create inactive prospect' }).click();
+  const created = page.getByRole('dialog', { name: 'Prospect created' });
+  await expect(created.getByText('Harbour Arts Trust is now a prospect')).toBeVisible();
+  await expect(created.getByText(/Add the primary contact next/)).toBeVisible();
+  await created.getByRole('button', { name: 'Add primary contact' }).click();
+
+  const workspace = page.getByRole('dialog', { name: 'Harbour Arts Trust' });
+  await workspace.getByRole('button', { name: 'Add contact' }).click();
+  await workspace.getByLabel('First name').fill('Hana'); await workspace.getByLabel('Last name').fill('Te Aho');
+  await workspace.getByLabel('Role or title').fill('Venue Manager'); await workspace.getByLabel('Email').fill('hana@harbourarts.test');
+  await workspace.getByText('Primary contact', { exact: true }).click();
+  await workspace.getByRole('button', { name: 'Add contact', exact: true }).last().click();
+  await expect(workspace.getByText('Hana Te Aho')).toBeVisible();
+  await workspace.getByRole('button', { name: 'Close account workspace' }).click();
+
+  const prospect = page.getByText('Harbour Arts Trust', { exact: true }).locator('..').locator('..');
+  await expect(prospect.getByText('prospect · 0 sites')).toBeVisible();
+  await expect(prospect.getByText('Add covered site')).toBeVisible();
+
+  const civic = page.getByText('Civic Events Limited', { exact: true }).locator('..').locator('..');
+  await civic.getByRole('button', { name: 'Edit organization' }).click();
+  const edit = page.getByRole('dialog', { name: 'Edit Civic Events Limited' });
+  await expect(edit.getByLabel('NZBN')).toHaveValue('9429041234567');
+  await edit.getByLabel('Account context').fill('Annual events programme with confirmed winter operations.');
+  await edit.getByRole('button', { name: 'Save organization' }).click();
+  await expect(page.getByRole('status')).toContainText('Civic Events Limited organization details updated');
+  expect(errors, errors.join('\n')).toEqual([]);
+});

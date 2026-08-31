@@ -62,6 +62,23 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
   }
 });
 
+test('managed organization spine routes human actions through governed RPCs', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+
+  assert.equal(hasEdge('components/CrmOrganizationDialog', 'find_crm_organization_candidates', 'calls'), true);
+  assert.equal(hasEdge('components/CrmOrganizationDialog', 'manage_crm_organization', 'calls'), true);
+  assert.equal(hasEdge('pages/CRMPage', 'get_crm_organization_readiness', 'calls'), true);
+  assert.equal(hasEdge('manage_crm_organization', 'organizations', 'reads'), true);
+  assert.equal(hasEdge('manage_crm_organization', 'organizations', 'writes'), true);
+  assert.equal(hasEdge('manage_crm_organization', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('get_crm_organization_readiness', 'crm_contacts', 'reads'), true);
+  assert.equal(hasEdge('pages/OrganizationSetupPage', 'update_organization_profile', 'calls'), true);
+  assert.equal(hasEdge('update_organization_profile', 'organizations', 'writes'), true);
+  assert.equal(hasEdge('update_organization_profile', 'audit_log', 'writes'), true);
+  assert.equal(atlas.edges.some((edge) => edge.source_name === 'components/CrmOrganizationDialog' && edge.edge_kind === 'writes'), false);
+});
+
 test('Atlas refresh plan preserves manual truth and retires only owned stale rows', () => {
   const manifest = {
     capabilities: [{

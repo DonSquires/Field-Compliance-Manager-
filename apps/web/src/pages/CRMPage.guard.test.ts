@@ -39,4 +39,12 @@ describe('governed CRM accounts', () => {
     expect(page).toMatch(/\.rpc\(["']manage_crm_invoice["']/);
     expect(page).not.toMatch(/\.from\(["']invoices["']\)\.update/);
   });
+
+  it('searches and manages the organization spine with evidence-backed next actions', () => {
+    expect(page).toContain('CrmOrganizationDialog');
+    expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
+    expect(page).toContain('Add organization');
+    expect(page).toContain('client.next_action');
+    expect(page).not.toMatch(/\.from\(["']organizations["']\)\.insert/);
+  });
 });

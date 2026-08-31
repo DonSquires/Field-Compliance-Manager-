@@ -20,12 +20,20 @@ used here as a workflow hypothesis, not as evidence about the current UI.
 - `bob-propose-client-onboarding` creates pending Bob proposal records. It is an
   optional governed producer, not the human onboarding workflow or canonical
   readiness owner.
+- The active CRM organization spine now searches scoped name/NZBN candidates
+  before creation, creates retry-safe inactive prospects, race-checks edits,
+  and shows the next readiness action from canonical contact, site, agreement,
+  module, commercial, and work-unit evidence.
+- Provider profile changes in Organization Setup and account organization changes
+  are both RPC-owned and audited. Direct authenticated organization mutation is
+  revoked.
 
 ## Gaps Confirmed
 
-1. No human, resumable onboarding record exists.
-2. Organization duplicate prevention is strong only when NZBN is known. Name
-   search is not a uniqueness guarantee.
+1. No multi-stage, resumable onboarding record exists beyond the retry-safe
+  prospect identity record.
+2. Candidate search and in-hierarchy exact-name rejection are live. Name search
+  remains candidate evidence rather than a global uniqueness guarantee.
 3. Site `address_match_key` is indexed but not unique, so candidate review must
    precede creation and ambiguous matches must remain visible.
 4. Existing agreement readiness does not require an active primary contact,
@@ -87,14 +95,13 @@ sales/finance role boundary that the authorization schema cannot enforce.
 
 Implement these boundaries before exposing their corresponding UI actions:
 
-1. `find_crm_onboarding_candidates` for scoped organization/NZBN and site/address
-   candidate search.
-2. `start_crm_onboarding` for retry-safe draft creation or attachment to an
-   existing account.
-3. Governed organization, site, agreement, location-link, and module transitions.
-4. `get_crm_onboarding_readiness` composed from canonical tables and the existing
-   agreement readiness evidence.
-5. `activate_crm_account` with row locking, expected draft state, blocker checks,
+1. Extend live organization candidate search with governed site/address
+  candidate search.
+2. Add a resumable stage ledger attached to the existing retry-safe prospect.
+3. Add governed site, agreement, location-link, and module transitions.
+4. Extend live organization readiness with boundary/reporting evidence and
+  stage ownership.
+5. Add `activate_crm_account` with row locking, expected draft state, blocker checks,
    and audit provenance.
 
 ## Acceptance Criteria
