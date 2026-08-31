@@ -22,6 +22,7 @@ interface BuilderJob {
   status: string;
   current_step_name: string | null;
   target_sha: string;
+  branch_name: string;
   frontend_required: boolean;
   backend_required: boolean;
   code_review_mode: ReviewMode;
@@ -67,7 +68,72 @@ interface BuilderSnapshot {
   workerRuns: BuilderWorkerRun[];
 }
 
-const BuilderControlRoomPage: React.FC = () => {
+interface BuilderControlRoomPageProps {
+  onOpenBob?: (context: Record<string, unknown>) => void;
+}
+
+function buildBobBuilderContext({
+  selectedJob,
+  selectedProject,
+  snapshot,
+  frontendFiles,
+  backendFiles,
+  reviewerModel,
+}: {
+  selectedJob: BuilderJob | null;
+  selectedProject: BuilderProject | null;
+  snapshot: BuilderSnapshot | null;
+  frontendFiles: string;
+  backendFiles: string;
+  reviewerModel: string;
+}) {
+  return {
+    builder: {
+      surface: 'builder_control_room',
+      intent: 'agentic_app_builder',
+      selectedProject: selectedProject ? {
+        id: selectedProject.id,
+        organization_id: selectedProject.organization_id,
+        repository: `${selectedProject.gitea_owner}/${selectedProject.gitea_repo}`,
+      } : null,
+      selectedJob: selectedJob ? {
+        id: selectedJob.id,
+        organization_id: selectedJob.organization_id,
+        project_id: selectedJob.project_id,
+        title: selectedJob.title,
+        status: selectedJob.status,
+        current_step_name: selectedJob.current_step_name,
+        target_sha: selectedJob.target_sha,
+        branch_name: selectedJob.branch_name,
+        frontend_required: selectedJob.frontend_required,
+        backend_required: selectedJob.backend_required,
+        code_review_mode: selectedJob.code_review_mode,
+        code_review_status: selectedJob.code_review_status,
+        last_error: selectedJob.last_error,
+      } : null,
+      steps: (snapshot?.steps ?? []).map(step => ({
+        step_id: step.step_id,
+        builder_mode: step.builder_mode,
+        status: step.status,
+        retryable: step.retryable,
+        result_summary: step.result_summary,
+        error: step.error,
+      })),
+      evidence: {
+        artifact_count: snapshot?.artifacts.length ?? 0,
+        worker_run_count: snapshot?.workerRuns.length ?? 0,
+      },
+      operatorInputs: {
+        frontend_files: frontendFiles.split(/\r?\n/).map(item => item.trim()).filter(Boolean),
+        backend_files: backendFiles.split(/\r?\n/).map(item => item.trim()).filter(Boolean),
+        reviewer_model_name: reviewerModel.trim() || null,
+      },
+      allowedActions: ['create_job', 'inspect_job', 'advance_next_step', 'run_to_human_gate'],
+    },
+  };
+}
+
+const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenBob }) => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [jobs, setJobs] = useState<BuilderJob[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -180,12 +246,16 @@ const BuilderControlRoomPage: React.FC = () => {
   };
 
   const selectedJob = useMemo(() => jobs.find(job => job.id === selectedId) ?? snapshot?.job ?? null, [jobs, selectedId, snapshot]);
+  const openBobBuilder = () => {
+    onOpenBob?.(buildBobBuilderContext({ selectedJob, selectedProject, snapshot, frontendFiles, backendFiles, reviewerModel }));
+  };
 
   return (
     <div className="builder-page">
       <header className="builder-heading">
         <div><span>Bob build system</span><h1>Builder control room</h1><p>Run governed implementation work to the next evidence or approval boundary.</p></div>
         <div className="builder-heading-actions">
+          <button type="button" onClick={openBobBuilder}><Bot size={16} /> Ask Bob</button>
           <button type="button" onClick={() => void loadList()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /> Refresh</button>
           <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> New job</button>
         </div>
@@ -240,6 +310,7 @@ const BuilderControlRoomPage: React.FC = () => {
             </div>
             <div className="builder-evidence"><span>{snapshot.artifacts.length} artifacts</span><span>{snapshot.workerRuns.length} worker runs</span></div>
             <div className="builder-actions">
+              <button type="button" onClick={openBobBuilder}><Bot size={15} /> Discuss with Bob</button>
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
             </div>

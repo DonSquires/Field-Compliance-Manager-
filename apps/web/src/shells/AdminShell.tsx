@@ -206,6 +206,7 @@ const AdminShell: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bobOpen, setBobOpen] = useState(false);
+  const [bobContextOverride, setBobContextOverride] = useState<Record<string, unknown> | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
 
@@ -331,6 +332,22 @@ const AdminShell: React.FC = () => {
     return false;
   }, [navigateToFieldOps, navigateToPage, profile?.role]);
 
+  const openBobWithContext = useCallback((context?: Record<string, unknown>) => {
+    setBobContextOverride(context ?? null);
+    setBobOpen(true);
+  }, []);
+
+  const openApprovalsFromBob = useCallback(() => {
+    setBobOpen(false);
+    setBobContextOverride(null);
+    navigateToPage('approvals');
+  }, [navigateToPage]);
+
+  const closeBob = useCallback(() => {
+    setBobOpen(false);
+    setBobContextOverride(null);
+  }, []);
+
   const bobContext = useMemo(() => ({
     page: activePage,
     crmTab,
@@ -345,7 +362,8 @@ const AdminShell: React.FC = () => {
     agreements: agreements.slice(0, 10),
     sites: sites.slice(0, 10),
     zones: zones.slice(0, 10),
-  }), [activePage, crmTab, rosterTab, fieldOpsSubArea, reportsTab, orgName, profile?.role, selectedAgreement, selectedSite, selectedZone, agreements, sites, zones]);
+    ...(bobContextOverride ?? {}),
+  }), [activePage, crmTab, rosterTab, fieldOpsSubArea, reportsTab, orgName, profile?.role, selectedAgreement, selectedSite, selectedZone, agreements, sites, zones, bobContextOverride]);
 
   const renderPage = useCallback(() => {
     switch (activePage) {
@@ -401,7 +419,7 @@ const AdminShell: React.FC = () => {
       case 'platform':
         return <GrandMasterPlatformPage />;
       case 'builder':
-        return <BuilderControlRoomPage />;
+        return <BuilderControlRoomPage onOpenBob={openBobWithContext} />;
       case 'platform-catalog':
         return <ModuleCatalogPage />;
       case 'platform-subscriptions':
@@ -417,7 +435,7 @@ const AdminShell: React.FC = () => {
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateFromHub, navigateToFieldOps]);
+  }, [activePage, fieldOpsSubArea, navigateFromHub, navigateToFieldOps, openBobWithContext]);
 
   if (!isMobile) {
     return (
@@ -484,7 +502,8 @@ const AdminShell: React.FC = () => {
 
         <BobPanel
           open={bobOpen}
-          onClose={() => setBobOpen(false)}
+          onClose={closeBob}
+          onOpenApprovals={openApprovalsFromBob}
           context={bobContext}
         />
 
@@ -556,7 +575,8 @@ const AdminShell: React.FC = () => {
 
       <BobPanel
         open={bobOpen}
-        onClose={() => setBobOpen(false)}
+        onClose={closeBob}
+        onOpenApprovals={openApprovalsFromBob}
         context={bobContext}
       />
 

@@ -29,6 +29,7 @@ test('atlas, oracle, caddie, conductor, endpoint, db, and UI/UX calibration stay
   assert.ok(status.modules.includes('aggregate_builder_review'));
   assert.ok(status.modules.includes('builder_runtime_coordinator'));
   assert.ok(status.modules.includes('builder_control_room'));
+  assert.ok(status.modules.includes('bob_control_plane_host_runtime'));
   assert.ok(status.modules.includes('release_preparation'));
   assert.ok(status.modules.includes('optional_code_review'));
   assert.ok(status.modules.includes('officer_safety_system'));
@@ -62,6 +63,7 @@ test('calibration update writes a fresh status artifact across all surfaces', ()
     'builder-security-handoff.js': 'builder_claim_aggregate_security_review\nimplementationWorkerRunIds\naggregate security evidence\nbuilder_recover_expired_security_review',
     'builder-runtime-coordinator.js': 'planBuilderAction\nadvanceBuilderJob\nrunBuilderUntilPause\nwaiting_for_human\naction_limit',
     'supabase/functions/bob-builder-control-room/index.ts': "CAN_BUILD\nadmin.rpc('builder_create_job'\ncanAccessOrganization\naction === 'advance' || action === 'run'\nsafeSnapshot",
+    'deploy/bob-control-plane/bob-control-plane.service': 'User=bob-builder\nSupplementaryGroups=docker\nHOST=127.0.0.1\nNoNewPrivileges=true\nProtectSystem=strict',
     'supabase/functions/_shared/builder-release-engineer.js': 'deriveReleaseImpact\nrollback_steps\ndeployment_enabled\napproval',
     'supabase/functions/_shared/builder-independent-code-review.js': 'parseIndependentCodeReview\nreviewerModelName\nabortIndependentCodeReview\nno approval',
     'apps/web/src/hooks/useOfficerSafety.ts': 'recordMovement\nacknowledgeAlert\ndetectionState\nactiveAlert',
@@ -107,6 +109,7 @@ test('atlas graph maps app, platform, deployment, and governance domains with ch
   assert.ok(graph.nodes.some((node) => node.type === 'service' && node.name === 'bob-control-plane'));
   assert.ok(graph.concreteEdges.some((edge) => edge.source === 'route:/assessment' && edge.target === 'service:bob-control-plane'));
   assert.ok(graph.concreteEdges.some((edge) => edge.source === 'edge_function:bob-query-atlas' && edge.target === 'table:bob_app_map_edges'));
+  assert.ok(graph.concreteEdges.some((edge) => edge.source === 'edge_function:bob-builder-control-room' && edge.target === 'service:bob-control-plane'));
 
   const synced = syncAtlasGraph(rootDir);
   assert.equal(synced.ok, true);

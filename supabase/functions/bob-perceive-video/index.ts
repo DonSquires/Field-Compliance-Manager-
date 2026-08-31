@@ -119,7 +119,7 @@ serve(async (req)=>{
     if (!attachmentId) return json({
       error: 'attachment_id is required'
     }, 400);
-    const { data: att } = await admin.from('bob_attachments').select('id, organization_id, file_name, purpose, storage_path, metadata').eq('id', attachmentId).maybeSingle();
+    const { data: att } = await admin.from('bob_attachments').select('id, organization_id, file_name, purpose, storage_path').eq('id', attachmentId).maybeSingle();
     if (!att) return json({
       error: 'Attachment not found'
     }, 404);
@@ -128,7 +128,7 @@ serve(async (req)=>{
       file_name: att.file_name,
       storage_path: att.storage_path,
       organization_id: att.organization_id,
-      capture_metadata: att.metadata ?? null
+      capture_metadata: null
     };
     if (!BOB_MEDIA_URL || !BOB_MEDIA_SECRET) {
       return json({

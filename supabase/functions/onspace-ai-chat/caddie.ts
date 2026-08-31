@@ -189,6 +189,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; human-confirms-before-dispatch; output is always DRAFT MR; Bob NEVER merges',
     effect_class: 'draft_governed_write'
   },
+  builder_control_room: {
+    purpose: 'Create, inspect, advance, or run governed Builder jobs through the Bob Builder control room. Use this when the user asks you to recommend a fix and then design/build/repair it from the chat panel. Actions: list, create, get, advance, run. Execution remains org-scoped, commit-pinned, evidence-backed, and pauses at human approval gates; Bob never receives raw shell or deployment authority.',
+    governance: 'WRITE-governed; master/grand_master only; commit-pinned Builder jobs; human gates remain enforced',
+    effect_class: 'draft_governed_write'
+  },
   generic_write: {
     purpose: 'RESERVED (not yet active): a governed, schema-driven create/update on an allowlisted table via the generic path, for entities no bespoke propose_* tool covers. Staged for a governed rollout; currently blocked.',
     governance: 'WRITE-governed; governance-locked (not yet active); bounded by TABLE_ALLOWLIST + GUARDED_COLUMNS + AUTH_DELEGATE',
@@ -279,6 +284,7 @@ const TOOL_REGISTRY = {
   if (effectClass === 'draft_governed_write') {
     // confirm_import is draft_governed_write but gated on canIngest (broader)
     if (tool === 'confirm_import') return caps.canIngest;
+    if (tool === 'builder_control_room') return caps.tier === 'admiral' || caps.tier === 'captain';
     return caps.canPromote;
   }
   // direct_world_change: admiral only (write_bob_chat, write_self_memory)
@@ -539,6 +545,7 @@ const TOOL_REGISTRY = {
     self_audit: 'bob-self-audit',
     review_merge_request: 'bob-review-merge-request',
     dispatch_flow: 'bob-dispatch-flow',
+    builder_control_room: 'bob-builder-control-room',
     check_proposals: 'bob-check-proposals',
     generic_write: 'bob-upsert-generic',
     // Proposal tools — each dispatches to its OWN edge function, NOT to

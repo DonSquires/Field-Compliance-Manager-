@@ -12,6 +12,10 @@ const LOCAL_WORKLOADS = new Set([
   'simple_documentation'
 ]);
 
+function normalizeProvider(value, fallback = PROVIDERS.OLLAMA) {
+  return Object.values(PROVIDERS).includes(value) ? value : fallback;
+}
+
 function stableSerialize(value) {
   if (Array.isArray(value)) {
     return `[${value.map(stableSerialize).join(',')}]`;
@@ -24,7 +28,7 @@ function stableSerialize(value) {
   return JSON.stringify(value);
 }
 
-function routeBuilderModel({ workloadKind, containsRestrictedData = false }) {
+function routeBuilderModel({ workloadKind, containsRestrictedData = false, preferredProvider = PROVIDERS.OLLAMA }) {
   if (!workloadKind || typeof workloadKind !== 'string') {
     throw new Error('workloadKind is required');
   }
@@ -36,9 +40,17 @@ function routeBuilderModel({ workloadKind, containsRestrictedData = false }) {
     };
   }
 
+  const provider = normalizeProvider(preferredProvider);
+  if (provider === PROVIDERS.OLLAMA) {
+    return {
+      provider: PROVIDERS.OLLAMA,
+      reason: 'local_first_builder_workload'
+    };
+  }
+
   return {
     provider: PROVIDERS.OPENAI,
-    reason: 'complex_builder_workload'
+    reason: 'explicit_external_builder_provider'
   };
 }
 
@@ -54,7 +66,8 @@ function buildModelRunRequest({
   inputArtifactIds = [],
   outputSchema = null,
   containsRestrictedData = false,
-  modelName = null
+  modelName = null,
+  preferredProvider = PROVIDERS.OLLAMA
 }) {
   if (!organizationId || !jobId || !builderMode || !promptVersion) {
     throw new Error('organizationId, jobId, builderMode, and promptVersion are required');
@@ -63,7 +76,7 @@ function buildModelRunRequest({
     throw new Error('systemPrompt and userPrompt are required');
   }
 
-  const route = routeBuilderModel({ workloadKind, containsRestrictedData });
+  const route = routeBuilderModel({ workloadKind, containsRestrictedData, preferredProvider });
   const requestBody = {
     provider: route.provider,
     model_name: modelName,

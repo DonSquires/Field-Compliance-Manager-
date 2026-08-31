@@ -1,0 +1,20 @@
+# Install as /etc/bob-control-plane.env, owned by root:bob-builder and mode 0640.
+# Values belong in the host secret store; never commit the populated file.
+BOB_ADMIN_TOKEN=
+BOB_RUNNER_TOKEN=
+BOB_MODEL_GATEWAY_TOKEN=
+BOB_ALLOWED_REPOSITORIES=DonSquires/Field-Compliance-Manager-
+BOB_ALLOWED_REFS=refs/heads/main
+BOB_ASSESSMENT_ROOT=/opt/bob-control-plane/current
+BOB_STATE_DIR=/var/lib/bob
+BOB_WORKER_IMAGE=fcm/bob-worker:local
+BOB_BUILDER_RUNNER_ID=bob-builder-host
+BOB_WORKER_TIMEOUT_MS=900000
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+# Bob routes Builder work to Ollama/local by default. Leave OpenAI blank unless an explicit external fallback is approved.
+OPENAI_API_KEY=
+# For a local VPS model use http://127.0.0.1:11434. For hPanel GPU, use a private authenticated gateway URL, not a public Ollama port.
+OLLAMA_URL=http://127.0.0.1:11434
+BOB_OLLAMA_AUTH_TOKEN=
+BOB_OLLAMA_MODELS=qwen2.5:7b

@@ -35,6 +35,24 @@ interface HealthCheckResult {
   [key: string]: any;
 }
 
+function formatServiceLabel(service: string): string {
+  const normalized = service.trim();
+  if (!normalized) return 'Service';
+  const byName: Record<string, string> = {
+    'bob-control-plane': 'Bob Control Plane',
+    'bob control plane': 'Bob Control Plane',
+    'bob_control_plane': 'Bob Control Plane',
+    ptt: 'PTT Server',
+    inference: 'Inference',
+    supabase: 'Supabase',
+  };
+  if (byName[normalized]) return byName[normalized];
+  return normalized
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
 const GrandMasterPlatformPage: React.FC = () => {
   const { profile } = useAuth();
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);
@@ -97,7 +115,19 @@ const GrandMasterPlatformPage: React.FC = () => {
       // ATLAS CALLS: check-services-health
       const { data, error: fnError } = await supabase.functions.invoke('check-services-health', { body: {} });
       if (fnError) throw fnError;
-      setHealth((data?.services as HealthCheckResult[]) || (Array.isArray(data) ? data : []));
+
+      const nextHealth: HealthCheckResult[] = Object.entries(data ?? {}).reduce<HealthCheckResult[]>((items, [service, entry]) => {
+        if (service === 'checkedAt') return items;
+        const value = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+        items.push({
+          service: String(service).replace(/_/g, ' '),
+          status: String(value.status ?? 'unknown'),
+          ...value,
+        });
+        return items;
+      }, []);
+
+      setHealth(nextHealth.length ? nextHealth : (Array.isArray(data) ? data as HealthCheckResult[] : []));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run health check');
     } finally {
@@ -192,11 +222,17 @@ const GrandMasterPlatformPage: React.FC = () => {
             {health.map((h, idx) => (
               <div key={idx} className="contact-card">
                 <div className="contact-header">
-                  <h3>{h.service || `Check ${idx + 1}`}</h3>
-                  <span className={`status-badge status-${h.status === 'ok' ? 'active' : 'inactive'}`}>
-                    {h.status}
+                  <h3>{formatServiceLabel(h.service || `Check ${idx + 1}`)}</h3>
+                  <span className={`status-badge status-${['online', 'ok'].includes(String(h.status)) ? 'active' : 'inactive'}`}>
+                    {String(h.status)}
                   </span>
                 </div>
+                {typeof h.builderReady === 'boolean' && (
+                  <p className="contact-details">Builder ready: {String(h.builderReady)}</p>
+                )}
+                {formatServiceLabel(h.service || '').includes('Bob Control Plane') && typeof h.selfHostedProfiles !== 'undefined' && (
+                  <p className="contact-details">Profiles: {Array.isArray(h.selfHostedProfiles) ? h.selfHostedProfiles.join(', ') : String(h.selfHostedProfiles)}</p>
+                )}
               </div>
             ))}
           </div>

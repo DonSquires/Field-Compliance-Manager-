@@ -7,7 +7,8 @@ const WORKER_PROFILES = Object.freeze({
   lint: Object.freeze(['npm', 'run', 'lint']),
   'frontend-verify': Object.freeze(['node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
   'backend-verify': Object.freeze(['node', '/opt/bob/backend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
-  'security-review': Object.freeze(['node', '/opt/bob/security-worker.js', '/artifacts/validated.patch', '/artifacts/changed-files.json', '/artifacts/security-review.json'])
+  'security-review': Object.freeze(['node', '/opt/bob/security-worker.js', '/artifacts/validated.patch', '/artifacts/changed-files.json', '/artifacts/security-review.json']),
+  'playwright-visual-check': Object.freeze(['node', '/opt/bob/browser-verifier.js', '/workspace', '/artifacts'])
 });
 
 function workerCommand(profile) {
@@ -16,7 +17,7 @@ function workerCommand(profile) {
   return [...command];
 }
 
-function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g', cpus = '1', pidsLimit = 128 }) {
+function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g', cpus = '1', pidsLimit = 128, env = {} }) {
   if (!image) throw new Error('worker image is required');
   if (!sourceDir || !artifactDir) throw new Error('sourceDir and artifactDir are required');
   const command = workerCommand(profile);
@@ -34,6 +35,9 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g'
   ];
   if (profile === 'frontend-verify' || profile === 'backend-verify') {
     args.push('--tmpfs=/work:rw,exec,nosuid,size=1024m');
+  }
+  if (profile === 'playwright-visual-check' && env.BOB_APP_URL) {
+    args.push('-e', `BOB_APP_URL=${env.BOB_APP_URL}`);
   }
   args.push(
     '--mount', `type=bind,src=${sourceDir},dst=/workspace,readonly`,

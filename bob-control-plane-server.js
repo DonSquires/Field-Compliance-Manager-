@@ -2,14 +2,19 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const { createClient } = require('@supabase/supabase-js');
 const { createWorkflowClient } = require('./supabase-workflow-client');
 const { createAssessment } = require('./assessment-manifest');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
-const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
+const { createModelGatewayConfig, modelGatewayReadiness, invokeBuilderModel } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
+const { executeWorker } = require('./worker-executor');
+const { runSelfHostedBuildLoop } = require('./bob-self-hosted');
+const { runVisualCheck } = require('./browser-verifier');
 
 const port = Number(process.env.PORT || 8080);
+const host = process.env.HOST || '0.0.0.0';
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
 const adminToken = process.env.BOB_ADMIN_TOKEN || '';
 const runnerToken = process.env.BOB_RUNNER_TOKEN || '';
@@ -18,6 +23,10 @@ const assessmentRoot = process.env.BOB_ASSESSMENT_ROOT || '/app';
 const allowedRepositories = new Set((process.env.BOB_ALLOWED_REPOSITORIES || '')
   .split(',')
   .map(repository => repository.trim())
+  .filter(Boolean));
+const allowedRefs = new Set((process.env.BOB_ALLOWED_REFS || 'refs/heads/main,main')
+  .split(',')
+  .map(ref => ref.trim())
   .filter(Boolean));
 const stateDir = process.env.BOB_STATE_DIR || '/data';
 const workflowClient = createWorkflowClient({
@@ -43,6 +52,36 @@ const jobs = new Map();
 const deliveries = new Set();
 const audit = [];
 let activeLease = null;
+let dockerReadinessCache = { checkedAt: 0, available: false };
+
+function detectDockerAccess(spawn = spawnSync) {
+  const result = spawn('docker', ['version', '--format', '{{.Server.Version}}'], {
+    encoding: 'utf8',
+    timeout: 5000,
+    stdio: ['ignore', 'pipe', 'ignore']
+  });
+  return result.status === 0 && Boolean(String(result.stdout || '').trim());
+}
+
+function cachedDockerAccess(now = Date.now(), detect = detectDockerAccess) {
+  if (now - dockerReadinessCache.checkedAt >= 15000) {
+    dockerReadinessCache = { checkedAt: now, available: detect() };
+  }
+  return dockerReadinessCache.available;
+}
+
+function builderRuntimeReadiness({ dockerAccess = detectDockerAccess() } = {}) {
+  const modelReadiness = modelGatewayReadiness(modelGatewayConfig);
+  const checks = {
+    persistence_configured: Boolean(builderSupabase),
+    model_gateway_configured: Boolean(modelGatewayToken && modelReadiness.ollama_configured),
+    local_model_configured: modelReadiness.ollama_configured,
+    worker_image_configured: Boolean(builderWorkerImage),
+    repository_available: fs.existsSync(path.join(assessmentRoot, '.git')),
+    docker_available: Boolean(dockerAccess)
+  };
+  return { ready: Object.values(checks).every(Boolean), checks, modelGateway: modelReadiness };
+}
 
 function saveState() {
   fs.mkdirSync(stateDir, { recursive: true });
@@ -98,6 +137,15 @@ function modelGatewayAuthorized(req) {
 
 function repositoryAllowed(repository) {
   return Boolean(repository) && allowedRepositories.has(repository);
+}
+
+function refAllowed(ref = 'main') {
+  if (!ref || typeof ref !== 'string') return false;
+  return allowedRefs.has(ref) || allowedRefs.has(ref.replace(/^refs\/heads\//, ''));
+}
+
+function giteaEvent(req) {
+  return String(req.headers['x-gitea-event'] || '').toLowerCase();
 }
 
 function boundedStringArray(value, maximum = 100) {
@@ -168,11 +216,97 @@ async function createJob(input, actor) {
 
 async function route(req, res, body) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease) });
+  if (req.method === 'GET' && url.pathname === '/health') {
+    const runtime = builderRuntimeReadiness({ dockerAccess: cachedDockerAccess() });
+    return json(res, 200, { status: runtime.ready ? 'ok' : 'degraded', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderRuntimeReady: runtime.ready });
+  }
+  if (req.method === 'GET' && url.pathname === '/ready') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const runtime = builderRuntimeReadiness();
+    return json(res, runtime.ready ? 200 : 503, runtime);
+  }
   if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run') {
     if (!modelGatewayAuthorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
     const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig });
     return json(res, result.status, result.body);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/bob/builder/self-hosted/loop') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const profiles = Array.isArray(body.profiles) ? body.profiles.filter(profile => typeof profile === 'string' && profile.trim()) : ['assessment', 'test'];
+    const dryRun = body.dryRun === true;
+    const selectedProfiles = profiles.length ? profiles : ['assessment', 'test'];
+    const appUrl = body.appUrl || process.env.BOB_APP_URL || process.env.VITE_APP_URL || null;
+    const runner = dryRun
+      ? async ({ profile, sourceDir, artifactDir, image, env }) => ({
+          status: 'succeeded',
+          exitCode: 0,
+          profile,
+          stdout: `dry-run:${profile}${env && env.BOB_APP_URL ? `:${env.BOB_APP_URL}` : ''}`,
+          stderr: '',
+          sourceDir,
+          artifactDir,
+          image,
+          env
+        })
+      : async options => {
+          try {
+            const workerOptions = {
+              ...options,
+              env: options.env || (options.profile === 'playwright-visual-check' && appUrl ? { BOB_APP_URL: appUrl } : {})
+            };
+            return await executeWorker(workerOptions);
+          } catch (error) {
+            return {
+              status: 'failed',
+              exitCode: 1,
+              profile: options.profile,
+              stdout: '',
+              stderr: String(error && error.message ? error.message : error),
+              sourceDir: options.sourceDir,
+              artifactDir: options.artifactDir,
+              image: options.image,
+              env: options.env
+            };
+          }
+        };
+    const result = await runSelfHostedBuildLoop({
+      rootDir: assessmentRoot,
+      artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+      profiles: selectedProfiles,
+      workerImage: builderWorkerImage || body.workerImage || 'fcm/bob-worker:local',
+      execute: runner,
+      assessmentFactory: createAssessment,
+      appUrl
+    });
+    return json(res, 200, result);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/bob/builder/browser-check') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const appUrl = body.appUrl || body.url || process.env.BOB_APP_URL || process.env.VITE_APP_URL;
+    if (!appUrl || typeof appUrl !== 'string') {
+      return json(res, 400, { error: 'appUrl is required' });
+    }
+    try {
+      const result = await runVisualCheck({
+        appUrl,
+        sourceDir: assessmentRoot,
+        artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+        testName: typeof body.testName === 'string' && body.testName.trim() ? body.testName.trim() : 'bob-hosted-browser-check'
+      });
+      return json(res, 200, {
+        mode: 'browser_check',
+        appUrl,
+        manifestPath: result.manifestPath,
+        screenshotPath: result.screenshotPath,
+        result: result.result
+      });
+    } catch (error) {
+      return json(res, 500, {
+        error: 'browser check failed',
+        details: String(error && error.message ? error.message : error),
+        appUrl
+      });
+    }
   }
   if (req.method === 'GET' && url.pathname === '/assessment') {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
@@ -180,12 +314,35 @@ async function route(req, res, body) {
     const atlas = buildAtlasGraph(assessmentRoot);
     return json(res, 200, { ...assessment, sourceRoot: assessmentRoot, atlas });
   }
+  if (req.method === 'GET' && url.pathname === '/system') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const assessment = createAssessment(assessmentRoot);
+    const atlas = buildAtlasGraph(assessmentRoot);
+    const runtime = builderRuntimeReadiness({ dockerAccess: cachedDockerAccess() });
+    const selfHosted = {
+      mode: 'self_hosted_bob',
+      readOnly: true,
+      defaultProfiles: ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'],
+      summary: 'Self-hosted Bob performs evidence-based repository assessment, app validation, and browser-level visual checks before any approval.'
+    };
+    return json(res, 200, {
+      service: 'bob-control-plane',
+      sourceRoot: assessmentRoot,
+      assessment,
+      atlas,
+      builderRuntime: runtime,
+      modelGateway: modelGatewayReadiness(modelGatewayConfig),
+      selfHosted,
+      activeLease: Boolean(activeLease)
+    });
+  }
   const workerRoute = req.method === 'POST' && /^\/jobs\/[^/]+\/(pickup|artifacts)$/.test(url.pathname);
   if (!authorized(req) && !workerRoute) return json(res, 401, { error: 'unauthorized' });
 
   if (req.method === 'POST' && url.pathname === '/jobs') {
     if (!body.repository) return json(res, 400, { error: 'repository is required' });
     if (!repositoryAllowed(body.repository)) return json(res, 403, { error: 'repository is not allowed' });
+    if (!refAllowed(body.ref || 'main')) return json(res, 403, { error: 'ref is not allowed' });
     return json(res, 201, await createJob(body, 'admin'));
   }
 
@@ -349,14 +506,17 @@ const server = http.createServer(async (req, res) => {
       const body = raw ? JSON.parse(raw) : {};
       if (req.method === 'POST' && req.url === '/webhooks/gitea') {
         if (!webhookValid(req, raw)) return json(res, 401, { error: 'invalid webhook signature' });
+        const event = giteaEvent(req);
+        if (event !== 'push') return json(res, 400, { error: 'unsupported webhook event' });
         const delivery = req.headers['x-gitea-delivery'] || req.headers['x-request-id'];
         if (delivery && deliveries.has(delivery)) return json(res, 202, { accepted: true, duplicate: true });
         const repository = body.repository?.full_name || body.repository?.name;
         if (!repositoryAllowed(repository)) return json(res, 403, { error: 'repository is not allowed' });
+        if (!refAllowed(body.ref)) return json(res, 403, { error: 'ref is not allowed' });
         if (delivery) deliveries.add(delivery);
         saveState();
         const job = await createJob({ repository, ref: body.ref, commitSha: body.after }, 'gitea');
-        record('gitea', 'webhook.received', job.id, { delivery });
+        record('gitea', 'webhook.received', job.id, { delivery, event });
         return json(res, 202, { accepted: true, jobId: job.id });
       }
       await route(req, res, body);
@@ -364,4 +524,6 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(port, '0.0.0.0', () => console.log(`bob-control-plane listening on ${port}`));
+server.listen(port, host, () => console.log(`bob-control-plane listening on ${host}:${port}`));
+
+module.exports = { builderRuntimeReadiness, cachedDockerAccess, detectDockerAccess };

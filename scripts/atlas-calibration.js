@@ -92,6 +92,11 @@ const REQUIREMENTS = [
     requiredMarkers: ['CAN_BUILD', "admin.rpc('builder_create_job'", 'canAccessOrganization', "action === 'advance' || action === 'run'", 'safeSnapshot']
   },
   {
+    name: 'bob_control_plane_host_runtime',
+    file: 'deploy/bob-control-plane/bob-control-plane.service',
+    requiredMarkers: ['User=bob-builder', 'SupplementaryGroups=docker', 'HOST=127.0.0.1', 'NoNewPrivileges=true', 'ProtectSystem=strict']
+  },
+  {
     name: 'release_preparation',
     file: 'supabase/functions/_shared/builder-release-engineer.js',
     requiredMarkers: ['deriveReleaseImpact', 'rollback_steps', 'deployment_enabled', 'approval']

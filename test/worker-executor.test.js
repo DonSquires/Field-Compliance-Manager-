@@ -20,6 +20,9 @@ test('worker profiles use fixed commands', () => {
     'node', '/opt/bob/security-worker.js', '/artifacts/validated.patch',
     '/artifacts/changed-files.json', '/artifacts/security-review.json'
   ]);
+  assert.deepEqual(workerCommand('playwright-visual-check'), [
+    'node', '/opt/bob/browser-verifier.js', '/workspace', '/artifacts'
+  ]);
   assert.throws(() => workerCommand('shell'), /unsupported worker profile/);
 });
 
@@ -38,6 +41,17 @@ test('docker arguments enforce worker isolation', () => {
   assert.equal(args.includes('npm'), true);
   assert.equal(args.includes('shell'), false);
   assert.equal(args.includes('/var/run/docker.sock'), false);
+});
+
+test('browser validation passes the app URL into the isolated worker environment', () => {
+  const args = dockerArguments({
+    image: 'fcm/bob-worker:test',
+    sourceDir: '/tmp/source',
+    artifactDir: '/tmp/artifacts',
+    profile: 'playwright-visual-check',
+    env: { BOB_APP_URL: 'https://app.example.com' }
+  });
+  assert.ok(args.some(value => value.includes('BOB_APP_URL=https://app.example.com')));
 });
 
 test('frontend verification executes only in disposable tmpfs while source remains read-only', () => {

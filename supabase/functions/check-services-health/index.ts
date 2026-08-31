@@ -15,6 +15,8 @@ const corsHeaders = {
 const INFERENCE_SERVICE_URL = Deno.env.get('INFERENCE_SERVICE_URL') ?? '';
 const INFERENCE_API_KEY = Deno.env.get('INFERENCE_API_KEY') ?? '';
 const PTT_SERVER_URL = Deno.env.get('PTT_SERVER_URL') ?? '';
+const BOB_CONTROL_PLANE_URL = Deno.env.get('BOB_CONTROL_PLANE_URL') ?? '';
+const BOB_CONTROL_PLANE_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN') ?? '';
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
@@ -70,6 +72,35 @@ serve(async (req)=>{
     }
   } else {
     results.ptt = {
+      status: 'not_configured'
+    };
+  }
+  if (BOB_CONTROL_PLANE_URL && BOB_CONTROL_PLANE_TOKEN) {
+    try {
+      const res = await fetch(`${BOB_CONTROL_PLANE_URL.replace(/\/+$/, '')}/system`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${BOB_CONTROL_PLANE_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        signal: AbortSignal.timeout(10000)
+      });
+      const data = await res.json().catch(() => ({}));
+      const builderReady = Boolean(data?.builderRuntime?.ready);
+      results.bob_control_plane = {
+        status: res.ok && builderReady ? 'online' : res.ok ? 'degraded' : 'offline',
+        httpStatus: res.status,
+        service: data?.service || 'bob-control-plane',
+        builderReady,
+        selfHostedProfiles: data?.selfHosted?.defaultProfiles ?? []
+      };
+    } catch {
+      results.bob_control_plane = {
+        status: 'offline'
+      };
+    }
+  } else {
+    results.bob_control_plane = {
       status: 'not_configured'
     };
   }

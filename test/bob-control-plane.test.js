@@ -38,6 +38,7 @@ test.before(async () => {
       BOB_ASSESSMENT_ROOT: root,
       GITEA_WEBHOOK_SECRET: webhookSecret,
       BOB_ALLOWED_REPOSITORIES: 'example/app',
+      BOB_ALLOWED_REFS: 'refs/heads/main,main',
       BOB_STATE_DIR: stateDir
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -61,7 +62,26 @@ test.after(() => {
 test('health is public and reports the control plane', async () => {
   const { response, body } = await request('GET', '/health');
   assert.equal(response.status, 200);
-  assert.deepEqual(body, { status: 'ok', service: 'bob-control-plane', activeLease: false });
+  assert.deepEqual(body, { status: 'degraded', service: 'bob-control-plane', activeLease: false, builderRuntimeReady: false });
+});
+
+test('readiness is authenticated and reports only bounded dependency state', async () => {
+  const denied = await request('GET', '/ready');
+  assert.equal(denied.response.status, 401);
+  const allowed = await request('GET', '/ready', undefined, { authorization: `Bearer ${adminToken}` });
+  assert.equal(allowed.response.status, 503);
+  assert.equal(allowed.body.ready, false);
+  assert.deepEqual(Object.keys(allowed.body.checks).sort(), [
+    'docker_available', 'local_model_configured', 'model_gateway_configured', 'persistence_configured',
+    'repository_available', 'worker_image_configured'
+  ]);
+  assert.deepEqual(allowed.body.modelGateway, {
+    openai_configured: false,
+    ollama_configured: true,
+    ollama_auth_configured: false,
+    local_builder_provider: 'ollama'
+  });
+  assert.equal(JSON.stringify(allowed.body).includes(adminToken), false);
 });
 
 test('assessment is authenticated and read-only', async () => {
@@ -79,6 +99,22 @@ test('assessment is authenticated and read-only', async () => {
   assert.deepEqual(allowed.body.atlas.domains.sort(), ['app', 'deployment', 'governance', 'platform']);
   assert.ok(allowed.body.atlas.edges.some(edge => edge.source === 'app' && edge.target === 'platform'));
   assert.ok(allowed.body.atlas.edges.some(edge => edge.source === 'platform' && edge.target === 'deployment'));
+});
+
+test('system overview aggregates the whole runtime before the part', async () => {
+  const denied = await request('GET', '/system');
+  assert.equal(denied.response.status, 401);
+
+  const allowed = await request('GET', '/system', undefined, {
+    authorization: `Bearer ${adminToken}`
+  });
+  assert.equal(allowed.response.status, 200);
+  assert.equal(allowed.body.service, 'bob-control-plane');
+  assert.equal(allowed.body.sourceRoot, root);
+  assert.equal(allowed.body.selfHosted.defaultProfiles.includes('assessment'), true);
+  assert.equal(allowed.body.builderRuntime.ready, false);
+  assert.deepEqual(allowed.body.modelGateway.local_builder_provider, 'ollama');
+  assert.equal(Array.isArray(allowed.body.assessment.files), true);
 });
 
 test('request bodies are bounded and malformed requests do not expose internal errors', async () => {
@@ -135,12 +171,48 @@ test('Builder runtime routes require the admin token and fixed server configurat
   assert.equal(deniedRun.response.status, 401);
 });
 
+test('self-hosted Bob loop is admin-only and supports a dry-run verification pass', async () => {
+  const denied = await request('POST', '/api/bob/builder/self-hosted/loop', { dryRun: true });
+  assert.equal(denied.response.status, 401);
+
+  const allowed = await request('POST', '/api/bob/builder/self-hosted/loop', {
+    dryRun: true,
+    profiles: ['assessment', 'test']
+  }, { authorization: `Bearer ${adminToken}` });
+
+  assert.equal(allowed.response.status, 200);
+  assert.equal(allowed.body.mode, 'self_hosted_bob');
+  assert.equal(allowed.body.paused, false);
+  assert.deepEqual(allowed.body.plan.profiles, ['assessment', 'test']);
+  assert.equal(allowed.body.steps.length, 2);
+  assert.equal(allowed.body.steps[0].status, 'succeeded');
+});
+
+test('browser checks can validate the live app URL through the control plane', async () => {
+  const response = await request('POST', '/api/bob/builder/browser-check', {
+    appUrl: 'http://127.0.0.1:4173',
+    testName: 'live-app-check'
+  }, { authorization: `Bearer ${adminToken}` });
+
+  assert.equal(response.response.status, 500);
+  assert.equal(response.body.error, 'browser check failed');
+  assert.equal(response.body.appUrl, 'http://127.0.0.1:4173');
+});
+
 test('job creation rejects repositories outside the allowlist', async () => {
   const { response, body } = await request('POST', '/jobs', { repository: 'untrusted/app' }, {
     authorization: `Bearer ${adminToken}`
   });
   assert.equal(response.status, 403);
   assert.deepEqual(body, { error: 'repository is not allowed' });
+});
+
+test('job creation rejects refs outside the allowlist', async () => {
+  const { response, body } = await request('POST', '/jobs', { repository: 'example/app', ref: 'feature/unsafe' }, {
+    authorization: `Bearer ${adminToken}`
+  });
+  assert.equal(response.status, 403);
+  assert.deepEqual(body, { error: 'ref is not allowed' });
 });
 
 test('authorized jobs can be inspected and cancelled', async () => {
@@ -224,6 +296,7 @@ test('Gitea webhooks require a valid signature and deduplicate deliveries', asyn
   const headers = {
     'content-type': 'application/json',
     'x-gitea-signature': signature,
+    'x-gitea-event': 'push',
     'x-gitea-delivery': 'delivery-1'
   };
 
@@ -238,6 +311,47 @@ test('Gitea webhooks require a valid signature and deduplicate deliveries', asyn
   assert.deepEqual(await duplicate.json(), { accepted: true, duplicate: true });
 });
 
+test('Gitea webhooks reject unsupported signed events before job intake', async () => {
+  const payload = JSON.stringify({
+    repository: { full_name: 'example/app' },
+    issue: { id: 1 }
+  });
+  const signature = crypto.createHmac('sha256', webhookSecret).update(payload).digest('hex');
+  const response = await fetch(`${baseUrl}/webhooks/gitea`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-gitea-signature': signature,
+      'x-gitea-event': 'issues',
+      'x-gitea-delivery': 'issue-delivery'
+    },
+    body: payload
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: 'unsupported webhook event' });
+});
+
+test('Gitea webhooks reject pushes outside the allowed refs', async () => {
+  const payload = JSON.stringify({
+    ref: 'refs/heads/feature/unsafe',
+    after: 'def456',
+    repository: { full_name: 'example/app' }
+  });
+  const signature = crypto.createHmac('sha256', webhookSecret).update(payload).digest('hex');
+  const response = await fetch(`${baseUrl}/webhooks/gitea`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-gitea-signature': signature,
+      'x-gitea-event': 'push',
+      'x-gitea-delivery': 'feature-delivery'
+    },
+    body: payload
+  });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: 'ref is not allowed' });
+});
+
 test('Gitea webhooks reject repositories outside the allowlist', async () => {
   const payload = JSON.stringify({
     ref: 'refs/heads/main',
@@ -250,6 +364,7 @@ test('Gitea webhooks reject repositories outside the allowlist', async () => {
     headers: {
       'content-type': 'application/json',
       'x-gitea-signature': signature,
+      'x-gitea-event': 'push',
       'x-gitea-delivery': 'untrusted-delivery'
     },
     body: payload

@@ -223,6 +223,13 @@ test('managed Atlas refresh includes capability nodes without inferring exercise
   assert.equal(atlas.nodes.some(node => Object.hasOwn(node, 'exercised')), false);
 });
 
+test('full Atlas refresh maps the Builder relay to the host control-plane feature', () => {
+  const manifest = collectAtlasRefresh(path.resolve(__dirname, '..'));
+  assert.ok(manifest.capabilities.some(row => row.entity_type === 'feature' && row.entity_name === 'bob_control_plane_host_runtime'));
+  assert.ok(manifest.edges.some(row => row.source_name === 'bob-builder-control-room'
+    && row.target_name === 'bob_control_plane_host_runtime' && row.edge_kind === 'calls'));
+});
+
 test('component extraction tolerates formatted multiline Supabase chains', () => {
   const edges = collectComponentEdges('apps/web/src/pages/ExamplePage.tsx', `
     const rows = supabase

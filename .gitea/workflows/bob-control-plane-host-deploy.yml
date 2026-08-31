@@ -1,0 +1,110 @@
+name: Deploy Bob control plane to VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_ref:
+        description: Exact branch, tag, or commit to deploy
+        required: true
+        default: main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.deploy_ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Bob control-plane host runtime
+        run: npm test -- --test-reporter=spec test/bob-control-plane.test.js test/bob-control-plane-readiness.test.js test/bob-control-plane-host-runtime.test.js
+
+      - name: Package release
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse --verify HEAD)"
+          echo "BOB_RELEASE_SHA=$release_sha" >> "$GITHUB_ENV"
+          tar \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='node_modules' \
+            --exclude='apps/web/node_modules' \
+            --exclude='bob-data' \
+            --exclude='bob-artifacts' \
+            --exclude='deploy/bob-control-plane/.env' \
+            -czf "/tmp/bob-control-plane-$release_sha.tgz" .
+
+      - name: Configure SSH
+        env:
+          BOB_VPS_SSH_KEY: ${{ secrets.BOB_VPS_SSH_KEY }}
+          BOB_VPS_KNOWN_HOSTS: ${{ secrets.BOB_VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$BOB_VPS_SSH_KEY"
+          test -n "$BOB_VPS_KNOWN_HOSTS"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$BOB_VPS_SSH_KEY" > ~/.ssh/bob_vps
+          chmod 600 ~/.ssh/bob_vps
+          printf '%s\n' "$BOB_VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload release to VPS
+        env:
+          BOB_VPS_HOST: ${{ secrets.BOB_VPS_HOST }}
+          BOB_VPS_USER: ${{ secrets.BOB_VPS_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$BOB_VPS_HOST"
+          test -n "$BOB_VPS_USER"
+          scp -i ~/.ssh/bob_vps -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "/tmp/bob-control-plane-$BOB_RELEASE_SHA.tgz" \
+            "$BOB_VPS_USER@$BOB_VPS_HOST:/tmp/bob-control-plane-$BOB_RELEASE_SHA.tgz"
+
+      - name: Install and verify on VPS
+        env:
+          BOB_VPS_HOST: ${{ secrets.BOB_VPS_HOST }}
+          BOB_VPS_USER: ${{ secrets.BOB_VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/bob_vps -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$BOB_VPS_USER@$BOB_VPS_HOST" \
+            "BOB_RELEASE_SHA='$BOB_RELEASE_SHA' bash -s" <<'REMOTE'
+          set -euo pipefail
+          SUDO=""
+          if [ "$(id -u)" -ne 0 ]; then
+            SUDO="sudo -n"
+          fi
+
+          release_dir="/opt/bob-control-plane/releases/$BOB_RELEASE_SHA"
+          $SUDO mkdir -p "$release_dir" /var/lib/bob/tmp
+          $SUDO tar -xzf "/tmp/bob-control-plane-$BOB_RELEASE_SHA.tgz" -C "$release_dir"
+          $SUDO chown -R root:root "$release_dir"
+          $SUDO chmod -R go-w "$release_dir"
+          $SUDO chown -R bob-builder:bob-builder /var/lib/bob
+          $SUDO chmod 700 /var/lib/bob /var/lib/bob/tmp
+
+          cd "$release_dir"
+          $SUDO npm ci --omit=dev
+          set -a
+          . /etc/bob-control-plane.env
+          set +a
+          $SUDO docker build -f Dockerfile.worker -t "$BOB_WORKER_IMAGE" .
+          $SUDO ln -sfn "$release_dir" /opt/bob-control-plane/current
+          $SUDO install -m 0644 deploy/bob-control-plane/bob-control-plane.service /etc/systemd/system/bob-control-plane.service
+          $SUDO systemctl daemon-reload
+          $SUDO systemctl enable bob-control-plane
+          $SUDO systemctl restart bob-control-plane
+          $SUDO systemctl is-active --quiet bob-control-plane
+          curl -fsS http://127.0.0.1:8091/health >/dev/null
+          curl -fsS -H "Authorization: Bearer $BOB_ADMIN_TOKEN" http://127.0.0.1:8091/ready >/dev/null
+          REMOTE

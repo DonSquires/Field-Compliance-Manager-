@@ -287,6 +287,24 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
       .filter(name => name && name !== '_shared')
   );
   const sourceEdges = collectSourceEdges(rootDir, { tables, rpcs, edgeFunctions });
+  const features = new Set();
+  if (fs.existsSync(path.join(rootDir, 'deploy/bob-control-plane/bob-control-plane.service'))
+      && fs.existsSync(path.join(rootDir, 'deploy/bob-control-plane/nginx.conf.template'))) {
+    features.add('bob_control_plane_host_runtime');
+    sourceEdges.push({
+      source_type: 'edge_function',
+      source_name: 'bob-builder-control-room',
+      target_type: 'feature',
+      target_name: 'bob_control_plane_host_runtime',
+      edge_kind: 'calls',
+      evidence_class: 'live-code',
+      retirement_status: 'live',
+      source_file: 'supabase/functions/bob-builder-control-room/index.ts',
+      migration_name: null,
+      caller_context: `${OWNER_MARKER} relays Builder advance and run actions to the host control plane`,
+      refresh_source: 'ci_generator'
+    });
+  }
   const edgesByKey = new Map();
   for (const edge of [...sourceEdges, ...collectSqlFunctionEdges(rootDir)]) edgesByKey.set(edgeKey(edge), edge);
   const edges = [...edgesByKey.values()].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
@@ -316,6 +334,7 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   addCapabilities('table', tables);
   addCapabilities('rpc', rpcs);
   addCapabilities('edge_function', edgeFunctions);
+  addCapabilities('feature', features);
 
   return {
     generated_at: new Date().toISOString(),

@@ -29,8 +29,16 @@ test('model routing keeps low-risk preprocessing local', () => {
   assert.equal(routeBuilderModel({ workloadKind: 'repository_summary' }).provider, 'ollama');
 });
 
-test('model routing sends complex builder work to OpenAI', () => {
-  assert.equal(routeBuilderModel({ workloadKind: 'architecture' }).provider, 'openai');
+test('model routing keeps complex builder work local by default', () => {
+  const route = routeBuilderModel({ workloadKind: 'architecture' });
+  assert.equal(route.provider, 'ollama');
+  assert.equal(route.reason, 'local_first_builder_workload');
+});
+
+test('model routing permits explicit external provider selection', () => {
+  const route = routeBuilderModel({ workloadKind: 'architecture', preferredProvider: 'openai' });
+  assert.equal(route.provider, 'openai');
+  assert.equal(route.reason, 'explicit_external_builder_provider');
 });
 
 test('model routing keeps restricted data local regardless of workload', () => {

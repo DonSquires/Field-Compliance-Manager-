@@ -271,6 +271,7 @@ const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
         'fetch_bylaw_source',
         'propose_freedom_camping_org_strategy',
         'dispatch_flow',
+        'builder_control_room',
         'review_merge_request',
         'config_error',
         'plan_failed',
@@ -347,6 +348,22 @@ const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
     }
   }
   return merged;
+}
+function sanitizeFrontendContext(value, depth = 0) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value.slice(0, 500);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (depth >= 4) return '[truncated]';
+  if (Array.isArray(value)) return value.slice(0, 20).map((item)=>sanitizeFrontendContext(item, depth + 1));
+  if (typeof value === 'object') {
+    const output = {};
+    for (const [key, item] of Object.entries(value).slice(0, 60)){
+      if (/secret|token|password|api[_-]?key|service[_-]?role/i.test(key)) continue;
+      output[key] = sanitizeFrontendContext(item, depth + 1);
+    }
+    return output;
+  }
+  return null;
 }
 /** Compute the emitted size of a knowledge-cards array as it appears in the planner payload. */ function knowledgeCardsEmittedSize(cards) {
   return cards.reduce((sum, c)=>sum + c.title.length + KNOWLEDGE_ENTRY_SEPARATOR.length + c.content.length, 0);
@@ -671,6 +688,8 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'write_bob_chat',
   // dispatch_flow dispatches a Duo coding flow (produces a DRAFT MR) — write-capable.
   'dispatch_flow',
+  // builder_control_room creates and advances governed Builder jobs through the control plane.
+  'builder_control_room',
   // C5 stage 1b (#243): generic_write is write-capable, so the explicit
   // write-refusal guard must cover it too (an in-message "don't write" blocks it).
   'generic_write'
@@ -1365,6 +1384,11 @@ function computeEgressForbiddenSet(caps, meta) {
       purpose: 'ADMIRAL ONLY. Dispatch a governed GitLab Duo coding flow (developer, fix_pipeline, code_review) to implement a task as a DRAFT MR. Bob COMPOSES the brief and PROPOSES the dispatch; the human CONFIRMS before it fires. The flow output always lands as a DRAFT MR -- Bob NEVER merges. Use this when the owner asks you to start a coding task, fix a pipeline, or review code via Duo. Args: { flow: "developer"|"fix_pipeline"|"code_review", goal: "short goal", brief: "full dispatch brief" }. NOTE: "developer" (workflow_definition=software_development) is CONFIRMED working; fix_pipeline and code_review are UNVERIFIED.',
       governance: 'WRITE-draft; admiral (grand_master) only; human-confirms-before-dispatch; output is always DRAFT MR; Bob NEVER merges'
     },
+    {
+      tool: 'builder_control_room',
+      purpose: 'MASTER/ADMIRAL ONLY. Create, inspect, advance, or run governed Builder jobs through the Bob Builder control room. Use this when the user asks you to recommend a fix and then design/build/repair it from the chat panel. Actions: list, create, get, advance, run. Execution stays org-scoped, commit-pinned, evidence-backed, and pauses at human approval gates. Bob never receives raw shell or deployment authority.',
+      governance: 'WRITE-governed; master/grand_master only; commit-pinned Builder jobs; human gates remain enforced'
+    },
     // C5 stage 1b (#243): generic governed write via the bob-upsert-generic path.
     // Catalogued so the validate:bob-catalogue-dispatch CI gate is satisfied and
     // the shape exists for later stages, but the WRITE PATH IS STILL BLOCKED by
@@ -1413,7 +1437,8 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'write_bob_chat' && caps.tier === 'admiral' || t.tool === 'query_atlas' && caps.tier === 'admiral' || t.tool === 'read_issues' && caps.tier === 'admiral' || // write_self_memory is Bob's direct-write to his own memory — ADMIRAL ONLY.
     t.tool === 'write_self_memory' && caps.tier === 'admiral' || // read_self_memory is Bob's read of his own memory — ADMIRAL ONLY.
     t.tool === 'read_self_memory' && caps.tier === 'admiral' || // dispatch_flow dispatches a governed Duo coding flow — ADMIRAL ONLY.
-    t.tool === 'dispatch_flow' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
+    t.tool === 'dispatch_flow' && caps.tier === 'admiral' || // builder_control_room runs governed Builder jobs — MASTER/ADMIRAL ONLY.
+    t.tool === 'builder_control_room' && (caps.tier === 'admiral' || caps.tier === 'captain') || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
 }
 // ── Persona + platform grounding (passed to the brain) ───────────────────────
 function buildPersona(tier) {
@@ -3092,6 +3117,16 @@ async function perceiveAttachment(authHeader, attachments) {
     selected_sheet: selectedSheet
   };
 }
+function summarizeCurrentAttachments(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.slice(0, 12).map((attachment)=>({
+      id: typeof attachment?.id === 'string' ? attachment.id : null,
+      name: String(attachment?.name ?? attachment?.file_name ?? 'uploaded-file').slice(0, 180),
+      type: String(attachment?.type ?? attachment?.file_type ?? 'application/octet-stream').slice(0, 120),
+      has_storage: Boolean(attachment?.storage_path),
+      has_text: Boolean(attachment?.table_text || attachment?.document_text || attachment?.text)
+    }));
+}
 async function execPlanImport(authHeader, orgId, att, text, sheetNames = [], selectedSheet = null) {
   // Fallback extraction: if perceiveAttachment returned empty text (e.g. the
   // extractor was not deployed at the time, or the first-sheet-only bug hit
@@ -3143,7 +3178,6 @@ async function execPlanImport(authHeader, orgId, att, text, sheetNames = [], sel
     `Rows: ${p.row_count ?? 'unknown'}. Columns: ${(p.headers ?? []).slice(0, 12).join(', ')}${(p.headers?.length ?? 0) > 12 ? ', ...' : ''}.`,
     '',
     best ? `Best target: **${best}**${reasoning} [${p.selection_method ?? 'model'}].` : 'I could not confidently infer a target table yet.',
-    mapLines.length ? `\nProposed mapping:\n${mapLines.join('\n')}` : '',
     '',
     tier === 'high' ? 'Confidence: HIGH. Say **confirm import** to prepare a governed dry-run (nothing written yet).' : tier === 'medium' ? 'Confidence: MEDIUM. Confirm the target/mapping (or name a different table) and I will re-plan.' : 'Confidence: LOW. Tell me the target table, or this may be a new record type needing a schema change.',
     p.diagnostic?.schema_tables === 0 ? '\n(Note: I could not read the live schema — a configuration issue, not your file.)' : '',
@@ -5666,6 +5700,88 @@ async function execConfirmImport(authHeader, supabase, caps, orgId, conversation
     }
   };
 }
+function boundedStrings(value, maximum = 40) {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(value.filter((item)=>typeof item === 'string').map((item)=>item.trim()).filter(Boolean))
+  ].slice(0, maximum);
+}
+async function execBuilderControlRoom(authHeader, caps, toolArgs) {
+  if (caps.tier !== 'admiral' && caps.tier !== 'captain') {
+    return {
+      reply: 'Builder execution is restricted to master and grand_master users.',
+      meta: {
+        tool: 'builder_control_room',
+        outcome: 'forbidden'
+      }
+    };
+  }
+  const action = String(toolArgs.action ?? '').trim();
+  const allowedActions = new Set([
+    'list',
+    'create',
+    'get',
+    'advance',
+    'run'
+  ]);
+  if (!allowedActions.has(action)) {
+    return {
+      reply: 'Tell me whether to list Builder jobs, create a job, inspect a job, run the next step, or run to the next human gate.',
+      meta: {
+        tool: 'builder_control_room',
+        outcome: 'need_action'
+      }
+    };
+  }
+  const payload = {
+    action
+  };
+  if (typeof toolArgs.organization_id === 'string') payload.organization_id = toolArgs.organization_id;
+  if (typeof toolArgs.project_id === 'string') payload.project_id = toolArgs.project_id;
+  if (typeof toolArgs.job_id === 'string') payload.job_id = toolArgs.job_id;
+  if (typeof toolArgs.title === 'string') payload.title = toolArgs.title.slice(0, 200);
+  if (typeof toolArgs.task_description === 'string') payload.task_description = toolArgs.task_description.slice(0, 12000);
+  if (typeof toolArgs.description === 'string') payload.description = toolArgs.description.slice(0, 2000);
+  if (typeof toolArgs.target_sha === 'string') payload.target_sha = toolArgs.target_sha.slice(0, 80);
+  if (typeof toolArgs.branch_name === 'string') payload.branch_name = toolArgs.branch_name.slice(0, 200);
+  if (typeof toolArgs.code_review_mode === 'string') payload.code_review_mode = toolArgs.code_review_mode;
+  if (typeof toolArgs.frontend_required === 'boolean') payload.frontend_required = toolArgs.frontend_required;
+  if (typeof toolArgs.backend_required === 'boolean') payload.backend_required = toolArgs.backend_required;
+  if (typeof toolArgs.reviewer_model_name === 'string') payload.reviewer_model_name = toolArgs.reviewer_model_name.slice(0, 200);
+  if (typeof toolArgs.max_actions === 'number') payload.max_actions = Math.min(Math.max(toolArgs.max_actions, 1), 8);
+  payload.frontend_files = boundedStrings(toolArgs.frontend_files, 30);
+  payload.backend_files = boundedStrings(toolArgs.backend_files, 40);
+  payload.constraints = boundedStrings(toolArgs.constraints, 100);
+  payload.requested_from_users = boundedStrings(toolArgs.requested_from_users, 100);
+  if (toolArgs.repository_context && typeof toolArgs.repository_context === 'object') payload.repository_context = toolArgs.repository_context;
+  if (toolArgs.design_context && typeof toolArgs.design_context === 'object') payload.design_context = toolArgs.design_context;
+  const result = await callFn('bob-builder-control-room', authHeader, payload);
+  if (!result.ok || result.data?.error) {
+    return {
+      reply: `Builder control room could not ${action}: ${String(result.data?.error ?? result.status).slice(0, 300)}.`,
+      meta: {
+        tool: 'builder_control_room',
+        outcome: 'failed',
+        action
+      }
+    };
+  }
+  const job = result.data?.job ?? result.data?.snapshot?.job ?? null;
+  const title = typeof job?.title === 'string' ? job.title : 'Builder job';
+  const status = typeof job?.status === 'string' ? job.status.replaceAll('_', ' ') : null;
+  const reason = typeof result.data?.reason === 'string' ? result.data.reason.replaceAll('_', ' ') : null;
+  const count = Array.isArray(result.data?.jobs) ? result.data.jobs.length : null;
+  const reply = action === 'list' ? `I found ${count ?? 0} Builder job${count === 1 ? '' : 's'} available in the control room.` : action === 'create' ? `I created the governed Builder job${status ? ` and it is now ${status}` : ''}.` : `I checked ${title}${status ? `; it is ${status}` : ''}${reason ? ` and paused at ${reason}` : ''}.`;
+  return {
+    reply,
+    meta: {
+      tool: 'builder_control_room',
+      outcome: 'ok',
+      action,
+      data: result.data
+    }
+  };
+}
 // ── MAIN ─────────────────────────────────────────────────────────────────────
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
@@ -5722,6 +5838,8 @@ serve(async (req)=>{
     const attachments = Array.isArray(body.attachments) ? body.attachments : [];
     const conversationId = body.conversation_id ?? undefined;
     const requestId = body.request_id ?? undefined;
+    const frontendContext = sanitizeFrontendContext(body.context);
+    const attachmentSummary = summarizeCurrentAttachments(attachments);
     // ── PILLAR H: Event log context — mutable counters for this turn ──────
     // step_index is incremented BEFORE each logEvent call so every step gets
     // a unique, monotonically increasing position within the turn.
@@ -6338,7 +6456,9 @@ serve(async (req)=>{
         user_id: user.id,
         organization_id: orgId,
         display_name: displayName,
-        tier: caps.tier
+        tier: caps.tier,
+        attachments: attachmentSummary,
+        frontend_context: frontendContext
       },
       recentMessages: history.length > 0 ? {
         last_message_role: history[history.length - 1]?.role,
@@ -7598,6 +7718,8 @@ serve(async (req)=>{
               }
             };
           }
+        case 'builder_control_room':
+          return execBuilderControlRoom(authHeader, caps, toolArgs);
         case 'check_proposals':
           {
             const cpPayload = {
@@ -7799,6 +7921,7 @@ serve(async (req)=>{
         kind: att.type,
         text: attText ? attText.slice(0, 2000) : undefined
       } : null,
+      attachments_summary: attachmentSummary,
       tools: catalogue,
       persona: buildPersona(caps.tier),
       platform_context: PLATFORM_CONTEXT,

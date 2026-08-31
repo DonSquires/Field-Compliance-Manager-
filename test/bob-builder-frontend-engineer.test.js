@@ -93,7 +93,7 @@ test('Frontend Engineer routes approved UX and bounded source through governed m
         return { ok: true, validated_output: { summary: 'Update example', patch, changed_files: ['apps/web/src/example.ts'], tests: [] }, artifact: { id: 'patch-1' } };
       }
     });
-    assert.equal(captured.modelRequest.provider, 'openai');
+    assert.equal(captured.modelRequest.provider, 'ollama');
     assert.equal(captured.modelRequest.prompt_version, FRONTEND_ENGINEER_PROMPT_VERSION);
     assert.deepEqual(captured.modelRequest.input_artifact_ids, ['ux-1']);
     assert.equal(result.patch_artifact.id, 'patch-1');

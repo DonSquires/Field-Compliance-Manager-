@@ -94,6 +94,7 @@ serve(async (req)=>{
     } : action === 'plan' ? {
       message: body.message ?? '',
       attachment: body.attachment ?? null,
+      attachments_summary: body.attachments_summary ?? [],
       tools: body.tools ?? [],
       persona: body.persona,
       platform_context: body.platform_context,

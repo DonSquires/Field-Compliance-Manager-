@@ -79,6 +79,7 @@ function collectConcreteEdges(rootDir, nodes) {
   };
 
   add('route', '/assessment', 'service', 'bob-control-plane', 'reads', 'authenticated assessment route builds the control-plane inventory');
+  add('edge_function', 'bob-builder-control-room', 'service', 'bob-control-plane', 'calls', 'authenticated Builder advance and run relay');
   add('edge_function', 'bob-query-atlas', 'table', 'bob_capability_map', 'reads', 'capability_map and gap_report queries');
   add('edge_function', 'bob-query-atlas', 'table', 'bob_app_map_edges', 'reads', 'terrain_edges and blast_radius queries');
   add('edge_function', 'bob-query-atlas', 'table', 'bob_capability_map', 'reads', 'blast_radius flow and capability origin');

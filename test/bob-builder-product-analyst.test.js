@@ -76,7 +76,7 @@ test('Product Analyst routes complex analysis through the governed model runner'
     completeAnalysis: async (_supabase, input) => ({ success: true, approval: { id: 'approval-1', ...input } })
   });
 
-  assert.equal(captured.modelRequest.provider, 'openai');
+  assert.equal(captured.modelRequest.provider, 'ollama');
   assert.equal(captured.modelRequest.prompt_version, PRODUCT_ANALYST_PROMPT_VERSION);
   assert.equal(captured.validateOutput, parseProductSpecification);
   assert.deepEqual(result.specification, specification);

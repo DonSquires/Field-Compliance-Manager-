@@ -1,0 +1,35 @@
+[Unit]
+Description=Bob Builder Control Plane
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=bob-builder
+Group=bob-builder
+SupplementaryGroups=docker
+WorkingDirectory=/opt/bob-control-plane/current
+EnvironmentFile=/etc/bob-control-plane.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8091
+Environment=TMPDIR=/var/lib/bob/tmp
+ExecStart=/usr/bin/env node /opt/bob-control-plane/current/bob-control-plane-server.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bob
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
