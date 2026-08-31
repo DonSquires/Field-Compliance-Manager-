@@ -151,13 +151,15 @@ const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenB
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
   });
 
+  const unavailableMessage = 'Builder control room is unavailable in this environment. The Bob Edge Function is not configured or reachable from this session.';
+
   const invoke = useCallback(async (body: Record<string, unknown>) => {
     try {
       const { data, error: invokeError } = await supabase.functions.invoke('bob-builder-control-room', { body });
       if (invokeError) {
         const message = String(invokeError.message || 'Failed to send a request to the Edge Function');
         if (/Edge Function|Failed to send a request/i.test(message)) {
-          throw new Error('Builder control room is unavailable in this environment. The Bob Edge Function is not configured or reachable from this session.');
+          throw new Error(unavailableMessage);
         }
         throw invokeError;
       }
@@ -165,11 +167,11 @@ const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenB
       return data;
     } catch (err) {
       if (err instanceof Error && /Edge Function|Failed to send a request|Builder control room is unavailable/i.test(err.message)) {
-        throw new Error('Builder control room is unavailable in this environment. The Bob Edge Function is not configured or reachable from this session.');
+        throw new Error(unavailableMessage);
       }
       throw err;
     }
-  }, []);
+  }, [unavailableMessage]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -262,7 +264,9 @@ const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenB
   };
 
   const selectedJob = useMemo(() => jobs.find(job => job.id === selectedId) ?? snapshot?.job ?? null, [jobs, selectedId, snapshot]);
+  const edgeFunctionUnavailable = useMemo(() => Boolean(error && /Builder control room is unavailable/i.test(error)), [error]);
   const openBobBuilder = () => {
+    if (edgeFunctionUnavailable) return;
     onOpenBob?.(buildBobBuilderContext({ selectedJob, selectedProject, snapshot, frontendFiles, backendFiles, reviewerModel }));
   };
 
@@ -271,9 +275,9 @@ const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenB
       <header className="builder-heading">
         <div><span>Bob build system</span><h1>Builder control room</h1><p>Run governed implementation work to the next evidence or approval boundary.</p></div>
         <div className="builder-heading-actions">
-          <button type="button" onClick={openBobBuilder}><Bot size={16} /> Ask Bob</button>
+          <button type="button" onClick={openBobBuilder} disabled={edgeFunctionUnavailable}><Bot size={16} /> Ask Bob</button>
           <button type="button" onClick={() => void loadList()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /> Refresh</button>
-          <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> New job</button>
+          <button type="button" className="is-primary" onClick={() => setShowCreate(true)} disabled={edgeFunctionUnavailable}><Plus size={16} /> New job</button>
         </div>
       </header>
 
@@ -284,7 +288,14 @@ const BuilderControlRoomPage: React.FC<BuilderControlRoomPageProps> = ({ onOpenB
         <div><FileCode2 size={18} /><span>Projects</span><strong>{projects.length}</strong></div>
       </section>
 
-      {error && <div className="builder-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={15} /></button></div>}
+      {error && !edgeFunctionUnavailable && <div className="builder-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={15} /></button></div>}
+      {edgeFunctionUnavailable && (
+        <div className="builder-message is-warning" role="status">
+          <AlertTriangle size={17} />
+          <span>{unavailableMessage}</span>
+          <button type="button" onClick={() => void loadList()}><RefreshCw size={15} /></button>
+        </div>
+      )}
       {notice && <div className="builder-message" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={15} /></button></div>}
 
       <div className="builder-layout">

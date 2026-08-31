@@ -53,6 +53,7 @@ import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { PttBar } from '../components/PttBar';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
   buildOfficerBreadcrumb,
@@ -428,6 +429,8 @@ const OfficerShell: React.FC = () => {
           <Siren size={19} aria-hidden="true" /><span>{safety.activeAlert?.kind === 'sos' ? 'SOS active' : 'SOS'}</span>
         </button>
       </nav>
+
+      <PttBar />
 
       <BobPanel
         open={bobOpen}

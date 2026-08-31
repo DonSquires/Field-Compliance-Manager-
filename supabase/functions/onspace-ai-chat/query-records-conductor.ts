@@ -221,6 +221,58 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
 }
 // ── Result rendering (org-shaped + person-safe dispatch) ─────────────────────
 /**
+ * Required identifying field(s) per query type. A row carrying none of these
+ * is not a record of the requested kind.
+ */ const REQUIRED_ROW_FIELDS = {
+  find_org: ['name'],
+  get_org: ['name'],
+  list_orgs: ['name'],
+  list_sites: ['name'],
+  list_routes: ['name', 'route_code'],
+  list_zones: ['name'],
+  find_user: ['display_name']
+};
+/**
+ * Detect a TOOL CONTRACT MISMATCH: the call returned HTTP 200 with rows, but
+ * the rows are not the entity that was asked for.
+ *
+ * Why this exists (2026-09 incident): the `bob-query-records` slug was left
+ * serving `bob-query-atlas` code by a half-finished deprecation. A correct
+ * `find_org` call fell through to Atlas's default `capability_map` action and
+ * returned capability rows with HTTP 200 / ok:true. Because only `!r.ok` was
+ * treated as failure, the conductor reported `outcome: 'ok'` and rendered
+ * "Found 25 record(s): - (unnamed) [id undefined]".
+ *
+ * The cost was not the bad text — it was that Bob was TOLD HE SUCCEEDED, so he
+ * had no signal a tool was broken and no reason to investigate. This exists to
+ * give Bob the truth, not to restrict what he may do with it.
+ *
+ * Deliberately conservative: fires only when EVERY row lacks EVERY required
+ * identifying field, so a partially-populated record set is never misreported
+ * as a broken tool.
+ */ export function detectContractMismatch(q, results) {
+  const required = REQUIRED_ROW_FIELDS[q];
+  if (!required || !Array.isArray(results) || results.length === 0) {
+    return { mismatch: false };
+  }
+  const rowHasAnyRequiredField = (row)=>{
+    if (!row || typeof row !== 'object') return false;
+    return required.some((field)=>{
+      const value = row[field];
+      return typeof value === 'string' ? value.trim() !== '' : value !== null && value !== undefined;
+    });
+  };
+  if (results.some(rowHasAnyRequiredField)) {
+    return { mismatch: false };
+  }
+  const first = results[0] && typeof results[0] === 'object' ? results[0] : {};
+  return {
+    mismatch: true,
+    expectedFields: required,
+    observedKeys: Object.keys(first).slice(0, 12)
+  };
+}
+/**
  * Render query_records results into human-facing reply text.
  *
  * Dispatches to the person-safe renderer for find_user results.

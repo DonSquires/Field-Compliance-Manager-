@@ -250,4 +250,67 @@ describe('BobPanel', () => {
 
     await waitFor(() => expect(mockConversationUpdate).toHaveBeenCalledWith({ title: 'Investigate roster export failure' }));
   });
+
+  it('lets users request generated Bob artifacts from the command deck', async () => {
+    render(<BobPanel open onClose={() => undefined} />);
+    await waitFor(() => expect(mockFrom).toHaveBeenCalledWith('bob_conversations'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Report' }));
+
+    expect((screen.getByPlaceholderText('Message Bob…') as HTMLInputElement).value).toContain('create a formal report artifact');
+  });
+
+  it('renders structured Bob artifacts and selectable recommendations from message metadata', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'bob_conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                order: () => ({
+                  limit: async () => ({ data: [{ id: 'conversation-1', title: 'Session', updated_at: '2026-08-31T00:00:00Z' }], error: null }),
+                }),
+              }),
+            }),
+          }),
+          insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'conversation-1' }, error: null }) }) }),
+          update: mockConversationUpdate,
+        };
+      }
+      if (table === 'bob_messages') {
+        return {
+          select: () => ({
+            eq: () => ({
+              order: async () => ({
+                data: [{
+                  id: 'message-1',
+                  role: 'assistant',
+                  content: 'I built the decision pack.',
+                  confidence: null,
+                  flagged: false,
+                  created_at: '2026-08-31T00:00:00Z',
+                  metadata: {
+                    artifacts: [{ title: 'Night Shift Decision Pack', type: 'report', status: 'ready', summary: 'Officer ranking and roster blockers.', content: '# Decision Pack' }],
+                    choices: [{ label: 'Aroha Ngata', value: 'officer-1', state: 'preferred', detail: 'Qualified and available' }],
+                    actions: [{ label: 'Prepare roster', prompt: 'Prepare the roster proposal for officer-1.' }],
+                  },
+                }],
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      return { select: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }) };
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('Night Shift Decision Pack')).toBeTruthy();
+    expect(screen.getByText('Officer ranking and roster blockers.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Aroha Ngata/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare roster' }));
+    expect((screen.getByPlaceholderText('Message Bob…') as HTMLInputElement).value).toBe('Prepare the roster proposal for officer-1.');
+  });
 });

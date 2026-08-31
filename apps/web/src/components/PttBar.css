@@ -1,0 +1,22 @@
+.ptt-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 52px;
+  padding: 7px 12px;
+  color: #dbe7ef;
+  background: #10212b;
+  border-top: 1px solid #315162;
+}
+
+.ptt-bar-status { display: grid; min-width: 0; gap: 1px; }
+.ptt-bar-status strong { font-size: 12px; }
+.ptt-bar-status span { overflow: hidden; color: #a8bdc9; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.ptt-bar select { min-width: 110px; padding: 6px; border: 1px solid #426473; border-radius: 4px; color: inherit; background: #142d39; font-size: 11px; }
+.ptt-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; border: 0; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 700; font-size: 11px; }
+.ptt-connect { margin-left: auto; padding: 7px 10px; background: #28716d; }
+.ptt-transmit { margin-left: auto; padding: 7px 12px; background: #246c92; touch-action: none; }
+.ptt-transmitting .ptt-transmit { background: #b93645; }
+.ptt-unavailable { color: #95a9b5; background: #142029; border-top-color: #2d414c; }
+.ptt-unavailable .ptt-bar-status span { color: #8b9ca6; }
+@media (max-width: 500px) { .ptt-bar { gap: 7px; padding: 7px 10px; } .ptt-bar select { max-width: 110px; min-width: 0; } .ptt-bar button span { display: none; } .ptt-bar button { width: 38px; padding: 7px; } }

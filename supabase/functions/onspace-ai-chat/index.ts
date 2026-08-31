@@ -430,7 +430,7 @@ const KNOWLEDGE_TOTAL_BUDGET = 120_000;
 // the isolate cache + the DB fetch.
 import { CONSTITUTIONAL_FALLBACK, CONSTITUTIONAL_NEG_CACHE_MS, classifyConstitutional, buildConstitutionalOrgFilter, selectCacheableCards, renderConstitutionalSection } from './constitutional-lane.ts';
 import { generateToolCatalogue, isToolEffectPermitted, classifyToolEffect } from './caddie.ts';
-import { resolveQueryRouting, renderQueryResults, formatQueryError } from './query-records-conductor.ts';
+import { resolveQueryRouting, renderQueryResults, formatQueryError, detectContractMismatch } from './query-records-conductor.ts';
 import { evaluateWelfareSafetySeam, isSafetySignalAction, buildAlertRaisePayload, captureWelfareTruthForWriteRefusal, buildAlertDedupeKey, buildDedupeQueryParams, validateAuthorityPredicate, validateWelfareContextCompleteness, buildAlertRaiseSuccess, buildAlertRaiseDeduplicated, buildAlertRaiseInsertFailed, buildAlertRaiseAuthorityFailed, buildAlertRaiseIncompleteContext } from './conductor-welfare-seam.ts';
 // Isolate-level cache — PLATFORM-CONSTITUTIONAL (org NULL) cards ONLY. Warms once
 // per edge isolate. Deliberately NOT org-scoped: caching org-constitutional cards
@@ -1525,6 +1525,60 @@ async function callFn(fnName, authHeader, payload) {
     data
   };
 }
+
+async function prepareRegisteredToolExecution(admin, { organizationId, conversationId, requestId, toolKey, inputPayload }) {
+  if (!organizationId || !toolKey) return { registered: false };
+  const { data: tool, error: toolError } = await admin.from('bob_tool_registry').select('tool_key, risk_level, requires_approval, enabled, retired_at').eq('tool_key', toolKey).maybeSingle();
+  if (toolError || !tool) return { registered: false };
+  if (!tool.enabled || tool.retired_at) return { registered: true, blocked: true, reason: 'tool_not_active' };
+
+  const { data: policy, error: policyError } = await admin.from('bob_tool_tenant_policy').select('enabled, requires_approval_override').eq('organization_id', organizationId).eq('tool_key', toolKey).maybeSingle();
+  if (policyError) return { registered: true, blocked: true, reason: 'policy_unavailable' };
+  if (policy?.enabled === false) return { registered: true, blocked: true, reason: 'disabled_by_tenant_policy' };
+
+  const request = String(requestId || crypto.randomUUID());
+  const conversation = String(conversationId || `request-${request}`);
+  const requiresApproval = policy?.requires_approval_override ?? tool.requires_approval;
+  const { data: execution, error: executionError } = await admin.from('bob_tool_executions').insert({
+    conversation_id: conversation,
+    request_id: request,
+    step_index: 0,
+    tool_key: toolKey,
+    decision_reason: requiresApproval ? 'approval_required_by_tool_policy' : 'registered_tool_permitted',
+    input_payload: inputPayload && typeof inputPayload === 'object' ? inputPayload : {},
+    ok: false,
+    retryable: false,
+  }).select('id').single();
+  if (executionError || !execution) return { registered: true, blocked: true, reason: 'execution_evidence_unavailable' };
+  if (!requiresApproval) return { registered: true, executionId: execution.id };
+  if (!['write', 'destructive', 'deploy', 'secret'].includes(tool.risk_level)) return { registered: true, blocked: true, reason: 'invalid_approval_configuration', executionId: execution.id };
+
+  const { data: approval, error: approvalError } = await admin.from('bob_action_approvals').insert({
+    conversation_id: conversation,
+    request_id: request,
+    tool_execution_id: execution.id,
+    approval_scope: tool.risk_level,
+    status: 'pending',
+    proposed_action: { tool_key: toolKey, input: inputPayload && typeof inputPayload === 'object' ? inputPayload : {} },
+    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  }).select('id').single();
+  if (approvalError || !approval) return { registered: true, blocked: true, reason: 'approval_evidence_unavailable', executionId: execution.id };
+  return { registered: true, blocked: true, reason: 'approval_required', executionId: execution.id, approvalId: approval.id };
+}
+
+async function finishRegisteredToolExecution(admin, executionId, result, startedAt) {
+  if (!executionId) return;
+  const outcome = String(result?.meta?.outcome ?? 'unknown');
+  const ok = outcome === 'ok' || outcome === 'completed';
+  await admin.from('bob_tool_executions').update({
+    ok,
+    latency_ms: Math.max(0, Date.now() - startedAt),
+    output_payload: { outcome },
+    error_code: ok ? null : outcome,
+    error_message: ok ? null : String(result?.meta?.error ?? '').slice(0, 500) || null,
+  }).eq('id', executionId);
+}
+
 // callInference: routes non-plan actions (embed, understand_documents, media,
 // knowledge retrieval) through bob-inference → VPS. Those paths need the VPS
 // for Supabase storage access and ONNX inference.
@@ -3016,6 +3070,62 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
       return 'I have proposed the ' + actionType.replace(/_/g, ' ') + '. Approve it in the bell.';
   }
 }
+function compactText(value, max = 220) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+function slugFileName(value, fallback = 'bob-artifact') {
+  const slug = String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
+  return slug || fallback;
+}
+function inferUiArtifact(userText, assistantText) {
+  const requested = String(userText ?? '').toLowerCase();
+  if (!/(produce|create|draft|build|generate|prepare|make)\b/.test(requested)) return null;
+  const wantsPhotoPack = /\b(photo|image|evidence photo|photographic evidence)\b/.test(requested);
+  const wantsDecisionPack = /\b(decision pack|preference order|rank|ranking|recommendation)\b/.test(requested);
+  const wantsReport = /\b(report|formal report|summary report)\b/.test(requested);
+  const wantsBrief = /\b(brief|operational brief|handover|runbook)\b/.test(requested);
+  const wantsDocument = /\b(document|doc|artifact|pack)\b/.test(requested);
+  if (!wantsPhotoPack && !wantsDecisionPack && !wantsReport && !wantsBrief && !wantsDocument) return null;
+  const type = wantsPhotoPack ? 'evidence' : wantsDecisionPack ? 'task' : wantsReport ? 'report' : 'document';
+  const title = wantsPhotoPack ? 'Photo Evidence Request Pack' : wantsDecisionPack ? 'Decision Pack' : wantsReport ? 'Bob Report' : wantsBrief ? 'Operational Brief' : 'Bob Artifact';
+  return {
+    title,
+    type,
+    status: 'draft',
+    summary: compactText(assistantText, 180) || 'Generated by Bob from the current conversation.',
+    content: String(assistantText ?? '').trim(),
+    mimeType: 'text/markdown',
+    downloadName: `${slugFileName(title)}.md`
+  };
+}
+function decorateAssistantMetadata(turn, previousTurn) {
+  if (!turn || turn.role !== 'assistant') return turn?.metadata ?? {};
+  const metadata = turn.metadata && typeof turn.metadata === 'object' && !Array.isArray(turn.metadata) ? {
+    ...turn.metadata
+  } : {};
+  if (Array.isArray(metadata.artifacts) && metadata.artifacts.length > 0) return metadata;
+  const previousUserText = previousTurn?.role === 'user' ? previousTurn.content : '';
+  const artifact = inferUiArtifact(previousUserText, turn.content);
+  if (!artifact) return metadata;
+  return {
+    ...metadata,
+    artifacts: [
+      artifact
+    ],
+    actions: Array.isArray(metadata.actions) ? metadata.actions : [
+      {
+        label: 'Refine artifact',
+        prompt: 'Bob, refine this artifact for operational use and include assumptions, risks, evidence, and next actions.',
+        kind: 'artifact'
+      },
+      {
+        label: 'Prepare approval',
+        prompt: 'Bob, turn this artifact into an approval-ready proposal with the required decision points.',
+        kind: 'approval'
+      }
+    ]
+  };
+}
 // Persist a conversation turn-set to bob_messages. MUST be awaited: this runs in
 // a Supabase edge isolate, which can be torn down as soon as the HTTP response
 // returns — an un-awaited (fire-and-forget) insert then races the shutdown and
@@ -3024,12 +3134,12 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
 // insert and surfacing errors makes persistence reliable.
 async function persist(supabase, orgId, conversationId, turns) {
   if (!orgId || !conversationId) return false;
-  const withMeta = turns.map((t)=>({
+  const withMeta = turns.map((t, index)=>({
       organization_id: orgId,
       conversation_id: conversationId,
       role: t.role,
       content: t.content,
-      metadata: t.metadata ?? {}
+      metadata: t.role === 'assistant' ? decorateAssistantMetadata(t, turns[index - 1]) : t.metadata ?? {}
     }));
   let { data, error } = await supabase.from('bob_messages').insert(withMeta).select('id');
   // DEGRADE GRACEFULLY: if the insert failed because `metadata` is absent (an env
@@ -4265,6 +4375,29 @@ async function execQueryRecords(authHeader, caps, args) {
         tool: 'query_records',
         outcome: 'empty',
         query: q
+      }
+    };
+  }
+  // A 200 with rows is NOT proof the right tool answered. If none of the rows
+  // carry the identifying fields of the requested entity, the tool is broken
+  // (e.g. a slug serving another function's code) — report that truthfully
+  // instead of rendering "(unnamed) [id undefined]" as a success.
+  // This does not constrain Bob's tool choice; it restores the signal he needs
+  // to notice a build bug and decide for himself how to investigate it.
+  const contract = detectContractMismatch(effectiveQuery, results);
+  if (contract.mismatch) {
+    console.error(`[conductor][query_records] contract mismatch for "${effectiveQuery}": expected one of ${JSON.stringify(contract.expectedFields)}, got keys ${JSON.stringify(contract.observedKeys)}`);
+    return {
+      reply: `[INTERNAL: your query_records "${effectiveQuery}" call returned ${results.length} row(s) that are NOT ${effectiveQuery} records — the rows carry none of the expected fields ${JSON.stringify(contract.expectedFields)} and instead look like ${JSON.stringify(contract.observedKeys)}. This is a BUILD FAULT in the query_records tool, not a mistake in your call, so retrying the same lookup will not help. Do not report these rows as records and do not invent record names. You may investigate the fault with the other tools available to you, and you should tell the user plainly that the record lookup is returning the wrong data so it can be fixed.]`,
+      meta: {
+        tool: 'query_records',
+        outcome: 'contract_mismatch',
+        query: q,
+        effective_query: effectiveQuery,
+        expected_fields: contract.expectedFields,
+        observed_keys: contract.observedKeys,
+        count: results.length,
+        internal: true
       }
     };
   }
@@ -6607,6 +6740,65 @@ serve(async (req)=>{
       }
       return found;
     };
+    /**
+     * Produce an explainable, read-only roster recommendation. This deliberately
+     * ranks every candidate rather than hiding unsuitable staff: the operator
+     * needs the qualified choices first, then the reasons other people cannot
+     * safely be selected.
+     */ const execRankRosterCandidates = async (toolArgs)=>{
+      const start = new Date(String(toolArgs.start ?? toolArgs.scheduled_start ?? ''));
+      const end = new Date(String(toolArgs.end ?? toolArgs.scheduled_end ?? ''));
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+        return { reply: 'I need a valid shift start and end time before I can rank officers.', meta: { tool: 'rank_roster_candidates', outcome: 'missing_window' } };
+      }
+      const startDay = start.toISOString().slice(0, 10);
+      const endDay = end.toISOString().slice(0, 10);
+      const weekday = ((start.getUTCDay() + 6) % 7) + 1;
+      const [usersResult, staffResult, credentialResult, leaveResult, availabilityResult, shiftResult] = await Promise.all([
+        admin.from('user_profiles').select('id, display_name, role').eq('organization_id', orgId).in('role', ['officer', 'admin_officer']).is('deactivated_at', null),
+        admin.from('staff_profiles').select('id, user_id, work_ready').eq('organization_id', orgId),
+        admin.from('staff_credentials').select('staff_id, credential_type, expiry_date, verified').eq('organization_id', orgId),
+        admin.from('leave_requests').select('staff_id, starts_on, ends_on').eq('organization_id', orgId).eq('status', 'approved').lte('starts_on', endDay).gte('ends_on', startDay),
+        admin.from('staff_availability').select('staff_id, day_of_week, specific_date, availability_type').eq('organization_id', orgId).in('availability_type', ['unavailable', 'leave']),
+        admin.from('shifts').select('officer_user_id, scheduled_start, scheduled_end, status').eq('organization_id', orgId).lt('scheduled_start', end.toISOString()).gt('scheduled_end', start.toISOString()).not('status', 'in', '(cancelled,declined)')
+      ]);
+      const failed = [usersResult, staffResult, credentialResult, leaveResult, availabilityResult, shiftResult].find((result)=>result.error);
+      if (failed?.error) return { reply: `I could not complete the roster readiness check: ${failed.error.message}`, meta: { tool: 'rank_roster_candidates', outcome: 'failed' } };
+      const staffByUser = new Map((staffResult.data ?? []).map((row)=>[row.user_id ?? row.id, row]));
+      const credentialsByStaff = new Map();
+      for (const credential of credentialResult.data ?? []) {
+        const list = credentialsByStaff.get(credential.staff_id) ?? [];
+        list.push(credential);
+        credentialsByStaff.set(credential.staff_id, list);
+      }
+      const candidates = (usersResult.data ?? []).map((user)=>{
+        const staff = staffByUser.get(user.id);
+        const staffId = staff?.id ?? user.id;
+        const credentials = credentialsByStaff.get(staffId) ?? [];
+        const currentVerified = credentials.filter((credential)=>credential.verified && (!credential.expiry_date || new Date(credential.expiry_date).getTime() >= end.getTime()));
+        const leave = (leaveResult.data ?? []).some((row)=>row.staff_id === staffId);
+        const unavailable = (availabilityResult.data ?? []).some((row)=>row.staff_id === staffId && (row.specific_date === startDay || row.specific_date === endDay || (row.specific_date === null && row.day_of_week === weekday)));
+        const conflict = (shiftResult.data ?? []).some((row)=>row.officer_user_id === user.id);
+        let state = 'qualified';
+        let reason = `${currentVerified.length} verified current credential${currentVerified.length === 1 ? '' : 's'}; work-ready.`;
+        if (credentials.length === 0) { state = 'no_credentials'; reason = 'No credentials are recorded.'; }
+        else if (!staff?.work_ready) { state = 'not_suitable'; reason = 'Not marked work-ready.'; }
+        else if (currentVerified.length === 0) { state = 'not_suitable'; reason = 'Credentials are expired or awaiting verification.'; }
+        else if (leave) { state = 'not_suitable'; reason = 'Approved leave overlaps this shift.'; }
+        else if (unavailable) { state = 'not_suitable'; reason = 'Marked unavailable for this shift date.'; }
+        else if (conflict) { state = 'not_suitable'; reason = 'Already rostered during this shift.'; }
+        return { label: user.display_name || 'Unnamed officer', state, reason, credential_count: currentVerified.length };
+      }).sort((left, right)=>{
+        const rank = { qualified: 0, not_suitable: 1, no_credentials: 2 };
+        return rank[left.state] - rank[right.state] || right.credential_count - left.credential_count || left.label.localeCompare(right.label);
+      });
+      const qualified = candidates.filter((candidate)=>candidate.state === 'qualified');
+      const lines = candidates.map((candidate, index)=>`${index + 1}. ${candidate.label} - ${candidate.state.replace('_', ' ')}: ${candidate.reason}`);
+      return {
+        reply: `Roster candidates for ${start.toLocaleString('en-NZ')} to ${end.toLocaleString('en-NZ')} (${qualified.length} qualified):\n${lines.join('\n')}\n\nSelect an officer to continue; this only records your choice and does not create a shift.`,
+        meta: { tool: 'rank_roster_candidates', outcome: 'ok', candidates, choices: candidates.map((candidate)=>({ label: candidate.label, value: candidate.label, state: candidate.state, detail: candidate.reason })) }
+      };
+    };
     /** Dispatch a single tool and return { reply, meta }. Pure execution, no persistence. */ const dispatchTool = async (tool, toolArgs, d)=>{
       // Geofence carry-forward (!752): if the planner chose propose_freedom_camping_zone
       // but did not re-supply the geometry (a terse "Confirmed" after a resolve turn),
@@ -7547,6 +7739,8 @@ serve(async (req)=>{
           return execCompare(authHeader, caps, toolArgs);
         case 'query_records':
           return execQueryRecords(authHeader, caps, toolArgs);
+        case 'rank_roster_candidates':
+          return execRankRosterCandidates(toolArgs);
         case 'scv_lookup':
           return execScvLookup(authHeader, toolArgs);
         case 'propose_client_onboarding':
@@ -8568,6 +8762,22 @@ serve(async (req)=>{
       });
       return json(structured);
     }
+    // Registry controls are additive during migration. Registered tools are
+    // fail-closed; unregistered legacy tools retain their existing safeguards.
+    const registeredGovernance = await prepareRegisteredToolExecution(admin, {
+      organizationId: orgId,
+      conversationId,
+      requestId,
+      toolKey: chosenTool,
+      inputPayload: args,
+    });
+    if (registeredGovernance.blocked) {
+      const governanceReply = registeredGovernance.reason === 'approval_required'
+        ? 'That action is ready for human approval. It has not been executed.'
+        : 'That tool is not available for execution under the current governance policy.';
+      await emitEvent('tool_governance_blocked', { tool: chosenTool, reason: registeredGovernance.reason, approval_id: registeredGovernance.approvalId ?? null }, { tool: chosenTool, outcome: registeredGovernance.reason });
+      return json(buildStructuredResponse({ reply: governanceReply, route: 'answer', startTime, meta: { tool: chosenTool, outcome: registeredGovernance.reason, approval_id: registeredGovernance.approvalId ?? null } }));
+    }
     // ══════════════════════════════════════════════════════════════════════════
     // PILLAR F — Explicit Introspection Action (#141, Phase 1)
     //
@@ -8837,6 +9047,7 @@ serve(async (req)=>{
     }
 
     let result;
+    const registeredToolStartedAt = Date.now();
     try {
       result = await dispatchTool(chosenTool, args, decision);
     } catch (toolErr) {
@@ -8853,8 +9064,8 @@ serve(async (req)=>{
         }
       };
     }
-
     // TASK CONTINUITY: Mark the step completed/failed/blocked based on result
+    await finishRegisteredToolExecution(admin, registeredGovernance.executionId, result, registeredToolStartedAt);
     const finishResult = await finishToolExecution(admin, taskLedger, chosenTool || 'unknown_tool', result);
     if (finishResult.success && finishResult.updatedSteps) {
       // Step status updated; refresh the task ledger for the loop

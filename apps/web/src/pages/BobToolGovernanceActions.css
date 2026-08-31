@@ -1,0 +1,15 @@
+.bob-execute {
+  border: 1px solid #397c6f;
+  border-radius: 4px;
+  padding: 7px 9px;
+  color: #91e4d1;
+  background: #143b35;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.bob-execute:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

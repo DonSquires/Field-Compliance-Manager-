@@ -83,16 +83,18 @@ const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPag
 const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightPage'));
 const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
+const PttOperationsPage = React.lazy(() => import('../pages/PttOperationsPage'));
+const BobToolGovernancePage = React.lazy(() => import('../pages/BobToolGovernancePage'));
 
 type AdminPage =
   | 'hub' | 'relationships' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
-  | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
+  | 'approvals' | 'tool-governance' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
-type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control' | 'radio';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
@@ -101,7 +103,7 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
-  'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
+  'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control', 'radio',
 ]);
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined): boolean {
@@ -131,6 +133,7 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
   'noise_control': { page: 'field-ops', fieldOpsSubArea: 'noise-control' },
   'biosecurity': { page: 'field-ops', fieldOpsSubArea: 'biosecurity' },
   'smoke_control': { page: 'field-ops', fieldOpsSubArea: 'smoke-control' },
+  'tool_governance': { page: 'tool-governance' },
   'reports': { page: 'reports', reportsTab: 'reports-hub' },
 };
 
@@ -152,6 +155,7 @@ const NAVIGATION_MAP = {
     { id: 'access-control', label: 'Access Control', icon: KeyRound },
     { id: 'org-setup', label: 'Organization Setup', icon: Settings },
     { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
+    { id: 'tool-governance', label: 'Tool Governance', icon: Shield },
   ],
   'System': [
     { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
@@ -381,6 +385,8 @@ const AdminShell: React.FC = () => {
             return <FieldOperationsPage onNavigate={navigateToFieldOps} />;
           case 'dispatch':
             return <DispatchConsolePage />;
+          case 'radio':
+            return <PttOperationsPage />;
           case 'patrol':
             return <PatrolPage />;
           case 'welfare-alerts':
@@ -426,6 +432,8 @@ const AdminShell: React.FC = () => {
         return <ProviderBillingPage />;
       case 'approvals':
         return <ApprovalsActivityPage />;
+      case 'tool-governance':
+        return <BobToolGovernancePage />;
       case 'roster':
         return <RosterOperationsPage />;
       case 'people-hr':

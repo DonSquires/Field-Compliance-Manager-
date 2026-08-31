@@ -64,6 +64,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only; own-org full; cross-org scoped (directory contact only — cross-org person-transfer is a custody boundary, not scoped access)',
     effect_class: 'internal_observation'
   },
+  rank_roster_candidates: {
+    purpose: 'Rank officers for a proposed roster window using live work-ready status, verified and current credentials, approved leave, unavailable periods, and overlapping shifts. Use this before asking a human to nominate an officer when a roster request has a site/zone and shift window. Return the ranked candidates and let the human select one; never assign or propose a roster slot from this tool.',
+    governance: 'read-only; roster planning only; no assignment or proposal',
+    effect_class: 'internal_observation'
+  },
   check_proposals: {
     purpose: 'Check the status of Bob recent proposals in the bell (bob_agentic_actions). Use this to see what has been approved, applied, rejected, or failed since the last turn, and to decide the next step in a multi-step workflow. Call this after a user says something was approved, or when Bob needs to know if a prior proposal landed before proposing the next dependent step. Filter by conversation_id to see only this conversation proposals. Do NOT call this for a FRESH request to list, review, or update records (e.g. "list all zones and update them", "review each one") — that is a query_records case, not check_proposals. Only call check_proposals to check the status of a proposal YOU have already filed earlier in THIS conversation.',
     governance: 'read-only; own-org scoped; no PII',
@@ -529,6 +534,7 @@ const TOOL_REGISTRY = {
   const toolToEdgeFn = {
     // Tools dispatched via callFn() to a separate edge function:
     query_records: 'bob-query-records',
+    rank_roster_candidates: 'onspace-ai-chat',
     schema_inspect: 'bob-schema-inspect',
     client_site_compare: 'bob-client-site-compare',
     scv_lookup: 'bob-scv-lookup',

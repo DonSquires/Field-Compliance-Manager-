@@ -9,6 +9,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { env } from '../lib/env';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -110,6 +111,12 @@ const GrandMasterPlatformPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const controlPlaneUrl = env.bobControlPlaneUrl.trim();
+  const controlPlaneToken = env.bobAdminToken.trim();
+  const appUrl = env.appUrl.trim() || 'http://127.0.0.1:4173';
+  const hasControlPlaneConfig = Boolean(controlPlaneUrl && controlPlaneToken);
+  const controlPlaneUnavailableMessage = 'Bob control plane is not configured. Set VITE_BOB_CONTROL_PLANE_URL and VITE_BOB_ADMIN_TOKEN to enable live platform operations.';
+
   const isGrandMaster = profile?.role === 'grand_master';
 
   // ATLAS READS: organizations, breach_alerts, observations, user_profiles, notifications
@@ -173,10 +180,14 @@ const GrandMasterPlatformPage: React.FC = () => {
   }, [browserCheck]);
 
   const loadAssessmentTrends = useCallback(async () => {
+    if (!hasControlPlaneConfig) {
+      setAssessmentTrends(null);
+      return;
+    }
     try {
-      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/assessment-trends', {
+      const response = await fetch(`${controlPlaneUrl.replace(/\/+$/, '')}/api/bob/builder/assessment-trends`, {
         headers: {
-          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+          'Authorization': `Bearer ${controlPlaneToken}`,
         },
       });
       if (!response.ok) throw new Error(`Assessment trends unavailable (${response.status})`);
@@ -190,13 +201,17 @@ const GrandMasterPlatformPage: React.FC = () => {
     } catch (err) {
       setAssessmentTrends(null);
     }
-  }, []);
+  }, [controlPlaneToken, controlPlaneUrl, hasControlPlaneConfig]);
 
   const loadScheduledAssessments = useCallback(async () => {
+    if (!hasControlPlaneConfig) {
+      setScheduledAssessments([]);
+      return;
+    }
     try {
-      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/scheduled-assessments', {
+      const response = await fetch(`${controlPlaneUrl.replace(/\/+$/, '')}/api/bob/builder/scheduled-assessments`, {
         headers: {
-          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+          'Authorization': `Bearer ${controlPlaneToken}`,
         },
       });
       if (!response.ok) throw new Error(`Scheduled assessments unavailable (${response.status})`);
@@ -205,13 +220,17 @@ const GrandMasterPlatformPage: React.FC = () => {
     } catch (err) {
       setScheduledAssessments([]);
     }
-  }, []);
+  }, [controlPlaneToken, controlPlaneUrl, hasControlPlaneConfig]);
 
   const loadSchedulerStatus = useCallback(async () => {
+    if (!hasControlPlaneConfig) {
+      setSchedulerStatus(null);
+      return;
+    }
     try {
-      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/scheduled-assessment-status', {
+      const response = await fetch(`${controlPlaneUrl.replace(/\/+$/, '')}/api/bob/builder/scheduled-assessment-status`, {
         headers: {
-          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+          'Authorization': `Bearer ${controlPlaneToken}`,
         },
       });
       if (!response.ok) throw new Error(`Scheduler status unavailable (${response.status})`);
@@ -220,13 +239,13 @@ const GrandMasterPlatformPage: React.FC = () => {
         running: Boolean(data?.running),
         intervalMs: Number(data?.intervalMs ?? 0),
         source: String(data?.source || 'local'),
-        appUrls: Array.isArray(data?.appUrls) ? data.appUrls.filter((item): item is string => typeof item === 'string') : [],
+        appUrls: Array.isArray(data?.appUrls) ? (data.appUrls as unknown[]).filter((item): item is string => typeof item === 'string') : [],
         lastUpdated: String(data?.lastUpdated || new Date().toISOString()),
       });
     } catch (err) {
       setSchedulerStatus(null);
     }
-  }, []);
+  }, [controlPlaneToken, controlPlaneUrl, hasControlPlaneConfig]);
 
   useEffect(() => {
     loadPlatformData();
@@ -278,7 +297,6 @@ const GrandMasterPlatformPage: React.FC = () => {
       setBrowserLoading(true);
       setError(null);
 
-      const appUrl = 'http://127.0.0.1:4173';
       const { data, error: fnError } = await supabase.functions.invoke('bob-builder-control-room', {
         body: {
           action: 'browser-check',
@@ -307,20 +325,25 @@ const GrandMasterPlatformPage: React.FC = () => {
   };
 
   const runPlatformAssessment = async () => {
+    if (!hasControlPlaneConfig) {
+      setError(controlPlaneUnavailableMessage);
+      setAssessment(null);
+      return;
+    }
     try {
       setAssessmentLoading(true);
       setError(null);
 
-      const response = await fetch('http://127.0.0.1:8080/api/bob/builder/self-hosted/loop', {
+      const response = await fetch(`${controlPlaneUrl.replace(/\/+$/, '')}/api/bob/builder/self-hosted/loop`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.REACT_APP_BOB_ADMIN_TOKEN || 'default-token'}`,
+          'Authorization': `Bearer ${controlPlaneToken}`,
         },
         body: JSON.stringify({
           profiles: ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'],
           dryRun: false,
-          appUrl: 'http://127.0.0.1:4173',
+          appUrl,
         }),
       });
       const data = await response.json();
@@ -333,7 +356,7 @@ const GrandMasterPlatformPage: React.FC = () => {
         readOnly: Boolean(data.readOnly),
         assessment: data.assessment || {},
         plan: data.plan || {},
-        steps: Array.isArray(data.steps) ? data.steps.filter((step): step is AssessmentStep => !!step && typeof step === 'object') : [],
+        steps: Array.isArray(data.steps) ? (data.steps as unknown[]).filter((step): step is AssessmentStep => !!step && typeof step === 'object') : [],
         paused: Boolean(data.paused),
         reason: String(data.reason || 'assessment_complete'),
       };
@@ -381,14 +404,20 @@ const GrandMasterPlatformPage: React.FC = () => {
           <p className="subtitle">{orgs.length} organisations across the platform</p>
         </div>
         <div className="ops-status-strip">
-          <span className={`live-pill ${schedulerStatus?.running ? 'is-live' : 'is-idle'}`}>
-            {schedulerStatus?.running ? 'Live scheduler' : 'Scheduler idle'}
+          <span className={`live-pill ${hasControlPlaneConfig && schedulerStatus?.running ? 'is-live' : 'is-idle'}`}>
+            {!hasControlPlaneConfig ? 'Config required' : schedulerStatus?.running ? 'Live scheduler' : 'Scheduler idle'}
           </span>
           {schedulerStatus && (
             <span className="sync-meta">Updated {new Date(schedulerStatus.lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           )}
         </div>
       </header>
+
+      {!hasControlPlaneConfig && (
+        <div className="alert alert-error" role="alert">
+          Bob control plane is not configured. Set VITE_BOB_CONTROL_PLANE_URL and VITE_BOB_ADMIN_TOKEN to enable live platform operations.
+        </div>
+      )}
 
       {error && (
         <div className="alert alert-error" role="alert">
@@ -436,7 +465,7 @@ const GrandMasterPlatformPage: React.FC = () => {
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <h2>Services Health</h2>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn btn-success btn-sm" onClick={runPlatformAssessment} disabled={assessmentLoading}>
+            <button className="btn btn-success btn-sm" onClick={runPlatformAssessment} disabled={assessmentLoading || !hasControlPlaneConfig}>
               {assessmentLoading ? 'Assessing…' : 'Run Full Assessment'}
             </button>
             <button className="btn btn-secondary btn-sm" onClick={runBrowserCheck} disabled={browserLoading}>

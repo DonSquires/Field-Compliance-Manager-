@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'radio';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;
@@ -46,6 +46,7 @@ const EMPTY_METRICS: Metrics = {
 
 const WORKFLOWS: Array<{ area: FieldOpsArea; label: string; detail: string; icon: LucideIcon; tone: string }> = [
   { area: 'dispatch', label: 'Dispatch console', detail: 'Create jobs, assign resources, and manage SLA response', icon: Radio, tone: 'teal' },
+  { area: 'radio', label: 'Radio operations', detail: 'Provision channels and review live communication evidence', icon: Radio, tone: 'blue' },
   { area: 'live-map', label: 'Live operations', detail: 'Review GPS freshness and separately confirmed welfare state', icon: Map, tone: 'blue' },
   { area: 'welfare-alerts', label: 'Welfare response', detail: 'Acknowledge, investigate, and resolve active alerts', icon: HeartPulse, tone: 'red' },
   { area: 'patrol', label: 'Patrol operations', detail: 'Manage routes, checkpoints, visits, and exceptions', icon: Route, tone: 'green' },

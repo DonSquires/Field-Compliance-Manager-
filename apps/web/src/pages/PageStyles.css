@@ -344,6 +344,37 @@
   background: var(--color-info-bg, #0d1e33);
 }
 
+.status-active,
+.status-passed,
+.status-complete,
+.status-online,
+.status-ok,
+.severity-low {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.status-inactive,
+.status-failed,
+.status-offline,
+.status-error,
+.severity-critical {
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.status-pending,
+.status-running,
+.status-warning,
+.severity-medium,
+.severity-high {
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.14);
+}
+
 .crm-branch-filter {
   display: flex;
   align-items: center;
@@ -544,6 +575,15 @@
 
 .btn-primary:hover:not(:disabled) {
   background: var(--color-primary-hover, #2563eb);
+}
+
+.btn-success {
+  background: #15803d;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #166534;
 }
 
 .btn-secondary {

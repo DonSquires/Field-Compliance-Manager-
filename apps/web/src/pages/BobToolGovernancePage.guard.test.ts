@@ -1,0 +1,5 @@
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+const source = readFileSync(resolve(__dirname, 'BobToolGovernancePage.tsx'), 'utf8');
+describe('BobToolGovernancePage', () => { it('uses only protected functions for tenant policy, approval, and execution decisions', () => { expect(source).toContain("functions.invoke('bob-tool-governance'"); expect(source).toContain("functions.invoke('bob-tool-executor'"); expect(source).toContain("action: 'set-policy'"); expect(source).toContain("action: 'request-approval'"); expect(source).toContain("action: 'decide-approval'"); expect(source).toContain("['write', 'destructive', 'deploy', 'secret']"); expect(source).toContain('proposed_action.input_fields'); expect(source).not.toContain("from('bob_tool_registry')"); }); });

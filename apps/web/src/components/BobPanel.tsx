@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Bot, FileUp, Loader2, Plus, SendHorizontal, ShieldCheck, X } from 'lucide-react';
+import { Bot, ClipboardCheck, Download, FileText, FileUp, Image, Loader2, Plus, SendHorizontal, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './BobPanel.css';
@@ -33,6 +33,36 @@ interface BobMessage {
   confidence: number | null;
   flagged: boolean;
   created_at: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface BobChoice {
+  label: string;
+  value: string;
+  state?: 'preferred' | 'qualified' | 'review' | 'not_suitable' | 'no_credentials';
+  detail?: string;
+}
+
+interface BobArtifact {
+  id?: string;
+  title: string;
+  type?: 'photo' | 'document' | 'report' | 'dataset' | 'map' | 'task' | 'evidence' | 'file';
+  status?: 'ready' | 'draft' | 'pending' | 'needs_approval';
+  summary?: string;
+  content?: string;
+  mimeType?: string;
+  downloadName?: string;
+  url?: string;
+  previewUrl?: string;
+  storage_bucket?: string;
+  storage_path?: string;
+}
+
+interface BobAction {
+  label: string;
+  prompt: string;
+  kind?: 'artifact' | 'photo' | 'document' | 'approval' | 'navigation' | 'selection';
+  detail?: string;
 }
 
 interface BobConversation {
@@ -62,6 +92,34 @@ interface ApprovalSummary {
   decidable: number;
 }
 
+const bobMissionActions: BobAction[] = [
+  {
+    label: 'Build Brief',
+    prompt: 'Bob, produce an operational brief for the current task with assumptions, blockers, decisions needed, and next actions.',
+    kind: 'document',
+  },
+  {
+    label: 'Create Report',
+    prompt: 'Bob, create a formal report artifact from this conversation, including evidence, decisions, risks, and recommended actions.',
+    kind: 'artifact',
+  },
+  {
+    label: 'Photo Evidence',
+    prompt: 'Bob, prepare a photo evidence request pack: what photos are needed, where they should be taken, quality checks, and how they should be labelled.',
+    kind: 'photo',
+  },
+  {
+    label: 'Decision Pack',
+    prompt: 'Bob, produce a decision pack with options, preference order, risks, approval requirements, and the safest next step.',
+    kind: 'approval',
+  },
+];
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+};
+
 interface BobPanelProps {
   open: boolean;
   onClose: () => void;
@@ -87,7 +145,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, onOpenApprova
   const loadMessages = useCallback(async (convId: string) => {
     const { data: history, error: historyErr } = await supabase
       .from('bob_messages')
-      .select('id, role, content, confidence, flagged, created_at')
+      .select('id, role, content, confidence, flagged, created_at, metadata')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
@@ -198,6 +256,58 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, onOpenApprova
     if (!titleError) {
       setConversations(rows => rows.map(row => row.id === convId ? { ...row, title } : row));
     }
+  };
+
+  const choicesFor = (message: BobMessage): BobChoice[] => {
+    const choices = message.metadata?.choices;
+    if (!Array.isArray(choices)) return [];
+    return choices.filter((choice): choice is BobChoice => Boolean(
+      choice && typeof choice === 'object' && typeof choice.label === 'string' && typeof choice.value === 'string'
+    ));
+  };
+
+  const artifactsFor = (message: BobMessage): BobArtifact[] => {
+    const metadata = asRecord(message.metadata);
+    const rawArtifacts = metadata?.artifacts ?? metadata?.artifact_cards ?? metadata?.outputs;
+    const artifacts = Array.isArray(rawArtifacts) ? rawArtifacts : metadata?.artifact ? [metadata.artifact] : [];
+    return artifacts.filter((artifact): artifact is BobArtifact => Boolean(
+      artifact && typeof artifact === 'object' && typeof (artifact as BobArtifact).title === 'string'
+    ));
+  };
+
+  const actionsFor = (message: BobMessage): BobAction[] => {
+    const actions = message.metadata?.actions;
+    if (!Array.isArray(actions)) return [];
+    return actions.filter((action): action is BobAction => Boolean(
+      action && typeof action === 'object' && typeof action.label === 'string' && typeof action.prompt === 'string'
+    ));
+  };
+
+  const requestMissionAction = (action: BobAction) => {
+    setInput(action.prompt);
+  };
+
+  const chooseBobOption = (choice: BobChoice) => {
+    setInput(`I select ${choice.value}. Continue with this selection.`);
+  };
+
+  const downloadArtifact = (artifact: BobArtifact) => {
+    if (artifact.url || artifact.previewUrl) {
+      window.open(artifact.url ?? artifact.previewUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const content = artifact.content ?? artifact.summary ?? '';
+    if (!content.trim()) return;
+    const mimeType = artifact.mimeType ?? (artifact.type === 'dataset' ? 'application/json' : 'text/markdown');
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = artifact.downloadName ?? `${artifact.title.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'bob-artifact'}.${mimeType.includes('json') ? 'json' : 'md'}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(href);
   };
 
   useEffect(() => {
@@ -331,7 +441,7 @@ Attached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: f
       // Refresh from bob_messages so we show the server-persisted, canonical thread
       const { data: history, error: historyErr } = await supabase
         .from('bob_messages')
-        .select('id, role, content, confidence, flagged, created_at')
+        .select('id, role, content, confidence, flagged, created_at, metadata')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true });
 
@@ -342,6 +452,7 @@ Attached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: f
         setPendingFiles([]);
       } else if (data?.reply) {
         // Fallback: function replied but history read didn't return rows yet
+        const replyMetadata = asRecord(data.metadata);
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== optimisticId),
           { id: optimisticId, role: 'user', content: attachmentNames.length ? `${message || 'Please review the attached file(s).'}
@@ -354,6 +465,7 @@ Attached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: f
             confidence: null,
             flagged: false,
             created_at: new Date().toISOString(),
+            metadata: replyMetadata,
           },
         ]);
         setPendingFiles([]);
@@ -380,7 +492,7 @@ Attached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: f
           <span><Bot size={16} aria-hidden="true" /></span>
           <div>
             <strong>Bob</strong>
-            <small>Chat, files, approvals, Builder</small>
+            <small>Ship's computer · artifacts · approvals</small>
           </div>
         </div>
         <div className="bob-panel-header-actions">
@@ -415,6 +527,21 @@ Attached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: f
         <div className="bob-panel-error" role="alert">{error}</div>
       )}
 
+      <div className="bob-command-deck" aria-label="Bob mission actions">
+        <div className="bob-command-status">
+          <span><Sparkles size={14} aria-hidden="true" /> Live console</span>
+          <small>{pendingFiles.length ? `${pendingFiles.length} file${pendingFiles.length === 1 ? '' : 's'} staged` : 'Ready for commands, files, photos, documents, and approvals'}</small>
+        </div>
+        <div className="bob-command-actions">
+          {bobMissionActions.map((action) => (
+            <button key={action.label} type="button" onClick={() => requestMissionAction(action)} disabled={sending || !conversationId} title={action.prompt}>
+              {action.kind === 'photo' ? <Image size={14} aria-hidden="true" /> : action.kind === 'approval' ? <ClipboardCheck size={14} aria-hidden="true" /> : <FileText size={14} aria-hidden="true" />}
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div ref={scrollRef} className="bob-message-list">
         {dragging && (
           <div className="bob-drop-target"><FileUp size={17} aria-hidden="true" /> Drop files for Bob to read.</div>
@@ -426,15 +553,76 @@ Attached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: f
             Ask Bob about what you're looking at.
           </div>
         ) : (
-          messages.map((m) => (
-            <div
-              key={m.id}
-              className={`bob-message is-${m.role}`}
-            >
-              {m.content}
-              {m.flagged && <div>Flagged for review</div>}
-            </div>
-          ))
+          messages.map((m) => {
+            const choices = choicesFor(m);
+            const artifacts = artifactsFor(m);
+            const actions = actionsFor(m);
+            return (
+              <div
+                key={m.id}
+                className={`bob-message is-${m.role} ${artifacts.length ? 'has-artifacts' : ''}`}
+              >
+                <div className="bob-message-content">{m.content}</div>
+                {artifacts.length > 0 && (
+                  <div className="bob-artifact-grid" aria-label="Bob artifacts">
+                    {artifacts.map((artifact, index) => {
+                      const artifactKey = artifact.id ?? `${m.id}-artifact-${index}`;
+                      const isPhoto = artifact.type === 'photo' || artifact.type === 'evidence';
+                      const preview = artifact.previewUrl ?? artifact.url;
+                      return (
+                        <article key={artifactKey} className={`bob-artifact-card is-${artifact.type ?? 'document'}`}>
+                          {isPhoto && preview ? (
+                            <img src={preview} alt={artifact.title} />
+                          ) : (
+                            <div className="bob-artifact-icon">
+                              {isPhoto ? <Image size={18} aria-hidden="true" /> : <FileText size={18} aria-hidden="true" />}
+                            </div>
+                          )}
+                          <div>
+                            <strong>{artifact.title}</strong>
+                            <span>{artifact.status ?? 'ready'} · {artifact.type ?? 'document'}</span>
+                            {artifact.summary && <p>{artifact.summary}</p>}
+                          </div>
+                          <button type="button" onClick={() => downloadArtifact(artifact)} disabled={sending || (!artifact.url && !artifact.previewUrl && !artifact.content && !artifact.summary)}>
+                            <Download size={14} aria-hidden="true" />
+                            <span>Open</span>
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+                {actions.length > 0 && (
+                  <div className="bob-inline-actions" aria-label="Bob actions">
+                    {actions.map((action) => (
+                      <button key={`${m.id}-${action.label}`} type="button" onClick={() => requestMissionAction(action)} disabled={sending} title={action.detail ?? action.prompt}>
+                        <Sparkles size={13} aria-hidden="true" />
+                        <span>{action.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {choices.length > 0 && (
+                  <div className="bob-choice-list" aria-label="Select a recommendation">
+                    {choices.map((choice) => (
+                      <button
+                        key={`${m.id}-${choice.value}`}
+                        type="button"
+                        className={`bob-choice is-${choice.state ?? 'qualified'}`}
+                        onClick={() => chooseBobOption(choice)}
+                        disabled={sending}
+                        title={choice.detail ?? `Select ${choice.label}`}
+                      >
+                        <span>{choice.label}</span>
+                        {choice.detail && <small>{choice.detail}</small>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {m.flagged && <div className="bob-message-flag">Flagged for review</div>}
+              </div>
+            );
+          })
         )}
       </div>
 

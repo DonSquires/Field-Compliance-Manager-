@@ -11,7 +11,27 @@ function requireEnv(key: string): string {
   return value;
 }
 
+function optionalEnv(key: string): string {
+  return import.meta.env[key] ?? '';
+}
+
 export const env = {
-  supabaseUrl: requireEnv('VITE_SUPABASE_URL'),
-  supabaseAnonKey: requireEnv('VITE_SUPABASE_ANON_KEY'),
+  get supabaseUrl() {
+    return requireEnv('VITE_SUPABASE_URL');
+  },
+  get supabaseAnonKey() {
+    return requireEnv('VITE_SUPABASE_ANON_KEY');
+  },
+  get bobControlPlaneUrl() {
+    return optionalEnv('VITE_BOB_CONTROL_PLANE_URL');
+  },
+  get bobAdminToken() {
+    return optionalEnv('VITE_BOB_ADMIN_TOKEN');
+  },
+  get appUrl() {
+    return optionalEnv('VITE_APP_URL');
+  },
+  get pttSignalUrl() {
+    return optionalEnv('VITE_PTT_SIGNAL_URL');
+  },
 };

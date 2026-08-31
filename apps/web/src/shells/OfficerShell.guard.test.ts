@@ -27,8 +27,14 @@ describe('OfficerShell state routing', () => {
     expect(source).toContain('safety.recordMovement');
     expect(source).toContain('safety.triggerSOS()');
     expect(source).toContain("navigateToModule('report')");
-    expect(source).not.toContain('PttBar');
     expect(source).not.toContain('ReportButton');
+  });
+
+  // The officer radio is a first-class persistent surface, unlike the retired
+  // per-module ReportButton it replaced.
+  it('mounts the persistent PTT radio bar', () => {
+    expect(source).toContain("import { PttBar } from '../components/PttBar'");
+    expect(source).toContain('<PttBar />');
   });
 
   it('routes the module selector to its own URL', () => {

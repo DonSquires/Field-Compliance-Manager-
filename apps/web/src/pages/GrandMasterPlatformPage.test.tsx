@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import GrandMasterPlatformPage from './GrandMasterPlatformPage';
 
 const { mockInvoke, mockFrom } = vi.hoisted(() => ({
@@ -21,7 +21,14 @@ vi.mock('../lib/supabase', () => ({
 }));
 
 describe('GrandMasterPlatformPage', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
+    vi.stubEnv('VITE_BOB_CONTROL_PLANE_URL', 'http://127.0.0.1:8080');
+    vi.stubEnv('VITE_BOB_ADMIN_TOKEN', 'test-admin-token');
+
     mockInvoke.mockReset();
     mockFrom.mockReset();
 
@@ -154,6 +161,29 @@ describe('GrandMasterPlatformPage', () => {
     });
 
     expect(screen.getByText('App Title')).toBeTruthy();
+  });
+
+  it('shows a clear configuration warning when the Bob control plane is not configured', async () => {
+    vi.stubEnv('VITE_BOB_CONTROL_PLANE_URL', '');
+    vi.stubEnv('VITE_BOB_ADMIN_TOKEN', '');
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    render(<GrandMasterPlatformPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Bob control plane is not configured/i)).toBeTruthy();
+    });
+
+    const assessmentButton = screen.getByRole('button', { name: 'Run Full Assessment' });
+    expect(assessmentButton).toHaveProperty('disabled', true);
+
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('/api/bob/builder/assessment-trends'),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer default-token' }) }),
+    );
+
+    fetchSpy.mockRestore();
   });
 
   it('runs a full platform assessment with all verification profiles', async () => {
