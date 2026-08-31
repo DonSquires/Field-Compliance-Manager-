@@ -102,14 +102,19 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
   'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing', 'builder',
 ]);
 
+const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
+  'relationships', 'onboarding', 'crm', 'sites',
+]);
+
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
   'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
 ]);
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined): boolean {
-  if (!PLATFORM_ONLY_PAGES.has(page)) return true;
-  return role === 'grand_master' || role === 'master';
+  if (PLATFORM_ONLY_PAGES.has(page)) return role === 'grand_master' || role === 'master';
+  if (CRM_MANAGEMENT_PAGES.has(page)) return role === 'grand_master' || role === 'master' || role === 'admin';
+  return true;
 }
 
 interface RedirectTarget {
@@ -230,7 +235,7 @@ const AdminShell: React.FC = () => {
 
     if (redirectTarget) {
       if (!canAccessAdminPage(redirectTarget.page, profile?.role)) {
-        setAccessNotice('This area is restricted to platform operators.');
+        setAccessNotice('This area is not available for your current role.');
         setActivePage('hub');
         navigate('/admin/hub', { replace: true });
         return;
@@ -243,7 +248,7 @@ const AdminShell: React.FC = () => {
       const areaQuery = redirectTarget.fieldOpsSubArea ? `?area=${redirectTarget.fieldOpsSubArea}` : '';
       navigate(`/admin/${redirectTarget.page}${areaQuery}`, { replace: true });
     } else if (!canAccessAdminPage(page, profile?.role)) {
-      setAccessNotice('This area is restricted to platform operators.');
+      setAccessNotice('This area is not available for your current role.');
       setActivePage('hub');
       navigate('/admin/hub', { replace: true });
     } else {
@@ -293,7 +298,7 @@ const AdminShell: React.FC = () => {
 
   const navigateToPage = useCallback((page: AdminPage) => {
     if (!isPageEnabled(page)) {
-      setAccessNotice('This area is restricted to platform operators.');
+      setAccessNotice('This area is not available for your current role.');
       setActivePage('hub');
       navigate('/admin/hub');
       return;
@@ -448,7 +453,7 @@ const AdminShell: React.FC = () => {
               {!sidebarCollapsed && (
                 <div className="admin-nav-group-label">{group}</div>
               )}
-              {items.map((item) => (
+              {items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role)).map((item) => (
                 <NavItem
                   key={item.id}
                   id={item.id}
@@ -528,7 +533,7 @@ const AdminShell: React.FC = () => {
             {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || canAccessAdminPage('platform', profile?.role)).map(([group, items]) => (
               <div key={group} className="admin-mobile-nav-group">
                 <div>{group}</div>
-                {items.map((item) => {
+                {items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role)).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button key={item.id} onClick={() => navigateToPage(item.id as AdminPage)} className={`admin-mobile-nav-item ${activePage === item.id ? 'is-active' : ''}`}>

@@ -16,8 +16,8 @@ test('operations triages and establishes provisional site boundary evidence', as
 
   await page.getByRole('button', { name: /North Pavilion/ }).click();
   await expect(page.getByText('Geometry required')).toBeVisible();
-  await expect(page.getByText('Verification requires visual polygon inspection')).toBeVisible();
-  await expect(page.getByRole('button', { name: /verify/i })).toHaveCount(0);
+  await expect(page.getByText('No boundary to inspect')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Verify boundary' })).toBeDisabled();
 
   await page.getByLabel('Latitude').fill('-41.2762');
   await page.getByLabel('Longitude').fill('173.2817');
@@ -27,6 +27,12 @@ test('operations triages and establishes provisional site boundary evidence', as
   await expect(page.getByRole('status')).toContainText('provisional point-radius boundary');
   await expect(page.getByText('Visual review required')).toBeVisible();
   await expect(page.getByText('Site geometry set via set_site_geometry')).toBeVisible();
+  await expect(page.getByLabel('Boundary map for North Pavilion')).toBeVisible();
+  await page.getByText('I inspected the full boundary against the site address.').click();
+  await page.getByRole('button', { name: 'Verify boundary' }).click();
+  await expect(page.getByRole('status')).toContainText('boundary verified from visual map review');
+  await expect(page.getByText('Verified boundary')).toBeVisible();
+  await expect(page.getByText('Boundary verified via visual map confirmation')).toBeVisible();
   await page.getByRole('heading', { name: 'Boundary review' }).scrollIntoViewIfNeeded();
   await expect(page).toHaveScreenshot('site-boundary-review.png', { fullPage: true });
   expect(errors, errors.join('\n')).toEqual([]);

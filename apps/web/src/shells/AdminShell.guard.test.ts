@@ -16,10 +16,16 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).not.toContain('if (isPlatformOperator) return true;\n    return true;');
   });
 
+  it('aligns CRM management pages with server administrator roles', () => {
+    expect(source).toContain('CRM_MANAGEMENT_PAGES');
+    expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
+    expect(source).toContain('items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role))');
+  });
+
   it('guards direct URLs and visible navigation', () => {
     expect(source).toContain('!canAccessAdminPage(page, profile?.role)');
     expect(source).toContain("group !== 'System' && group !== 'Platform'");
-    expect(source).toContain('This area is restricted to platform operators.');
+    expect(source).toContain('This area is not available for your current role.');
   });
 
   it('persists field operations subareas in the URL', () => {

@@ -29,8 +29,9 @@ used here as a workflow hypothesis, not as evidence about the current UI.
   revoked.
 - CRM site creation is candidate-first, retry-safe, and audited. New sites begin
   with explicit provisional, unverified boundary provenance.
-- The Sites route is an operational boundary-review queue. It can establish
-  provisional point-radius evidence but does not claim visual polygon verification.
+- The Sites route is an operational boundary-review queue. It establishes
+  provisional point-radius evidence, renders the governed GeoJSON, requires an
+  explicit human inspection confirmation, and verifies through the audited RPC.
 - Accepted operational agreements now expose governed covered-site and module
   setup. Direct authenticated writes to agreement locations and modules are revoked.
 - Agreement readiness now evaluates canonical coverage, authoritative boundary,
@@ -56,6 +57,8 @@ used here as a workflow hypothesis, not as evidence about the current UI.
   deliberately scoped owner before additional UI controls are exposed.
 6. Activation records the canonical account and agreement transition, but a
   post-activation handoff view joining hazards and first actions is still absent.
+7. Stage assignment history and per-stage notes are not yet modeled, so handover
+  accountability is visible by owning workspace rather than a named assignee.
 
 ## Target Workflow
 
@@ -130,8 +133,10 @@ Implement these boundaries before exposing their corresponding UI actions:
   it.
 - The activation RPC rejects incomplete, stale, unauthorized, or duplicate
   transitions.
-- Desktop and mobile Playwright scenarios cover create, resume, blocked review,
-  completion, activation, stale-state rejection, and retry behavior.
+- Desktop and mobile Playwright scenarios cover candidate-first organization and
+  site creation, contact setup, agreement configuration, blocked readiness
+  handoffs, resume, activation, stale-stage rejection and retry, and visual
+  boundary verification.
 
 ## Delivery Order
 
@@ -140,5 +145,6 @@ Implement these boundaries before exposing their corresponding UI actions:
 3. **Complete:** governed site creation and boundary-review handoff.
 4. **Complete:** governed agreement/location/module setup.
 5. **Complete:** operational and commercial readiness integrations with owner handoffs.
-6. **Partial:** activation gate, incomplete queue, target-live ordering, and age
-  metrics are live. Post-activation handoff summary remains.
+6. **Complete:** activation gate, incomplete queue, target-live ordering, age
+  metrics, stale-state recovery, and role-aligned navigation are live.
+7. **Pending:** post-activation handoff summary and named stage assignment/history.

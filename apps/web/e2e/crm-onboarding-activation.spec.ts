@@ -63,3 +63,30 @@ test('missing onboarding RPC hides misleading queue totals and recovers on retry
   await expect(page.getByRole('button', { name: /Ready Venue Trust/ })).toBeVisible();
   await expect(page.getByText('In progress', { exact: true })).toBeVisible();
 });
+
+test('stale stage rejection preserves context and allows a human retry', async ({ page }) => {
+  let attempts = 0;
+  await page.route('**/rest/v1/rpc/manage_crm_onboarding_stage', async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'P0001', message: 'Onboarding ledger changed since it was opened' }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await signInAsAdmin(page, '/admin/onboarding');
+  await page.getByRole('button', { name: /Ready Venue Trust/ }).click();
+  await page.getByRole('button', { name: 'Advance stage' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('Onboarding ledger changed since it was opened');
+  await expect(page.getByRole('button', { name: /Ready Venue Trust/ })).toBeVisible();
+  await expect(page.getByText('Onboarding data unavailable')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Advance stage' }).click();
+  await expect(page.getByRole('status')).toContainText('Ready Venue Trust advanced to review');
+});
