@@ -17,6 +17,7 @@ import './GeographyPages.css';
 
 interface LocationRow {
   id: string;
+  organization_id: string;
   name: string;
   address: string | null;
   suburb: string | null;
@@ -29,6 +30,7 @@ interface SiteFacet extends HouseMapSite {
   name: string;
   site_type: string | null;
   active: boolean;
+  location_id: string | null;
 }
 
 interface ZoneFacet extends HouseMapZone {
@@ -38,6 +40,7 @@ interface ZoneFacet extends HouseMapZone {
   is_active: boolean;
   nightly_limit_consecutive: number | null;
   scv_required: boolean;
+  location_id: string | null;
 }
 
 interface ZoneClosure {
@@ -57,6 +60,8 @@ const LocationsPage: React.FC = () => {
   const [selected, setSelected] = useState<LocationRow | null>(null);
   const [sites, setSites] = useState<SiteFacet[]>([]);
   const [zones, setZones] = useState<ZoneFacet[]>([]);
+  const [operationalSites, setOperationalSites] = useState<SiteFacet[]>([]);
+  const [operationalZones, setOperationalZones] = useState<ZoneFacet[]>([]);
   const [closures, setClosures] = useState<ZoneClosure[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -71,18 +76,18 @@ const LocationsPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const { data, error: err } = await supabase
-          .from('locations')
-          .select('id, name, address, suburb, postcode, notes')
-          .eq('organization_id', orgId)
-          .order('name', { ascending: true });
+        const { data, error: err } = await supabase.rpc('get_crm_operational_geography');
 
         if (err) throw err;
-        setLocations((data as LocationRow[]) || []);
+        const geography = (data ?? {}) as { locations?: LocationRow[]; sites?: SiteFacet[]; zones?: ZoneFacet[] };
+        const locationRows = geography.locations ?? [];
+        setLocations(locationRows);
+        setOperationalSites(geography.sites ?? []);
+        setOperationalZones(geography.zones ?? []);
 
-        if (data && data.length > 0) {
-          setSelected(data[0] as LocationRow);
-          await loadFacets(data[0].id);
+        if (locationRows.length > 0) {
+          setSelected(locationRows[0]);
+          await loadFacets(locationRows[0].id, geography.sites ?? [], geography.zones ?? []);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load locations');
@@ -94,22 +99,11 @@ const LocationsPage: React.FC = () => {
     loadLocations();
   }, [profile?.organizationId]);
 
-  const loadFacets = async (locationId: string) => {
+  const loadFacets = async (locationId: string, availableSites = operationalSites, availableZones = operationalZones) => {
     try {
-      // ATLAS READS: client_sites, location_zones
-      const [sitesRes, zonesRes] = await Promise.all([
-        supabase.from('client_sites').select('id, name, site_type, active, gps_lat, gps_lng, boundary, boundary_status, boundary_verification').eq('location_id', locationId),
-        supabase
-          .from('location_zones')
-          .select('id, name, zone_type, is_active, nightly_limit_consecutive, scv_required, boundary, center_point, boundary_status, boundary_verification')
-          .eq('location_id', locationId),
-      ]);
-
-      if (sitesRes.error) throw sitesRes.error;
-      if (zonesRes.error) throw zonesRes.error;
-
-      const zoneRows = (zonesRes.data as ZoneFacet[]) || [];
-      setSites((sitesRes.data as SiteFacet[]) || []);
+      const siteRows = availableSites.filter((site) => site.location_id === locationId);
+      const zoneRows = availableZones.filter((zone) => zone.location_id === locationId);
+      setSites(siteRows);
       setZones(zoneRows);
 
       if (zoneRows.length > 0) {
@@ -199,7 +193,7 @@ const LocationsPage: React.FC = () => {
 
             {selected.notes && <p className="contact-meta">{selected.notes}</p>}
 
-            <LocationHouseMap organizationId={profile?.organizationId ?? ''} house={{ name: selected.name, address: [selected.address, selected.suburb, selected.postcode].filter(Boolean).join(', ') || null }} sites={sites} zones={zones} />
+            <LocationHouseMap organizationId={selected.organization_id} house={{ name: selected.name, address: [selected.address, selected.suburb, selected.postcode].filter(Boolean).join(', ') || null }} sites={sites} zones={zones} />
 
             <section className="reports-section">
               <h3>Site Facet ({sites.length})</h3>

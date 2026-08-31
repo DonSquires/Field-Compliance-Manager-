@@ -29,6 +29,8 @@ interface ZoneRow extends HouseMapZone {
 
 interface ClosureRow { id: string; closure_type: string; status: string; effective_from: string; effective_to: string | null; reason: string | null }
 interface BoundaryEvent { id: string; boundary_source: string | null; verification_state: string | null; changed_via: string; change_reason: string | null; version: number; created_at: string; has_boundary: boolean }
+interface OperationalLocation { id: string; organization_id: string; name: string; address: string | null; suburb: string | null; postcode: string | null }
+interface OperationalSite extends HouseMapSite { location_id: string | null }
 
 export default function ZoneDetailPage() {
   const { profile } = useAuth();
@@ -40,6 +42,8 @@ export default function ZoneDetailPage() {
   const [sites, setSites] = useState<HouseMapSite[]>([]);
   const [closures, setClosures] = useState<ClosureRow[]>([]);
   const [boundaryHistory, setBoundaryHistory] = useState<BoundaryEvent[]>([]);
+  const [operationalLocations, setOperationalLocations] = useState<OperationalLocation[]>([]);
+  const [operationalSites, setOperationalSites] = useState<OperationalSite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,26 +51,26 @@ export default function ZoneDetailPage() {
     const load = async () => {
       if (!profile?.organizationId) return;
       setLoading(true); setError(null);
-      const { data, error: zonesError } = await supabase.from('location_zones').select('id,organization_id,location_id,site_id,name,address,zone_type,module_key,rule_type,is_active,active_schedule,onsite_profile,enforcement_workflow_override,boundary,center_point,boundary_status,boundary_verification,bylaw_clause,bylaw_source_url,nightly_limit_consecutive,nightly_limit_monthly,scv_required').eq('organization_id', profile.organizationId).order('name');
+      const { data, error: zonesError } = await supabase.rpc('get_crm_operational_geography');
       if (zonesError) { setError(zonesError.message); setLoading(false); return; }
-      const rows = (data as ZoneRow[]) ?? [];
+      const geography = (data ?? {}) as { locations?: OperationalLocation[]; sites?: OperationalSite[]; zones?: ZoneRow[] };
+      const rows = geography.zones ?? [];
+      setOperationalLocations(geography.locations ?? []); setOperationalSites(geography.sites ?? []);
       const requested = new URLSearchParams(location.search).get('zone');
       const initial = rows.find((zone) => zone.id === requested) ?? rows[0] ?? null;
       setZones(rows); setSelected(initial);
-      if (initial) await loadContext(initial);
+      if (initial) await loadContext(initial, geography.locations ?? [], geography.sites ?? []);
       setLoading(false);
     };
     void load();
   }, [profile?.organizationId, location.search]);
 
-  const loadContext = async (zone: ZoneRow) => {
-    const houseQuery = zone.location_id ? supabase.from('locations').select('name,address,suburb,postcode').eq('id', zone.location_id).maybeSingle() : Promise.resolve({ data: null, error: null });
-    const sitesQuery = zone.location_id ? supabase.from('client_sites').select('id,name,gps_lat,gps_lng,boundary,boundary_status,boundary_verification').eq('location_id', zone.location_id) : zone.site_id ? supabase.from('client_sites').select('id,name,gps_lat,gps_lng,boundary,boundary_status,boundary_verification').eq('id', zone.site_id) : Promise.resolve({ data: [], error: null });
-    const [houseRes, sitesRes, closuresRes, historyRes] = await Promise.all([houseQuery, sitesQuery, supabase.from('zone_closures').select('id,closure_type,status,effective_from,effective_to,reason').eq('zone_id', zone.id).order('effective_from', { ascending: false }), supabase.rpc('get_boundary_history', { p_entity_type: 'location_zone', p_entity_id: zone.id })]);
-    if (houseRes.error || sitesRes.error || closuresRes.error || historyRes.error) { setError(houseRes.error?.message ?? sitesRes.error?.message ?? closuresRes.error?.message ?? historyRes.error?.message ?? 'Zone context failed to load'); return; }
-    const row = houseRes.data as { name: string; address: string | null; suburb: string | null; postcode: string | null } | null;
+  const loadContext = async (zone: ZoneRow, availableLocations = operationalLocations, availableSites = operationalSites) => {
+    const [closuresRes, historyRes] = await Promise.all([supabase.from('zone_closures').select('id,closure_type,status,effective_from,effective_to,reason').eq('zone_id', zone.id).order('effective_from', { ascending: false }), supabase.rpc('get_boundary_history', { p_entity_type: 'location_zone', p_entity_id: zone.id })]);
+    if (closuresRes.error || historyRes.error) { setError(closuresRes.error?.message ?? historyRes.error?.message ?? 'Zone context failed to load'); return; }
+    const row = availableLocations.find((item) => item.id === zone.location_id) ?? null;
     setHouse(row ? { name: row.name, address: [row.address, row.suburb, row.postcode].filter(Boolean).join(', ') || null } : { name: zone.name, address: zone.address });
-    setSites((sitesRes.data as HouseMapSite[]) ?? []); setClosures((closuresRes.data as ClosureRow[]) ?? []); setBoundaryHistory((historyRes.data as BoundaryEvent[]) ?? []);
+    setSites(availableSites.filter((site) => zone.location_id ? site.location_id === zone.location_id : site.id === zone.site_id)); setClosures((closuresRes.data as ClosureRow[]) ?? []); setBoundaryHistory((historyRes.data as BoundaryEvent[]) ?? []);
   };
 
   const selectZone = (zone: ZoneRow) => { setSelected(zone); navigate(`/admin/zones?zone=${zone.id}`, { replace: true }); void loadContext(zone); };

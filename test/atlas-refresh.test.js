@@ -90,8 +90,12 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('pages/ActivationHandoffsPage', 'manage_crm_activation_handoff_task', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'resolve_context_authorized', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'is_zone_closed', 'calls'), true);
-  assert.equal(hasEdge('pages/LocationsPage', 'locations', 'reads'), true);
-  assert.equal(hasEdge('pages/LocationsPage', 'location_zones', 'reads'), true);
+  assert.equal(hasEdge('pages/LocationsPage', 'get_crm_operational_geography', 'calls'), true);
+  assert.equal(hasEdge('pages/ZoneDetailPage', 'get_crm_operational_geography', 'calls'), true);
+  assert.equal(hasEdge('get_crm_operational_geography', 'locations', 'reads'), true);
+  assert.equal(hasEdge('get_crm_operational_geography', 'client_sites', 'reads'), true);
+  assert.equal(hasEdge('get_crm_operational_geography', 'location_zones', 'reads'), true);
+  assert.equal(hasEdge('get_crm_operational_geography', 'service_agreement_locations', 'reads'), true);
   assert.equal(hasEdge('pages/SiteDetailPage', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('pages/ZoneDetailPage', 'zone_closures', 'reads'), true);
   assert.equal(hasEdge('pages/ZoneDetailPage', 'get_boundary_history', 'calls'), true);
@@ -139,6 +143,11 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('get_crm_activation_handoffs', 'roster_slots', 'reads'), true);
   assert.equal(hasEdge('manage_crm_activation_handoff_task', 'crm_activation_handoff_tasks', 'writes'), true);
   assert.equal(hasEdge('manage_crm_activation_handoff_task', 'crm_activation_handoffs', 'writes'), true);
+  assert.equal(hasEdge('seed_aam_e2e_dataset', 'organizations', 'writes'), true);
+  assert.equal(hasEdge('seed_aam_e2e_dataset', 'service_agreement_modules', 'writes'), true);
+  assert.equal(hasEdge('seed_aam_e2e_dataset', 'location_zones', 'writes'), true);
+  assert.equal(hasEdge('seed_aam_e2e_dataset', 'shift_templates', 'writes'), true);
+  assert.equal(hasEdge('purge_aam_e2e_dataset', 'organizations', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'organizations', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'crm_onboarding_ledgers', 'writes'), true);
   assert.equal(hasEdge('activate_crm_account', 'audit_log', 'writes'), true);
