@@ -86,4 +86,40 @@ describe('GrandMasterPlatformPage', () => {
 
     expect(mockInvoke).toHaveBeenCalledWith('check-services-health', { body: {} });
   });
+
+  it('runs a live browser check through the Bob control-room relay', async () => {
+    mockInvoke.mockImplementation(async (name: string, payload?: { body?: Record<string, unknown> }) => {
+      if (name === 'check-services-health') return { data: { bob_control_plane: { status: 'online', service: 'bob-control-plane', builderReady: true } }, error: null };
+      if (name === 'bob-builder-control-room') {
+        return {
+          data: {
+            ok: true,
+            appUrl: 'http://127.0.0.1:4173',
+            result: { status: 'passed', title: 'App Title', checks: ['page_load'] },
+          },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    });
+
+    render(<GrandMasterPlatformPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Platform Overview')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Browser Check' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Live app check')).toBeTruthy();
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith('bob-builder-control-room', {
+      body: expect.objectContaining({
+        action: 'browser-check',
+        appUrl: expect.any(String),
+      }),
+    });
+  });
 });

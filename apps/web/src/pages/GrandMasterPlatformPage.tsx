@@ -61,7 +61,9 @@ const GrandMasterPlatformPage: React.FC = () => {
   const [userCount, setUserCount] = useState(0);
   const [notifications, setNotifications] = useState<PlatformNotification[]>([]);
   const [health, setHealth] = useState<HealthCheckResult[] | null>(null);
+  const [browserCheck, setBrowserCheck] = useState<{ appUrl: string; status: string; title?: string; checks?: string[] } | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [browserLoading, setBrowserLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -132,6 +134,37 @@ const GrandMasterPlatformPage: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to run health check');
     } finally {
       setHealthLoading(false);
+    }
+  };
+
+  const runBrowserCheck = async () => {
+    try {
+      setBrowserLoading(true);
+      setError(null);
+
+      const appUrl = 'http://127.0.0.1:4173';
+      const { data, error: fnError } = await supabase.functions.invoke('bob-builder-control-room', {
+        body: {
+          action: 'browser-check',
+          appUrl,
+          testName: 'live-app-check',
+        },
+      });
+      if (fnError) throw fnError;
+      if (data?.error) throw new Error(String(data.error));
+
+      const status = (data?.result && typeof data.result === 'object' ? (data.result as Record<string, unknown>) : {}) as Record<string, unknown>;
+      setBrowserCheck({
+        appUrl: String((data?.appUrl ?? appUrl) || appUrl),
+        status: String(status.status ?? 'unknown'),
+        title: typeof status.title === 'string' ? status.title : undefined,
+        checks: Array.isArray(status.checks) ? status.checks.filter((item): item is string => typeof item === 'string') : undefined,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run browser check');
+      setBrowserCheck(null);
+    } finally {
+      setBrowserLoading(false);
     }
   };
 
@@ -213,9 +246,14 @@ const GrandMasterPlatformPage: React.FC = () => {
       <section className="reports-section">
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <h2>Services Health</h2>
-          <button className="btn btn-primary btn-sm" onClick={runHealthCheck} disabled={healthLoading}>
-            {healthLoading ? 'Checking…' : 'Run Health Check'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-secondary btn-sm" onClick={runBrowserCheck} disabled={browserLoading}>
+              {browserLoading ? 'Running browser check…' : 'Run Browser Check'}
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={runHealthCheck} disabled={healthLoading}>
+              {healthLoading ? 'Checking…' : 'Run Health Check'}
+            </button>
+          </div>
         </div>
         {health && (
           <div className="contacts-list">
@@ -235,6 +273,21 @@ const GrandMasterPlatformPage: React.FC = () => {
                 )}
               </div>
             ))}
+          </div>
+        )}
+        {browserCheck && (
+          <div className="contact-card" style={{ marginTop: 12 }}>
+            <div className="contact-header">
+              <h3>Live app check</h3>
+              <span className={`status-badge status-${browserCheck.status === 'passed' ? 'active' : 'inactive'}`}>
+                {browserCheck.status}
+              </span>
+            </div>
+            <p className="contact-details">URL: {browserCheck.appUrl}</p>
+            {browserCheck.title && <p className="contact-details">Title: {browserCheck.title}</p>}
+            {browserCheck.checks && browserCheck.checks.length > 0 && (
+              <p className="contact-details">Checks: {browserCheck.checks.join(', ')}</p>
+            )}
           </div>
         )}
       </section>
