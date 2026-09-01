@@ -36,7 +36,7 @@ interface OpenShift {
   site_name: string | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'map' | 'report' | 'modules' | 'schedule';
+type HomeDestination = 'dispatch' | 'patrol' | 'map' | 'report' | 'modules' | 'schedule' | 'on_call';
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -233,6 +233,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           <QuickAction icon={<Radio />} label="Dispatch" detail="Assigned jobs" onClick={() => onNavigate('dispatch')} />
           <QuickAction icon={<Map />} label="Live map" detail="Sites and zones" onClick={() => onNavigate('map')} />
           <QuickAction icon={<ClipboardPlus />} label="Field report" detail="Record an incident" onClick={() => onNavigate('report')} />
+          <QuickAction icon={<Clock3 />} label="On-Call" detail="Accept assignments, log callouts" onClick={() => onNavigate('on_call')} />
         </div>
         <button type="button" className="officer-all-modules" onClick={() => onNavigate('modules')}>All enabled modules <ArrowRight size={16} aria-hidden="true" /></button>
       </section>

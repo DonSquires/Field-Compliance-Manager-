@@ -4089,6 +4089,115 @@ $$;
 ALTER FUNCTION "public"."officer_gps_log_set_point"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."respond_to_on_call_period"("p_period_id" "uuid", "p_decision" "text") RETURNS TABLE("id" "uuid", "status" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_period on_call_periods%rowtype;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  if p_decision not in ('accepted', 'declined') then raise exception 'Invalid decision'; end if;
+
+  select * into v_period from on_call_periods where on_call_periods.id = p_period_id for update;
+  if not found then raise exception 'On-call period not found'; end if;
+  if v_period.officer_user_id <> v_user_id then raise exception 'Not authorised to respond to this on-call period'; end if;
+  if v_period.status <> 'pending' then raise exception 'On-call period is no longer pending'; end if;
+
+  update on_call_periods set status = p_decision where on_call_periods.id = p_period_id;
+
+  return query select p_period_id, p_decision;
+end;
+$$;
+
+ALTER FUNCTION "public"."respond_to_on_call_period"("p_period_id" "uuid", "p_decision" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."respond_to_on_call_period"("p_period_id" "uuid", "p_decision" "text") IS 'Officer accept/decline of their own pending on-call period assignment.';
+
+
+CREATE OR REPLACE FUNCTION "public"."log_callout_milestone"("p_on_call_period_id" "uuid", "p_milestone" "text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision) RETURNS TABLE("id" "uuid", "milestone" "text", "milestone_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_period on_call_periods%rowtype;
+  v_callout callout_shifts%rowtype;
+  v_now timestamptz := now();
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  if p_milestone not in ('received', 'departed', 'arrived', 'work_started', 'work_ended', 'returned') then
+    raise exception 'Invalid callout milestone';
+  end if;
+
+  select * into v_period from on_call_periods where on_call_periods.id = p_on_call_period_id;
+  if not found then raise exception 'On-call period not found'; end if;
+  if v_period.officer_user_id <> v_user_id then raise exception 'Not authorised to log a callout against this on-call period'; end if;
+  if v_period.status <> 'accepted' then raise exception 'On-call period is not in an accepted state'; end if;
+
+  select * into v_callout from callout_shifts
+  where callout_shifts.on_call_period_id = p_on_call_period_id and callout_shifts.officer_user_id = v_user_id;
+
+  if not found then
+    if p_milestone <> 'received' then raise exception 'The first logged milestone for a callout must be received'; end if;
+    insert into callout_shifts (organization_id, on_call_period_id, officer_user_id, callout_received_at)
+    values (v_period.organization_id, p_on_call_period_id, v_user_id, v_now)
+    returning * into v_callout;
+  else
+    update callout_shifts set
+      departed_at = case when p_milestone = 'departed' then v_now else departed_at end,
+      arrived_at = case when p_milestone = 'arrived' then v_now else arrived_at end,
+      work_started_at = case when p_milestone = 'work_started' then v_now else work_started_at end,
+      work_ended_at = case when p_milestone = 'work_ended' then v_now else work_ended_at end,
+      returned_at = case when p_milestone = 'returned' then v_now else returned_at end
+    where callout_shifts.id = v_callout.id;
+  end if;
+
+  if p_milestone = 'returned' then
+    update on_call_periods set status = 'completed' where on_call_periods.id = p_on_call_period_id;
+  end if;
+
+  return query select v_callout.id, p_milestone, v_now;
+end;
+$$;
+
+ALTER FUNCTION "public"."log_callout_milestone"("p_on_call_period_id" "uuid", "p_milestone" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."log_callout_milestone"("p_on_call_period_id" "uuid", "p_milestone" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) IS 'Officer callout timeline logging: creates the callout_shift on first (received) milestone, then records each subsequent stage against it.';
+
+
+CREATE OR REPLACE FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric DEFAULT NULL::numeric, "p_duration_minutes" integer DEFAULT NULL::integer, "p_outside_jurisdiction" boolean DEFAULT false) RETURNS TABLE("id" "uuid")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_callout callout_shifts%rowtype;
+  v_id uuid;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  if p_journey_type not in ('outbound', 'return', 'round_trip') then raise exception 'Invalid journey type'; end if;
+
+  select * into v_callout from callout_shifts where callout_shifts.id = p_callout_shift_id;
+  if not found then raise exception 'Callout shift not found'; end if;
+  if v_callout.officer_user_id <> v_user_id and not is_admin_for_org(v_callout.organization_id) then
+    raise exception 'Not authorised to submit travel allowance for this callout';
+  end if;
+
+  insert into travel_allowances (organization_id, callout_shift_id, officer_user_id, journey_type, distance_km, duration_minutes, outside_jurisdiction)
+  values (v_callout.organization_id, p_callout_shift_id, v_callout.officer_user_id, p_journey_type, p_distance_km, p_duration_minutes, coalesce(p_outside_jurisdiction, false))
+  returning travel_allowances.id into v_id;
+
+  return query select v_id;
+end;
+$$;
+
+ALTER FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) IS 'Officer/admin travel allowance claim for a callout. rate_per_km/time_rate are left for payroll to assign -- no rate configuration table exists yet.';
+
+
 CREATE OR REPLACE FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision DEFAULT NULL::double precision, "p_heading" double precision DEFAULT NULL::double precision, "p_speed_kmh" double precision DEFAULT NULL::double precision, "p_activity_type" "text" DEFAULT 'gps_update'::"text", "p_shift_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
@@ -25384,6 +25493,21 @@ GRANT ALL ON FUNCTION "public"."observations_set_gps_point"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "anon";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."officer_gps_log_set_point"() TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."respond_to_on_call_period"("p_period_id" "uuid", "p_decision" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."respond_to_on_call_period"("p_period_id" "uuid", "p_decision" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."respond_to_on_call_period"("p_period_id" "uuid", "p_decision" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."respond_to_on_call_period"("p_period_id" "uuid", "p_decision" "text") TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."log_callout_milestone"("p_on_call_period_id" "uuid", "p_milestone" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."log_callout_milestone"("p_on_call_period_id" "uuid", "p_milestone" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) FROM "anon";
+GRANT ALL ON FUNCTION "public"."log_callout_milestone"("p_on_call_period_id" "uuid", "p_milestone" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."log_callout_milestone"("p_on_call_period_id" "uuid", "p_milestone" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) FROM "anon";
+GRANT ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "authenticated";
