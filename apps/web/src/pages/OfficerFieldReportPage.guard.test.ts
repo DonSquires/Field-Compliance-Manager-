@@ -8,6 +8,7 @@ describe('officer field report capture UI', () => {
   it('uses only the governed capture RPC for submission', () => {
     expect(source).toContain("supabase.rpc('submit_officer_field_report'");
     expect(source).not.toContain(".from('officer_field_reports').insert");
+    expect(source).not.toContain(".from('incidents')");
   });
   it('preserves retry identity and capture time until confirmed', () => {
     expect(source).toContain('p_client_event_id: eventIdRef.current');

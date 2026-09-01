@@ -9,6 +9,7 @@ describe('field report review workbench', () => {
   it('uses only the governed review RPC for lifecycle transition', () => {
     expect(source).toContain("supabase.rpc('review_officer_field_report'");
     expect(source).not.toContain(".update({ status: 'reviewed'");
+    expect(source).not.toContain(".from('incidents')");
   });
 
   it('requires review notes and sends the expected current status', () => {

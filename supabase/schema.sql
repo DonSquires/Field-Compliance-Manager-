@@ -26263,14 +26263,12 @@ GRANT ALL ON TABLE "public"."import_place_aliases" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."incident_attachments" TO "anon";
-GRANT ALL ON TABLE "public"."incident_attachments" TO "authenticated";
+GRANT SELECT ON TABLE "public"."incident_attachments" TO "authenticated";
 GRANT ALL ON TABLE "public"."incident_attachments" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."incidents" TO "anon";
-GRANT ALL ON TABLE "public"."incidents" TO "authenticated";
+GRANT SELECT ON TABLE "public"."incidents" TO "authenticated";
 GRANT ALL ON TABLE "public"."incidents" TO "service_role";
 
 
