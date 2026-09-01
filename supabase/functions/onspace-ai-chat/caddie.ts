@@ -80,7 +80,7 @@ const TOOL_REGISTRY = {
     effect_class: 'admin_diagnostic_substrate_action'
   },
   repo_search: {
-    purpose: 'Search and READ the app source code safely. Use action search with one term or | for OR, then action read with the exact path. Search results provide startline; pass start_line and optional end_line to read the exact location, or use offset/next_offset for character paging. Never use unsupported grep actions, repeat offset 0 after a continuation, or treat a truncated window as the whole file.',
+    purpose: 'Inspect source repositories with explicit identity. Start with action catalog to distinguish legacy_gitlab (historical reference), active_github (current Field Compliance Manager source), and bob_gitea (Bob Builder/control-plane source). Use action search only for legacy_gitlab. Use action read with repository: legacy_gitlab | active_github | bob_gitea and an exact path for any source. Never treat findings from one source as evidence about another.',
     governance: 'read-only; secret-safe',
     effect_class: 'admin_diagnostic_substrate_action'
   },

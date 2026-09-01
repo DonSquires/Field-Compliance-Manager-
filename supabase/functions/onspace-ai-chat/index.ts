@@ -3397,9 +3397,9 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
     };
   }
   const action = String(args.action ?? (args.path ? 'read' : 'search'));
-  if (action !== 'search' && action !== 'read') {
+  if (action !== 'search' && action !== 'read' && action !== 'catalog') {
     return {
-      reply: `Repo search action must be "search" or "read", not "${action}".`,
+      reply: `Repo search action must be "catalog", "search", or "read", not "${action}".`,
       meta: {
         tool: 'repo_search',
         outcome: 'invalid_args',
@@ -3445,6 +3445,7 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
   }
   const r = await callFn('bob-repo-search', authHeader, {
     action,
+    repository: args.repository,
     query: args.query ?? args.q,
     path: args.path,
     ref: args.ref,
@@ -3462,6 +3463,14 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
         outcome: 'failed',
         error: r.data?.error ?? null
       }
+    };
+  }
+  if (action === 'catalog') {
+    const repositories = Array.isArray(r.data?.repositories) ? r.data.repositories : [];
+    const lines = repositories.map((repository)=>`- **${repository.key}** (${repository.provider}; ${repository.role}) — ${repository.repository} @ ${repository.default_ref}\n  ${repository.description}`).join('\n');
+    return {
+      reply: `Repository catalogue:\n${lines || 'No repository sources are configured.'}`,
+      meta: { tool: 'repo_search', outcome: 'ok', action, repositories }
     };
   }
   if (action === 'read') {
@@ -3492,6 +3501,9 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
         tool: 'repo_search',
         outcome: 'ok',
         action,
+        repository: r.data?.repository ?? 'legacy_gitlab',
+        provider: r.data?.provider ?? 'gitlab',
+        repository_role: r.data?.repository_role ?? 'legacy',
         read_state: readState,
         has_more: hasMore,
         offset: r.data?.offset ?? null,

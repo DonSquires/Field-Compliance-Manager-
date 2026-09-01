@@ -12,3 +12,15 @@ test('Conductor validates repo_search arguments before calling GitLab', () => {
   assert.match(source, /path is required/);
   assert.match(source, /outcome: 'invalid_args'/);
 });
+
+test('Conductor exposes the repository catalogue and forwards the selected source', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/onspace-ai-chat/index.ts'), 'utf8');
+  const catalogue = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/onspace-ai-chat/caddie.ts'), 'utf8');
+
+  assert.match(source, /action !== 'catalog'/);
+  assert.match(source, /repository: args\.repository/);
+  assert.match(source, /Repository catalogue/);
+  assert.match(catalogue, /legacy_gitlab/);
+  assert.match(catalogue, /active_github/);
+  assert.match(catalogue, /bob_gitea/);
+});

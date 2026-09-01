@@ -45,6 +45,13 @@ const GITLAB_PROJECT_ID = Deno.env.get('GITLAB_PROJECT_ID') ?? '83317421';
 const GITLAB_ALLOWED_PROJECTS = new Set((Deno.env.get('GITLAB_ALLOWED_PROJECTS') ?? GITLAB_PROJECT_ID).split(',').map((value)=>value.trim()).filter(Boolean));
 const GITLAB_BASE_URL = (Deno.env.get('GITLAB_BASE_URL') ?? 'https://gitlab.com').replace(/\/+$/, '');
 const GITLAB_DEFAULT_REF = Deno.env.get('GITLAB_DEFAULT_REF') ?? 'Main';
+const GITHUB_READ_TOKEN = Deno.env.get('GITHUB_READ_TOKEN') ?? Deno.env.get('GITHUB_TOKEN') ?? '';
+const GITHUB_REPOSITORY = Deno.env.get('GITHUB_ACTIVE_REPOSITORY') ?? 'DonSquires/Field-Compliance-Manager-';
+const GITHUB_DEFAULT_REF = Deno.env.get('GITHUB_DEFAULT_REF') ?? 'main';
+const GITEA_BASE_URL = (Deno.env.get('GITEA_BASE_URL') ?? '').replace(/\/+$/, '');
+const GITEA_TOKEN = Deno.env.get('GITEA_TOKEN') ?? '';
+const GITEA_REPOSITORY = Deno.env.get('GITEA_BUILDER_REPOSITORY') ?? 'Iron-Eagle-Security-Ltd/field-compliance-manager';
+const GITEA_DEFAULT_REF = Deno.env.get('GITEA_DEFAULT_REF') ?? 'main';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -105,6 +112,48 @@ async function gl(path, token = GITLAB_READ_TOKEN) {
     }
   });
 }
+const REPOSITORIES = {
+  legacy_gitlab: {
+    provider: 'gitlab', role: 'legacy', repository: GITLAB_PROJECT_ID, default_ref: GITLAB_DEFAULT_REF,
+    description: 'Legacy source repository. Use it for historical frontend behaviour and prior implementation evidence, not as the active build source.'
+  },
+  active_github: {
+    provider: 'github', role: 'active', repository: GITHUB_REPOSITORY, default_ref: GITHUB_DEFAULT_REF,
+    description: 'Active Field Compliance Manager repository. Treat this as the current build source unless the user explicitly asks for historical comparison.'
+  },
+  bob_gitea: {
+    provider: 'gitea', role: 'bob_builder', repository: GITEA_REPOSITORY, default_ref: GITEA_DEFAULT_REF,
+    description: 'Bob self-hosted Builder/control-plane repository. Use it for Bob workers, Gitea automation, and Builder runtime concerns.'
+  }
+};
+function resolveRepository(value) {
+  const key = String(value ?? 'legacy_gitlab');
+  return REPOSITORIES[key] ? { key, ...REPOSITORIES[key] } : null;
+}
+function decodeBase64(value) {
+  const binary = atob(String(value ?? '').replace(/\s/g, ''));
+  return new TextDecoder().decode(Uint8Array.from(binary, char => char.charCodeAt(0)));
+}
+async function readRepositoryFile(source, filePath, ref) {
+  if (source.provider === 'gitlab') {
+    const response = await gl(`/repository/files/${encodeURIComponent(filePath)}/raw?ref=${encodeURIComponent(ref)}`);
+    return { ok: response.ok, status: response.status, content: response.ok ? await response.text() : '', provider: source.provider };
+  }
+  if (source.provider === 'github') {
+    if (!GITHUB_READ_TOKEN) return { ok: false, status: 503, error: 'GitHub read access is not configured (GITHUB_READ_TOKEN missing).' };
+    const response = await fetch(`https://api.github.com/repos/${source.repository}/contents/${filePath.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`, {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${GITHUB_READ_TOKEN}` }
+    });
+    const body = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, content: response.ok && typeof body.content === 'string' ? decodeBase64(body.content) : '', provider: source.provider };
+  }
+  if (!GITEA_BASE_URL || !GITEA_TOKEN) return { ok: false, status: 503, error: 'Gitea read access is not configured.' };
+  const response = await fetch(`${GITEA_BASE_URL}/api/v1/repos/${source.repository}/contents/${filePath.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`, {
+    headers: { Authorization: `token ${GITEA_TOKEN}`, Accept: 'application/json' }
+  });
+  const body = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, content: response.ok && typeof body.content === 'string' ? decodeBase64(body.content) : '', provider: source.provider };
+}
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: CORS
@@ -140,11 +189,23 @@ serve(async (req)=>{
     }, 503);
     const body = await req.json().catch(()=>({}));
     const action = String(body.action ?? 'search');
-    if (!GITLAB_READ_TOKEN) return json({
+    const source = resolveRepository(body.repository);
+    if (!source) return json({ error: 'Unknown repository. Use legacy_gitlab, active_github, or bob_gitea.' }, 400);
+    if (action === 'catalog') {
+      return json({ ok: true, action, repositories: Object.entries(REPOSITORIES).map(([key, value]) => ({ key, ...value })) });
+    }
+    if ((source.provider === 'gitlab' || action === 'read_bob_chat' || action === 'write_bob_chat') && !GITLAB_READ_TOKEN) return json({
       error: 'Repo search not configured (GITLAB_READ_TOKEN or legacy GITLAB_TOKEN missing)'
     }, 503);
-    const ref = String(body.ref ?? GITLAB_DEFAULT_REF);
+    const ref = String(body.ref ?? source.default_ref);
     if (action === 'search') {
+      if (source.provider !== 'gitlab') return json({
+        ok: false,
+        error: `Search is currently available only for legacy_gitlab. Use catalog to identify the ${source.key} source, then read exact paths from it.`,
+        repository: source.key,
+        provider: source.provider,
+        role: source.role
+      }, 422);
       const query = String(body.query ?? '').trim();
       if (!query) return json({
         error: 'query is required'
@@ -266,16 +327,16 @@ serve(async (req)=>{
         ok: false,
         error: 'That path is private and not readable.'
       }, 403);
-      const r = await gl(`/repository/files/${encodeURIComponent(path)}/raw?ref=${encodeURIComponent(ref)}`);
+      const r = await readRepositoryFile(source, path, ref);
       if (r.status === 404) return json({
         ok: false,
-        error: `File not found: ${path} @ ${ref}`
+        error: `File not found: ${path} @ ${ref} in ${source.key}`
       }, 404);
       if (!r.ok) return json({
         ok: false,
-        error: `GitLab file read returned ${r.status}`
+        error: r.error ?? `${source.provider} file read returned ${r.status}`
       }, 502);
-      const raw = await r.text();
+      const raw = r.content;
       // Redact BEFORE windowing so a redaction can never be split across a window
       // boundary (a half-redacted secret line would defeat the guard). The window
       // math is the pure computeReadWindow helper (Bob Blocker 1, boundary-tested).
@@ -288,6 +349,9 @@ serve(async (req)=>{
           action,
           path,
           ref,
+          repository: source.key,
+          provider: source.provider,
+          repository_role: source.role,
           read_state: lineWindow.readState,
           total_lines: lineWindow.totalLines,
           start_line: lineWindow.startLine,
@@ -310,6 +374,9 @@ serve(async (req)=>{
         action,
         path,
         ref,
+        repository: source.key,
+        provider: source.provider,
+        repository_role: source.role,
         read_state: w.readState,
         read_note: w.readNote,
         total_length: w.totalLength,

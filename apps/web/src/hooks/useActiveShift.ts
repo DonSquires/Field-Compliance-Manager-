@@ -39,7 +39,12 @@ export function useActiveShift(userId: string, organizationId: string) {
   const [error, setError] = useState<Error | null>(null);
 
   const fetchActiveShift = useCallback(async () => {
-    if (!userId || !organizationId) return;
+    if (!userId || !organizationId) {
+      setShift(null);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -116,8 +121,13 @@ export function useActiveShift(userId: string, organizationId: string) {
         setShift(null);
       }
     } catch (err) {
-      console.error('Error fetching active shift:', err);
-      setError(err instanceof Error ? err : new Error('Unknown error'));
+      const message = err instanceof Error
+        ? err.message
+        : err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
+          ? err.message
+          : 'Shift status could not be loaded.';
+      console.error('Error fetching active shift:', message);
+      setError(new Error(message));
     } finally {
       setIsLoading(false);
     }
