@@ -16,9 +16,11 @@ describe('officer debrief workspace', () => {
     expect(page).toContain('p_safety_incident_reported: safetyIncident');
     expect(page).toContain('p_equipment_issue_reported: equipmentIssue');
   });
-  it('requires follow-up context and states that completion is separate', () => {
+  it('requires follow-up context and completes the shift through a separate governed action', () => {
     expect(page).toContain('!followUp || followUpNotes.trim()');
-    expect(page).toContain('It does not complete the shift.');
+    expect(page).toContain("supabase.rpc('complete_officer_shift'");
+    expect(page).toContain('p_expected_status: completionShift.status');
+    expect(page).toContain('Complete shift');
     expect(page).toContain('Recent debriefs');
   });
 });

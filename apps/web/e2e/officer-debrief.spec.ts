@@ -31,6 +31,10 @@ test('officer debrief is structured, validated, and server-confirmed', async ({ 
   await shellHeader.evaluate((element) => { element.style.visibility = ''; });
   await actionBar.evaluate((element) => { element.style.visibility = ''; });
   await submit.click();
-  await expect(page.getByText('Debrief submitted with an auditable server receipt.')).toBeVisible();
+  await expect(page.getByText('Debrief recorded. Complete the shift when all field work is finished.')).toBeVisible();
+  const complete = page.getByRole('button', { name: 'Complete shift' });
+  await expect(complete).toBeVisible();
+  await complete.click();
+  await expect(page.getByText(/Shift completed at .* You are no longer on active duty for this shift\./)).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

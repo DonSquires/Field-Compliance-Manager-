@@ -19,6 +19,8 @@ const OfficerDebriefPage: React.FC = () => {
   const [followUpNotes, setFollowUpNotes] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [completionShift, setCompletionShift] = useState<ShiftOption | null>(null);
+  const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const eventIdRef = useRef(crypto.randomUUID());
@@ -67,7 +69,8 @@ const OfficerDebriefPage: React.FC = () => {
     if (submitError || !(data as Array<{ id: string }> | null)?.[0]) {
       setError(submitError?.message ?? 'Debrief receipt was not confirmed. Your entries remain available for retry.');
     } else {
-      setNotice('Debrief submitted with an auditable server receipt. Shift completion status was not changed.');
+      setCompletionShift(selectedShift?.status === 'in_progress' ? selectedShift : null);
+      setNotice(selectedShift?.status === 'in_progress' ? 'Debrief recorded. Complete the shift when all field work is finished.' : 'Debrief submitted with an auditable server receipt.');
       setSummary(''); setSafetyIncident(false); setEquipmentIssue(false); setFollowUp(false); setFollowUpNotes('');
       eventIdRef.current = crypto.randomUUID();
       await loadDebriefData();
@@ -75,10 +78,21 @@ const OfficerDebriefPage: React.FC = () => {
     setSubmitting(false);
   };
 
+  const completeShift = async () => {
+    if (!completionShift) return;
+    setCompleting(true);setError(null);setNotice(null);
+    const { data, error: completionError } = await supabase.rpc('complete_officer_shift', { p_shift_id: completionShift.id, p_expected_status: completionShift.status });
+    const receipt = (data as Array<{ shift_id: string; shift_status: string; completed_at: string }> | null)?.[0];
+    if (completionError || !receipt) setError(completionError?.message ?? 'Shift completion was not confirmed. Review remaining field work and retry.');
+    else { setCompletionShift(null);setNotice(`Shift completed at ${new Date(receipt.completed_at).toLocaleString('en-NZ')}. You are no longer on active duty for this shift.`);await loadDebriefData(); }
+    setCompleting(false);
+  };
+
   return <div className="officer-debrief">
     <header className="officer-debrief-header"><div><span>Shift handover</span><h1>Debrief</h1><p>Record operational context for the next supervisor or team.</p></div><button type="button" onClick={() => void loadDebriefData()} disabled={loading} title="Refresh debriefs"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
     {error && <div className="officer-debrief-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
     {notice && <div className="officer-debrief-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
+    {completionShift && <section className="officer-debrief-completion" aria-label="Shift completion"><div><span>Debrief received</span><strong>Finish {completionShift.service_type.replaceAll('_', ' ')} shift</strong><p>Completion confirms all stops, required module tasks, dispatch jobs, and welfare alerts are closed.</p></div><button type="button" onClick={() => void completeShift()} disabled={completing}>{completing ? <><RefreshCw size={16} className="is-spinning" />Completing</> : <><CheckCircle2 size={16} />Complete shift</>}</button></section>}
     <div className="officer-debrief-layout">
       <form className="officer-debrief-form" onSubmit={submitDebrief}>
         <div className="officer-debrief-panel-heading"><div><span>New handover</span><h2>Shift account</h2></div><ClipboardCheck size={20} /></div>
@@ -87,7 +101,7 @@ const OfficerDebriefPage: React.FC = () => {
         <label><span>Operational summary</span><textarea required minLength={10} maxLength={5000} rows={6} value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="Work completed, exceptions, unresolved conditions, and context the next team needs" /><small>{summary.trim().length}/5000 · minimum 10 characters</small></label>
         <div className="officer-debrief-toggles"><label><input type="checkbox" checked={safetyIncident} onChange={(event) => setSafetyIncident(event.target.checked)} /><span><ShieldAlert size={17} /><b>Safety incident</b><small>A safety matter occurred during this shift</small></span></label><label><input type="checkbox" checked={equipmentIssue} onChange={(event) => setEquipmentIssue(event.target.checked)} /><span><Wrench size={17} /><b>Equipment issue</b><small>Equipment requires inspection or service</small></span></label><label><input type="checkbox" checked={followUp} onChange={(event) => setFollowUp(event.target.checked)} /><span><ClipboardCheck size={17} /><b>Follow-up required</b><small>A supervisor or next shift must take action</small></span></label></div>
         {followUp && <label><span>Required follow-up</span><textarea required rows={4} value={followUpNotes} onChange={(event) => setFollowUpNotes(event.target.value)} placeholder="Action required, owner if known, and urgency" /></label>}
-        <div className="officer-debrief-submit"><span>Submission creates an append-only handover. It does not complete the shift.</span><button type="submit" disabled={!canSubmit}>{submitting ? <><RefreshCw size={16} className="is-spinning" />Submitting</> : <><Send size={16} />Submit debrief</>}</button></div>
+        <div className="officer-debrief-submit"><span>Submission creates an append-only handover. Shift completion remains a separate confirmed action.</span><button type="submit" disabled={!canSubmit}>{submitting ? <><RefreshCw size={16} className="is-spinning" />Submitting</> : <><Send size={16} />Submit debrief</>}</button></div>
       </form>
       <aside className="officer-debrief-history"><div className="officer-debrief-panel-heading"><div><span>Receipts</span><h2>Recent debriefs</h2></div><strong>{debriefs.length}</strong></div>{loading ? <div className="officer-debrief-empty"><RefreshCw size={19} className="is-spinning" />Loading handovers</div> : debriefs.length === 0 ? <div className="officer-debrief-empty"><ClipboardCheck size={22} />No debriefs submitted yet</div> : <div className="officer-debrief-list">{debriefs.map((debrief) => { const shift = shifts.find((item) => item.id === debrief.shift_id); return <article key={debrief.id}><div><strong>{shift ? shift.service_type.replaceAll('_', ' ') : 'Shift debrief'}</strong><time dateTime={debrief.submitted_at}>{new Date(debrief.submitted_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time></div><p>{debrief.summary}</p><div>{debrief.safety_incident_reported && <span className="is-alert">Safety</span>}{debrief.equipment_issue_reported && <span>Equipment</span>}{debrief.follow_up_required && <span className="is-followup">Follow-up</span>}</div>{debrief.follow_up_notes && <small>{debrief.follow_up_notes}</small>}</article>; })}</div>}</aside>
     </div>

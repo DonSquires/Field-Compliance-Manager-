@@ -280,7 +280,7 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
         return;
       }
       await route.fulfill(fulfillJson([
-        { id: '66666666-6666-4666-8666-666666666666', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: 'accepted', notes: 'North district patrol', shift_health: null, total_stops: 8 },
+        { id: '66666666-6666-4666-8666-666666666666', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: select.includes('completed_stops') ? 'in_progress' : 'accepted', notes: 'North district patrol', shift_health: null, total_stops: 8, completed_stops: 8 },
         { id: '77777777-7777-4777-8777-777777777777', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'site_guard', scheduled_start: '2026-09-02T18:00:00.000Z', scheduled_end: '2026-09-03T02:00:00.000Z', status: 'published', notes: null, shift_health: null, total_stops: 1 },
       ]));
       return;
@@ -327,6 +327,10 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
     }
     if (resource === 'submit_shift_debrief') {
       await route.fulfill(fulfillJson([{ id: '99999999-9999-4999-8999-999999999999', created: true, submitted_at: '2026-08-30T09:30:00.000Z' }]));
+      return;
+    }
+    if (resource === 'complete_officer_shift') {
+      await route.fulfill(fulfillJson([{ shift_id: '66666666-6666-4666-8666-666666666666', shift_status: 'completed', completed_at: '2026-08-30T09:35:00.000Z' }]));
       return;
     }
     if (resource === 'submit_officer_field_report') {
