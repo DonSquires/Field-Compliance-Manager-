@@ -51,6 +51,14 @@ const ACTION_OPTIONS: { type: ActionType; label: string; btnClass: string }[] = 
   { type: 'dismissed', label: '✕ Dismiss', btnClass: 'btn-danger' },
 ];
 
+// Action types that produce a printable notice document via generate-notice,
+// keyed to that function's notice_type parameter.
+const NOTICE_GENERATING_ACTIONS: Partial<Record<ActionType, string>> = {
+  written_warning: 'written_warning',
+  notice_to_vacate: 'notice_to_vacate',
+  infringement: 'infringement',
+};
+
 const BreachReviewPage: React.FC = () => {
   const { profile } = useAuth();
   const [alerts, setAlerts] = useState<BreachAlert[]>([]);
@@ -61,6 +69,7 @@ const BreachReviewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [generatedNotices, setGeneratedNotices] = useState<Record<string, { noticeId: string; pdfUrl: string | null }>>({});
 
   // ATLAS READS: breach_alerts, location_zones, observations
   const loadAlerts = useCallback(async () => {
@@ -124,6 +133,23 @@ const BreachReviewPage: React.FC = () => {
       const { data, error: updateErr } = await supabase.rpc('manage_breach_alert', { p_alert_id: alert.id, p_expected_status: alert.status, p_action: actionType, p_notes: actionNotes.trim() });
 
       const receipt=(data as Array<{alert_status:string;action_type:string|null;actioned_at:string}>|null)?.[0];if (updateErr||!receipt) throw updateErr??new Error('Breach decision receipt was not confirmed.');
+
+      // Actions that produce a printable notice (written warning, notice to
+      // vacate, infringement) generate it through generate-notice -- this
+      // function was fully built (atomic notice numbering, template
+      // rendering, infringement_notices/notices_to_vacate inserts) but no
+      // page ever called it, so the action was recorded with no document.
+      const noticeType = NOTICE_GENERATING_ACTIONS[actionType];
+      if (noticeType) {
+        const { data: noticeData, error: noticeErr } = await supabase.functions.invoke<{ ok: boolean; notice_id: string; pdf_url: string | null }>('generate-notice', {
+          body: { notice_type: noticeType, breach_alert_id: alert.id, officer_name: profile.displayName, authorized_by: profile.displayName, additional_notes: actionNotes.trim() || undefined },
+        });
+        if (noticeErr || !noticeData?.ok) {
+          setError(`Decision recorded, but the notice document could not be generated: ${noticeErr?.message ?? 'unknown error'}`);
+        } else {
+          setGeneratedNotices((prev) => ({ ...prev, [alert.id]: { noticeId: noticeData.notice_id, pdfUrl: noticeData.pdf_url } }));
+        }
+      }
 
       if (statusFilter === 'open') {
         setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
@@ -316,6 +342,13 @@ const BreachReviewPage: React.FC = () => {
                     <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--color-success)' }}>
                       ✓ Actioned: {alert.action_type.replace(/_/g, ' ').toUpperCase()}
                       {alert.actioned_at ? ` on ${new Date(alert.actioned_at).toLocaleDateString()}` : ''}
+                    </p>
+                  )}
+                  {generatedNotices[alert.id]?.pdfUrl && (
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px' }}>
+                      <a href={generatedNotices[alert.id].pdfUrl!} target="_blank" rel="noreferrer">
+                        View generated notice
+                      </a>
                     </p>
                   )}
                 </div>

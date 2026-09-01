@@ -175,7 +175,7 @@ describe('Schema Enum & Constraint Validation', () => {
       // ✓ DispatchConsolePage → dispatch_jobs.status (via NEXT_STATUS)
       // ✓ FieldReportsPage → officer_field_reports.status ('reviewed')
       // ✓ OfficerDispatchPage → dispatch_jobs.status (via NEXT_STATUS)
-      // ✓ OfficerParkingPage → parking_chalk_records.status ('resolved')
+      // ✓ OfficerParkingPage → parking_chalk_records.status (server-set by process-officer-scan)
       // ✓ ProviderBillingPage → org_module_subscriptions.status ('active'|'suspended')
       // ✓ RosterHRPage → leave_requests.status ('approved'|'declined'), timesheets.status ('approved'|'rejected')
       // ✓ VehicleSearchPage → entity_flags.active (boolean)
