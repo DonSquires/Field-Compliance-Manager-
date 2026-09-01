@@ -19,7 +19,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { readWorkflowContext } from '../lib/workflowNavigation';
+import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNavigation';
 import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
@@ -99,7 +99,7 @@ interface CrmState {
   error: string | null;
 }
 
-const CRMPage: React.FC = () => {
+const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = () => undefined }) => {
   const location = useLocation();
   const requestedAccountId = readWorkflowContext(location.search).accountId;
   const { profile } = useAuth();
@@ -139,6 +139,7 @@ const CRMPage: React.FC = () => {
   const [quoteAction, setQuoteAction] = useState<'send' | 'accept' | 'decline' | null>(null);
   const [quoteActionReason, setQuoteActionReason] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
+  const [quoteAcceptance, setQuoteAcceptance] = useState<{ quoteTitle: string; accountId: string; accountName: string; agreementId: string } | null>(null);
   const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
   const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
   const [invoiceReason, setInvoiceReason] = useState('');
@@ -427,11 +428,13 @@ const CRMPage: React.FC = () => {
       p_reason: quoteAction === 'decline' ? quoteActionReason.trim() : null,
     });
     const receipt = Array.isArray(data) ? data[0] : data;
-    if (error || !receipt) {
+    const agreementId = receipt?.service_agreement_id ? String(receipt.service_agreement_id) : null;
+    if (error || !receipt || (quoteAction === 'accept' && !agreementId)) {
       setState((current) => ({ ...current, error: error?.message ?? 'Quote lifecycle receipt was not confirmed.' }));
     } else {
       const nextStatus = String(receipt.quote_status);
-      setNotice(quoteAction === 'send' ? `${pricingQuote.title} sent for acceptance.` : quoteAction === 'accept' ? `${pricingQuote.title} accepted and linked to its service agreement.` : `${pricingQuote.title} declined with reason retained.`);
+      setNotice(quoteAction === 'send' ? `${pricingQuote.title} sent for acceptance.` : quoteAction === 'accept' ? null : `${pricingQuote.title} declined with reason retained.`);
+      if (quoteAction === 'accept' && agreementId) setQuoteAcceptance({ quoteTitle: pricingQuote.title, accountId: pricingQuote.client.id, accountName: pricingQuote.client.name, agreementId });
       if (quoteAction === 'send') setPricingQuote({ ...pricingQuote, status: nextStatus }); else setPricingQuote(null);
       setQuoteAction(null);
       setQuoteActionReason('');
@@ -649,6 +652,16 @@ const CRMPage: React.FC = () => {
         <div className="alert alert-success" role="status">
           {notice}
         </div>
+      )}
+      {quoteAcceptance && (
+        <section className="crm-quote-acceptance" aria-label="Quote acceptance receipt">
+          <div>
+            <span>Quote accepted</span>
+            <strong>{quoteAcceptance.quoteTitle}</strong>
+            <p>Service agreement {quoteAcceptance.agreementId.slice(0, 8)} established for {quoteAcceptance.accountName}.</p>
+          </div>
+          <button type="button" className="btn btn-primary" onClick={() => onNavigate('relationships', { accountId: quoteAcceptance.accountId, agreementId: quoteAcceptance.agreementId })}>Open service agreement</button>
+        </section>
       )}
 
       <div className="crm-branch-filter">

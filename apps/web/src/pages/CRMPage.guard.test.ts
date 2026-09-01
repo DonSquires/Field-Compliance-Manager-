@@ -33,6 +33,13 @@ describe('governed CRM accounts', () => {
     expect(page).not.toMatch(/\.rpc\(["']accept_quote["']/);
   });
 
+  it('continues an accepted quote into its server-confirmed agreement', () => {
+    expect(page).toContain('receipt.service_agreement_id');
+    expect(page).toContain("quoteAction === 'accept' && !agreementId");
+    expect(page).toContain('Open service agreement');
+    expect(page).toContain("onNavigate('relationships', { accountId: quoteAcceptance.accountId, agreementId: quoteAcceptance.agreementId })");
+  });
+
   it('operates account relationships and invoice lifecycle through governed RPCs', () => {
     expect(page).toContain('CrmAccountWorkspace');
     expect(page).toMatch(/\.from\(["']invoices["']\)/);

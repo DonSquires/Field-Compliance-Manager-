@@ -375,7 +375,7 @@ const AdminShell: React.FC = () => {
       case 'handoffs':
         return <ActivationHandoffsPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'crm':
-        return <CRMPage />;
+        return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'reports':
         return <ReportsHubPage />;
       case 'field-ops':
