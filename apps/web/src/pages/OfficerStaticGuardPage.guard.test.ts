@@ -7,6 +7,7 @@ const home = readFileSync(resolve(process.cwd(), 'src/pages/OfficerHomePage.tsx'
 const page = readFileSync(resolve(process.cwd(), 'src/pages/OfficerStaticGuardPage.tsx'), 'utf8');
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901014000_static_guard_post_attendance.sql'), 'utf8');
 const shiftUpdateFix = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901015000_fix_static_guard_shift_updates.sql'), 'utf8');
+const rehydrationMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901016000_rehydrate_static_guard_evidence.sql'), 'utf8');
 
 describe('officer static guarding post', () => {
   it('routes static assignments to a dedicated post workspace', () => {
@@ -51,5 +52,15 @@ describe('officer static guarding post', () => {
     expect(shiftUpdateFix).toContain("update public.shifts set status='in_progress',actual_start=coalesce(actual_start,v_at)");
     expect(shiftUpdateFix).toContain('update public.shifts set completed_stops=');
     expect(shiftUpdateFix).not.toMatch(/update public\.shifts set[^;]*updated_at/);
+  });
+
+  it('rehydrates durable attendance evidence and suppresses invalid actions from persisted state', () => {
+    expect(rehydrationMigration).toContain("from public.shift_stop_actions a where a.shift_stop_id=v_stop.id and a.action_type='static_post_arrived'");
+    expect(rehydrationMigration).toContain("a.action_type='static_post_departed'");
+    expect(rehydrationMigration).toContain("'attendance_evidence',jsonb_build_object('arrival',v_arrival_receipt,'departure',v_departure_receipt)");
+    expect(page).toContain('post.attendance_evidence.arrival.reference');
+    expect(page).toContain('post.attendance_evidence.departure.reference');
+    expect(page).toContain("['pending','en_route'].includes(post.stop.status)");
+    expect(page).toContain("post.stop.status === 'on_scene'");
   });
 });
