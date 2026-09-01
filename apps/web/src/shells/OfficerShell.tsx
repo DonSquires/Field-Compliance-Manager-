@@ -82,6 +82,7 @@ const OfficerHomePage = React.lazy(() => import('../pages/OfficerHomePage').then
 const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePage'));
 const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
 const OfficerIncidentPage = React.lazy(() => import('../pages/OfficerIncidentPage'));
+const OfficerStaticGuardPage = React.lazy(() => import('../pages/OfficerStaticGuardPage'));
 
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
@@ -375,7 +376,7 @@ const OfficerShell: React.FC = () => {
       case 'overnight_verification':
         return <OfficerOvernightVerificationPage />;
       case 'site_guard':
-        return <OfficerDispatchPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
+        return <OfficerStaticGuardPage />;
       case 'ems':
         return <OfficerFieldReportPage />;
       case 'debrief':
