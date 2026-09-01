@@ -69,6 +69,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831094000_govern_operational_place_management.sql',
   'supabase/migrations/20260831095000_operational_place_editor.sql',
   'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
+  'supabase/migrations/20260901020000_resolve_contracted_operational_context.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];
@@ -235,12 +236,12 @@ function collectSqlFunctionEdges(rootDir) {
   }
 
   const edges = new Map();
-  const add = (rpcName, tableName, kind, file, context) => {
+  const add = (rpcName, targetType, targetName, kind, file, context) => {
     const edge = {
       source_type: 'rpc',
       source_name: rpcName,
-      target_type: 'table',
-      target_name: tableName,
+      target_type: targetType,
+      target_name: targetName,
       edge_kind: kind,
       evidence_class: 'live-schema',
       retirement_status: 'live',
@@ -254,10 +255,11 @@ function collectSqlFunctionEdges(rootDir) {
 
   for (const [rpcName, definition] of latestFunctions) {
     for (const match of definition.body.matchAll(/\b(?:FROM|JOIN)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
-      add(rpcName, match[1], 'reads', definition.file, `SQL reads public.${match[1]}`);
+      const calledAsFunction = latestFunctions.has(match[1]) && /^\s*\(/.test(definition.body.slice((match.index ?? 0) + match[0].length));
+      add(rpcName, calledAsFunction ? 'rpc' : 'table', match[1], calledAsFunction ? 'calls' : 'reads', definition.file, calledAsFunction ? `SQL calls public.${match[1]}` : `SQL reads public.${match[1]}`);
     }
     for (const match of definition.body.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
-      add(rpcName, match[1], 'writes', definition.file, `SQL writes public.${match[1]}`);
+      add(rpcName, 'table', match[1], 'writes', definition.file, `SQL writes public.${match[1]}`);
     }
   }
   return [...edges.values()];

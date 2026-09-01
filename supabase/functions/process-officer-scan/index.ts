@@ -762,7 +762,8 @@ serve(async (req)=>{
     const plateSource = alprUsed ? 'alpr' : 'manual';
     const alprProvider = alprResult?.provider ?? null;
     console.log(`[scan] plate=${plateNumber} source=${plateSource} org=${orgId}`);
-    // Step 5: Geofence resolution from GPS via resolve_context() (3-layer:
+    // Step 5: Geofence resolution from GPS via resolve_operational_context().
+    // It preserves direct-org resolution and adds accepted contracted places.
     // operating bounds -> governing jurisdiction -> site geofence + zone).
     // resolve_context RETURNS TABLE; read the single row. (The old
     // get_zone_for_gps call cast a table result to a scalar, so GPS zone
@@ -778,7 +779,7 @@ serve(async (req)=>{
     let effectiveRules = null;
     let zoneClosure = null;
     if (!zoneId && hasLatitude && hasLongitude) {
-      const { data: ctxRows, error: contextError } = await supabase.rpc('resolve_context', {
+      const { data: ctxRows, error: contextError } = await supabase.rpc('resolve_operational_context', {
         p_lat: Number(gpsLat),
         p_lng: Number(gpsLng),
         p_org_id: orgId,
@@ -798,12 +799,14 @@ serve(async (req)=>{
         outOfBoundsDistrict = ctx.out_of_bounds_district ?? null;
         effectiveRules = ctx.effective_rules ?? null;
       }
-      console.log(`[scan] resolve_context zone=${zoneId ?? 'none'} on_site=${onSite} in_bounds=${inOperatingBounds}`);
+      console.log(`[scan] resolve_operational_context zone=${zoneId ?? 'none'} on_site=${onSite} in_bounds=${inOperatingBounds}`);
     }
     if (zoneId) {
       // Lightweight fetch for the zone name (used in the evidence watermark) and
       // location_id; site_id already came from resolve_context.
-      const { data: zoneData, error: zoneError } = await supabase.from('location_zones').select('id, name, location_id, site_id, module_key, active_schedule, boundary_verification').eq('id', zoneId).eq('organization_id', orgId).eq('is_active', true).maybeSingle();
+      let zoneQuery = supabase.from('location_zones').select('id, name, location_id, site_id, module_key, active_schedule, boundary_verification').eq('id', zoneId).eq('is_active', true);
+      if (manualZoneId) zoneQuery = zoneQuery.eq('organization_id', orgId);
+      const { data: zoneData, error: zoneError } = await zoneQuery.maybeSingle();
       if (zoneError) return json({ error: 'Zone context could not be loaded', detail: zoneError.message }, 503);
       if (!zoneData || zoneData.boundary_verification !== 'verified') return json({ error: 'An active verified Zone in this organization is required' }, 409);
       if (moduleKey && zoneData.module_key && zoneData.module_key !== moduleKey) return json({ error: 'Selected Zone does not support this scan module' }, 409);
@@ -827,7 +830,7 @@ serve(async (req)=>{
     }
     const geofenceContext = {
       resolved_at: capturedDate.toISOString(),
-      resolution_source: manualZoneId ? 'manual_zone' : 'resolve_context',
+      resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context',
       spatial_resolution_evaluated: !manualZoneId && hasLatitude && hasLongitude,
       zone_id: zoneId,
       site_id: siteId,

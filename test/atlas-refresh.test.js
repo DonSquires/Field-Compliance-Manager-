@@ -32,6 +32,9 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
         UPDATE public.alpha SET id = id;
       END;
       $$;
+      CREATE OR REPLACE FUNCTION public.wrap_alpha() RETURNS jsonb LANGUAGE sql AS $$
+        SELECT * FROM public.get_alpha();
+      $$;
     `);
     write(root, 'supabase/functions/ping/index.ts', 'Deno.serve(() => new Response("ok"));');
     write(root, 'apps/web/src/pages/TestPage.tsx', `
@@ -59,6 +62,8 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'ping'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
+    assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));
+    assert.equal(manifest.edges.some(row => row.source_name === 'wrap_alpha' && row.target_type === 'table' && row.target_name === 'get_alpha'), false);
     assert.equal(manifest.edges.some(row => row.target_name === 'if'), false);
     assert.equal(manifest.edges.some(row => row.target_name === 'test_noise'), false);
     assert.equal(manifest.capabilities.every(row => row.exercised === null), true);
@@ -174,7 +179,8 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('resolve_context', 'location_zones', 'reads'), true);
   assert.equal(hasEdge('resolve_context', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('resolve_context', 'locations', 'reads'), true);
-  assert.equal(hasEdge('process-officer-scan', 'resolve_context', 'calls'), true);
+  assert.equal(hasEdge('process-officer-scan', 'resolve_operational_context', 'calls'), true);
+  assert.equal(hasEdge('resolve_operational_context', 'resolve_context', 'calls'), true);
   assert.equal(hasEdge('process-officer-scan', 'is_zone_closed', 'calls'), true);
   assert.equal(hasEdge('process-officer-scan', '_geofence_active_at', 'calls'), true);
   assert.equal(hasEdge('process-officer-scan', 'parking_chalk_records', 'writes'), true);

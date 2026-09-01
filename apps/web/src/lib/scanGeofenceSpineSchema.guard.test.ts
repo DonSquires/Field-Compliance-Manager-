@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260831085000_scan_geofence_context.sql'), 'utf8');
+const operationalContext = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901020000_resolve_contracted_operational_context.sql'), 'utf8');
 const scan = readFileSync(resolve(process.cwd(), '../../supabase/functions/process-officer-scan/index.ts'), 'utf8');
 
 describe('officer scan geofence spine', () => {
@@ -19,18 +20,28 @@ describe('officer scan geofence spine', () => {
 
   it('resolves closure state after every zone match and fails closed on lookup errors', () => {
     expect(scan).toContain("error: 'Geofence context could not be resolved'");
+    expect(scan).toContain("supabase.rpc('resolve_operational_context'");
     expect(scan).toContain("supabase.rpc('is_zone_closed'");
     expect(scan).toContain("error: 'Zone closure state could not be resolved'");
-    expect(scan).toContain("resolution_source: manualZoneId ? 'manual_zone' : 'resolve_context'");
+    expect(scan).toContain("resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context'");
   });
 
   it('prevents manual Zone selection from bypassing tenant and geofence gates', () => {
-    expect(scan).toContain(".eq('organization_id', orgId).eq('is_active', true)");
+    expect(scan).toContain("if (manualZoneId) zoneQuery = zoneQuery.eq('organization_id', orgId)");
     expect(scan).toContain("zoneData.boundary_verification !== 'verified'");
     expect(scan).toContain('zoneData.module_key !== moduleKey');
     expect(scan).toContain("supabase.rpc('_geofence_active_at'");
     expect(scan).toContain("error: 'Selected Zone is not active at the capture time'");
     expect(scan).toContain('spatial_resolution_evaluated: !manualZoneId');
+  });
+
+  it('resolves only active contracted places for provider field operations', () => {
+    expect(operationalContext).toContain('from public.resolve_context(p_lat,p_lng,p_org_id,p_module_key,p_at)');
+    expect(operationalContext).toContain("sa.invitation_status='accepted'");
+    expect(operationalContext).toContain("sal.status='active'");
+    expect(operationalContext).toContain('sam.enabled');
+    expect(operationalContext).toContain('sal.zone_id=rc.matched_zone_id');
+    expect(operationalContext).toContain('to service_role');
   });
 
   it('rejects scans without defensible spatial evidence', () => {
