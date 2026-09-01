@@ -174,6 +174,16 @@
   font-size: 12px;
 }
 
+.officer-shell-safety-outcome {
+  margin: 10px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid #387155;
+  border-radius: 6px;
+  color: #bcebcf;
+  background: #10261c;
+  font-size: 12px;
+}
+
 .officer-shell-evidence-warning {
   padding: 9px 16px;
   color: #fde68a;

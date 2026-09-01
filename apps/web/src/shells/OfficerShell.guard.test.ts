@@ -29,6 +29,8 @@ describe('OfficerShell state routing', () => {
     expect(source).toContain("navigateToModule('report')");
     expect(source).not.toContain('PttBar');
     expect(source).not.toContain('ReportButton');
+    expect(source).toContain('safety.resolutionOutcome');
+    expect(source).toContain('officer-shell-safety-outcome');
   });
 
   it('routes the module selector to its own URL', () => {

@@ -412,6 +412,7 @@ const OfficerShell: React.FC = () => {
             Safety action not confirmed: {safety.lastError}
           </div>
         )}
+        {safety.resolutionOutcome && <div className="officer-shell-safety-outcome" role="status">{safety.resolutionOutcome}</div>}
         {breadcrumbIssue && (
           <div role="status" className="officer-shell-evidence-warning">
             Location evidence not confirmed. {breadcrumbIssue.pendingCount} {breadcrumbIssue.pendingCount === 1 ? 'record is' : 'records are'} queued for retry. {breadcrumbIssue.error}

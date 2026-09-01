@@ -89,6 +89,7 @@ export interface UseOfficerSafetyApi {
   minutesRemaining: number;
   writeStatus: WriteStatus;
   lastError: string | null;
+  resolutionOutcome: string | null;
   checkIn: () => Promise<boolean>;
   triggerSOS: () => Promise<boolean>;
   /** The ONLY other way to clear an active alert besides checkIn(). */
@@ -118,6 +119,7 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
   const [minutesRemaining, setMinutesRemaining] = useState(checkinIntervalMinutes);
   const [writeStatus, setWriteStatus] = useState<WriteStatus>('idle');
   const [lastError, setLastError] = useState<string | null>(null);
+  const [resolutionOutcome, setResolutionOutcome] = useState<string | null>(null);
 
   const lastCheckinRef = useRef<Date>(new Date());
   const lastMovementRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
@@ -136,6 +138,38 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
         : !officerManDownEnabled
           ? 'disabled_by_officer'
           : 'active';
+
+  const loadCanonicalAlert = useCallback(async () => {
+    if (!officerId || !organizationId) return;
+    try {
+      const { data } = await supabase.from('welfare_alerts').select('id,alert_type,triggered_at,status').eq('organization_id', organizationId).eq('officer_user_id', officerId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(1).maybeSingle();
+      if (!data) return;
+      const kind: AlertKind = data.alert_type === 'sos' ? 'sos' : data.alert_type === 'gps_lost' ? 'gps_lost' : data.alert_type === 'inactivity' ? 'inactivity' : 'motion';
+      setActiveAlert({ id: data.id, kind, triggeredAt: new Date(data.triggered_at) });
+      setStatus('alerting');
+    } catch { /* Initial safety state remains available even when hydration fails. */ }
+  }, [officerId, organizationId]);
+
+  useEffect(() => { void loadCanonicalAlert(); }, [loadCanonicalAlert]);
+
+  const syncActiveAlert = useCallback(async () => {
+    const alert = activeAlertRef.current;
+    if (!alert) return;
+    try {
+      const { data: currentAlert } = await supabase.from('welfare_alerts').select('status,resolution_notes,resolved_at').eq('id', alert.id).single();
+      if (currentAlert?.status === 'resolved') {
+        setActiveAlert(null);
+        setStatus('ok');
+        setResolutionOutcome(`Supervisor resolved your welfare alert${currentAlert.resolution_notes ? `: ${currentAlert.resolution_notes}` : '.'}`);
+      }
+    } catch { /* Keep the alert active unless canonical resolution is confirmed. */ }
+  }, []);
+
+  useEffect(() => {
+    if (!activeAlert) return;
+    const timer = setInterval(() => void syncActiveAlert(), TICK_MS);
+    return () => clearInterval(timer);
+  }, [activeAlert, syncActiveAlert]);
 
   // ─── Time-based tick: missed check-in + stationary detection ───────────
   useEffect(() => {
@@ -353,6 +387,7 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
     minutesRemaining,
     writeStatus,
     lastError,
+    resolutionOutcome,
     checkIn,
     triggerSOS,
     acknowledgeAlert,

@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useOfficerSafety } from './useOfficerSafety';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 vi.mock('../lib/supabase', () => ({ supabase: { from: vi.fn(), rpc: vi.fn() } }));
 import { supabase } from '../lib/supabase';
+
+const safetySource = readFileSync(resolve(process.cwd(), 'src/hooks/useOfficerSafety.ts'), 'utf8');
 
 function mockTable(handlers: Record<string, (...args: unknown[]) => unknown>) {
   (supabase.from as unknown as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
@@ -24,6 +28,30 @@ function baseOptions(overrides: Partial<Parameters<typeof useOfficerSafety>[0]> 
 }
 
 describe('useOfficerSafety', () => {
+  it('rehydrates and polls canonical active-alert state for supervisor outcomes', () => {
+    expect(safetySource).toContain('loadCanonicalAlert');
+    expect(safetySource).toContain(".in('status', ['pending', 'acknowledged'])");
+    expect(safetySource).toContain('syncActiveAlert');
+    expect(safetySource).toContain("currentAlert?.status === 'resolved'");
+    expect(safetySource).toContain('setResolutionOutcome');
+  });
+  it('clears a hydrated alert when the supervisor resolution reaches canonical state', async () => {
+    vi.useFakeTimers();
+    const hydrationResult = Promise.resolve({ data: { id: 'alert-supervisor', alert_type: 'sos', triggered_at: '2026-09-01T08:00:00.000Z', status: 'pending' }, error: null });
+    const hydrationQuery = { eq: () => ({ eq: () => ({ in: () => ({ order: () => ({ limit: () => ({ maybeSingle: () => hydrationResult }) }) }) }) }) };
+    const resolutionQuery = { eq: () => ({ single: () => Promise.resolve({ data: { status: 'resolved', resolution_notes: 'Supervisor confirmed the officer is safe.', resolved_at: '2026-09-01T08:05:00.000Z' }, error: null }) }) };
+    (supabase.from as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      select: (columns: string) => columns.includes('alert_type') ? hydrationQuery : resolutionQuery,
+    }));
+    const { result } = renderHook(() => useOfficerSafety(baseOptions()));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.activeAlert?.id).toBe('alert-supervisor');
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(result.current.activeAlert).toBeNull();
+    expect(result.current.status).toBe('ok');
+    expect(result.current.resolutionOutcome).toContain('Supervisor confirmed the officer is safe.');
+    vi.useRealTimers();
+  });
   it('never resolves an active alert from recordMovement alone — the core P0 fix', async () => {
     mockTable({
       welfare_alerts: () => ({

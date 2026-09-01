@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/pages/WelfareAlertsPage.tsx'), 'utf8');
+const outcomeSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901005000_welfare_outcome_return.sql'), 'utf8');
 
 describe('supervisor welfare response workbench', () => {
   it('loads tenant-scoped alerts and subscribes with the same tenant filter', () => {
@@ -32,5 +33,11 @@ describe('supervisor welfare response workbench', () => {
   it('uses real phone and GPS actions rather than inert controls', () => {
     expect(source).toContain('href={`tel:');
     expect(source).toContain('https://www.google.com/maps?q=');
+  });
+
+  it('returns acknowledgement and resolution outcomes personally to the officer', () => {
+    expect(outcomeSql).toContain('p_recipient_user_id=>v_alert.officer_user_id');
+    expect(outcomeSql).toContain("'welfare_alert_id',v_alert.id");
+    expect(outcomeSql).toContain("'welfare_alert_outcome:'||v_alert.id::text||':'||v_alert.status");
   });
 });
