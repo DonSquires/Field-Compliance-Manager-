@@ -57,7 +57,7 @@ test('test worker keeps source read-only while allowing calibration evidence', (
   });
   assert.ok(args.includes('--read-only'));
   assert.ok(args.includes('--tmpfs=/tmp:rw,exec,nosuid,size=1024m'));
-  assert.ok(args.includes('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=16m'));
+  assert.ok(args.includes('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=16m,mode=1777'));
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
 });
 
@@ -70,7 +70,7 @@ test('build worker keeps source read-only while allowing web dist output', () =>
   });
   assert.ok(args.includes('--read-only'));
   assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=64m'));
-  assert.ok(args.includes('--tmpfs=/workspace/apps/web/dist:rw,exec,nosuid,size=256m'));
+  assert.ok(args.includes('--tmpfs=/workspace/apps/web/dist:rw,exec,nosuid,size=256m,mode=1777'));
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
 });
 

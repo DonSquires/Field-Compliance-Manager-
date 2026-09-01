@@ -39,10 +39,10 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g'
     args.push('--tmpfs=/work:rw,exec,nosuid,size=1024m');
   }
   if (profile === 'test') {
-    args.push('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=16m');
+    args.push('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=16m,mode=1777');
   }
   if (profile === 'build') {
-    args.push('--tmpfs=/workspace/apps/web/dist:rw,exec,nosuid,size=256m');
+    args.push('--tmpfs=/workspace/apps/web/dist:rw,exec,nosuid,size=256m,mode=1777');
   }
   if (profile === 'playwright-visual-check' && env.BOB_APP_URL) {
     args.push('-e', `BOB_APP_URL=${env.BOB_APP_URL}`);
