@@ -4,6 +4,7 @@ RUN apk add --no-cache git
 
 WORKDIR /opt/bob
 COPY assessment-manifest.js /opt/bob/assessment-manifest.js
+COPY builder-build-worker.js /opt/bob/builder-build-worker.js
 COPY frontend-worker.js /opt/bob/frontend-worker.js
 COPY backend-worker.js /opt/bob/backend-worker.js
 COPY security-worker.js /opt/bob/security-worker.js

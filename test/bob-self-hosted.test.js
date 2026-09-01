@@ -3,7 +3,13 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { buildSelfHostedPlan, runSelfHostedBuildLoop } = require('../bob-self-hosted');
+const { buildSelfHostedPlan, runSelfHostedBuildLoop, workerMemory } = require('../bob-self-hosted');
+
+test('build workers receive the bounded build-memory allocation', () => {
+  assert.equal(workerMemory('build'), '2g');
+  assert.equal(workerMemory('lint'), '2g');
+  assert.equal(workerMemory('test'), '1g');
+});
 
 test('self-hosted Bob builds an assessment-first plan from the repo state', () => {
   const assessment = {

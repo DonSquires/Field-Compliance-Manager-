@@ -2,6 +2,13 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createAssessment } = require('./assessment-manifest');
 
+function workerMemory(profile) {
+  if (profile === 'build' || profile === 'lint') {
+    return process.env.BOB_TYPESCRIPT_WORKER_MEMORY || '2g';
+  }
+  return process.env.BOB_WORKER_MEMORY || '1g';
+}
+
 function buildSelfHostedPlan(assessment, requestedProfiles = ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check']) {
   const defaultProfiles = ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'];
   const profiles = Array.isArray(requestedProfiles) && requestedProfiles.length
@@ -56,7 +63,7 @@ async function runSelfHostedBuildLoop({
             artifactDir: resolvedArtifacts,
             profile,
             timeoutMs: Number(process.env.BOB_WORKER_TIMEOUT_MS || 10 * 60 * 1000),
-            memory: process.env.BOB_WORKER_MEMORY || '1g',
+            memory: workerMemory(profile),
             cpus: process.env.BOB_WORKER_CPUS || '1',
             pidsLimit: Number(process.env.BOB_WORKER_PIDS_LIMIT || 128),
             browserCheck: true,
@@ -108,7 +115,7 @@ async function runSelfHostedBuildLoop({
           artifactDir: resolvedArtifacts,
           profile,
           timeoutMs: Number(process.env.BOB_WORKER_TIMEOUT_MS || 10 * 60 * 1000),
-          memory: process.env.BOB_WORKER_MEMORY || '1g',
+          memory: workerMemory(profile),
           cpus: process.env.BOB_WORKER_CPUS || '1',
           pidsLimit: Number(process.env.BOB_WORKER_PIDS_LIMIT || 128),
           browserCheck: false,
@@ -162,4 +169,4 @@ async function runSelfHostedBuildLoop({
   };
 }
 
-module.exports = { buildSelfHostedPlan, runSelfHostedBuildLoop };
+module.exports = { buildSelfHostedPlan, runSelfHostedBuildLoop, workerMemory };

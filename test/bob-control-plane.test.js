@@ -39,7 +39,8 @@ test.before(async () => {
       GITEA_WEBHOOK_SECRET: webhookSecret,
       BOB_ALLOWED_REPOSITORIES: 'example/app',
       BOB_ALLOWED_REFS: 'refs/heads/main,main',
-      BOB_STATE_DIR: stateDir
+      BOB_STATE_DIR: stateDir,
+      BOB_CONTROL_PLANE_TEST_WORKER: 'synthetic'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

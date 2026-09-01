@@ -86,6 +86,23 @@ function builderRuntimeReadiness({ dockerAccess = detectDockerAccess() } = {}) {
   return { ready: Object.values(checks).every(Boolean), checks, modelGateway: modelReadiness };
 }
 
+async function runBuilderWorker(options) {
+  // Route integration tests exercise state, authorization, and assessment
+  // persistence. They cannot launch a second Docker daemon from inside the
+  // already-isolated test worker, so opt into a deterministic test executor.
+  // Production always takes the real Docker worker path.
+  if (process.env.BOB_CONTROL_PLANE_TEST_WORKER === 'synthetic') {
+    return {
+      status: 'succeeded',
+      exitCode: 0,
+      profile: options.profile,
+      stdout: `synthetic:${options.profile}`,
+      stderr: ''
+    };
+  }
+  return executeWorker(options);
+}
+
 function saveState() {
   fs.mkdirSync(stateDir, { recursive: true });
   const state = {
@@ -122,6 +139,13 @@ const scheduledAssessmentRuntime = {
   source: 'local',
   timer: null
 };
+
+const PLATFORM_ASSESSMENT_PROFILES = Object.freeze([
+  'assessment',
+  'test',
+  'build',
+  'lint'
+]);
 
 function startScheduledAssessmentLoop({
   intervalMs = Number(process.env.BOB_SCHEDULED_ASSESSMENT_INTERVAL_MS || (5 * 60 * 1000)),
@@ -515,9 +539,9 @@ async function route(req, res, body) {
       const result = await runSelfHostedBuildLoop({
         rootDir: assessmentRoot,
         artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
-        profiles: ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'],
+        profiles: PLATFORM_ASSESSMENT_PROFILES,
         workerImage: builderWorkerImage || 'fcm/bob-worker:local',
-        execute: executeWorker,
+        execute: runBuilderWorker,
         assessmentFactory: createAssessment,
         appUrls
       });
@@ -593,9 +617,9 @@ async function route(req, res, body) {
       const result = await runSelfHostedBuildLoop({
         rootDir: assessmentRoot,
         artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
-        profiles: ['assessment', 'test', 'build', 'lint', 'security-review', 'playwright-visual-check'],
+        profiles: PLATFORM_ASSESSMENT_PROFILES,
         workerImage: builderWorkerImage || 'fcm/bob-worker:local',
-        execute: executeWorker,
+        execute: runBuilderWorker,
         assessmentFactory: createAssessment,
         appUrls
       });

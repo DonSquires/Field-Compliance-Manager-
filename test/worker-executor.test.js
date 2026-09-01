@@ -9,7 +9,7 @@ const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, redactLo
 test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('assessment'), ['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']);
   assert.deepEqual(workerCommand('test'), ['npm', 'test']);
-  assert.deepEqual(workerCommand('build'), ['npm', 'run', 'build']);
+  assert.deepEqual(workerCommand('build'), ['node', '/opt/bob/builder-build-worker.js', '/workspace']);
   assert.deepEqual(workerCommand('frontend-verify'), [
     'node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts'
   ]);
@@ -41,6 +41,32 @@ test('docker arguments enforce worker isolation', () => {
   assert.equal(args.includes('npm'), true);
   assert.equal(args.includes('shell'), false);
   assert.equal(args.includes('/var/run/docker.sock'), false);
+});
+
+test('test worker keeps source read-only while allowing calibration evidence', () => {
+  const args = dockerArguments({
+    image: 'fcm/bob-worker:test',
+    sourceDir: '/tmp/source',
+    artifactDir: '/tmp/artifacts',
+    profile: 'test'
+  });
+  assert.ok(args.includes('--read-only'));
+  assert.ok(args.includes('--tmpfs=/tmp:rw,exec,nosuid,size=1024m'));
+  assert.ok(args.includes('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=16m'));
+  assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
+});
+
+test('build worker keeps source read-only while allowing web dist output', () => {
+  const args = dockerArguments({
+    image: 'fcm/bob-worker:test',
+    sourceDir: '/tmp/source',
+    artifactDir: '/tmp/artifacts',
+    profile: 'build'
+  });
+  assert.ok(args.includes('--read-only'));
+  assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=64m'));
+  assert.ok(args.includes('--tmpfs=/workspace/apps/web/dist:rw,exec,nosuid,size=256m'));
+  assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
 });
 
 test('browser validation passes the app URL into the isolated worker environment', () => {

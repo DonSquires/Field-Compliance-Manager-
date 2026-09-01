@@ -1,6 +1,8 @@
 {
   "scripts": {
     "test": "node --test test/*.test.js",
+    "build": "npm --prefix apps/web run build",
+    "lint": "npm --prefix apps/web run lint",
     "assess": "node assessment-manifest.js",
     "runner": "node bob-runner.js",
     "calibrate": "node scripts/atlas-calibration.js",

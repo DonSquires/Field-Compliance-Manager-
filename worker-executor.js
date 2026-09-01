@@ -3,7 +3,7 @@ const { spawn } = require('node:child_process');
 const WORKER_PROFILES = Object.freeze({
   assessment: Object.freeze(['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']),
   test: Object.freeze(['npm', 'test']),
-  build: Object.freeze(['npm', 'run', 'build']),
+  build: Object.freeze(['node', '/opt/bob/builder-build-worker.js', '/workspace']),
   lint: Object.freeze(['npm', 'run', 'lint']),
   'frontend-verify': Object.freeze(['node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
   'backend-verify': Object.freeze(['node', '/opt/bob/backend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
@@ -31,10 +31,18 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g'
     `--memory=${memory}`,
     `--cpus=${cpus}`,
     `--pids-limit=${pidsLimit}`,
-    '--tmpfs=/tmp:rw,noexec,nosuid,size=64m',
   ];
+  args.push(profile === 'test'
+    ? '--tmpfs=/tmp:rw,exec,nosuid,size=1024m'
+    : '--tmpfs=/tmp:rw,noexec,nosuid,size=64m');
   if (profile === 'frontend-verify' || profile === 'backend-verify') {
     args.push('--tmpfs=/work:rw,exec,nosuid,size=1024m');
+  }
+  if (profile === 'test') {
+    args.push('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=16m');
+  }
+  if (profile === 'build') {
+    args.push('--tmpfs=/workspace/apps/web/dist:rw,exec,nosuid,size=256m');
   }
   if (profile === 'playwright-visual-check' && env.BOB_APP_URL) {
     args.push('-e', `BOB_APP_URL=${env.BOB_APP_URL}`);
