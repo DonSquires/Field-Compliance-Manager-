@@ -340,7 +340,7 @@ const OfficerShell: React.FC = () => {
       case 'ems':
         return <OfficerFieldReportPage />;
       case 'debrief':
-        return <OfficerDebriefPage />;
+        return <OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
       case 'map':
         return <OfficerMapPage />;
       case 'modules':

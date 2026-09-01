@@ -41,7 +41,7 @@ test('officer report capture is evidential, responsive, and server-confirmed', a
   await shellHeader.evaluate((element) => { element.style.visibility = ''; });
   await actionBar.evaluate((element) => { element.style.visibility = ''; });
   await submit.click();
-  await expect(page.getByText(/Report confirmed · receipt bbbbbbbb/)).toBeVisible();
+  await expect(page.getByText(/Report confirmed · receipt bbbbbbbb · linked to patrol · 31 Aug/)).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 

@@ -334,7 +334,7 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
       return;
     }
     if (resource === 'submit_officer_field_report') {
-      await route.fulfill(fulfillJson([{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', created: true, received_at: '2026-08-30T09:30:00.000Z' }]));
+      await route.fulfill(fulfillJson([{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', created: true, received_at: '2026-08-30T09:30:00.000Z', shift_id: '66666666-6666-4666-8666-666666666666' }]));
       return;
     }
     if (resource === 'respond_to_roster_slot') {

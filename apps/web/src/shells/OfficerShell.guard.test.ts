@@ -35,4 +35,8 @@ describe('OfficerShell state routing', () => {
     expect(source).not.toContain("module === 'modules' || module === null");
     expect(source).toContain('navigate(`/officer/${module}`');
   });
+
+  it('routes post-debrief actions through the owning officer shell', () => {
+    expect(source).toContain("<OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />");
+  });
 });

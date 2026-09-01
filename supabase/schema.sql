@@ -4067,7 +4067,7 @@ ALTER FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_e
 COMMENT ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") IS 'Race-checks and records the submitted-to-reviewed field report transition with required supervisor notes and audit provenance.';
 
 
-CREATE OR REPLACE FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text" DEFAULT NULL::"text", "p_address" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision, "p_shift_id" "uuid" DEFAULT NULL::"uuid", "p_immediate_action" "text" DEFAULT NULL::"text", "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
+CREATE OR REPLACE FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text" DEFAULT NULL::"text", "p_address" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision, "p_shift_id" "uuid" DEFAULT NULL::"uuid", "p_immediate_action" "text" DEFAULT NULL::"text", "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone, "shift_id" "uuid")
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
 declare v_user_id uuid := auth.uid(); v_org_id uuid; v_existing public.officer_field_reports%rowtype; v_report public.officer_field_reports%rowtype;
 begin
@@ -4083,12 +4083,12 @@ begin
   if p_follow_up_required and nullif(trim(coalesce(p_follow_up_notes, '')), '') is null then raise exception 'Follow-up notes are required'; end if;
   if p_shift_id is not null and not exists (select 1 from public.shifts s where s.id = p_shift_id and s.organization_id = v_org_id and s.officer_user_id = v_user_id) then raise exception 'Shift does not belong to the authenticated officer'; end if;
   select r.* into v_existing from public.officer_field_reports r where r.organization_id = v_org_id and r.officer_id = v_user_id and r.client_event_id = p_client_event_id;
-  if found then return query select v_existing.id, false, v_existing.created_at; return; end if;
+  if found then return query select v_existing.id, false, v_existing.created_at, v_existing.shift_id; return; end if;
   insert into public.officer_field_reports (organization_id, officer_id, client_event_id, reported_at, report_type, severity, status, title, description, location_name, address, gps_lat, gps_lng, shift_id, immediate_action, follow_up_required, follow_up_notes)
   values (v_org_id, v_user_id, p_client_event_id, p_reported_at, p_report_type, p_severity, 'submitted', trim(p_title), trim(p_description), nullif(trim(coalesce(p_location_name, '')), ''), nullif(trim(coalesce(p_address, '')), ''), p_gps_lat, p_gps_lng, p_shift_id, nullif(trim(coalesce(p_immediate_action, '')), ''), coalesce(p_follow_up_required, false), nullif(trim(coalesce(p_follow_up_notes, '')), '')) returning * into v_report;
   insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
   values (v_org_id, v_user_id, 'officer_field_report_submitted', 'officer_field_reports', v_report.id, jsonb_build_object('report_type', v_report.report_type, 'severity', v_report.severity, 'shift_id', v_report.shift_id, 'follow_up_required', v_report.follow_up_required));
-  return query select v_report.id, true, v_report.created_at;
+  return query select v_report.id, true, v_report.created_at, v_report.shift_id;
 end;
 $$;
 

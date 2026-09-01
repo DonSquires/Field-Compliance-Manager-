@@ -7,7 +7,7 @@ const shell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx')
 
 describe('officer debrief workspace', () => {
   it('replaces the exposed placeholder with a real handover page', () => {
-    expect(shell).toContain('return <OfficerDebriefPage />');
+    expect(shell).toContain('return <OfficerDebriefPage onNavigate=');
     expect(shell).not.toContain('return <ComingSoonPage title="Debrief" />');
   });
   it('uses the governed RPC with stable retry identity and structured flags', () => {
@@ -21,6 +21,8 @@ describe('officer debrief workspace', () => {
     expect(page).toContain("supabase.rpc('complete_officer_shift'");
     expect(page).toContain('p_expected_status: completionShift.status');
     expect(page).toContain('Complete shift');
+    expect(page).toContain('Open timesheet');
+    expect(page).toContain('Return home');
     expect(page).toContain('Recent debriefs');
   });
 });

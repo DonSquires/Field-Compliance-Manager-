@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock3, RefreshCw, Send, ShieldAlert, Wrench, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock3, Home, RefreshCw, Send, ShieldAlert, Wrench, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './OfficerDebriefPage.css';
@@ -7,7 +7,7 @@ import './OfficerDebriefPage.css';
 interface ShiftOption { id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; total_stops: number; completed_stops: number; }
 interface DebriefRecord { id: string; shift_id: string; summary: string; safety_incident_reported: boolean; equipment_issue_reported: boolean; follow_up_required: boolean; follow_up_notes: string | null; submitted_at: string; }
 
-const OfficerDebriefPage: React.FC = () => {
+const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesheet') => void }> = ({ onNavigate }) => {
   const { profile } = useAuth();
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
   const [debriefs, setDebriefs] = useState<DebriefRecord[]>([]);
@@ -20,6 +20,7 @@ const OfficerDebriefPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [completionShift, setCompletionShift] = useState<ShiftOption | null>(null);
+  const [completedShiftId, setCompletedShiftId] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -84,7 +85,7 @@ const OfficerDebriefPage: React.FC = () => {
     const { data, error: completionError } = await supabase.rpc('complete_officer_shift', { p_shift_id: completionShift.id, p_expected_status: completionShift.status });
     const receipt = (data as Array<{ shift_id: string; shift_status: string; completed_at: string }> | null)?.[0];
     if (completionError || !receipt) setError(completionError?.message ?? 'Shift completion was not confirmed. Review remaining field work and retry.');
-    else { setCompletionShift(null);setNotice(`Shift completed at ${new Date(receipt.completed_at).toLocaleString('en-NZ')}. You are no longer on active duty for this shift.`);await loadDebriefData(); }
+    else { setCompletionShift(null);setCompletedShiftId(receipt.shift_id);setNotice(`Shift completed at ${new Date(receipt.completed_at).toLocaleString('en-NZ')}. You are no longer on active duty for this shift.`);await loadDebriefData(); }
     setCompleting(false);
   };
 
@@ -93,6 +94,7 @@ const OfficerDebriefPage: React.FC = () => {
     {error && <div className="officer-debrief-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
     {notice && <div className="officer-debrief-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
     {completionShift && <section className="officer-debrief-completion" aria-label="Shift completion"><div><span>Debrief received</span><strong>Finish {completionShift.service_type.replaceAll('_', ' ')} shift</strong><p>Completion confirms all stops, required module tasks, dispatch jobs, and welfare alerts are closed.</p></div><button type="button" onClick={() => void completeShift()} disabled={completing}>{completing ? <><RefreshCw size={16} className="is-spinning" />Completing</> : <><CheckCircle2 size={16} />Complete shift</>}</button></section>}
+    {completedShiftId && <section className="officer-debrief-next" aria-label="After shift completion"><div><span>Shift receipt</span><strong>{completedShiftId.slice(0, 8)}</strong><p>Record worked time now, or return to the officer home screen.</p></div><div><button type="button" onClick={() => onNavigate?.('home')}><Home size={16} />Return home</button><button type="button" className="is-primary" onClick={() => onNavigate?.('timesheet')}><Clock3 size={16} />Open timesheet</button></div></section>}
     <div className="officer-debrief-layout">
       <form className="officer-debrief-form" onSubmit={submitDebrief}>
         <div className="officer-debrief-panel-heading"><div><span>New handover</span><h2>Shift account</h2></div><ClipboardCheck size={20} /></div>
