@@ -17,6 +17,13 @@ describe('supervisor welfare response workbench', () => {
     expect(source).not.toContain(".from('welfare_alerts').update");
   });
 
+  it('shows the governed responder identity for each recorded transition', () => {
+    expect(source).toContain('acknowledger:acknowledged_by(id, display_name)');
+    expect(source).toContain('resolver:resolved_by(id, display_name)');
+    expect(source).toContain("selected.acknowledger?.display_name ?? 'Responder unavailable'");
+    expect(source).toContain("selected.resolver?.display_name ?? 'Responder unavailable'");
+  });
+
   it('requires human notes and surfaces concurrent transition failures', () => {
     expect(source).toContain('required rows={4}');
     expect(source).toContain('This alert changed before your action was saved');

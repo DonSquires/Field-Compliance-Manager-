@@ -2684,7 +2684,7 @@ COMMENT ON FUNCTION "public"."geometry_area_m2"("p_geojson" "jsonb") IS 'Read-on
 
 
 
-CREATE OR REPLACE FUNCTION "public"."get_approvals_activity"("p_limit" integer DEFAULT 50, "p_offset" integer DEFAULT 0, "p_statuses" "text"[] DEFAULT NULL::"text"[], "p_action_types" "text"[] DEFAULT NULL::"text"[]) RETURNS TABLE("id" "uuid", "action_type" "text", "status" "text", "bob_reasoning" "text", "confidence_score" real, "context_table" "text", "context_summary" "text", "created_at" timestamp with time zone, "applied_at" timestamp with time zone, "approved_at" timestamp with time zone, "proposed_payload" "jsonb", "amended_payload" "jsonb", "organization_id" "uuid", "org_name" "text", "triggered_by" "uuid", "triggered_by_name" "text", "user_id" "uuid", "user_name" "text", "approved_by" "uuid", "approved_by_name" "text", "rejection_reason" "text", "error_message" "text", "result_table" "text", "result_record_id" "uuid", "assigned_approver_id" "uuid", "can_decide" boolean)
+CREATE OR REPLACE FUNCTION "public"."get_approvals_activity"("p_limit" integer DEFAULT 50, "p_offset" integer DEFAULT 0, "p_statuses" "text"[] DEFAULT NULL::"text"[], "p_action_types" "text"[] DEFAULT NULL::"text"[]) RETURNS TABLE("id" "uuid", "action_type" "text", "status" "text", "bob_reasoning" "text", "confidence_score" real, "context_table" "text", "context_summary" "text", "created_at" timestamp with time zone, "applied_at" timestamp with time zone, "approved_at" timestamp with time zone, "proposed_payload" "jsonb", "amended_payload" "jsonb", "organization_id" "uuid", "org_name" "text", "triggered_by" "uuid", "triggered_by_name" "text", "user_id" "uuid", "user_name" "text", "approved_by" "uuid", "approved_by_name" "text", "rejection_reason" "text", "error_message" "text", "result_table" "text", "result_record_id" "uuid", "assigned_approver_id" "uuid", "assigned_approver_name" "text", "can_decide" boolean)
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -2733,6 +2733,7 @@ begin
     a.result_table,
     a.result_record_id,
     a.assigned_approver_id,
+    (select up4.display_name from public.user_profiles up4 where up4.id = a.assigned_approver_id) as assigned_approver_name,
     case
       when a.status not in ('pending', 'pending_approval', 'proposed') then false
       when v_role = 'grand_master' then true
