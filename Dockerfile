@@ -16,10 +16,12 @@ COPY builder-frontend-orchestrator.js /app/builder-frontend-orchestrator.js
 COPY builder-model-gateway.js /app/builder-model-gateway.js
 COPY builder-runtime-coordinator.js /app/builder-runtime-coordinator.js
 COPY builder-security-handoff.js /app/builder-security-handoff.js
+COPY bob-self-hosted.js /app/bob-self-hosted.js
 COPY browser-verifier.js /app/browser-verifier.js
 COPY frontend-worker.js /app/frontend-worker.js
 COPY security-worker.js /app/security-worker.js
 COPY supabase-workflow-client.js /app/supabase-workflow-client.js
+COPY worker-executor.js /app/worker-executor.js
 COPY scripts/atlas-graph.js /app/scripts/atlas-graph.js
 COPY supabase/functions/_shared /app/supabase/functions/_shared
 

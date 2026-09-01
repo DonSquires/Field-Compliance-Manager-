@@ -82,6 +82,8 @@ test('browser validation passes the app URL into the isolated worker environment
     profile: 'playwright-visual-check',
     env: { BOB_APP_URL: 'https://app.example.com' }
   });
+  assert.equal(args.includes('--network=none'), false);
+  assert.ok(args.includes('--network=bridge'));
   assert.ok(args.some(value => value.includes('BOB_APP_URL=https://app.example.com')));
 });
 

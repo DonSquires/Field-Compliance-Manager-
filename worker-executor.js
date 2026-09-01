@@ -23,7 +23,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g'
   const command = workerCommand(profile);
   const args = [
     'run', '--rm', '--init',
-    '--network=none',
+    profile === 'playwright-visual-check' && env.BOB_APP_URL ? '--network=bridge' : '--network=none',
     '--read-only',
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges:true',

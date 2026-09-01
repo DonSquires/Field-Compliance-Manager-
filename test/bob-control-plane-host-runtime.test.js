@@ -52,6 +52,9 @@ test('production control-plane image includes required runtime modules', () => {
   assert.match(dockerfile, /COPY builder-security-handoff\.js \/app\/builder-security-handoff\.js/);
   assert.match(dockerfile, /COPY builder-model-gateway\.js \/app\/builder-model-gateway\.js/);
   assert.match(dockerfile, /COPY builder-runtime-coordinator\.js \/app\/builder-runtime-coordinator\.js/);
+  assert.match(dockerfile, /COPY bob-self-hosted\.js \/app\/bob-self-hosted\.js/);
+  assert.match(dockerfile, /COPY worker-executor\.js \/app\/worker-executor\.js/);
+  assert.match(dockerfile, /COPY browser-verifier\.js \/app\/browser-verifier\.js/);
   assert.match(dockerfile, /COPY supabase-workflow-client\.js \/app\/supabase-workflow-client\.js/);
   assert.match(dockerfile, /COPY supabase\/functions\/_shared \/app\/supabase\/functions\/_shared/);
   assert.match(dockerfile, /CMD \["node", "\/app\/bob-control-plane-server\.js"\]/);

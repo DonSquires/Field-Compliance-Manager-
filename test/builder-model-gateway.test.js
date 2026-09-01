@@ -52,6 +52,19 @@ test('model gateway rejects models outside the provider allowlist', () => {
   assert.equal(validateModelRequest(request({ model: 'unapproved' }), config()), 'model is not allowed');
 });
 
+test('model gateway reports an unconfigured provider without dereferencing it', async () => {
+  const result = await invokeBuilderModel({
+    input: request({ provider: 'ollama', model: 'approved-local' }),
+    config: { openai: { baseUrl: 'https://openai.example/v1', apiKey: 'test-key', models: new Set(['approved-openai']) } },
+    fetchImpl: async () => {
+      throw new Error('fetch should not be called');
+    }
+  });
+
+  assert.equal(result.status, 503);
+  assert.equal(result.body.error, 'ollama provider is not configured');
+});
+
 test('model gateway normalizes OpenAI output and usage', async () => {
   let capturedUrl;
   const result = await invokeBuilderModel({

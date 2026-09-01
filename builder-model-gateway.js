@@ -52,7 +52,8 @@ function validateModelRequest(input, config) {
   if (!input.system_prompt || !input.user_prompt) return 'system_prompt and user_prompt are required';
   if (typeof input.system_prompt !== 'string' || typeof input.user_prompt !== 'string') return 'prompts must be strings';
   if (input.system_prompt.length + input.user_prompt.length > config.maxPromptChars) return 'prompt exceeds configured limit';
-  if (input.model && !config[input.provider].models.has(input.model)) return 'model is not allowed';
+  const providerConfig = config[input.provider];
+  if (input.model && providerConfig?.models?.size && !providerConfig.models.has(input.model)) return 'model is not allowed';
   return null;
 }
 
@@ -67,14 +68,14 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
   let lastResult = null;
   for (const provider of providerOrder) {
     const providerConfig = config[provider];
-    const fallbackModel = input.model && providerConfig.models.has(input.model)
-      ? input.model
-      : [...providerConfig.models][0];
-
     if (!providerConfig || !providerConfig.models?.size) {
       lastResult = { status: 503, body: { error: `${provider} provider is not configured` } };
       continue;
     }
+
+    const fallbackModel = input.model && providerConfig.models.has(input.model)
+      ? input.model
+      : [...providerConfig.models][0];
 
     if (provider === 'openai' && !providerConfig.apiKey) {
       lastResult = { status: 503, body: { error: 'OpenAI provider is not configured' } };
