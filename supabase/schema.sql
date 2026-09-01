@@ -3528,7 +3528,7 @@ ALTER FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_ser
 
 COMMENT ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") IS 'Idempotent admin dispatch creation with optional atomic resource assignment and SLA ownership.';
 
-CREATE OR REPLACE FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "status" "text")
+CREATE OR REPLACE FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "status" "text", "shift_id" "uuid", "completed_at" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
 declare
@@ -3563,7 +3563,10 @@ begin
     select 1 from dispatch_jobs other where other.dispatch_resource_id = v_job.dispatch_resource_id
       and other.id <> p_job_id and other.status in ('dispatched', 'acknowledged', 'en_route', 'on_scene')
   ) then update dispatch_resources set status = 'available' where id = v_job.dispatch_resource_id; end if;
-  return query select p_job_id, p_next_status;
+  return query
+  select updated.id, updated.status, updated.shift_id, updated.completed_at
+  from dispatch_jobs updated
+  where updated.id = p_job_id;
 end;
 $$;
 

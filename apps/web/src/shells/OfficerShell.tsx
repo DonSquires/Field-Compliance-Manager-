@@ -328,7 +328,7 @@ const OfficerShell: React.FC = () => {
       case 'parking':
         return <OfficerParkingPage />;
       case 'dispatch':
-        return <OfficerDispatchPage />;
+        return <OfficerDispatchPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
       case 'biosecurity':
         return <OfficerBiosecurityPage />;
       case 'freedom_camping':
@@ -336,7 +336,7 @@ const OfficerShell: React.FC = () => {
       case 'overnight_verification':
         return <OfficerOvernightVerificationPage />;
       case 'site_guard':
-        return <OfficerDispatchPage />;
+        return <OfficerDispatchPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
       case 'ems':
         return <OfficerFieldReportPage />;
       case 'debrief':

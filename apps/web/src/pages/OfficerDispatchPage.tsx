@@ -7,6 +7,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { CheckCircle2, FileText, Home, Map, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { supabase } from '../lib/supabase';
@@ -20,6 +21,13 @@ interface DispatchJob {
   briefing_notes: string | null;
   sla_respond_by: string | null;
   created_at: string;
+}
+
+interface CompletionReceipt {
+  id: string;
+  shiftId: string | null;
+  jobType: string;
+  completedAt: string;
 }
 
 const NEXT_STATUS: Record<string, string> = {
@@ -36,13 +44,14 @@ const STATUS_LABEL: Record<string, string> = {
   on_scene: 'Mark Completed',
 };
 
-const OfficerDispatchPage: React.FC = () => {
+const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' | 'report' | 'debrief') => void }> = ({ onNavigate }) => {
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
+  const [completionReceipt, setCompletionReceipt] = useState<CompletionReceipt | null>(null);
 
   // ATLAS READS: dispatch_jobs (via shifts assigned to this officer)
   const loadJobs = useCallback(async () => {
@@ -112,10 +121,12 @@ const OfficerDispatchPage: React.FC = () => {
       });
 
       if (error) throw error;
-      if (!data?.length) throw new Error('The dispatch status change was not confirmed.');
+      const result = (data as Array<{ id: string; status: string; shift_id: string | null; completed_at: string | null }> | null)?.[0];
+      if (!result || result.id !== job.id || result.status !== nextStatus) throw new Error('The dispatch status change was not confirmed.');
 
       if (nextStatus === 'completed') {
-        setJobs(jobs.filter((j) => j.id !== job.id));
+        setCompletionReceipt({ id: result.id, shiftId: result.shift_id, jobType: job.job_type, completedAt: result.completed_at ?? new Date().toISOString() });
+        setJobs((current) => current.filter((item) => item.id !== job.id));
         setOutcomeNotes((current) => {
           const next = { ...current };
           delete next[job.id];
@@ -159,6 +170,26 @@ const OfficerDispatchPage: React.FC = () => {
         </div>
       )}
 
+      {completionReceipt && (
+        <section className="dispatch-completion" aria-label="Dispatch completion receipt">
+          <div className="dispatch-completion-summary">
+            <CheckCircle2 size={22} />
+            <div>
+              <span>Dispatch completed</span>
+              <strong>{completionReceipt.jobType}</strong>
+              <p>Receipt {completionReceipt.id.slice(0, 8)} · shift {completionReceipt.shiftId?.slice(0, 8) ?? 'not linked'} · {new Date(completionReceipt.completedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</p>
+              <small>Your shift remains active. Continue with assigned work or use Debrief only when all shift work is finished.</small>
+            </div>
+          </div>
+          <div className="dispatch-completion-actions" aria-label="Dispatch next actions">
+            <button type="button" className="btn btn-primary" onClick={() => onNavigate?.('home')}><Home size={16} />Shift home</button>
+            <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('map')}><Map size={16} />Open map</button>
+            <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('report')}><FileText size={16} />Field report</button>
+            <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('debrief')}><ShieldCheck size={16} />Debrief</button>
+          </div>
+        </section>
+      )}
+
       <div className="contacts-list">
         {jobs.length === 0 ? (
           <div className="empty-state">
@@ -182,8 +213,9 @@ const OfficerDispatchPage: React.FC = () => {
               </div>
               {job.status === 'on_scene' && (
                 <div className="form-group" style={{ marginTop: '10px' }}>
-                  <label>Outcome notes</label>
+                  <label htmlFor={`dispatch-outcome-${job.id}`}>Outcome notes</label>
                   <textarea
+                    id={`dispatch-outcome-${job.id}`}
                     rows={3}
                     required
                     value={outcomeNotes[job.id] ?? ''}

@@ -257,6 +257,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
 
 export async function installOfficerScheduleFixtures(page: Page): Promise<void> {
   let internalSlotStatus = 'published';
+  const dispatchJobs = [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', job_type: 'Alarm response', priority: 'high', status: 'on_scene', briefing_notes: 'Verify the north loading entrance and record the outcome.', sla_respond_by: '2026-08-30T10:00:00.000Z', created_at: '2026-08-30T09:00:00.000Z' }];
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'officer-e2e-token', refresh_token: 'officer-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: officerUser }) });
   });
@@ -313,6 +314,10 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
       await route.fulfill(fulfillJson([{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', report_type: 'maintenance', severity: 'medium', status: 'submitted', title: 'Damaged perimeter sign', description: 'Sign mount is loose at the eastern vehicle entrance.', location_name: 'East Gate', reported_at: '2026-08-30T06:00:00.000Z', follow_up_required: true }]));
       return;
     }
+    if (resource === 'dispatch_jobs') {
+      await route.fulfill(fulfillJson(dispatchJobs));
+      return;
+    }
     if (resource === 'location_zones') {
       await route.fulfill(fulfillJson([{ id: '66666666-6666-4666-8666-666666666666', name: 'Civic Event Operations Zone', module_key: 'freedom_camping', boundary_verification: 'verified', is_active: true }]));
       return;
@@ -335,6 +340,13 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
     }
     if (resource === 'submit_officer_field_report') {
       await route.fulfill(fulfillJson([{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', created: true, received_at: '2026-08-30T09:30:00.000Z', shift_id: '66666666-6666-4666-8666-666666666666' }]));
+      return;
+    }
+    if (resource === 'advance_dispatch_job_status') {
+      const payload = JSON.parse(request.postData() ?? '{}');
+      const job = dispatchJobs.find((item) => item.id === payload.p_job_id);
+      if (job) job.status = payload.p_next_status;
+      await route.fulfill(fulfillJson([{ id: payload.p_job_id, status: payload.p_next_status, shift_id: '66666666-6666-4666-8666-666666666666', completed_at: payload.p_next_status === 'completed' ? '2026-08-30T09:30:00.000Z' : null }]));
       return;
     }
     if (resource === 'respond_to_roster_slot') {
