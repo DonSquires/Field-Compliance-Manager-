@@ -7,6 +7,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -19,9 +20,15 @@ interface NoiseAssessment {
   action_taken: string | null;
   scene_description: string | null;
   assessed_at: string;
+  review_status: string;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  follow_up_required: boolean;
 }
 
 const OfficerNoiseControlPage: React.FC = () => {
+  const location=useLocation();
+  const requestedAssessmentId=new URLSearchParams(location.search).get('assessment');
   const { profile } = useAuth();
   const [assessments, setAssessments] = useState<NoiseAssessment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +45,7 @@ const OfficerNoiseControlPage: React.FC = () => {
 
       const { data, error: err } = await supabase
         .from('noise_assessments')
-        .select('id, decibel_reading, noise_source, prior_notice_count, action_taken, scene_description, assessed_at')
+        .select('id, decibel_reading, noise_source, prior_notice_count, action_taken, scene_description, assessed_at, review_status, reviewed_at, review_notes, follow_up_required')
         .eq('officer_user_id', profile.id)
         .order('assessed_at', { ascending: false });
 
@@ -54,6 +61,7 @@ const OfficerNoiseControlPage: React.FC = () => {
   useEffect(() => {
     loadAssessments();
   }, [loadAssessments]);
+  useEffect(()=>{if(requestedAssessmentId)document.getElementById(`officer-noise-${requestedAssessmentId}`)?.scrollIntoView({block:'center'});},[assessments,requestedAssessmentId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,7 +162,7 @@ const OfficerNoiseControlPage: React.FC = () => {
           </div>
         ) : (
           assessments.map((a) => (
-            <div key={a.id} className="contact-card">
+            <div key={a.id} id={`officer-noise-${a.id}`} className={`contact-card ${a.id===requestedAssessmentId?'is-context-focus':''}`}>
               <div className="contact-header">
                 <h3>{a.noise_source || 'Noise complaint'}</h3>
                 {a.decibel_reading != null && <span className="badge">{a.decibel_reading} dB</span>}
@@ -165,6 +173,7 @@ const OfficerNoiseControlPage: React.FC = () => {
                   {a.prior_notice_count} prior notice(s) · {new Date(a.assessed_at).toLocaleString()}
                 </p>
                 {a.action_taken && <p className="contact-meta">Action: {a.action_taken}</p>}
+                {a.review_status!=='open'&&<section className="noise-officer-review"><strong>Supervisor review · {a.review_status.replaceAll('_',' ')}</strong><span>{a.review_notes??'Review note unavailable'}</span><small>{a.follow_up_required?'Follow-up required':'No further follow-up'}{a.reviewed_at?` · ${new Date(a.reviewed_at).toLocaleString('en-NZ')}`:''}</small></section>}
               </div>
             </div>
           ))

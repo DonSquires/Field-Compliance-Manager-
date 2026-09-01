@@ -311,6 +311,10 @@ const OfficerShell: React.FC = () => {
       const debrief = destination.debriefId ? `?debrief=${encodeURIComponent(destination.debriefId)}` : '';
       navigate(`/officer/debrief${debrief}`);setActiveModule('debrief');return true;
     }
+    if (destination.kind === 'officer_noise') {
+      const assessment = destination.assessmentId ? `?assessment=${encodeURIComponent(destination.assessmentId)}` : '';
+      navigate(`/officer/noise_control${assessment}`);setActiveModule('noise_control');return true;
+    }
     return false;
   }, [navigate, navigateToModule, profile?.role]);
 

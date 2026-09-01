@@ -13,6 +13,7 @@ export type NotificationDestination =
   | { kind: 'officer_schedule'; rosterSlotId: string | null }
   | { kind: 'officer_breach'; breachAlertId: string | null }
   | { kind: 'officer_debrief'; debriefId: string | null }
+  | { kind: 'officer_noise'; assessmentId: string | null }
   | { kind: 'client_page'; page: string }
   | { kind: 'bob'; conversationId: string | null };
 
@@ -27,6 +28,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   const rosterSlotId = typeof notification.link_payload?.roster_slot_id === 'string' ? notification.link_payload.roster_slot_id : null;
   const breachAlertId = typeof notification.link_payload?.breach_alert_id === 'string' ? notification.link_payload.breach_alert_id : null;
   const debriefId = typeof notification.link_payload?.debrief_id === 'string' ? notification.link_payload.debrief_id : null;
+  const assessmentId = typeof notification.link_payload?.assessment_id === 'string' ? notification.link_payload.assessment_id : null;
 
   if (notification.category === 'bob_conversation' || link === 'bob_chat') return { kind: 'bob', conversationId };
 
@@ -48,6 +50,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
     if (notification.category === 'roster' && link === 'schedule') return { kind: 'officer_schedule', rosterSlotId };
     if (notification.category === 'breach_decision' || link === 'breach-decision') return { kind: 'officer_breach', breachAlertId };
     if (notification.category === 'debrief_followup' || link === 'debrief-followup') return { kind: 'officer_debrief', debriefId };
+    if (notification.category === 'noise_review' || link === 'noise-review') return { kind: 'officer_noise', assessmentId };
     if (link === 'open-jobs' || link === 'roster' || notification.category === 'open_job' || notification.category === 'roster') return { kind: 'officer_module', module: null };
     if (notification.category === 'welfare') return { kind: 'officer_module', module: null };
     return null;

@@ -10822,6 +10822,11 @@ CREATE TABLE IF NOT EXISTS "public"."noise_assessments" (
     "complaint_address" "text",
     "complainant_site_id" "uuid",
     "external_refs" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "review_status" "text" DEFAULT 'open'::"text" NOT NULL,
+    "reviewed_by" "uuid",
+    "reviewed_at" timestamp with time zone,
+    "review_notes" "text",
+    CONSTRAINT "noise_assessments_review_status_check" CHECK (("review_status" = ANY (ARRAY['open'::"text", 'acknowledged'::"text", 'follow_up'::"text", 'closed'::"text"]))),
     CONSTRAINT "noise_assessments_action_taken_check" CHECK (("action_taken" = ANY (ARRAY['no_action'::"text", 'verbal_warning'::"text", 'abatement_notice'::"text", 'direction_notice'::"text", 'enforcement_notice'::"text", 'equipment_seized'::"text", 'prosecution_referral'::"text"]))),
     CONSTRAINT "noise_assessments_time_score_check" CHECK ((("time_score" >= 1) AND ("time_score" <= 4))),
     CONSTRAINT "noise_assessments_tone_score_check" CHECK ((("tone_score" >= 0) AND ("tone_score" <= 2))),
@@ -11174,7 +11179,7 @@ CREATE TABLE IF NOT EXISTS "public"."notifications" (
     "dedup_key" "text",
     "read_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'report_reviewed'::"text", 'leave_decision'::"text", 'timesheet_decision'::"text", 'breach_decision'::"text", 'debrief_followup'::"text", 'welfare'::"text", 'dispatch'::"text", 'roster'::"text", 'open_job'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
+    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'report_reviewed'::"text", 'leave_decision'::"text", 'timesheet_decision'::"text", 'breach_decision'::"text", 'debrief_followup'::"text", 'noise_review'::"text", 'welfare'::"text", 'dispatch'::"text", 'roster'::"text", 'open_job'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
     CONSTRAINT "notifications_recipient_chk" CHECK ((("recipient_user_id" IS NOT NULL) OR ("recipient_role" IS NOT NULL))),
     CONSTRAINT "notifications_severity_check" CHECK (("severity" = ANY (ARRAY['info'::"text", 'warning'::"text", 'critical'::"text"])))
 );
@@ -18966,6 +18971,9 @@ ALTER TABLE ONLY "public"."noise_assessments"
 ALTER TABLE ONLY "public"."noise_assessments"
     ADD CONSTRAINT "noise_assessments_officer_user_id_fkey" FOREIGN KEY ("officer_user_id") REFERENCES "public"."user_profiles"("id");
 
+ALTER TABLE ONLY "public"."noise_assessments"
+  ADD CONSTRAINT "noise_assessments_reviewed_by_fkey" FOREIGN KEY ("reviewed_by") REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL;
+
 
 
 ALTER TABLE ONLY "public"."noise_assessments"
@@ -26399,8 +26407,7 @@ GRANT ALL ON TABLE "public"."monthly_report_packs" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."noise_assessments" TO "anon";
-GRANT ALL ON TABLE "public"."noise_assessments" TO "authenticated";
+GRANT INSERT,SELECT ON TABLE "public"."noise_assessments" TO "authenticated";
 GRANT ALL ON TABLE "public"."noise_assessments" TO "service_role";
 
 
@@ -27217,6 +27224,10 @@ CREATE TRIGGER "debrief_followup_after_insert" AFTER INSERT ON "public"."shift_d
 REVOKE ALL ON FUNCTION "public"."seed_debrief_followup"() FROM PUBLIC,"anon","authenticated";
 CREATE FUNCTION "public"."manage_debrief_followup"(p_followup_id uuid,p_expected_version integer,p_action text,p_note text) RETURNS TABLE(followup_id uuid,followup_status text,owner_user_id uuid,followup_version integer,acted_at timestamptz) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$declare v_actor uuid:=auth.uid();v_item public.debrief_followups%rowtype;v_note text:=nullif(trim(coalesce(p_note,'')),'');begin select f.* into v_item from public.debrief_followups f where f.id=p_followup_id for update;if not found then raise exception 'Debrief follow-up not found';end if;if not public.is_admin_for_org(v_item.organization_id) then raise exception 'Active operations administrator required';end if;if v_item.version<>p_expected_version then raise exception 'Debrief follow-up changed since it was opened';end if;if v_note is null then raise exception 'Follow-up action notes are required';end if;if p_action='claim' and v_item.status='open' then update public.debrief_followups set status='claimed',owner_user_id=v_actor,latest_note=v_note,version=version+1,updated_at=clock_timestamp() where id=v_item.id returning * into v_item;elsif p_action='escalate' and v_item.status in('open','claimed') then update public.debrief_followups set status='escalated',owner_user_id=coalesce(owner_user_id,v_actor),latest_note=v_note,version=version+1,updated_at=clock_timestamp() where id=v_item.id returning * into v_item;elsif p_action='resolve' and v_item.status in('claimed','escalated') then update public.debrief_followups set status='resolved',owner_user_id=coalesce(owner_user_id,v_actor),latest_note=v_note,resolved_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp() where id=v_item.id returning * into v_item;else raise exception 'Unsupported debrief follow-up transition from % using %',v_item.status,p_action;end if;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_item.organization_id,v_actor,'debrief_followup_managed','debrief_followups',v_item.id,jsonb_build_object('action',p_action,'status',v_item.status,'owner_user_id',v_item.owner_user_id,'version',v_item.version,'note',v_note));if p_action in('escalate','resolve') then perform public.enqueue_notification(p_organization_id=>v_item.organization_id,p_category=>'debrief_followup',p_title=>case when p_action='resolve' then 'Debrief follow-up resolved' else 'Debrief follow-up escalated' end,p_body=>v_note,p_severity=>case when p_action='escalate' then 'warning' else 'info' end,p_recipient_user_id=>v_item.officer_user_id,p_link_page=>'debrief-followup',p_link_payload=>jsonb_build_object('debrief_id',v_item.debrief_id,'followup_id',v_item.id),p_dedup_key=>'debrief_followup:'||v_item.id::text||':'||v_item.version::text);end if;return query select v_item.id,v_item.status,v_item.owner_user_id,v_item.version,v_item.updated_at;end;$$;
 REVOKE ALL ON FUNCTION "public"."manage_debrief_followup"(uuid,integer,text,text) FROM PUBLIC,"anon";GRANT EXECUTE ON FUNCTION "public"."manage_debrief_followup"(uuid,integer,text,text) TO "authenticated","service_role";
+
+CREATE FUNCTION "public"."manage_noise_assessment_review"(p_assessment_id uuid,p_expected_review_status text,p_action text,p_notes text) RETURNS TABLE(assessment_id uuid,review_status text,reviewed_by uuid,reviewed_at timestamptz,follow_up_required boolean) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$declare v_actor uuid:=auth.uid();v_item public.noise_assessments%rowtype;v_officer uuid;v_next text;v_notes text:=nullif(trim(coalesce(p_notes,'')),'');begin select n.* into v_item from public.noise_assessments n where n.id=p_assessment_id for update;if not found then raise exception 'Noise assessment not found';end if;if not public.is_admin_for_org(v_item.organization_id) then raise exception 'Active Noise Control administrator required';end if;if v_item.review_status<>p_expected_review_status then raise exception 'Noise review changed from expected status % to %',p_expected_review_status,v_item.review_status;end if;if v_notes is null then raise exception 'Noise review notes are required';end if;if p_action='acknowledge' and v_item.review_status='open' then v_next:='acknowledged';elsif p_action='require_follow_up' and v_item.review_status in('open','acknowledged','follow_up') then v_next:='follow_up';elsif p_action='close' and v_item.review_status in('open','acknowledged','follow_up') then v_next:='closed';else raise exception 'Unsupported Noise Control review transition from % using %',v_item.review_status,p_action;end if;update public.noise_assessments set review_status=v_next,reviewed_by=v_actor,reviewed_at=clock_timestamp(),review_notes=v_notes,follow_up_required=case when v_next='follow_up' then true when v_next='closed' then false else follow_up_required end where id=v_item.id returning * into v_item;v_officer:=coalesce(v_item.officer_user_id,v_item.officer_id);insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_item.organization_id,v_actor,'noise_assessment_reviewed','noise_assessments',v_item.id,jsonb_build_object('previous_review_status',p_expected_review_status,'review_status',v_item.review_status,'action',p_action,'source_officer_id',v_officer,'notes',v_notes));if v_officer is not null then perform public.enqueue_notification(p_organization_id=>v_item.organization_id,p_category=>'noise_review',p_title=>'Noise assessment reviewed',p_body=>v_notes,p_severity=>case when v_next='follow_up' then 'warning' else 'info' end,p_recipient_user_id=>v_officer,p_link_page=>'noise-review',p_link_payload=>jsonb_build_object('assessment_id',v_item.id),p_dedup_key=>'noise_review:'||v_item.id::text||':'||v_item.review_status);end if;return query select v_item.id,v_item.review_status,v_item.reviewed_by,v_item.reviewed_at,v_item.follow_up_required;end;$$;
+REVOKE ALL ON FUNCTION "public"."manage_noise_assessment_review"(uuid,text,text,text) FROM PUBLIC,"anon";
+GRANT EXECUTE ON FUNCTION "public"."manage_noise_assessment_review"(uuid,text,text,text) TO "authenticated","service_role";
 
 
 DROP POLICY "roster_slots_select" ON "public"."roster_slots";
