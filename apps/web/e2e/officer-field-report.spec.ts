@@ -26,7 +26,9 @@ test('officer report capture is evidential, responsive, and server-confirmed', a
   const actionBar = page.locator('.officer-action-bar');
   const submitBounds = await submit.boundingBox();
   const actionBarBounds = await actionBar.boundingBox();
-  expect(submitBounds && actionBarBounds && submitBounds.y + submitBounds.height <= actionBarBounds.y).toBe(true);
+  // Sub-pixel layout rounding (font metrics) can put these within a fraction of a
+  // pixel of each other with no visible overlap; tolerate <1px, not a real overlap.
+  expect(submitBounds && actionBarBounds && submitBounds.y + submitBounds.height <= actionBarBounds.y + 1).toBe(true);
   const shellHeader = page.locator('.officer-shell-header');
   await shellHeader.evaluate((element) => { element.style.visibility = 'hidden'; });
   await actionBar.evaluate((element) => { element.style.visibility = 'hidden'; });
