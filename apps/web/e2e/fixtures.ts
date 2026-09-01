@@ -148,6 +148,9 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       await route.fulfill(fulfillJson(reports));
       return;
     }
+    if (table === 'patrol_checkpoint_visits') { await route.fulfill(fulfillJson([{ id:'89898989-8989-4989-8989-898989898989',organization_id:ORG_ID,patrol_id:'90909090-9090-4090-8090-909090909090',checkpoint_id:'91919191-9191-4191-8191-919191919191',officer_user_id:OFFICER_ID,shift_stop_id:'92929292-9292-4292-8292-929292929292',visited_at:'2026-08-30T08:45:00.000Z',scan_method:'qr_camera',gps_accuracy:6,gps_distance_from_checkpoint:4,within_radius:true,notes:'North gate secure.'},{id:'93939393-9393-4393-8393-939393939393',organization_id:ORG_ID,patrol_id:'90909090-9090-4090-8090-909090909090',checkpoint_id:'94949494-9494-4494-8494-949494949494',officer_user_id:OFFICER_ID,shift_stop_id:null,visited_at:'2026-08-30T08:30:00.000Z',scan_method:'manual_code',gps_accuracy:null,gps_distance_from_checkpoint:null,within_radius:null,notes:'Manual fallback used after GPS loss.'}]));return; }
+    if (table === 'patrol_checkpoints') { await route.fulfill(fulfillJson([{id:'91919191-9191-4191-8191-919191919191',name:'North gate checkpoint'},{id:'94949494-9494-4494-8494-949494949494',name:'Loading bay checkpoint'}]));return; }
+    if (table === 'patrols') { await route.fulfill(fulfillJson([{id:'90909090-9090-4090-8090-909090909090',status:'in_progress',shift_id:'66666666-6666-4666-8666-666666666666'}]));return; }
     if (table === 'monthly_report_packs') { await route.fulfill(fulfillJson(monthlyReportPacks)); return; }
     if (table === 'welfare_alerts') { await route.fulfill(fulfillJson(welfareAlerts)); return; }
     if (table === 'get_approvals_activity') { await route.fulfill(fulfillJson(approvalActions)); return; }

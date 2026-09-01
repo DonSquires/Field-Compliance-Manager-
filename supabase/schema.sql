@@ -25012,8 +25012,6 @@ GRANT ALL ON FUNCTION "public"."compare_boundaries_hausdorff"("p_geojson_a" "tex
 
 
 
-GRANT ALL ON FUNCTION "public"."complete_shift_stop"("p_stop_id" "uuid", "p_officer_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) TO "anon";
-GRANT ALL ON FUNCTION "public"."complete_shift_stop"("p_stop_id" "uuid", "p_officer_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."complete_shift_stop"("p_stop_id" "uuid", "p_officer_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) TO "service_role";
 
 

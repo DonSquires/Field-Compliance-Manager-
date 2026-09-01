@@ -76,7 +76,7 @@ const GrandMasterPlatformPage = React.lazy(() => import('../pages/GrandMasterPla
 const ProviderBillingPage = React.lazy(() => import('../pages/ProviderBillingPage'));
 const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlRoomPage'));
 const ReportsHubPage = React.lazy(() => import('../pages/ReportsHubPage'));
-const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
+const PatrolOversightPage = React.lazy(() => import('../pages/PatrolOversightPage'));
 const DispatchConsolePage = React.lazy(() => import('../pages/DispatchConsolePage'));
 const WelfareAlertsPage = React.lazy(() => import('../pages/WelfareAlertsPage'));
 const SmokeControlPage = React.lazy(() => import('../pages/modules/SmokeControlPage'));
@@ -390,7 +390,7 @@ const AdminShell: React.FC = () => {
           case 'dispatch':
             return <DispatchConsolePage />;
           case 'patrol':
-            return <PatrolPage />;
+            return <PatrolOversightPage />;
           case 'welfare-alerts':
             return <WelfareAlertsPage />;
           case 'smoke-control':
