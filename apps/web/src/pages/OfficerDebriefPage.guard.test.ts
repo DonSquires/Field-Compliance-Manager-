@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/OfficerDebriefPage.tsx'), 'utf8');
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx'), 'utf8');
+const completionFix = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901018000_fix_officer_shift_completion.sql'), 'utf8');
 
 describe('officer debrief workspace', () => {
   it('replaces the exposed placeholder with a real handover page', () => {
@@ -24,6 +25,9 @@ describe('officer debrief workspace', () => {
     expect(page).toContain('Open timesheet');
     expect(page).toContain('Return home');
     expect(page).toContain('Recent debriefs');
+    expect(completionFix).toContain("update public.roster_slots set status='completed' where linked_shift_id=v_shift.id");
+    expect(completionFix).not.toMatch(/update public\.roster_slots set[^;]*updated_at/);
+    expect(completionFix).toContain("v_shift.status<>p_expected_status");
   });
   it('shows and focuses admin follow-up only for the officer own debrief IDs',()=>{
     expect(page).toContain("from('debrief_followups')");
