@@ -36,7 +36,7 @@ interface OpenShift {
   site_name: string | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'map' | 'report' | 'modules' | 'schedule';
+type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'map' | 'report' | 'modules' | 'schedule';
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -194,7 +194,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
                 <span>{shiftProgress.percent}%</span>
               </div>
               <div className="officer-progress-track"><span style={{ width: `${shiftProgress.percent}%` }} /></div>
-              <button type="button" className="officer-primary-action" onClick={() => onNavigate(shift.shift_type === 'patrol' ? 'patrol' : 'dispatch')}>
+              <button type="button" className="officer-primary-action" onClick={() => onNavigate(shift.shift_type === 'patrol' ? 'patrol' : shift.shift_type === 'static_guarding' ? 'site_guard' : 'dispatch')}>
                 <Navigation size={18} aria-hidden="true" /> Open assignment <ArrowRight size={17} aria-hidden="true" />
               </button>
             </>
