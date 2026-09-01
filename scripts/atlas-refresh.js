@@ -321,6 +321,10 @@ function collectSourceEdges(rootDir, knownEntities) {
 
 function collectAtlasRefresh(rootDir = process.cwd()) {
   const { tables, rpcs } = collectDdlEntities(rootDir);
+  const repositoryFiles = [
+    ...walkFiles(rootDir, 'apps/web/src'),
+    ...walkFiles(rootDir, 'supabase/functions')
+  ].sort();
   const edgeFunctions = new Set(
     walkFiles(rootDir, 'supabase/functions')
       .map(file => file.match(/^supabase\/functions\/([^/]+)\/index\.ts$/)?.[1])
@@ -360,6 +364,7 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   return {
     generated_at: new Date().toISOString(),
     generator: OWNER_MARKER,
+    repository_files: repositoryFiles,
     capabilities: capabilities.sort((left, right) => capabilityKey(left).localeCompare(capabilityKey(right))),
     edges
   };
@@ -370,6 +375,7 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
   const edgeByKey = new Map(existingEdges.map(row => [edgeKey(row), row]));
   const generatedCapabilityKeys = new Set(manifest.capabilities.map(capabilityKey));
   const generatedEdgeKeys = new Set(manifest.edges.map(edgeKey));
+  const repositoryFiles = new Set(manifest.repository_files || []);
   const plan = {
     capabilityUpserts: [],
     edgeUpserts: [],
@@ -428,8 +434,12 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
   for (const existing of existingEdges) {
     const legacyManagedContext = MANAGED_SOURCES.includes(existing.source_file)
       && /^\.from\(['"][^'"]+['"]\)\.(?:insert|update|upsert|delete)/.test(String(existing.caller_context || ''));
+    const deletedRepositorySource = repositoryFiles.size > 0
+      && (String(existing.source_file || '').startsWith('apps/web/src/')
+        || String(existing.source_file || '').startsWith('supabase/functions/'))
+      && !repositoryFiles.has(existing.source_file);
     if (existing.refresh_source === 'ci_generator'
-        && (String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext)
+        && (String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext || deletedRepositorySource)
         && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);

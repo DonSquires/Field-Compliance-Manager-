@@ -269,6 +269,38 @@ test('Atlas refresh plan preserves manual truth and retires only owned stale row
   assert.equal(plan.edgeRetireIds.includes('unmanaged-pre-marker'), false);
 });
 
+test('Atlas refresh retires legacy CI edges only when their repository source was deleted', () => {
+  const manifest = {
+    repository_files: ['apps/web/src/pages/CurrentPage.tsx'],
+    capabilities: [],
+    edges: []
+  };
+  const existingEdges = [
+    {
+      id: 'deleted-source', source_type: 'component', source_name: 'pages/DeletedPage',
+      target_type: 'table', target_name: 'incidents', edge_kind: 'writes',
+      source_file: 'apps/web/src/pages/DeletedPage.tsx', refresh_source: 'ci_generator',
+      caller_context: ".from('incidents').insert({})", retirement_status: 'live'
+    },
+    {
+      id: 'current-source', source_type: 'component', source_name: 'pages/CurrentPage',
+      target_type: 'table', target_name: 'incidents', edge_kind: 'reads',
+      source_file: 'apps/web/src/pages/CurrentPage.tsx', refresh_source: 'ci_generator',
+      caller_context: ".from('incidents')", retirement_status: 'live'
+    },
+    {
+      id: 'manual-deleted-source', source_type: 'component', source_name: 'pages/DeletedPage',
+      target_type: 'table', target_name: 'incidents', edge_kind: 'reads',
+      source_file: 'apps/web/src/pages/DeletedPage.tsx', refresh_source: 'manual_seed',
+      caller_context: 'manually verified', retirement_status: 'live'
+    }
+  ];
+
+  const plan = buildRefreshPlan(manifest, [], existingEdges);
+
+  assert.deepEqual(plan.edgeRetireIds, ['deleted-source']);
+});
+
 test('Atlas refresh plan preserves exercised state on CI-owned capabilities', () => {
   const manifest = {
     capabilities: [{
