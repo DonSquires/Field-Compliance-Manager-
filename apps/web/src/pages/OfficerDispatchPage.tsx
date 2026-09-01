@@ -8,6 +8,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { CheckCircle2, FileText, Home, Map, ShieldCheck } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { supabase } from '../lib/supabase';
@@ -45,6 +46,8 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' | 'report' | 'debrief') => void }> = ({ onNavigate }) => {
+  const location = useLocation();
+  const requestedJobId = new URLSearchParams(location.search).get('job');
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,6 +100,8 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
     const interval = setInterval(loadJobs, 30000);
     return () => clearInterval(interval);
   }, [loadJobs]);
+
+  useEffect(() => { if (requestedJobId) document.getElementById(`officer-dispatch-${requestedJobId}`)?.scrollIntoView({ block: 'center' }); }, [jobs, requestedJobId]);
 
   const handleAdvanceStatus = async (job: DispatchJob) => {
     const nextStatus = NEXT_STATUS[job.status];
@@ -197,7 +202,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
           </div>
         ) : (
           jobs.map((job) => (
-            <div key={job.id} className="contact-card">
+            <div key={job.id} id={`officer-dispatch-${job.id}`} className={`contact-card ${job.id === requestedJobId ? 'is-context-focus' : ''}`}>
               <div className="contact-header">
                 <h3>{job.job_type}</h3>
                 <span className={`severity-badge severity-${job.priority === 'high' ? 'high' : 'low'}`}>

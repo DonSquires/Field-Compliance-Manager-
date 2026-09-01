@@ -281,6 +281,12 @@ const OfficerShell: React.FC = () => {
       setActiveModule('report');
       return true;
     }
+    if (destination.kind === 'officer_dispatch') {
+      const job = destination.dispatchJobId ? `?job=${encodeURIComponent(destination.dispatchJobId)}` : '';
+      navigate(`/officer/dispatch${job}`);
+      setActiveModule('dispatch');
+      return true;
+    }
     return false;
   }, [navigate, navigateToModule, profile?.role]);
 

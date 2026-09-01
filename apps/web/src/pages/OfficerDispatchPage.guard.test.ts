@@ -32,6 +32,12 @@ describe('officer dispatch lifecycle boundary', () => {
     }
   });
 
+  it('opens and focuses the exact personally delivered dispatch job', () => {
+    expect(source).toContain("get('job')");
+    expect(source).toContain('id={`officer-dispatch-${job.id}`}');
+    expect(source).toContain("job.id === requestedJobId ? 'is-context-focus' : ''");
+  });
+
   it('returns the locked job context without widening RPC access', () => {
     expect(migration).toContain('returns table (id uuid, status text, shift_id uuid, completed_at timestamptz)');
     expect(migration).toContain('select updated.id, updated.status, updated.shift_id, updated.completed_at');

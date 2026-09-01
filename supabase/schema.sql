@@ -3867,22 +3867,13 @@ CREATE OR REPLACE FUNCTION "public"."notify_dispatch_job_created"() RETURNS "tri
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
+declare v_officer uuid;
 begin
-  if new.status in ('pending', 'dispatched') then
-    perform public.enqueue_notification(
-      p_organization_id   => new.organization_id,
-      p_category          => 'dispatch',
-      p_title             => 'New dispatch job',
-      p_body              => 'A new dispatch job is available.',
-      p_severity          => case when new.priority in ('critical', 'high') then 'warning' else 'info' end,
-      p_recipient_user_id => null,
-      p_recipient_role    => 'officer',
-      p_link_page         => 'open-jobs',
-      p_link_payload      => jsonb_build_object('dispatch_job_id', new.id),
-      p_dedup_key         => 'dispatch_job_open:' || new.id::text
-    );
-  end if;
-
+  if new.status not in('pending','dispatched') then return new;end if;
+  if new.dispatch_resource_id is not null then select dr.assigned_officer_id into v_officer from dispatch_resources dr where dr.id=new.dispatch_resource_id;end if;
+  if v_officer is null and new.shift_id is not null then select s.officer_user_id into v_officer from shifts s where s.id=new.shift_id;end if;
+  if v_officer is null then return new;end if;
+  perform enqueue_notification(p_organization_id=>new.organization_id,p_category=>'dispatch',p_title=>'New dispatch assignment',p_body=>replace(new.job_type,'_',' ')||' requires your response.',p_severity=>case when new.priority in('urgent','high') then 'warning' else 'info' end,p_recipient_user_id=>v_officer,p_link_page=>'dispatch',p_link_payload=>jsonb_build_object('dispatch_job_id',new.id),p_dedup_key=>'dispatch_job_assigned:'||new.id::text);
   return new;
 end;
 $$;

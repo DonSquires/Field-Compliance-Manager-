@@ -32,3 +32,15 @@ test('dispatch completion keeps shift context and gives the officer a next comma
   await expect(page).toHaveURL(/\/officer\/map$/);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('personal dispatch notification opens the exact assigned job', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsOfficer(page, '/officer/dispatch?job=cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+
+  const job = page.locator('#officer-dispatch-cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+  await expect(job).toHaveClass(/is-context-focus/);
+  await expect(job.getByText('Alarm response', { exact: true })).toBeVisible();
+  await expect(job.getByRole('button', { name: 'Mark Completed' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
