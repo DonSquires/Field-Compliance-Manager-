@@ -89,6 +89,7 @@ const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPag
 const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightPage'));
 const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
+const IncidentOversightPage = React.lazy(() => import('../pages/IncidentOversightPage'));
 const DebriefFollowupPage = React.lazy(() => import('../pages/DebriefFollowupPage'));
 
 type AdminPage =
@@ -99,7 +100,7 @@ type AdminPage =
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
-type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control' | 'incidents';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
@@ -113,7 +114,7 @@ const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
   'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
-  'debrief-followup',
+  'debrief-followup', 'incidents',
 ]);
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined): boolean {
@@ -415,6 +416,8 @@ const AdminShell: React.FC = () => {
             return <NoiseControlOversightPage />;
           case 'biosecurity':
             return <BiosecurityOversightPage />;
+          case 'incidents':
+            return <IncidentOversightPage />;
           default:
             return <FieldOperationsPage onNavigate={navigateToFieldOps} />;
         }

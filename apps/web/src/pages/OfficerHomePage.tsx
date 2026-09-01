@@ -11,6 +11,7 @@ import {
   Radio,
   RefreshCw,
   Route,
+  ShieldAlert,
   ShieldCheck,
   Signal,
   SignalZero,
@@ -36,7 +37,7 @@ interface OpenShift {
   site_name: string | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'map' | 'report' | 'modules' | 'schedule';
+type HomeDestination = 'dispatch' | 'patrol' | 'map' | 'report' | 'modules' | 'schedule' | 'incident_report';
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -233,6 +234,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           <QuickAction icon={<Radio />} label="Dispatch" detail="Assigned jobs" onClick={() => onNavigate('dispatch')} />
           <QuickAction icon={<Map />} label="Live map" detail="Sites and zones" onClick={() => onNavigate('map')} />
           <QuickAction icon={<ClipboardPlus />} label="Field report" detail="Record an incident" onClick={() => onNavigate('report')} />
+          <QuickAction icon={<ShieldAlert />} label="Report incident" detail="Confrontations, damage, welfare" onClick={() => onNavigate('incident_report')} />
         </div>
         <button type="button" className="officer-all-modules" onClick={() => onNavigate('modules')}>All enabled modules <ArrowRight size={16} aria-hidden="true" /></button>
       </section>
