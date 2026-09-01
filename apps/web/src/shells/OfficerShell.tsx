@@ -299,6 +299,10 @@ const OfficerShell: React.FC = () => {
       setActiveModule('dispatch');
       return true;
     }
+    if (destination.kind === 'officer_schedule') {
+      const slot = destination.rosterSlotId ? `?slot=${encodeURIComponent(destination.rosterSlotId)}` : '';
+      navigate(`/officer/schedule${slot}`);setActiveModule('schedule');return true;
+    }
     return false;
   }, [navigate, navigateToModule, profile?.role]);
 

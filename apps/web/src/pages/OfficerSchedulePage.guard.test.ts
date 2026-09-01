@@ -36,4 +36,5 @@ describe('officer schedule workspace', () => {
     expect(page).toContain('receipt.shift_id');
     expect(page).toContain('Assignment ownership receipt');
   });
+  it('focuses the exact finalized coverage assignment from notification context',()=>{expect(page).toContain("get('slot')");expect(page).toContain('officer-roster-slot-${slot.id}');expect(page).toContain('scrollIntoView');});
 });
