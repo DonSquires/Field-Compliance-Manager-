@@ -20,6 +20,7 @@ test('host runtime is loopback-bound, non-root, and uses host-visible protected 
   assert.doesNotMatch(service, /MemoryDenyWriteExecute/);
   const server = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
   assert.match(server, /path\.join\(stateDir, 'artifacts'\)/);
+  assert.match(server, /chmodSync\(artifactDir, 0o777\)/);
   assert.doesNotMatch(server, /path\.join\(assessmentRoot, 'bob-artifacts'\)/);
 });
 

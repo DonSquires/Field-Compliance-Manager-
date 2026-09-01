@@ -60,6 +60,7 @@ let dockerReadinessCache = { checkedAt: 0, available: false };
 function runtimeArtifactDir() {
   const artifactDir = path.join(stateDir, 'artifacts');
   fs.mkdirSync(artifactDir, { recursive: true });
+  fs.chmodSync(artifactDir, 0o777);
   return artifactDir;
 }
 
