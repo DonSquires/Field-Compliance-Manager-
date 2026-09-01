@@ -83,12 +83,13 @@ const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePag
 const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
 const OfficerIncidentPage = React.lazy(() => import('../pages/OfficerIncidentPage'));
 const OfficerStaticGuardPage = React.lazy(() => import('../pages/OfficerStaticGuardPage'));
+const OfficerPersonLookupPage = React.lazy(() => import('../pages/OfficerPersonLookupPage'));
 
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
   | 'site_guard' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
   | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
-  | 'vehicle_lookup' | 'credentials' | 'modules' | 'incident_report' | null;
+  | 'vehicle_lookup' | 'credentials' | 'modules' | 'incident_report' | 'person_lookup' | null;
 
 type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 
@@ -116,6 +117,7 @@ const MODULE_METADATA: Record<string, { label: string; icon: LucideIcon }> = {
   vehicle_lookup: { label: 'Vehicle', icon: Car },
   credentials: { label: 'Credentials', icon: BadgeCheck },
   incident_report: { label: 'Incidents', icon: ShieldAlert },
+  person_lookup: { label: 'Person Lookup', icon: UserRound },
 };
 
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
@@ -383,6 +385,8 @@ const OfficerShell: React.FC = () => {
         return <OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
       case 'incident_report':
         return <OfficerIncidentPage />;
+      case 'person_lookup':
+        return <OfficerPersonLookupPage />;
       case 'map':
         return <OfficerMapPage />;
       case 'modules':

@@ -13,7 +13,7 @@ describe('field operations command surface', () => {
   });
 
   it('provides interactive routes for each implemented operational workflow', () => {
-    for (const area of ['dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search', 'field-reports', 'incidents']) {
+    for (const area of ['dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search', 'field-reports', 'incidents', 'person-search', 'face-review']) {
       expect(page).toContain(`area: '${area}'`);
     }
     expect(page).toContain('onClick={() => onNavigate(area)}');

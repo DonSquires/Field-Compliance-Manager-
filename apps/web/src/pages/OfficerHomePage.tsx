@@ -37,7 +37,7 @@ interface OpenShift {
   site_name: string | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'map' | 'report' | 'modules' | 'schedule' | 'incident_report';
+type HomeDestination = 'dispatch' | 'patrol' | 'map' | 'report' | 'modules' | 'schedule' | 'incident_report' | 'person_lookup';
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -235,6 +235,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           <QuickAction icon={<Map />} label="Live map" detail="Sites and zones" onClick={() => onNavigate('map')} />
           <QuickAction icon={<ClipboardPlus />} label="Field report" detail="Record an incident" onClick={() => onNavigate('report')} />
           <QuickAction icon={<ShieldAlert />} label="Report incident" detail="Confrontations, damage, welfare" onClick={() => onNavigate('incident_report')} />
+          <QuickAction icon={<Users />} label="Person lookup" detail="Check flags before an encounter" onClick={() => onNavigate('person_lookup')} />
         </div>
         <button type="button" className="officer-all-modules" onClick={() => onNavigate('modules')}>All enabled modules <ArrowRight size={16} aria-hidden="true" /></button>
       </section>

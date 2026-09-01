@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'incidents';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'incidents' | 'person-search' | 'face-review';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;
@@ -54,6 +54,8 @@ const WORKFLOWS: Array<{ area: FieldOpsArea; label: string; detail: string; icon
   { area: 'incidents', label: 'Incidents', detail: 'Review and progress logged field incidents', icon: ShieldAlert, tone: 'red' },
   { area: 'breach-review', label: 'Breach review', detail: 'Assess compliance alerts and record governed outcomes', icon: ShieldAlert, tone: 'red' },
   { area: 'vehicle-search', label: 'Vehicle intelligence', detail: 'Search vehicle, observation, and compliance history', icon: Car, tone: 'blue' },
+  { area: 'person-search', label: 'Person search & flags', detail: 'Search the person registry and manage people-of-interest flags', icon: FileSearch, tone: 'slate' },
+  { area: 'face-review', label: 'Face & person record review', detail: 'Verify or reject manual-review face and person records', icon: ShieldAlert, tone: 'amber' },
   { area: 'officer-activity', label: 'Officer investigations', detail: 'Build audited timelines and issue hashed evidence', icon: FileSearch, tone: 'slate' },
 ];
 

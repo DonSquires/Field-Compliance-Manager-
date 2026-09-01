@@ -4142,6 +4142,86 @@ ALTER FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_e
 COMMENT ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") IS 'Race-checks and records the submitted-to-reviewed field report transition with required supervisor notes and audit provenance.';
 
 
+CREATE OR REPLACE FUNCTION "public"."review_face_observation"("p_observation_id" "uuid", "p_decision" "text", "p_person_record_id" "uuid" DEFAULT NULL::"uuid", "p_new_person_display_name" "text" DEFAULT NULL::"text", "p_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "review_state" "text", "person_record_id" "uuid")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_observation face_observations%rowtype;
+  v_person_id uuid;
+begin
+  if p_decision not in ('verified', 'rejected') then
+    raise exception 'Invalid review decision';
+  end if;
+
+  select * into v_observation from face_observations where face_observations.id = p_observation_id for update;
+  if not found then raise exception 'Face observation not found'; end if;
+
+  if not is_admin_for_org(v_observation.organization_id) then
+    raise exception 'Not authorised to review this face observation';
+  end if;
+
+  v_person_id := p_person_record_id;
+  if p_decision = 'verified' and v_person_id is null then
+    if p_new_person_display_name is null or trim(p_new_person_display_name) = '' then
+      raise exception 'A person_record_id or a new person display name is required to verify a face observation';
+    end if;
+    insert into person_records (organization_id, display_name, review_state)
+    values (v_observation.organization_id, trim(p_new_person_display_name), 'verified')
+    returning id into v_person_id;
+  end if;
+
+  update face_observations set
+    review_state = p_decision,
+    person_record_id = coalesce(v_person_id, person_record_id)
+  where face_observations.id = p_observation_id;
+
+  insert into audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_observation.organization_id, auth.uid(), 'face_observation_reviewed', 'face_observations', p_observation_id,
+    jsonb_build_object('decision', p_decision, 'person_record_id', v_person_id, 'notes', p_notes));
+
+  return query select p_observation_id, p_decision, v_person_id;
+end;
+$$;
+
+ALTER FUNCTION "public"."review_face_observation"("p_observation_id" "uuid", "p_decision" "text", "p_person_record_id" "uuid", "p_new_person_display_name" "text", "p_notes" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."review_face_observation"("p_observation_id" "uuid", "p_decision" "text", "p_person_record_id" "uuid", "p_new_person_display_name" "text", "p_notes" "text") IS 'Human-review gate for face_observations: org-admin only, verifies or rejects, optionally creating/linking a person_record, and audits the decision.';
+
+
+CREATE OR REPLACE FUNCTION "public"."review_person_record"("p_person_record_id" "uuid", "p_decision" "text", "p_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "review_state" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_record person_records%rowtype;
+begin
+  if p_decision not in ('verified', 'rejected') then
+    raise exception 'Invalid review decision';
+  end if;
+
+  select * into v_record from person_records where person_records.id = p_person_record_id for update;
+  if not found then raise exception 'Person record not found'; end if;
+
+  if not is_admin_for_org(v_record.organization_id) then
+    raise exception 'Not authorised to review this person record';
+  end if;
+
+  update person_records set review_state = p_decision where person_records.id = p_person_record_id;
+
+  insert into audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_record.organization_id, auth.uid(), 'person_record_reviewed', 'person_records', p_person_record_id,
+    jsonb_build_object('decision', p_decision, 'notes', p_notes));
+
+  return query select p_person_record_id, p_decision;
+end;
+$$;
+
+ALTER FUNCTION "public"."review_person_record"("p_person_record_id" "uuid", "p_decision" "text", "p_notes" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."review_person_record"("p_person_record_id" "uuid", "p_decision" "text", "p_notes" "text") IS 'Human-review gate for person_records: org-admin only, verifies or rejects a draft record, and audits the decision.';
+
+
 CREATE OR REPLACE FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text" DEFAULT NULL::"text", "p_address" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision, "p_shift_id" "uuid" DEFAULT NULL::"uuid", "p_immediate_action" "text" DEFAULT NULL::"text", "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone, "shift_id" "uuid")
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
 declare v_user_id uuid := auth.uid(); v_org_id uuid; v_existing public.officer_field_reports%rowtype; v_report public.officer_field_reports%rowtype;
@@ -25367,6 +25447,16 @@ REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uui
 REVOKE ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") FROM "anon";
 GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."review_face_observation"("p_observation_id" "uuid", "p_decision" "text", "p_person_record_id" "uuid", "p_new_person_display_name" "text", "p_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."review_face_observation"("p_observation_id" "uuid", "p_decision" "text", "p_person_record_id" "uuid", "p_new_person_display_name" "text", "p_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."review_face_observation"("p_observation_id" "uuid", "p_decision" "text", "p_person_record_id" "uuid", "p_new_person_display_name" "text", "p_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."review_face_observation"("p_observation_id" "uuid", "p_decision" "text", "p_person_record_id" "uuid", "p_new_person_display_name" "text", "p_notes" "text") TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."review_person_record"("p_person_record_id" "uuid", "p_decision" "text", "p_notes" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."review_person_record"("p_person_record_id" "uuid", "p_decision" "text", "p_notes" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."review_person_record"("p_person_record_id" "uuid", "p_decision" "text", "p_notes" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."review_person_record"("p_person_record_id" "uuid", "p_decision" "text", "p_notes" "text") TO "service_role";
 
 
 REVOKE ALL ON FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text", "p_address" "text", "p_gps_lat" double precision, "p_gps_lng" double precision, "p_shift_id" "uuid", "p_immediate_action" "text", "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM PUBLIC;
