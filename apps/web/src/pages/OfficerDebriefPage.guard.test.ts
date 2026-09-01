@@ -25,4 +25,10 @@ describe('officer debrief workspace', () => {
     expect(page).toContain('Return home');
     expect(page).toContain('Recent debriefs');
   });
+  it('shows and focuses admin follow-up only for the officer own debrief IDs',()=>{
+    expect(page).toContain("from('debrief_followups')");
+    expect(page).toContain("get('debrief')");
+    expect(page).toContain('Admin follow-up');
+    expect(page).toContain('officer-debrief-${debrief.id}');
+  });
 });

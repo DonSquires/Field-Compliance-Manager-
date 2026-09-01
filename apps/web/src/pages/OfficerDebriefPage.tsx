@@ -1,16 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock3, Home, RefreshCw, Send, ShieldAlert, Wrench, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './OfficerDebriefPage.css';
 
 interface ShiftOption { id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; total_stops: number; completed_stops: number; }
 interface DebriefRecord { id: string; shift_id: string; summary: string; safety_incident_reported: boolean; equipment_issue_reported: boolean; follow_up_required: boolean; follow_up_notes: string | null; submitted_at: string; }
+interface DebriefFollowup { id:string;debrief_id:string;status:string;priority:string;owner_user_id:string|null;latest_note:string|null;resolved_at:string|null; }
 
 const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesheet') => void }> = ({ onNavigate }) => {
+  const location=useLocation();const requestedDebriefId=new URLSearchParams(location.search).get('debrief');
   const { profile } = useAuth();
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
   const [debriefs, setDebriefs] = useState<DebriefRecord[]>([]);
+  const [followups,setFollowups]=useState<Record<string,DebriefFollowup>>({});
   const [shiftId, setShiftId] = useState('');
   const [summary, setSummary] = useState('');
   const [safetyIncident, setSafetyIncident] = useState(false);
@@ -39,6 +43,7 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
     const debriefRows = (debriefResponse.data as DebriefRecord[]) ?? [];
     setShifts(shiftRows);
     setDebriefs(debriefRows);
+    if(debriefRows.length){const{data:followupRows,error:followupError}=await supabase.from('debrief_followups').select('id,debrief_id,status,priority,owner_user_id,latest_note,resolved_at').in('debrief_id',debriefRows.map((debrief)=>debrief.id));if(followupError)setError(`Debriefs loaded, but follow-up status is unavailable: ${followupError.message}`);else setFollowups(Object.fromEntries(((followupRows as DebriefFollowup[])??[]).map((item)=>[item.debrief_id,item])));}else setFollowups({});
     setShiftId((current) => current || shiftRows.find((shift) => !debriefRows.some((debrief) => debrief.shift_id === shift.id))?.id || '');
     const failures = [shiftResponse.error && `Shifts: ${shiftResponse.error.message}`, debriefResponse.error && `Debriefs: ${debriefResponse.error.message}`].filter(Boolean);
     if (failures.length) setError(failures.join(' · '));
@@ -46,6 +51,7 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
   }, [profile?.id, profile?.organizationId]);
 
   useEffect(() => { void loadDebriefData(); }, [loadDebriefData]);
+  useEffect(()=>{if(requestedDebriefId)document.getElementById(`officer-debrief-${requestedDebriefId}`)?.scrollIntoView({block:'center'});},[debriefs,requestedDebriefId]);
 
   const submittedShiftIds = useMemo(() => new Set(debriefs.map((debrief) => debrief.shift_id)), [debriefs]);
   const eligibleShifts = shifts.filter((shift) => !submittedShiftIds.has(shift.id));
@@ -105,7 +111,7 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
         {followUp && <label><span>Required follow-up</span><textarea required rows={4} value={followUpNotes} onChange={(event) => setFollowUpNotes(event.target.value)} placeholder="Action required, owner if known, and urgency" /></label>}
         <div className="officer-debrief-submit"><span>Submission creates an append-only handover. Shift completion remains a separate confirmed action.</span><button type="submit" disabled={!canSubmit}>{submitting ? <><RefreshCw size={16} className="is-spinning" />Submitting</> : <><Send size={16} />Submit debrief</>}</button></div>
       </form>
-      <aside className="officer-debrief-history"><div className="officer-debrief-panel-heading"><div><span>Receipts</span><h2>Recent debriefs</h2></div><strong>{debriefs.length}</strong></div>{loading ? <div className="officer-debrief-empty"><RefreshCw size={19} className="is-spinning" />Loading handovers</div> : debriefs.length === 0 ? <div className="officer-debrief-empty"><ClipboardCheck size={22} />No debriefs submitted yet</div> : <div className="officer-debrief-list">{debriefs.map((debrief) => { const shift = shifts.find((item) => item.id === debrief.shift_id); return <article key={debrief.id}><div><strong>{shift ? shift.service_type.replaceAll('_', ' ') : 'Shift debrief'}</strong><time dateTime={debrief.submitted_at}>{new Date(debrief.submitted_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time></div><p>{debrief.summary}</p><div>{debrief.safety_incident_reported && <span className="is-alert">Safety</span>}{debrief.equipment_issue_reported && <span>Equipment</span>}{debrief.follow_up_required && <span className="is-followup">Follow-up</span>}</div>{debrief.follow_up_notes && <small>{debrief.follow_up_notes}</small>}</article>; })}</div>}</aside>
+      <aside className="officer-debrief-history"><div className="officer-debrief-panel-heading"><div><span>Receipts</span><h2>Recent debriefs</h2></div><strong>{debriefs.length}</strong></div>{loading ? <div className="officer-debrief-empty"><RefreshCw size={19} className="is-spinning" />Loading handovers</div> : debriefs.length === 0 ? <div className="officer-debrief-empty"><ClipboardCheck size={22} />No debriefs submitted yet</div> : <div className="officer-debrief-list">{debriefs.map((debrief) => { const shift = shifts.find((item) => item.id === debrief.shift_id);const followup=followups[debrief.id]; return <article id={`officer-debrief-${debrief.id}`} className={debrief.id===requestedDebriefId?'is-context-focus':undefined} key={debrief.id}><div><strong>{shift ? shift.service_type.replaceAll('_', ' ') : 'Shift debrief'}</strong><time dateTime={debrief.submitted_at}>{new Date(debrief.submitted_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time></div><p>{debrief.summary}</p><div>{debrief.safety_incident_reported && <span className="is-alert">Safety</span>}{debrief.equipment_issue_reported && <span>Equipment</span>}{debrief.follow_up_required && <span className="is-followup">Follow-up</span>}</div>{debrief.follow_up_notes && <small>{debrief.follow_up_notes}</small>}{followup&&<section className={`officer-debrief-followup status-${followup.status}`}><strong>Admin follow-up · {followup.status}</strong><span>{followup.latest_note??'Awaiting an admin action note.'}</span><small>{followup.priority} priority{followup.resolved_at?` · resolved ${new Date(followup.resolved_at).toLocaleString('en-NZ')}`:''}</small></section>}</article>; })}</div>}</aside>
     </div>
   </div>;
 };

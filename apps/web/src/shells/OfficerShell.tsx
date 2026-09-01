@@ -307,6 +307,10 @@ const OfficerShell: React.FC = () => {
       const breach = destination.breachAlertId ? `?breach=${encodeURIComponent(destination.breachAlertId)}` : '';
       navigate(`/officer/freedom_camping${breach}`);setActiveModule('freedom_camping');return true;
     }
+    if (destination.kind === 'officer_debrief') {
+      const debrief = destination.debriefId ? `?debrief=${encodeURIComponent(destination.debriefId)}` : '';
+      navigate(`/officer/debrief${debrief}`);setActiveModule('debrief');return true;
+    }
     return false;
   }, [navigate, navigateToModule, profile?.role]);
 
