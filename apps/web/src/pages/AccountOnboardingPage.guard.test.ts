@@ -33,4 +33,10 @@ describe('Account Onboarding failure state', () => {
     expect(source).toContain('aria-label="Stage note"');
     expect(source).not.toContain("supabase.from('crm_onboarding_events')");
   });
+
+  it('preserves account, agreement, and ledger context across owner handoffs', () => {
+    expect(source).toContain('accountId: selected.account_organization_id');
+    expect(source).toContain('agreementId: selected.agreement_id');
+    expect(source).toContain('ledgerId: selected.ledger_id');
+  });
 });

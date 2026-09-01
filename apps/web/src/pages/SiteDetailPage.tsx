@@ -11,12 +11,14 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { workflowContextQuery } from '../lib/workflowNavigation';
 import { LocationHouseMap, type HouseMapZone } from '../components/LocationHouseMap';
 import './PageStyles.css';
 import './GeographyPages.css';
 
 interface ClientSite {
   id: string;
+  client_organization_id: string;
   name: string;
   address: string | null;
   site_type: string | null;
@@ -81,20 +83,15 @@ const SiteDetailPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const { data, error: err } = await supabase
-          .from('client_sites')
-          .select(
-            'id, name, address, site_type, risk_level, site_brief, access_instructions, hs_notes, gps_lat, gps_lng, active, location_id, boundary, boundary_status, boundary_verification'
-          )
-          .eq('client_organization_id', orgId)
-          .order('name', { ascending: true });
+        const { data, error: err } = await supabase.rpc('get_crm_operational_geography');
 
         if (err) throw err;
-        setSites((data as ClientSite[]) || []);
+        const siteRows = ((data as { sites?: ClientSite[] } | null)?.sites) ?? [];
+        setSites(siteRows);
 
-        if (data && data.length > 0) {
+        if (siteRows.length > 0) {
           const requestedId = new URLSearchParams(location.search).get('site');
-          const initialSite = (data as ClientSite[]).find((site) => site.id === requestedId) ?? data[0] as ClientSite;
+          const initialSite = siteRows.find((site) => site.id === requestedId) ?? siteRows[0];
           setSelectedSite(initialSite);
           await loadSiteDetail(initialSite.id, initialSite);
         }
@@ -294,7 +291,7 @@ const SiteDetailPage: React.FC = () => {
 
             {house && <LocationHouseMap organizationId={profile?.organizationId ?? ''} house={house} sites={[selectedSite]} zones={zones} />}
 
-            {zones.length > 0 && <section className="reports-section"><h3>Zone facets ({zones.length})</h3><div className="contacts-list">{zones.map((zone) => <div className="contact-card" key={zone.id}><div className="contact-header"><h3>{zone.name}</h3><span className={`status-badge status-${zone.boundary_verification === 'verified' ? 'active' : 'inactive'}`}>{zone.boundary_verification}</span></div><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(`/admin/zones?zone=${zone.id}`)}>Open zone</button></div></div>)}</div></section>}
+            {zones.length > 0 && <section className="reports-section"><h3>Zone facets ({zones.length})</h3><div className="contacts-list">{zones.map((zone) => <div className="contact-card" key={zone.id}><div className="contact-header"><h3>{zone.name}</h3><span className={`status-badge status-${zone.boundary_verification === 'verified' ? 'active' : 'inactive'}`}>{zone.boundary_verification}</span></div><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(`/admin/zones${workflowContextQuery({ accountId: selectedSite.client_organization_id, locationId: selectedSite.location_id ?? undefined, siteId: selectedSite.id, zoneId: zone.id })}`)}>Open zone</button></div></div>)}</div></section>}
 
             <section className="reports-section">
               <h3>Services ({services.length})</h3>

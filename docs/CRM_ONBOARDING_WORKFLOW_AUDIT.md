@@ -66,6 +66,12 @@ used here as a workflow hypothesis, not as evidence about the current UI.
 The target is a separate **Account Onboarding** workspace, not a long modal and
 not an extension of provider Organization Setup.
 
+The active administrator surfaces share an **Account flow** rail: Account,
+Agreement, Onboarding, Places, Roster, and Handoff. Navigation carries explicit
+account, agreement, ledger, location, site, zone, work-unit, and handoff IDs in
+the URL so owner links and browser history reopen the intended record rather
+than whichever record happens to be selected globally.
+
 ### Qualify
 
 - Search organization name and NZBN before create.

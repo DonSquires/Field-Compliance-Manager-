@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   AlertTriangle,
   CalendarClock,
@@ -12,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { readWorkflowContext, type NavigateWithContext, type WorkflowContext } from "../lib/workflowNavigation";
 import "./AccountOnboardingPage.css";
 import "./AccountOnboardingUnavailable.css";
 import "./AccountOnboardingOwnership.css";
@@ -52,8 +54,10 @@ const stages = ["qualify", "configure", "review"] as const;
 export default function AccountOnboardingPage({
   onNavigate,
 }: {
-  onNavigate: (destination: string) => void;
+  onNavigate: NavigateWithContext;
 }) {
+  const location = useLocation();
+  const requestedContext = readWorkflowContext(location.search);
   const [rows, setRows] = useState<QueueRow[]>([]),
     [selectedId, setSelectedId] = useState<string | null>(null),
     [loading, setLoading] = useState(true),
@@ -62,6 +66,7 @@ export default function AccountOnboardingPage({
     [error, setError] = useState<string | null>(null),
     [notice, setNotice] = useState<string | null>(null),
     [handoffReady, setHandoffReady] = useState(false),
+    [activatedContext, setActivatedContext] = useState<WorkflowContext | null>(null),
     [confirming, setConfirming] = useState(false),
     [targetDate, setTargetDate] = useState(""),
     [assignees, setAssignees] = useState<Assignee[]>([]),
@@ -84,14 +89,11 @@ export default function AccountOnboardingPage({
       const next = (queueResult.data as QueueRow[]) ?? [];
       setRows(next);
       setAssignees((assigneeResult.data as Assignee[]) ?? []);
-      setSelectedId(
-        preferred && next.some((row) => row.ledger_id === preferred)
-          ? preferred
-          : (next[0]?.ledger_id ?? null),
-      );
+      const requested = next.find((row) => row.ledger_id === requestedContext.ledgerId || row.account_organization_id === requestedContext.accountId);
+      setSelectedId(preferred && next.some((row) => row.ledger_id === preferred) ? preferred : requested?.ledger_id ?? next[0]?.ledger_id ?? null);
     }
     setLoading(false);
-  }, []);
+  }, [requestedContext.accountId, requestedContext.ledgerId]);
   useEffect(() => {
     void loadQueue();
   }, [loadQueue]);
@@ -145,6 +147,7 @@ export default function AccountOnboardingPage({
       setNotice(
         `${selected.account_name} activated and removed from the incomplete queue.`,
       );
+      setActivatedContext({ accountId: selected.account_organization_id, agreementId: selected.agreement_id ?? undefined, ledgerId: selected.ledger_id });
       setHandoffReady(true);
       setConfirming(false);
       await loadQueue();
@@ -226,7 +229,7 @@ export default function AccountOnboardingPage({
         <div className="onboarding-message is-success" role="status">
           <CheckCircle2 size={16} />
           <span>{notice}</span>
-          {handoffReady && <button type="button" onClick={() => onNavigate("handoffs")}>Open activation handoff</button>}
+          {handoffReady && <button type="button" onClick={() => onNavigate("handoffs", activatedContext ?? {})}>Open activation handoff</button>}
         </div>
       )}
       <section className="onboarding-summary">
@@ -377,7 +380,7 @@ export default function AccountOnboardingPage({
                       label="Primary contact"
                       detail="An active primary contact is required"
                       owner="Account administration"
-                      onOpen={() => onNavigate("crm")}
+                      onOpen={() => onNavigate("crm", { accountId: selected.account_organization_id, agreementId: selected.agreement_id ?? undefined, ledgerId: selected.ledger_id })}
                     />
                   )}{" "}
                   {(selected.readiness?.dimensions ?? []).map((item) => (
@@ -395,7 +398,7 @@ export default function AccountOnboardingPage({
                         <small>{item.owner}</small>
                       </div>
                       {item.status === "blocked" && (
-                        <button onClick={() => onNavigate(item.destination)}>
+                        <button onClick={() => onNavigate(item.destination, { accountId: selected.account_organization_id, agreementId: selected.agreement_id ?? undefined, ledgerId: selected.ledger_id })}>
                           Open owner
                         </button>
                       )}

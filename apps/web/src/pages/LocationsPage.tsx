@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
 import {
@@ -17,6 +17,7 @@ import {
   type HouseMapZone,
 } from "../components/LocationHouseMap";
 import { OperationalPlaceManager } from "../components/OperationalPlaceManager";
+import { readWorkflowContext, workflowContextQuery } from "../lib/workflowNavigation";
 import "./PageStyles.css";
 import "./GeographyPages.css";
 
@@ -60,6 +61,8 @@ interface ZoneClosure {
 
 const LocationsPage: React.FC = () => {
   const navigate = useNavigate();
+  const routerLocation = useLocation();
+  const requestedLocationId = readWorkflowContext(routerLocation.search).locationId;
   const { profile } = useAuth();
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [selected, setSelected] = useState<LocationRow | null>(null);
@@ -100,7 +103,7 @@ const LocationsPage: React.FC = () => {
         setOperationalZones(geography.zones ?? []);
 
         if (locationRows.length > 0) {
-          const nextSelected = locationRows.find((item) => item.id === selected?.id) ?? locationRows[0];
+          const nextSelected = locationRows.find((item) => item.id === requestedLocationId) ?? locationRows.find((item) => item.id === selected?.id) ?? locationRows[0];
           setSelected(nextSelected);
           await loadFacets(
             nextSelected.id,
@@ -118,7 +121,7 @@ const LocationsPage: React.FC = () => {
     };
 
     loadLocations();
-  }, [profile?.organizationId, refreshRevision]);
+  }, [profile?.organizationId, refreshRevision, requestedLocationId]);
 
   const loadFacets = async (
     locationId: string,
@@ -283,7 +286,7 @@ const LocationsPage: React.FC = () => {
                           type="button"
                           className="btn btn-sm btn-secondary"
                           onClick={() =>
-                            navigate(`/admin/site-360?site=${site.id}`)
+                            navigate(`/admin/site-360${workflowContextQuery({ accountId: selected.organization_id, locationId: selected.id, siteId: site.id })}`)
                           }
                         >
                           Open site
@@ -344,7 +347,7 @@ const LocationsPage: React.FC = () => {
                             type="button"
                             className="btn btn-sm btn-secondary"
                             onClick={() =>
-                              navigate(`/admin/zones?zone=${zone.id}`)
+                              navigate(`/admin/zones${workflowContextQuery({ accountId: selected.organization_id, locationId: selected.id, zoneId: zone.id })}`)
                             }
                           >
                             Open zone

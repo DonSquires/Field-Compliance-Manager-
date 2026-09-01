@@ -105,8 +105,8 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
     }
     map.on('click', ({ latlng }) => { setProbePoint({ lat: latlng.lat, lng: latlng.lng }); setResolution(null); setClosure(null); });
     if (bounds.isValid()) map.fitBounds(bounds.pad(0.18), { maxZoom: 18 });
-    window.setTimeout(() => map.invalidateSize(), 0);
-    return () => { map.remove(); mapRef.current = null; };
+    const invalidateTimer = window.setTimeout(() => map.invalidateSize(), 0);
+    return () => { window.clearTimeout(invalidateTimer); map.remove(); mapRef.current = null; };
   }, [sites, zones, linzPreview, probePoint, resolution, house.name]);
 
   useEffect(() => {

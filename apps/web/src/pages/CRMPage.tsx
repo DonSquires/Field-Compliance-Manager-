@@ -16,8 +16,10 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { readWorkflowContext } from '../lib/workflowNavigation';
 import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
@@ -98,6 +100,8 @@ interface CrmState {
 }
 
 const CRMPage: React.FC = () => {
+  const location = useLocation();
+  const requestedAccountId = readWorkflowContext(location.search).accountId;
   const { profile } = useAuth();
   const [state, setState] = useState<CrmState>({
     ownOrg: null,
@@ -142,6 +146,10 @@ const CRMPage: React.FC = () => {
   const [siteAccount, setSiteAccount] = useState<{ id: string; name: string } | null>(null);
   const quoteRequestId = useRef(crypto.randomUUID());
   const lineRequestId = useRef(crypto.randomUUID());
+
+  useEffect(() => {
+    if (requestedAccountId) document.getElementById(`crm-account-${requestedAccountId}`)?.scrollIntoView({ block: 'center' });
+  }, [requestedAccountId, state.clients]);
 
   // ATLAS READS: organizations, crm_account_list (view), service_agreements
   const loadCrm = useCallback(async () => {
@@ -673,7 +681,7 @@ const CRMPage: React.FC = () => {
             </div>
           ) : (
             state.clients.map((client) => (
-              <div key={client.id} className="contact-card">
+              <div id={`crm-account-${client.id}`} key={client.id} className={`contact-card ${client.id === requestedAccountId ? 'is-context-focus' : ''}`}>
                 <div className="contact-header">
                   <h3>{client.name}</h3>
                   <span className="contact-type-badge">Client</span>

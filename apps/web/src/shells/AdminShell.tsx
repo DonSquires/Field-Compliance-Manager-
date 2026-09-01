@@ -49,6 +49,8 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
+import { WorkflowRail } from '../components/WorkflowRail';
+import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
 import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
@@ -298,7 +300,7 @@ const AdminShell: React.FC = () => {
     return canAccessAdminPage(page, profile?.role);
   }, [profile?.role]);
 
-  const navigateToPage = useCallback((page: AdminPage) => {
+  const navigateToPage = useCallback((page: AdminPage, context?: WorkflowContext) => {
     if (!isPageEnabled(page)) {
       setAccessNotice('This area is not available for your current role.');
       setActivePage('hub');
@@ -308,7 +310,7 @@ const AdminShell: React.FC = () => {
 
     setActivePage(page);
     setMobileMenuOpen(false);
-    navigate(`/admin/${page}`);
+    navigate(`/admin/${page}${workflowContextQuery(context)}`);
   }, [navigate, isPageEnabled]);
 
   const navigateToFieldOps = useCallback((area: FieldOpsSubArea) => {
@@ -325,6 +327,8 @@ const AdminShell: React.FC = () => {
     }
     navigateToPage(destination as AdminPage);
   }, [navigateToFieldOps, navigateToPage]);
+
+  const workflowContext = useMemo(() => readWorkflowContext(location.search), [location.search]);
 
   const navigateFromNotification = useCallback((notification: NotificationRecord) => {
     const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
@@ -365,11 +369,11 @@ const AdminShell: React.FC = () => {
       case 'hub':
         return <AdminHubPage onNavigate={navigateFromHub} />;
       case 'relationships':
-        return <RelationshipWorkspacePage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+        return <RelationshipWorkspacePage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'onboarding':
-        return <AccountOnboardingPage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+        return <AccountOnboardingPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'handoffs':
-        return <ActivationHandoffsPage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+        return <ActivationHandoffsPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'crm':
         return <CRMPage />;
       case 'reports':
@@ -497,6 +501,7 @@ const AdminShell: React.FC = () => {
 
           <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
+            <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
             <React.Suspense fallback={<LazyPageFallback />}>
               {renderPage()}
             </React.Suspense>
@@ -553,6 +558,7 @@ const AdminShell: React.FC = () => {
 
       <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
+        <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
         <React.Suspense fallback={<LazyPageFallback />}>
           {renderPage()}
         </React.Suspense>
