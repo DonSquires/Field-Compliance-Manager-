@@ -17,6 +17,7 @@ interface NoiseAssessment {
   noise_source: string | null;
   prior_notice_count: number;
   action_taken: string | null;
+  matrix_total: number | null;
   assessed_at: string;
 }
 
@@ -37,7 +38,7 @@ const NoiseControlOversightPage: React.FC = () => {
 
         const { data, error: err } = await supabase
           .from('noise_assessments')
-          .select('id, officer_name, decibel_reading, noise_source, prior_notice_count, action_taken, assessed_at')
+          .select('id, officer_name, decibel_reading, noise_source, prior_notice_count, action_taken, matrix_total, assessed_at')
           .eq('organization_id', orgId)
           .order('assessed_at', { ascending: false })
           .limit(100);
@@ -89,6 +90,7 @@ const NoiseControlOversightPage: React.FC = () => {
               <th>Source</th>
               <th>Decibels</th>
               <th>Prior Notices</th>
+              <th>Matrix Total</th>
               <th>Action</th>
               <th>Date</th>
             </tr>
@@ -96,7 +98,7 @@ const NoiseControlOversightPage: React.FC = () => {
           <tbody>
             {assessments.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center">
+                <td colSpan={7} className="text-center">
                   No assessments
                 </td>
               </tr>
@@ -107,6 +109,7 @@ const NoiseControlOversightPage: React.FC = () => {
                   <td>{a.noise_source || '-'}</td>
                   <td>{a.decibel_reading ?? '-'}</td>
                   <td>{a.prior_notice_count}</td>
+                  <td>{a.matrix_total ?? '-'}</td>
                   <td>{a.action_taken || '-'}</td>
                   <td>{new Date(a.assessed_at).toLocaleString()}</td>
                 </tr>
