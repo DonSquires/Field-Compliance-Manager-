@@ -20,7 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'ems-alerts' | 'on-call';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'ems-alerts' | 'on-call' | 'ptt-channels';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;
@@ -55,6 +55,7 @@ const WORKFLOWS: Array<{ area: FieldOpsArea; label: string; detail: string; icon
   { area: 'debrief-followup', label: 'Debrief follow-up', detail: 'Own safety, equipment, and handover actions', icon: FileWarning, tone: 'amber' },
   { area: 'ems-alerts', label: 'EMS alerts', detail: 'Respond to electronic monitoring tamper and breach alerts', icon: Siren, tone: 'red' },
   { area: 'on-call', label: 'On-call roster', detail: 'Assign on-call periods and review callout/travel claims', icon: Clock3, tone: 'slate' },
+  { area: 'ptt-channels', label: 'PTT channels', detail: 'Manage push-to-talk radio channels and emergency broadcast', icon: Radio, tone: 'teal' },
   { area: 'breach-review', label: 'Breach review', detail: 'Assess compliance alerts and record governed outcomes', icon: ShieldAlert, tone: 'red' },
   { area: 'vehicle-search', label: 'Vehicle intelligence', detail: 'Search vehicle, observation, and compliance history', icon: Car, tone: 'blue' },
   { area: 'officer-activity', label: 'Officer investigations', detail: 'Build audited timelines and issue hashed evidence', icon: FileSearch, tone: 'slate' },

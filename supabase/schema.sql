@@ -4198,6 +4198,49 @@ ALTER FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "
 COMMENT ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) IS 'Officer/admin travel allowance claim for a callout. rate_per_km/time_rate are left for payroll to assign -- no rate configuration table exists yet.';
 
 
+CREATE OR REPLACE FUNCTION "public"."record_voice_consent"("p_consented" boolean) RETURNS TABLE("id" "uuid", "consented" boolean, "revoked_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_org_id uuid;
+  v_existing radio_voice_consents%rowtype;
+  v_id uuid;
+  v_revoked_at timestamptz;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+
+  select organization_id into v_org_id from user_profiles where id = v_user_id and deactivated_at is null;
+  if v_org_id is null then raise exception 'Active profile required'; end if;
+
+  select * into v_existing from radio_voice_consents
+  where user_id = v_user_id and organization_id = v_org_id
+  order by created_at desc limit 1;
+
+  v_revoked_at := case when not p_consented then now() else null end;
+
+  if found and v_existing.consented = p_consented then
+    return query select v_existing.id, v_existing.consented, v_existing.revoked_at;
+    return;
+  end if;
+
+  insert into radio_voice_consents (organization_id, user_id, consented, revoked_at)
+  values (v_org_id, v_user_id, p_consented, v_revoked_at)
+  returning radio_voice_consents.id into v_id;
+
+  insert into audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_org_id, v_user_id, case when p_consented then 'voice_consent_granted' else 'voice_consent_revoked' end, 'radio_voice_consents', v_id, '{}'::jsonb);
+
+  return query select v_id, p_consented, v_revoked_at;
+end;
+$$;
+
+ALTER FUNCTION "public"."record_voice_consent"("p_consented" boolean) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."record_voice_consent"("p_consented" boolean) IS 'Self-attested voice consent grant/revoke for the PTT universal translator pipeline. Always self-scoped to auth.uid(); audited.';
+
+
 CREATE OR REPLACE FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision DEFAULT NULL::double precision, "p_heading" double precision DEFAULT NULL::double precision, "p_speed_kmh" double precision DEFAULT NULL::double precision, "p_activity_type" "text" DEFAULT 'gps_update'::"text", "p_shift_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
@@ -25508,6 +25551,11 @@ REVOKE ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "
 REVOKE ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) FROM "anon";
 GRANT ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."submit_travel_allowance"("p_callout_shift_id" "uuid", "p_journey_type" "text", "p_distance_km" numeric, "p_duration_minutes" integer, "p_outside_jurisdiction" boolean) TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."record_voice_consent"("p_consented" boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."record_voice_consent"("p_consented" boolean) FROM "anon";
+GRANT ALL ON FUNCTION "public"."record_voice_consent"("p_consented" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."record_voice_consent"("p_consented" boolean) TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."record_officer_breadcrumb"("p_client_event_id" "uuid", "p_recorded_at" timestamp with time zone, "p_gps_lat" double precision, "p_gps_lng" double precision, "p_accuracy_meters" double precision, "p_heading" double precision, "p_speed_kmh" double precision, "p_activity_type" "text", "p_shift_id" "uuid") TO "authenticated";
