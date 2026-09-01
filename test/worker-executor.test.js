@@ -7,8 +7,8 @@ const { dockerArguments, redact, workerCommand } = require('../worker-executor')
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, redactLog } = require('../frontend-worker');
 
 test('immutable releases include worker tmpfs mountpoints', () => {
-  assert.ok(fs.existsSync(path.resolve(__dirname, '../.bob/.gitkeep')));
-  assert.ok(fs.existsSync(path.resolve(__dirname, '../apps/web/dist/.gitkeep')));
+  assert.ok(fs.statSync(path.resolve(__dirname, '../.bob')).isDirectory());
+  assert.ok(fs.statSync(path.resolve(__dirname, '../apps/web/dist')).isDirectory());
 });
 
 test('worker profiles use fixed commands', () => {
