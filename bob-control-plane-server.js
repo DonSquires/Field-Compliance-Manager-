@@ -80,7 +80,8 @@ function builderRuntimeReadiness({ dockerAccess = detectDockerAccess() } = {}) {
     model_gateway_configured: Boolean(modelGatewayToken && modelReadiness.ollama_configured),
     local_model_configured: modelReadiness.ollama_configured,
     worker_image_configured: Boolean(builderWorkerImage),
-    repository_available: fs.existsSync(path.join(assessmentRoot, '.git')),
+    repository_available: ['package.json', 'assessment-manifest.js']
+      .every(file => fs.existsSync(path.join(assessmentRoot, file))),
     docker_available: Boolean(dockerAccess)
   };
   return { ready: Object.values(checks).every(Boolean), checks, modelGateway: modelReadiness };

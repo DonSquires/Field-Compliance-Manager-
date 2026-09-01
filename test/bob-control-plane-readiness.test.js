@@ -20,6 +20,8 @@ test('Builder readiness checks real Docker access without exposing configuration
   assert.match(source, /modelGatewayReadiness/);
   assert.match(source, /worker_image_configured/);
   assert.match(source, /repository_available/);
+  assert.match(source, /\['package\.json', 'assessment-manifest\.js'\]/);
+  assert.doesNotMatch(source, /path\.join\(assessmentRoot, '\.git'\)/);
   assert.doesNotMatch(source, /checks = \{[^}]*SUPABASE_SERVICE_ROLE_KEY/s);
 });
 
