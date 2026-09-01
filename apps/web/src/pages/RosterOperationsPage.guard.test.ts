@@ -47,4 +47,9 @@ describe('enterprise roster operations', () => {
     expect(page.includes('Create shift for this work unit')).toBe(true);
     expect(page.includes('workflowContextQuery(workflowContext)')).toBe(true);
   });
+  it('keeps mobilisation handoff ownership visible and directly reachable', () => {
+    expect(page).toContain('Mobilisation handoff · roster evidence');
+    expect(page).toContain('Return to handoff');
+    expect(page).toContain('`/admin/handoffs${workflowContextQuery(workflowContext)}`');
+  });
 });

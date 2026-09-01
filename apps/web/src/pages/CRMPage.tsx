@@ -144,12 +144,21 @@ const CRMPage: React.FC = () => {
   const [invoiceReason, setInvoiceReason] = useState('');
   const [organizationDialog, setOrganizationDialog] = useState<EditableCrmOrganization | 'create' | null>(null);
   const [siteAccount, setSiteAccount] = useState<{ id: string; name: string } | null>(null);
+  const openedContextAccountId = useRef<string | null>(null);
   const quoteRequestId = useRef(crypto.randomUUID());
   const lineRequestId = useRef(crypto.randomUUID());
 
   useEffect(() => {
-    if (requestedAccountId) document.getElementById(`crm-account-${requestedAccountId}`)?.scrollIntoView({ block: 'center' });
-  }, [requestedAccountId, state.clients]);
+    if (!requestedAccountId) {
+      openedContextAccountId.current = null;
+      return;
+    }
+    const requestedAccount = [...state.clients, ...state.branches].find((account) => account.id === requestedAccountId);
+    if (!requestedAccount || openedContextAccountId.current === requestedAccountId) return;
+    openedContextAccountId.current = requestedAccountId;
+    setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name });
+    document.getElementById(`crm-account-${requestedAccountId}`)?.scrollIntoView({ block: 'center' });
+  }, [requestedAccountId, state.branches, state.clients]);
 
   // ATLAS READS: organizations, crm_account_list (view), service_agreements
   const loadCrm = useCallback(async () => {

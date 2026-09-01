@@ -40,6 +40,12 @@ describe('governed CRM accounts', () => {
     expect(page).not.toMatch(/\.from\(["']invoices["']\)\.update/);
   });
 
+  it('opens the exact account workspace once from explicit URL context', () => {
+    expect(page).toContain('openedContextAccountId');
+    expect(page).toContain('account.id === requestedAccountId');
+    expect(page).toContain('setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name })');
+  });
+
   it('searches and manages the organization spine with evidence-backed next actions', () => {
     expect(page).toContain('CrmOrganizationDialog');
     expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
