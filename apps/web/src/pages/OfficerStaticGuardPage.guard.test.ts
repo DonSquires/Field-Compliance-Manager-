@@ -8,6 +8,7 @@ const page = readFileSync(resolve(process.cwd(), 'src/pages/OfficerStaticGuardPa
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901014000_static_guard_post_attendance.sql'), 'utf8');
 const shiftUpdateFix = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901015000_fix_static_guard_shift_updates.sql'), 'utf8');
 const rehydrationMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901016000_rehydrate_static_guard_evidence.sql'), 'utf8');
+const boundaryMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901017000_enforce_static_guard_site_boundary.sql'), 'utf8');
 
 describe('officer static guarding post', () => {
   it('routes static assignments to a dedicated post workspace', () => {
@@ -62,5 +63,15 @@ describe('officer static guarding post', () => {
     expect(page).toContain('post.attendance_evidence.departure.reference');
     expect(page).toContain("['pending','en_route'].includes(post.stop.status)");
     expect(page).toContain("post.stop.status === 'on_scene'");
+  });
+
+  it('rejects off-site transitions before state or evidence changes', () => {
+    expect(boundaryMigration).toContain("s.boundary_verification='verified'");
+    expect(boundaryMigration).toContain('st_covers(s.boundary,p.geometry)');
+    expect(boundaryMigration).toContain('st_dwithin(coalesce(s.center_point,s.boundary)::geography');
+    expect(boundaryMigration).toContain('Current position is outside the assigned site boundary');
+    expect(boundaryMigration.indexOf('Current position is outside the assigned site boundary')).toBeLessThan(boundaryMigration.indexOf("update public.shift_stops set status='on_scene'"));
+    expect(boundaryMigration).toContain("'gps_result',v_geofence_result");
+    expect(boundaryMigration).toContain("'geofence_result',v_geofence_result");
   });
 });
