@@ -6,8 +6,11 @@ const FUNCTION_NAME = 'bob-builder-control-room';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-const CONTROL_PLANE_URL = Deno.env.get('BOB_CONTROL_PLANE_URL') ?? Deno.env.get('FCM_API_URL') ?? '';
-const CONTROL_PLANE_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN') ?? Deno.env.get('FCM_API_TOKEN') ?? '';
+// Builder execution is a dedicated host service. Do not fall back to FCM_API:
+// that token/origin authorizes unrelated application integrations and does not
+// expose the Builder route contract.
+const CONTROL_PLANE_URL = Deno.env.get('BOB_CONTROL_PLANE_URL') ?? '';
+const CONTROL_PLANE_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN') ?? '';
 const CAN_BUILD = new Set(['grand_master', 'master']);
 const CORS = {
   'Access-Control-Allow-Origin': '*',

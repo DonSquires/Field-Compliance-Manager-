@@ -56,7 +56,8 @@ describe('Builder control room boundary', () => {
     expect(relay).toContain("Deno.env.get('BOB_ADMIN_TOKEN')");
     expect(relay).toContain('canAccessOrganization');
     expect(relay).toContain("CAN_BUILD.has(role)");
-    expect(relay).toContain("Deno.env.get('FCM_API_TOKEN')");
+    expect(relay).not.toContain("Deno.env.get('FCM_API_TOKEN')");
+    expect(relay).not.toContain("Deno.env.get('FCM_API_URL')");
     expect(relay).toContain("action === 'advance' || action === 'run'");
     expect(relay).toContain("Builder execution host is unavailable");
     expect(relay).toContain("failed ? 'failed' : 'listed'");
