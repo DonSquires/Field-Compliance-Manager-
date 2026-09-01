@@ -263,6 +263,8 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
 
 export async function installOfficerScheduleFixtures(page: Page): Promise<void> {
   let internalSlotStatus = 'published';
+  let linkedSlotStatus = 'published';
+  let linkedShiftStatus = 'published';
   const dispatchJobs = [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', job_type: 'Alarm response', priority: 'high', status: 'on_scene', briefing_notes: 'Verify the north loading entrance and record the outcome.', sla_respond_by: '2026-08-30T10:00:00.000Z', created_at: '2026-08-30T09:00:00.000Z' }];
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'officer-e2e-token', refresh_token: 'officer-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: officerUser }) });
@@ -287,7 +289,7 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
         return;
       }
       await route.fulfill(fulfillJson([
-        { id: '66666666-6666-4666-8666-666666666666', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: select.includes('completed_stops') ? 'in_progress' : 'accepted', notes: 'North district patrol', shift_health: null, total_stops: 8, completed_stops: 8 },
+        { id: '66666666-6666-4666-8666-666666666666', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'patrol', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: select.includes('completed_stops') ? 'in_progress' : linkedShiftStatus, notes: 'North district patrol', shift_health: null, total_stops: 8, completed_stops: 8 },
         { id: '77777777-7777-4777-8777-777777777777', organization_id: ORG_ID, officer_user_id: OFFICER_ID, service_type: 'site_guard', scheduled_start: '2026-09-02T18:00:00.000Z', scheduled_end: '2026-09-03T02:00:00.000Z', status: 'published', notes: null, shift_health: null, total_stops: 1 },
       ]));
       return;
@@ -300,7 +302,7 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
     }
     if (resource === 'roster_slots') {
       await route.fulfill(fulfillJson([
-        { id: '33333333-3333-4333-8333-333333333334', work_unit_id: '44444444-4444-4444-8444-444444444445', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: 'published', linked_shift_id: '66666666-6666-4666-8666-666666666666', notes: null },
+        { id: '33333333-3333-4333-8333-333333333334', work_unit_id: '44444444-4444-4444-8444-444444444445', scheduled_start: '2026-08-31T06:00:00.000Z', scheduled_end: '2026-08-31T14:00:00.000Z', status: linkedSlotStatus, linked_shift_id: '66666666-6666-4666-8666-666666666666', notes: null },
         { id: '55555555-5555-4555-8555-555555555556', work_unit_id: '77777777-7777-4777-8777-777777777778', scheduled_start: '2026-09-03T21:00:00.000Z', scheduled_end: '2026-09-04T01:00:00.000Z', status: internalSlotStatus, linked_shift_id: null, notes: 'Monthly roster reconciliation' },
       ]));
       return;
@@ -356,8 +358,11 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
       return;
     }
     if (resource === 'respond_to_roster_slot') {
-      internalSlotStatus = 'declined';
-      await route.fulfill(fulfillJson([{ slot_id: '55555555-5555-4555-8555-555555555556', slot_status: 'declined', shift_id: null, shift_status: null }]));
+      const payload = JSON.parse(request.postData() ?? '{}');
+      const status = payload.p_response === 'accept' ? 'accepted' : 'declined';
+      const linked = payload.p_slot_id === '33333333-3333-4333-8333-333333333334';
+      if (linked) { linkedSlotStatus = status;linkedShiftStatus = status; } else internalSlotStatus = status;
+      await route.fulfill(fulfillJson([{ slot_id: payload.p_slot_id, slot_status: status, shift_id: linked ? '66666666-6666-4666-8666-666666666666' : null, shift_status: linked ? status : null }]));
       return;
     }
     await route.fulfill(fulfillJson([]));

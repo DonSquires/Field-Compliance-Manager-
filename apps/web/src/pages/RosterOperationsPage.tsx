@@ -94,6 +94,20 @@ const RosterOperationsPage: React.FC = () => {
     setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLoading(false);
   }, [profile?.organizationId, weekEnd, weekStart]);
   useEffect(() => { void load(); }, [load]);
+  const syncOfficerResponses = useCallback(async () => {
+    if (!profile?.organizationId) return;
+    const org = profile.organizationId;
+    const [shiftResponse, slotResponse] = await Promise.all([
+      supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+    ]);
+    if (!shiftResponse.error) setShifts((shiftResponse.data as Shift[]) ?? []);
+    if (!slotResponse.error) setSlots((slotResponse.data as RosterSlot[]) ?? []);
+  }, [profile?.organizationId, weekEnd, weekStart]);
+  useEffect(() => {
+    const interval = window.setInterval(() => void syncOfficerResponses(), 15_000);
+    return () => window.clearInterval(interval);
+  }, [syncOfficerResponses]);
 
   const visibleStaff = staff.filter((person) => (!search || person.name.toLowerCase().includes(search.toLowerCase())) && (readiness === 'all' || (readiness === 'ready' ? person.workReady && person.credentialRisk === 'clear' : !person.workReady || person.credentialRisk !== 'clear')));
   const selectedShift = shifts.find((shift) => shift.id === selectedShiftId) ?? null;

@@ -40,6 +40,12 @@ describe('enterprise roster operations', () => {
     expect(page).toContain('Replacement officer');
     expect(page).not.toContain(".from('roster_slots').update");
   });
+  it('polls shared slot and shift ownership without putting the roster back into loading state', () => {
+    expect(page).toContain('syncOfficerResponses');
+    expect(page).toContain("supabase.from('roster_slots')");
+    expect(page).toContain("supabase.from('shifts')");
+    expect(page).toContain('window.setInterval(() => void syncOfficerResponses(), 15_000)');
+  });
   it('turns work-unit context into an explicit preselected roster action', () => {
     expect(page.includes('readWorkflowContext(location.search)')).toBe(true);
     expect(page.includes('unit.id === workflowContext.workUnitId')).toBe(true);
