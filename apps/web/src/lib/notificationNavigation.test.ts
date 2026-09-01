@@ -16,6 +16,7 @@ describe('notification navigation', () => {
   it('maps officer open work to home and client reports to reports', () => {
     expect(resolveNotificationDestination('officer', notification({ category: 'open_job', link_page: 'open-jobs' }))).toEqual({ kind: 'officer_module', module: null });
     expect(resolveNotificationDestination('officer', notification({ category: 'report_reviewed', link_payload: { report_id: 'report-1' } }))).toEqual({ kind: 'officer_report', reportId: 'report-1' });
+    expect(resolveNotificationDestination('officer', notification({ category: 'leave_decision', link_payload: { leave_request_id: 'leave-1' } }))).toEqual({ kind: 'officer_leave', leaveRequestId: 'leave-1' });
     expect(resolveNotificationDestination('officer', notification({ category: 'dispatch', link_page: 'dispatch', link_payload: { dispatch_job_id: 'job-1' } }))).toEqual({ kind: 'officer_dispatch', dispatchJobId: 'job-1' });
     expect(resolveNotificationDestination('client_viewer', notification({ category: 'report_ready' }))).toEqual({ kind: 'client_page', page: 'reports' });
   });

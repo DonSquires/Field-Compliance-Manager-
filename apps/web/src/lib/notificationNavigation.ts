@@ -7,6 +7,7 @@ export type NotificationDestination =
   | { kind: 'admin_hr_credential'; credentialId: string | null }
   | { kind: 'officer_module'; module: string | null }
   | { kind: 'officer_report'; reportId: string | null }
+  | { kind: 'officer_leave'; leaveRequestId: string | null }
   | { kind: 'officer_dispatch'; dispatchJobId: string | null }
   | { kind: 'client_page'; page: string }
   | { kind: 'bob'; conversationId: string | null };
@@ -16,6 +17,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   const conversationId = typeof notification.link_payload?.conversation_id === 'string' ? notification.link_payload.conversation_id : null;
   const credentialId = typeof notification.link_payload?.credential_id === 'string' ? notification.link_payload.credential_id : null;
   const reportId = typeof notification.link_payload?.report_id === 'string' ? notification.link_payload.report_id : null;
+  const leaveRequestId = typeof notification.link_payload?.leave_request_id === 'string' ? notification.link_payload.leave_request_id : null;
   const dispatchJobId = typeof notification.link_payload?.dispatch_job_id === 'string' ? notification.link_payload.dispatch_job_id : null;
 
   if (notification.category === 'bob_conversation' || link === 'bob_chat') return { kind: 'bob', conversationId };
@@ -32,6 +34,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
 
   if (role === 'officer') {
     if (notification.category === 'report_reviewed' || link === 'field-report-review') return { kind: 'officer_report', reportId };
+    if (notification.category === 'leave_decision' || link === 'leave-decision') return { kind: 'officer_leave', leaveRequestId };
     if (notification.category === 'dispatch' || link === 'dispatch') return { kind: 'officer_dispatch', dispatchJobId };
     if (link === 'open-jobs' || link === 'roster' || notification.category === 'open_job' || notification.category === 'roster') return { kind: 'officer_module', module: null };
     if (notification.category === 'welfare') return { kind: 'officer_module', module: null };

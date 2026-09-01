@@ -323,6 +323,10 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
       await route.fulfill(fulfillJson([{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', report_type: 'maintenance', severity: 'medium', status: 'reviewed', title: 'Damaged perimeter sign', description: 'Sign mount is loose at the eastern vehicle entrance.', location_name: 'East Gate', reported_at: '2026-08-30T06:00:00.000Z', follow_up_required: true, review_notes: 'Facilities owns replacement before the next patrol.', reviewed_at: '2026-08-30T09:30:00.000Z' }]));
       return;
     }
+    if (resource === 'leave_requests') {
+      await route.fulfill(fulfillJson([{ id: '36363636-3636-4636-8636-363636363636', staff_id: OFFICER_ID, leave_type: 'annual', starts_on: '2026-09-14', ends_on: '2026-09-16', status: 'declined', reason: 'Family commitment', decision_notes: 'Coverage is already committed for these dates.', approved_at: '2026-08-30T09:30:00.000Z' }]));
+      return;
+    }
     if (resource === 'dispatch_jobs') {
       await route.fulfill(fulfillJson(dispatchJobs));
       return;

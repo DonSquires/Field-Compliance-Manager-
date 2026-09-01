@@ -6,6 +6,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -19,9 +20,13 @@ interface LeaveRequest {
   ends_on: string;
   status: string;
   reason: string | null;
+  decision_notes: string | null;
+  approved_at: string | null;
 }
 
 const OfficerLeavePage: React.FC = () => {
+  const location = useLocation();
+  const requestedLeaveId = new URLSearchParams(location.search).get('leave');
   const { profile } = useAuth();
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +44,7 @@ const OfficerLeavePage: React.FC = () => {
 
       const { data, error: err } = await supabase
         .from('leave_requests')
-        .select('id, leave_type, starts_on, ends_on, status, reason')
+        .select('id, leave_type, starts_on, ends_on, status, reason, decision_notes, approved_at')
         .order('starts_on', { ascending: false });
 
       if (err) throw err;
@@ -54,6 +59,7 @@ const OfficerLeavePage: React.FC = () => {
   useEffect(() => {
     loadRequests();
   }, [loadRequests]);
+  useEffect(() => { if (requestedLeaveId) document.getElementById(`officer-leave-${requestedLeaveId}`)?.scrollIntoView({ block: 'center' }); }, [requests, requestedLeaveId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,7 +155,7 @@ const OfficerLeavePage: React.FC = () => {
           </div>
         ) : (
           requests.map((r) => (
-            <div key={r.id} className="contact-card">
+            <div key={r.id} id={`officer-leave-${r.id}`} className={`contact-card ${r.id === requestedLeaveId ? 'is-context-focus' : ''}`}>
               <div className="contact-header">
                 <h3>{r.leave_type}</h3>
                 <span className={`status-badge status-${r.status}`}>{r.status}</span>
@@ -159,6 +165,7 @@ const OfficerLeavePage: React.FC = () => {
                   {new Date(r.starts_on).toLocaleDateString()} – {new Date(r.ends_on).toLocaleDateString()}
                 </p>
                 {r.reason && <p className="contact-meta">{r.reason}</p>}
+                {r.decision_notes && <p className="contact-meta"><strong>Decision note:</strong> {r.decision_notes}{r.approved_at ? ` · ${new Date(r.approved_at).toLocaleString('en-NZ')}` : ''}</p>}
               </div>
             </div>
           ))

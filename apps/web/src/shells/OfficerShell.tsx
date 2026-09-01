@@ -281,6 +281,12 @@ const OfficerShell: React.FC = () => {
       setActiveModule('report');
       return true;
     }
+    if (destination.kind === 'officer_leave') {
+      const leave = destination.leaveRequestId ? `?leave=${encodeURIComponent(destination.leaveRequestId)}` : '';
+      navigate(`/officer/leave${leave}`);
+      setActiveModule('leave');
+      return true;
+    }
     if (destination.kind === 'officer_dispatch') {
       const job = destination.dispatchJobId ? `?job=${encodeURIComponent(destination.dispatchJobId)}` : '';
       navigate(`/officer/dispatch${job}`);

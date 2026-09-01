@@ -10,4 +10,12 @@ describe('officer leave submission', () => {
     expect(page).toContain("supabase.rpc('submit_officer_leave_request'");
     expect(page).not.toContain(".from('leave_requests').insert");
   });
+
+  it('opens the exact request and shows the admin decision evidence', () => {
+    expect(page).toContain("get('leave')");
+    expect(page).toContain('decision_notes');
+    expect(page).toContain('approved_at');
+    expect(page).toContain('Decision note');
+    expect(page).toContain('id={`officer-leave-${r.id}`}');
+  });
 });
