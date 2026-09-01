@@ -23,6 +23,19 @@ create policy "jurisdiction_rule_sets_select" on "public"."jurisdiction_rule_set
   to PUBLIC
   using (public.org_access_allowed(organization_id));
 
+create policy "jurisdiction_rule_sets_insert" on "public"."jurisdiction_rule_sets"
+  for insert
+  with check (public.is_admin_for_org(organization_id));
+
+create policy "jurisdiction_rule_sets_update" on "public"."jurisdiction_rule_sets"
+  for update
+  using (public.is_admin_for_org(organization_id))
+  with check (public.is_admin_for_org(organization_id));
+
+create policy "jurisdiction_rule_sets_delete" on "public"."jurisdiction_rule_sets"
+  for delete
+  using (public.is_admin_for_org(organization_id));
+
 grant delete, insert, maintain, references, select, trigger, truncate, update on table "public"."jurisdiction_rule_sets" to "anon", "authenticated", "postgres", "service_role";
 
 comment on table "public"."jurisdiction_rule_sets" is 'Jurisdiction-specific legal/operational rules per module. Supports councils, government, and private enterprise.';

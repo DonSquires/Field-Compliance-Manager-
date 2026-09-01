@@ -27,6 +27,7 @@ interface ZoneRow extends HouseMapZone {
   address: string | null;
   bylaw_clause: string | null;
   bylaw_source_url: string | null;
+  jurisdiction_rule_set_id: string | null;
   nightly_limit_consecutive: number | null;
   nightly_limit_monthly: number | null;
   scv_required: boolean;
@@ -86,6 +87,10 @@ export default function ZoneDetailPage() {
   const [managing, setManaging] = useState(false);
   const [managerDirty, setManagerDirty] = useState(false);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [bylawForm, setBylawForm] = useState({ bylaw_clause: '', bylaw_source_url: '' });
+  const [savingBylaw, setSavingBylaw] = useState(false);
+  const [ruleSets, setRuleSets] = useState<Array<{ id: string; name: string; module_key: string }>>([]);
+  const [ruleSetId, setRuleSetId] = useState<string>('');
 
   useEffect(() => {
     const load = async () => {
@@ -176,6 +181,49 @@ export default function ZoneDetailPage() {
     setSelected(zone);
     navigate(`/admin/zones?zone=${zone.id}`, { replace: true });
     void loadContext(zone);
+  };
+
+  useEffect(() => {
+    setBylawForm({ bylaw_clause: selected?.bylaw_clause ?? '', bylaw_source_url: selected?.bylaw_source_url ?? '' });
+    setRuleSetId(selected?.jurisdiction_rule_set_id ?? '');
+  }, [selected]);
+
+  // ATLAS READS: jurisdiction_rule_sets
+  useEffect(() => {
+    const loadRuleSets = async () => {
+      const orgId = profile?.organizationId;
+      if (!orgId) return;
+      const { data } = await supabase
+        .from('jurisdiction_rule_sets')
+        .select('id, name, module_key')
+        .eq('organization_id', orgId)
+        .order('name');
+      setRuleSets((data as Array<{ id: string; name: string; module_key: string }>) ?? []);
+    };
+    void loadRuleSets();
+  }, [profile?.organizationId]);
+
+  const handleSaveBylaw = async () => {
+    if (!selected || savingBylaw) return;
+    setSavingBylaw(true);
+    setError(null);
+    // ATLAS WRITES: location_zones
+    const { error: updateError } = await supabase
+      .from('location_zones')
+      .update({
+        bylaw_clause: bylawForm.bylaw_clause.trim() || null,
+        bylaw_source_url: bylawForm.bylaw_source_url.trim() || null,
+        jurisdiction_rule_set_id: ruleSetId || null,
+      })
+      .eq('id', selected.id);
+    if (updateError) {
+      setError(updateError.message);
+    } else {
+      const updated = { ...selected, bylaw_clause: bylawForm.bylaw_clause.trim() || null, bylaw_source_url: bylawForm.bylaw_source_url.trim() || null, jurisdiction_rule_set_id: ruleSetId || null };
+      setSelected(updated);
+      setZones(zones.map((z) => (z.id === updated.id ? updated : z)));
+    }
+    setSavingBylaw(false);
   };
 
   if (loading)
@@ -309,21 +357,47 @@ export default function ZoneDetailPage() {
                 </strong>
               </article>
             </section>
-            {(selected.bylaw_clause || selected.bylaw_source_url) && (
-              <section className="reports-section">
-                <h3>Legal authority</h3>
-                <p>{selected.bylaw_clause ?? "Clause not recorded"}</p>
-                {selected.bylaw_source_url && (
-                  <a
-                    href={selected.bylaw_source_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open source bylaw
+            <section className="reports-section">
+              <h3>Legal authority</h3>
+              <div className="form-group">
+                <label>Bylaw clause</label>
+                <textarea
+                  rows={2}
+                  value={bylawForm.bylaw_clause}
+                  onChange={(e) => setBylawForm({ ...bylawForm, bylaw_clause: e.target.value })}
+                  placeholder="e.g. Reserves and Beaches Bylaw 2020, clause 12.3"
+                />
+              </div>
+              <div className="form-group">
+                <label>Source URL</label>
+                <input
+                  value={bylawForm.bylaw_source_url}
+                  onChange={(e) => setBylawForm({ ...bylawForm, bylaw_source_url: e.target.value })}
+                  placeholder="https://…"
+                />
+              </div>
+              <div className="form-group">
+                <label>Jurisdiction rule set</label>
+                <select value={ruleSetId} onChange={(e) => setRuleSetId(e.target.value)}>
+                  <option value="">None linked</option>
+                  {ruleSets.map((rs) => (
+                    <option key={rs.id} value={rs.id}>
+                      {rs.name} ({rs.module_key.replaceAll('_', ' ')})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => void handleSaveBylaw()} disabled={savingBylaw}>
+                {savingBylaw ? 'Saving…' : 'Save Legal Authority'}
+              </button>
+              {selected.bylaw_source_url && (
+                <p>
+                  <a href={selected.bylaw_source_url} target="_blank" rel="noreferrer">
+                    Open current source bylaw
                   </a>
-                )}
-              </section>
-            )}
+                </p>
+              )}
+            </section>
             <section className="reports-section">
               <h3>Closure history ({closures.length})</h3>
               {closures.length ? (
