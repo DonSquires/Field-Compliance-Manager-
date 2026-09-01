@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLocation } from 'react-router-dom';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
 import {
   buildOfficerScanPayload,
@@ -45,6 +46,8 @@ interface ZoneOption {
   name: string;
 }
 
+interface BreachOutcome { id: string; observation_id: string; status: string; action_type: string | null; actioned_at: string | null; notes: string | null; }
+
 type LocationState =
   | { status: 'locating'; latitude: null; longitude: null; accuracy: null; message: string }
   | { status: 'ready'; latitude: number; longitude: number; accuracy: number; message: string }
@@ -75,10 +78,13 @@ const STATUS_MESSAGE: Record<OfficerScanResult['compliance_status'], string> = {
 };
 
 const OfficerFreedomCampingPage: React.FC = () => {
+  const routeLocation = useLocation();
+  const requestedBreachId = new URLSearchParams(routeLocation.search).get('breach');
   const { profile } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [observations, setObservations] = useState<ObservationSummary[]>([]);
   const [zones, setZones] = useState<ZoneOption[]>([]);
+    const [breaches, setBreaches] = useState<BreachOutcome[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [plateNumber, setPlateNumber] = useState('');
@@ -117,8 +123,16 @@ const OfficerFreedomCampingPage: React.FC = () => {
       ]);
       if (observationsResponse.error) throw observationsResponse.error;
       if (zonesResponse.error) throw zonesResponse.error;
-      setObservations((observationsResponse.data as ObservationSummary[]) ?? []);
+      const observationRows = (observationsResponse.data as ObservationSummary[]) ?? [];
+      setObservations(observationRows);
       setZones((zonesResponse.data as ZoneOption[]) ?? []);
+      const observationIds = observationRows.map((observation) => observation.id);
+      if (observationIds.length) {
+        const { data: breachRows, error: breachError } = await supabase.from('breach_alerts').select('id, observation_id, status, action_type, actioned_at, notes').in('observation_id', observationIds).order('actioned_at', { ascending: false, nullsFirst: false });
+        if (breachError) throw breachError;
+        setBreaches((breachRows as BreachOutcome[]) ?? []);
+      } else setBreaches([]);
+      useEffect(() => { if (requestedBreachId) document.getElementById(`officer-breach-${requestedBreachId}`)?.scrollIntoView({ block: 'center' }); }, [breaches, requestedBreachId]);
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : 'Recent scans could not be loaded.');
     } finally {
@@ -441,6 +455,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
               })}
             </div>
           </section>
+          {breaches.length > 0 && <section className="fc-recent"><div className="fc-section-heading"><div><span className="fc-eyebrow">Supervisor decisions</span><h2>Breach outcomes</h2></div></div><div className="fc-recent-list">{breaches.map((breach) => <article id={`officer-breach-${breach.id}`} className={`fc-breach-outcome ${breach.id === requestedBreachId ? 'is-context-focus' : ''}`} key={breach.id}><div><strong>Admin outcome · {breach.status.replaceAll('_', ' ')}</strong><span>{breach.action_type?.replaceAll('_', ' ') ?? 'Review decision'}</span></div>{breach.notes && <p>{breach.notes}</p>}<small>Alert {breach.id.slice(0, 8)}{breach.actioned_at ? ` · ${new Date(breach.actioned_at).toLocaleString('en-NZ')}` : ''}</small></article>)}</div></section>}
         </aside>
       </div>
     </div>

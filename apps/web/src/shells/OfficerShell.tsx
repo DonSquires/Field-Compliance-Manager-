@@ -303,6 +303,10 @@ const OfficerShell: React.FC = () => {
       const slot = destination.rosterSlotId ? `?slot=${encodeURIComponent(destination.rosterSlotId)}` : '';
       navigate(`/officer/schedule${slot}`);setActiveModule('schedule');return true;
     }
+    if (destination.kind === 'officer_breach') {
+      const breach = destination.breachAlertId ? `?breach=${encodeURIComponent(destination.breachAlertId)}` : '';
+      navigate(`/officer/freedom_camping${breach}`);setActiveModule('freedom_camping');return true;
+    }
     return false;
   }, [navigate, navigateToModule, profile?.role]);
 

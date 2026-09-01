@@ -20,7 +20,9 @@ type ActionType =
   | 'infringement'
   | 'tow_request'
   | 'welfare_referral'
-  | 'dismissed';
+  | 'dismissed'
+  | 'resolved'
+  | 'exempt_homeless';
 
 interface BreachAlert {
   id: string;
@@ -119,25 +121,9 @@ const BreachReviewPage: React.FC = () => {
       setBusyId(alert.id);
       setError(null);
 
-      const notesCombined = actionNotes.trim()
-        ? alert.notes
-          ? `${alert.notes} | Action note: ${actionNotes.trim()}`
-          : actionNotes.trim()
-        : alert.notes;
+      const { data, error: updateErr } = await supabase.rpc('manage_breach_alert', { p_alert_id: alert.id, p_expected_status: alert.status, p_action: actionType, p_notes: actionNotes.trim() });
 
-      // ATLAS WRITES: breach_alerts
-      const { error: updateErr } = await supabase
-        .from('breach_alerts')
-        .update({
-          status: actionType === 'dismissed' ? 'dismissed' : 'actioned',
-          action_type: actionType,
-          actioned_by: profile.id,
-          actioned_at: new Date().toISOString(),
-          notes: notesCombined,
-        })
-        .eq('id', alert.id);
-
-      if (updateErr) throw updateErr;
+      const receipt=(data as Array<{alert_status:string;action_type:string|null;actioned_at:string}>|null)?.[0];if (updateErr||!receipt) throw updateErr??new Error('Breach decision receipt was not confirmed.');
 
       if (statusFilter === 'open') {
         setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
@@ -147,10 +133,10 @@ const BreachReviewPage: React.FC = () => {
             a.id === alert.id
               ? {
                   ...a,
-                  status: actionType === 'dismissed' ? 'dismissed' : 'actioned',
-                  action_type: actionType,
-                  actioned_at: new Date().toISOString(),
-                  notes: notesCombined,
+                  status: receipt.alert_status,
+                  action_type: receipt.action_type,
+                  actioned_at: receipt.actioned_at,
+                  notes: actionNotes.trim(),
                 }
               : a
           )
@@ -351,7 +337,7 @@ const BreachReviewPage: React.FC = () => {
                         <button
                           className="btn btn-sm btn-danger"
                           disabled={busyId === alert.id}
-                          onClick={() => handleAction(alert, 'dismissed')}
+                          onClick={() => { setActiveActionAlertId(alert.id);setActionNotes(''); }}
                         >
                           ✕ Dismiss Breach
                         </button>
@@ -367,7 +353,7 @@ const BreachReviewPage: React.FC = () => {
                             <button
                               key={act.type}
                               className={`btn btn-sm ${act.btnClass}`}
-                              disabled={busyId === alert.id}
+                              disabled={busyId === alert.id || !actionNotes.trim()}
                               onClick={() => handleAction(alert, act.type)}
                             >
                               {busyId === alert.id ? 'Processing…' : act.label}
@@ -376,7 +362,7 @@ const BreachReviewPage: React.FC = () => {
                         </div>
 
                         <div className="form-group">
-                          <label style={{ fontSize: '11px' }}>Enforcement / Review Note (Optional)</label>
+                          <label style={{ fontSize: '11px' }}>Enforcement / Review Note (Required)</label>
                           <input
                             type="text"
                             placeholder="e.g. Spoke to vehicle occupant; requested relocation by 10am"
@@ -404,52 +390,18 @@ const BreachReviewPage: React.FC = () => {
                 {/* Actioned alerts: mark as resolved or exempt_homeless */}
                 {alert.status === 'actioned' && (
                   <div style={{ marginTop: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '10px' }}>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <div className="form-group"><label>Resolution note</label><input value={activeActionAlertId===alert.id?actionNotes:''} onFocus={()=>setActiveActionAlertId(alert.id)} onChange={(event)=>{setActiveActionAlertId(alert.id);setActionNotes(event.target.value);}} /></div><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap',marginTop:'8px' }}>
                       <button
                         className="btn btn-sm btn-success"
-                        disabled={busyId === alert.id}
-                        onClick={async () => {
-                          if (!profile?.id) return;
-                          setBusyId(alert.id);
-                          try {
-                            const { error: err } = await supabase
-                              .from('breach_alerts')
-                              .update({ status: 'resolved', actioned_by: profile.id, actioned_at: new Date().toISOString() })
-                              .eq('id', alert.id);
-                            if (err) throw err;
-                            setAlerts((prev) =>
-                              prev.map((a) => (a.id === alert.id ? { ...a, status: 'resolved' } : a))
-                            );
-                          } catch (err) {
-                            setError(err instanceof Error ? err.message : 'Failed to mark as resolved');
-                          } finally {
-                            setBusyId(null);
-                          }
-                        }}
+                        onClick={() => void handleAction(alert,'resolved')}
+                        disabled={busyId===alert.id||activeActionAlertId!==alert.id||!actionNotes.trim()}
                       >
                         ✓ Mark Resolved
                       </button>
                       <button
                         className="btn btn-sm btn-secondary"
-                        disabled={busyId === alert.id}
-                        onClick={async () => {
-                          if (!profile?.id) return;
-                          setBusyId(alert.id);
-                          try {
-                            const { error: err } = await supabase
-                              .from('breach_alerts')
-                              .update({ status: 'exempt_homeless', actioned_by: profile.id, actioned_at: new Date().toISOString() })
-                              .eq('id', alert.id);
-                            if (err) throw err;
-                            setAlerts((prev) =>
-                              prev.map((a) => (a.id === alert.id ? { ...a, status: 'exempt_homeless' } : a))
-                            );
-                          } catch (err) {
-                            setError(err instanceof Error ? err.message : 'Failed to mark as exempt');
-                          } finally {
-                            setBusyId(null);
-                          }
-                        }}
+                        onClick={() => void handleAction(alert,'exempt_homeless')}
+                        disabled={busyId===alert.id||activeActionAlertId!==alert.id||!actionNotes.trim()}
                       >
                         🏠 Mark Exempt - Homeless
                       </button>
