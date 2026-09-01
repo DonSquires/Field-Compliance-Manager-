@@ -3574,6 +3574,13 @@ begin
     select 1 from dispatch_jobs other where other.dispatch_resource_id = v_job.dispatch_resource_id
       and other.id <> p_job_id and other.status in ('dispatched', 'acknowledged', 'en_route', 'on_scene')
   ) then update dispatch_resources set status = 'available' where id = v_job.dispatch_resource_id; end if;
+  if p_next_status = 'completed' then
+    begin
+      perform resolve_dispatch_job_pay_lines(p_job_id);
+    exception when others then
+      raise warning 'resolve_dispatch_job_pay_lines failed for job %: %', p_job_id, sqlerrm;
+    end;
+  end if;
   return query
   select updated.id, updated.status, updated.shift_id, updated.completed_at
   from dispatch_jobs updated
@@ -5522,6 +5529,103 @@ ALTER FUNCTION "public"."resolve_context"("p_lat" double precision, "p_lng" doub
 
 
 COMMENT ON FUNCTION "public"."resolve_context"("p_lat" double precision, "p_lng" double precision, "p_org_id" "uuid", "p_module_key" "text", "p_at" timestamp with time zone) IS 'Three-layer geofence resolution with verification gate (P1/P2) and role-aware governing jurisdiction. 0347 convergence step 1: the OWNERSHIP answer (client_org_id) ALWAYS resolves TO THE HOUSE (locations.organization_id) where a house is reachable. site_id is a transitional COMPATIBILITY LINK (v2 ruling !1304), used only as a ROUTE to the house, never as a co-equal owner. Resolution tiers: (1) zone.location_id -> locations; (2) zone.site_id -> client_sites.location_id -> locations (site as route); (3) zone.site_id -> client_sites.client_organization_id (transitional last-resort only while a site has no house link during migration). Per the owner ruling (2026-08-05) all three tiers return the SAME org by construction (same PLACE axis), so this changes the SOURCE of the answer, not the answer. ON-SITE geometry, zone matching, Layer 1/2, resolution_status, all 12 columns and governor_overlap_flag are byte-unchanged from 0290. Safe day-one: live zones have location_id NULL and their sites may not yet carry location_id, so resolution reaches tier 3 = the exact 0290 answer -> IDENTICAL output on current data; becomes house-authoritative as step 2 populates location_id upward.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."resolve_dispatch_job_pay_lines"("p_job_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
+    AS $$
+declare
+  v_job dispatch_jobs%rowtype;
+  v_resource dispatch_resources%rowtype;
+  v_rule rate_rules%rowtype;
+  v_officer_lat double precision;
+  v_officer_lng double precision;
+  v_site_lat double precision;
+  v_site_lng double precision;
+  v_distance_km numeric;
+  v_quantity numeric;
+  v_line_total numeric;
+begin
+  select * into v_job from dispatch_jobs where id = p_job_id;
+  if not found or v_job.status <> 'completed' or v_job.dispatch_resource_id is null then return; end if;
+  select * into v_resource from dispatch_resources where id = v_job.dispatch_resource_id;
+  if not found or v_resource.assigned_officer_id is null then return; end if;
+  for v_rule in
+    select * from rate_rules r
+    where r.organization_id = v_job.organization_id and r.rule_kind = 'pay' and r.active
+      and (r.service_type is null or r.service_type = v_resource.service_type)
+      and (r.job_type is null or r.job_type = v_job.job_type)
+      and (r.site_id is null or r.site_id = v_job.client_site_id)
+      and (r.effective_from is null or r.effective_from <= coalesce(v_job.completed_at, now())::date)
+      and (r.effective_to is null or r.effective_to >= coalesce(v_job.completed_at, now())::date)
+    order by r.priority desc, r.created_at desc
+  loop
+    v_quantity := null; v_distance_km := null;
+    case v_rule.rate_type
+      when 'hourly', 'per_hour_allowance' then
+        if v_job.dispatched_at is not null then
+          v_quantity := round((extract(epoch from (v_job.completed_at - v_job.dispatched_at)) / 3600.0)::numeric, 4);
+        end if;
+      when 'per_hour_travel' then
+        if v_job.en_route_at is not null and v_job.on_scene_at is not null then
+          v_quantity := round((extract(epoch from (v_job.on_scene_at - v_job.en_route_at)) / 3600.0)::numeric, 4);
+        end if;
+      when 'flat', 'daily', 'oncall_flat', 'callout', 'higher_duties_flat', 'per_visit', 'per_notice' then
+        v_quantity := 1;
+      when 'per_km' then
+        select og.gps_lat, og.gps_lng into v_officer_lat, v_officer_lng from officer_gps_log og
+          where og.officer_id = v_resource.assigned_officer_id and og.created_at <= coalesce(v_job.dispatched_at, v_job.created_at)
+          order by og.created_at desc limit 1;
+        select cs.gps_lat, cs.gps_lng into v_site_lat, v_site_lng from client_sites cs where cs.id = v_job.client_site_id;
+        if v_officer_lat is not null and v_officer_lng is not null and v_site_lat is not null and v_site_lng is not null then
+          v_distance_km := compute_point_distance_km(v_officer_lat, v_officer_lng, v_site_lat, v_site_lng);
+          v_quantity := v_distance_km;
+        end if;
+      else v_quantity := null;
+    end case;
+    if v_quantity is null then continue; end if;
+    v_line_total := round((v_quantity * v_rule.amount)::numeric, 2);
+    if v_rule.pay_code is not null then
+      insert into dispatch_job_pay_lines (
+        organization_id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code,
+        rate_type, description, quantity, unit_rate, line_total, distance_km,
+        role_code, region_code, service_type, day_category
+      ) values (
+        v_job.organization_id, v_job.id, v_resource.assigned_officer_id, v_rule.id, v_rule.pay_code,
+        v_rule.rate_type, v_rule.name, v_quantity, v_rule.amount, v_line_total, v_distance_km,
+        v_rule.role_code, v_rule.region_code, v_rule.service_type, v_rule.day_category
+      )
+      on conflict (organization_id, source_dispatch_id, pay_code) where pay_code is not null
+      do update set officer_user_id = excluded.officer_user_id, rate_rule_id = excluded.rate_rule_id, rate_type = excluded.rate_type,
+        description = excluded.description, quantity = excluded.quantity, unit_rate = excluded.unit_rate, line_total = excluded.line_total,
+        distance_km = excluded.distance_km, role_code = excluded.role_code, region_code = excluded.region_code,
+        service_type = excluded.service_type, day_category = excluded.day_category;
+    else
+      insert into dispatch_job_pay_lines (
+        organization_id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code,
+        rate_type, description, quantity, unit_rate, line_total, distance_km,
+        role_code, region_code, service_type, day_category
+      ) values (
+        v_job.organization_id, v_job.id, v_resource.assigned_officer_id, v_rule.id, null,
+        v_rule.rate_type, v_rule.name, v_quantity, v_rule.amount, v_line_total, v_distance_km,
+        v_rule.role_code, v_rule.region_code, v_rule.service_type, v_rule.day_category
+      )
+      on conflict (organization_id, source_dispatch_id) where pay_code is null
+      do update set officer_user_id = excluded.officer_user_id, rate_rule_id = excluded.rate_rule_id, rate_type = excluded.rate_type,
+        description = excluded.description, quantity = excluded.quantity, unit_rate = excluded.unit_rate, line_total = excluded.line_total,
+        distance_km = excluded.distance_km, role_code = excluded.role_code, region_code = excluded.region_code,
+        service_type = excluded.service_type, day_category = excluded.day_category;
+    end if;
+  end loop;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."resolve_dispatch_job_pay_lines"("p_job_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."resolve_dispatch_job_pay_lines"("p_job_id" "uuid") IS 'Resolves and idempotently upserts dispatch_job_pay_lines for a completed dispatch job, matching the single highest-priority active rate_rules row (rule_kind=pay) per pay_code family. Called by advance_dispatch_job_status() on completion; safe to re-run.';
 
 
 
