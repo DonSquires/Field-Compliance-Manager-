@@ -39,3 +39,20 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await expect(page.getByText('Requires 3 staff')).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('administrator finalizes an officer coverage claim into roster ownership', async ({ page }) => {
+  const errors=monitorBrowserErrors(page);await signInAsAdmin(page,'/admin/people-hr');
+  await page.getByRole('button',{name:'Open Shifts'}).click();
+  const claim=page.getByText('Claimed festival patrol').locator('..').locator('..');
+  await expect(claim).toContainText('claimed by Ana Ngata');
+  await claim.getByRole('button',{name:'Finalize assignment'}).click();
+  const dialog=page.getByRole('dialog',{name:'Finalize assignment'});
+  await expect(dialog.getByRole('button',{name:'Confirm assignment'})).toBeDisabled();
+  await dialog.getByLabel('Select work unit').selectOption({label:'North District Patrol · patrol'});
+  await dialog.getByLabel('Finalization notes').fill('Claim matched to the published festival patrol requirement.');
+  await dialog.getByRole('button',{name:'Confirm assignment'}).click();
+  await expect(page.getByRole('status')).toContainText('Coverage finalized for Ana Ngata · roster 96969696 · shift 97979797.');
+  await expect(page.getByText('Claimed festival patrol')).toBeHidden();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  expect(errors,errors.join('\n')).toEqual([]);
+});

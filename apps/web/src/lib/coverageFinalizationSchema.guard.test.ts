@@ -1,0 +1,3 @@
+import { readFileSync } from 'node:fs';import { resolve } from 'node:path';import { describe,expect,it } from 'vitest';
+const sql=readFileSync(resolve(process.cwd(),'../../supabase/migrations/20260901008000_finalize_shift_coverage.sql'),'utf8');
+describe('coverage finalization',()=>{it('locks the claim and reuses governed roster primitives',()=>{for(const value of ['for update',"v_request.status<>'claimed'",'create_roster_slot','materialize_roster_slot','roster_slot_id'])expect(sql).toContain(value);});it('notifies the claimant and closes anonymous access',()=>{expect(sql).toContain('p_recipient_user_id=>v_request.claimed_by');expect(sql).toContain("'coverage_finalized:'||v_request.id::text");expect(sql).toContain('from public,anon;');});});

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, MapPin, RefreshCw, ShieldCheck, Users, X } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { claimShiftCoverage } from '../lib/shiftCoverage';
 import { supabase } from '../lib/supabase';
@@ -47,6 +48,8 @@ function localDateIso(): string {
 }
 
 const OfficerSchedulePage: React.FC = () => {
+  const location=useLocation();
+  const requestedSlotId=new URLSearchParams(location.search).get('slot');
   const { profile } = useAuth();
   const [view, setView] = useState<ScheduleView>('assigned');
   const [assigned, setAssigned] = useState<AssignedShift[]>([]);
@@ -96,6 +99,7 @@ const OfficerSchedulePage: React.FC = () => {
   }, [profile?.id, profile?.organizationId]);
 
   useEffect(() => { void loadSchedule(); }, [loadSchedule]);
+  useEffect(()=>{if(requestedSlotId)document.getElementById(`officer-roster-slot-${requestedSlotId}`)?.scrollIntoView({block:'center'});},[requestedSlotId,slots]);
 
   const workforceSlots = useMemo(() => slots.filter((slot) => !slot.linked_shift_id), [slots]);
   const nextShift = useMemo(() => [...assigned, ...workforceSlots].filter((item) => ['draft', 'scheduled', 'published', 'accepted'].includes(item.status)).sort((left, right) => left.scheduled_start.localeCompare(right.scheduled_start))[0] ?? null, [assigned, workforceSlots]);
@@ -146,8 +150,8 @@ const OfficerSchedulePage: React.FC = () => {
 
       {loading ? <div className="officer-schedule-empty"><RefreshCw size={20} className="is-spinning" />Checking roster</div> : view === 'assigned' ? (
         assigned.length + workforceSlots.length === 0 ? <div className="officer-schedule-empty"><CalendarDays size={23} />No upcoming assigned shifts</div> : <div className="officer-schedule-list">
-          {assigned.map((shift) => { const slot = slots.find((item) => item.linked_shift_id === shift.id); return <article className="officer-assigned-shift" key={shift.id}><div className="officer-schedule-date"><strong>{formatDate(shift.scheduled_start)}</strong><span>{formatTime(shift.scheduled_start)} - {formatTime(shift.scheduled_end)}</span></div><div><strong>{shift.service_type.replaceAll('_', ' ')}</strong><small>{shift.total_stops} planned stops{shift.notes ? ` · ${shift.notes}` : ''}</small></div><span className={`status-${shift.status}`}>{shift.status.replaceAll('_', ' ')}</span>{slot?.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
-          {workforceSlots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); return <article className="officer-assigned-shift officer-internal-slot" key={slot.id}><div className="officer-schedule-date"><strong>{formatDate(slot.scheduled_start)}</strong><span>{formatTime(slot.scheduled_start)} - {formatTime(slot.scheduled_end)}</span></div><div><strong>{unit?.name ?? 'Internal assignment'}</strong><small>{unit?.service_type.replaceAll('_', ' ')}{slot.notes ? ` · ${slot.notes}` : ''}</small></div><span className={`status-${slot.status}`}>{slot.status}</span>{slot.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
+          {assigned.map((shift) => { const slot = slots.find((item) => item.linked_shift_id === shift.id); return <article id={slot?`officer-roster-slot-${slot.id}`:undefined} className={`officer-assigned-shift ${slot?.id===requestedSlotId?'is-context-focus':''}`} key={shift.id}><div className="officer-schedule-date"><strong>{formatDate(shift.scheduled_start)}</strong><span>{formatTime(shift.scheduled_start)} - {formatTime(shift.scheduled_end)}</span></div><div><strong>{shift.service_type.replaceAll('_', ' ')}</strong><small>{shift.total_stops} planned stops{shift.notes ? ` · ${shift.notes}` : ''}</small></div><span className={`status-${shift.status}`}>{shift.status.replaceAll('_', ' ')}</span>{slot?.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
+          {workforceSlots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); return <article id={`officer-roster-slot-${slot.id}`} className={`officer-assigned-shift officer-internal-slot ${slot.id===requestedSlotId?'is-context-focus':''}`} key={slot.id}><div className="officer-schedule-date"><strong>{formatDate(slot.scheduled_start)}</strong><span>{formatTime(slot.scheduled_start)} - {formatTime(slot.scheduled_end)}</span></div><div><strong>{unit?.name ?? 'Internal assignment'}</strong><small>{unit?.service_type.replaceAll('_', ' ')}{slot.notes ? ` · ${slot.notes}` : ''}</small></div><span className={`status-${slot.status}`}>{slot.status}</span>{slot.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
         </div>
       ) : coverage.length === 0 ? <div className="officer-schedule-empty"><ShieldCheck size={23} />No open coverage right now</div> : <div className="officer-schedule-list">{coverage.map((request) => <article className={`officer-coverage urgency-${request.urgency}`} key={request.id}><div className="officer-schedule-date"><strong>{formatDate(`${request.shift_date}T00:00:00`)}</strong><span>{request.start_time.slice(0, 5)} - {request.end_time.slice(0, 5)}</span></div><div><strong>{request.site?.name ?? 'Location to be confirmed'}</strong><small><Users size={13} /> {request.required_staff_count} needed{request.notes ? ` · ${request.notes}` : ''}</small></div><span>{request.urgency}</span><button type="button" onClick={() => setSelectedCoverage(request)}>Review claim</button></article>)}</div>}
 

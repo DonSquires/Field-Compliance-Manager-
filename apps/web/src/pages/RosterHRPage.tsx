@@ -73,7 +73,10 @@ interface CoverageRequestRow {
   status: string;
   notes: string | null;
   site_name: string | null;
+  claimed_by: string | null;
+  roster_slot_id: string | null;
 }
+interface CoverageWorkUnit { id:string;name:string;work_unit_type:string; }
 
 interface TimesheetRow {
   id: string;
@@ -110,6 +113,8 @@ const RosterHRPage: React.FC = () => {
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
+    const [coverageWorkUnits,setCoverageWorkUnits]=useState<CoverageWorkUnit[]>([]);
+    const [coverageFinalization,setCoverageFinalization]=useState<{request:CoverageRequestRow;workUnitId:string;notes:string}|null>(null);
   const [showCoverageForm, setShowCoverageForm] = useState(false);
   const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' } | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
@@ -138,7 +143,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes] =
+      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -170,12 +175,13 @@ const RosterHRPage: React.FC = () => {
             .order('period_start', { ascending: false }),
           supabase
             .from('shift_coverage_requests')
-            .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes, site:site_id(name)')
+            .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes, claimed_by, roster_slot_id, site:site_id(name)')
             .eq('organization_id', orgId)
-            .eq('status', 'open')
+            .in('status', ['open', 'claimed'])
             .order('urgency', { ascending: false })
             .order('shift_date', { ascending: true }),
           supabase.rpc('get_staff_readiness_assessment', { p_organization_id: orgId }),
+                  supabase.from('roster_work_units').select('id,name,work_unit_type').eq('organization_id',orgId).eq('active',true).order('name'),
         ]);
 
       if (profilesRes.error) throw profilesRes.error;
@@ -186,6 +192,7 @@ const RosterHRPage: React.FC = () => {
       if (timesheetsRes.error) throw timesheetsRes.error;
       if (coverageRes.error) throw coverageRes.error;
       if (readinessRes.error) throw readinessRes.error;
+  if(workUnitsRes.error)throw workUnitsRes.error;
 
       const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.user_id ?? s.id, s]));
       const merged: StaffRow[] = (profilesRes.data || []).map((p: any) => ({
@@ -225,8 +232,11 @@ const RosterHRPage: React.FC = () => {
           status: row.status,
           notes: row.notes,
           site_name: row.site?.name ?? null,
+          claimed_by:row.claimed_by,
+          roster_slot_id:row.roster_slot_id,
         }))
       );
+      setCoverageWorkUnits((workUnitsRes.data as CoverageWorkUnit[])||[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load roster data');
     } finally {
@@ -283,6 +293,8 @@ const RosterHRPage: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to create coverage request');
     }
   };
+
+  const finalizeCoverage=async(event:React.FormEvent)=>{event.preventDefault();if(!coverageFinalization)return;setSaving(true);setError(null);setNotice(null);const{data,error:finalizeError}=await supabase.rpc('finalize_shift_coverage',{p_request_id:coverageFinalization.request.id,p_expected_status:coverageFinalization.request.status,p_work_unit_id:coverageFinalization.workUnitId,p_notes:coverageFinalization.notes.trim()||null});const receipt=(data as Array<{request_id:string;roster_slot_id:string;shift_id:string|null}>|null)?.[0];if(finalizeError||!receipt)setError(finalizeError?.message??'Coverage finalization receipt was not confirmed.');else{setNotice(`Coverage finalized for ${staffNames[coverageFinalization.request.claimed_by??'']??'claimant'} · roster ${receipt.roster_slot_id.slice(0,8)}${receipt.shift_id?` · shift ${receipt.shift_id.slice(0,8)}`:''}.`);setCoverageFinalization(null);await loadAll();}setSaving(false);};
 
   const isExpiringSoon = (expiryDate: string | null) => {
     if (!expiryDate) return false;
@@ -504,7 +516,9 @@ const RosterHRPage: React.FC = () => {
                       Requires {c.required_staff_count} staff
                     </p>
                     {c.notes && <p className="contact-meta">{c.notes}</p>}
+                    <p className="contact-meta">Status: {c.status}{c.claimed_by?` · claimed by ${staffNames[c.claimed_by]??c.claimed_by}`:''}</p>
                   </div>
+                  {c.status==='claimed'&&<button type="button" className="btn btn-sm btn-primary" onClick={()=>setCoverageFinalization({request:c,workUnitId:'',notes:''})}>Finalize assignment</button>}
                 </div>
               ))
             )}
@@ -645,6 +659,7 @@ const RosterHRPage: React.FC = () => {
       {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
       {credentialRenewal && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-renewal-title" onSubmit={handleCredentialRenewal}><header><div><span>Credential evidence</span><h2 id="credential-renewal-title">Record renewal</h2></div><button type="button" onClick={() => setCredentialRenewal(null)} aria-label="Close credential renewal">×</button></header><p>The existing {credentialRenewal.source.credential_type.replaceAll('_',' ')} record remains in history. This replacement is verified against your evidence notes.</p><label><span>Credential number</span><input required value={credentialRenewal.credentialNumber} onChange={(event)=>setCredentialRenewal({...credentialRenewal,credentialNumber:event.target.value})}/></label><label><span>Issuing authority</span><input required value={credentialRenewal.issuingAuthority} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuingAuthority:event.target.value})}/></label><div className="form-row"><label><span>Issued date</span><input type="date" required value={credentialRenewal.issuedDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuedDate:event.target.value})}/></label><label><span>New expiry date</span><input type="date" required min={credentialRenewal.source.expiry_date??undefined} value={credentialRenewal.expiryDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,expiryDate:event.target.value})}/></label></div><label><span>Verification evidence notes</span><textarea rows={4} required minLength={10} value={credentialRenewal.evidenceNotes} onChange={(event)=>setCredentialRenewal({...credentialRenewal,evidenceNotes:event.target.value})}/></label><footer><button type="button" className="btn btn-secondary" onClick={()=>setCredentialRenewal(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving||!credentialRenewal.credentialNumber.trim()||!credentialRenewal.issuingAuthority.trim()||!credentialRenewal.issuedDate||!credentialRenewal.expiryDate||credentialRenewal.evidenceNotes.trim().length<10}>{saving?'Saving':'Confirm renewal'}</button></footer></form></div>}
+      {coverageFinalization&&<div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-finalization-title" onSubmit={finalizeCoverage}><header><div><span>Coverage ownership</span><h2 id="coverage-finalization-title">Finalize assignment</h2></div><button type="button" onClick={()=>setCoverageFinalization(null)} aria-label="Close coverage finalization">×</button></header><p>Confirm the claimant against an active work unit. Field work creates the linked operational shift through the governed roster workflow.</p><label><span>Select work unit</span><select required value={coverageFinalization.workUnitId} onChange={(event)=>setCoverageFinalization({...coverageFinalization,workUnitId:event.target.value})}><option value="">Select work unit</option>{coverageWorkUnits.map((unit)=><option value={unit.id} key={unit.id}>{unit.name} · {unit.work_unit_type}</option>)}</select></label><label><span>Finalization notes</span><textarea rows={3} value={coverageFinalization.notes} onChange={(event)=>setCoverageFinalization({...coverageFinalization,notes:event.target.value})}/></label><footer><button type="button" className="btn btn-secondary" onClick={()=>setCoverageFinalization(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving||!coverageFinalization.workUnitId}>{saving?'Finalizing':'Confirm assignment'}</button></footer></form></div>}
     </div>
   );
 };

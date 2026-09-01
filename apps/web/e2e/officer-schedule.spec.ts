@@ -54,3 +54,15 @@ test('linked assignment acceptance returns the shared roster and shift identity'
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('coverage finalization notification opens the exact roster assignment', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsOfficer(page, '/officer/schedule?slot=96969696-9696-4696-8696-969696969696');
+
+  const assignment = page.locator('#officer-roster-slot-96969696-9696-4696-8696-969696969696');
+  await expect(assignment).toHaveClass(/is-context-focus/);
+  await expect(assignment).toContainText('Claimed festival patrol');
+  await expect(assignment.getByText('published', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
