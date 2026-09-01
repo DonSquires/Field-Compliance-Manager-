@@ -2366,9 +2366,11 @@ COMMENT ON FUNCTION "public"."evaluate_parking_compliance"("p_org_id" "uuid", "p
 
 
 CREATE OR REPLACE FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") RETURNS integer
-    LANGUAGE "plpgsql" SECURITY DEFINER
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
 declare
+  v_actor       uuid := auth.uid();
+  v_provider    uuid;
   v_agreement   record;
   v_count       integer := 0;
   v_data        jsonb;
@@ -2383,10 +2385,16 @@ declare
   v_breaches    integer;
   v_facilities  jsonb;
 begin
+  if p_period_start is null or p_period_end is null or p_period_start > p_period_end or p_period_end - p_period_start > 366 then
+    raise exception 'Select a valid report period of 366 days or less';
+  end if;
+  select organization_id into v_provider from user_profiles where id = v_actor and deactivated_at is null;
+  if v_provider is null or not is_admin_for_org(v_provider) then raise exception 'Active provider administrator required'; end if;
   for v_agreement in
     select id, organization_id, provider_organization_id, monthly_report_template_code
     from service_agreements
-    where monthly_report_template_code is not null
+    where provider_organization_id = v_provider
+      and monthly_report_template_code is not null
   loop
     -- SLA performance for this agreement over the period.
     select
@@ -2451,21 +2459,24 @@ begin
 
     insert into monthly_report_packs (
       organization_id, service_agreement_id, template_code,
-      period_start, period_end, status, data, generated_at, updated_at
+      period_start, period_end, status, data, generated_at, generated_by, updated_at
     ) values (
       v_agreement.provider_organization_id, v_agreement.id,
       v_agreement.monthly_report_template_code,
-      p_period_start, p_period_end, 'generated', v_data, now(), now()
+      p_period_start, p_period_end, 'generated', v_data, now(), v_actor, now()
     )
     on conflict (service_agreement_id, template_code, period_start)
     do update set
       data = excluded.data,
       status = case when monthly_report_packs.status = 'sent' then 'sent' else 'generated' end,
       generated_at = now(),
+      generated_by = v_actor,
       updated_at = now();
 
     v_count := v_count + 1;
   end loop;
+  insert into audit_log(organization_id, actor_user_id, action, target_table, metadata)
+  values(v_provider, v_actor, 'monthly_report_packs_generated', 'monthly_report_packs', jsonb_build_object('period_start', p_period_start, 'period_end', p_period_end, 'pack_count', v_count));
 
   return v_count;
 end;
@@ -25057,9 +25068,8 @@ GRANT ALL ON FUNCTION "public"."evaluate_parking_compliance"("p_org_id" "uuid", 
 
 
 
-GRANT ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "anon";
-GRANT ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "service_role";
+REVOKE ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") FROM PUBLIC, "anon";
+GRANT EXECUTE ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "authenticated", "service_role";
 
 
 

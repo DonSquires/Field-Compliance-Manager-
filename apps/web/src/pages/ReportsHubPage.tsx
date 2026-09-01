@@ -8,7 +8,7 @@
  * — those were a screen-first guess and have been removed.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -39,6 +39,17 @@ interface ReportMetrics {
   nonCompliantObservations: number;
 }
 
+interface MonthlyReportPack {
+  id: string;
+  template_code: string;
+  period_start: string;
+  period_end: string;
+  status: string;
+  generated_at: string | null;
+  sent_at: string | null;
+  agreement: Array<{ name: string }> | null;
+}
+
 const ReportsHubPage: React.FC = () => {
   const { profile } = useAuth();
   const [metrics, setMetrics] = useState<ReportMetrics>({
@@ -49,61 +60,74 @@ const ReportsHubPage: React.FC = () => {
 
   const [breachAlerts, setBreachAlerts] = useState<BreachAlert[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
+  const [reportPacks, setReportPacks] = useState<MonthlyReportPack[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState({
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
   });
 
-  // ATLAS READS: breach_alerts, observations
-  useEffect(() => {
-    const loadReports = async () => {
-      if (!profile?.organizationId) return;
+  // ATLAS READS: breach_alerts, observations, monthly_report_packs
+  const loadReports = useCallback(async () => {
+    if (!profile?.organizationId) return;
 
-      try {
-        setLoading(true);
-        setError(null);
+    try {
+      setLoading(true);
+      setError(null);
 
-        const { data: breachData, error: breachErr } = await supabase
+      const [breachResponse, observationResponse, packResponse] = await Promise.all([
+        supabase
           .from('breach_alerts')
           .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
           .eq('organization_id', profile.organizationId)
           .gte('created_at', dateRange.start)
           .lte('created_at', dateRange.end)
-          .order('created_at', { ascending: false });
-
-        if (breachErr) throw breachErr;
-
-        const { data: obsData, error: obsErr } = await supabase
+          .order('created_at', { ascending: false }),
+        supabase
           .from('observations')
           .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
           .eq('organization_id', profile.organizationId)
           .gte('observed_at', dateRange.start)
           .lte('observed_at', dateRange.end)
-          .order('observed_at', { ascending: false });
+          .order('observed_at', { ascending: false }),
+        supabase
+          .from('monthly_report_packs')
+          .select('id, template_code, period_start, period_end, status, generated_at, sent_at, agreement:service_agreement_id(name)')
+          .eq('organization_id', profile.organizationId)
+          .gte('period_start', dateRange.start)
+          .lte('period_end', dateRange.end)
+          .order('period_end', { ascending: false }),
+      ]);
 
-        if (obsErr) throw obsErr;
+      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error;
+      if (failure) throw failure;
+      const breaches = (breachResponse.data as BreachAlert[]) || [];
+      const obs = (observationResponse.data as Observation[]) || [];
+      setBreachAlerts(breaches);
+      setObservations(obs);
+      setReportPacks((packResponse.data as MonthlyReportPack[]) || []);
+      setMetrics({ totalBreaches: breaches.length, totalObservations: obs.length, nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load reports');
+    } finally {
+      setLoading(false);
+    }
+  }, [profile?.organizationId, dateRange.end, dateRange.start]);
 
-        const breaches = (breachData as BreachAlert[]) || [];
-        const obs = (obsData as Observation[]) || [];
+  useEffect(() => { void loadReports(); }, [loadReports]);
 
-        setBreachAlerts(breaches);
-        setObservations(obs);
-        setMetrics({
-          totalBreaches: breaches.length,
-          totalObservations: obs.length,
-          nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length,
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load reports');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadReports();
-  }, [profile?.organizationId, dateRange]);
+  const generateReportPacks = async () => {
+    setGenerating(true);
+    setError(null);
+    setNotice(null);
+    const { data, error: generationError } = await supabase.rpc('generate_due_report_packs', { p_period_start: dateRange.start, p_period_end: dateRange.end });
+    if (generationError || typeof data !== 'number') setError(generationError?.message ?? 'Report pack generation was not confirmed.');
+    else { setNotice(`${data} report packs generated for the selected period.`); await loadReports(); }
+    setGenerating(false);
+  };
 
   if (loading) {
     return (
@@ -131,6 +155,7 @@ const ReportsHubPage: React.FC = () => {
           {error}
         </div>
       )}
+      {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
       <div className="reports-filter">
         <label>Date Range</label>
@@ -149,6 +174,7 @@ const ReportsHubPage: React.FC = () => {
             min={dateRange.start}
           />
         </div>
+        <button type="button" className="btn btn-primary" onClick={() => void generateReportPacks()} disabled={generating}>{generating ? 'Generating...' : 'Generate report packs'}</button>
       </div>
 
       <div className="kpi-grid">
@@ -168,6 +194,18 @@ const ReportsHubPage: React.FC = () => {
           <div className="kpi-unit">observations</div>
         </div>
       </div>
+
+      <section className="reports-section">
+        <h2>Monthly Report Packs ({reportPacks.length})</h2>
+        <div className="reports-table-wrapper">
+          <table className="reports-table">
+            <thead><tr><th>Agreement</th><th>Period</th><th>Template</th><th>Status</th><th>Generated</th></tr></thead>
+            <tbody>
+              {reportPacks.length === 0 ? <tr><td colSpan={5} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => <tr key={pack.id}><td>{pack.agreement?.[0]?.name ?? 'Service agreement'}</td><td>{pack.period_start} to {pack.period_end}</td><td>{pack.template_code}</td><td><span className={`status-badge status-${pack.status}`}>{pack.status}</span></td><td>{pack.generated_at ? new Date(pack.generated_at).toLocaleString() : '-'}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="reports-section">
         <h2>Recent Breach Alerts ({breachAlerts.length})</h2>
