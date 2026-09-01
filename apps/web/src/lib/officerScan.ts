@@ -31,6 +31,9 @@ export interface OfficerScanResult {
   on_site: boolean;
   in_operating_bounds: boolean;
   out_of_bounds_district: string | null;
+  effective_rules?: Record<string, unknown> | null;
+  zone_closed?: boolean;
+  zone_closure?: { closure_type: string; reason: string | null; effective_from: string; effective_to: string | null } | null;
   vehicle_make: string | null;
   vehicle_model: string | null;
   vehicle_colour: string | null;

@@ -49,18 +49,24 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
+import { WorkflowRail } from '../components/WorkflowRail';
+import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
 import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
+const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
+const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHandoffsPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
 const RosterTargetsPage = React.lazy(() => import('../pages/RosterTargetsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
+const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryReviewPage'));
 const SiteDetailPage = React.lazy(() => import('../pages/SiteDetailPage'));
+const ZoneDetailPage = React.lazy(() => import('../pages/ZoneDetailPage'));
 const ApprovalsActivityPage = React.lazy(() => import('../pages/ApprovalsActivityPage'));
 const LocationsPage = React.lazy(() => import('../pages/LocationsPage'));
 const AccessControlPage = React.lazy(() => import('../pages/AccessControlPage'));
@@ -87,7 +93,7 @@ const PttOperationsPage = React.lazy(() => import('../pages/PttOperationsPage'))
 const BobToolGovernancePage = React.lazy(() => import('../pages/BobToolGovernancePage'));
 
 type AdminPage =
-  | 'hub' | 'relationships' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360'
+  | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'tool-governance' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -101,14 +107,19 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
   'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing', 'builder',
 ]);
 
+const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
+  'relationships', 'onboarding', 'handoffs', 'crm', 'sites',
+]);
+
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
   'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control', 'radio',
 ]);
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined): boolean {
-  if (!PLATFORM_ONLY_PAGES.has(page)) return true;
-  return role === 'grand_master' || role === 'master';
+  if (PLATFORM_ONLY_PAGES.has(page)) return role === 'grand_master' || role === 'master';
+  if (CRM_MANAGEMENT_PAGES.has(page)) return role === 'grand_master' || role === 'master' || role === 'admin';
+  return true;
 }
 
 interface RedirectTarget {
@@ -141,6 +152,8 @@ const NAVIGATION_MAP = {
   'Core': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
     { id: 'relationships', label: 'Relationships', icon: Network },
+    { id: 'onboarding', label: 'Account Onboarding', icon: ClipboardCheck },
+    { id: 'handoffs', label: 'Activation Handoffs', icon: ClipboardCheck },
     { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
     { id: 'roster', label: 'Roster', icon: Users },
     { id: 'people-hr', label: 'People & HR', icon: Users },
@@ -149,8 +162,10 @@ const NAVIGATION_MAP = {
     { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
   'Config': [
-    { id: 'sites', label: 'Sites', icon: Building2 },
     { id: 'locations', label: 'Locations', icon: MapPin },
+    { id: 'site-360', label: 'Sites', icon: Building2 },
+    { id: 'zones', label: 'Zones', icon: MapPin },
+    { id: 'sites', label: 'Boundary Review', icon: ClipboardCheck },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'access-control', label: 'Access Control', icon: KeyRound },
     { id: 'org-setup', label: 'Organization Setup', icon: Settings },
@@ -229,7 +244,7 @@ const AdminShell: React.FC = () => {
 
     if (redirectTarget) {
       if (!canAccessAdminPage(redirectTarget.page, profile?.role)) {
-        setAccessNotice('This area is restricted to platform operators.');
+        setAccessNotice('This area is not available for your current role.');
         setActivePage('hub');
         navigate('/admin/hub', { replace: true });
         return;
@@ -242,7 +257,7 @@ const AdminShell: React.FC = () => {
       const areaQuery = redirectTarget.fieldOpsSubArea ? `?area=${redirectTarget.fieldOpsSubArea}` : '';
       navigate(`/admin/${redirectTarget.page}${areaQuery}`, { replace: true });
     } else if (!canAccessAdminPage(page, profile?.role)) {
-      setAccessNotice('This area is restricted to platform operators.');
+      setAccessNotice('This area is not available for your current role.');
       setActivePage('hub');
       navigate('/admin/hub', { replace: true });
     } else {
@@ -290,9 +305,9 @@ const AdminShell: React.FC = () => {
     return canAccessAdminPage(page, profile?.role);
   }, [profile?.role]);
 
-  const navigateToPage = useCallback((page: AdminPage) => {
+  const navigateToPage = useCallback((page: AdminPage, context?: WorkflowContext) => {
     if (!isPageEnabled(page)) {
-      setAccessNotice('This area is restricted to platform operators.');
+      setAccessNotice('This area is not available for your current role.');
       setActivePage('hub');
       navigate('/admin/hub');
       return;
@@ -300,7 +315,7 @@ const AdminShell: React.FC = () => {
 
     setActivePage(page);
     setMobileMenuOpen(false);
-    navigate(`/admin/${page}`);
+    navigate(`/admin/${page}${workflowContextQuery(context)}`);
   }, [navigate, isPageEnabled]);
 
   const navigateToFieldOps = useCallback((area: FieldOpsSubArea) => {
@@ -318,6 +333,8 @@ const AdminShell: React.FC = () => {
     navigateToPage(destination as AdminPage);
   }, [navigateToFieldOps, navigateToPage]);
 
+  const workflowContext = useMemo(() => readWorkflowContext(location.search), [location.search]);
+
   const navigateFromNotification = useCallback((notification: NotificationRecord) => {
     const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
     if (!destination) return false;
@@ -329,12 +346,17 @@ const AdminShell: React.FC = () => {
       navigateToFieldOps(destination.area as FieldOpsSubArea);
       return true;
     }
+    if (destination.kind === 'admin_hr_credential') {
+      const credential = destination.credentialId ? `&credential=${encodeURIComponent(destination.credentialId)}` : '';
+      navigate(`/admin/people-hr?tab=credentials${credential}`);
+      return true;
+    }
     if (destination.kind === 'admin_page') {
       navigateToPage(destination.page as AdminPage);
       return true;
     }
     return false;
-  }, [navigateToFieldOps, navigateToPage, profile?.role]);
+  }, [navigate, navigateToFieldOps, navigateToPage, profile?.role]);
 
   const openBobWithContext = useCallback((context?: Record<string, unknown>) => {
     setBobContextOverride(context ?? null);
@@ -374,9 +396,13 @@ const AdminShell: React.FC = () => {
       case 'hub':
         return <AdminHubPage onNavigate={navigateFromHub} />;
       case 'relationships':
-        return <RelationshipWorkspacePage />;
+        return <RelationshipWorkspacePage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+      case 'onboarding':
+        return <AccountOnboardingPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+      case 'handoffs':
+        return <ActivationHandoffsPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'crm':
-        return <CRMPage />;
+        return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'reports':
         return <ReportsHubPage />;
       case 'field-ops':
@@ -413,7 +439,11 @@ const AdminShell: React.FC = () => {
             return <FieldOperationsPage onNavigate={navigateToFieldOps} />;
         }
       case 'sites':
+        return <SiteBoundaryReviewPage />;
+      case 'site-360':
         return <SiteDetailPage />;
+      case 'zones':
+        return <ZoneDetailPage />;
       case 'org-setup':
         return <OrganizationSetupPage />;
       case 'users':
@@ -462,7 +492,7 @@ const AdminShell: React.FC = () => {
               {!sidebarCollapsed && (
                 <div className="admin-nav-group-label">{group}</div>
               )}
-              {items.map((item) => (
+              {items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role)).map((item) => (
                 <NavItem
                   key={item.id}
                   id={item.id}
@@ -502,6 +532,7 @@ const AdminShell: React.FC = () => {
 
           <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
+            <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
             <React.Suspense fallback={<LazyPageFallback />}>
               {renderPage()}
             </React.Suspense>
@@ -543,7 +574,7 @@ const AdminShell: React.FC = () => {
             {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || canAccessAdminPage('platform', profile?.role)).map(([group, items]) => (
               <div key={group} className="admin-mobile-nav-group">
                 <div>{group}</div>
-                {items.map((item) => {
+                {items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role)).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button key={item.id} onClick={() => navigateToPage(item.id as AdminPage)} className={`admin-mobile-nav-item ${activePage === item.id ? 'is-active' : ''}`}>
@@ -559,6 +590,7 @@ const AdminShell: React.FC = () => {
 
       <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
+        <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
         <React.Suspense fallback={<LazyPageFallback />}>
           {renderPage()}
         </React.Suspense>

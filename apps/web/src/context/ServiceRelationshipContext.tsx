@@ -182,7 +182,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         if (zoneIds.length > 0) {
           const { data: zoneData, error: zoneError } = await supabase
             .from('location_zones')
-            .select('id, name, zone_type, location_id, organization_id, is_active, service_agreement_id')
+            .select('id, name, zone_type, location_id, organization_id, is_active')
             .in('id', zoneIds);
 
           if (zoneError) throw zoneError;
@@ -193,7 +193,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
             location_id: zone.location_id ?? null,
             organization_id: zone.organization_id ?? null,
             is_active: Boolean(zone.is_active),
-            service_agreement_id: zone.service_agreement_id ?? null,
+            service_agreement_id: (links ?? []).find((link) => link.zone_id === zone.id)?.service_agreement_id ?? null,
           }));
         }
       }

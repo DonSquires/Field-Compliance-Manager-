@@ -705,6 +705,14 @@ serve(async (req)=>{
     if (!['freedom_camping', 'parking_enforcement'].includes(moduleKey)) return json({
       error: 'Unsupported scan module'
     }, 400);
+    const hasLatitude = gpsLat !== null && gpsLat !== undefined;
+    const hasLongitude = gpsLng !== null && gpsLng !== undefined;
+    if (!manualZoneId && (!hasLatitude || !hasLongitude)) return json({
+      error: 'A manual Zone or complete GPS coordinates are required'
+    }, 400);
+    if (hasLatitude !== hasLongitude || hasLatitude && (!Number.isFinite(Number(gpsLat)) || !Number.isFinite(Number(gpsLng)) || Number(gpsLat) < -90 || Number(gpsLat) > 90 || Number(gpsLng) < -180 || Number(gpsLng) > 180)) return json({
+      error: 'gps_lat and gps_lng must be a complete valid coordinate pair'
+    }, 400);
     if (profile.role === 'scan_operator') {
       const { data: agreements, error: agreementsError } = await supabase.from('service_agreements').select('id').or(`provider_organization_id.eq.${orgId},client_organization_id.eq.${orgId}`);
       if (agreementsError) return json({
@@ -768,13 +776,18 @@ serve(async (req)=>{
     let inOperatingBounds = true;
     let outOfBoundsDistrict = null;
     let effectiveRules = null;
-    if (!zoneId && gpsLat !== null && gpsLng !== null) {
-      const { data: ctxRows } = await supabase.rpc('resolve_context', {
-        p_lat: gpsLat,
-        p_lng: gpsLng,
+    let zoneClosure = null;
+    if (!zoneId && hasLatitude && hasLongitude) {
+      const { data: ctxRows, error: contextError } = await supabase.rpc('resolve_context', {
+        p_lat: Number(gpsLat),
+        p_lng: Number(gpsLng),
         p_org_id: orgId,
         p_module_key: moduleKey ?? null
       });
+      if (contextError) return json({
+        error: 'Geofence context could not be resolved',
+        detail: contextError.message
+      }, 503);
       const ctx = Array.isArray(ctxRows) ? ctxRows[0] : ctxRows;
       if (ctx) {
         zoneId = ctx.matched_zone_id ?? null;
@@ -790,13 +803,42 @@ serve(async (req)=>{
     if (zoneId) {
       // Lightweight fetch for the zone name (used in the evidence watermark) and
       // location_id; site_id already came from resolve_context.
-      const { data: zoneData } = await supabase.from('location_zones').select('id, name, location_id, site_id').eq('id', zoneId).single();
-      if (zoneData) {
-        zoneName = zoneData.name;
-        locationId = zoneData.location_id;
-        if (!siteId) siteId = zoneData.site_id;
+      const { data: zoneData, error: zoneError } = await supabase.from('location_zones').select('id, name, location_id, site_id, module_key, active_schedule, boundary_verification').eq('id', zoneId).eq('organization_id', orgId).eq('is_active', true).maybeSingle();
+      if (zoneError) return json({ error: 'Zone context could not be loaded', detail: zoneError.message }, 503);
+      if (!zoneData || zoneData.boundary_verification !== 'verified') return json({ error: 'An active verified Zone in this organization is required' }, 409);
+      if (moduleKey && zoneData.module_key && zoneData.module_key !== moduleKey) return json({ error: 'Selected Zone does not support this scan module' }, 409);
+      if (manualZoneId) {
+        const { data: scheduleActive, error: scheduleError } = await supabase.rpc('_geofence_active_at', { p_schedule: zoneData.active_schedule, p_at: capturedDate.toISOString() });
+        if (scheduleError) return json({ error: 'Zone schedule could not be resolved', detail: scheduleError.message }, 503);
+        if (scheduleActive !== true) return json({ error: 'Selected Zone is not active at the capture time' }, 409);
       }
+      zoneName = zoneData.name;
+      locationId = zoneData.location_id;
+      if (!siteId) siteId = zoneData.site_id;
+      const { data: closureData, error: closureError } = await supabase.rpc('is_zone_closed', {
+        p_zone_id: zoneId,
+        p_at: capturedDate.toISOString()
+      });
+      if (closureError) return json({
+        error: 'Zone closure state could not be resolved',
+        detail: closureError.message
+      }, 503);
+      zoneClosure = closureData ?? null;
     }
+    const geofenceContext = {
+      resolved_at: capturedDate.toISOString(),
+      resolution_source: manualZoneId ? 'manual_zone' : 'resolve_context',
+      spatial_resolution_evaluated: !manualZoneId && hasLatitude && hasLongitude,
+      zone_id: zoneId,
+      site_id: siteId,
+      location_id: locationId,
+      client_org_id: clientOrgId,
+      on_site: onSite,
+      in_operating_bounds: inOperatingBounds,
+      out_of_bounds_district: outOfBoundsDistrict,
+      effective_rules: effectiveRules,
+      closure: zoneClosure ?? { closed: false }
+    };
     // ── PARKING ENFORCEMENT BRANCH ──────────────────────────────────────────
     // When module_key === 'parking_enforcement', run the parking-specific
     // pipeline (steps 6P–12P) and early-return. The FC-specific steps 6–12
@@ -1004,6 +1046,7 @@ serve(async (req)=>{
         cof_status: cofStatus,
         cof_expiry: cofExpiry ?? null,
         vehicle_compliance_flags: vehicleComplianceFlags.length > 0 ? vehicleComplianceFlags : null
+        ,geofence_context: geofenceContext
       }).select('id').single();
       if (chalkErr || !chalkData) {
         return json({
@@ -1145,6 +1188,9 @@ serve(async (req)=>{
         on_site: onSite,
         in_operating_bounds: inOperatingBounds,
         out_of_bounds_district: outOfBoundsDistrict,
+        effective_rules: effectiveRules,
+        zone_closed: zoneClosure?.closed === true,
+        zone_closure: zoneClosure,
         // Record IDs
         chalk_record_id: chalkRecordId,
         breach_alert_id: parkingBreachAlertId,
@@ -1386,6 +1432,7 @@ serve(async (req)=>{
       movement_similarity: movementResult?.similarity ?? null,
       movement_decision: movementResult?.decision ?? null,
       client_org_id: clientOrgId ?? null
+      ,geofence_context: geofenceContext
     }).select('id').single();
     if (obsErr || !obsData) return json({
       error: 'Failed to record observation',
@@ -1563,6 +1610,8 @@ serve(async (req)=>{
       in_operating_bounds: inOperatingBounds,
       out_of_bounds_district: outOfBoundsDistrict,
       effective_rules: effectiveRules,
+      zone_closed: zoneClosure?.closed === true,
+      zone_closure: zoneClosure,
       vehicle_make: vehicleMake,
       vehicle_model: vehicleModel,
       vehicle_colour: vehicleColour,

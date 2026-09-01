@@ -24,6 +24,10 @@ describe('governed approvals workbench', () => {
 
   it('respects the RPC decision-authority flag', () => {
     expect(source).toContain('selected.can_decide');
-    expect(source).toContain('current scope cannot decide it');
+    expect(source).toContain('assigned_approver_name');
+    expect(source).toContain('Decision owner');
+    expect(source).toContain('Your authority');
+    expect(source).toContain('owns this decision');
+    expect(source).not.toContain('Decision authority</dt><dd>');
   });
 });

@@ -388,6 +388,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
               <div className="fc-result-plate">{result.plate_number}</div>
               <p className="fc-verdict-message">{STATUS_MESSAGE[status]}</p>
               {result.compliance_reason && <p className="fc-reason">{formatComplianceReason(result.compliance_reason)}</p>}
+              {result.zone_closed && <div className="alert alert-warning" role="alert"><AlertTriangle size={16} aria-hidden="true" />Zone closure in force: {result.zone_closure?.closure_type.replaceAll('_', ' ') ?? 'closure'}{result.zone_closure?.reason ? ` · ${result.zone_closure.reason}` : ''}. The compliance verdict remains rule-derived.</div>}
 
               <dl className="fc-metrics">
                 <div><dt>Current streak</dt><dd>{result.nights_this_zone}<small>{result.limit_consecutive !== null ? ` / ${result.limit_consecutive}` : ''}</small></dd></div>

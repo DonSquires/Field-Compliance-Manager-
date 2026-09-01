@@ -77,6 +77,7 @@ test('supervisor records acknowledgement and verified resolution through the gov
   await acknowledgement.getByRole('button', { name: 'Confirm acknowledgement' }).click();
   await expect(page.getByRole('status')).toContainText('Alert acknowledged');
   await expect(page.getByText('acknowledged', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/Morgan Reed · .*29\/08\/2026/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Resolve' }).click();
   const resolution = page.getByRole('dialog', { name: 'Resolve alert' });
@@ -84,5 +85,6 @@ test('supervisor records acknowledgement and verified resolution through the gov
   await resolution.getByRole('button', { name: 'Confirm resolution' }).click();
   await expect(page.getByRole('status')).toContainText('Alert resolved');
   await expect(page.getByText('resolved', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/Morgan Reed · .*29\/08\/2026/)).toHaveCount(2);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

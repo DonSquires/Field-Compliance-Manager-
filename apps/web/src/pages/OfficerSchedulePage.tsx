@@ -58,6 +58,7 @@ const OfficerSchedulePage: React.FC = () => {
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [responseReceipt, setResponseReceipt] = useState<{ slotId: string; slotStatus: string; shiftId: string | null; shiftStatus: string | null } | null>(null);
   const [responding, setResponding] = useState<{ slot: RosterSlot; response: 'accept' | 'decline' } | null>(null);
   const [declineReason, setDeclineReason] = useState('');
 
@@ -120,14 +121,15 @@ const OfficerSchedulePage: React.FC = () => {
   const respondToSlot = async () => {
     if (!responding) return;
     setClaiming(true); setError(null);
-    const { error: responseError } = await supabase.rpc('respond_to_roster_slot', {
+    const { data, error: responseError } = await supabase.rpc('respond_to_roster_slot', {
       p_slot_id: responding.slot.id,
       p_expected_status: responding.slot.status,
       p_response: responding.response,
       p_decline_reason: responding.response === 'decline' ? declineReason.trim() : null,
     });
-    if (responseError) setError(responseError.message);
-    else { setNotice(responding.response === 'accept' ? 'Assignment accepted and confirmed.' : 'Assignment declined with your recorded reason.'); setResponding(null); setDeclineReason(''); await loadSchedule(); }
+    const receipt = (data as Array<{ slot_id: string; slot_status: string; shift_id: string | null; shift_status: string | null }> | null)?.[0];
+    if (responseError || !receipt) setError(responseError?.message ?? 'Assignment response receipt was not confirmed.');
+    else { setResponseReceipt({ slotId: receipt.slot_id, slotStatus: receipt.slot_status, shiftId: receipt.shift_id, shiftStatus: receipt.shift_status });setNotice(responding.response === 'accept' ? 'Assignment accepted and confirmed.' : 'Assignment declined with your recorded reason.'); setResponding(null); setDeclineReason(''); await loadSchedule(); }
     setClaiming(false);
   };
 
@@ -136,6 +138,7 @@ const OfficerSchedulePage: React.FC = () => {
       <header className="officer-schedule-header"><div><span>Roster</span><h1>My schedule</h1><p>Confirmed assignments and open coverage available to claim.</p></div><button type="button" onClick={() => void loadSchedule()} disabled={loading} title="Refresh schedule"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /><span>Refresh</span></button></header>
       {error && <div className="officer-schedule-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
       {notice && <div className="officer-schedule-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
+      {responseReceipt && <section className="officer-schedule-receipt" aria-label="Assignment ownership receipt"><div><span>Assignment ownership receipt</span><strong>{responseReceipt.slotStatus.replaceAll('_',' ')}</strong><small>Roster slot {responseReceipt.slotId.slice(0,8)}{responseReceipt.shiftId ? ` · field shift ${responseReceipt.shiftId.slice(0,8)} ${responseReceipt.shiftStatus?.replaceAll('_',' ') ?? ''}` : ' · workforce assignment'}</small></div><button type="button" onClick={() => setResponseReceipt(null)} title="Dismiss receipt"><X size={16}/></button></section>}
 
       <section className="officer-schedule-next"><div><span>Next confirmed assignment</span><strong>{nextShift ? formatDate(nextShift.scheduled_start) : 'No confirmed shift'}</strong><small>{nextShift ? `${formatTime(nextShift.scheduled_start)} - ${formatTime(nextShift.scheduled_end)} · ${nextAssignmentLabel?.replaceAll('_', ' ')}` : 'Open coverage remains available below.'}</small></div><CalendarDays size={24} /></section>
 

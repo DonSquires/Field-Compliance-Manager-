@@ -27,6 +27,8 @@ interface ApprovalRow {
   error_message: string | null;
   result_table: string | null;
   result_record_id: string | null;
+  assigned_approver_id: string | null;
+  assigned_approver_name: string | null;
   can_decide: boolean;
 }
 
@@ -183,7 +185,8 @@ const ApprovalsActivityPage: React.FC = () => {
                 <div><dt>Triggered by</dt><dd>{selected.triggered_by_name ?? selected.user_name ?? 'Unknown'}</dd></div>
                 <div><dt>Created</dt><dd>{new Date(selected.created_at).toLocaleString('en-NZ')}</dd></div>
                 <div><dt>Confidence signal</dt><dd>{selected.confidence_score == null ? 'Not supplied' : `${Math.round(selected.confidence_score * 100)}%`}</dd></div>
-                <div><dt>Decision authority</dt><dd>{selected.can_decide ? 'Confirmed' : 'Not available'}</dd></div>
+                <div><dt>Decision owner</dt><dd>{selected.assigned_approver_id ? selected.assigned_approver_name ?? 'Assigned approver unavailable' : 'Role and organisation scope'}</dd></div>
+                <div><dt>Your authority</dt><dd>{selected.can_decide ? 'Can decide' : 'View only'}</dd></div>
               </dl>
 
               <section className="approvals-reasoning"><span>Proposal reasoning</span><p>{selected.bob_reasoning ?? 'No reasoning was recorded with this proposal.'}</p></section>
@@ -194,7 +197,7 @@ const ApprovalsActivityPage: React.FC = () => {
               {selected.result_record_id && <div className="approvals-outcome is-applied"><CheckCircle2 size={17} /><div><strong>Applied result</strong><span>{selected.result_table ?? 'record'} · {selected.result_record_id}</span></div></div>}
 
               {selected.status === 'pending' && (
-                selected.can_decide ? <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openDecision('reject')}><XCircle size={17} /> Reject</button><button type="button" className="is-approve" onClick={() => openDecision('approve')}><CheckCircle2 size={17} /> Review approval</button></div> : <div className="approvals-no-authority"><ShieldCheck size={17} /> This action is visible to you, but your current scope cannot decide it.</div>
+                selected.can_decide ? <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openDecision('reject')}><XCircle size={17} /> Reject</button><button type="button" className="is-approve" onClick={() => openDecision('approve')}><CheckCircle2 size={17} /> Review approval</button></div> : <div className="approvals-no-authority"><ShieldCheck size={17} /> {selected.assigned_approver_name ? `${selected.assigned_approver_name} owns this decision. Your current scope is view only.` : 'This decision is routed by role and organisation scope. Your current scope is view only.'}</div>
               )}
             </>
           )}

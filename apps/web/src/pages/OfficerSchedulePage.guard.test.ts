@@ -30,4 +30,10 @@ describe('officer schedule workspace', () => {
     expect(page).toContain("supabase.rpc('respond_to_roster_slot'");
     expect(page).toContain('Decline reason');
   });
+
+  it('shows the server-confirmed slot and linked-shift ownership receipt', () => {
+    expect(page).toContain('receipt.slot_id');
+    expect(page).toContain('receipt.shift_id');
+    expect(page).toContain('Assignment ownership receipt');
+  });
 });

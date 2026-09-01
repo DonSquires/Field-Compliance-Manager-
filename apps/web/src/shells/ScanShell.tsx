@@ -35,6 +35,8 @@ interface ScanResult {
   effective_limit_minutes?: number;
   breach_alert_id?: string | null;
   breach_write_error?: string;
+  zone_closed?: boolean;
+  zone_closure?: { closure_type: string; reason: string | null } | null;
 }
 
 const MODULE_LABEL: Record<ScanModuleKey, string> = {
@@ -303,6 +305,7 @@ function ScanResultView({ result }: { result: ScanResult }) {
         <div><dt>Zone</dt><dd>{result.zone_name ?? 'No configured zone'}</dd></div>
         {result.module_key === 'parking_enforcement' ? <div><dt>Time limit</dt><dd>{result.effective_limit_minutes ?? '—'} min</dd></div> : <div><dt>Night count</dt><dd>{result.nights_this_zone ?? 0} current · {result.nights_this_month ?? 0} month</dd></div>}
       </dl>
+      {result.zone_closed && <div className="scan-error" role="alert"><AlertTriangle size={18} /> Zone closure in force: {result.zone_closure?.closure_type.replaceAll('_', ' ') ?? 'closure'}{result.zone_closure?.reason ? ` · ${result.zone_closure.reason}` : ''}. Verdict remains rule-derived.</div>}
       {result.breach_write_error && <div className="scan-error" role="alert"><AlertTriangle size={18} /> Record saved, but the breach alert was not confirmed.</div>}
     </div>
   );

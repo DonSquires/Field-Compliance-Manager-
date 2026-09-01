@@ -11,6 +11,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './AccessControlPage.css';
 
 interface AccessPreset {
   id: string;
@@ -41,6 +42,7 @@ interface UserLite {
   id: string;
   display_name: string | null;
   email: string | null;
+  updated_at: string;
 }
 
 const AccessControlPage: React.FC = () => {
@@ -51,6 +53,8 @@ const AccessControlPage: React.FC = () => {
   const [users, setUsers] = useState<Record<string, UserLite>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [revokeGrant, setRevokeGrant] = useState<AreaGrant | null>(null);
+  const [revokeReason, setRevokeReason] = useState('');
 
   // ATLAS READS: access_presets, preset_assignments, staff_area_grants, user_profiles
   const loadAll = useCallback(async () => {
@@ -71,7 +75,7 @@ const AccessControlPage: React.FC = () => {
           .from('staff_area_grants')
           .select('id, user_id, area, level, status, source_preset')
           .eq('scope_org_id', orgId),
-        supabase.from('user_profiles').select('id, display_name, email').eq('organization_id', orgId),
+        supabase.from('user_profiles').select('id, display_name, email, updated_at').eq('organization_id', orgId),
       ]);
 
       if (presetsRes.error) throw presetsRes.error;
@@ -99,12 +103,15 @@ const AccessControlPage: React.FC = () => {
     loadAll();
   }, [loadAll]);
 
-  const handleRevokeGrant = async (grant: AreaGrant) => {
+  const handleRevokeGrant = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!revokeGrant || !revokeReason.trim()) return;
     try {
-      // ATLAS WRITES: staff_area_grants
-      const { error } = await supabase.from('staff_area_grants').update({ status: 'ended' }).eq('id', grant.id);
+      const target = users[revokeGrant.user_id];
+      if (!target) throw new Error('Grant user could not be resolved.');
+      const { error } = await supabase.rpc('manage_user_identity_access', { p_user_id: revokeGrant.user_id, p_expected_updated_at: target.updated_at, p_action: 'end_grant', p_display_name: target.display_name, p_phone: null, p_role: null, p_preset_id: null, p_assignment_id: null, p_grant_id: revokeGrant.id, p_reason: revokeReason.trim() });
       if (error) throw error;
-      setGrants(grants.map((g) => (g.id === grant.id ? { ...g, status: 'ended' } : g)));
+      setRevokeGrant(null); setRevokeReason(''); await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to revoke grant');
     }
@@ -202,7 +209,7 @@ const AccessControlPage: React.FC = () => {
                     </td>
                     <td>
                       {grant.status === 'active' && (
-                        <button className="btn btn-sm btn-danger" onClick={() => handleRevokeGrant(grant)}>
+                        <button className="btn btn-sm btn-danger" onClick={() => { setRevokeGrant(grant); setRevokeReason(''); }}>
                           Revoke
                         </button>
                       )}
@@ -214,6 +221,7 @@ const AccessControlPage: React.FC = () => {
           </table>
         </div>
       </section>
+      {revokeGrant && <div className="access-dialog-backdrop"><form className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="revoke-grant-title" onSubmit={handleRevokeGrant}><h2 id="revoke-grant-title">End direct access grant</h2><p>{userLabel(revokeGrant.user_id)} · {revokeGrant.area} · {revokeGrant.level}</p><label><span>Reason for ending access</span><textarea required rows={3} value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} /></label><div className="access-dialog-actions"><button type="button" onClick={() => setRevokeGrant(null)}>Cancel</button><button type="submit" className="is-danger" disabled={!revokeReason.trim()}>End grant</button></div></form></div>}
     </div>
   );
 };

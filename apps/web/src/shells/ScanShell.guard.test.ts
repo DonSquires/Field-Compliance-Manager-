@@ -21,4 +21,10 @@ describe('ScanShell standalone contract', () => {
   it('limits the UI to the two server-supported scan branches', () => {
     expect(source).toContain("key === 'freedom_camping' || key === 'parking_enforcement'");
   });
+
+  it('surfaces closure evidence without replacing the module verdict', () => {
+    expect(source).toContain('result.zone_closed');
+    expect(source).toContain('result.zone_closure?.closure_type');
+    expect(source).toContain('Verdict remains rule-derived.');
+  });
 });

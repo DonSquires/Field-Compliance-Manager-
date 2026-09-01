@@ -27,6 +27,8 @@ interface WelfareAlert {
   officer_phone: string | null;
   notes: string | null;
   officer: { id: string; display_name: string | null; phone: string | null } | null;
+  acknowledger: { id: string; display_name: string | null } | null;
+  resolver: { id: string; display_name: string | null } | null;
 }
 
 const ALERT_LABEL: Record<AlertType, string> = {
@@ -69,7 +71,7 @@ const WelfareAlertsPage: React.FC = () => {
     try {
       const { data, error: queryError } = await supabase
         .from('welfare_alerts')
-        .select('id, officer_user_id, status, alert_type, escalation_level, escalated_at, acknowledged_at, acknowledgement_notes, resolved_at, resolution_notes, triggered_at, gps_lat, gps_lng, gps_accuracy, officer_phone, notes, officer:officer_user_id(id, display_name, phone)')
+        .select('id, officer_user_id, status, alert_type, escalation_level, escalated_at, acknowledged_at, acknowledgement_notes, resolved_at, resolution_notes, triggered_at, gps_lat, gps_lng, gps_accuracy, officer_phone, notes, officer:officer_user_id(id, display_name, phone), acknowledger:acknowledged_by(id, display_name), resolver:resolved_by(id, display_name)')
         .eq('organization_id', profile.organizationId)
         .order('escalation_level', { ascending: false })
         .order('triggered_at', { ascending: false })
@@ -176,8 +178,8 @@ const WelfareAlertsPage: React.FC = () => {
               </dl>
 
               {selected.notes && <section className="welfare-notes"><span>Alert evidence</span><p>{selected.notes}</p></section>}
-              {selected.acknowledgement_notes && <section className="welfare-history-note"><UserCheck size={16} /><div><strong>Acknowledgement</strong><span>{selected.acknowledgement_notes}</span><small>{selected.acknowledged_at ? new Date(selected.acknowledged_at).toLocaleString('en-NZ') : ''}</small></div></section>}
-              {selected.resolution_notes && <section className="welfare-history-note is-resolved"><CheckCircle2 size={16} /><div><strong>Resolution</strong><span>{selected.resolution_notes}</span><small>{selected.resolved_at ? new Date(selected.resolved_at).toLocaleString('en-NZ') : ''}</small></div></section>}
+              {selected.acknowledgement_notes && <section className="welfare-history-note"><UserCheck size={16} /><div><strong>Acknowledgement</strong><span>{selected.acknowledgement_notes}</span><small>{selected.acknowledger?.display_name ?? 'Responder unavailable'}{selected.acknowledged_at ? ` · ${new Date(selected.acknowledged_at).toLocaleString('en-NZ')}` : ''}</small></div></section>}
+              {selected.resolution_notes && <section className="welfare-history-note is-resolved"><CheckCircle2 size={16} /><div><strong>Resolution</strong><span>{selected.resolution_notes}</span><small>{selected.resolver?.display_name ?? 'Responder unavailable'}{selected.resolved_at ? ` · ${new Date(selected.resolved_at).toLocaleString('en-NZ')}` : ''}</small></div></section>}
 
               <div className="welfare-contact-actions">
                 {(selected.officer_phone ?? selected.officer?.phone) ? <a href={`tel:${selected.officer_phone ?? selected.officer?.phone}`}><Phone size={16} /> Call officer</a> : <button type="button" disabled><Phone size={16} /> Phone unavailable</button>}

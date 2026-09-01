@@ -4,6 +4,7 @@ import type { NotificationRecord } from '../components/NotificationCenter';
 export type NotificationDestination =
   | { kind: 'admin_page'; page: string }
   | { kind: 'admin_field_ops'; area: string }
+  | { kind: 'admin_hr_credential'; credentialId: string | null }
   | { kind: 'officer_module'; module: string | null }
   | { kind: 'client_page'; page: string }
   | { kind: 'bob'; conversationId: string | null };
@@ -11,6 +12,7 @@ export type NotificationDestination =
 export function resolveNotificationDestination(role: AppRole, notification: NotificationRecord): NotificationDestination | null {
   const link = notification.link_page;
   const conversationId = typeof notification.link_payload?.conversation_id === 'string' ? notification.link_payload.conversation_id : null;
+  const credentialId = typeof notification.link_payload?.credential_id === 'string' ? notification.link_payload.credential_id : null;
 
   if (notification.category === 'bob_conversation' || link === 'bob_chat') return { kind: 'bob', conversationId };
 
@@ -18,7 +20,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
     if (link === 'WelfareAlertsPage' || notification.category === 'welfare') return { kind: 'admin_field_ops', area: 'welfare-alerts' };
     if (link === 'open-jobs' || notification.category === 'dispatch') return { kind: 'admin_field_ops', area: 'dispatch' };
     if (link === 'roster') return { kind: 'admin_page', page: 'roster' };
-    if (link === 'credential-expiry' || notification.category === 'credential_expiry') return { kind: 'admin_page', page: 'users' };
+    if (link === 'credential-expiry' || notification.category === 'credential_expiry') return { kind: 'admin_hr_credential', credentialId };
     if (notification.category === 'report_ready') return { kind: 'admin_page', page: 'reports' };
     if (notification.category === 'schema_change_request' || notification.category === 'bob_self_memory') return { kind: 'admin_page', page: 'approvals' };
     return null;

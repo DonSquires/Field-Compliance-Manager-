@@ -1,0 +1,89 @@
+.house-map-gates {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border-bottom: 1px solid #294252;
+  background: #0c1b26;
+}
+
+.house-map-gates span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid #334d5e;
+  border-radius: 4px;
+  color: #9eb2bd;
+  font-size: 8px;
+}
+
+.house-map-gates span.is-ready {
+  border-color: #346b5e;
+  color: #a9dfd2;
+  background: #102c25;
+}
+
+.house-map-gates span.is-blocked {
+  border-color: #785143;
+  color: #efc0a7;
+  background: #2e211b;
+}
+
+.house-map-resolution {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid #294252;
+  background: #294252;
+}
+
+.house-map-resolution > div {
+  display: grid;
+  gap: 3px;
+  min-height: 54px;
+  padding: 9px 11px;
+  background: #0b1924;
+}
+
+.house-map-resolution span {
+  color: #7f97a5;
+  font-size: 7px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.house-map-resolution strong {
+  color: #dce8ed;
+  font-size: 9px;
+  line-height: 1.35;
+  text-transform: capitalize;
+}
+
+.house-map-resolution.is-resolved > div:first-child {
+  background: #113028;
+}
+
+.house-map-resolution.is-resolved > div:first-child strong {
+  color: #a8e4d5;
+}
+
+.house-map-resolution.is-unresolved > div:first-child {
+  background: #35221e;
+}
+
+.house-map-resolution.is-unresolved > div:first-child strong,
+.house-map-resolution .is-warning strong {
+  color: #f2b9a7;
+}
+
+@media (max-width: 640px) {
+  .house-map-gates {
+    display: grid;
+  }
+
+  .house-map-resolution {
+    grid-template-columns: 1fr 1fr;
+  }
+}

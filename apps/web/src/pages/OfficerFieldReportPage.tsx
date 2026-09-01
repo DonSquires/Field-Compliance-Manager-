@@ -21,7 +21,7 @@ const OfficerFieldReportPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [receipt, setReceipt] = useState<{ id: string; receivedAt: string } | null>(null);
+  const [receipt, setReceipt] = useState<{ id: string; receivedAt: string; shiftId: string | null; shiftLabel: string | null } | null>(null);
   const eventIdRef = useRef(crypto.randomUUID());
   const capturedAtRef = useRef(new Date().toISOString());
 
@@ -61,16 +61,16 @@ const OfficerFieldReportPage: React.FC = () => {
       p_immediate_action: form.immediateAction.trim() || null, p_follow_up_required: form.followUp,
       p_follow_up_notes: form.followUp ? form.followUpNotes.trim() : null,
     });
-    const result = (data as Array<{ id: string; received_at: string }> | null)?.[0];
+    const result = (data as Array<{ id: string; received_at: string; shift_id: string | null }> | null)?.[0];
     if (submitError || !result) setError(submitError?.message ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
-    else { setReceipt({ id: result.id, receivedAt: result.received_at }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
+    else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id);setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
     setSubmitting(false);
   };
 
   return <div className="officer-report-page">
     <header className="officer-report-header"><div><span>Field evidence</span><h1>Field report</h1><p>Submit operational, maintenance, or health and safety concerns.</p></div><button type="button" onClick={() => void loadData()} disabled={loading} title="Refresh reports"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
     {error && <div className="officer-report-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
-    {receipt && <div className="officer-report-message is-success" role="status"><CheckCircle2 size={17} /><span>Report confirmed · receipt {receipt.id.slice(0, 8)} · {new Date(receipt.receivedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span><button type="button" onClick={() => setReceipt(null)} title="Dismiss"><X size={16} /></button></div>}
+    {receipt && <div className="officer-report-message is-success" role="status"><CheckCircle2 size={17} /><span>Report confirmed · receipt {receipt.id.slice(0, 8)} · {receipt.shiftId ? `linked to ${receipt.shiftLabel ?? `shift ${receipt.shiftId.slice(0, 8)}`}` : 'not linked to a shift'} · {new Date(receipt.receivedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span><button type="button" onClick={() => setReceipt(null)} title="Dismiss"><X size={16} /></button></div>}
     <div className="officer-report-layout">
       <form className="officer-report-form" onSubmit={submitReport}><div className="officer-report-panel-heading"><div><span>New submission</span><h2>Report details</h2></div><ClipboardPlus size={20} /></div>
         <div className="officer-report-grid"><label><span>Type</span><select value={form.reportType} onChange={(e) => setForm({ ...form, reportType: e.target.value as ReportType })}><option value="incident">Incident</option><option value="maintenance">Maintenance</option><option value="health_safety">Health & safety</option></select></label><label><span>Severity</span><select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value as ReportSeverity })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div>

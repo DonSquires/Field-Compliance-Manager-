@@ -33,10 +33,31 @@ describe('governed CRM accounts', () => {
     expect(page).not.toMatch(/\.rpc\(["']accept_quote["']/);
   });
 
+  it('continues an accepted quote into its server-confirmed agreement', () => {
+    expect(page).toContain('receipt.service_agreement_id');
+    expect(page).toContain("quoteAction === 'accept' && !agreementId");
+    expect(page).toContain('Open service agreement');
+    expect(page).toContain("onNavigate('relationships', { accountId: quoteAcceptance.accountId, agreementId: quoteAcceptance.agreementId })");
+  });
+
   it('operates account relationships and invoice lifecycle through governed RPCs', () => {
     expect(page).toContain('CrmAccountWorkspace');
     expect(page).toMatch(/\.from\(["']invoices["']\)/);
     expect(page).toMatch(/\.rpc\(["']manage_crm_invoice["']/);
     expect(page).not.toMatch(/\.from\(["']invoices["']\)\.update/);
+  });
+
+  it('opens the exact account workspace once from explicit URL context', () => {
+    expect(page).toContain('openedContextAccountId');
+    expect(page).toContain('account.id === requestedAccountId');
+    expect(page).toContain('setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name })');
+  });
+
+  it('searches and manages the organization spine with evidence-backed next actions', () => {
+    expect(page).toContain('CrmOrganizationDialog');
+    expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
+    expect(page).toContain('Add organization');
+    expect(page).toContain('client.next_action');
+    expect(page).not.toMatch(/\.from\(["']organizations["']\)\.insert/);
   });
 });

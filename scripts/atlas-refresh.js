@@ -9,12 +9,30 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/OfficerSchedulePage.tsx',
   'apps/web/src/pages/RosterHRPage.tsx',
   'apps/web/src/pages/OfficerLeavePage.tsx',
+  'apps/web/src/pages/OrganizationSetupPage.tsx',
+  'apps/web/src/pages/UserManagementPage.tsx',
+  'apps/web/src/pages/AccessControlPage.tsx',
   'apps/web/src/pages/CRMPage.tsx',
+  'apps/web/src/pages/SiteBoundaryReviewPage.tsx',
+  'apps/web/src/pages/AccountOnboardingPage.tsx',
+  'apps/web/src/pages/ActivationHandoffsPage.tsx',
+  'apps/web/src/components/OperationalPlaceManager.tsx',
+  'apps/web/src/pages/LocationsPage.tsx',
+  'apps/web/src/pages/SiteDetailPage.tsx',
+  'apps/web/src/pages/ZoneDetailPage.tsx',
+  'apps/web/src/components/LocationHouseMap.tsx',
   'apps/web/src/pages/RelationshipWorkspacePage.tsx',
   'apps/web/src/components/CrmAccountWorkspace.tsx',
+  'apps/web/src/components/CrmAgreementSetupDialog.tsx',
+  'apps/web/src/components/CrmOperationalReadinessDialog.tsx',
+  'apps/web/src/components/CrmOrganizationDialog.tsx',
+  'apps/web/src/components/CrmSiteDialog.tsx',
+  'apps/web/src/components/UserIdentityWorkspace.tsx',
   'apps/web/src/pages/WelfareAlertsPage.tsx',
   'apps/web/src/pages/OfficerFieldReportPage.tsx',
   'apps/web/src/hooks/useOfficerSafety.ts',
+  'supabase/functions/process-officer-scan/index.ts',
+  'supabase/functions/resolve-point-context/index.ts',
   'supabase/migrations/20260830128000_roster_work_units.sql',
   'supabase/migrations/20260830129000_materialize_roster_slots.sql',
   'supabase/migrations/20260830130500_roster_slot_response.sql',
@@ -31,7 +49,28 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260830141000_govern_welfare_alert_transitions.sql',
   'supabase/migrations/20260830125000_submit_officer_field_report.sql',
   'supabase/migrations/20260830142000_harden_officer_field_report_submission.sql',
-  'supabase/migrations/20260830143000_govern_crm_contacts_and_activities.sql'
+  'supabase/migrations/20260830143000_govern_crm_contacts_and_activities.sql',
+  'supabase/migrations/20260830144000_govern_crm_organization_spine.sql',
+  'supabase/migrations/20260830145000_govern_user_identity_access.sql',
+  'supabase/migrations/20260831080000_govern_crm_site_creation.sql',
+  'supabase/migrations/20260831081000_govern_crm_site_boundary_review.sql',
+  'supabase/migrations/20260831082000_govern_crm_agreement_setup.sql',
+  'supabase/migrations/20260831083000_crm_operational_readiness.sql',
+  'supabase/migrations/20260831084000_crm_onboarding_activation.sql',
+  'supabase/migrations/20260831085000_scan_geofence_context.sql',
+  'supabase/migrations/20260831086000_resolve_verified_site_context.sql',
+  'supabase/migrations/20260831087000_authorize_resolve_context.sql',
+  'supabase/migrations/20260831088000_crm_boundary_visual_review.sql',
+  'supabase/migrations/20260831089000_fix_boundary_history_ambiguity.sql',
+  'supabase/migrations/20260831090000_crm_onboarding_ownership_history.sql',
+  'supabase/migrations/20260831091000_crm_activation_handoffs.sql',
+  'supabase/migrations/20260831092000_aam_e2e_seed.sql',
+  'supabase/migrations/20260831093000_crm_operational_geography.sql',
+  'supabase/migrations/20260831094000_govern_operational_place_management.sql',
+  'supabase/migrations/20260831095000_operational_place_editor.sql',
+  'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
+  'supabase/schemas/public/functions/resolve_context.sql',
+  'supabase/schemas/public/functions/is_zone_closed.sql'
 ];
 
 function walkFiles(rootDir, relativeDir) {
@@ -91,19 +130,20 @@ function componentName(sourceFile) {
 }
 
 function collectComponentEdges(sourceFile, content) {
-  const sourceName = componentName(sourceFile);
+  const source = sourceIdentity(sourceFile);
+  const sourceName = source.source_name;
   const edges = [];
-  const tableCalls = Array.from(content.matchAll(/supabase\s*\.\s*from\(['"]([^'"]+)['"]\)/g));
+  const tableCalls = Array.from(content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*from\(['"]([^'"]+)['"]\)/g));
   for (const [index, match] of tableCalls.entries()) {
     const chainEnd = content.indexOf(';', match.index);
     const nextCall = tableCalls[index + 1]?.index ?? content.length;
     const segmentEnd = chainEnd === -1 ? nextCall : Math.min(chainEnd, nextCall);
     const chain = content.slice(match.index, segmentEnd);
     const edgeKind = /\.\s*(?:insert|update|delete|upsert)\s*\(/.test(chain) ? 'writes' : 'reads';
-    edges.push({ source_type: 'component', source_name: sourceName, target_type: 'table', target_name: match[1], edge_kind: edgeKind, evidence_class: 'live-code', source_file: sourceFile, caller_context: `Supabase table ${edgeKind === 'writes' ? 'mutation' : 'query'} in component` });
+    edges.push({ ...source, target_type: 'table', target_name: match[1], edge_kind: edgeKind, evidence_class: 'live-code', source_file: sourceFile, caller_context: `Supabase table ${edgeKind === 'writes' ? 'mutation' : 'query'} in source` });
   }
-  for (const match of content.matchAll(/supabase\s*\.\s*rpc\(['"]([^'"]+)['"]/g)) {
-    edges.push({ source_type: 'component', source_name: sourceName, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in component' });
+  for (const match of content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*rpc\(\s*['"]([^'"]+)['"]/g)) {
+    edges.push({ ...source, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in source' });
   }
   return edges;
 }
@@ -117,10 +157,10 @@ function staleGeneratedEdgeIds(existingEdges, generatedEdges) {
 
 function collectManagedRpcEdges(sourceFile, content, inventory) {
   const edges = [];
-  const functionPattern = /create(?: or replace)? function public\.([a-zA-Z0-9_]+)[\s\S]*?as \$\$([\s\S]*?)\$\$;/gi;
+  const functionPattern = /create(?: or replace)? function public\.([a-zA-Z0-9_]+)[\s\S]*?as \$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\2\$;/gi;
   for (const match of content.matchAll(functionPattern)) {
     const sourceName = match[1];
-    const body = match[2];
+    const body = match[3];
     const writes = new Set();
     const reads = new Set();
     for (const write of body.matchAll(/(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?([a-zA-Z0-9_]+)/gi)) {
@@ -148,9 +188,9 @@ function collectManagedAtlas(rootDir = process.cwd()) {
     const filePath = path.join(rootDir, sourceFile);
     if (!fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, 'utf8');
-    edges.push(...(sourceFile.startsWith('apps/web/src/')
-      ? collectComponentEdges(sourceFile, content)
-      : collectManagedRpcEdges(sourceFile, content, inventory)));
+    edges.push(...(sourceFile.endsWith('.sql')
+      ? collectManagedRpcEdges(sourceFile, content, inventory)
+      : collectComponentEdges(sourceFile, content)));
   }
   const dedupedEdges = uniqueBy(edges, edgeKey);
   const nodes = uniqueBy(dedupedEdges.flatMap(edge => [
@@ -405,8 +445,10 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     }
   }
   for (const existing of existingEdges) {
+    const legacyManagedContext = MANAGED_SOURCES.includes(existing.source_file)
+      && /^\.from\(['"][^'"]+['"]\)\.(?:insert|update|upsert|delete)/.test(String(existing.caller_context || ''));
     if (existing.refresh_source === 'ci_generator'
-        && String(existing.caller_context || '').startsWith(OWNER_MARKER)
+        && (String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext)
         && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);

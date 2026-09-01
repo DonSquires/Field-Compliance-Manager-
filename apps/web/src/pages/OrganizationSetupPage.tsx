@@ -24,6 +24,7 @@ interface OrgProfile {
   enforcement_workflow_mode: string;
   jurisdiction_verification: string;
   status: string;
+  updated_at: string;
 }
 
 interface ModuleRow {
@@ -81,7 +82,7 @@ const OrganizationSetupPage: React.FC = () => {
         supabase
           .from('organizations')
           .select(
-            'id, name, contact_email, contact_phone, billing_email, billing_address, enforcement_workflow_mode, jurisdiction_verification, status'
+            'id, name, contact_email, contact_phone, billing_email, billing_address, enforcement_workflow_mode, jurisdiction_verification, status, updated_at'
           )
           .eq('id', orgId)
           .single(),
@@ -124,19 +125,17 @@ const OrganizationSetupPage: React.FC = () => {
       setSaving(true);
       setError(null);
 
-      // ATLAS WRITES: organizations
-      const { error } = await supabase
-        .from('organizations')
-        .update({
-          contact_email: org.contact_email,
-          contact_phone: org.contact_phone,
-          billing_email: org.billing_email,
-          billing_address: org.billing_address,
-          enforcement_workflow_mode: org.enforcement_workflow_mode,
-        })
-        .eq('id', org.id);
+      const { data, error } = await supabase.rpc('update_organization_profile', {
+        p_expected_updated_at: org.updated_at,
+        p_contact_email: org.contact_email,
+        p_contact_phone: org.contact_phone,
+        p_billing_email: org.billing_email,
+        p_billing_address: org.billing_address,
+        p_enforcement_workflow_mode: org.enforcement_workflow_mode,
+      });
 
       if (error) throw error;
+      if (data) setOrg(data as OrgProfile);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save organisation profile');
     } finally {

@@ -1,6 +1,6 @@
 # CRM Onboarding Workflow Audit
 
-Verified 2026-08-30 against the active AdminShell routes, current React pages,
+Verified 2026-08-31 against the active AdminShell routes, current React pages,
 `supabase/schema.sql`, and live Atlas. Bob's legacy-oriented recommendation is
 used here as a workflow hypothesis, not as evidence about the current UI.
 
@@ -20,27 +20,57 @@ used here as a workflow hypothesis, not as evidence about the current UI.
 - `bob-propose-client-onboarding` creates pending Bob proposal records. It is an
   optional governed producer, not the human onboarding workflow or canonical
   readiness owner.
+- The active CRM organization spine now searches scoped name/NZBN candidates
+  before creation, creates retry-safe inactive prospects, race-checks edits,
+  and shows the next readiness action from canonical contact, site, agreement,
+  module, commercial, and work-unit evidence.
+- Provider profile changes in Organization Setup and account organization changes
+  are both RPC-owned and audited. Direct authenticated organization mutation is
+  revoked.
+- CRM site creation is candidate-first, retry-safe, and audited. New sites begin
+  with explicit provisional, unverified boundary provenance.
+- The Sites route is an operational boundary-review queue. It establishes
+  provisional point-radius evidence, renders the governed GeoJSON, requires an
+  explicit human inspection confirmation, and verifies through the audited RPC.
+- Accepted operational agreements now expose governed covered-site and module
+  setup. Direct authenticated writes to agreement locations and modules are revoked.
+- Agreement readiness now evaluates canonical coverage, authoritative boundary,
+  module, positive billing-rate, attributed work-unit, and reporting-template
+  evidence. Every blocker links to its existing owning workspace.
+- Account Onboarding is now a durable target-live queue backed by a tenant-scoped
+  stage ledger. Review entry and activation are expected-state, blocker-checked,
+  row-locked, and audited server transitions.
 
 ## Gaps Confirmed
 
-1. No human, resumable onboarding record exists.
-2. Organization duplicate prevention is strong only when NZBN is known. Name
-   search is not a uniqueness guarantee.
-3. Site `address_match_key` is indexed but not unique, so candidate review must
-   precede creation and ambiguous matches must remain visible.
-4. Existing agreement readiness does not require an active primary contact,
-   accepted agreement, enabled module, authoritative/provisionally acknowledged
-   boundary, operational work unit, or explicit activation decision.
-5. Organization and service-agreement tables still expose broad direct mutation
-   grants and overlapping policies. A human onboarding UI must not write them
-   directly.
-6. There is no single operational handoff view joining what was sold, covered
-   places, contacts, modules, hazards, commercial readiness, and first actions.
+1. The durable ledger covers qualification, configuration, review, and activation.
+  It now records a named provider administrator, current stage note, target date,
+  expected-state version, and immutable transition history.
+2. Candidate search and in-hierarchy exact-name rejection are live. Name search
+  remains candidate evidence rather than a global uniqueness guarantee.
+3. Site `address_match_key` is indexed but not globally unique. The governed
+  account-scoped candidate and creation flow serializes duplicate review.
+4. The lightweight account summary readiness does not include boundary or
+  reporting evidence. Account Onboarding uses the detailed operational evaluator
+  as the canonical activation gate.
+5. The agreement header remains quote-lifecycle owned. Covered-site and module
+  rows are RPC-owned, but remaining agreement profile fields still need a
+  deliberately scoped owner before additional UI controls are exposed.
+6. Activation creates a governed handoff that joins current site access/safety
+  notes, attributed work units, and the first published roster action. Completion
+  tasks are version-checked, note-backed, and audited.
+7. Named ownership, stage-note history, and post-activation handoff are live.
 
 ## Target Workflow
 
 The target is a separate **Account Onboarding** workspace, not a long modal and
 not an extension of provider Organization Setup.
+
+The active administrator surfaces share an **Account flow** rail: Account,
+Agreement, Onboarding, Places, Roster, and Handoff. Navigation carries explicit
+account, agreement, ledger, location, site, zone, work-unit, and handoff IDs in
+the URL so owner links and browser history reopen the intended record rather
+than whichever record happens to be selected globally.
 
 ### Qualify
 
@@ -87,15 +117,15 @@ sales/finance role boundary that the authorization schema cannot enforce.
 
 Implement these boundaries before exposing their corresponding UI actions:
 
-1. `find_crm_onboarding_candidates` for scoped organization/NZBN and site/address
-   candidate search.
-2. `start_crm_onboarding` for retry-safe draft creation or attachment to an
-   existing account.
-3. Governed organization, site, agreement, location-link, and module transitions.
-4. `get_crm_onboarding_readiness` composed from canonical tables and the existing
-   agreement readiness evidence.
-5. `activate_crm_account` with row locking, expected draft state, blocker checks,
-   and audit provenance.
+1. **Complete:** governed site/address candidate search and retry-safe creation.
+2. **Complete:** resumable, versioned stage ledger attached to prospects.
+3. **Complete:** quote-owned agreement creation plus governed site boundary,
+  location-link, and module transitions.
+4. **Complete for accepted agreements:** operational readiness includes boundary,
+  commercial, work-unit, reporting, owner, and destination evidence. The account
+  summary RPC still remains a lighter qualification view.
+5. **Complete:** `activate_crm_account` uses row locking, expected prospect and
+  ledger state, operational blocker checks, and audit provenance.
 
 ## Acceptance Criteria
 
@@ -110,14 +140,21 @@ Implement these boundaries before exposing their corresponding UI actions:
   it.
 - The activation RPC rejects incomplete, stale, unauthorized, or duplicate
   transitions.
-- Desktop and mobile Playwright scenarios cover create, resume, blocked review,
-  completion, activation, stale-state rejection, and retry behavior.
+- Desktop and mobile Playwright scenarios cover candidate-first organization and
+  site creation, contact setup, agreement configuration, blocked readiness
+  handoffs, resume, activation, stale-stage rejection and retry, and visual
+  boundary verification.
 
 ## Delivery Order
 
-1. Draft ledger, scoped candidate search, and readiness RPC.
-2. Qualify lane using the existing governed account workspace for contacts.
-3. Governed site creation and boundary-review handoff.
-4. Governed agreement/location/module setup.
-5. Operational and commercial readiness integrations.
-6. Activation gate, handoff summary, incomplete queue, and time-to-live metrics.
+1. **Complete:** scoped candidate search, readiness RPC, and durable stage ledger are live.
+2. **Complete:** qualify lane uses the governed account workspace for contacts.
+3. **Complete:** governed site creation and boundary-review handoff.
+4. **Complete:** governed agreement/location/module setup.
+5. **Complete:** operational and commercial readiness integrations with owner handoffs.
+6. **Complete:** activation gate, incomplete queue, target-live ordering, age
+  metrics, stale-state recovery, and role-aligned navigation are live.
+7. **Complete:** provider-scoped named ownership, required stage notes,
+  expected-version workflow updates, and immutable transition history.
+8. **Complete:** activation-triggered site briefing, first-roster, and reporting
+  handoff tasks backed by live canonical evidence and audited task transitions.

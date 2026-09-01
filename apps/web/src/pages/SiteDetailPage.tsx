@@ -8,12 +8,17 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { workflowContextQuery } from '../lib/workflowNavigation';
+import { LocationHouseMap, type HouseMapZone } from '../components/LocationHouseMap';
 import './PageStyles.css';
+import './GeographyPages.css';
 
 interface ClientSite {
   id: string;
+  client_organization_id: string;
   name: string;
   address: string | null;
   site_type: string | null;
@@ -24,6 +29,10 @@ interface ClientSite {
   gps_lat: number | null;
   gps_lng: number | null;
   active: boolean;
+  location_id: string | null;
+  boundary: GeoJSON.GeoJsonObject | null;
+  boundary_status: string;
+  boundary_verification: string;
 }
 
 interface SiteService {
@@ -50,6 +59,8 @@ interface LocationNote {
 }
 
 const SiteDetailPage: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const [sites, setSites] = useState<ClientSite[]>([]);
   const [selectedSite, setSelectedSite] = useState<ClientSite | null>(null);
@@ -57,6 +68,8 @@ const SiteDetailPage: React.FC = () => {
   const [financial, setFinancial] = useState<FinancialConfig | null>(null);
   const [notes, setNotes] = useState<LocationNote[]>([]);
   const [newNote, setNewNote] = useState('');
+  const [house, setHouse] = useState<{ name: string; address: string | null } | null>(null);
+  const [zones, setZones] = useState<HouseMapZone[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,20 +83,17 @@ const SiteDetailPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const { data, error: err } = await supabase
-          .from('client_sites')
-          .select(
-            'id, name, address, site_type, risk_level, site_brief, access_instructions, hs_notes, gps_lat, gps_lng, active'
-          )
-          .eq('client_organization_id', orgId)
-          .order('name', { ascending: true });
+        const { data, error: err } = await supabase.rpc('get_crm_operational_geography');
 
         if (err) throw err;
-        setSites((data as ClientSite[]) || []);
+        const siteRows = ((data as { sites?: ClientSite[] } | null)?.sites) ?? [];
+        setSites(siteRows);
 
-        if (data && data.length > 0) {
-          setSelectedSite(data[0] as ClientSite);
-          await loadSiteDetail(data[0].id);
+        if (siteRows.length > 0) {
+          const requestedId = new URLSearchParams(location.search).get('site');
+          const initialSite = siteRows.find((site) => site.id === requestedId) ?? siteRows[0];
+          setSelectedSite(initialSite);
+          await loadSiteDetail(initialSite.id, initialSite);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load sites');
@@ -93,9 +103,9 @@ const SiteDetailPage: React.FC = () => {
     };
 
     loadSites();
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, location.search]);
 
-  const loadSiteDetail = async (siteId: string) => {
+  const loadSiteDetail = async (siteId: string, site?: ClientSite) => {
     try {
       // ATLAS READS: site_services, site_financial_config, location_notes
       const [servicesRes, financialRes, notesRes] = await Promise.all([
@@ -122,6 +132,21 @@ const SiteDetailPage: React.FC = () => {
       setServices((servicesRes.data as SiteService[]) || []);
       setFinancial((financialRes.data as FinancialConfig) || null);
       setNotes((notesRes.data as LocationNote[]) || []);
+      const currentSite = site ?? sites.find((row) => row.id === siteId);
+      if (currentSite?.location_id) {
+        const [houseRes, zonesRes] = await Promise.all([
+          supabase.from('locations').select('name,address,suburb,postcode').eq('id', currentSite.location_id).single(),
+          supabase.from('location_zones').select('id,name,boundary,center_point,boundary_status,boundary_verification').eq('location_id', currentSite.location_id),
+        ]);
+        if (houseRes.error) throw houseRes.error;
+        if (zonesRes.error) throw zonesRes.error;
+        const row = houseRes.data as { name: string; address: string | null; suburb: string | null; postcode: string | null };
+        setHouse({ name: row.name, address: [row.address, row.suburb, row.postcode].filter(Boolean).join(', ') || null });
+        setZones((zonesRes.data as HouseMapZone[]) ?? []);
+      } else {
+        setHouse({ name: currentSite?.name ?? 'Unlinked site', address: currentSite?.address ?? null });
+        setZones([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load site detail');
     }
@@ -129,7 +154,8 @@ const SiteDetailPage: React.FC = () => {
 
   const handleSelectSite = (site: ClientSite) => {
     setSelectedSite(site);
-    loadSiteDetail(site.id);
+    navigate(`/admin/site-360?site=${site.id}`, { replace: true });
+    loadSiteDetail(site.id, site);
   };
 
   const handleToggleService = async (service: SiteService) => {
@@ -186,7 +212,7 @@ const SiteDetailPage: React.FC = () => {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container geography-page">
       <header className="page-header">
         <h1>Sites</h1>
         <p className="subtitle">{sites.length} sites in this organisation</p>
@@ -262,6 +288,10 @@ const SiteDetailPage: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {house && <LocationHouseMap organizationId={profile?.organizationId ?? ''} house={house} sites={[selectedSite]} zones={zones} />}
+
+            {zones.length > 0 && <section className="reports-section"><h3>Zone facets ({zones.length})</h3><div className="contacts-list">{zones.map((zone) => <div className="contact-card" key={zone.id}><div className="contact-header"><h3>{zone.name}</h3><span className={`status-badge status-${zone.boundary_verification === 'verified' ? 'active' : 'inactive'}`}>{zone.boundary_verification}</span></div><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(`/admin/zones${workflowContextQuery({ accountId: selectedSite.client_organization_id, locationId: selectedSite.location_id ?? undefined, siteId: selectedSite.id, zoneId: zone.id })}`)}>Open zone</button></div></div>)}</div></section>}
 
             <section className="reports-section">
               <h3>Services ({services.length})</h3>

@@ -2366,9 +2366,11 @@ COMMENT ON FUNCTION "public"."evaluate_parking_compliance"("p_org_id" "uuid", "p
 
 
 CREATE OR REPLACE FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") RETURNS integer
-    LANGUAGE "plpgsql" SECURITY DEFINER
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
 declare
+  v_actor       uuid := auth.uid();
+  v_provider    uuid;
   v_agreement   record;
   v_count       integer := 0;
   v_data        jsonb;
@@ -2383,10 +2385,16 @@ declare
   v_breaches    integer;
   v_facilities  jsonb;
 begin
+  if p_period_start is null or p_period_end is null or p_period_start > p_period_end or p_period_end - p_period_start > 366 then
+    raise exception 'Select a valid report period of 366 days or less';
+  end if;
+  select organization_id into v_provider from user_profiles where id = v_actor and deactivated_at is null;
+  if v_provider is null or not is_admin_for_org(v_provider) then raise exception 'Active provider administrator required'; end if;
   for v_agreement in
     select id, organization_id, provider_organization_id, monthly_report_template_code
     from service_agreements
-    where monthly_report_template_code is not null
+    where provider_organization_id = v_provider
+      and monthly_report_template_code is not null
   loop
     -- SLA performance for this agreement over the period.
     select
@@ -2451,21 +2459,24 @@ begin
 
     insert into monthly_report_packs (
       organization_id, service_agreement_id, template_code,
-      period_start, period_end, status, data, generated_at, updated_at
+      period_start, period_end, status, data, generated_at, generated_by, updated_at
     ) values (
       v_agreement.provider_organization_id, v_agreement.id,
       v_agreement.monthly_report_template_code,
-      p_period_start, p_period_end, 'generated', v_data, now(), now()
+      p_period_start, p_period_end, 'generated', v_data, now(), v_actor, now()
     )
     on conflict (service_agreement_id, template_code, period_start)
     do update set
       data = excluded.data,
       status = case when monthly_report_packs.status = 'sent' then 'sent' else 'generated' end,
       generated_at = now(),
+      generated_by = v_actor,
       updated_at = now();
 
     v_count := v_count + 1;
   end loop;
+  insert into audit_log(organization_id, actor_user_id, action, target_table, metadata)
+  values(v_provider, v_actor, 'monthly_report_packs_generated', 'monthly_report_packs', jsonb_build_object('period_start', p_period_start, 'period_end', p_period_end, 'pack_count', v_count));
 
   return v_count;
 end;
@@ -2684,7 +2695,7 @@ COMMENT ON FUNCTION "public"."geometry_area_m2"("p_geojson" "jsonb") IS 'Read-on
 
 
 
-CREATE OR REPLACE FUNCTION "public"."get_approvals_activity"("p_limit" integer DEFAULT 50, "p_offset" integer DEFAULT 0, "p_statuses" "text"[] DEFAULT NULL::"text"[], "p_action_types" "text"[] DEFAULT NULL::"text"[]) RETURNS TABLE("id" "uuid", "action_type" "text", "status" "text", "bob_reasoning" "text", "confidence_score" real, "context_table" "text", "context_summary" "text", "created_at" timestamp with time zone, "applied_at" timestamp with time zone, "approved_at" timestamp with time zone, "proposed_payload" "jsonb", "amended_payload" "jsonb", "organization_id" "uuid", "org_name" "text", "triggered_by" "uuid", "triggered_by_name" "text", "user_id" "uuid", "user_name" "text", "approved_by" "uuid", "approved_by_name" "text", "rejection_reason" "text", "error_message" "text", "result_table" "text", "result_record_id" "uuid", "assigned_approver_id" "uuid", "can_decide" boolean)
+CREATE OR REPLACE FUNCTION "public"."get_approvals_activity"("p_limit" integer DEFAULT 50, "p_offset" integer DEFAULT 0, "p_statuses" "text"[] DEFAULT NULL::"text"[], "p_action_types" "text"[] DEFAULT NULL::"text"[]) RETURNS TABLE("id" "uuid", "action_type" "text", "status" "text", "bob_reasoning" "text", "confidence_score" real, "context_table" "text", "context_summary" "text", "created_at" timestamp with time zone, "applied_at" timestamp with time zone, "approved_at" timestamp with time zone, "proposed_payload" "jsonb", "amended_payload" "jsonb", "organization_id" "uuid", "org_name" "text", "triggered_by" "uuid", "triggered_by_name" "text", "user_id" "uuid", "user_name" "text", "approved_by" "uuid", "approved_by_name" "text", "rejection_reason" "text", "error_message" "text", "result_table" "text", "result_record_id" "uuid", "assigned_approver_id" "uuid", "assigned_approver_name" "text", "can_decide" boolean)
     LANGUAGE "plpgsql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -2733,6 +2744,7 @@ begin
     a.result_table,
     a.result_record_id,
     a.assigned_approver_id,
+    (select up4.display_name from public.user_profiles up4 where up4.id = a.assigned_approver_id) as assigned_approver_name,
     case
       when a.status not in ('pending', 'pending_approval', 'proposed') then false
       when v_role = 'grand_master' then true
@@ -2803,14 +2815,14 @@ BEGIN
       RAISE EXCEPTION 'get_boundary_history: access denied for organization %', p_entity_id;
     END IF;
   ELSIF p_entity_type = 'location_zone' THEN
-    SELECT organization_id INTO v_org_id
-      FROM public.location_zones WHERE id = p_entity_id;
+    SELECT z.organization_id INTO v_org_id
+      FROM public.location_zones z WHERE z.id = p_entity_id;
     IF NOT FOUND OR NOT org_access_allowed(v_org_id) THEN
       RAISE EXCEPTION 'get_boundary_history: access denied for location_zone %', p_entity_id;
     END IF;
   ELSIF p_entity_type = 'client_site' THEN
-    SELECT client_organization_id INTO v_org_id
-      FROM public.client_sites WHERE id = p_entity_id;
+    SELECT s.client_organization_id INTO v_org_id
+      FROM public.client_sites s WHERE s.id = p_entity_id;
     IF NOT FOUND OR NOT org_access_allowed(v_org_id) THEN
       RAISE EXCEPTION 'get_boundary_history: access denied for client_site %', p_entity_id;
     END IF;
@@ -3375,6 +3387,7 @@ begin
   return v_shift;
 end;$$;
 
+
 ALTER FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) OWNER TO "postgres";
 
 COMMENT ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) IS 'Creates an authorized roster shift after work-readiness, leave, timing, and overlap checks.';
@@ -3406,6 +3419,33 @@ $$;
 ALTER FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") OWNER TO "postgres";
 
 COMMENT ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") IS 'Creates one retry-safe, self-owned, append-only handover per eligible shift and audits submission.';
+
+
+CREATE OR REPLACE FUNCTION "public"."complete_officer_shift"("p_shift_id" "uuid", "p_expected_status" "text") RETURNS TABLE("shift_id" "uuid", "shift_status" "text", "completed_at" timestamp with time zone)
+    LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
+declare v_actor uuid:=auth.uid();v_shift public.shifts%rowtype;v_completed_at timestamptz:=clock_timestamp();
+begin
+  if v_actor is null then raise exception 'Authentication required';end if;
+  select s.* into v_shift from public.shifts s where s.id=p_shift_id for update;
+  if not found then raise exception 'Shift not found';end if;
+  if v_shift.officer_user_id<>v_actor then raise exception 'Shift does not belong to the authenticated officer';end if;
+  if v_shift.status<>p_expected_status then raise exception 'Shift changed from expected status % to %',p_expected_status,v_shift.status;end if;
+  if v_shift.status<>'in_progress' then raise exception 'Only an in-progress shift can be completed';end if;
+  if not exists(select 1 from public.shift_debriefs d where d.shift_id=v_shift.id and d.officer_user_id=v_actor) then raise exception 'Submit the shift debrief before completing the shift';end if;
+  if exists(select 1 from public.shift_stops st where st.shift_id=v_shift.id and st.status not in('completed','skipped','cancelled')) then raise exception 'Complete or skip every shift stop before completing the shift';end if;
+  if exists(select 1 from public.shift_stop_modules sm join public.shift_stops st on st.id=sm.shift_stop_id where st.shift_id=v_shift.id and sm.is_required and sm.status not in('completed','skipped')) then raise exception 'Complete or skip every required module task before completing the shift';end if;
+  if exists(select 1 from public.dispatch_jobs j where j.shift_id=v_shift.id and j.status not in('completed','cancelled')) then raise exception 'Complete or cancel every dispatch job before completing the shift';end if;
+  if exists(select 1 from public.welfare_alerts w where w.shift_id=v_shift.id and w.status<>'resolved') then raise exception 'Resolve active welfare alerts before completing the shift';end if;
+  update public.shifts set status='completed',actual_end=coalesce(actual_end,v_completed_at) where id=v_shift.id returning * into v_shift;
+  update public.roster_slots set status='completed',updated_at=v_completed_at where linked_shift_id=v_shift.id and status in('published','accepted');
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_shift.organization_id,v_actor,'officer_shift_completed','shifts',v_shift.id,jsonb_build_object('previous_status',p_expected_status,'actual_end',v_shift.actual_end));
+  return query select v_shift.id,v_shift.status,v_shift.actual_end;
+end;
+$$;
+
+ALTER FUNCTION "public"."complete_officer_shift"("p_shift_id" "uuid", "p_expected_status" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."complete_officer_shift"("p_shift_id" "uuid", "p_expected_status" "text") IS 'Allows the owning officer to complete an in-progress shift only after debrief and all operational, module, dispatch, and welfare work is terminal.';
 
 
 
@@ -3499,7 +3539,7 @@ ALTER FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_ser
 
 COMMENT ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") IS 'Idempotent admin dispatch creation with optional atomic resource assignment and SLA ownership.';
 
-CREATE OR REPLACE FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "status" "text")
+CREATE OR REPLACE FUNCTION "public"."advance_dispatch_job_status"("p_job_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "status" "text", "shift_id" "uuid", "completed_at" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public'
     AS $$
 declare
@@ -3534,7 +3574,10 @@ begin
     select 1 from dispatch_jobs other where other.dispatch_resource_id = v_job.dispatch_resource_id
       and other.id <> p_job_id and other.status in ('dispatched', 'acknowledged', 'en_route', 'on_scene')
   ) then update dispatch_resources set status = 'available' where id = v_job.dispatch_resource_id; end if;
-  return query select p_job_id, p_next_status;
+  return query
+  select updated.id, updated.status, updated.shift_id, updated.completed_at
+  from dispatch_jobs updated
+  where updated.id = p_job_id;
 end;
 $$;
 
@@ -4038,7 +4081,7 @@ ALTER FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_e
 COMMENT ON FUNCTION "public"."review_officer_field_report"("p_report_id" "uuid", "p_expected_status" "public"."report_status", "p_review_notes" "text") IS 'Race-checks and records the submitted-to-reviewed field report transition with required supervisor notes and audit provenance.';
 
 
-CREATE OR REPLACE FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text" DEFAULT NULL::"text", "p_address" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision, "p_shift_id" "uuid" DEFAULT NULL::"uuid", "p_immediate_action" "text" DEFAULT NULL::"text", "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone)
+CREATE OR REPLACE FUNCTION "public"."submit_officer_field_report"("p_client_event_id" "uuid", "p_reported_at" timestamp with time zone, "p_report_type" "public"."report_type", "p_severity" "public"."report_severity", "p_title" "text", "p_description" "text", "p_location_name" "text" DEFAULT NULL::"text", "p_address" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision, "p_shift_id" "uuid" DEFAULT NULL::"uuid", "p_immediate_action" "text" DEFAULT NULL::"text", "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "received_at" timestamp with time zone, "shift_id" "uuid")
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
 declare v_user_id uuid := auth.uid(); v_org_id uuid; v_existing public.officer_field_reports%rowtype; v_report public.officer_field_reports%rowtype;
 begin
@@ -4054,12 +4097,12 @@ begin
   if p_follow_up_required and nullif(trim(coalesce(p_follow_up_notes, '')), '') is null then raise exception 'Follow-up notes are required'; end if;
   if p_shift_id is not null and not exists (select 1 from public.shifts s where s.id = p_shift_id and s.organization_id = v_org_id and s.officer_user_id = v_user_id) then raise exception 'Shift does not belong to the authenticated officer'; end if;
   select r.* into v_existing from public.officer_field_reports r where r.organization_id = v_org_id and r.officer_id = v_user_id and r.client_event_id = p_client_event_id;
-  if found then return query select v_existing.id, false, v_existing.created_at; return; end if;
+  if found then return query select v_existing.id, false, v_existing.created_at, v_existing.shift_id; return; end if;
   insert into public.officer_field_reports (organization_id, officer_id, client_event_id, reported_at, report_type, severity, status, title, description, location_name, address, gps_lat, gps_lng, shift_id, immediate_action, follow_up_required, follow_up_notes)
   values (v_org_id, v_user_id, p_client_event_id, p_reported_at, p_report_type, p_severity, 'submitted', trim(p_title), trim(p_description), nullif(trim(coalesce(p_location_name, '')), ''), nullif(trim(coalesce(p_address, '')), ''), p_gps_lat, p_gps_lng, p_shift_id, nullif(trim(coalesce(p_immediate_action, '')), ''), coalesce(p_follow_up_required, false), nullif(trim(coalesce(p_follow_up_notes, '')), '')) returning * into v_report;
   insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
   values (v_org_id, v_user_id, 'officer_field_report_submitted', 'officer_field_reports', v_report.id, jsonb_build_object('report_type', v_report.report_type, 'severity', v_report.severity, 'shift_id', v_report.shift_id, 'follow_up_required', v_report.follow_up_required));
-  return query select v_report.id, true, v_report.created_at;
+  return query select v_report.id, true, v_report.created_at, v_report.shift_id;
 end;
 $$;
 
@@ -9841,7 +9884,7 @@ CREATE TABLE IF NOT EXISTS "public"."geofence_boundary_history" (
     "change_reason" "text",
     "version" integer DEFAULT 1 NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "geofence_boundary_history_changed_via_check" CHECK (("changed_via" = ANY (ARRAY['governed_proposal'::"text", 'direct_edit'::"text", 'reconciliation'::"text", 'refresh'::"text", 'verification'::"text", 'backfill'::"text"]))),
+    CONSTRAINT "geofence_boundary_history_changed_via_check" CHECK (("changed_via" = ANY (ARRAY['governed_proposal'::"text", 'direct_edit'::"text", 'admin_upload'::"text", 'reconciliation'::"text", 'refresh'::"text", 'verification'::"text", 'backfill'::"text"]))),
     CONSTRAINT "geofence_boundary_history_entity_type_check" CHECK (("entity_type" = ANY (ARRAY['organization'::"text", 'location_zone'::"text", 'client_site'::"text"])))
 );
 
@@ -13523,6 +13566,8 @@ CREATE TABLE IF NOT EXISTS "public"."staff_credentials" (
     "verified_by" "uuid",
     "verified_at" timestamp with time zone,
     "notes" "text",
+    "client_request_id" "uuid",
+    "replaces_credential_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     CONSTRAINT "staff_credentials_credential_type_check" CHECK (("credential_type" = ANY (ARRAY['certificate_of_authority'::"text", 'warrant_of_authority'::"text", 'drivers_licence'::"text", 'first_aid'::"text", 'security_licence'::"text", 'firearms_licence'::"text", 'noise_control_warrant'::"text", 'biosecurity_warrant'::"text", 'other'::"text"])))
 );
@@ -20213,6 +20258,10 @@ ALTER TABLE ONLY "public"."staff_credentials"
     ADD CONSTRAINT "staff_credentials_verified_by_fkey" FOREIGN KEY ("verified_by") REFERENCES "public"."user_profiles"("id");
 
 
+ALTER TABLE ONLY "public"."staff_credentials"
+  ADD CONSTRAINT "staff_credentials_replaces_credential_id_fkey" FOREIGN KEY ("replaces_credential_id") REFERENCES "public"."staff_credentials"("id") ON DELETE RESTRICT;
+
+
 
 ALTER TABLE ONLY "public"."staff_documents"
     ADD CONSTRAINT "staff_documents_credential_id_fkey" FOREIGN KEY ("credential_id") REFERENCES "public"."staff_credentials"("id") ON DELETE SET NULL;
@@ -25025,9 +25074,8 @@ GRANT ALL ON FUNCTION "public"."evaluate_parking_compliance"("p_org_id" "uuid", 
 
 
 
-GRANT ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "anon";
-GRANT ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "service_role";
+REVOKE ALL ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") FROM PUBLIC, "anon";
+GRANT EXECUTE ON FUNCTION "public"."generate_due_report_packs"("p_period_start" "date", "p_period_end" "date") TO "authenticated", "service_role";
 
 
 
@@ -25136,6 +25184,11 @@ REVOKE ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_c
 REVOKE ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM "anon";
 GRANT ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."complete_officer_shift"("p_shift_id" "uuid", "p_expected_status" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."complete_officer_shift"("p_shift_id" "uuid", "p_expected_status" "text") FROM "anon";
+GRANT EXECUTE ON FUNCTION "public"."complete_officer_shift"("p_shift_id" "uuid", "p_expected_status" "text") TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."complete_officer_shift"("p_shift_id" "uuid", "p_expected_status" "text") TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."create_dispatch_job"("p_organization_id" "uuid", "p_service_agreement_id" "uuid", "p_client_site_id" "uuid", "p_client_request_id" "uuid", "p_job_type" "text", "p_priority" "text", "p_sla_minutes" integer, "p_dispatch_resource_id" "uuid", "p_briefing_notes" "text", "p_shift_id" "uuid") TO "authenticated";
@@ -26856,8 +26909,7 @@ GRANT ALL ON TABLE "public"."staff_branch_authorisations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."staff_credentials" TO "anon";
-GRANT ALL ON TABLE "public"."staff_credentials" TO "authenticated";
+GRANT SELECT ON TABLE "public"."staff_credentials" TO "authenticated";
 GRANT ALL ON TABLE "public"."staff_credentials" TO "service_role";
 
 
@@ -27283,6 +27335,12 @@ declare v_actor uuid:=auth.uid();v_staff public.staff_profiles%rowtype;v_assessm
 REVOKE ALL ON FUNCTION "public"."get_staff_readiness_assessment"(uuid),"public"."set_staff_work_readiness"(uuid,boolean,boolean,text) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."get_staff_readiness_assessment"(uuid),"public"."set_staff_work_readiness"(uuid,boolean,boolean,text) TO "authenticated","service_role";
 
+CREATE UNIQUE INDEX IF NOT EXISTS "staff_credentials_client_request_idx" ON "public"."staff_credentials"("organization_id","client_request_id") WHERE "client_request_id" IS NOT NULL;
+REVOKE ALL ON TABLE "public"."staff_credentials" FROM PUBLIC,"anon";REVOKE INSERT,UPDATE,DELETE ON TABLE "public"."staff_credentials" FROM "authenticated";GRANT SELECT ON TABLE "public"."staff_credentials" TO "authenticated";
+CREATE FUNCTION "public"."renew_staff_credential"(p_client_request_id uuid,p_source_credential_id uuid,p_expected_expiry_date date,p_credential_number text,p_issuing_authority text,p_issued_date date,p_expiry_date date,p_evidence_notes text) RETURNS TABLE(credential_id uuid,staff_id uuid,verified boolean,verified_at timestamptz,created boolean) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_source public.staff_credentials%rowtype;v_renewal public.staff_credentials%rowtype;v_number text:=nullif(trim(coalesce(p_credential_number,'')),'');v_authority text:=nullif(trim(coalesce(p_issuing_authority,'')),'');v_notes text:=nullif(trim(coalesce(p_evidence_notes,'')),'');begin if p_client_request_id is null then raise exception 'Client request ID is required';end if;select c.* into v_source from public.staff_credentials c where c.id=p_source_credential_id for update;if not found then raise exception 'Source credential not found';end if;if not public.is_admin_for_org(v_source.organization_id) then raise exception 'Active provider administrator required';end if;if v_source.expiry_date is distinct from p_expected_expiry_date then raise exception 'Credential expiry changed from expected state';end if;if v_source.expiry_date is null then raise exception 'Only expiring credentials can be renewed';end if;if v_number is null or v_authority is null or v_notes is null or length(v_notes)<10 then raise exception 'Credential number, issuing authority, and evidence notes are required';end if;if p_issued_date is null or p_expiry_date is null or p_issued_date>p_expiry_date or p_expiry_date<=v_source.expiry_date then raise exception 'Renewal dates must establish a later valid credential';end if;perform pg_advisory_xact_lock(hashtextextended(p_client_request_id::text,0));select c.* into v_renewal from public.staff_credentials c where c.organization_id=v_source.organization_id and c.client_request_id=p_client_request_id;if found then if v_renewal.replaces_credential_id<>v_source.id then raise exception 'Credential renewal request identity collision';end if;return query select v_renewal.id,v_renewal.staff_id,v_renewal.verified,v_renewal.verified_at,false;return;end if;insert into public.staff_credentials(staff_id,organization_id,credential_type,credential_number,issuing_authority,issued_date,expiry_date,authorized_activities,verified,verified_by,verified_at,notes,client_request_id,replaces_credential_id) values(v_source.staff_id,v_source.organization_id,v_source.credential_type,v_number,v_authority,p_issued_date,p_expiry_date,v_source.authorized_activities,true,v_actor,clock_timestamp(),v_notes,p_client_request_id,v_source.id) returning * into v_renewal;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_source.organization_id,v_actor,'staff_credential_renewed','staff_credentials',v_renewal.id,jsonb_build_object('source_credential_id',v_source.id,'staff_id',v_source.staff_id,'credential_type',v_source.credential_type,'previous_expiry_date',v_source.expiry_date,'expiry_date',v_renewal.expiry_date,'evidence_notes',v_notes));return query select v_renewal.id,v_renewal.staff_id,v_renewal.verified,v_renewal.verified_at,true;end;$$;
+REVOKE ALL ON FUNCTION "public"."renew_staff_credential"(uuid,uuid,date,text,text,date,date,text) FROM PUBLIC,"anon";GRANT EXECUTE ON FUNCTION "public"."renew_staff_credential"(uuid,uuid,date,text,text,date,date,text) TO "authenticated","service_role";
+
 
 ALTER TABLE "public"."quotes" ADD COLUMN IF NOT EXISTS "client_request_id" uuid;
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_quotes_client_request" ON "public"."quotes"(provider_org_id,client_request_id) WHERE client_request_id IS NOT NULL;
@@ -27368,3 +27426,617 @@ DROP POLICY IF EXISTS "invoices_update" ON "public"."invoices";
 REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."invoices" FROM PUBLIC,"anon","authenticated";
 REVOKE ALL ON FUNCTION "public"."manage_crm_invoice"(uuid,text,text,text) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."manage_crm_invoice"(uuid,text,text,text) TO "authenticated","service_role";
+
+
+ALTER TABLE "public"."organizations" ADD COLUMN IF NOT EXISTS "client_request_id" uuid;
+ALTER TABLE "public"."organizations" ADD COLUMN IF NOT EXISTS "updated_at" timestamptz NOT NULL DEFAULT now();
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_organizations_parent_client_request" ON "public"."organizations"("parent_organization_id","client_request_id") WHERE "client_request_id" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "idx_organizations_parent_normalized_name" ON "public"."organizations"("parent_organization_id",lower(trim("name")));
+
+CREATE FUNCTION "public"."find_crm_organization_candidates"(p_query text,p_nzbn text DEFAULT NULL) RETURNS TABLE(id uuid,name text,organization_type text,status text,nzbn text,parent_organization_id uuid,match_reason text,manageable boolean) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_query text:=lower(trim(coalesce(p_query,'')));v_nzbn text:=nullif(regexp_replace(coalesce(p_nzbn,''),'[^0-9]','','g'),'');begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;if char_length(v_query)<2 and v_nzbn is null then raise exception 'Enter at least two name characters or an NZBN';end if;return query select o.id,o.name,o.organization_type,o.status,o.nzbn,o.parent_organization_id,case when v_nzbn is not null and regexp_replace(coalesce(o.nzbn,''),'[^0-9]','','g')=v_nzbn then 'Exact NZBN' when lower(trim(o.name))=v_query then 'Exact name' else 'Similar name' end,(o.id=v_provider or o.parent_organization_id=v_provider or public.crm_actor_can_manage_account(o.id)) from public.organizations o where (o.id=v_provider or o.parent_organization_id=v_provider or public.crm_actor_can_manage_account(o.id) or o.discoverable) and ((char_length(v_query)>=2 and lower(o.name) like '%'||v_query||'%') or (v_nzbn is not null and regexp_replace(coalesce(o.nzbn,''),'[^0-9]','','g')=v_nzbn)) order by case when v_nzbn is not null and regexp_replace(coalesce(o.nzbn,''),'[^0-9]','','g')=v_nzbn then 0 when lower(trim(o.name))=v_query then 1 else 2 end,o.name limit 20;end;$$;
+
+CREATE FUNCTION "public"."manage_crm_organization"(p_client_request_id uuid,p_organization_id uuid,p_expected_updated_at timestamptz,p_action text,p_name text,p_organization_type text,p_nzbn text DEFAULT NULL,p_company_registration_number text DEFAULT NULL,p_contact_email text DEFAULT NULL,p_contact_phone text DEFAULT NULL,p_billing_email text DEFAULT NULL,p_billing_address text DEFAULT NULL,p_account_notes text DEFAULT NULL,p_status text DEFAULT NULL) RETURNS public.organizations LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_org public.organizations%rowtype;v_name text:=nullif(trim(coalesce(p_name,'')),'');v_nzbn text:=nullif(regexp_replace(coalesce(p_nzbn,''),'[^0-9]','','g'),'');v_status text;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;if p_action='create' then if p_client_request_id is null then raise exception 'client_request_id is required';end if;select o.* into v_org from public.organizations o where o.parent_organization_id=v_provider and o.client_request_id=p_client_request_id;if found then return v_org;end if;else select o.* into v_org from public.organizations o where o.id=p_organization_id for update;if not found then raise exception 'Organization not found';end if;if v_org.id<>v_provider and v_org.parent_organization_id<>v_provider then raise exception 'Organization is outside your managed account hierarchy';end if;if v_org.updated_at<>p_expected_updated_at then raise exception 'Organization changed since it was opened';end if;end if;if p_action in('create','update') then if v_name is null or char_length(v_name)>200 then raise exception 'Organization name is required and must be 200 characters or fewer';end if;if p_organization_type not in('client','branch','contractor','government','private_enterprise') then raise exception 'Unsupported CRM organization type';end if;if exists(select 1 from public.organizations o where o.parent_organization_id=v_provider and lower(trim(o.name))=lower(v_name) and o.id is distinct from p_organization_id) then raise exception 'An organization with this name already exists in your account hierarchy';end if;if v_nzbn is not null and char_length(v_nzbn)<>13 then raise exception 'NZBN must contain 13 digits';end if;if p_action='create' then insert into public.organizations(name,organization_type,parent_organization_id,active,status,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes,client_request_id)values(v_name,p_organization_type,v_provider,false,'prospect',v_nzbn,nullif(trim(coalesce(p_company_registration_number,'')),''),nullif(lower(trim(coalesce(p_contact_email,''))),''),nullif(trim(coalesce(p_contact_phone,'')),''),nullif(lower(trim(coalesce(p_billing_email,''))),''),nullif(trim(coalesce(p_billing_address,'')),''),nullif(trim(coalesce(p_account_notes,'')),''),p_client_request_id)returning * into v_org;else update public.organizations set name=v_name,organization_type=p_organization_type,nzbn=v_nzbn,company_registration_number=nullif(trim(coalesce(p_company_registration_number,'')),''),contact_email=nullif(lower(trim(coalesce(p_contact_email,''))),''),contact_phone=nullif(trim(coalesce(p_contact_phone,'')),''),billing_email=nullif(lower(trim(coalesce(p_billing_email,''))),''),billing_address=nullif(trim(coalesce(p_billing_address,'')),''),account_notes=nullif(trim(coalesce(p_account_notes,'')),''),updated_at=clock_timestamp() where id=v_org.id returning * into v_org;end if;elsif p_action='set_status' then if v_org.id=v_provider then raise exception 'Provider status is managed outside CRM accounts';end if;v_status:=p_status;if v_status not in('prospect','suspended','archived') then raise exception 'CRM cannot directly activate an organization';end if;if v_org.status='archived' and v_status='suspended' then raise exception 'Archived organizations must return to prospect review first';end if;update public.organizations set status=v_status,active=false,updated_at=clock_timestamp() where id=v_org.id returning * into v_org;else raise exception 'Unsupported organization action';end if;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_provider,v_actor,'crm_organization_'||p_action,'organizations',v_org.id,jsonb_build_object('name',v_org.name,'organization_type',v_org.organization_type,'status',v_org.status));return v_org;end;$$;
+
+CREATE FUNCTION "public"."get_crm_organization_readiness"(p_organization_ids uuid[] DEFAULT NULL) RETURNS TABLE(organization_id uuid,organization_status text,identity_status text,contact_status text,location_status text,agreement_status text,module_status text,billing_status text,operations_status text,blockers text[],next_action text) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;return query with accounts as(select o.* from public.organizations o where o.parent_organization_id=v_provider and (p_organization_ids is null or o.id=any(p_organization_ids))),facts as(select a.id,a.status,(a.name<>'' and a.organization_type is not null) identity_ready,exists(select 1 from public.crm_contacts c where c.organization_id=a.id and c.is_primary and c.deactivated_at is null) contact_ready,exists(select 1 from public.client_sites s where s.client_organization_id=a.id and s.active) location_ready,exists(select 1 from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id and sa.invitation_status='accepted') agreement_ready,exists(select 1 from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id and sa.invitation_status='accepted' and cardinality(sa.enabled_modules)>0) module_ready,exists(select 1 from public.service_agreements sa join public.crm_commercial_settings cc on cc.service_agreement_id=sa.id where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id) billing_ready,exists(select 1 from public.roster_work_units wu join public.service_agreement_locations sal on sal.id=wu.service_agreement_location_id join public.service_agreements sa on sa.id=sal.service_agreement_id where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id and wu.active) operations_ready from accounts a)select f.id,f.status,case when f.identity_ready then 'ready' else 'blocked' end,case when f.contact_ready then 'ready' else 'blocked' end,case when f.location_ready then 'ready' else 'blocked' end,case when f.agreement_ready then 'ready' else 'blocked' end,case when f.module_ready then 'ready' else 'blocked' end,case when f.billing_ready then 'ready' else 'blocked' end,case when f.operations_ready then 'ready' else 'blocked' end,array_remove(array[case when not f.identity_ready then 'Confirm the organization identity' end,case when not f.contact_ready then 'Add a primary contact' end,case when not f.location_ready then 'Add an active covered site' end,case when not f.agreement_ready then 'Create and accept a service agreement' end,case when not f.module_ready then 'Enable at least one agreement module' end,case when not f.billing_ready then 'Complete commercial settings' end,case when not f.operations_ready then 'Create an operational work unit' end],null),case when not f.contact_ready then 'Add primary contact' when not f.location_ready then 'Add covered site' when not f.agreement_ready then 'Create service agreement' when not f.module_ready then 'Enable service modules' when not f.billing_ready then 'Complete billing setup' when not f.operations_ready then 'Complete operational setup' else 'Ready for activation review' end from facts f order by f.id;end;$$;
+
+CREATE FUNCTION "public"."update_organization_profile"(p_expected_updated_at timestamptz,p_contact_email text,p_contact_phone text,p_billing_email text,p_billing_address text,p_enforcement_workflow_mode text) RETURNS public.organizations LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_org public.organizations%rowtype;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active organization administrator required';end if;select o.* into v_org from public.organizations o where o.id=v_provider for update;if not found then raise exception 'Organization not found';end if;if v_org.updated_at<>p_expected_updated_at then raise exception 'Organization changed since it was opened';end if;if p_enforcement_workflow_mode not in('admin_first','officer_direct','hybrid') then raise exception 'Unsupported enforcement workflow mode';end if;update public.organizations set contact_email=nullif(lower(trim(coalesce(p_contact_email,''))),''),contact_phone=nullif(trim(coalesce(p_contact_phone,'')),''),billing_email=nullif(lower(trim(coalesce(p_billing_email,''))),''),billing_address=nullif(trim(coalesce(p_billing_address,'')),''),enforcement_workflow_mode=p_enforcement_workflow_mode,updated_at=clock_timestamp() where id=v_provider returning * into v_org;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_provider,v_actor,'organization_profile_updated','organizations',v_provider,jsonb_build_object('enforcement_workflow_mode',v_org.enforcement_workflow_mode,'billing_configured',v_org.billing_email is not null));return v_org;end;$$;
+
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."organizations" FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."find_crm_organization_candidates"(text,text) FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."manage_crm_organization"(uuid,uuid,timestamptz,text,text,text,text,text,text,text,text,text,text,text) FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."get_crm_organization_readiness"(uuid[]) FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."update_organization_profile"(timestamptz,text,text,text,text,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."find_crm_organization_candidates"(text,text),"public"."manage_crm_organization"(uuid,uuid,timestamptz,text,text,text,text,text,text,text,text,text,text,text),"public"."get_crm_organization_readiness"(uuid[]),"public"."update_organization_profile"(timestamptz,text,text,text,text,text) TO "authenticated","service_role";
+
+CREATE OR REPLACE FUNCTION "public"."find_crm_organization_candidates"(p_query text,p_nzbn text DEFAULT NULL)
+RETURNS TABLE(id uuid,name text,organization_type text,status text,nzbn text,parent_organization_id uuid,match_reason text,manageable boolean)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_query text:=lower(trim(coalesce(p_query,'')));v_nzbn text:=nullif(regexp_replace(coalesce(p_nzbn,''),'[^0-9]','','g'),'');
+begin
+  select actor.organization_id into v_provider from public.user_profiles actor where actor.id=v_actor and actor.deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  if char_length(v_query)<2 and v_nzbn is null then raise exception 'Enter at least two name characters or an NZBN';end if;
+  return query select o.id,o.name,o.organization_type,o.status,o.nzbn,o.parent_organization_id,
+    case when v_nzbn is not null and regexp_replace(coalesce(o.nzbn,''),'[^0-9]','','g')=v_nzbn then 'Exact NZBN' when lower(trim(o.name))=v_query then 'Exact name' else 'Similar name' end,
+    (o.id=v_provider or o.parent_organization_id=v_provider or public.crm_actor_can_manage_account(o.id))
+  from public.organizations o
+  where (o.id=v_provider or o.parent_organization_id=v_provider or public.crm_actor_can_manage_account(o.id) or o.discoverable)
+    and ((char_length(v_query)>=2 and lower(o.name) like '%'||v_query||'%') or (v_nzbn is not null and regexp_replace(coalesce(o.nzbn,''),'[^0-9]','','g')=v_nzbn))
+  order by case when v_nzbn is not null and regexp_replace(coalesce(o.nzbn,''),'[^0-9]','','g')=v_nzbn then 0 when lower(trim(o.name))=v_query then 1 else 2 end,o.name limit 20;
+end;$$;
+
+CREATE OR REPLACE FUNCTION "public"."manage_crm_organization"(p_client_request_id uuid,p_organization_id uuid,p_expected_updated_at timestamptz,p_action text,p_name text,p_organization_type text,p_nzbn text DEFAULT NULL,p_company_registration_number text DEFAULT NULL,p_contact_email text DEFAULT NULL,p_contact_phone text DEFAULT NULL,p_billing_email text DEFAULT NULL,p_billing_address text DEFAULT NULL,p_account_notes text DEFAULT NULL,p_status text DEFAULT NULL)
+RETURNS public.organizations LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_org public.organizations%rowtype;v_name text:=nullif(trim(coalesce(p_name,'')),'');v_nzbn text:=nullif(regexp_replace(coalesce(p_nzbn,''),'[^0-9]','','g'),'');v_status text;
+begin
+  select actor.organization_id into v_provider from public.user_profiles actor where actor.id=v_actor and actor.deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  if p_action='create' then
+    if p_client_request_id is null then raise exception 'client_request_id is required';end if;
+    select o.* into v_org from public.organizations o where o.parent_organization_id=v_provider and o.client_request_id=p_client_request_id;if found then return v_org;end if;
+  else
+    select o.* into v_org from public.organizations o where o.id=p_organization_id for update;if not found then raise exception 'Organization not found';end if;
+    if v_org.id<>v_provider and v_org.parent_organization_id is distinct from v_provider then raise exception 'Organization is outside your managed account hierarchy';end if;
+    if v_org.updated_at<>p_expected_updated_at then raise exception 'Organization changed since it was opened';end if;
+  end if;
+  if p_action in('create','update') then
+    if v_name is null or char_length(v_name)>200 then raise exception 'Organization name is required and must be 200 characters or fewer';end if;
+    if p_organization_type not in('client','branch','contractor','government','private_enterprise') then raise exception 'Unsupported CRM organization type';end if;
+    if exists(select 1 from public.organizations o where o.parent_organization_id=v_provider and lower(trim(o.name))=lower(v_name) and o.id is distinct from p_organization_id) then raise exception 'An organization with this name already exists in your account hierarchy';end if;
+    if v_nzbn is not null and char_length(v_nzbn)<>13 then raise exception 'NZBN must contain 13 digits';end if;
+    if p_action='create' then
+      insert into public.organizations(name,organization_type,parent_organization_id,active,status,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes,client_request_id)
+      values(v_name,p_organization_type,v_provider,false,'prospect',v_nzbn,nullif(trim(coalesce(p_company_registration_number,'')),''),nullif(lower(trim(coalesce(p_contact_email,''))),''),nullif(trim(coalesce(p_contact_phone,'')),''),nullif(lower(trim(coalesce(p_billing_email,''))),''),nullif(trim(coalesce(p_billing_address,'')),''),nullif(trim(coalesce(p_account_notes,'')),''),p_client_request_id) returning * into v_org;
+    else
+      update public.organizations set name=v_name,organization_type=p_organization_type,nzbn=v_nzbn,company_registration_number=nullif(trim(coalesce(p_company_registration_number,'')),''),contact_email=nullif(lower(trim(coalesce(p_contact_email,''))),''),contact_phone=nullif(trim(coalesce(p_contact_phone,'')),''),billing_email=nullif(lower(trim(coalesce(p_billing_email,''))),''),billing_address=nullif(trim(coalesce(p_billing_address,'')),''),account_notes=nullif(trim(coalesce(p_account_notes,'')),''),updated_at=clock_timestamp() where id=v_org.id returning * into v_org;
+    end if;
+  elsif p_action='set_status' then
+    if v_org.id=v_provider then raise exception 'Provider status is managed outside CRM accounts';end if;
+    v_status:=p_status;if v_status not in('prospect','suspended','archived') then raise exception 'CRM cannot directly activate an organization';end if;
+    if v_org.status='archived' and v_status='suspended' then raise exception 'Archived organizations must return to prospect review first';end if;
+    update public.organizations set status=v_status,active=false,updated_at=clock_timestamp() where id=v_org.id returning * into v_org;
+  else raise exception 'Unsupported organization action';end if;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_organization_'||p_action,'organizations',v_org.id,jsonb_build_object('name',v_org.name,'organization_type',v_org.organization_type,'status',v_org.status));
+  return v_org;
+end;$$;
+
+CREATE OR REPLACE FUNCTION "public"."get_crm_organization_readiness"(p_organization_ids uuid[] DEFAULT NULL)
+RETURNS TABLE(organization_id uuid,organization_status text,identity_status text,contact_status text,location_status text,agreement_status text,module_status text,billing_status text,operations_status text,blockers text[],next_action text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;
+begin
+  select actor.organization_id into v_provider from public.user_profiles actor where actor.id=v_actor and actor.deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  return query with accounts as(select o.* from public.organizations o where o.parent_organization_id=v_provider and (p_organization_ids is null or o.id=any(p_organization_ids))),facts as(
+    select a.id,a.status,(a.name<>'' and a.organization_type is not null) identity_ready,
+      exists(select 1 from public.crm_contacts c where c.organization_id=a.id and c.is_primary and c.deactivated_at is null) contact_ready,
+      exists(select 1 from public.client_sites s where s.client_organization_id=a.id and s.active) location_ready,
+      exists(select 1 from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id and sa.invitation_status='accepted') agreement_ready,
+      exists(select 1 from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id and sa.invitation_status='accepted' and cardinality(sa.enabled_modules)>0) module_ready,
+      exists(select 1 from public.service_agreements sa join public.crm_commercial_settings cc on cc.service_agreement_id=sa.id where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id) billing_ready,
+      exists(select 1 from public.roster_work_units wu join public.service_agreement_locations sal on sal.id=wu.service_agreement_location_id join public.service_agreements sa on sa.id=sal.service_agreement_id where sa.provider_organization_id=v_provider and sa.client_organization_id=a.id and wu.active) operations_ready
+    from accounts a)
+  select f.id,f.status,case when f.identity_ready then 'ready' else 'blocked' end,case when f.contact_ready then 'ready' else 'blocked' end,case when f.location_ready then 'ready' else 'blocked' end,case when f.agreement_ready then 'ready' else 'blocked' end,case when f.module_ready then 'ready' else 'blocked' end,case when f.billing_ready then 'ready' else 'blocked' end,case when f.operations_ready then 'ready' else 'blocked' end,
+    array_remove(array[case when not f.identity_ready then 'Confirm the organization identity' end,case when not f.contact_ready then 'Add a primary contact' end,case when not f.location_ready then 'Add an active covered site' end,case when not f.agreement_ready then 'Create and accept a service agreement' end,case when not f.module_ready then 'Enable at least one agreement module' end,case when not f.billing_ready then 'Complete commercial settings' end,case when not f.operations_ready then 'Create an operational work unit' end],null),
+    case when not f.contact_ready then 'Add primary contact' when not f.location_ready then 'Add covered site' when not f.agreement_ready then 'Create service agreement' when not f.module_ready then 'Enable service modules' when not f.billing_ready then 'Complete billing setup' when not f.operations_ready then 'Complete operational setup' else 'Ready for activation review' end
+  from facts f order by f.id;
+end;$$;
+
+
+ALTER TABLE "public"."user_profiles" ADD COLUMN IF NOT EXISTS "updated_at" timestamptz NOT NULL DEFAULT now();
+DROP TRIGGER IF EXISTS "trg_touch_user_profiles" ON "public"."user_profiles";
+CREATE TRIGGER "trg_touch_user_profiles" BEFORE UPDATE ON "public"."user_profiles" FOR EACH ROW EXECUTE FUNCTION "public"."tg_touch_updated_at"();
+
+CREATE FUNCTION "public"."log_user_management_action"(p_organization_id uuid,p_target_user_id uuid,p_action_type text,p_performed_by uuid,p_old_value jsonb DEFAULT NULL,p_new_value jsonb DEFAULT NULL,p_metadata jsonb DEFAULT NULL) RETURNS uuid LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_id uuid;
+begin
+  if p_organization_id is null or p_target_user_id is null or p_action_type is null or p_performed_by is null then raise exception 'Complete audit provenance is required';end if;
+  insert into public.user_management_audit(target_user_id,action_type,performed_by,old_value,new_value,metadata)
+  values(p_target_user_id,p_action_type,p_performed_by,p_old_value,p_new_value,coalesce(p_metadata,'{}'::jsonb)||jsonb_build_object('organization_id',p_organization_id)) returning id into v_id;
+  return v_id;
+end;$$;
+
+CREATE FUNCTION "public"."identity_role_level"(p_role text) RETURNS integer LANGUAGE sql IMMUTABLE SET search_path=public AS $$
+  select case p_role when 'grand_master' then 6 when 'master' then 5 when 'admin' then 4 when 'admin_officer' then 4 when 'officer' then 2 when 'scan_operator' then 2 when 'nzscv_monitor' then 1 when 'client_admin' then 1 when 'client_officer' then 1 when 'client_viewer' then 1 else 0 end;
+$$;
+
+CREATE FUNCTION "public"."manage_user_identity_access"(p_user_id uuid,p_expected_updated_at timestamptz,p_action text,p_display_name text DEFAULT NULL,p_phone text DEFAULT NULL,p_role text DEFAULT NULL,p_preset_id uuid DEFAULT NULL,p_assignment_id uuid DEFAULT NULL,p_grant_id uuid DEFAULT NULL,p_reason text DEFAULT NULL) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor public.user_profiles%rowtype;v_target public.user_profiles%rowtype;v_preset public.access_presets%rowtype;v_assignment public.preset_assignments%rowtype;v_grant public.staff_area_grants%rowtype;v_reason text:=nullif(trim(coalesce(p_reason,'')),'');v_old_identity jsonb;
+begin
+  select p.* into v_actor from public.user_profiles p where p.id=auth.uid() and p.deactivated_at is null;
+  if not found or v_actor.role not in('grand_master','master','admin') then raise exception 'Active identity administrator required';end if;
+  select p.* into v_target from public.user_profiles p where p.id=p_user_id for update;if not found then raise exception 'User profile not found';end if;
+  if v_actor.role<>'grand_master' and v_target.organization_id<>v_actor.organization_id then raise exception 'User is outside your organization';end if;
+  if public.identity_role_level(v_target.role)>public.identity_role_level(v_actor.role) then raise exception 'Cannot manage a user above your authority';end if;
+  if p_expected_updated_at is not null and v_target.updated_at<>p_expected_updated_at then raise exception 'User identity changed since it was opened';end if;
+  if v_reason is null then raise exception 'A change reason is required';end if;
+  if p_action='update_identity' then
+    if nullif(trim(coalesce(p_display_name,'')),'') is null then raise exception 'Display name is required';end if;
+    if p_role not in('grand_master','master','admin','admin_officer','nzscv_monitor','officer','scan_operator','client_admin','client_officer','client_viewer') then raise exception 'Unsupported user role';end if;
+    if public.identity_role_level(p_role)>public.identity_role_level(v_actor.role) then raise exception 'Cannot assign a role above your authority';end if;
+    if v_target.id=v_actor.id and p_role<>v_target.role then raise exception 'You cannot change your own role';end if;
+    v_old_identity:=jsonb_build_object('display_name',v_target.display_name,'phone',v_target.phone,'role',v_target.role);
+    update public.user_profiles set display_name=trim(p_display_name),phone=nullif(trim(coalesce(p_phone,'')),''),role=p_role where id=v_target.id returning * into v_target;
+    perform public.log_user_management_action(v_target.organization_id,v_target.id,'user_identity_updated',v_actor.id,v_old_identity,jsonb_build_object('display_name',v_target.display_name,'phone',v_target.phone,'role',v_target.role),jsonb_build_object('reason',v_reason));
+  elsif p_action='set_preset' then
+    if v_target.id=v_actor.id then raise exception 'You cannot change your own access preset';end if;
+    if v_target.role not in('grand_master','master','admin','admin_officer') then raise exception 'Access presets apply to administration roles';end if;
+    select p.* into v_preset from public.access_presets p where p.id=p_preset_id and (p.organization_id is null or p.organization_id=v_target.organization_id);if not found then raise exception 'Access preset is not available for this organization';end if;
+    update public.preset_assignments set status='ended',updated_at=clock_timestamp() where user_id=v_target.id and scope_org_id=v_target.organization_id and status='active';
+    insert into public.preset_assignments(user_id,preset_id,scope_org_id,status,assigned_by) values(v_target.id,v_preset.id,v_target.organization_id,'active',v_actor.id)
+    on conflict(user_id,preset_id,scope_org_id) do update set status='active',assigned_by=excluded.assigned_by,updated_at=clock_timestamp() returning * into v_assignment;
+    perform public.log_user_management_action(v_target.organization_id,v_target.id,'access_preset_assigned',v_actor.id,null,jsonb_build_object('preset_id',v_preset.id,'preset_key',v_preset.key),jsonb_build_object('reason',v_reason));
+  elsif p_action='clear_preset' then
+    if v_target.id=v_actor.id then raise exception 'You cannot change your own access preset';end if;
+    update public.preset_assignments set status='ended',updated_at=clock_timestamp() where id=p_assignment_id and user_id=v_target.id and scope_org_id=v_target.organization_id and status='active' returning * into v_assignment;
+    if not found then raise exception 'Active preset assignment not found';end if;
+    perform public.log_user_management_action(v_target.organization_id,v_target.id,'access_preset_ended',v_actor.id,jsonb_build_object('assignment_id',v_assignment.id,'preset_id',v_assignment.preset_id),null,jsonb_build_object('reason',v_reason));
+  elsif p_action='end_grant' then
+    if v_target.id=v_actor.id then raise exception 'You cannot end your own direct access grant';end if;
+    update public.staff_area_grants set status='ended',updated_at=clock_timestamp() where id=p_grant_id and user_id=v_target.id and scope_org_id=v_target.organization_id and status='active' returning * into v_grant;
+    if not found then raise exception 'Active direct grant not found';end if;
+    perform public.log_user_management_action(v_target.organization_id,v_target.id,'direct_access_grant_ended',v_actor.id,jsonb_build_object('grant_id',v_grant.id,'area',v_grant.area,'level',v_grant.level),null,jsonb_build_object('reason',v_reason));
+  else raise exception 'Unsupported identity access action';end if;
+  return jsonb_build_object('user_id',v_target.id,'display_name',v_target.display_name,'role',v_target.role,'updated_at',v_target.updated_at,'action',p_action,'assignment_id',v_assignment.id,'grant_id',v_grant.id);
+end;$$;
+
+CREATE FUNCTION "public"."get_user_spine_readiness"(p_organization_id uuid) RETURNS TABLE(user_id uuid,identity_status text,employment_status text,access_status text,credential_status text,work_status text,blockers text[],next_action text) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+begin
+  if not public.is_admin_for_org(p_organization_id) then raise exception 'Not authorised to assess users';end if;
+  return query select u.id,
+    case when u.deactivated_at is not null then 'deactivated' when u.email is null or u.display_name is null then 'incomplete' else 'active' end,
+    case when u.role in('officer','admin_officer') and sp.id is null then 'missing' when sp.id is null then 'not_applicable' when sp.end_date is not null and sp.end_date<current_date then 'ended' else 'current' end,
+    case when u.role in('grand_master','master','admin','admin_officer') and not exists(select 1 from public.preset_assignments pa where pa.user_id=u.id and pa.scope_org_id=u.organization_id and pa.status='active') then 'missing_preset' else 'role_scoped' end,
+    case when u.role in('officer','admin_officer') and sp.id is not null and not exists(select 1 from public.staff_credentials c where c.staff_id=sp.id and c.verified and(c.expiry_date is null or c.expiry_date>=current_date)) then 'missing_valid' when u.role in('officer','admin_officer') then 'current' else 'not_applicable' end,
+    case when u.role in('officer','admin_officer') and coalesce(sp.work_ready,false) then 'ready' when u.role in('officer','admin_officer') then 'blocked' else 'not_applicable' end,
+    array_remove(array[case when u.deactivated_at is not null then 'Reactivate the identity before assigning work' end,case when u.display_name is null or u.email is null then 'Complete the identity profile' end,case when u.role in('officer','admin_officer') and sp.id is null then 'Create the employment profile' end,case when u.role in('grand_master','master','admin','admin_officer') and not exists(select 1 from public.preset_assignments pa where pa.user_id=u.id and pa.scope_org_id=u.organization_id and pa.status='active') then 'Assign an access preset' end,case when u.role in('officer','admin_officer') and sp.id is not null and not exists(select 1 from public.staff_credentials c where c.staff_id=sp.id and c.verified and(c.expiry_date is null or c.expiry_date>=current_date)) then 'Verify a current credential' end,case when u.role in('officer','admin_officer') and sp.id is not null and not sp.work_ready then 'Complete work-readiness review' end],null),
+    case when u.deactivated_at is not null then 'Reactivate identity' when u.display_name is null or u.email is null then 'Complete identity profile' when u.role in('officer','admin_officer') and sp.id is null then 'Create employment profile' when u.role in('grand_master','master','admin','admin_officer') and not exists(select 1 from public.preset_assignments pa where pa.user_id=u.id and pa.scope_org_id=u.organization_id and pa.status='active') then 'Assign access preset' when u.role in('officer','admin_officer') and sp.id is not null and not exists(select 1 from public.staff_credentials c where c.staff_id=sp.id and c.verified and(c.expiry_date is null or c.expiry_date>=current_date)) then 'Verify credential' when u.role in('officer','admin_officer') and sp.id is not null and not sp.work_ready then 'Review work readiness' else 'Ready for assigned responsibilities' end
+  from public.user_profiles u left join public.staff_profiles sp on sp.user_id=u.id or sp.id=u.id where u.organization_id=p_organization_id order by u.display_name nulls last,u.email;
+end;$$;
+
+DROP POLICY IF EXISTS "user_profiles_insert" ON "public"."user_profiles";
+DROP POLICY IF EXISTS "user_profiles_update" ON "public"."user_profiles";
+DROP POLICY IF EXISTS "preset_assignments_write" ON "public"."preset_assignments";
+DROP POLICY IF EXISTS "area_grants_write" ON "public"."staff_area_grants";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."user_profiles" FROM PUBLIC,"anon","authenticated";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."preset_assignments" FROM PUBLIC,"anon","authenticated";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."staff_area_grants" FROM PUBLIC,"anon","authenticated";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."user_management_audit" FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."log_user_management_action"(uuid,uuid,text,uuid,jsonb,jsonb,jsonb) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."log_user_management_action"(uuid,uuid,text,uuid,jsonb,jsonb,jsonb) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."identity_role_level"(text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."identity_role_level"(text) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."manage_user_identity_access"(uuid,timestamptz,text,text,text,text,uuid,uuid,uuid,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."manage_user_identity_access"(uuid,timestamptz,text,text,text,text,uuid,uuid,uuid,text) TO "authenticated","service_role";
+REVOKE ALL ON FUNCTION "public"."get_user_spine_readiness"(uuid) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_user_spine_readiness"(uuid) TO "authenticated","service_role";
+
+ALTER TABLE "public"."client_sites" ADD COLUMN IF NOT EXISTS "client_request_id" uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_client_sites_org_client_request" ON "public"."client_sites"("client_organization_id","client_request_id") WHERE "client_request_id" IS NOT NULL;
+
+CREATE FUNCTION "public"."find_crm_site_candidates"(p_account_organization_id uuid,p_query text DEFAULT NULL,p_address text DEFAULT NULL)
+RETURNS TABLE(id uuid,name text,address text,site_type text,active boolean,boundary_status text,boundary_verification text,match_reason text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_query text:=lower(trim(coalesce(p_query,'')));v_address_key text:=regexp_replace(lower(trim(coalesce(p_address,''))),'[^a-z0-9]+','','g');
+begin
+  if v_actor is null or not public.crm_actor_can_manage_account(p_account_organization_id) then raise exception 'Not authorised to review sites for this CRM account';end if;
+  if char_length(v_query)<2 and char_length(v_address_key)<4 then raise exception 'Enter at least two name characters or a complete address';end if;
+  return query select s.id,s.name,s.address,s.site_type,s.active,s.boundary_status,s.boundary_verification,
+    case when char_length(v_address_key)>=4 and s.address_match_key=v_address_key then 'Exact address' when lower(trim(s.name))=v_query then 'Exact name' else 'Similar site' end
+  from public.client_sites s
+  where s.client_organization_id=p_account_organization_id
+    and ((char_length(v_query)>=2 and lower(s.name) like '%'||v_query||'%') or (char_length(v_address_key)>=4 and s.address_match_key=v_address_key))
+  order by case when char_length(v_address_key)>=4 and s.address_match_key=v_address_key then 0 when lower(trim(s.name))=v_query then 1 else 2 end,s.name limit 20;
+end;$$;
+
+CREATE FUNCTION "public"."create_crm_site"(p_client_request_id uuid,p_account_organization_id uuid,p_name text,p_address text,p_site_type text DEFAULT 'commercial_premises')
+RETURNS TABLE(id uuid,name text,address text,site_type text,active boolean,boundary_status text,boundary_verification text,created boolean)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_site public.client_sites%rowtype;v_name text:=nullif(trim(coalesce(p_name,'')),'');v_address text:=nullif(trim(coalesce(p_address,'')),'');v_address_key text;
+begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) or not public.crm_actor_can_manage_account(p_account_organization_id) then raise exception 'Active CRM administrator required';end if;
+  if p_client_request_id is null then raise exception 'client_request_id is required';end if;
+  perform 1 from public.organizations where id=p_account_organization_id for update;
+  if not found then raise exception 'CRM account organization not found';end if;
+  select s.* into v_site from public.client_sites s where s.client_organization_id=p_account_organization_id and s.client_request_id=p_client_request_id;
+  if found then return query select v_site.id,v_site.name,v_site.address,v_site.site_type,v_site.active,v_site.boundary_status,v_site.boundary_verification,false;return;end if;
+  if v_name is null or char_length(v_name)>200 then raise exception 'Site name is required and must be 200 characters or fewer';end if;
+  if v_address is null or char_length(v_address)<4 or char_length(v_address)>500 then raise exception 'A complete site address is required';end if;
+  if p_site_type not in('freedom_camping_area','parking_area','commercial_premises','residential_complex','government_facility','hospital','education_facility','industrial_site','public_space','other') then raise exception 'Unsupported site type';end if;
+  v_address_key:=regexp_replace(lower(v_address),'[^a-z0-9]+','','g');
+  if exists(select 1 from public.client_sites s where s.client_organization_id=p_account_organization_id and s.address_match_key=v_address_key) then raise exception 'A site with this address already exists for the account';end if;
+  insert into public.client_sites(client_organization_id,name,address,address_match_key,site_type,active,site_origin,boundary_status,boundary_verification,client_request_id)
+  values(p_account_organization_id,v_name,v_address,v_address_key,p_site_type,true,'contracted','provisional','unverified',p_client_request_id) returning * into v_site;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+  values(v_provider,v_actor,'crm_site_created','client_sites',v_site.id,jsonb_build_object('account_organization_id',p_account_organization_id,'address_match_key',v_address_key,'boundary_status',v_site.boundary_status,'boundary_verification',v_site.boundary_verification));
+  return query select v_site.id,v_site.name,v_site.address,v_site.site_type,v_site.active,v_site.boundary_status,v_site.boundary_verification,true;
+end;$$;
+
+REVOKE INSERT ON TABLE "public"."client_sites" FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."find_crm_site_candidates"(uuid,text,text) FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."create_crm_site"(uuid,uuid,text,text,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."find_crm_site_candidates"(uuid,text,text),"public"."create_crm_site"(uuid,uuid,text,text,text) TO "authenticated","service_role";
+
+CREATE FUNCTION "public"."get_crm_site_boundary_queue"()
+RETURNS TABLE(site_id uuid,account_organization_id uuid,account_name text,site_name text,address text,site_type text,active boolean,gps_lat double precision,gps_lng double precision,boundary_status text,boundary_verification text,boundary_verified_at timestamptz,has_boundary boolean,boundary_geojson jsonb)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;
+begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  return query select s.id,o.id,o.name,s.name,s.address,s.site_type,s.active,s.gps_lat,s.gps_lng,s.boundary_status,s.boundary_verification,s.boundary_verified_at,(s.boundary is not null),case when s.boundary is null then null else public.st_asgeojson(s.boundary)::jsonb end
+  from public.client_sites s join public.organizations o on o.id=s.client_organization_id
+  where public.crm_actor_can_manage_account(o.id)
+  order by case when s.boundary_verification='unverified' then 0 else 1 end,case when s.boundary_status='provisional' then 0 else 1 end,o.name,s.name;
+end;$$;
+
+COMMENT ON FUNCTION "public"."get_crm_site_boundary_queue"() IS 'Returns manageable CRM sites with current boundary GeoJSON for governed visual review. Geometry remains scoped by crm_actor_can_manage_account.';
+
+CREATE FUNCTION "public"."manage_crm_site_boundary"(p_site_id uuid,p_action text,p_expected_verification text,p_center_lat double precision DEFAULT NULL,p_center_lng double precision DEFAULT NULL,p_radius_m double precision DEFAULT 50)
+RETURNS TABLE(site_id uuid,boundary_status text,boundary_verification text,gps_lat double precision,gps_lng double precision,boundary_verified_at timestamptz,area_m2 numeric)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_site public.client_sites%rowtype;v_area numeric:=null;
+begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  select s.* into v_site from public.client_sites s where s.id=p_site_id for update;
+  if not found then raise exception 'Site not found';end if;
+  if not public.crm_actor_can_manage_account(v_site.client_organization_id) then raise exception 'Not authorised to review this site boundary';end if;
+  if v_site.boundary_verification is distinct from p_expected_verification then raise exception 'Site boundary changed since it was opened';end if;
+  if p_action='set_provisional' then
+    if p_center_lat is null or p_center_lat not between -90 and 90 or p_center_lng is null or p_center_lng not between -180 and 180 then raise exception 'Valid latitude and longitude are required';end if;
+    if p_radius_m is null or p_radius_m<5 or p_radius_m>5000 then raise exception 'Boundary radius must be between 5 and 5000 metres';end if;
+    v_area:=public.set_site_geometry(v_site.id,null,p_center_lat,p_center_lng,p_radius_m,'point_radius',v_actor,'direct_edit');
+    update public.client_sites set gps_lat=p_center_lat,gps_lng=p_center_lng,boundary_status='provisional',boundary_verification='unverified',boundary_verified_by=null,boundary_verified_at=null where id=v_site.id returning * into v_site;
+  elsif p_action='verify' then
+    if v_site.boundary is null then raise exception 'A boundary must be established before verification';end if;
+    if not public.verify_boundary('client_site',v_site.id) then raise exception 'Boundary verification failed';end if;
+    select s.* into v_site from public.client_sites s where s.id=p_site_id;
+  else raise exception 'Unsupported site boundary action';end if;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+  values(v_provider,v_actor,'crm_site_boundary_'||p_action,'client_sites',v_site.id,jsonb_build_object('account_organization_id',v_site.client_organization_id,'boundary_status',v_site.boundary_status,'boundary_verification',v_site.boundary_verification,'gps_lat',v_site.gps_lat,'gps_lng',v_site.gps_lng,'area_m2',v_area));
+  return query select v_site.id,v_site.boundary_status,v_site.boundary_verification,v_site.gps_lat,v_site.gps_lng,v_site.boundary_verified_at,v_area;
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."get_crm_site_boundary_queue"() FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."manage_crm_site_boundary"(uuid,text,text,double precision,double precision,double precision) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_site_boundary_queue"(),"public"."manage_crm_site_boundary"(uuid,text,text,double precision,double precision,double precision) TO "authenticated","service_role";
+REVOKE ALL ON FUNCTION "public"."set_site_geometry"(uuid,jsonb,double precision,double precision,double precision,text,uuid,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."set_site_geometry"(uuid,jsonb,double precision,double precision,double precision,text,uuid,text) TO "service_role";
+
+CREATE FUNCTION "public"."get_crm_agreement_setup"(p_agreement_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_agreement public.service_agreements%rowtype;
+begin
+  select sa.* into v_agreement from public.service_agreements sa where sa.id=p_agreement_id;
+  if not found then raise exception 'Service agreement not found';end if;
+  if v_actor is null or not public.is_admin_for_org(v_agreement.provider_organization_id) then raise exception 'Provider administrator required';end if;
+  return jsonb_build_object(
+    'agreement',jsonb_build_object('id',v_agreement.id,'name',v_agreement.name,'client_organization_id',v_agreement.client_organization_id,'invitation_status',v_agreement.invitation_status,'enabled_modules',v_agreement.enabled_modules),
+    'sites',(select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'address',s.address,'boundary_status',s.boundary_status,'boundary_verification',s.boundary_verification,'linked',sal.id is not null,'link_status',sal.status) order by s.name),'[]'::jsonb) from public.client_sites s left join public.service_agreement_locations sal on sal.service_agreement_id=v_agreement.id and sal.site_id=s.id where s.client_organization_id=v_agreement.client_organization_id and s.active),
+    'modules',(select coalesce(jsonb_agg(jsonb_build_object('module_key',mc.module_key,'enabled',coalesce(sam.enabled,false),'sla_minutes',sam.sla_minutes,'allows_client_submission',coalesce(sam.allows_client_submission,false),'allows_auto_dispatch',coalesce(sam.allows_auto_dispatch,false)) order by mc.module_key),'[]'::jsonb) from public.module_catalog mc left join public.service_agreement_modules sam on sam.service_agreement_id=v_agreement.id and sam.module_key=mc.module_key where mc.active)
+  );
+end;$$;
+
+CREATE FUNCTION "public"."manage_crm_agreement_setup"(p_agreement_id uuid,p_expected_invitation_status text,p_action text,p_site_id uuid DEFAULT NULL,p_module_key text DEFAULT NULL,p_enabled boolean DEFAULT true,p_sla_minutes integer DEFAULT NULL,p_allows_client_submission boolean DEFAULT false,p_allows_auto_dispatch boolean DEFAULT false)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_agreement public.service_agreements%rowtype;v_link public.service_agreement_locations%rowtype;v_module public.service_agreement_modules%rowtype;
+begin
+  select sa.* into v_agreement from public.service_agreements sa where sa.id=p_agreement_id for update;
+  if not found then raise exception 'Service agreement not found';end if;
+  if v_actor is null or not public.is_admin_for_org(v_agreement.provider_organization_id) then raise exception 'Provider administrator required';end if;
+  if v_agreement.agreement_type<>'operational' or v_agreement.invitation_status<>'accepted' then raise exception 'Only accepted operational agreements can be configured';end if;
+  if v_agreement.invitation_status is distinct from p_expected_invitation_status then raise exception 'Service agreement changed since it was opened';end if;
+  if p_action in('link_site','unlink_site') then
+    if p_site_id is null or not exists(select 1 from public.client_sites s where s.id=p_site_id and s.client_organization_id=v_agreement.client_organization_id and s.active) then raise exception 'Active client site required';end if;
+    if p_action='link_site' then
+      insert into public.service_agreement_locations(service_agreement_id,site_id,status,created_by) values(v_agreement.id,p_site_id,'active',v_actor)
+      on conflict(service_agreement_id,site_id) do update set status='active',updated_at=clock_timestamp() returning * into v_link;
+    else
+      update public.service_agreement_locations set status='ended',updated_at=clock_timestamp() where service_agreement_id=v_agreement.id and site_id=p_site_id returning * into v_link;
+      if not found then raise exception 'Covered site link not found';end if;
+    end if;
+  elsif p_action='set_module' then
+    if p_module_key is null or not exists(select 1 from public.module_catalog mc where mc.module_key=p_module_key and mc.active) then raise exception 'Active module catalog entry required';end if;
+    if p_sla_minutes is not null and (p_sla_minutes<1 or p_sla_minutes>10080) then raise exception 'Module SLA must be between 1 and 10080 minutes';end if;
+    insert into public.service_agreement_modules(service_agreement_id,module_key,enabled,sla_minutes,allows_client_submission,allows_auto_dispatch)
+    values(v_agreement.id,p_module_key,coalesce(p_enabled,true),p_sla_minutes,p_allows_client_submission,p_allows_auto_dispatch)
+    on conflict(service_agreement_id,module_key) do update set enabled=excluded.enabled,sla_minutes=excluded.sla_minutes,allows_client_submission=excluded.allows_client_submission,allows_auto_dispatch=excluded.allows_auto_dispatch returning * into v_module;
+    update public.service_agreements set enabled_modules=coalesce((select array_agg(sam.module_key order by sam.module_key) from public.service_agreement_modules sam where sam.service_agreement_id=v_agreement.id and sam.enabled),'{}'::text[]) where id=v_agreement.id returning * into v_agreement;
+  else raise exception 'Unsupported agreement setup action';end if;
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)
+  values(v_agreement.provider_organization_id,v_actor,'crm_agreement_'||p_action,'service_agreements',v_agreement.id,jsonb_build_object('site_id',p_site_id,'module_key',p_module_key,'enabled',p_enabled,'sla_minutes',p_sla_minutes));
+  return jsonb_build_object('agreement_id',v_agreement.id,'action',p_action,'site_link_id',v_link.id,'module_id',v_module.id,'enabled_modules',v_agreement.enabled_modules);
+end;$$;
+
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."service_agreement_locations" FROM PUBLIC,"anon","authenticated";
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON TABLE "public"."service_agreement_modules" FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."get_crm_agreement_setup"(uuid) FROM PUBLIC,"anon","authenticated";
+REVOKE ALL ON FUNCTION "public"."manage_crm_agreement_setup"(uuid,text,text,uuid,text,boolean,integer,boolean,boolean) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_agreement_setup"(uuid),"public"."manage_crm_agreement_setup"(uuid,text,text,uuid,text,boolean,integer,boolean,boolean) TO "authenticated","service_role";
+
+CREATE FUNCTION "public"."get_crm_operational_readiness"(p_agreement_id uuid)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_agreement public.service_agreements%rowtype;v_location_count integer;v_boundary_ready boolean;v_module_count integer;v_billing_ready boolean;v_work_unit_count integer;v_reporting_ready boolean;
+begin
+  select sa.* into v_agreement from public.service_agreements sa where sa.id=p_agreement_id;
+  if not found then raise exception 'Service agreement not found';end if;
+  if v_actor is null or not public.is_admin_for_org(v_agreement.provider_organization_id) then raise exception 'Provider administrator required';end if;
+  if v_agreement.agreement_type<>'operational' then raise exception 'Operational agreement required';end if;
+  select count(*) into v_location_count from public.service_agreement_locations sal where sal.service_agreement_id=v_agreement.id and sal.status='active';
+  select v_location_count>0 and not exists(select 1 from public.service_agreement_locations sal left join public.client_sites s on s.id=sal.site_id left join public.location_zones z on z.id=sal.zone_id where sal.service_agreement_id=v_agreement.id and sal.status='active' and ((sal.site_id is not null and (s.boundary is null or s.boundary_status<>'authoritative' or s.boundary_verification<>'verified')) or (sal.zone_id is not null and (z.boundary is null or not exists(select 1 from public.geofence_boundary_history h where h.entity_type='location_zone' and h.entity_id=z.id and h.verification_state='verified'))))) into v_boundary_ready;
+  select count(*) into v_module_count from public.service_agreement_modules sam where sam.service_agreement_id=v_agreement.id and sam.enabled;
+  select exists(select 1 from public.crm_commercial_settings c where c.service_agreement_id=v_agreement.id and coalesce(c.base_rate_per_hour,c.callout_rate_per_hour,c.travel_rate_per_km)>0) or exists(select 1 from public.site_financial_config f join public.service_agreement_locations sal on sal.service_agreement_id=f.service_agreement_id and (sal.site_id=f.site_id or sal.zone_id=f.zone_id) where f.service_agreement_id=v_agreement.id and f.active and sal.status='active' and coalesce(f.hourly_rate,f.per_visit_rate,f.flat_rate_monthly,f.per_notice_rate,f.callout_rate)>0) into v_billing_ready;
+  select count(*) into v_work_unit_count from public.roster_work_units wu join public.service_agreement_locations sal on sal.id=wu.service_agreement_location_id and sal.service_agreement_id=v_agreement.id and sal.status='active' join public.service_agreement_modules sam on sam.id=wu.service_agreement_module_id and sam.service_agreement_id=v_agreement.id and sam.enabled where wu.active;
+  select not v_agreement.client_portal_reports_enabled or (v_agreement.monthly_report_template_code is not null and exists(select 1 from public.report_templates rt where rt.organization_id=v_agreement.provider_organization_id and rt.template_code=v_agreement.monthly_report_template_code)) into v_reporting_ready;
+  return jsonb_build_object('agreement_id',v_agreement.id,'invitation_status',v_agreement.invitation_status,'ready',v_agreement.invitation_status='accepted' and v_location_count>0 and v_boundary_ready and v_module_count>0 and v_billing_ready and v_work_unit_count>0 and v_reporting_ready,'dimensions',jsonb_build_array(
+    jsonb_build_object('key','coverage','label','Covered places','status',case when v_location_count>0 then 'ready' else 'blocked' end,'detail',case when v_location_count>0 then v_location_count||' active location link'||case when v_location_count=1 then '' else 's' end else 'No active covered site or zone is linked' end,'owner','Account administration','destination','relationships'),
+    jsonb_build_object('key','boundary','label','Boundary evidence','status',case when v_boundary_ready then 'ready' else 'blocked' end,'detail',case when v_boundary_ready then 'All covered places have authoritative verified boundaries' else 'Every covered place needs authoritative verified geometry' end,'owner','Operations administration','destination','sites'),
+    jsonb_build_object('key','modules','label','Service scope','status',case when v_module_count>0 then 'ready' else 'blocked' end,'detail',case when v_module_count>0 then v_module_count||' enabled service module'||case when v_module_count=1 then '' else 's' end else 'No service module is enabled' end,'owner','Account administration','destination','relationships'),
+    jsonb_build_object('key','billing','label','Commercial rates','status',case when v_billing_ready then 'ready' else 'blocked' end,'detail',case when v_billing_ready then 'A positive agreement or covered-place rate is recorded' else 'No positive billable rate is recorded' end,'owner','Commercial administration','destination','crm'),
+    jsonb_build_object('key','operations','label','Operational work','status',case when v_work_unit_count>0 then 'ready' else 'blocked' end,'detail',case when v_work_unit_count>0 then v_work_unit_count||' active attributed work unit'||case when v_work_unit_count=1 then '' else 's' end else 'No active work unit is attributed to this agreement' end,'owner','Roster administration','destination','roster-targets'),
+    jsonb_build_object('key','reporting','label','Reporting delivery','status',case when v_reporting_ready then 'ready' else 'blocked' end,'detail',case when not v_agreement.client_portal_reports_enabled then 'Client report delivery is disabled by contract' when v_reporting_ready then 'The configured monthly template exists for the provider' else 'Client reporting is enabled without a valid monthly template' end,'owner','Reporting administration','destination','reports')
+  ));
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."get_crm_operational_readiness"(uuid) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_operational_readiness"(uuid) TO "authenticated","service_role";
+
+CREATE TABLE "public"."crm_onboarding_ledgers"(
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),"provider_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,"account_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "current_stage" text NOT NULL DEFAULT 'qualify',"status" text NOT NULL DEFAULT 'in_progress',"version" integer NOT NULL DEFAULT 1,"target_live_at" timestamptz NOT NULL DEFAULT(now()+interval '30 days'),"started_at" timestamptz NOT NULL DEFAULT now(),"updated_at" timestamptz NOT NULL DEFAULT now(),"activated_at" timestamptz,"activated_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"assigned_to" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"stage_note" text,
+  CONSTRAINT "crm_onboarding_ledgers_stage_check" CHECK("current_stage" IN('qualify','configure','review','activated')),CONSTRAINT "crm_onboarding_ledgers_status_check" CHECK("status" IN('in_progress','blocked','ready','activated')),UNIQUE("provider_organization_id","account_organization_id")
+);
+ALTER TABLE "public"."crm_onboarding_ledgers" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "crm_onboarding_ledgers_select" ON "public"."crm_onboarding_ledgers" FOR SELECT TO "authenticated" USING(public.org_access_allowed(provider_organization_id));
+REVOKE ALL ON TABLE "public"."crm_onboarding_ledgers" FROM PUBLIC,"anon","authenticated";
+GRANT ALL ON TABLE "public"."crm_onboarding_ledgers" TO "service_role";
+
+CREATE TABLE "public"."crm_onboarding_events"(
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),"ledger_id" uuid NOT NULL REFERENCES "public"."crm_onboarding_ledgers"("id") ON DELETE CASCADE,"provider_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,"account_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,
+  "event_type" text NOT NULL CHECK("event_type" IN('started','workflow_updated','activated')),"from_stage" text,"to_stage" text NOT NULL,"ledger_status" text NOT NULL,"assigned_to" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"note" text NOT NULL CHECK(char_length(trim("note")) BETWEEN 3 AND 1000),"actor_user_id" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"ledger_version" integer NOT NULL,"created_at" timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX "crm_onboarding_events_ledger_created_idx" ON "public"."crm_onboarding_events"("ledger_id","created_at" DESC);
+ALTER TABLE "public"."crm_onboarding_events" ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE "public"."crm_onboarding_events" FROM PUBLIC,"anon","authenticated";
+GRANT ALL ON TABLE "public"."crm_onboarding_events" TO "service_role";
+
+CREATE FUNCTION "public"."seed_crm_onboarding_ledger"() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_ledger public.crm_onboarding_ledgers%rowtype;begin if new.organization_type='client' and new.parent_organization_id is not null and new.status='prospect' then insert into public.crm_onboarding_ledgers(provider_organization_id,account_organization_id) values(new.parent_organization_id,new.id) on conflict do nothing returning * into v_ledger;if v_ledger.id is not null then insert into public.crm_onboarding_events(ledger_id,provider_organization_id,account_organization_id,event_type,to_stage,ledger_status,note,ledger_version) values(v_ledger.id,v_ledger.provider_organization_id,v_ledger.account_organization_id,'started',v_ledger.current_stage,v_ledger.status,'Onboarding ledger created',v_ledger.version);end if;end if;return new;end;$$;
+CREATE TRIGGER "trg_seed_crm_onboarding_ledger" AFTER INSERT ON "public"."organizations" FOR EACH ROW EXECUTE FUNCTION "public"."seed_crm_onboarding_ledger"();
+INSERT INTO "public"."crm_onboarding_ledgers"("provider_organization_id","account_organization_id") SELECT o.parent_organization_id,o.id FROM "public"."organizations" o WHERE o.organization_type='client' AND o.parent_organization_id IS NOT NULL AND o.status='prospect' ON CONFLICT DO NOTHING;
+
+CREATE FUNCTION "public"."get_crm_onboarding_queue"()
+RETURNS TABLE(ledger_id uuid,account_organization_id uuid,account_name text,organization_status text,organization_updated_at timestamptz,current_stage text,ledger_status text,version integer,started_at timestamptz,target_live_at timestamptz,days_open integer,overdue boolean,has_primary_contact boolean,agreement_id uuid,agreement_name text,readiness jsonb)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;
+begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+return query select l.id,o.id,o.name,o.status,o.updated_at,l.current_stage,l.status,l.version,l.started_at,l.target_live_at,greatest(0,floor(extract(epoch from(now()-l.started_at))/86400)::integer),l.target_live_at<now(),exists(select 1 from public.crm_contacts c where c.organization_id=o.id and c.is_primary and c.deactivated_at is null),sa.id,sa.name,case when sa.id is null then null else public.get_crm_operational_readiness(sa.id) end
+from public.crm_onboarding_ledgers l join public.organizations o on o.id=l.account_organization_id left join lateral(select a.id,a.name from public.service_agreements a where a.provider_organization_id=l.provider_organization_id and a.client_organization_id=l.account_organization_id and a.agreement_type='operational' order by case when a.invitation_status='accepted' then 0 else 1 end,a.created_at desc limit 1)sa on true
+where l.provider_organization_id=v_provider and l.status<>'activated' order by l.target_live_at,l.started_at;
+end;$$;
+
+CREATE FUNCTION "public"."manage_crm_onboarding_stage"(p_account_organization_id uuid,p_expected_version integer,p_stage text,p_target_live_at timestamptz DEFAULT NULL)
+RETURNS "public"."crm_onboarding_ledgers" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_ledger public.crm_onboarding_ledgers%rowtype;v_rank integer;v_next_rank integer;v_agreement_id uuid;v_readiness jsonb;
+begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+select * into v_ledger from public.crm_onboarding_ledgers where provider_organization_id=v_provider and account_organization_id=p_account_organization_id for update;if not found then raise exception 'Onboarding ledger not found';end if;if v_ledger.version<>p_expected_version then raise exception 'Onboarding ledger changed since it was opened';end if;
+v_rank:=array_position(array['qualify','configure','review'],v_ledger.current_stage);v_next_rank:=array_position(array['qualify','configure','review'],p_stage);if v_next_rank is null or v_next_rank<v_rank or v_next_rank>v_rank+1 then raise exception 'Onboarding stage transition is not allowed';end if;
+if p_stage='review' then select sa.id into v_agreement_id from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=p_account_organization_id and sa.agreement_type='operational' and sa.invitation_status='accepted' order by sa.created_at desc limit 1;if v_agreement_id is null then raise exception 'Accepted operational agreement required before review';end if;if not exists(select 1 from public.crm_contacts c where c.organization_id=p_account_organization_id and c.is_primary and c.deactivated_at is null) then raise exception 'Active primary contact required before review';end if;v_readiness:=public.get_crm_operational_readiness(v_agreement_id);if not coalesce((v_readiness->>'ready')::boolean,false) then raise exception 'Operational readiness blockers remain before review';end if;end if;
+update public.crm_onboarding_ledgers set current_stage=p_stage,status=case when p_stage='review' then 'ready' else 'in_progress' end,target_live_at=coalesce(p_target_live_at,target_live_at),version=version+1,updated_at=clock_timestamp() where id=v_ledger.id returning * into v_ledger;
+insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_provider,v_actor,'crm_onboarding_stage_changed','crm_onboarding_ledgers',v_ledger.id,jsonb_build_object('account_organization_id',p_account_organization_id,'stage',p_stage,'version',v_ledger.version));return v_ledger;
+end;$$;
+
+CREATE FUNCTION "public"."activate_crm_account"(p_account_organization_id uuid,p_agreement_id uuid,p_expected_organization_updated_at timestamptz,p_expected_ledger_version integer)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_org public.organizations%rowtype;v_ledger public.crm_onboarding_ledgers%rowtype;v_agreement public.service_agreements%rowtype;v_readiness jsonb;
+begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+select * into v_org from public.organizations where id=p_account_organization_id for update;if not found or v_org.parent_organization_id is distinct from v_provider then raise exception 'Managed CRM account not found';end if;if v_org.status<>'prospect' or v_org.active then raise exception 'Only an inactive prospect can be activated';end if;if v_org.updated_at is distinct from p_expected_organization_updated_at then raise exception 'Organization changed since activation review';end if;
+select * into v_ledger from public.crm_onboarding_ledgers where provider_organization_id=v_provider and account_organization_id=v_org.id for update;if not found or v_ledger.version<>p_expected_ledger_version then raise exception 'Onboarding ledger changed since activation review';end if;if v_ledger.current_stage<>'review' then raise exception 'Onboarding must be in review before activation';end if;
+select * into v_agreement from public.service_agreements where id=p_agreement_id and provider_organization_id=v_provider and client_organization_id=v_org.id and agreement_type='operational' for update;if not found or v_agreement.invitation_status<>'accepted' then raise exception 'Accepted operational agreement required';end if;
+if not exists(select 1 from public.crm_contacts c where c.organization_id=v_org.id and c.is_primary and c.deactivated_at is null) then raise exception 'Active primary contact required';end if;v_readiness:=public.get_crm_operational_readiness(v_agreement.id);if not coalesce((v_readiness->>'ready')::boolean,false) then raise exception 'Operational readiness blockers remain';end if;
+update public.organizations set status='active',active=true,updated_at=clock_timestamp() where id=v_org.id returning * into v_org;update public.crm_onboarding_ledgers set current_stage='activated',status='activated',version=version+1,activated_at=clock_timestamp(),activated_by=v_actor,updated_at=clock_timestamp() where id=v_ledger.id returning * into v_ledger;
+insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata)values(v_provider,v_actor,'crm_account_activated','organizations',v_org.id,jsonb_build_object('agreement_id',v_agreement.id,'ledger_id',v_ledger.id,'ledger_version',v_ledger.version));return jsonb_build_object('account_organization_id',v_org.id,'organization_status',v_org.status,'ledger_status',v_ledger.status,'activated_at',v_ledger.activated_at);
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."seed_crm_onboarding_ledger"(),"public"."get_crm_onboarding_queue"(),"public"."manage_crm_onboarding_stage"(uuid,integer,text,timestamptz),"public"."activate_crm_account"(uuid,uuid,timestamptz,integer) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_onboarding_queue"(),"public"."manage_crm_onboarding_stage"(uuid,integer,text,timestamptz),"public"."activate_crm_account"(uuid,uuid,timestamptz,integer) TO "authenticated","service_role";
+
+CREATE FUNCTION "public"."get_crm_onboarding_assignees"() RETURNS TABLE("user_id" uuid,"display_name" text,"role" text) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;return query select u.id,coalesce(nullif(trim(u.display_name),''),u.email,'Administrator'),u.role from public.user_profiles u where u.deactivated_at is null and u.role in('admin','master','grand_master') and (u.organization_id=v_provider or u.employer_organization_id=v_provider) order by coalesce(nullif(trim(u.display_name),''),u.email,'Administrator');end;$$;
+
+CREATE FUNCTION "public"."get_crm_onboarding_workspace"() RETURNS TABLE("ledger_id" uuid,"account_organization_id" uuid,"account_name" text,"organization_status" text,"organization_updated_at" timestamptz,"current_stage" text,"ledger_status" text,"version" integer,"started_at" timestamptz,"target_live_at" timestamptz,"days_open" integer,"overdue" boolean,"has_primary_contact" boolean,"agreement_id" uuid,"agreement_name" text,"readiness" jsonb,"assigned_to" uuid,"assigned_name" text,"stage_note" text) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;return query select l.id,o.id,o.name,o.status,o.updated_at,l.current_stage,l.status,l.version,l.started_at,l.target_live_at,greatest(0,floor(extract(epoch from(now()-l.started_at))/86400)::integer),l.target_live_at<now(),exists(select 1 from public.crm_contacts c where c.organization_id=o.id and c.is_primary and c.deactivated_at is null),sa.id,sa.name,case when sa.id is null then null else public.get_crm_operational_readiness(sa.id) end,l.assigned_to,u.display_name,l.stage_note from public.crm_onboarding_ledgers l join public.organizations o on o.id=l.account_organization_id left join public.user_profiles u on u.id=l.assigned_to left join lateral(select a.id,a.name from public.service_agreements a where a.provider_organization_id=l.provider_organization_id and a.client_organization_id=l.account_organization_id and a.agreement_type='operational' order by case when a.invitation_status='accepted' then 0 else 1 end,a.created_at desc limit 1)sa on true where l.provider_organization_id=v_provider and l.status<>'activated' order by l.target_live_at,l.started_at;end;$$;
+
+CREATE FUNCTION "public"."get_crm_onboarding_history"("p_account_organization_id" uuid) RETURNS TABLE("event_id" uuid,"event_type" text,"from_stage" text,"to_stage" text,"ledger_status" text,"assigned_to" uuid,"assigned_name" text,"note" text,"actor_user_id" uuid,"actor_name" text,"ledger_version" integer,"created_at" timestamptz) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_ledger_id uuid;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;select l.id into v_ledger_id from public.crm_onboarding_ledgers l where l.provider_organization_id=v_provider and l.account_organization_id=p_account_organization_id;if v_ledger_id is null then raise exception 'Onboarding ledger not found';end if;return query select e.id,e.event_type,e.from_stage,e.to_stage,e.ledger_status,e.assigned_to,a.display_name,e.note,e.actor_user_id,x.display_name,e.ledger_version,e.created_at from public.crm_onboarding_events e left join public.user_profiles a on a.id=e.assigned_to left join public.user_profiles x on x.id=e.actor_user_id where e.ledger_id=v_ledger_id order by e.created_at desc,e.ledger_version desc;end;$$;
+
+CREATE FUNCTION "public"."manage_crm_onboarding_workflow"("p_account_organization_id" uuid,"p_expected_version" integer,"p_stage" text,"p_target_live_at" timestamptz,"p_assigned_to" uuid,"p_note" text) RETURNS "public"."crm_onboarding_ledgers" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_ledger public.crm_onboarding_ledgers%rowtype;v_previous_stage text;v_rank integer;v_next_rank integer;v_agreement_id uuid;v_readiness jsonb;v_note text:=trim(coalesce(p_note,''));begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;select * into v_ledger from public.crm_onboarding_ledgers where provider_organization_id=v_provider and account_organization_id=p_account_organization_id for update;if not found then raise exception 'Onboarding ledger not found';end if;if v_ledger.version<>p_expected_version then raise exception 'Onboarding ledger changed since it was opened';end if;if v_ledger.status='activated' then raise exception 'Activated onboarding cannot be changed';end if;if char_length(v_note) not between 3 and 1000 then raise exception 'Stage note must be between 3 and 1000 characters';end if;if not exists(select 1 from public.user_profiles u where u.id=p_assigned_to and u.deactivated_at is null and u.role in('admin','master','grand_master') and (u.organization_id=v_provider or u.employer_organization_id=v_provider)) then raise exception 'Select an active provider CRM administrator';end if;v_rank:=array_position(array['qualify','configure','review'],v_ledger.current_stage);v_next_rank:=array_position(array['qualify','configure','review'],p_stage);if v_next_rank is null or v_next_rank<v_rank or v_next_rank>v_rank+1 then raise exception 'Onboarding stage transition is not allowed';end if;if p_stage='review' and p_stage<>v_ledger.current_stage then select sa.id into v_agreement_id from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=p_account_organization_id and sa.agreement_type='operational' and sa.invitation_status='accepted' order by sa.created_at desc limit 1;if v_agreement_id is null then raise exception 'Accepted operational agreement required before review';end if;if not exists(select 1 from public.crm_contacts c where c.organization_id=p_account_organization_id and c.is_primary and c.deactivated_at is null) then raise exception 'Active primary contact required before review';end if;v_readiness:=public.get_crm_operational_readiness(v_agreement_id);if not coalesce((v_readiness->>'ready')::boolean,false) then raise exception 'Operational readiness blockers remain before review';end if;end if;v_previous_stage:=v_ledger.current_stage;update public.crm_onboarding_ledgers set current_stage=p_stage,status=case when p_stage='review' then 'ready' else 'in_progress' end,target_live_at=coalesce(p_target_live_at,target_live_at),assigned_to=p_assigned_to,stage_note=v_note,version=version+1,updated_at=clock_timestamp() where id=v_ledger.id returning * into v_ledger;insert into public.crm_onboarding_events(ledger_id,provider_organization_id,account_organization_id,event_type,from_stage,to_stage,ledger_status,assigned_to,note,actor_user_id,ledger_version) values(v_ledger.id,v_provider,p_account_organization_id,'workflow_updated',v_previous_stage,v_ledger.current_stage,v_ledger.status,v_ledger.assigned_to,v_note,v_actor,v_ledger.version);insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_onboarding_workflow_updated','crm_onboarding_ledgers',v_ledger.id,jsonb_build_object('account_organization_id',p_account_organization_id,'from_stage',v_previous_stage,'stage',v_ledger.current_stage,'assigned_to',v_ledger.assigned_to,'version',v_ledger.version));return v_ledger;end;$$;
+
+CREATE OR REPLACE FUNCTION "public"."activate_crm_account"("p_account_organization_id" uuid,"p_agreement_id" uuid,"p_expected_organization_updated_at" timestamptz,"p_expected_ledger_version" integer) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_org public.organizations%rowtype;v_ledger public.crm_onboarding_ledgers%rowtype;v_agreement public.service_agreements%rowtype;v_readiness jsonb;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;select * into v_org from public.organizations where id=p_account_organization_id for update;if not found or v_org.parent_organization_id is distinct from v_provider then raise exception 'Managed CRM account not found';end if;if v_org.status<>'prospect' or v_org.active then raise exception 'Only an inactive prospect can be activated';end if;if v_org.updated_at is distinct from p_expected_organization_updated_at then raise exception 'Organization changed since activation review';end if;select * into v_ledger from public.crm_onboarding_ledgers where provider_organization_id=v_provider and account_organization_id=v_org.id for update;if not found or v_ledger.version<>p_expected_ledger_version then raise exception 'Onboarding ledger changed since activation review';end if;if v_ledger.current_stage<>'review' then raise exception 'Onboarding must be in review before activation';end if;if v_ledger.assigned_to is null or nullif(trim(v_ledger.stage_note),'') is null then raise exception 'Named onboarding owner and review note required before activation';end if;select * into v_agreement from public.service_agreements where id=p_agreement_id and provider_organization_id=v_provider and client_organization_id=v_org.id and agreement_type='operational' for update;if not found or v_agreement.invitation_status<>'accepted' then raise exception 'Accepted operational agreement required';end if;if not exists(select 1 from public.crm_contacts c where c.organization_id=v_org.id and c.is_primary and c.deactivated_at is null) then raise exception 'Active primary contact required';end if;v_readiness:=public.get_crm_operational_readiness(v_agreement.id);if not coalesce((v_readiness->>'ready')::boolean,false) then raise exception 'Operational readiness blockers remain';end if;update public.organizations set status='active',active=true,updated_at=clock_timestamp() where id=v_org.id returning * into v_org;update public.crm_onboarding_ledgers set current_stage='activated',status='activated',version=version+1,activated_at=clock_timestamp(),activated_by=v_actor,updated_at=clock_timestamp() where id=v_ledger.id returning * into v_ledger;insert into public.crm_onboarding_events(ledger_id,provider_organization_id,account_organization_id,event_type,from_stage,to_stage,ledger_status,assigned_to,note,actor_user_id,ledger_version) values(v_ledger.id,v_provider,v_org.id,'activated','review','activated','activated',v_ledger.assigned_to,'Account activated after governed readiness review',v_actor,v_ledger.version);insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_account_activated','organizations',v_org.id,jsonb_build_object('agreement_id',v_agreement.id,'ledger_id',v_ledger.id,'assigned_to',v_ledger.assigned_to,'ledger_version',v_ledger.version));return jsonb_build_object('account_organization_id',v_org.id,'organization_status',v_org.status,'ledger_status',v_ledger.status,'activated_at',v_ledger.activated_at);end;$$;
+
+REVOKE ALL ON FUNCTION "public"."get_crm_onboarding_assignees"(),"public"."get_crm_onboarding_workspace"(),"public"."get_crm_onboarding_history"(uuid),"public"."manage_crm_onboarding_workflow"(uuid,integer,text,timestamptz,uuid,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_onboarding_assignees"(),"public"."get_crm_onboarding_workspace"(),"public"."get_crm_onboarding_history"(uuid),"public"."manage_crm_onboarding_workflow"(uuid,integer,text,timestamptz,uuid,text) TO "authenticated","service_role";
+
+CREATE OR REPLACE FUNCTION "public"."manage_crm_onboarding_workflow"("p_account_organization_id" uuid,"p_expected_version" integer,"p_stage" text,"p_target_live_at" timestamptz,"p_assigned_to" uuid,"p_note" text)
+RETURNS "public"."crm_onboarding_ledgers" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare
+  v_actor uuid:=auth.uid();v_provider uuid;v_ledger public.crm_onboarding_ledgers%rowtype;v_previous_stage text;v_rank integer;v_next_rank integer;v_agreement_id uuid;v_readiness jsonb;v_note text:=trim(coalesce(p_note,''));
+begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;
+  if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  select * into v_ledger from public.crm_onboarding_ledgers where provider_organization_id=v_provider and account_organization_id=p_account_organization_id for update;
+  if not found then raise exception 'Onboarding ledger not found';end if;
+  if v_ledger.version<>p_expected_version then raise exception 'Onboarding ledger changed since it was opened';end if;
+  if v_ledger.status='activated' then raise exception 'Activated onboarding cannot be changed';end if;
+  if char_length(v_note) not between 3 and 1000 then raise exception 'Stage note must be between 3 and 1000 characters';end if;
+  if not exists(select 1 from public.user_profiles u where u.id=p_assigned_to and u.deactivated_at is null and u.role in('admin','master','grand_master') and (u.organization_id=v_provider or u.employer_organization_id=v_provider)) then raise exception 'Select an active provider CRM administrator';end if;
+  v_rank:=array_position(array['qualify','configure','review'],v_ledger.current_stage);v_next_rank:=array_position(array['qualify','configure','review'],p_stage);
+  if v_next_rank is null or v_next_rank<v_rank or v_next_rank>v_rank+1 then raise exception 'Onboarding stage transition is not allowed';end if;
+  if p_stage='review' and p_stage<>v_ledger.current_stage then
+    select sa.id into v_agreement_id from public.service_agreements sa where sa.provider_organization_id=v_provider and sa.client_organization_id=p_account_organization_id and sa.agreement_type='operational' and sa.invitation_status='accepted' order by sa.created_at desc limit 1;
+    if v_agreement_id is null then raise exception 'Accepted operational agreement required before review';end if;
+    if not exists(select 1 from public.crm_contacts c where c.organization_id=p_account_organization_id and c.is_primary and c.deactivated_at is null) then raise exception 'Active primary contact required before review';end if;
+    v_readiness:=public.get_crm_operational_readiness(v_agreement_id);
+    if not coalesce((v_readiness->>'ready')::boolean,false) then raise exception 'Operational readiness blockers remain before review';end if;
+  end if;
+  v_previous_stage:=v_ledger.current_stage;
+  update public.crm_onboarding_ledgers set current_stage=p_stage,status=case when p_stage=v_ledger.current_stage then v_ledger.status when p_stage='review' then 'ready' else 'in_progress' end,target_live_at=coalesce(p_target_live_at,target_live_at),assigned_to=p_assigned_to,stage_note=v_note,version=version+1,updated_at=clock_timestamp() where id=v_ledger.id returning * into v_ledger;
+  insert into public.crm_onboarding_events(ledger_id,provider_organization_id,account_organization_id,event_type,from_stage,to_stage,ledger_status,assigned_to,note,actor_user_id,ledger_version) values(v_ledger.id,v_provider,p_account_organization_id,'workflow_updated',v_previous_stage,v_ledger.current_stage,v_ledger.status,v_ledger.assigned_to,v_note,v_actor,v_ledger.version);
+  insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_onboarding_workflow_updated','crm_onboarding_ledgers',v_ledger.id,jsonb_build_object('account_organization_id',p_account_organization_id,'from_stage',v_previous_stage,'stage',v_ledger.current_stage,'assigned_to',v_ledger.assigned_to,'version',v_ledger.version));
+  return v_ledger;
+end;$$;
+
+GRANT EXECUTE ON FUNCTION "public"."seed_crm_onboarding_ledger"() TO "service_role";
+
+ALTER TABLE "public"."observations" ADD COLUMN IF NOT EXISTS "geofence_context" jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE "public"."parking_chalk_records" ADD COLUMN IF NOT EXISTS "geofence_context" jsonb NOT NULL DEFAULT '{}'::jsonb;
+COMMENT ON COLUMN "public"."observations"."geofence_context" IS 'Immutable-at-capture snapshot of resolve_context and is_zone_closed evidence used by the officer scan. Geometry answers where; rules and closure overlays answer what.';
+COMMENT ON COLUMN "public"."parking_chalk_records"."geofence_context" IS 'Immutable-at-capture snapshot of resolve_context and is_zone_closed evidence used by the parking scan. Geometry answers where; rules and closure overlays answer what.';
+
+CREATE FUNCTION "public"."preserve_scan_geofence_context"() RETURNS trigger LANGUAGE plpgsql SET search_path=public AS $$
+begin
+  if old.geofence_context<>'{}'::jsonb and new.geofence_context is distinct from old.geofence_context then raise exception 'Captured geofence context is immutable';end if;
+  return new;
+end;$$;
+
+CREATE TRIGGER "trg_observations_preserve_geofence_context" BEFORE UPDATE OF "geofence_context" ON "public"."observations" FOR EACH ROW EXECUTE FUNCTION "public"."preserve_scan_geofence_context"();
+CREATE TRIGGER "trg_parking_chalk_preserve_geofence_context" BEFORE UPDATE OF "geofence_context" ON "public"."parking_chalk_records" FOR EACH ROW EXECUTE FUNCTION "public"."preserve_scan_geofence_context"();
+
+REVOKE ALL ON FUNCTION "public"."preserve_scan_geofence_context"() FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."preserve_scan_geofence_context"() TO "service_role";
+
+CREATE FUNCTION "public"."resolve_verified_site_context"(p_lat double precision,p_lng double precision,p_client_org_ids uuid[])
+RETURNS TABLE(site_id uuid,site_name text,location_id uuid,client_organization_id uuid,match_kind text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
+  with point as(select st_setsrid(st_point(p_lng,p_lat),4326) geometry)
+  select s.id,s.name,s.location_id,s.client_organization_id,
+    case when st_covers(s.boundary,p.geometry) then 'verified_boundary' else 'verified_onsite_radius' end
+  from public.client_sites s cross join point p
+  where s.client_organization_id=any(coalesce(p_client_org_ids,'{}'::uuid[]))
+    and s.active
+    and s.boundary is not null
+    and s.boundary_verification='verified'
+    and st_isvalid(s.boundary)
+    and not st_isempty(s.boundary)
+    and (st_covers(s.boundary,p.geometry) or st_dwithin(coalesce(s.center_point,s.boundary)::geography,p.geometry::geography,coalesce(s.onsite_radius_meters,10)))
+  order by case when st_covers(s.boundary,p.geometry) then 0 else 1 end,st_area(s.boundary),s.name
+  limit 1;
+$$;
+
+REVOKE ALL ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) TO "service_role";
+
+CREATE FUNCTION "public"."resolve_context_authorized"("p_lat" double precision,"p_lng" double precision,"p_org_id" uuid,"p_module_key" text DEFAULT NULL,"p_at" timestamptz DEFAULT now())
+RETURNS TABLE("in_operating_bounds" boolean,"out_of_bounds_district" text,"governing_jurisdiction_id" uuid,"governing_jurisdiction_name" text,"on_site" boolean,"site_id" uuid,"client_org_id" uuid,"matched_zone_id" uuid,"matched_module_key" text,"effective_rules" jsonb,"resolution_status" text,"governor_overlap_flag" boolean)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+begin
+  if auth.uid() is null or not public.org_access_allowed(p_org_id) then raise exception 'Geofence context access denied';end if;
+  return query select * from public.resolve_context(p_lat,p_lng,p_org_id,p_module_key,p_at);
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."resolve_context"(double precision,double precision,uuid,text,timestamptz) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."resolve_context"(double precision,double precision,uuid,text,timestamptz) TO "service_role";
+REVOKE ALL ON FUNCTION "public"."resolve_context_authorized"(double precision,double precision,uuid,text,timestamptz) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."resolve_context_authorized"(double precision,double precision,uuid,text,timestamptz) TO "authenticated";
+
+COMMENT ON FUNCTION "public"."resolve_context_authorized"(double precision,double precision,uuid,text,timestamptz) IS 'Authenticated tenant-scoped wrapper for resolve_context. The underlying canonical resolver is service-role only; browser callers must pass org_access_allowed for p_org_id.';
+COMMENT ON FUNCTION "public"."resolve_verified_site_context"(double precision,double precision,uuid[]) IS 'Service-only standalone Site resolver. Matches only active, valid, verified Site geometry within an already-authorized client organization scope; prefers polygon coverage over the configured on-site radius.';
+
+CREATE TABLE "public"."crm_activation_handoffs"(
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),"provider_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,"account_organization_id" uuid NOT NULL REFERENCES "public"."organizations"("id") ON DELETE CASCADE,"agreement_id" uuid NOT NULL REFERENCES "public"."service_agreements"("id") ON DELETE RESTRICT,"onboarding_ledger_id" uuid NOT NULL UNIQUE REFERENCES "public"."crm_onboarding_ledgers"("id") ON DELETE RESTRICT,"owner_user_id" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"status" text NOT NULL DEFAULT 'open' CHECK("status" IN('open','completed')),"version" integer NOT NULL DEFAULT 1,"activated_at" timestamptz NOT NULL,"completed_at" timestamptz,"completed_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"created_at" timestamptz NOT NULL DEFAULT clock_timestamp(),"updated_at" timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE TABLE "public"."crm_activation_handoff_tasks"(
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),"handoff_id" uuid NOT NULL REFERENCES "public"."crm_activation_handoffs"("id") ON DELETE CASCADE,"task_key" text NOT NULL CHECK("task_key" IN('site_briefing','first_roster_action','reporting_handoff')),"title" text NOT NULL,"destination" text NOT NULL CHECK("destination" IN('site-360','roster','reports')),"status" text NOT NULL DEFAULT 'pending' CHECK("status" IN('pending','completed')),"completion_note" text,"completed_at" timestamptz,"completed_by" uuid REFERENCES "public"."user_profiles"("id") ON DELETE SET NULL,"created_at" timestamptz NOT NULL DEFAULT clock_timestamp(),UNIQUE("handoff_id","task_key")
+);
+CREATE INDEX "crm_activation_handoffs_provider_status_idx" ON "public"."crm_activation_handoffs"("provider_organization_id","status","activated_at" DESC);
+ALTER TABLE "public"."crm_activation_handoffs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."crm_activation_handoff_tasks" ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE "public"."crm_activation_handoffs","public"."crm_activation_handoff_tasks" FROM PUBLIC,"anon","authenticated";
+GRANT ALL ON TABLE "public"."crm_activation_handoffs","public"."crm_activation_handoff_tasks" TO "service_role";
+
+CREATE FUNCTION "public"."seed_crm_activation_handoff"() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+declare v_agreement_id uuid;v_handoff_id uuid;begin if new.status='activated' and old.status is distinct from 'activated' then select sa.id into v_agreement_id from public.service_agreements sa where sa.provider_organization_id=new.provider_organization_id and sa.client_organization_id=new.account_organization_id and sa.agreement_type='operational' and sa.invitation_status='accepted' order by sa.created_at desc limit 1;if v_agreement_id is null then raise exception 'Accepted operational agreement required for activation handoff';end if;insert into public.crm_activation_handoffs(provider_organization_id,account_organization_id,agreement_id,onboarding_ledger_id,owner_user_id,activated_at) values(new.provider_organization_id,new.account_organization_id,v_agreement_id,new.id,new.assigned_to,coalesce(new.activated_at,clock_timestamp())) on conflict(onboarding_ledger_id) do update set owner_user_id=excluded.owner_user_id returning id into v_handoff_id;insert into public.crm_activation_handoff_tasks(handoff_id,task_key,title,destination) values(v_handoff_id,'site_briefing','Confirm site access and safety briefing','site-360'),(v_handoff_id,'first_roster_action','Publish the first operational roster action','roster'),(v_handoff_id,'reporting_handoff','Confirm reporting delivery handoff','reports') on conflict(handoff_id,task_key) do nothing;end if;return new;end;$$;
+CREATE TRIGGER "trg_seed_crm_activation_handoff" AFTER UPDATE OF "status" ON "public"."crm_onboarding_ledgers" FOR EACH ROW EXECUTE FUNCTION "public"."seed_crm_activation_handoff"();
+
+CREATE FUNCTION "public"."get_crm_activation_handoffs"() RETURNS TABLE("handoff_id" uuid,"account_organization_id" uuid,"account_name" text,"agreement_id" uuid,"agreement_name" text,"owner_user_id" uuid,"owner_name" text,"handoff_status" text,"version" integer,"activated_at" timestamptz,"completed_at" timestamptz,"tasks" jsonb,"sites" jsonb,"work_units" jsonb,"first_roster_at" timestamptz) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;return query select h.id,o.id,o.name,sa.id,sa.name,h.owner_user_id,u.display_name,h.status,h.version,h.activated_at,h.completed_at,(select coalesce(jsonb_agg(jsonb_build_object('task_id',t.id,'task_key',t.task_key,'title',t.title,'destination',t.destination,'status',t.status,'completion_note',t.completion_note,'completed_at',t.completed_at,'completed_by_name',cu.display_name) order by t.created_at),'[]'::jsonb) from public.crm_activation_handoff_tasks t left join public.user_profiles cu on cu.id=t.completed_by where t.handoff_id=h.id),(select coalesce(jsonb_agg(jsonb_build_object('site_id',s.id,'name',s.name,'address',s.address,'risk_level',s.risk_level,'access_instructions',s.access_instructions,'hs_notes',s.hs_notes) order by s.name),'[]'::jsonb) from public.service_agreement_locations sal join public.client_sites s on s.id=sal.site_id where sal.service_agreement_id=h.agreement_id and sal.status='active'),(select coalesce(jsonb_agg(jsonb_build_object('work_unit_id',wu.id,'name',wu.name,'service_type',wu.service_type,'active',wu.active) order by wu.name),'[]'::jsonb) from public.roster_work_units wu join public.service_agreement_locations sal on sal.id=wu.service_agreement_location_id where sal.service_agreement_id=h.agreement_id and sal.status='active'),(select min(rs.scheduled_start) from public.roster_slots rs join public.roster_work_units wu on wu.id=rs.work_unit_id join public.service_agreement_locations sal on sal.id=wu.service_agreement_location_id where sal.service_agreement_id=h.agreement_id and rs.status in('published','accepted','completed') and rs.scheduled_start>=h.activated_at) from public.crm_activation_handoffs h join public.organizations o on o.id=h.account_organization_id join public.service_agreements sa on sa.id=h.agreement_id left join public.user_profiles u on u.id=h.owner_user_id where h.provider_organization_id=v_provider order by case when h.status='open' then 0 else 1 end,h.activated_at desc;end;$$;
+
+CREATE FUNCTION "public"."manage_crm_activation_handoff_task"("p_handoff_id" uuid,"p_task_id" uuid,"p_expected_version" integer,"p_complete" boolean,"p_note" text) RETURNS "public"."crm_activation_handoffs" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_handoff public.crm_activation_handoffs%rowtype;v_task public.crm_activation_handoff_tasks%rowtype;v_note text:=trim(coalesce(p_note,''));v_all_complete boolean;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;select * into v_handoff from public.crm_activation_handoffs h where h.id=p_handoff_id and h.provider_organization_id=v_provider for update;if not found then raise exception 'Activation handoff not found';end if;if v_handoff.version<>p_expected_version then raise exception 'Activation handoff changed since it was opened';end if;select * into v_task from public.crm_activation_handoff_tasks t where t.id=p_task_id and t.handoff_id=v_handoff.id for update;if not found then raise exception 'Activation handoff task not found';end if;if char_length(v_note) not between 3 and 1000 then raise exception 'Completion note must be between 3 and 1000 characters';end if;if p_complete and v_task.task_key='first_roster_action' and not exists(select 1 from public.roster_slots rs join public.roster_work_units wu on wu.id=rs.work_unit_id join public.service_agreement_locations sal on sal.id=wu.service_agreement_location_id where sal.service_agreement_id=v_handoff.agreement_id and rs.status in('published','accepted','completed') and rs.scheduled_start>=v_handoff.activated_at) then raise exception 'Publish the first post-activation roster action before completing this task';end if;update public.crm_activation_handoff_tasks set status=case when p_complete then 'completed' else 'pending' end,completion_note=v_note,completed_at=case when p_complete then clock_timestamp() else null end,completed_by=case when p_complete then v_actor else null end where id=v_task.id;select not exists(select 1 from public.crm_activation_handoff_tasks t where t.handoff_id=v_handoff.id and t.status<>'completed') into v_all_complete;update public.crm_activation_handoffs set status=case when v_all_complete then 'completed' else 'open' end,version=version+1,completed_at=case when v_all_complete then clock_timestamp() else null end,completed_by=case when v_all_complete then v_actor else null end,updated_at=clock_timestamp() where id=v_handoff.id returning * into v_handoff;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_activation_handoff_task_'||case when p_complete then 'completed' else 'reopened' end,'crm_activation_handoff_tasks',v_task.id,jsonb_build_object('handoff_id',v_handoff.id,'task_key',v_task.task_key,'handoff_status',v_handoff.status,'handoff_version',v_handoff.version,'note',v_note));return v_handoff;end;$$;
+
+REVOKE ALL ON FUNCTION "public"."seed_crm_activation_handoff"(),"public"."get_crm_activation_handoffs"(),"public"."manage_crm_activation_handoff_task"(uuid,uuid,integer,boolean,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_activation_handoffs"(),"public"."manage_crm_activation_handoff_task"(uuid,uuid,integer,boolean,text) TO "authenticated","service_role";
+GRANT EXECUTE ON FUNCTION "public"."seed_crm_activation_handoff"() TO "service_role";
+
+CREATE FUNCTION "public"."purge_aam_e2e_dataset"("p_provider_organization_id" uuid) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_account_id constant uuid:='a1000000-0000-4000-8000-000000000001';v_agreement_id constant uuid:='a1000000-0000-4000-8000-000000000004';v_location_id constant uuid:='a1000000-0000-4000-8000-000000000002';v_site_id constant uuid:='a1000000-0000-4000-8000-000000000003';
+begin
+  if auth.role() is distinct from 'service_role' then raise exception 'Service role required';end if;
+  if exists(select 1 from public.organizations o where o.id=v_account_id and (o.parent_organization_id is distinct from p_provider_organization_id or o.external_refs->>'dataset' is distinct from 'aam_e2e_20260831')) then raise exception 'AAM dataset identity collision';end if;
+  delete from public.shifts s where s.organization_id=p_provider_organization_id and s.notes like '[AAM E2E]%';delete from public.roster_slots s where s.organization_id=p_provider_organization_id and s.notes like '[AAM E2E]%';delete from public.shift_templates t where t.organization_id=p_provider_organization_id and t.name like '[AAM E2E]%';delete from public.roster_work_units w where w.organization_id=p_provider_organization_id and w.name like '[AAM E2E]%';delete from public.crm_activation_handoff_tasks t using public.crm_activation_handoffs h where t.handoff_id=h.id and h.account_organization_id=v_account_id;delete from public.crm_activation_handoffs h where h.account_organization_id=v_account_id;delete from public.crm_onboarding_events e where e.account_organization_id=v_account_id;delete from public.crm_onboarding_ledgers l where l.account_organization_id=v_account_id;delete from public.geofence_boundary_history h where (h.entity_type='client_site' and h.entity_id=v_site_id) or (h.entity_type='location_zone' and h.entity_id in(select z.id from public.location_zones z where z.location_id=v_location_id));delete from public.service_agreement_locations l where l.service_agreement_id=v_agreement_id;delete from public.service_agreement_modules m where m.service_agreement_id=v_agreement_id;delete from public.crm_commercial_settings c where c.service_agreement_id=v_agreement_id;delete from public.crm_contacts c where c.organization_id=v_account_id;delete from public.location_zones z where z.location_id=v_location_id;delete from public.client_sites s where s.id=v_site_id;delete from public.locations l where l.id=v_location_id;delete from public.service_agreements a where a.id=v_agreement_id;delete from public.organizations o where o.id=v_account_id;
+  return jsonb_build_object('purged',true,'dataset','aam_e2e_20260831');
+end;$$;
+
+CREATE FUNCTION "public"."seed_aam_e2e_dataset"("p_provider_organization_id" uuid,"p_owner_user_id" uuid,"p_admin_user_id" uuid,"p_admin_email" text,"p_officer_user_ids" uuid[],"p_officer_emails" text[]) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_account_id constant uuid:='a1000000-0000-4000-8000-000000000001';v_location_id constant uuid:='a1000000-0000-4000-8000-000000000002';v_site_id constant uuid:='a1000000-0000-4000-8000-000000000003';v_agreement_id constant uuid:='a1000000-0000-4000-8000-000000000004';v_contact_id constant uuid:='a1000000-0000-4000-8000-000000000005';v_commercial_id constant uuid:='a1000000-0000-4000-8000-000000000006';v_site_link_id uuid;v_static_module_id uuid;v_work_unit_id uuid;v_module text;v_zone_type text;v_zone_id uuid;v_index integer;v_shift_type text;v_start time;v_end time;v_operational_modules text[]:=array['access_control','biosecurity','ems','freedom_camping','noise_control','parking_enforcement','patrol','smoke_complaints','static_guarding'];
+begin
+  if auth.role() is distinct from 'service_role' then raise exception 'Service role required';end if;if not exists(select 1 from public.organizations o where o.id=p_provider_organization_id and o.active) then raise exception 'Active provider organization required';end if;if not exists(select 1 from public.user_profiles u where u.id=p_owner_user_id and u.organization_id=p_provider_organization_id and u.role in('grand_master','master','admin') and u.deactivated_at is null) then raise exception 'Active provider owner required';end if;if cardinality(p_officer_user_ids)<>5 or cardinality(p_officer_emails)<>5 then raise exception 'Exactly five AAM officers are required';end if;perform public.purge_aam_e2e_dataset(p_provider_organization_id);
+  insert into public.user_profiles(id,organization_id,role,display_name,email,deactivated_at) values(p_admin_user_id,p_provider_organization_id,'admin','AAM E2E Administrator',p_admin_email,null) on conflict(id) do update set organization_id=excluded.organization_id,role=excluded.role,display_name=excluded.display_name,email=excluded.email,deactivated_at=null;
+  for v_index in 1..5 loop insert into public.user_profiles(id,organization_id,role,display_name,email,deactivated_at) values(p_officer_user_ids[v_index],p_provider_organization_id,'officer','AAM E2E Officer '||v_index,p_officer_emails[v_index],null) on conflict(id) do update set organization_id=excluded.organization_id,role=excluded.role,display_name=excluded.display_name,email=excluded.email,deactivated_at=null;insert into public.staff_profiles(id,organization_id,employee_number,employment_type,start_date,user_id,work_ready,notes) values(p_officer_user_ids[v_index],p_provider_organization_id,'AAM-'||lpad(v_index::text,3,'0'),'casual',current_date,p_officer_user_ids[v_index],true,'AAM E2E retained test identity') on conflict(id) do update set organization_id=excluded.organization_id,employee_number=excluded.employee_number,user_id=excluded.user_id,work_ready=true,notes=excluded.notes;end loop;
+  insert into public.organizations(id,name,organization_type,parent_organization_id,active,status,contact_email,billing_email,billing_address,account_notes,external_refs) values(v_account_id,'AAM End-to-End Test Account','client',p_provider_organization_id,false,'prospect','operations@aam-e2e.test','billing@aam-e2e.test','100 Test Avenue, Wellington','Controlled synthetic account. Safe to purge and reseed.',jsonb_build_object('dataset','aam_e2e_20260831'));insert into public.crm_contacts(id,organization_id,first_name,last_name,role_title,email,is_primary,is_emergency) values(v_contact_id,v_account_id,'Ari','AAM','Test Operations Lead','ari@aam-e2e.test',true,true);insert into public.locations(id,organization_id,name,address,address_match_key,suburb,postcode,notes,created_by) values(v_location_id,v_account_id,'AAM Test Operations House','100 Test Avenue, Wellington','100testavenuewellington','Te Aro','6011','Synthetic location for module, zone, and roster verification.',p_admin_user_id);insert into public.client_sites(id,client_organization_id,organization_id,location_id,name,address,address_match_key,site_type,risk_level,site_brief,access_instructions,hs_notes,active,site_origin,boundary,boundary_status,boundary_verification,boundary_verified_by,boundary_verified_at,external_refs) values(v_site_id,v_account_id,v_account_id,v_location_id,'AAM Test Operations Site','100 Test Avenue, Wellington','100testavenuewellington','commercial_premises','medium','Synthetic all-module operational test site.','Use the signed east service entrance. Test access code only.','Synthetic hazards: vehicle movement and wet-surface controls.',true,'contracted',st_geomfromtext('POLYGON((174.7750 -41.2920,174.7770 -41.2920,174.7770 -41.2900,174.7750 -41.2900,174.7750 -41.2920))',4326),'authoritative','verified',p_owner_user_id,clock_timestamp(),jsonb_build_object('dataset','aam_e2e_20260831'));insert into public.geofence_boundary_history(entity_type,entity_id,boundary,boundary_source,verification_state,verified_by,verified_at,changed_by,changed_via,change_reason,version) select 'client_site',v_site_id,s.boundary,'aam_e2e_seed','verified',p_owner_user_id,clock_timestamp(),p_owner_user_id,'backfill','AAM E2E verified test site boundary',1 from public.client_sites s where s.id=v_site_id;
+  foreach v_module in array v_operational_modules loop v_zone_id:=(substr(md5('aam-e2e-zone-'||v_module),1,8)||'-'||substr(md5('aam-e2e-zone-'||v_module),9,4)||'-4'||substr(md5('aam-e2e-zone-'||v_module),14,3)||'-8'||substr(md5('aam-e2e-zone-'||v_module),18,3)||'-'||substr(md5('aam-e2e-zone-'||v_module),21,12))::uuid;v_zone_type:=case v_module when 'access_control' then 'access_control' when 'biosecurity' then 'biosecurity' when 'freedom_camping' then 'freedom_camping' when 'noise_control' then 'noise_control' when 'parking_enforcement' then 'parking' when 'patrol' then 'patrol_route' else 'general' end;insert into public.location_zones(id,organization_id,location_id,name,address,zone_type,module_key,rule_type,is_active,boundary,boundary_status,boundary_verification,boundary_verified_by,boundary_verified_at,center_point,metadata) values(v_zone_id,v_account_id,v_location_id,'AAM '||replace(initcap(v_module),'_',' ')||' Zone','100 Test Avenue, Wellington',v_zone_type,v_module,'restricted',true,st_multi(st_geomfromtext('POLYGON((174.7745 -41.2925,174.7775 -41.2925,174.7775 -41.2895,174.7745 -41.2895,174.7745 -41.2925))',4326)),'authoritative','verified',p_owner_user_id,clock_timestamp(),st_geomfromtext('POINT(174.776 -41.291)',4326),jsonb_build_object('dataset','aam_e2e_20260831'));insert into public.geofence_boundary_history(entity_type,entity_id,boundary,boundary_source,verification_state,verified_by,verified_at,changed_by,changed_via,change_reason,version) select 'location_zone',v_zone_id,z.boundary,'aam_e2e_seed','verified',p_owner_user_id,clock_timestamp(),p_owner_user_id,'backfill','AAM E2E verified module zone',1 from public.location_zones z where z.id=v_zone_id;end loop;
+  insert into public.service_agreements(id,provider_organization_id,client_organization_id,name,starts_on,agreement_type,invitation_status,client_portal_access_mode,client_portal_reports_enabled,enabled_modules,external_refs) select v_agreement_id,p_provider_organization_id,v_account_id,'AAM All-Module Service Agreement',current_date,'operational','accepted','full_modules',false,array_agg(mc.module_key order by mc.module_key),jsonb_build_object('dataset','aam_e2e_20260831') from public.module_catalog mc where mc.active;insert into public.service_agreement_modules(id,service_agreement_id,module_key,enabled,sla_minutes,allows_client_submission,allows_auto_dispatch,standalone_scan_enabled,settings) select gen_random_uuid(),v_agreement_id,mc.module_key,true,30,true,true,(mc.module_key in('freedom_camping','parking_enforcement')),jsonb_build_object('dataset','aam_e2e_20260831') from public.module_catalog mc where mc.active;insert into public.service_agreement_locations(id,service_agreement_id,site_id,status,created_by) values(gen_random_uuid(),v_agreement_id,v_site_id,'active',p_admin_user_id) returning id into v_site_link_id;insert into public.service_agreement_locations(id,service_agreement_id,zone_id,status,created_by) select gen_random_uuid(),v_agreement_id,z.id,'active',p_admin_user_id from public.location_zones z where z.location_id=v_location_id;insert into public.crm_commercial_settings(id,service_agreement_id,billing_cycle,payment_terms_days,currency,base_rate_per_hour,invoice_email,notes) values(v_commercial_id,v_agreement_id,'monthly',14,'NZD',85,'billing@aam-e2e.test','AAM E2E synthetic commercial readiness');select sam.id into v_static_module_id from public.service_agreement_modules sam where sam.service_agreement_id=v_agreement_id and sam.module_key='static_guarding';insert into public.roster_work_units(organization_id,name,work_unit_type,service_type,service_agreement_location_id,service_agreement_module_id,created_by) values(p_provider_organization_id,'[AAM E2E] Static Site Operations','static','static_guarding',v_site_link_id,v_static_module_id,p_admin_user_id) returning id into v_work_unit_id;
+  for v_index in 1..5 loop v_shift_type:=(array['day','swing','night','overnight','split'])[v_index];v_start:=(array['08:00','14:00','20:00','22:00','07:00'])[v_index]::time;v_end:=(array['16:00','22:00','04:00','06:00','11:00'])[v_index]::time;insert into public.shift_templates(organization_id,name,description,shift_type,start_time,end_time,recurrence_type,active_days,required_staff_count,site_id,is_active,effective_from,notes,created_by) values(p_provider_organization_id,'[AAM E2E] '||initcap(v_shift_type)||' Shift','Synthetic canonical '||v_shift_type||' shift template',v_shift_type,v_start,v_end,'weekly',array[1,2,3,4,5,6,7],1,v_site_id,true,current_date,'[AAM E2E] retained test template',p_admin_user_id);end loop;
+  return jsonb_build_object('dataset','aam_e2e_20260831','account_id',v_account_id,'agreement_id',v_agreement_id,'location_id',v_location_id,'site_id',v_site_id,'work_unit_id',v_work_unit_id,'admin_user_id',p_admin_user_id,'officer_user_ids',to_jsonb(p_officer_user_ids),'active_module_count',(select count(*) from public.module_catalog where active),'operational_zones',(select jsonb_agg(jsonb_build_object('zone_id',z.id,'module_key',z.module_key) order by z.module_key) from public.location_zones z where z.location_id=v_location_id));
+end;$$;
+
+REVOKE ALL ON FUNCTION "public"."purge_aam_e2e_dataset"(uuid),"public"."seed_aam_e2e_dataset"(uuid,uuid,uuid,text,uuid[],text[]) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."purge_aam_e2e_dataset"(uuid),"public"."seed_aam_e2e_dataset"(uuid,uuid,uuid,text,uuid[],text[]) TO "service_role";
+
+CREATE FUNCTION "public"."get_crm_operational_geography"() RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;begin
+  select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;
+  return jsonb_build_object(
+    'locations',(select coalesce(jsonb_agg(to_jsonb(x) order by x.name),'[]'::jsonb) from(select distinct l.id,l.organization_id,l.name,l.address,l.suburb,l.postcode,l.notes from public.locations l where l.organization_id=v_provider or exists(select 1 from public.service_agreements sa join public.service_agreement_locations sal on sal.service_agreement_id=sa.id and sal.status='active' left join public.client_sites s on s.id=sal.site_id left join public.location_zones z on z.id=sal.zone_id where sa.provider_organization_id=v_provider and sa.invitation_status='accepted' and sa.agreement_type='operational' and (s.location_id=l.id or z.location_id=l.id)))x),
+    'sites',(select coalesce(jsonb_agg(to_jsonb(x) order by x.name),'[]'::jsonb) from(select distinct s.id,s.client_organization_id,s.location_id,s.name,s.address,s.site_type,s.active,s.gps_lat,s.gps_lng,st_asgeojson(s.boundary)::jsonb boundary,s.boundary_status,s.boundary_verification from public.client_sites s where s.client_organization_id=v_provider or exists(select 1 from public.service_agreements sa join public.service_agreement_locations sal on sal.service_agreement_id=sa.id and sal.status='active' where sa.provider_organization_id=v_provider and sa.invitation_status='accepted' and sa.agreement_type='operational' and sal.site_id=s.id))x),
+    'zones',(select coalesce(jsonb_agg(to_jsonb(x) order by x.name),'[]'::jsonb) from(select distinct z.id,z.organization_id,z.location_id,z.site_id,z.name,z.address,z.zone_type,z.module_key,z.rule_type,z.is_active,z.active_schedule,z.onsite_profile,z.enforcement_workflow_override,st_asgeojson(z.boundary)::jsonb boundary,st_asgeojson(z.center_point)::jsonb center_point,z.boundary_status,z.boundary_verification,z.bylaw_clause,z.bylaw_source_url,z.nightly_limit_consecutive,z.nightly_limit_monthly,z.scv_required from public.location_zones z where z.organization_id=v_provider or exists(select 1 from public.service_agreements sa join public.service_agreement_locations sal on sal.service_agreement_id=sa.id and sal.status='active' where sa.provider_organization_id=v_provider and sa.invitation_status='accepted' and sa.agreement_type='operational' and sal.zone_id=z.id))x)
+  );
+end;$$;
+REVOKE ALL ON FUNCTION "public"."get_crm_operational_geography"() FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_operational_geography"() TO "authenticated","service_role";
+COMMENT ON FUNCTION "public"."get_crm_operational_geography"() IS 'Returns provider-owned and accepted-agreement client locations, sites, and zones through one CRM-admin scoped read boundary.';
+
+ALTER TABLE "public"."client_sites" ADD COLUMN IF NOT EXISTS "configuration_version" integer NOT NULL DEFAULT 1;
+ALTER TABLE "public"."location_zones" ADD COLUMN IF NOT EXISTS "configuration_version" integer NOT NULL DEFAULT 1;
+
+CREATE OR REPLACE FUNCTION "public"."crm_actor_can_manage_location"("p_location_id" uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
+select exists(select 1 from public.locations l join public.user_profiles u on u.id=auth.uid() and u.deactivated_at is null where l.id=p_location_id and public.is_admin_for_org(u.organization_id) and (l.organization_id=u.organization_id or exists(select 1 from public.service_agreements sa join public.service_agreement_locations sal on sal.service_agreement_id=sa.id and sal.status='active' left join public.client_sites s on s.id=sal.site_id left join public.location_zones z on z.id=sal.zone_id where sa.provider_organization_id=u.organization_id and sa.invitation_status='accepted' and sa.agreement_type='operational' and (s.location_id=l.id or z.location_id=l.id))));$$;
+
+CREATE FUNCTION "public"."manage_crm_site_profile"("p_site_id" uuid,"p_expected_version" integer,"p_risk_level" text,"p_site_brief" text,"p_access_instructions" text,"p_hs_notes" text,"p_active" boolean) RETURNS "public"."client_sites" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_site public.client_sites%rowtype;v_provider uuid;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;select * into v_site from public.client_sites s where s.id=p_site_id for update;if not found or v_provider is null or not public.is_admin_for_org(v_provider) or not public.crm_actor_can_manage_account(v_site.client_organization_id) then raise exception 'Active CRM administrator required for this site';end if;if v_site.configuration_version<>p_expected_version then raise exception 'Site configuration changed since it was opened';end if;if p_risk_level is not null and p_risk_level not in('low','medium','high','critical') then raise exception 'Unsupported risk level';end if;update public.client_sites set risk_level=p_risk_level,site_brief=nullif(trim(coalesce(p_site_brief,'')),''),access_instructions=nullif(trim(coalesce(p_access_instructions,'')),''),hs_notes=nullif(trim(coalesce(p_hs_notes,'')),''),active=p_active,configuration_version=configuration_version+1 where id=v_site.id returning * into v_site;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_site_profile_updated','client_sites',v_site.id,jsonb_build_object('account_organization_id',v_site.client_organization_id,'configuration_version',v_site.configuration_version,'risk_level',v_site.risk_level,'active',v_site.active));return v_site;end;$$;
+
+CREATE FUNCTION "public"."manage_crm_zone"("p_action" text,"p_zone_id" uuid,"p_location_id" uuid,"p_expected_version" integer,"p_name" text,"p_zone_type" text,"p_module_key" text,"p_rule_type" text,"p_is_active" boolean,"p_nightly_limit_consecutive" integer,"p_nightly_limit_monthly" integer,"p_scv_required" boolean,"p_enforcement_workflow_override" text) RETURNS "public"."location_zones" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_location public.locations%rowtype;v_zone public.location_zones%rowtype;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) or not public.crm_actor_can_manage_location(p_location_id) then raise exception 'Active CRM administrator required for this location';end if;select * into v_location from public.locations l where l.id=p_location_id;if not found then raise exception 'Location not found';end if;if nullif(trim(coalesce(p_name,'')),'') is null then raise exception 'Zone name is required';end if;if p_zone_type not in('freedom_camping','parking','noise_control','biosecurity','trespass','access_control','general','patrol_route') then raise exception 'Unsupported zone type';end if;if p_rule_type not in('overnight_limited','day_visit_only','prohibited','restricted','unrestricted') then raise exception 'Unsupported zone rule';end if;if p_enforcement_workflow_override is not null and p_enforcement_workflow_override not in('admin_first','officer_direct','hybrid') then raise exception 'Unsupported enforcement workflow';end if;if not exists(select 1 from public.module_catalog m where m.module_key=p_module_key and m.active) then raise exception 'Select an active module';end if;if (p_nightly_limit_consecutive is not null and p_nightly_limit_consecutive<0) or (p_nightly_limit_monthly is not null and p_nightly_limit_monthly<0) then raise exception 'Night limits cannot be negative';end if;if p_action='create' then insert into public.location_zones(organization_id,location_id,name,zone_type,module_key,rule_type,is_active,nightly_limit_consecutive,nightly_limit_monthly,scv_required,enforcement_workflow_override,boundary_status,boundary_verification) values(v_location.organization_id,v_location.id,trim(p_name),p_zone_type,p_module_key,p_rule_type,coalesce(p_is_active,true),p_nightly_limit_consecutive,p_nightly_limit_monthly,coalesce(p_scv_required,false),nullif(p_enforcement_workflow_override,''),'provisional','unverified') returning * into v_zone;elsif p_action='update' then select * into v_zone from public.location_zones z where z.id=p_zone_id and z.location_id=p_location_id for update;if not found then raise exception 'Zone not found in this location';end if;if v_zone.configuration_version<>p_expected_version then raise exception 'Zone configuration changed since it was opened';end if;update public.location_zones set name=trim(p_name),zone_type=p_zone_type,module_key=p_module_key,rule_type=p_rule_type,is_active=p_is_active,nightly_limit_consecutive=p_nightly_limit_consecutive,nightly_limit_monthly=p_nightly_limit_monthly,scv_required=p_scv_required,enforcement_workflow_override=nullif(p_enforcement_workflow_override,''),configuration_version=configuration_version+1 where id=v_zone.id returning * into v_zone;else raise exception 'Unsupported zone action';end if;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_zone_'||p_action,'location_zones',v_zone.id,jsonb_build_object('location_id',v_location.id,'module_key',v_zone.module_key,'configuration_version',v_zone.configuration_version));return v_zone;end;$$;
+
+CREATE FUNCTION "public"."manage_crm_place_boundary"("p_entity_type" text,"p_entity_id" uuid,"p_expected_version" integer,"p_geojson" jsonb,"p_source" text,"p_verify" boolean DEFAULT false) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_site public.client_sites%rowtype;v_zone public.location_zones%rowtype;v_geometry geometry;v_version integer;v_verification text;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) then raise exception 'Active CRM administrator required';end if;if p_entity_type='client_site' then select * into v_site from public.client_sites s where s.id=p_entity_id for update;if not found or not public.crm_actor_can_manage_account(v_site.client_organization_id) then raise exception 'Site not found or access denied';end if;if v_site.configuration_version<>p_expected_version then raise exception 'Site configuration changed since it was opened';end if;if p_verify then if v_site.boundary is null then raise exception 'Save a boundary before verification';end if;perform public.verify_boundary('client_site',v_site.id);update public.client_sites set configuration_version=configuration_version+1 where id=v_site.id returning configuration_version,boundary_verification into v_version,v_verification;else v_geometry:=st_makevalid(st_setsrid(st_geomfromgeojson(p_geojson::text),4326));if geometrytype(v_geometry)<>'POLYGON' then raise exception 'Site boundary must be a GeoJSON Polygon';end if;update public.client_sites set boundary=v_geometry,center_point=st_centroid(v_geometry),boundary_status='authoritative',boundary_verification='unverified',boundary_verified_by=null,boundary_verified_at=null,configuration_version=configuration_version+1 where id=v_site.id returning configuration_version,boundary_verification into v_version,v_verification;insert into public.geofence_boundary_history(entity_type,entity_id,boundary,boundary_source,verification_state,changed_by,changed_via,change_reason,version) values('client_site',v_site.id,v_geometry,coalesce(nullif(trim(p_source),''),'manual_geojson'),'unverified',v_actor,'admin_upload','Site boundary uploaded by administrator',public._gbh_next_version('client_site',v_site.id));end if;elsif p_entity_type='location_zone' then select * into v_zone from public.location_zones z where z.id=p_entity_id for update;if not found or not public.crm_actor_can_manage_location(v_zone.location_id) then raise exception 'Zone not found or access denied';end if;if v_zone.configuration_version<>p_expected_version then raise exception 'Zone configuration changed since it was opened';end if;if p_verify then if v_zone.boundary is null then raise exception 'Save a boundary before verification';end if;perform public.verify_boundary('location_zone',v_zone.id);update public.location_zones set configuration_version=configuration_version+1 where id=v_zone.id returning configuration_version,boundary_verification into v_version,v_verification;else v_geometry:=st_multi(st_makevalid(st_setsrid(st_geomfromgeojson(p_geojson::text),4326)));if geometrytype(v_geometry)<>'MULTIPOLYGON' then raise exception 'Zone boundary must be a GeoJSON Polygon or MultiPolygon';end if;update public.location_zones set boundary=v_geometry,center_point=st_centroid(v_geometry),boundary_status='authoritative',boundary_verification='unverified',boundary_verified_by=null,boundary_verified_at=null,configuration_version=configuration_version+1 where id=v_zone.id returning configuration_version,boundary_verification into v_version,v_verification;insert into public.geofence_boundary_history(entity_type,entity_id,boundary,boundary_source,verification_state,changed_by,changed_via,change_reason,version) values('location_zone',v_zone.id,v_geometry,coalesce(nullif(trim(p_source),''),'manual_geojson'),'unverified',v_actor,'admin_upload','Zone boundary uploaded by administrator',public._gbh_next_version('location_zone',v_zone.id));end if;else raise exception 'Unsupported boundary entity type';end if;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,case when p_verify then 'crm_place_boundary_verified' else 'crm_place_boundary_uploaded' end,case when p_entity_type='client_site' then 'client_sites' else 'location_zones' end,p_entity_id,jsonb_build_object('entity_type',p_entity_type,'configuration_version',v_version,'source',p_source));return jsonb_build_object('entity_type',p_entity_type,'entity_id',p_entity_id,'configuration_version',v_version,'boundary_verification',v_verification);end;$$;
+
+CREATE FUNCTION "public"."manage_crm_zone_closure"("p_zone_id" uuid,"p_action" text,"p_closure_id" uuid,"p_closure_type" text,"p_effective_from" date,"p_effective_to" date,"p_reason" text) RETURNS "public"."zone_closures" LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_zone public.location_zones%rowtype;v_closure public.zone_closures%rowtype;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;select * into v_zone from public.location_zones z where z.id=p_zone_id;if not found or v_provider is null or not public.is_admin_for_org(v_provider) or not public.crm_actor_can_manage_location(v_zone.location_id) then raise exception 'Active CRM administrator required for this zone';end if;if p_action='create' then if p_closure_type not in('prohibited','restricted','temporary_closure') then raise exception 'Unsupported closure type';end if;if p_effective_from is null or (p_effective_to is not null and p_effective_to<p_effective_from) then raise exception 'Valid closure dates are required';end if;if nullif(trim(coalesce(p_reason,'')),'') is null then raise exception 'Closure reason is required';end if;insert into public.zone_closures(organization_id,zone_id,closure_type,status,effective_from,effective_to,reason,created_by) values(v_zone.organization_id,v_zone.id,p_closure_type,case when p_effective_from<=current_date then 'active' else 'scheduled' end,p_effective_from,p_effective_to,trim(p_reason),v_actor) returning * into v_closure;elsif p_action='lift' then select * into v_closure from public.zone_closures c where c.id=p_closure_id and c.zone_id=v_zone.id for update;if not found then raise exception 'Closure not found';end if;update public.zone_closures set status='lifted',effective_to=coalesce(effective_to,current_date),resolution_notes=nullif(trim(coalesce(p_reason,'')),''),lifted_by=v_actor,lifted_at=clock_timestamp() where id=v_closure.id returning * into v_closure;else raise exception 'Unsupported closure action';end if;insert into public.audit_log(organization_id,actor_user_id,action,target_table,target_id,metadata) values(v_provider,v_actor,'crm_zone_closure_'||p_action,'zone_closures',v_closure.id,jsonb_build_object('zone_id',v_zone.id,'closure_type',v_closure.closure_type,'status',v_closure.status));return v_closure;end;$$;
+
+REVOKE ALL ON FUNCTION "public"."crm_actor_can_manage_location"(uuid),"public"."manage_crm_site_profile"(uuid,integer,text,text,text,text,boolean),"public"."manage_crm_zone"(text,uuid,uuid,integer,text,text,text,text,boolean,integer,integer,boolean,text),"public"."manage_crm_place_boundary"(text,uuid,integer,jsonb,text,boolean),"public"."manage_crm_zone_closure"(uuid,text,uuid,text,date,date,text) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."manage_crm_site_profile"(uuid,integer,text,text,text,text,boolean),"public"."manage_crm_zone"(text,uuid,uuid,integer,text,text,text,text,boolean,integer,integer,boolean,text),"public"."manage_crm_place_boundary"(text,uuid,integer,jsonb,text,boolean),"public"."manage_crm_zone_closure"(uuid,text,uuid,text,date,date,text) TO "authenticated","service_role";
+GRANT EXECUTE ON FUNCTION "public"."crm_actor_can_manage_location"(uuid) TO "service_role";
+
+CREATE FUNCTION "public"."get_crm_operational_place_editor"("p_location_id" uuid) RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public AS $$
+declare v_actor uuid:=auth.uid();v_provider uuid;v_location public.locations%rowtype;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) or not public.crm_actor_can_manage_location(p_location_id) then raise exception 'Active CRM administrator required for this location';end if;select * into v_location from public.locations l where l.id=p_location_id;if not found then raise exception 'Location not found';end if;return jsonb_build_object('location',jsonb_build_object('id',v_location.id,'name',v_location.name,'organization_id',v_location.organization_id),'sites',(select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'risk_level',s.risk_level,'site_brief',s.site_brief,'access_instructions',s.access_instructions,'hs_notes',s.hs_notes,'active',s.active,'boundary_status',s.boundary_status,'boundary_verification',s.boundary_verification,'configuration_version',s.configuration_version) order by s.name),'[]'::jsonb) from public.client_sites s where s.location_id=v_location.id),'zones',(select coalesce(jsonb_agg(jsonb_build_object('id',z.id,'name',z.name,'zone_type',z.zone_type,'module_key',z.module_key,'rule_type',z.rule_type,'is_active',z.is_active,'nightly_limit_consecutive',z.nightly_limit_consecutive,'nightly_limit_monthly',z.nightly_limit_monthly,'scv_required',z.scv_required,'enforcement_workflow_override',z.enforcement_workflow_override,'boundary_status',z.boundary_status,'boundary_verification',z.boundary_verification,'configuration_version',z.configuration_version) order by z.name),'[]'::jsonb) from public.location_zones z where z.location_id=v_location.id),'modules',(select coalesce(jsonb_agg(jsonb_build_object('module_key',m.module_key,'display_name',initcap(replace(m.module_key,'_',' '))) order by m.module_key),'[]'::jsonb) from public.module_catalog m where m.active),'closures',(select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'zone_id',c.zone_id,'closure_type',c.closure_type,'status',c.status,'effective_from',c.effective_from,'effective_to',c.effective_to,'reason',c.reason,'resolution_notes',c.resolution_notes) order by c.created_at desc),'[]'::jsonb) from public.zone_closures c join public.location_zones z on z.id=c.zone_id where z.location_id=v_location.id));end;$$;
+REVOKE ALL ON FUNCTION "public"."get_crm_operational_place_editor"(uuid) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."get_crm_operational_place_editor"(uuid) TO "authenticated","service_role";

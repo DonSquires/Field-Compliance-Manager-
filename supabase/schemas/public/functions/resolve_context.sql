@@ -329,8 +329,12 @@ BEGIN
 END;
 $function$;
 
+revoke all
+  on function "public"."resolve_context"(double precision, double precision, uuid, text, timestamp with time zone)
+  from public, "anon", "authenticated";
+
 grant execute
   on function "public"."resolve_context"(double precision, double precision, uuid, text, timestamp with time zone)
-  to public, "anon", "authenticated", "postgres", "service_role";
+  to "service_role";
 
 comment on function "public"."resolve_context"(double precision, double precision, uuid, text, timestamp with time zone) is 'Three-layer geofence resolution with verification gate (P1/P2) and role-aware governing jurisdiction. 0347 convergence step 1: the OWNERSHIP answer (client_org_id) ALWAYS resolves TO THE HOUSE (locations.organization_id) where a house is reachable. site_id is a transitional COMPATIBILITY LINK (v2 ruling !1304), used only as a ROUTE to the house, never as a co-equal owner. Resolution tiers: (1) zone.location_id -> locations; (2) zone.site_id -> client_sites.location_id -> locations (site as route); (3) zone.site_id -> client_sites.client_organization_id (transitional last-resort only while a site has no house link during migration). Per the owner ruling (2026-08-05) all three tiers return the SAME org by construction (same PLACE axis), so this changes the SOURCE of the answer, not the answer. ON-SITE geometry, zone matching, Layer 1/2, resolution_status, all 12 columns and governor_overlap_flag are byte-unchanged from 0290. Safe day-one: live zones have location_id NULL and their sites may not yet carry location_id, so resolution reaches tier 3 = the exact 0290 answer -> IDENTICAL output on current data; becomes house-authoritative as step 2 populates location_id upward.';
