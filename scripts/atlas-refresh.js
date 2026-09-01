@@ -68,6 +68,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831093000_crm_operational_geography.sql',
   'supabase/migrations/20260831094000_govern_operational_place_management.sql',
   'supabase/migrations/20260831095000_operational_place_editor.sql',
+  'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];

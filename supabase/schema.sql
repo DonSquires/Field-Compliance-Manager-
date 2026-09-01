@@ -9842,7 +9842,7 @@ CREATE TABLE IF NOT EXISTS "public"."geofence_boundary_history" (
     "change_reason" "text",
     "version" integer DEFAULT 1 NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "geofence_boundary_history_changed_via_check" CHECK (("changed_via" = ANY (ARRAY['governed_proposal'::"text", 'direct_edit'::"text", 'reconciliation'::"text", 'refresh'::"text", 'verification'::"text", 'backfill'::"text"]))),
+    CONSTRAINT "geofence_boundary_history_changed_via_check" CHECK (("changed_via" = ANY (ARRAY['governed_proposal'::"text", 'direct_edit'::"text", 'admin_upload'::"text", 'reconciliation'::"text", 'refresh'::"text", 'verification'::"text", 'backfill'::"text"]))),
     CONSTRAINT "geofence_boundary_history_entity_type_check" CHECK (("entity_type" = ANY (ARRAY['organization'::"text", 'location_zone'::"text", 'client_site'::"text"])))
 );
 
