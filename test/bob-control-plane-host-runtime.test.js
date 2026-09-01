@@ -18,6 +18,9 @@ test('host runtime is loopback-bound, non-root, and uses host-visible protected 
   assert.match(service, /PrivateTmp=true/);
   assert.match(service, /ReadWritePaths=\/var\/lib\/bob/);
   assert.doesNotMatch(service, /MemoryDenyWriteExecute/);
+  const server = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  assert.match(server, /path\.join\(stateDir, 'artifacts'\)/);
+  assert.doesNotMatch(server, /path\.join\(assessmentRoot, 'bob-artifacts'\)/);
 });
 
 test('TLS proxy exposes only health and Builder execution routes', () => {

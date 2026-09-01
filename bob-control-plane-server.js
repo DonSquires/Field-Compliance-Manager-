@@ -57,6 +57,12 @@ const audit = [];
 let activeLease = null;
 let dockerReadinessCache = { checkedAt: 0, available: false };
 
+function runtimeArtifactDir() {
+  const artifactDir = path.join(stateDir, 'artifacts');
+  fs.mkdirSync(artifactDir, { recursive: true });
+  return artifactDir;
+}
+
 function detectDockerAccess(spawn = spawnSync) {
   const result = spawn('docker', ['version', '--format', '{{.Server.Version}}'], {
     encoding: 'utf8',
@@ -425,7 +431,7 @@ async function route(req, res, body) {
         };
     const result = await runSelfHostedBuildLoop({
       rootDir: assessmentRoot,
-      artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+      artifactDir: runtimeArtifactDir(),
       profiles: selectedProfiles,
       workerImage: builderWorkerImage || body.workerImage || 'fcm/bob-worker:local',
       execute: runner,
@@ -457,7 +463,7 @@ async function route(req, res, body) {
       const result = await runVisualCheck({
         appUrl,
         sourceDir: assessmentRoot,
-        artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+        artifactDir: runtimeArtifactDir(),
         testName: checkRecord.testName
       });
       const completed = {
@@ -539,7 +545,7 @@ async function route(req, res, body) {
     try {
       const result = await runSelfHostedBuildLoop({
         rootDir: assessmentRoot,
-        artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+        artifactDir: runtimeArtifactDir(),
         profiles: PLATFORM_ASSESSMENT_PROFILES,
         workerImage: builderWorkerImage || 'fcm/bob-worker:local',
         execute: runBuilderWorker,
@@ -617,7 +623,7 @@ async function route(req, res, body) {
     try {
       const result = await runSelfHostedBuildLoop({
         rootDir: assessmentRoot,
-        artifactDir: path.join(assessmentRoot, 'bob-artifacts'),
+        artifactDir: runtimeArtifactDir(),
         profiles: PLATFORM_ASSESSMENT_PROFILES,
         workerImage: builderWorkerImage || 'fcm/bob-worker:local',
         execute: runBuilderWorker,
