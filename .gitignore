@@ -10,12 +10,17 @@ __pycache__/
 
 node_modules/
 apps/web/dist/
+!apps/web/dist/
+apps/web/dist/*
+!apps/web/dist/.gitkeep
 apps/web/tsconfig.tsbuildinfo
 apps/web/playwright-report/
 apps/web/test-results/
 bob-data/
 bob-artifacts/
 .bob/
+!.bob/
+.bob/*
 !.bob/.gitkeep
 
 # Local recovery and command-output artifacts
