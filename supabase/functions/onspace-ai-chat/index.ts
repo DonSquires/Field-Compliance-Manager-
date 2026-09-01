@@ -643,8 +643,9 @@ function budgetKnowledgeCards(cards) {
 // returns and a READ tool is dispatched, the conductor feeds the structured result
 // back into the next plan call as task_state and lets Bob decide the next step —
 // until he chooses answer/ask, hits a write, or hits the step cap.
-// Default OFF: when off, behaviour is byte-for-byte the current single-shot path.
-const BOB_LOOP_ENABLED = Deno.env.get('BOB_LOOP_ENABLED') === 'true';
+// Default ON for bounded read-only chaining. Set BOB_LOOP_ENABLED=false as the
+// operational kill switch if the host needs to fall back to single-shot turns.
+const BOB_LOOP_ENABLED = Deno.env.get('BOB_LOOP_ENABLED') !== 'false';
 // Default 8 (was 4): a batch "list + update all" across an org tree (a parent
 // plus its branches) needs one read step per org to iterate list_zones/list_sites
 // per-org (#124). 4 truncated any multi-org iteration before it finished. 8 is a
