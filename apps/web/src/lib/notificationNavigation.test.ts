@@ -10,6 +10,7 @@ describe('notification navigation', () => {
   it('maps known admin operations without trusting arbitrary link strings', () => {
     expect(resolveNotificationDestination('admin', notification({ category: 'welfare', link_page: 'WelfareAlertsPage' }))).toEqual({ kind: 'admin_field_ops', area: 'welfare-alerts' });
     expect(resolveNotificationDestination('admin', notification({ category: 'schema_change_request' }))).toEqual({ kind: 'admin_page', page: 'approvals' });
+    expect(resolveNotificationDestination('admin', notification({ category: 'credential_expiry', link_payload: { credential_id: 'credential-1' } }))).toEqual({ kind: 'admin_hr_credential', credentialId: 'credential-1' });
   });
 
   it('maps officer open work to home and client reports to reports', () => {

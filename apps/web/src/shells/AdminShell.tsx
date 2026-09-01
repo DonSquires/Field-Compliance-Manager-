@@ -341,12 +341,17 @@ const AdminShell: React.FC = () => {
       navigateToFieldOps(destination.area as FieldOpsSubArea);
       return true;
     }
+    if (destination.kind === 'admin_hr_credential') {
+      const credential = destination.credentialId ? `&credential=${encodeURIComponent(destination.credentialId)}` : '';
+      navigate(`/admin/people-hr?tab=credentials${credential}`);
+      return true;
+    }
     if (destination.kind === 'admin_page') {
       navigateToPage(destination.page as AdminPage);
       return true;
     }
     return false;
-  }, [navigateToFieldOps, navigateToPage, profile?.role]);
+  }, [navigate, navigateToFieldOps, navigateToPage, profile?.role]);
 
   const bobContext = useMemo(() => ({
     page: activePage,

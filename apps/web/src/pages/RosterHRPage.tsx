@@ -7,7 +7,8 @@
  * queue) + timesheets (hours, approval, payroll export).
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -35,6 +36,8 @@ interface CredentialRow {
   staff_id: string;
   credential_type: string;
   credential_number: string | null;
+  issuing_authority: string | null;
+  issued_date: string | null;
   expiry_date: string | null;
   verified: boolean;
 }
@@ -92,8 +95,10 @@ const TABS: { id: RosterTab; label: string }[] = [
 ];
 
 const RosterHRPage: React.FC = () => {
+  const location = useLocation();
+  const requestedCredentialId = new URLSearchParams(location.search).get('credential');
   const { profile } = useAuth();
-  const [tab, setTab] = useState<RosterTab>('staff');
+  const [tab, setTab] = useState<RosterTab>(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,9 +114,11 @@ const RosterHRPage: React.FC = () => {
   const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' } | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [readinessReview, setReadinessReview] = useState<{ staffId: string; name: string; current: boolean; next: boolean } | null>(null);
+  const [credentialRenewal, setCredentialRenewal] = useState<{ source: CredentialRow; credentialNumber: string; issuingAuthority: string; issuedDate: string; expiryDate: string; evidenceNotes: string } | null>(null);
   const [readinessNotes, setReadinessNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const credentialRequestId = useRef(crypto.randomUUID());
   const [coverageForm, setCoverageForm] = useState({
     shift_date: '',
     start_time: '',
@@ -143,7 +150,7 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId),
           supabase
             .from('staff_credentials')
-            .select('id, staff_id, credential_type, credential_number, expiry_date, verified')
+            .select('id, staff_id, credential_type, credential_number, issuing_authority, issued_date, expiry_date, verified')
             .eq('organization_id', orgId)
             .order('expiry_date', { ascending: true }),
           supabase
@@ -197,6 +204,7 @@ const RosterHRPage: React.FC = () => {
       const names: Record<string, string> = {};
       merged.forEach((s) => {
         names[s.id] = s.display_name || s.email || s.id;
+        if (s.staff_id) names[s.staff_id] = s.display_name || s.email || s.id;
       });
 
       setStaff(merged);
@@ -230,6 +238,12 @@ const RosterHRPage: React.FC = () => {
     loadAll();
   }, [loadAll]);
 
+  useEffect(() => {
+    if (!requestedCredentialId) return;
+    setTab('credentials');
+    document.getElementById(`credential-${requestedCredentialId}`)?.scrollIntoView({ block: 'center' });
+  }, [credentials, requestedCredentialId]);
+
   const handleReview = async (event: React.FormEvent) => {
     event.preventDefault();if (!review) return;setSaving(true);setError(null);setNotice(null);
     const currentStatus = review.kind === 'leave' ? leaveRequests.find((item) => item.id === review.id)?.status : timesheets.find((item) => item.id === review.id)?.status;
@@ -243,6 +257,14 @@ const RosterHRPage: React.FC = () => {
     event.preventDefault();if (!readinessReview || !readinessNotes.trim()) return;setSaving(true);setError(null);setNotice(null);
     const { error: readinessError } = await supabase.rpc('set_staff_work_readiness', { p_staff_id: readinessReview.staffId, p_expected_work_ready: readinessReview.current, p_work_ready: readinessReview.next, p_review_notes: readinessNotes.trim() });
     if (readinessError) setError(readinessError.message);else { setNotice(`${readinessReview.name} readiness updated and audited.`);setReadinessReview(null);setReadinessNotes('');await loadAll(); }setSaving(false);
+  };
+
+  const handleCredentialRenewal = async (event: React.FormEvent) => {
+    event.preventDefault();if (!credentialRenewal) return;setSaving(true);setError(null);setNotice(null);
+    const { data, error: renewalError } = await supabase.rpc('renew_staff_credential', { p_client_request_id: credentialRequestId.current, p_source_credential_id: credentialRenewal.source.id, p_expected_expiry_date: credentialRenewal.source.expiry_date, p_credential_number: credentialRenewal.credentialNumber.trim(), p_issuing_authority: credentialRenewal.issuingAuthority.trim(), p_issued_date: credentialRenewal.issuedDate, p_expiry_date: credentialRenewal.expiryDate, p_evidence_notes: credentialRenewal.evidenceNotes.trim() });
+    const receipt = (data as Array<{ credential_id: string; created: boolean }> | null)?.[0];
+    if (renewalError || !receipt) setError(renewalError?.message ?? 'Credential renewal receipt was not confirmed.');
+    else { const staffName=staffNames[credentialRenewal.source.staff_id]||'Staff member';setNotice(`${staffName} credential renewal recorded and verified · receipt ${receipt.credential_id.slice(0,8)}.`);setCredentialRenewal(null);credentialRequestId.current=crypto.randomUUID();await loadAll(); }setSaving(false);
   };
 
   const handleCreateCoverage = async (e: React.FormEvent) => {
@@ -351,18 +373,19 @@ const RosterHRPage: React.FC = () => {
                   <th>Number</th>
                   <th>Expiry</th>
                   <th>Verified</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {credentials.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-center">
+                    <td colSpan={6} className="text-center">
                       No credentials recorded
                     </td>
                   </tr>
                 ) : (
                   credentials.map((c) => (
-                    <tr key={c.id}>
+                    <tr key={c.id} id={`credential-${c.id}`} className={c.id === requestedCredentialId ? 'is-context-focus' : undefined}>
                       <td>{staffNames[c.staff_id] || c.staff_id}</td>
                       <td>{c.credential_type}</td>
                       <td>{c.credential_number || '-'}</td>
@@ -372,6 +395,7 @@ const RosterHRPage: React.FC = () => {
                         </span>
                       </td>
                       <td>{c.verified ? '✓' : '—'}</td>
+                      <td><button type="button" className="btn btn-sm btn-primary" disabled={!c.expiry_date} onClick={() => { credentialRequestId.current=crypto.randomUUID();setCredentialRenewal({ source:c,credentialNumber:c.credential_number??'',issuingAuthority:c.issuing_authority??'',issuedDate:new Date().toISOString().slice(0,10),expiryDate:'',evidenceNotes:'' }); }}>Record renewal</button></td>
                     </tr>
                   ))
                 )}
@@ -620,6 +644,7 @@ const RosterHRPage: React.FC = () => {
       )}
       {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
+      {credentialRenewal && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-renewal-title" onSubmit={handleCredentialRenewal}><header><div><span>Credential evidence</span><h2 id="credential-renewal-title">Record renewal</h2></div><button type="button" onClick={() => setCredentialRenewal(null)} aria-label="Close credential renewal">×</button></header><p>The existing {credentialRenewal.source.credential_type.replaceAll('_',' ')} record remains in history. This replacement is verified against your evidence notes.</p><label><span>Credential number</span><input required value={credentialRenewal.credentialNumber} onChange={(event)=>setCredentialRenewal({...credentialRenewal,credentialNumber:event.target.value})}/></label><label><span>Issuing authority</span><input required value={credentialRenewal.issuingAuthority} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuingAuthority:event.target.value})}/></label><div className="form-row"><label><span>Issued date</span><input type="date" required value={credentialRenewal.issuedDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuedDate:event.target.value})}/></label><label><span>New expiry date</span><input type="date" required min={credentialRenewal.source.expiry_date??undefined} value={credentialRenewal.expiryDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,expiryDate:event.target.value})}/></label></div><label><span>Verification evidence notes</span><textarea rows={4} required minLength={10} value={credentialRenewal.evidenceNotes} onChange={(event)=>setCredentialRenewal({...credentialRenewal,evidenceNotes:event.target.value})}/></label><footer><button type="button" className="btn btn-secondary" onClick={()=>setCredentialRenewal(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving||!credentialRenewal.credentialNumber.trim()||!credentialRenewal.issuingAuthority.trim()||!credentialRenewal.issuedDate||!credentialRenewal.expiryDate||credentialRenewal.evidenceNotes.trim().length<10}>{saving?'Saving':'Confirm renewal'}</button></footer></form></div>}
     </div>
   );
 };

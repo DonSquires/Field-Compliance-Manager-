@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/RosterHRPage.tsx'), 'utf8');
+const credentialSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql'), 'utf8');
 
 describe('governed HR administration', () => {
   it('uses server-owned leave and timesheet decisions', () => {
@@ -24,5 +25,19 @@ describe('governed HR administration', () => {
     expect(page).toContain("supabase.rpc('set_staff_work_readiness'");
     expect(page).toContain('Readiness review notes');
     expect(page).not.toContain(".from('staff_profiles').update");
+  });
+
+  it('records credential renewals through a governed, race-checked RPC', () => {
+    expect(page).toContain("supabase.rpc('renew_staff_credential'");
+    expect(page).toContain('p_expected_expiry_date: credentialRenewal.source.expiry_date');
+    expect(page).toContain('Record renewal');
+    expect(page).toContain('renewal recorded and verified');
+    expect(page).not.toMatch(/from\('staff_credentials'\)[\s\S]{0,220}\.(insert|update|upsert)\(/);
+  });
+
+  it('appends retry-safe credential lineage and closes direct mutations', () => {
+    for (const evidence of ['for update', 'is_admin_for_org', 'is distinct from p_expected_expiry_date', 'replaces_credential_id', 'client_request_id', 'pg_advisory_xact_lock', "'staff_credential_renewed'"]) expect(credentialSql).toContain(evidence);
+    expect(credentialSql).toContain('revoke insert,update,delete on table public.staff_credentials from authenticated');
+    expect(credentialSql).toContain('from public,anon;');
   });
 });
