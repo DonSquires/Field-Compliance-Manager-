@@ -21,7 +21,11 @@ interface NoiseAssessment {
   assessed_at: string;
 }
 
-const NoiseControlOversightPage: React.FC = () => {
+interface NoiseControlOversightPageProps {
+  onNavigateSettings?: () => void;
+}
+
+const NoiseControlOversightPage: React.FC<NoiseControlOversightPageProps> = ({ onNavigateSettings }) => {
   const { profile } = useAuth();
   const [assessments, setAssessments] = useState<NoiseAssessment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +75,11 @@ const NoiseControlOversightPage: React.FC = () => {
       <header className="page-header">
         <h1>Noise Control</h1>
         <p className="subtitle">{assessments.length} assessments across the organisation</p>
+        {onNavigateSettings && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onNavigateSettings}>
+            Settings
+          </button>
+        )}
       </header>
 
       {error && (
