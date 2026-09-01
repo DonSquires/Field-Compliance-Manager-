@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Route,
   ShieldAlert,
+  Siren,
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -18,7 +19,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'ems-alerts';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;
@@ -51,6 +52,7 @@ const WORKFLOWS: Array<{ area: FieldOpsArea; label: string; detail: string; icon
   { area: 'patrol', label: 'Patrol operations', detail: 'Manage routes, checkpoints, visits, and exceptions', icon: Route, tone: 'green' },
   { area: 'field-reports', label: 'Field reports', detail: 'Triage submitted reports and required follow-up', icon: FileWarning, tone: 'amber' },
   { area: 'debrief-followup', label: 'Debrief follow-up', detail: 'Own safety, equipment, and handover actions', icon: FileWarning, tone: 'amber' },
+  { area: 'ems-alerts', label: 'EMS alerts', detail: 'Respond to electronic monitoring tamper and breach alerts', icon: Siren, tone: 'red' },
   { area: 'breach-review', label: 'Breach review', detail: 'Assess compliance alerts and record governed outcomes', icon: ShieldAlert, tone: 'red' },
   { area: 'vehicle-search', label: 'Vehicle intelligence', detail: 'Search vehicle, observation, and compliance history', icon: Car, tone: 'blue' },
   { area: 'officer-activity', label: 'Officer investigations', detail: 'Build audited timelines and issue hashed evidence', icon: FileSearch, tone: 'slate' },

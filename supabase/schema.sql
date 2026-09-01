@@ -3393,6 +3393,90 @@ ALTER FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_ser
 COMMENT ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) IS 'Creates an authorized roster shift after work-readiness, leave, timing, and overlap checks.';
 
 
+CREATE OR REPLACE FUNCTION "public"."submit_ems_device_check"("p_device_id" "uuid", "p_signal_quality" "text" DEFAULT NULL::"text", "p_physical_condition" "text" DEFAULT NULL::"text", "p_participant_present" boolean DEFAULT NULL::boolean, "p_tamper_observed" boolean DEFAULT false, "p_notes" "text" DEFAULT NULL::"text", "p_gps_lat" double precision DEFAULT NULL::double precision, "p_gps_lng" double precision DEFAULT NULL::double precision) RETURNS TABLE("id" "uuid", "alert_id" "uuid")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_device ems_devices%rowtype;
+  v_check_id uuid;
+  v_alert_id uuid;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+  if p_signal_quality is not null and p_signal_quality not in ('strong', 'weak', 'no_signal') then
+    raise exception 'Invalid signal quality';
+  end if;
+
+  select * into v_device from ems_devices where ems_devices.id = p_device_id;
+  if not found then raise exception 'Device not found'; end if;
+  if not is_admin_for_org(v_device.organization_id)
+     and not exists (select 1 from user_profiles p where p.id = v_user_id and p.organization_id = v_device.organization_id and p.deactivated_at is null and p.role in ('officer', 'admin_officer')) then
+    raise exception 'Not authorised to check this device';
+  end if;
+
+  insert into ems_device_checks (organization_id, device_id, officer_user_id, signal_quality, physical_condition, participant_present, tamper_observed, notes, gps_lat, gps_lng)
+  values (v_device.organization_id, p_device_id, v_user_id, p_signal_quality, p_physical_condition, p_participant_present, coalesce(p_tamper_observed, false), nullif(trim(coalesce(p_notes, '')), ''), p_gps_lat, p_gps_lng)
+  returning ems_device_checks.id into v_check_id;
+
+  if coalesce(p_tamper_observed, false) then
+    insert into ems_alerts (organization_id, device_id, alert_type, severity, status)
+    values (v_device.organization_id, p_device_id, 'tamper', 'critical', 'active')
+    returning ems_alerts.id into v_alert_id;
+    update ems_devices set status = 'tampered' where ems_devices.id = p_device_id;
+  end if;
+
+  return query select v_check_id, v_alert_id;
+end;
+$$;
+
+ALTER FUNCTION "public"."submit_ems_device_check"("p_device_id" "uuid", "p_signal_quality" "text", "p_physical_condition" "text", "p_participant_present" boolean, "p_tamper_observed" boolean, "p_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."submit_ems_device_check"("p_device_id" "uuid", "p_signal_quality" "text", "p_physical_condition" "text", "p_participant_present" boolean, "p_tamper_observed" boolean, "p_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) IS 'Officer/admin EMS device check submission. Tamper observations auto-raise a critical ems_alerts row and flag the device.';
+
+
+CREATE OR REPLACE FUNCTION "public"."respond_to_ems_alert"("p_alert_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "status" "text", "outcome" "text")
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  v_user_id uuid := auth.uid();
+  v_alert ems_alerts%rowtype;
+  v_allowed boolean;
+begin
+  if v_user_id is null then raise exception 'Authentication required'; end if;
+
+  select * into v_alert from ems_alerts where ems_alerts.id = p_alert_id for update;
+  if not found then raise exception 'Alert not found'; end if;
+  if not is_admin_for_org(v_alert.organization_id) then raise exception 'Not authorised to respond to this alert'; end if;
+  if v_alert.status <> p_expected_status then raise exception 'Alert changed from expected status'; end if;
+
+  v_allowed := case v_alert.status
+    when 'active' then p_next_status in ('acknowledged', 'resolved', 'false_alarm')
+    when 'acknowledged' then p_next_status in ('resolved', 'false_alarm')
+    else false end;
+  if not v_allowed then raise exception 'Invalid alert transition'; end if;
+  if p_next_status in ('resolved', 'false_alarm') and nullif(trim(coalesce(p_outcome, '')), '') is null then
+    raise exception 'An outcome is required to close an alert';
+  end if;
+
+  update ems_alerts set
+    status = p_next_status,
+    outcome = coalesce(p_outcome, outcome),
+    responded_by = v_user_id,
+    acknowledged_at = case when p_next_status = 'acknowledged' then now() else acknowledged_at end,
+    resolved_at = case when p_next_status in ('resolved', 'false_alarm') then now() else resolved_at end
+  where ems_alerts.id = p_alert_id;
+
+  return query select p_alert_id, p_next_status, p_outcome;
+end;
+$$;
+
+ALTER FUNCTION "public"."respond_to_ems_alert"("p_alert_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome" "text") OWNER TO "postgres";
+
+COMMENT ON FUNCTION "public"."respond_to_ems_alert"("p_alert_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome" "text") IS 'Org-admin EMS alert response: race-checked active -> acknowledged -> resolved/false_alarm lifecycle, outcome required to close.';
+
+
 CREATE OR REPLACE FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean DEFAULT false, "p_equipment_issue_reported" boolean DEFAULT false, "p_follow_up_required" boolean DEFAULT false, "p_follow_up_notes" "text" DEFAULT NULL::"text") RETURNS TABLE("id" "uuid", "created" boolean, "submitted_at" timestamp with time zone)
     LANGUAGE "plpgsql" SECURITY DEFINER SET "search_path" TO 'public' AS $$
 declare v_user_id uuid := auth.uid(); v_shift public.shifts%rowtype; v_debrief public.shift_debriefs%rowtype;
@@ -25181,6 +25265,16 @@ REVOKE ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid"
 REVOKE ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) FROM "anon";
 GRANT ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."create_roster_shift"("p_officer_user_id" "uuid", "p_service_type" "text", "p_scheduled_start" timestamp with time zone, "p_scheduled_end" timestamp with time zone, "p_location_id" "uuid", "p_zone_id" "uuid", "p_patrol_route_id" "uuid", "p_notes" "text", "p_publish" boolean) TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."submit_ems_device_check"("p_device_id" "uuid", "p_signal_quality" "text", "p_physical_condition" "text", "p_participant_present" boolean, "p_tamper_observed" boolean, "p_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."submit_ems_device_check"("p_device_id" "uuid", "p_signal_quality" "text", "p_physical_condition" "text", "p_participant_present" boolean, "p_tamper_observed" boolean, "p_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) FROM "anon";
+GRANT ALL ON FUNCTION "public"."submit_ems_device_check"("p_device_id" "uuid", "p_signal_quality" "text", "p_physical_condition" "text", "p_participant_present" boolean, "p_tamper_observed" boolean, "p_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."submit_ems_device_check"("p_device_id" "uuid", "p_signal_quality" "text", "p_physical_condition" "text", "p_participant_present" boolean, "p_tamper_observed" boolean, "p_notes" "text", "p_gps_lat" double precision, "p_gps_lng" double precision) TO "service_role";
+
+REVOKE ALL ON FUNCTION "public"."respond_to_ems_alert"("p_alert_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome" "text") FROM PUBLIC;
+REVOKE ALL ON FUNCTION "public"."respond_to_ems_alert"("p_alert_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome" "text") FROM "anon";
+GRANT ALL ON FUNCTION "public"."respond_to_ems_alert"("p_alert_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."respond_to_ems_alert"("p_alert_id" "uuid", "p_expected_status" "text", "p_next_status" "text", "p_outcome" "text") TO "service_role";
 
 
 REVOKE ALL ON FUNCTION "public"."submit_shift_debrief"("p_shift_id" "uuid", "p_client_event_id" "uuid", "p_summary" "text", "p_safety_incident_reported" boolean, "p_equipment_issue_reported" boolean, "p_follow_up_required" boolean, "p_follow_up_notes" "text") FROM PUBLIC;
