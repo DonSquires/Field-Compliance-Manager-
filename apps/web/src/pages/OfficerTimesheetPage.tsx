@@ -7,6 +7,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -19,9 +20,13 @@ interface Timesheet {
   actual_hours: number | null;
   overtime_hours: number;
   status: string;
+  review_notes: string | null;
+  approved_at: string | null;
 }
 
 const OfficerTimesheetPage: React.FC = () => {
+  const location = useLocation();
+  const requestedTimesheetId = new URLSearchParams(location.search).get('timesheet');
   const { profile } = useAuth();
   const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +46,7 @@ const OfficerTimesheetPage: React.FC = () => {
 
         const { data, error: err } = await supabase
           .from('timesheets')
-          .select('id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, status')
+          .select('id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, status, review_notes, approved_at')
           .order('period_start', { ascending: false });
 
         if (err) throw err;
@@ -55,6 +60,8 @@ const OfficerTimesheetPage: React.FC = () => {
 
     load();
   }, [profile?.id]);
+
+  useEffect(() => { if (requestedTimesheetId) document.getElementById(`officer-timesheet-${requestedTimesheetId}`)?.scrollIntoView({ block: 'center' }); }, [requestedTimesheetId, timesheets]);
 
   const submitTimesheet = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -130,7 +137,7 @@ const OfficerTimesheetPage: React.FC = () => {
               </tr>
             ) : (
               timesheets.map((t) => (
-                <tr key={t.id}>
+                <tr key={t.id} id={`officer-timesheet-${t.id}`} className={t.id === requestedTimesheetId ? 'is-context-focus' : undefined}>
                   <td>
                     {new Date(t.period_start).toLocaleDateString()} – {new Date(t.period_end).toLocaleDateString()}
                   </td>
@@ -139,6 +146,7 @@ const OfficerTimesheetPage: React.FC = () => {
                   <td>{t.overtime_hours}</td>
                   <td>
                     <span className={`status-badge status-${t.status}`}>{t.status}</span>
+                    {t.review_notes && <small className="timesheet-review-note"><strong>Review note:</strong> {t.review_notes}{t.approved_at ? ` · ${new Date(t.approved_at).toLocaleString('en-NZ')}` : ''}</small>}
                   </td>
                 </tr>
               ))

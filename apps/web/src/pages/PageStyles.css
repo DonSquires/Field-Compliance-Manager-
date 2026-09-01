@@ -394,6 +394,9 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success, #22c55e) 28%, transparent);
 }
 
+.reports-table tr.is-context-focus { outline: 2px solid var(--color-success, #22c55e); outline-offset: -2px; background: var(--color-bg-hover, #1a2942); }
+.timesheet-review-note { display: block; margin-top: 5px; max-width: 32rem; color: var(--color-text-secondary, #94a3b8); white-space: normal; }
+
 .contact-header {
   display: flex;
   justify-content: space-between;
