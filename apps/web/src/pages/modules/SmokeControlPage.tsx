@@ -411,6 +411,7 @@ const SmokeControlPage: React.FC = () => {
                       </div>
                       {assessment.smoke_source_type && <p className="assessment-source">Source: {assessment.smoke_source_type}</p>}
                       {assessment.action_taken && <p className="assessment-source">Action: {ACTION_LABELS[assessment.action_taken] ?? assessment.action_taken}</p>}
+                      {assessment.legal_basis && <p className="contact-meta">Legal basis: {assessment.legal_basis}</p>}
                       {assessment.bob_classification && (
                         <p className="contact-meta">
                           AI estimate: {assessment.bob_classification}

@@ -14,6 +14,12 @@
  * function. This one also drives the AI classification, since that call
  * needs a signed URL the client cannot mint itself.
  *
+ * legal_basis is resolved from the site's smoke zone (location_zones.bylaw_clause,
+ * module_key='smoke_complaints') when configured, per the workflow card:
+ * "bylaw instrument varies by zone. Never fabricate the legal basis. Check
+ * zone config before issuing a direction." Falls through to the column
+ * default (RMA s.17A) when no zone bylaw clause is configured.
+ *
  * Input:
  *   POST /submit-smoke-assessment
  *   Headers: Authorization: Bearer <supabase_jwt>
@@ -140,6 +146,22 @@ serve(async (req) => {
       }
     }
 
+    // Bylaw instrument varies by zone (workflow_smoke_control: "VERIFY LIVE ...
+    // never fabricate the legal basis. Check zone config before issuing a
+    // direction.") -- resolve the site's smoke zone bylaw_clause if configured,
+    // otherwise fall through to the column default.
+    let legalBasis = body.legal_basis ?? undefined;
+    if (!legalBasis) {
+      const { data: zone } = await supabase
+        .from('location_zones')
+        .select('bylaw_clause')
+        .eq('site_id', body.site_id)
+        .eq('module_key', 'smoke_complaints')
+        .not('bylaw_clause', 'is', null)
+        .maybeSingle();
+      if (zone?.bylaw_clause) legalBasis = zone.bylaw_clause;
+    }
+
     const { data: assessment, error: insertError } = await supabase
       .from('smoke_assessments')
       .insert([
@@ -156,7 +178,7 @@ serve(async (req) => {
           action_taken: body.action_taken,
           scene_description: body.scene_description ?? null,
           notes: body.notes ?? null,
-          legal_basis: body.legal_basis ?? undefined,
+          legal_basis: legalBasis,
           follow_up_required: body.follow_up_required ?? false,
           is_out_of_hours: body.is_out_of_hours ?? false,
           gps_lat: body.gps_lat ?? null,
