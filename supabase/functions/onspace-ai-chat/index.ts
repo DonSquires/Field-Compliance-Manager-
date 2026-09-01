@@ -3858,10 +3858,12 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
   // it needs a node (from_type/from_name) and returns two SEPARATE sections
   // (flow_reach, fk_reach). Forward its args and render both sections.
   if (action === 'blast_radius') {
+    const fromType = String(toolArgs.from_type ?? toolArgs.entity_type ?? toolArgs.type ?? '').trim();
+    const fromName = String(toolArgs.from_name ?? toolArgs.entity_name ?? toolArgs.name ?? '').trim();
     const br = await callFn('bob-query-atlas', authHeader, {
       action,
-      from_type: String(toolArgs.from_type ?? '').trim(),
-      from_name: String(toolArgs.from_name ?? '').trim(),
+      from_type: fromType,
+      from_name: fromName,
       direction: String(toolArgs.direction ?? 'downstream').trim(),
       max_depth: typeof toolArgs.max_depth === 'number' ? toolArgs.max_depth : 4
     });
@@ -3876,11 +3878,19 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
     const flow = Array.isArray(br.data?.flow_reach) ? br.data.flow_reach : [];
     const fk = Array.isArray(br.data?.fk_reach) ? br.data.fk_reach : [];
     const origin = br.data?.origin ?? {
-      entity_type: toolArgs.from_type,
-      entity_name: toolArgs.from_name
+      entity_type: fromType,
+      entity_name: fromName
     };
+    const isRenderableNode = (row)=>{
+      const type = String(row?.entity_type ?? row?.target_type ?? '');
+      const name = String(row?.entity_name ?? row?.target_name ?? '');
+      return /^[a-z_][a-z0-9_]*$/i.test(type) && /^[a-z_][a-z0-9_.-]*$/i.test(name) && !['if', 'then', 'else'].includes(name.toLowerCase());
+    };
+    const directFlow = flow.filter((row)=>Number(row.depth) === 1 && isRenderableNode(row)).slice(0, 20);
+    const directFk = fk.filter((row)=>Number(row.depth) === 1 && isRenderableNode(row)).slice(0, 20);
+    const formatReach = (rows)=>rows.map((row)=>`- ${row.edge_kind ?? 'relates'} ${row.entity_type ?? row.target_type}:${row.entity_name ?? row.target_name}`).join('\n');
     return {
-      reply: `[INTERNAL: Atlas blast_radius from ${origin.entity_type}:${origin.entity_name} (direction=${br.data?.direction ?? 'downstream'}, max_depth=${br.data?.max_depth ?? 4}, requested_max_depth=${br.data?.requested_max_depth ?? br.data?.max_depth ?? 4}). Reason over these two DISTINCT sections and NEVER conflate them: FLOW_REACH is proven data-flow (writes/reads/calls/invokes); FK_REACH is a structural RELATION only (undirected) and must NOT be reported as a data-flow path. Report to the human in plain language what touching this node affects, keeping flow vs structural distinct.]\n\nFLOW_REACH (${flow.length}): ${JSON.stringify(flow).slice(0, 40000)}\n\nFK_REACH (${fk.length}): ${JSON.stringify(fk).slice(0, 40000)}`,
+      reply: `Atlas blast radius for ${origin.entity_type}:${origin.entity_name}: ${flow.length} proven flow node(s) and ${fk.length} structural FK node(s) within depth ${br.data?.max_depth ?? 4}.\n\nDirect proven flow dependencies:\n${formatReach(directFlow) || '- None recorded at depth 1.'}\n\nDirect structural FK relations (not data flow):\n${formatReach(directFk) || '- None recorded at depth 1.'}\n\nThis is a bounded terrain summary. Do not treat an FK relation as evidence of a live data path.`,
       meta: {
         tool: 'query_atlas',
         outcome: 'ok',
@@ -3914,13 +3924,13 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       internal: true
     }
   };
-  const summary = results.slice(0, 50).map((row)=>{
+  const summary = results.slice(0, 20).map((row)=>{
     if (action === 'capability_map') return `  ${row.entity_type}:${row.entity_name} present=${row.present} wired=${row.wired} exercised=${row.exercised ?? '?'}`;
     if (action === 'terrain_edges') return `  ${row.source_type}:${row.source_name} -[${row.edge_kind}]-> ${row.target_type}:${row.target_name}`;
     return `  ${row.entity_type}:${row.entity_name} wired=${row.wired} exercised=${row.exercised ?? '?'} notes=${row.notes ?? '-'}`;
   }).join('\n');
   return {
-    reply: `[INTERNAL: Atlas ${action} (${results.length} results). Reason over this to understand the terrain. Do NOT dump raw to the user.]\n\n${summary}`,
+    reply: `[INTERNAL: Atlas ${action} returned ${results.length} result(s). Use these as evidence, then answer the user's actual question in plain language. Do NOT list raw edges, internal IDs, or every returned row. State what is present, wired, exercised, missing, or uncertain; for operability audits, group findings into working, degraded, and unbuilt.]\n\n${summary}`,
     meta: {
       tool: 'query_atlas',
       outcome: 'ok',
