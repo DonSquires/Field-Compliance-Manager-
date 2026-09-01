@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin, RefreshCw, Send, X } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './OfficerFieldReportPage.css';
@@ -7,12 +8,14 @@ import './OfficerFieldReportPage.css';
 type ReportType = 'incident' | 'maintenance' | 'health_safety';
 type ReportSeverity = 'low' | 'medium' | 'high' | 'critical';
 interface ShiftOption { id: string; service_type: string; scheduled_start: string; status: string; }
-interface ReportRecord { id: string; report_type: ReportType; severity: ReportSeverity; status: string; title: string; description: string; location_name: string | null; reported_at: string; follow_up_required: boolean; }
+interface ReportRecord { id: string; report_type: ReportType; severity: ReportSeverity; status: string; title: string; description: string; location_name: string | null; reported_at: string; follow_up_required: boolean; review_notes: string | null; reviewed_at: string | null; }
 interface GpsState { status: 'idle' | 'locating' | 'captured' | 'unavailable'; lat: number | null; lng: number | null; accuracy: number | null; }
 
 const initialForm = { reportType: 'incident' as ReportType, severity: 'medium' as ReportSeverity, shiftId: '', title: '', description: '', locationName: '', address: '', immediateAction: '', followUp: false, followUpNotes: '' };
 
 const OfficerFieldReportPage: React.FC = () => {
+  const location = useLocation();
+  const requestedReportId = new URLSearchParams(location.search).get('report');
   const { profile } = useAuth();
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
@@ -30,7 +33,7 @@ const OfficerFieldReportPage: React.FC = () => {
     setLoading(true); setError(null);
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const [reportResponse, shiftResponse] = await Promise.all([
-      supabase.from('officer_field_reports').select('id, report_type, severity, status, title, description, location_name, reported_at, follow_up_required').eq('officer_id', profile.id).order('reported_at', { ascending: false }).limit(20),
+      supabase.from('officer_field_reports').select('id, report_type, severity, status, title, description, location_name, reported_at, follow_up_required, review_notes, reviewed_at').eq('officer_id', profile.id).order('reported_at', { ascending: false }).limit(20),
       supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('organization_id', profile.organizationId).eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
     ]);
     setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts((shiftResponse.data as ShiftOption[]) ?? []);
@@ -39,6 +42,7 @@ const OfficerFieldReportPage: React.FC = () => {
     if (failures.length) setError(failures.join(' · ')); setLoading(false);
   }, [profile?.id, profile?.organizationId]);
   useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => { if (requestedReportId) document.getElementById(`officer-report-${requestedReportId}`)?.scrollIntoView({ block: 'center' }); }, [reports, requestedReportId]);
 
   const acquireGps = () => {
     if (!navigator.geolocation) { setGps({ status: 'unavailable', lat: null, lng: null, accuracy: null }); return; }
@@ -84,7 +88,7 @@ const OfficerFieldReportPage: React.FC = () => {
         {form.followUp && <label><span>Required follow-up</span><textarea required rows={3} value={form.followUpNotes} onChange={(e) => setForm({ ...form, followUpNotes: e.target.value })} placeholder="Action required, urgency, and owner if known" /></label>}
         <div className="officer-report-submit"><span>Submission is timestamped and audited. Failed receipts retain this form for retry.</span><button type="submit" disabled={!canSubmit}>{submitting ? <><RefreshCw size={16} className="is-spinning" />Submitting</> : <><Send size={16} />Submit report</>}</button></div>
       </form>
-      <aside className="officer-report-history"><div className="officer-report-panel-heading"><div><span>My records</span><h2>Recent reports</h2></div><strong>{reports.length}</strong></div>{loading ? <div className="officer-report-empty"><RefreshCw size={19} className="is-spinning" />Loading reports</div> : reports.length === 0 ? <div className="officer-report-empty"><FileText size={22} />No reports submitted yet</div> : <div className="officer-report-list">{reports.map((report) => <article className={`severity-${report.severity}`} key={report.id}><div><strong>{report.title}</strong><span>{report.status}</span></div><p>{report.description}</p><small><MapPin size={12} />{report.location_name || 'Location not named'} · {new Date(report.reported_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></article>)}</div>}</aside>
+      <aside className="officer-report-history"><div className="officer-report-panel-heading"><div><span>My records</span><h2>Recent reports</h2></div><strong>{reports.length}</strong></div>{loading ? <div className="officer-report-empty"><RefreshCw size={19} className="is-spinning" />Loading reports</div> : reports.length === 0 ? <div className="officer-report-empty"><FileText size={22} />No reports submitted yet</div> : <div className="officer-report-list">{reports.map((report) => <article id={`officer-report-${report.id}`} className={`severity-${report.severity} ${report.id===requestedReportId?'is-context-focus':''}`} key={report.id}><div><strong>{report.title}</strong><span>{report.status}</span></div><p>{report.description}</p>{report.review_notes&&<section className="officer-report-review"><strong>Supervisor review</strong><span>{report.review_notes}</span><small>{report.reviewed_at?new Date(report.reviewed_at).toLocaleString('en-NZ'):'Review time unavailable'}</small></section>}<small><MapPin size={12} />{report.location_name || 'Location not named'} · {new Date(report.reported_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></article>)}</div>}</aside>
     </div>
   </div>;
 };

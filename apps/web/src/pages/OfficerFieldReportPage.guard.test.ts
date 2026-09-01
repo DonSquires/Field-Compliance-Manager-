@@ -20,4 +20,10 @@ describe('officer field report capture UI', () => {
     expect(source).toContain('p_immediate_action: form.immediateAction.trim() || null');
     expect(source).toContain('!form.followUp || form.followUpNotes.trim().length > 0');
   });
+  it('opens the exact report and shows the supervisor review outcome', () => {
+    expect(source).toContain("new URLSearchParams(location.search).get('report')");
+    expect(source).toContain('review_notes, reviewed_at');
+    expect(source).toContain('Supervisor review');
+    expect(source).toContain('is-context-focus');
+  });
 });

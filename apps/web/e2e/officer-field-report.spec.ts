@@ -63,3 +63,16 @@ test('an unconfirmed report receipt preserves evidence for retry', async ({ page
   await expect(page.getByRole('button', { name: 'Submit report' })).toBeEnabled();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('review notification opens the exact report with the supervisor outcome', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsOfficer(page, '/officer/report?report=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+
+  const report = page.locator('#officer-report-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  await expect(report).toHaveClass(/is-context-focus/);
+  await expect(report.getByText('reviewed', { exact: true })).toBeVisible();
+  await expect(report.getByText('Supervisor review')).toBeVisible();
+  await expect(report.getByText('Facilities owns replacement before the next patrol.')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});

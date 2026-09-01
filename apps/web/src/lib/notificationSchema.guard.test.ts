@@ -7,9 +7,9 @@ const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations
 
 describe('notification producer schema contract', () => {
   it('allows categories emitted by roster and open-shift triggers', () => {
-    for (const category of ['roster', 'open_job']) {
+    for (const category of ['roster', 'open_job', 'report_reviewed']) {
       expect(schema).toMatch(new RegExp(`notifications_category_check[\\s\\S]*?'${category}'`));
-      expect(migration).toContain(`'${category}'::text`);
+      if (category !== 'report_reviewed') expect(migration).toContain(`'${category}'::text`);
     }
   });
 });

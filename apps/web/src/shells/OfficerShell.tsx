@@ -275,8 +275,14 @@ const OfficerShell: React.FC = () => {
       navigateToModule(destination.module as ActiveModule);
       return true;
     }
+    if (destination.kind === 'officer_report') {
+      const report = destination.reportId ? `?report=${encodeURIComponent(destination.reportId)}` : '';
+      navigate(`/officer/report${report}`);
+      setActiveModule('report');
+      return true;
+    }
     return false;
-  }, [navigateToModule, profile?.role]);
+  }, [navigate, navigateToModule, profile?.role]);
 
   // Get welfare status
   const currentWelfareStatus: WelfareStatus = safety.activeAlert?.kind === 'sos'

@@ -4072,6 +4072,7 @@ begin
   insert into public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
   values (v_report.organization_id, v_actor_id, 'officer_field_report_reviewed', 'officer_field_reports', v_report.id,
     jsonb_build_object('officer_id', v_report.officer_id, 'severity', v_report.severity, 'review_notes', v_report.review_notes));
+  perform public.enqueue_notification(p_organization_id=>v_report.organization_id,p_category=>'report_reviewed',p_title=>'Field report reviewed',p_body=>v_report.review_notes,p_severity=>'info',p_recipient_user_id=>v_report.officer_id,p_link_page=>'field-report-review',p_link_payload=>jsonb_build_object('report_id',v_report.id),p_dedup_key=>'field-report-reviewed:'||v_report.id::text);
   return v_report;
 end;
 $$;
@@ -11182,7 +11183,7 @@ CREATE TABLE IF NOT EXISTS "public"."notifications" (
     "dedup_key" "text",
     "read_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'welfare'::"text", 'dispatch'::"text", 'roster'::"text", 'open_job'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
+    CONSTRAINT "notifications_category_check" CHECK (("category" = ANY (ARRAY['credential_expiry'::"text", 'sla_breach'::"text", 'report_ready'::"text", 'report_reviewed'::"text", 'welfare'::"text", 'dispatch'::"text", 'roster'::"text", 'open_job'::"text", 'system'::"text", 'schema_change_request'::"text", 'bob_conversation'::"text", 'bob_self_memory'::"text"]))),
     CONSTRAINT "notifications_recipient_chk" CHECK ((("recipient_user_id" IS NOT NULL) OR ("recipient_role" IS NOT NULL))),
     CONSTRAINT "notifications_severity_check" CHECK (("severity" = ANY (ARRAY['info'::"text", 'warning'::"text", 'critical'::"text"])))
 );
