@@ -3,8 +3,15 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830111000_officer_breadcrumb_timeline.sql'), 'utf8');
+const recordingFix = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901019000_fix_officer_breadcrumb_recording.sql'), 'utf8');
 
 describe('officer breadcrumb evidence schema', () => {
+  it('qualifies breadcrumb ownership and retry lookups against output parameter names', () => {
+    expect(recordingFix).toContain('where up.id = v_user_id');
+    expect(recordingFix).toContain('where s.id = p_shift_id');
+    expect(recordingFix).toContain('where g.organization_id = v_org_id');
+    expect(recordingFix).not.toMatch(/from public\.user_profiles\s+where id =/);
+  });
   it('derives officer and organization identity from auth and deduplicates device events', () => {
     expect(migration).toContain('v_user_id uuid := auth.uid()');
     expect(migration).toContain('client_event_id = p_client_event_id');
