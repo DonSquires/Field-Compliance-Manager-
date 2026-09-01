@@ -31,6 +31,8 @@ create table "public"."smoke_assessments" (
   "address"             text,
   "complaint_address"   text,
   "complainant_site_id" uuid,
+  "gps_lat"             double precision,
+  "gps_lng"             double precision,
   constraint "smoke_assessments_action_taken_check"
     check ((action_taken = ANY (ARRAY['no_action'::text, 'verbal_warning'::text, 'abatement_notice'::text, 'infringement_notice'::text, 'prosecution_referral'::text]))),
   constraint "smoke_assessments_complainant_site_id_fkey" foreign key (complainant_site_id) references public.client_sites(id) on delete set null,

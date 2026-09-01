@@ -13427,6 +13427,8 @@ CREATE TABLE IF NOT EXISTS "public"."smoke_assessments" (
     "address" "text",
     "complaint_address" "text",
     "complainant_site_id" "uuid",
+    "gps_lat" double precision,
+    "gps_lng" double precision,
     CONSTRAINT "smoke_assessments_action_taken_check" CHECK (("action_taken" = ANY (ARRAY['no_action'::"text", 'verbal_warning'::"text", 'abatement_notice'::"text", 'infringement_notice'::"text", 'prosecution_referral'::"text"]))),
     CONSTRAINT "smoke_assessments_complaint_source_check" CHECK (("complaint_source" = ANY (ARRAY['neighbour'::"text", 'council_hotline'::"text", 'self_report'::"text", 'other'::"text"]))),
     CONSTRAINT "smoke_assessments_smoke_source_type_check" CHECK (("smoke_source_type" = ANY (ARRAY['domestic_solid_fuel'::"text", 'industrial'::"text", 'vehicle_exhaust'::"text", 'agricultural'::"text", 'nuisance_burning'::"text", 'unknown'::"text"])))
