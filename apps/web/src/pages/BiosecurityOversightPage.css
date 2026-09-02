@@ -1,0 +1,72 @@
+.biosecurity-ops { --bio-ink: #183028; --bio-muted: #607069; --bio-line: #d8e1dc; --bio-leaf: #1f6b4f; --bio-red: #a53535; color: var(--bio-ink); }
+.biosecurity-ops__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.biosecurity-ops__header h1 { margin: 4px 0; color: #f5faf7; font-size: 1.75rem; }
+.biosecurity-ops__header p { margin: 0; color: #b9c8c1; }
+.biosecurity-ops__header .btn-secondary { color: #dce9e3; border-color: #52675e; }
+.biosecurity-ops__eyebrow { display: inline-flex; align-items: center; gap: 7px; color: #67c7a1; font-size: .78rem; font-weight: 800; text-transform: uppercase; }
+.biosecurity-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--bio-line); background: #fff; margin-bottom: 16px; }
+.biosecurity-metrics > div { display: grid; grid-template-columns: 28px 1fr; column-gap: 10px; padding: 14px 16px; border-right: 1px solid var(--bio-line); }
+.biosecurity-metrics > div:last-child { border-right: 0; }
+.biosecurity-metrics svg { grid-row: span 2; width: 20px; color: var(--bio-leaf); align-self: center; }
+.biosecurity-metrics strong { font-size: 1.25rem; line-height: 1; }
+.biosecurity-metrics span { color: var(--bio-muted); font-size: .76rem; }
+.biosecurity-workspace { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); min-height: 680px; border: 1px solid var(--bio-line); background: #fff; }
+.biosecurity-queue { border-right: 1px solid var(--bio-line); background: #f7faf8; min-width: 0; }
+.biosecurity-queue__tools { padding: 14px; border-bottom: 1px solid var(--bio-line); }
+.biosecurity-search { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; border: 1px solid #bdc9c2; background: #fff; }
+.biosecurity-search:focus-within { border-color: var(--bio-leaf); box-shadow: 0 0 0 2px rgba(31,107,79,.12); }
+.biosecurity-search input { width: 100%; border: 0; outline: 0; background: transparent; }
+.biosecurity-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.biosecurity-filters select { width: 100%; min-width: 0; height: 36px; border: 1px solid #bdc9c2; background: #fff; }
+.biosecurity-queue__count { padding: 9px 14px; color: var(--bio-muted); font-size: .74rem; font-weight: 800; text-transform: uppercase; border-bottom: 1px solid var(--bio-line); }
+.biosecurity-queue__list { max-height: 610px; overflow-y: auto; }
+.biosecurity-case-row { display: grid; width: 100%; gap: 5px; padding: 13px 14px; text-align: left; border: 0; border-bottom: 1px solid var(--bio-line); border-left: 3px solid transparent; background: transparent; color: inherit; cursor: pointer; }
+.biosecurity-case-row:hover { background: #eef5f1; }
+.biosecurity-case-row.is-selected { border-left-color: var(--bio-leaf); background: #fff; }
+.biosecurity-case-row strong { font-size: .9rem; }
+.biosecurity-case-row > span:not(.biosecurity-priority), .biosecurity-case-row small { color: var(--bio-muted); font-size: .75rem; }
+.biosecurity-case-row .is-overdue { color: var(--bio-red); font-weight: 800; }
+.biosecurity-priority { display: inline-flex; width: fit-content; padding: 3px 6px; font-size: .65rem; font-weight: 900; text-transform: uppercase; color: #315047; background: #e7efeb; }
+.biosecurity-priority.is-urgent { color: #8a2020; background: #f8dede; }
+.biosecurity-priority.is-high { color: #86430c; background: #f8e7d4; }
+.biosecurity-priority.is-monitor { color: #315070; background: #e2ebf4; }
+.biosecurity-case { min-width: 0; padding: 20px; }
+.biosecurity-case__title { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--bio-line); }
+.biosecurity-case__title h2 { margin: 7px 0 3px; font-size: 1.35rem; }
+.biosecurity-case__title p { margin: 0; color: var(--bio-muted); font-size: .82rem; }
+.biosecurity-evidence-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(250px, .8fr); border-bottom: 1px solid var(--bio-line); }
+.biosecurity-evidence, .biosecurity-advisory { padding: 18px 0; }
+.biosecurity-advisory { padding-left: 20px; border-left: 1px solid var(--bio-line); }
+.biosecurity-evidence { padding-right: 20px; }
+.biosecurity-evidence h3, .biosecurity-advisory h3, .biosecurity-decision h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: .95rem; }
+.biosecurity-photo { aspect-ratio: 16 / 9; display: grid; place-items: center; overflow: hidden; background: #edf1ef; border: 1px solid var(--bio-line); }
+.biosecurity-photo img { width: 100%; height: 100%; object-fit: contain; background: #202724; }
+.biosecurity-photo__empty, .biosecurity-photo .loading-state { display: grid; justify-items: center; gap: 8px; color: var(--bio-muted); }
+.biosecurity-evidence dl, .biosecurity-advisory dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 14px 0; }
+.biosecurity-evidence dt, .biosecurity-advisory dt { color: var(--bio-muted); font-size: .69rem; font-weight: 800; text-transform: uppercase; }
+.biosecurity-evidence dd, .biosecurity-advisory dd { margin: 3px 0 0; font-size: .82rem; overflow-wrap: anywhere; }
+.biosecurity-note { padding: 10px 12px; border-left: 3px solid #9baea4; background: #f2f5f3; font-size: .82rem; }
+.biosecurity-advisory__identity { display: grid; gap: 3px; }
+.biosecurity-advisory__identity span { color: var(--bio-muted); font-size: .76rem; }
+.biosecurity-confidence { position: relative; height: 24px; margin: 13px 0; background: #e3eae6; overflow: hidden; }
+.biosecurity-confidence > span { position: absolute; inset: 0 auto 0 0; background: #74ad91; }
+.biosecurity-confidence strong { position: relative; display: block; padding: 4px 8px; font-size: .72rem; text-align: right; }
+.biosecurity-advisory__warning { display: flex; align-items: flex-start; gap: 8px; padding: 10px; color: #74410f; background: #fff4df; font-size: .77rem; }
+.biosecurity-decision { padding-top: 18px; }
+.biosecurity-decision > header { display: flex; justify-content: space-between; align-items: center; }
+.biosecurity-decision > header span { color: var(--bio-leaf); font-size: .68rem; font-weight: 900; text-transform: uppercase; }
+.biosecurity-decision > header h3 { margin-top: 3px; }
+.biosecurity-action-tabs, .biosecurity-decision-options { display: flex; gap: 0; margin: 0 0 14px; }
+.biosecurity-action-tabs button, .biosecurity-decision-options button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 12px; border: 1px solid #b8c6be; background: #fff; color: var(--bio-ink); font-weight: 700; cursor: pointer; }
+.biosecurity-action-tabs button + button, .biosecurity-decision-options button + button { border-left: 0; }
+.biosecurity-action-tabs button.is-active, .biosecurity-decision-options button.is-active { color: #fff; background: var(--bio-leaf); border-color: var(--bio-leaf); }
+.biosecurity-decision .form-group > span { display: block; margin-bottom: 6px; font-size: .76rem; font-weight: 800; }
+.biosecurity-decision .form-group input, .biosecurity-decision .form-group select, .biosecurity-decision .form-group textarea { width: 100%; }
+.biosecurity-previous-decision { padding: 9px 11px; background: #f2f5f3; color: var(--bio-muted); font-size: .78rem; }
+.biosecurity-decision footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 12px; }
+.biosecurity-decision footer span { max-width: 520px; color: var(--bio-muted); font-size: .72rem; }
+.biosecurity-officer-review { display: grid; gap: 5px; margin: 12px 0; padding: 12px; border-left: 3px solid var(--bio-leaf); background: #eef5f1; }
+.biosecurity-officer-review > span, .biosecurity-officer-review small { color: var(--bio-muted); font-size: .76rem; }
+.biosecurity-officer-review p { margin: 4px 0; }
+@media (max-width: 960px) { .biosecurity-workspace { grid-template-columns: 280px minmax(0, 1fr); } .biosecurity-evidence-grid { grid-template-columns: 1fr; } .biosecurity-advisory { padding-left: 0; border-left: 0; border-top: 1px solid var(--bio-line); } .biosecurity-evidence { padding-right: 0; } }
+@media (max-width: 720px) { .biosecurity-ops__header { align-items: center; } .biosecurity-metrics { grid-template-columns: 1fr 1fr; } .biosecurity-metrics > div:nth-child(2) { border-right: 0; } .biosecurity-metrics > div:nth-child(-n+2) { border-bottom: 1px solid var(--bio-line); } .biosecurity-workspace { display: block; } .biosecurity-queue { border-right: 0; border-bottom: 1px solid var(--bio-line); } .biosecurity-queue__list { max-height: 330px; } .biosecurity-case { padding: 16px; } .biosecurity-case__title { flex-direction: column; } .biosecurity-decision .form-row { grid-template-columns: 1fr; } .biosecurity-action-tabs, .biosecurity-decision-options { display: grid; grid-template-columns: 1fr; } .biosecurity-action-tabs button + button, .biosecurity-decision-options button + button { border-left: 1px solid #b8c6be; border-top: 0; } .biosecurity-decision footer { align-items: stretch; flex-direction: column; } }

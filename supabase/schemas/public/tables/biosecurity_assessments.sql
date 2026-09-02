@@ -33,23 +33,41 @@ create table "public"."biosecurity_assessments" (
   "location_name"          text,
   "protected_land_address" text,
   "protected_land_site_id" uuid,
+  "review_status"          text                     not null default 'awaiting_review',
+  "review_version"         integer                  not null default 1,
+  "review_priority"        text                     not null default 'routine',
+  "assigned_reviewer_id"   uuid,
+  "review_due_at"          timestamp with time zone,
+  "species_review_decision" text                    not null default 'pending',
+  "confirmed_species_name" text,
+  "reviewed_by"            uuid,
+  "reviewed_at"            timestamp with time zone,
+  "review_notes"           text,
   constraint "biosecurity_assessments_action_taken_check"
     check ((action_taken = ANY (ARRAY['no_action'::text, 'advisory_notice'::text, 'notice_of_direction'::text, 'infringement_notice'::text, 'mpi_referral'::text]))),
   constraint "biosecurity_assessments_density_estimate_check"
     check ((density_estimate = ANY (ARRAY['isolated'::text, 'scattered'::text, 'moderate'::text, 'dense'::text, 'severe'::text, 'not_found'::text]))),
+  constraint "biosecurity_assessments_review_status_check" check (review_status in ('awaiting_review', 'triaged', 'follow_up', 'closed')),
+  constraint "biosecurity_assessments_review_priority_check" check (review_priority in ('urgent', 'high', 'routine', 'monitor')),
+  constraint "biosecurity_assessments_species_review_decision_check" check (species_review_decision in ('pending', 'confirmed', 'rejected', 'insufficient_evidence')),
+  constraint "biosecurity_assessments_review_version_check" check (review_version > 0),
   constraint "biosecurity_assessments_pkey" primary key (id),
   constraint "biosecurity_assessments_protected_land_site_id_fkey" foreign key (protected_land_site_id) references public.client_sites(id) on delete set null,
   constraint "biosecurity_assessments_site_id_fkey" foreign key (site_id) references public.client_sites(id) on delete set null,
   constraint "biosecurity_assessments_dispatch_job_id_fkey" foreign key (dispatch_job_id) references public.dispatch_jobs(id),
   constraint "biosecurity_assessments_organization_id_fkey" foreign key (organization_id) references public.organizations(id),
   constraint "biosecurity_assessments_officer_id_fkey" foreign key (officer_id) references public.user_profiles(id) on delete set null,
-  constraint "biosecurity_assessments_officer_user_id_fkey" foreign key (officer_user_id) references public.user_profiles(id)
+  constraint "biosecurity_assessments_officer_user_id_fkey" foreign key (officer_user_id) references public.user_profiles(id),
+  constraint "biosecurity_assessments_assigned_reviewer_id_fkey" foreign key (assigned_reviewer_id) references public.user_profiles(id) on delete set null,
+  constraint "biosecurity_assessments_reviewed_by_fkey" foreign key (reviewed_by) references public.user_profiles(id) on delete set null
 );
 
 alter table "public"."biosecurity_assessments"
   enable row level security;
 
 create index idx_ba_org_status on public.biosecurity_assessments using btree (organization_id, status);
+
+create index idx_biosecurity_review_queue on public.biosecurity_assessments using btree (organization_id, review_status, review_priority, review_due_at, assessed_at desc);
 
 create index idx_ba_protected_land_address on public.biosecurity_assessments using btree (organization_id, protected_land_address)
   where (protected_land_address is not null);
@@ -90,7 +108,8 @@ create policy "bob_full_read" on "public"."biosecurity_assessments"
   to "authenticated"
   using ((( select auth.uid() as uid) = '00000000-0000-0000-0000-00000000b0b0'::uuid));
 
-grant delete, insert, maintain, references, select, trigger, truncate, update on table "public"."biosecurity_assessments" to "anon", "authenticated", "postgres", "service_role";
+grant insert, references, select, trigger on table "public"."biosecurity_assessments" to "anon", "authenticated";
+grant all on table "public"."biosecurity_assessments" to "postgres", "service_role";
 
 comment on column "public"."biosecurity_assessments"."location_name" is 'Free-text location/site name entered by the officer. Added in 0236 — the BiosecurityPage UI was built against this column but it never existed live (same drift class as photo_urls/0033). Mirrors parking_chalk_records.location_name.';
 

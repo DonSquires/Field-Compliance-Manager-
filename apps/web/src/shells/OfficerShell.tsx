@@ -316,6 +316,10 @@ const OfficerShell: React.FC = () => {
       const assessment = destination.assessmentId ? `?assessment=${encodeURIComponent(destination.assessmentId)}` : '';
       navigate(`/officer/noise_control${assessment}`);setActiveModule('noise_control');return true;
     }
+    if (destination.kind === 'officer_biosecurity') {
+      const assessment = destination.assessmentId ? `?assessment=${encodeURIComponent(destination.assessmentId)}` : '';
+      navigate(`/officer/biosecurity${assessment}`);setActiveModule('biosecurity');return true;
+    }
     return false;
   }, [navigate, navigateToModule, profile?.role]);
 

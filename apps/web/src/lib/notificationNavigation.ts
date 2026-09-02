@@ -14,6 +14,7 @@ export type NotificationDestination =
   | { kind: 'officer_breach'; breachAlertId: string | null }
   | { kind: 'officer_debrief'; debriefId: string | null }
   | { kind: 'officer_noise'; assessmentId: string | null }
+  | { kind: 'officer_biosecurity'; assessmentId: string | null }
   | { kind: 'client_page'; page: string }
   | { kind: 'bob'; conversationId: string | null };
 
@@ -51,6 +52,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
     if (notification.category === 'breach_decision' || link === 'breach-decision') return { kind: 'officer_breach', breachAlertId };
     if (notification.category === 'debrief_followup' || link === 'debrief-followup') return { kind: 'officer_debrief', debriefId };
     if (notification.category === 'noise_review' || link === 'noise-review') return { kind: 'officer_noise', assessmentId };
+    if (notification.category === 'biosecurity_review' || link === 'biosecurity-review') return { kind: 'officer_biosecurity', assessmentId };
     if (link === 'open-jobs' || link === 'roster' || notification.category === 'open_job' || notification.category === 'roster') return { kind: 'officer_module', module: null };
     if (notification.category === 'welfare') return { kind: 'officer_module', module: null };
     return null;

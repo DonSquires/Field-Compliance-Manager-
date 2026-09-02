@@ -23,6 +23,7 @@ describe('notification navigation', () => {
     expect(resolveNotificationDestination('officer', notification({ category: 'breach_decision', link_payload: { breach_alert_id: 'breach-1' } }))).toEqual({ kind: 'officer_breach', breachAlertId: 'breach-1' });
     expect(resolveNotificationDestination('officer', notification({ category: 'debrief_followup', link_payload: { debrief_id: 'debrief-1' } }))).toEqual({ kind: 'officer_debrief', debriefId: 'debrief-1' });
     expect(resolveNotificationDestination('officer', notification({ category: 'noise_review', link_payload: { assessment_id: 'noise-1' } }))).toEqual({ kind: 'officer_noise', assessmentId: 'noise-1' });
+    expect(resolveNotificationDestination('officer', notification({ category: 'biosecurity_review', link_payload: { assessment_id: 'bio-1' } }))).toEqual({ kind: 'officer_biosecurity', assessmentId: 'bio-1' });
     expect(resolveNotificationDestination('client_viewer', notification({ category: 'report_ready' }))).toEqual({ kind: 'client_page', page: 'reports' });
   });
 

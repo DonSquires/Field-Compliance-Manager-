@@ -8,6 +8,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Camera, LoaderCircle } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
@@ -40,6 +41,13 @@ interface BiosecurityAssessment {
     reasoning?: string;
   } | null;
   photo_urls: Array<{ id: string; name: string; storage_path: string }>;
+  review_status: 'awaiting_review' | 'triaged' | 'follow_up' | 'closed';
+  review_priority: 'urgent' | 'high' | 'routine' | 'monitor';
+  review_due_at: string | null;
+  species_review_decision: 'pending' | 'confirmed' | 'rejected' | 'insufficient_evidence';
+  confirmed_species_name: string | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
   status: string;
   assessed_at: string;
 }
@@ -47,6 +55,8 @@ interface BiosecurityAssessment {
 interface ClientSite { id: string; name: string; address: string | null; }
 
 const OfficerBiosecurityPage: React.FC = () => {
+  const location = useLocation();
+  const requestedAssessmentId = new URLSearchParams(location.search).get('assessment');
   const { profile } = useAuth();
   const [assessments, setAssessments] = useState<BiosecurityAssessment[]>([]);
   const [sites, setSites] = useState<ClientSite[]>([]);
@@ -81,7 +91,7 @@ const OfficerBiosecurityPage: React.FC = () => {
       const [{ data, error: err }, siteResult] = await Promise.all([
         supabase
           .from('biosecurity_assessments')
-          .select('id, species_name, species_confirmed, density_estimate, action_taken, scene_description, location_name, notice_number, mpi_referral_number, follow_up_required, notes, bob_species_id, bob_confidence, bob_recommendation, bob_checklist, photo_urls, status, assessed_at')
+          .select('id, species_name, species_confirmed, density_estimate, action_taken, scene_description, location_name, notice_number, mpi_referral_number, follow_up_required, notes, bob_species_id, bob_confidence, bob_recommendation, bob_checklist, photo_urls, review_status, review_priority, review_due_at, species_review_decision, confirmed_species_name, reviewed_at, review_notes, status, assessed_at')
           .or(`officer_user_id.eq.${profile.id},officer_id.eq.${profile.id}`)
           .order('assessed_at', { ascending: false }),
         supabase.from('client_sites').select('id, name, address').eq('active', true).order('name'),
@@ -100,6 +110,9 @@ const OfficerBiosecurityPage: React.FC = () => {
   useEffect(() => {
     loadAssessments();
   }, [loadAssessments]);
+  useEffect(() => {
+    if (requestedAssessmentId) document.getElementById(`officer-biosecurity-${requestedAssessmentId}`)?.scrollIntoView({ block: 'center' });
+  }, [assessments, requestedAssessmentId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -292,7 +305,7 @@ const OfficerBiosecurityPage: React.FC = () => {
           </div>
         ) : (
           assessments.map((a) => (
-            <div key={a.id} className="contact-card">
+            <div key={a.id} id={`officer-biosecurity-${a.id}`} className={`contact-card ${a.id === requestedAssessmentId ? 'is-context-focus' : ''}`}>
               <div className="contact-header">
                 <h3>{a.species_name || 'Unidentified species'}</h3>
                 <span className={`status-badge status-${a.status}`}>{a.status}</span>
@@ -310,6 +323,13 @@ const OfficerBiosecurityPage: React.FC = () => {
                     {a.bob_recommendation && <p>{a.bob_recommendation}</p>}
                   </div>
                 )}
+                <section className="biosecurity-officer-review">
+                  <strong>Case status · {a.review_status.replaceAll('_', ' ')}</strong>
+                  <span>{a.review_priority} priority{a.review_due_at ? ` · due ${new Date(a.review_due_at).toLocaleString('en-NZ')}` : ''}</span>
+                  {a.species_review_decision !== 'pending' && <span>Human decision: {a.species_review_decision.replaceAll('_', ' ')}{a.confirmed_species_name ? ` · ${a.confirmed_species_name}` : ''}</span>}
+                  {a.review_notes && <p>{a.review_notes}</p>}
+                  <small>{a.follow_up_required ? 'Additional field evidence is required.' : a.review_status === 'closed' ? 'Supervisor review complete.' : 'Awaiting supervisor decision.'}{a.reviewed_at ? ` · ${new Date(a.reviewed_at).toLocaleString('en-NZ')}` : ''}</small>
+                </section>
                 {a.location_name && <p className="contact-meta">Location: {a.location_name}</p>}
                 {a.notice_number && <p className="contact-meta">Notice: {a.notice_number}</p>}
                 {a.mpi_referral_number && <p className="contact-meta">MPI referral: {a.mpi_referral_number}</p>}
