@@ -89,6 +89,10 @@ describe('Builder control room boundary', () => {
     expect(relay).toContain("action === 'publish_workspace'");
     expect(relay).toContain("action === 'create_pull_request'");
     expect(relay).toContain('ARTIFACT_PREVIEW_LIMIT_BYTES');
+    expect(relay).toContain("let stage = 'request'");
+    expect(relay).toContain("error: 'Builder control room is unavailable', stage");
+    expect(relay).toContain('try {\n      await admin.from(\'audit_log\').insert({');
+    expect(relay).not.toContain("}).catch(() => {});");
     expect(relay).toContain("admin.storage.from('builder-artifacts').download");
     expect(relay).toContain("admin.from('builder_job_steps')");
     expect(relay).not.toContain('storage_location: artifact.storage_location');

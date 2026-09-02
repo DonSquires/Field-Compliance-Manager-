@@ -525,8 +525,7 @@ async function applyAtlasRefresh(manifest, { baseUrl, serviceKey, allowLargeReti
   return plan;
 }
 
-function writeManifest(rootDir, manifest) {
-  const outputDir = path.join(rootDir, '.bob');
+function writeManifest(rootDir, manifest, outputDir = process.env.ATLAS_REFRESH_OUTPUT_DIR || path.join(rootDir, '.bob')) {
   fs.mkdirSync(outputDir, { recursive: true });
   fs.writeFileSync(path.join(outputDir, 'atlas-refresh-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 }

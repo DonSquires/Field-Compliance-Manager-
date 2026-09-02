@@ -72,18 +72,23 @@ async function relay(path: string, method: 'GET' | 'POST', body?: unknown) {
 }
 
 serve(async req => {
+  let stage = 'request';
+  try {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST required' }, 405);
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return json({ error: 'Builder control room is unavailable' }, 503);
   }
+  stage = 'authenticate';
   const authHeader = req.headers.get('Authorization') ?? '';
   if (!authHeader) return json({ error: 'Unauthorized' }, 401);
   const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: authHeader } } });
   const { data: { user }, error: authError } = await callerClient.auth.getUser();
   if (authError || !user) return json({ error: 'Unauthorized' }, 401);
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-  const { data: profile } = await admin.from('user_profiles').select('role, organization_id, authorized_organization_ids, email').eq('id', user.id).single();
+  stage = 'load_profile';
+  const { data: profile, error: profileError } = await admin.from('user_profiles').select('role, organization_id, authorized_organization_ids, email').eq('id', user.id).single();
+  if (profileError || !profile) return json({ error: 'Builder identity could not be loaded' }, 503);
   const role = resolveEffectiveRole(user.email ?? profile?.email, profile?.role);
   if (!profile || !CAN_BUILD.has(role)) return json({ error: 'Forbidden' }, 403);
 
@@ -94,14 +99,16 @@ serve(async req => {
   const canAccessOrganization = (organizationId: string | null) => role === 'grand_master' || Boolean(organizationId && allowedOrganizations.has(organizationId));
 
   const audit = async (organizationId: string | null, result: string, jobId: string | null = null) => {
-    await admin.from('audit_log').insert({
-      organization_id: organizationId,
-      user_id: user.id,
-      action: FUNCTION_NAME,
-      entity_type: 'builder_job',
-      entity_id: jobId,
-      change_summary: JSON.stringify({ action, result }),
-    }).catch(() => {});
+    try {
+      await admin.from('audit_log').insert({
+        organization_id: organizationId,
+        user_id: user.id,
+        action: FUNCTION_NAME,
+        entity_type: 'builder_job',
+        entity_id: jobId,
+        change_summary: JSON.stringify({ action, result }),
+      });
+    } catch {}
   };
 
   if (action === 'refresh_atlas') {
@@ -114,6 +121,7 @@ serve(async req => {
   }
 
   if (action === 'list') {
+    stage = 'list_builder_state';
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];
     let projectsQuery = admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo, name, status').eq('status', 'active').order('name');
     let jobsQuery = admin.from('builder_jobs').select('id, organization_id, project_id, title, status, current_step_name, target_sha, frontend_required, backend_required, code_review_mode, code_review_status, last_error, created_at, updated_at').order('created_at', { ascending: false }).limit(100);
@@ -129,6 +137,7 @@ serve(async req => {
   }
 
   if (action === 'create') {
+    stage = 'create_builder_job';
     if (!canAccessOrganization(requestedOrgId)) return json({ error: 'Organization access denied' }, 403);
     const projectId = typeof body.project_id === 'string' ? body.project_id : '';
     const requestedAction = typeof body.requested_action === 'string' ? body.requested_action : '';
@@ -160,6 +169,7 @@ serve(async req => {
   }
 
   const jobId = typeof body.job_id === 'string' ? body.job_id : '';
+  stage = 'load_builder_job';
   const { data: job } = await admin.from('builder_jobs').select('id, organization_id').eq('id', jobId).single();
   if (!job || !canAccessOrganization(job.organization_id)) return json({ error: 'Builder job is unavailable' }, 404);
 
@@ -172,6 +182,7 @@ serve(async req => {
   }
 
   if (action === 'get') {
+    stage = 'load_builder_snapshot';
     const [jobResult, stepsResult, artifactsResult, runsResult, approvalsResult] = await Promise.all([
       admin.from('builder_jobs').select('*').eq('id', jobId).single(),
       admin.from('builder_job_steps').select('*').eq('job_id', jobId).order('ordinal_position'),
@@ -267,6 +278,7 @@ serve(async req => {
     return json({ pull_request: result.payload });
   }
   if (action === 'advance' || action === 'run') {
+    stage = 'relay_builder_execution';
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) {
       await audit(job.organization_id, 'unavailable', jobId);
       return json({ error: 'Builder execution host is unavailable' }, 503);
@@ -290,4 +302,8 @@ serve(async req => {
   }
 
   return json({ error: 'Unsupported Builder action' }, 400);
+  } catch (error) {
+    console.error(`[${FUNCTION_NAME}] ${stage}`, error);
+    return json({ error: 'Builder control room is unavailable', stage }, 503);
+  }
 });

@@ -13,6 +13,11 @@ const {
   buildRefreshPlan
 } = require('../scripts/atlas-refresh');
 
+test('Atlas refresh can place its local manifest outside a read-only source checkout', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../scripts/atlas-refresh.js'), 'utf8');
+  assert.match(source, /ATLAS_REFRESH_OUTPUT_DIR \|\| path\.join\(rootDir, '\.bob'\)/);
+});
+
 function write(root, relativePath, content) {
   const filePath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });

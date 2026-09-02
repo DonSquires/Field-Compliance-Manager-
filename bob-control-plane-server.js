@@ -143,7 +143,7 @@ function refreshAtlas() {
   const output = require('node:child_process').execFileSync(process.execPath, ['scripts/atlas-refresh.js', '--apply'], {
     cwd: assessmentRoot,
     encoding: 'utf8',
-    env: process.env,
+    env: { ...process.env, ATLAS_REFRESH_OUTPUT_DIR: '/tmp/bob-atlas-refresh' },
     maxBuffer: 1024 * 1024
   });
   return { refreshed_at: new Date().toISOString(), summary: output.trim().slice(-1000) };
