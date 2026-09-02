@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Camera, CheckCircle2, Crosshair, LogOut, MapPin, RefreshCw, ScanLine, Shield, Upload, WifiOff, X } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, Crosshair, LogOut, MapPin, RefreshCw, ScanLine, Upload, WifiOff, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { BrandLogo } from '../components/BrandLogo';
 import {
   buildOfficerScanPayload,
   canSubmitOfficerScan,
@@ -248,7 +249,7 @@ export function ScanShell() {
   return (
     <div className="scan-shell">
       <header className="scan-shell-header">
-        <div className="scan-shell-brand"><span><Shield size={19} /></span><div><strong>Field Compliance Manager</strong><small>Standalone scan station</small></div></div>
+        <div className="scan-shell-brand"><span><BrandLogo /></span><div><strong>Field Compliance Manager</strong><small>Standalone scan station</small></div></div>
         <div className="scan-shell-user"><span>{profile.displayName}</span><button type="button" onClick={() => void handleSignOut()} title="Sign out"><LogOut size={18} /><span className="sr-only">Sign out</span></button></div>
       </header>
 

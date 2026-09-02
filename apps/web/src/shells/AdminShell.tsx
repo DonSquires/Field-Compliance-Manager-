@@ -18,6 +18,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { BrandLogo } from '../components/BrandLogo';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
   Bot,
@@ -458,7 +459,7 @@ const AdminShell: React.FC = () => {
       <div className="admin-shell admin-shell-desktop">
         <aside className={`admin-sidebar ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
           <div className="admin-sidebar-brand">
-            <span><Shield size={18} aria-hidden="true" /></span>
+            <span><BrandLogo /></span>
             {!sidebarCollapsed && <div><strong>FCM</strong><small>Administration</small></div>}
             <button type="button" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}>
               {sidebarCollapsed ? <ChevronRight size={17} aria-hidden="true" /> : <ChevronLeft size={17} aria-hidden="true" />}
@@ -531,7 +532,7 @@ const AdminShell: React.FC = () => {
     <div className="admin-shell admin-shell-mobile">
       <header className="admin-mobile-header">
         <div className="admin-mobile-brand">
-          <span><Shield size={17} aria-hidden="true" /></span><strong>{orgName || 'Field Compliance Manager'}</strong>
+          <span><BrandLogo /></span><strong>{orgName || 'Field Compliance Manager'}</strong>
         </div>
         <div className="admin-shell-tools">
           <NotificationCenter onNavigate={navigateFromNotification} />

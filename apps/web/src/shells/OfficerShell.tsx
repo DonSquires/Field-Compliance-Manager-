@@ -52,6 +52,7 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
+import { BrandLogo } from '../components/BrandLogo';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
@@ -426,7 +427,7 @@ const OfficerShell: React.FC = () => {
     <div className="officer-shell">
       <header className="officer-shell-header">
         <button type="button" className="officer-shell-brand" onClick={() => navigateToModule(null)} title="Officer home">
-          <span><Shield size={19} aria-hidden="true" /></span>
+          <span><BrandLogo /></span>
           <div><strong>Field Compliance Manager</strong><small>{activeShift ? `${activeShift.shift_type} shift` : 'Officer operations'}</small></div>
         </button>
 

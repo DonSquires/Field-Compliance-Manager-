@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, Mail, Shield } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { BrandLogo } from '../components/BrandLogo';
 import './LoginPage.css';
 
 type EntryMode = 'sign_in' | 'request_reset' | 'reset_sent' | 'update_password';
@@ -68,7 +69,7 @@ const LoginPage: React.FC = () => {
       <div className="login-atmosphere" aria-hidden="true" />
       <section className="login-shell" aria-labelledby="login-title">
         <header className="login-brand">
-          <span><Shield size={22} strokeWidth={1.8} aria-hidden="true" /></span>
+          <span><BrandLogo /></span>
           <div><strong>Field Compliance Manager</strong><small>Secure operations access</small></div>
         </header>
 

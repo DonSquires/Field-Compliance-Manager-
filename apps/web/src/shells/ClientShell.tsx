@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Building2, ChevronLeft, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, Menu, ScanLine, Shield, X } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, Menu, ScanLine, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { BrandLogo } from '../components/BrandLogo';
 import { ClientPortalPage as ClientPortalContent } from '../pages/ClientPortalPage';
 import { getClientPortalPages, isClientPortalPage, type ClientPortalPage } from '../lib/clientPortalAccess';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
@@ -67,7 +68,7 @@ export function ClientShell() {
   const navigation = (
     <>
       <button type="button" className="client-shell-brand" onClick={() => openPage('overview')} title="Client portal home">
-        <span><Shield size={20} aria-hidden="true" /></span>
+        <span><BrandLogo /></span>
         {!collapsed && <div><strong>Field Compliance</strong><small>Client portal</small></div>}
       </button>
 
