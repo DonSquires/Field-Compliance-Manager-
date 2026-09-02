@@ -84,7 +84,7 @@ const OfficerStaticGuardPage = React.lazy(() => import('../pages/OfficerStaticGu
 
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
-  | 'site_guard' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
+  | 'site_guard' | 'access_control' | 'ems' | 'ptt_radio' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
   | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
   | 'vehicle_lookup' | 'credentials' | 'modules' | null;
 
@@ -100,7 +100,9 @@ const MODULE_METADATA: Record<string, { label: string; icon: LucideIcon }> = {
   biosecurity: { label: 'Biosecurity', icon: Activity },
   smoke_control: { label: 'Smoke Control', icon: Wind },
   site_guard: { label: 'Site Guard', icon: Shield },
-  ems: { label: 'EMS', icon: Activity },
+  access_control: { label: 'Physical Access Control', icon: Shield },
+  ems: { label: 'Electronic Monitoring Equipment', icon: Activity },
+  ptt_radio: { label: 'PTT Radio', icon: Radio },
   patrol: { label: 'Patrol', icon: Route },
   report: { label: 'Reports', icon: FileText },
   leave: { label: 'Leave', icon: CalendarDays },
@@ -192,7 +194,7 @@ const OfficerShell: React.FC = () => {
 
   // Load granted modules
   useEffect(() => {
-    setGrantedModules(Array.from(enabledModules));
+    setGrantedModules(Array.from(enabledModules).filter((module) => module !== 'welfare'));
   }, [enabledModules]);
 
   useEffect(() => {
@@ -382,8 +384,12 @@ const OfficerShell: React.FC = () => {
         return <OfficerOvernightVerificationPage />;
       case 'site_guard':
         return <OfficerStaticGuardPage />;
+      case 'access_control':
+        return <ComingSoonPage title="Physical Access Control" />;
       case 'ems':
-        return <OfficerFieldReportPage />;
+        return <ComingSoonPage title="Electronic Monitoring Equipment" />;
+      case 'ptt_radio':
+        return <ComingSoonPage title="PTT Radio" />;
       case 'debrief':
         return <OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />;
       case 'map':

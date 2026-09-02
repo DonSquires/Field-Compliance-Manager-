@@ -25,8 +25,14 @@ create policy "bob_full_read" on "public"."welfare_checks"
 
 create policy "welfare_checks_insert" on "public"."welfare_checks"
   for insert
-  to PUBLIC
-  with check (public.org_access_allowed(organization_id));
+  to "authenticated"
+  with check (
+    officer_user_id = (select auth.uid())
+    and public.org_access_allowed(organization_id)
+  );
+
+comment on policy "welfare_checks_insert" on "public"."welfare_checks" is
+  'Officers may record only their own welfare check-ins inside an organization they can access; service-role automation bypasses RLS.';
 
 create policy "welfare_checks_select" on "public"."welfare_checks"
   for select

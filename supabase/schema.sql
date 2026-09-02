@@ -24723,7 +24723,10 @@ COMMENT ON POLICY "vo_zone_reachable_select" ON "public"."vehicle_observations" 
 ALTER TABLE "public"."welfare_alerts" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "welfare_alerts_insert" ON "public"."welfare_alerts" FOR INSERT WITH CHECK ("public"."org_access_allowed"("organization_id"));
+CREATE POLICY "welfare_alerts_insert" ON "public"."welfare_alerts" FOR INSERT TO "authenticated" WITH CHECK ((("officer_user_id" = ( SELECT "auth"."uid"() AS "uid")) AND "public"."org_access_allowed"("organization_id")));
+
+
+COMMENT ON POLICY "welfare_alerts_insert" ON "public"."welfare_alerts" IS 'Officers may raise only their own welfare alerts inside an organization they can access; service-role automation bypasses RLS.';
 
 
 
@@ -24738,7 +24741,10 @@ CREATE POLICY "welfare_alerts_update" ON "public"."welfare_alerts" FOR UPDATE US
 ALTER TABLE "public"."welfare_checks" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "welfare_checks_insert" ON "public"."welfare_checks" FOR INSERT WITH CHECK ("public"."org_access_allowed"("organization_id"));
+CREATE POLICY "welfare_checks_insert" ON "public"."welfare_checks" FOR INSERT TO "authenticated" WITH CHECK ((("officer_user_id" = ( SELECT "auth"."uid"() AS "uid")) AND "public"."org_access_allowed"("organization_id")));
+
+
+COMMENT ON POLICY "welfare_checks_insert" ON "public"."welfare_checks" IS 'Officers may record only their own welfare check-ins inside an organization they can access; service-role automation bypasses RLS.';
 
 
 

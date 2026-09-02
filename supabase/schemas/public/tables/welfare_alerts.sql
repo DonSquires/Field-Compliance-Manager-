@@ -42,8 +42,14 @@ create policy "bob_full_read" on "public"."welfare_alerts"
 
 create policy "welfare_alerts_insert" on "public"."welfare_alerts"
   for insert
-  to PUBLIC
-  with check (public.org_access_allowed(organization_id));
+  to "authenticated"
+  with check (
+    officer_user_id = (select auth.uid())
+    and public.org_access_allowed(organization_id)
+  );
+
+comment on policy "welfare_alerts_insert" on "public"."welfare_alerts" is
+  'Officers may raise only their own welfare alerts inside an organization they can access; service-role automation bypasses RLS.';
 
 create policy "welfare_alerts_select" on "public"."welfare_alerts"
   for select
