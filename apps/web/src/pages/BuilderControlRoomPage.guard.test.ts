@@ -37,6 +37,17 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('A new evidence review is required.');
     expect(source).toContain('approval.reviewed_artifact_ids.includes(artifact.id)');
     expect(source).toContain('Immutable evidence under review');
+    expect(source).toContain('const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;');
+    expect(source).toContain('Evidence unavailable');
+    expect(source).toContain('!evidenceComplete');
+    expect(source).toContain('Builder job workspace');
+    expect(source).toContain('Immutable task brief');
+    expect(source).toContain('Verified artifacts');
+    expect(source).toContain('Durable execution timeline');
+    expect(source).toContain("action: 'read_artifact'");
+    expect(source).toContain('Selected artifact content');
+    expect(source).toContain('<BobPanel');
+    expect(source).toContain("surface: 'builder_control_room'");
   });
 
   it('keeps relay authority server-side and organization-scoped', () => {
@@ -52,6 +63,9 @@ describe('Builder control room boundary', () => {
     expect(relay).toContain("action === 'decide_approval'");
     expect(relay).toContain("callerClient.rpc(rpc");
     expect(relay).toContain('reviewed_artifact_ids');
+    expect(relay).toContain("action === 'read_artifact'");
+    expect(relay).toContain('ARTIFACT_PREVIEW_LIMIT_BYTES');
+    expect(relay).toContain("admin.storage.from('builder-artifacts').download");
     expect(relay).toContain("admin.from('builder_job_steps')");
     expect(relay).not.toContain('storage_location: artifact.storage_location');
   });

@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { dockerArguments, redact, workerCommand } = require('../worker-executor');
-const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, redactLog } = require('../frontend-worker');
+const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, redactLog } = require('../frontend-worker');
 
 test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('assessment'), ['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']);
@@ -21,6 +21,16 @@ test('worker profiles use fixed commands', () => {
     '/artifacts/changed-files.json', '/artifacts/security-review.json'
   ]);
   assert.throws(() => workerCommand('shell'), /unsupported worker profile/);
+});
+
+test('frontend verification uses a bounded Vitest worker pool', () => {
+  const testCommand = frontendVerificationCommands().at(-2);
+  assert.deepEqual(testCommand, ['run', 'test', '--prefix', 'apps/web', '--', '--pool=threads', '--maxWorkers=1', '--reporter=dot']);
+});
+
+test('frontend verification runs Playwright serially after build and unit checks', () => {
+  const e2eCommand = frontendVerificationCommands().at(-1);
+  assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', '--workers=1', '--reporter=line']);
 });
 
 test('docker arguments enforce worker isolation', () => {

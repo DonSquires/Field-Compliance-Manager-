@@ -17,9 +17,11 @@
  * edge function receives the caller's JWT rather than a page-level identity.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { AlertTriangle, Bot, CheckCircle2, FileSearch, PanelRightClose, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import './BobPanel.css';
 
 interface BobMessage {
   id: string;
@@ -28,6 +30,7 @@ interface BobMessage {
   confidence: number | null;
   flagged: boolean;
   created_at: string;
+  metadata: Record<string, unknown>;
 }
 
 interface BobPanelProps {
@@ -45,6 +48,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contextEntries = useMemo(() => Object.entries(context ?? {})
+    .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
+    .slice(0, 4), [context]);
 
   // ATLAS READS: bob_conversations, bob_messages
   // Verified against live production data: bob_conversations.module_key is
@@ -87,7 +93,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
 
       const { data: history, error: historyErr } = await supabase
         .from('bob_messages')
-        .select('id, role, content, confidence, flagged, created_at')
+        .select('id, role, content, confidence, flagged, created_at, metadata')
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true });
 
@@ -118,7 +124,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
     const optimisticId = `optimistic-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
-      { id: optimisticId, role: 'user', content: message, confidence: null, flagged: false, created_at: new Date().toISOString() },
+      { id: optimisticId, role: 'user', content: message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
     ]);
     setInput('');
     setSending(true);
@@ -139,7 +145,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
       // Refresh from bob_messages so we show the server-persisted, canonical thread
       const { data: history, error: historyErr } = await supabase
         .from('bob_messages')
-        .select('id, role, content, confidence, flagged, created_at')
+        .select('id, role, content, confidence, flagged, created_at, metadata')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true });
 
@@ -151,7 +157,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
         // Fallback: function replied but history read didn't return rows yet
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== optimisticId),
-          { id: optimisticId, role: 'user', content: message, confidence: null, flagged: false, created_at: new Date().toISOString() },
+          { id: optimisticId, role: 'user', content: message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
           {
             id: `reply-${Date.now()}`,
             role: 'assistant',
@@ -159,6 +165,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
             confidence: null,
             flagged: false,
             created_at: new Date().toISOString(),
+            metadata: {},
           },
         ]);
       }
@@ -173,96 +180,67 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        bottom: 0,
-        right: 0,
-        width: '360px',
-        maxWidth: '100vw',
-        height: '480px',
-        maxHeight: '80vh',
-        backgroundColor: 'var(--color-bg-secondary)',
-        border: '1px solid var(--color-border)',
-        borderRadius: '12px 12px 0 0',
-        display: 'flex',
-        flexDirection: 'column',
-        boxShadow: '0 -4px 24px rgba(0, 0, 0, 0.2)',
-        zIndex: 200,
-      }}
+      className="bob-panel"
+      aria-label="Bob agent workspace"
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--color-border)',
-        }}
-      >
-        <strong>🤖 Bob</strong>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }}>
-          ×
-        </button>
-      </div>
+      <header className="bob-panel-header">
+        <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>Bob</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
+        <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
+      </header>
+
+      {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value]) => <span key={key}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
 
       {error && (
-        <div style={{ padding: '8px 16px', color: '#EF5350', fontSize: '12px' }}>{error}</div>
+        <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
       )}
 
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
         {loading ? (
-          <div style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>Loading conversation…</div>
+          <div className="bob-agent-status"><Sparkles size={16} /> Loading conversation</div>
         ) : messages.length === 0 ? (
-          <div style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>
-            Ask Bob about what you're looking at.
-          </div>
+          <div className="bob-empty-state"><Bot size={24} /><strong>What should we work through?</strong><div><button type="button" onClick={() => setInput('Summarize the current context and identify the next safe action.')}>Summarize context</button><button type="button" onClick={() => setInput('Create a step-by-step plan with unknowns and approval gates.')}>Plan work</button><button type="button" onClick={() => setInput('Check this surface for risks, missing evidence, and tests.')}>Review risk</button></div></div>
         ) : (
           messages.map((m) => (
-            <div
-              key={m.id}
-              style={{
-                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '85%',
-                padding: '8px 12px',
-                borderRadius: '10px',
-                fontSize: '13px',
-                backgroundColor: m.role === 'user' ? 'var(--color-primary)' : 'var(--color-bg-primary)',
-                color: m.role === 'user' ? 'white' : 'var(--color-text-primary)',
-              }}
-            >
-              {m.content}
-              {m.flagged && <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '4px' }}>⚠ flagged for review</div>}
-            </div>
+            <article key={m.id} className={`bob-message role-${m.role}`}>
+              {m.role !== 'user' && <span className="bob-message-avatar"><Bot size={14} /></span>}
+              <div className="bob-message-body">
+                {m.role === 'assistant' && <AgentMetadata message={m} />}
+                <div className="bob-message-content">{m.content}</div>
+                <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
+              </div>
+            </article>
           ))
         )}
       </div>
 
-      <form onSubmit={handleSend} style={{ display: 'flex', gap: '8px', padding: '12px', borderTop: '1px solid var(--color-border)' }}>
-        <input
-          type="text"
+      <form onSubmit={handleSend} className="bob-composer">
+        <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Message Bob…"
+          placeholder="Ask Bob to plan, inspect, explain, or prepare a proposal"
           disabled={sending || !conversationId}
-          style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--color-border)' }}
+          rows={3}
         />
         <button
           type="submit"
           disabled={sending || !input.trim() || !conversationId}
-          style={{
-            padding: '8px 16px',
-            borderRadius: '6px',
-            border: 'none',
-            backgroundColor: 'var(--color-primary)',
-            color: 'white',
-            cursor: sending ? 'not-allowed' : 'pointer',
-          }}
+          title="Send request to Bob"
         >
-          {sending ? '…' : 'Send'}
+          {sending ? <Sparkles size={17} className="is-spinning" /> : <Send size={17} />}
+          <span className="sr-only">Send</span>
         </button>
       </form>
     </div>
   );
 };
+
+function AgentMetadata({ message }: { message: BobMessage }) {
+  const metadata = message.metadata ?? {};
+  const plannedTool = typeof metadata.planned_tool === 'string' ? metadata.planned_tool : null;
+  const suggestedAction = typeof metadata.suggested_action === 'string' ? metadata.suggested_action : null;
+  const confidence = typeof metadata.confidence === 'number' ? metadata.confidence : message.confidence;
+  if (!plannedTool && !suggestedAction && confidence == null) return null;
+  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}{suggestedAction && <span className="bob-suggested-action">{suggestedAction}</span>}</div>;
+}
 
 export default BobPanel;

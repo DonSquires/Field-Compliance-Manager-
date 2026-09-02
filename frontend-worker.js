@@ -79,6 +79,15 @@ function run(command, args, options) {
   };
 }
 
+function frontendVerificationCommands() {
+  return [
+    ['run', 'lint', '--prefix', 'apps/web'],
+    ['run', 'build', '--prefix', 'apps/web'],
+    ['run', 'test', '--prefix', 'apps/web', '--', '--pool=threads', '--maxWorkers=1', '--reporter=dot'],
+    ['run', 'test:e2e', '--prefix', 'apps/web', '--', '--workers=1', '--reporter=line']
+  ];
+}
+
 function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/work/repository' }) {
   const patchText = fs.readFileSync(patchPath, 'utf8');
   const changedFiles = validatePatchText(patchText);
@@ -104,11 +113,7 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   }
 
   if (patchApplied) {
-    for (const args of [
-      ['run', 'lint', '--prefix', 'apps/web'],
-      ['run', 'build', '--prefix', 'apps/web'],
-      ['run', 'test', '--prefix', 'apps/web']
-    ]) {
+    for (const args of frontendVerificationCommands()) {
       commands.push(run('npm', args, { cwd: workDir }));
       if (commands.at(-1).status !== 0) break;
     }
@@ -155,5 +160,6 @@ module.exports = {
   redactLog,
   changedFilesFromPatch,
   validatePatchText,
+  frontendVerificationCommands,
   executeFrontendPatch
 };

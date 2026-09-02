@@ -9,6 +9,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '
 const CONTROL_PLANE_URL = Deno.env.get('BOB_CONTROL_PLANE_URL') ?? Deno.env.get('FCM_API_URL') ?? '';
 const CONTROL_PLANE_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN') ?? Deno.env.get('FCM_API_TOKEN') ?? '';
 const CAN_BUILD = new Set(['grand_master', 'master']);
+const ARTIFACT_PREVIEW_LIMIT_BYTES = 256 * 1024;
+const ARTIFACT_PREVIEW_TYPES = new Set(['application/json', 'text/markdown', 'text/plain', 'text/x-diff']);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -178,6 +180,29 @@ serve(async req => {
     await audit(approval.organization_id, decisionError ? 'approval_failed' : `approval_${decision}`, jobId);
     if (decisionError) return json({ error: decisionError.message }, 409);
     return json({ job: safeJob(data as Record<string, unknown>) });
+  }
+  if (action === 'read_artifact') {
+    const artifactId = typeof body.artifact_id === 'string' ? body.artifact_id : '';
+    if (!artifactId) return json({ error: 'Artifact is required' }, 400);
+    const { data: artifact, error: artifactError } = await admin
+      .from('builder_artifacts')
+      .select('id, job_id, content_type, content_size_bytes, storage_location, checksum, status')
+      .eq('id', artifactId)
+      .eq('job_id', jobId)
+      .single();
+    if (artifactError || !artifact) return json({ error: 'Builder artifact is unavailable' }, 404);
+    if (artifact.status !== 'final' || !ARTIFACT_PREVIEW_TYPES.has(artifact.content_type ?? '') || !artifact.storage_location?.startsWith('supabase_storage://builder-artifacts/')) {
+      return json({ error: 'This artifact cannot be previewed in the workspace' }, 409);
+    }
+    if ((artifact.content_size_bytes ?? 0) > ARTIFACT_PREVIEW_LIMIT_BYTES) return json({ error: 'Artifact is too large for browser preview' }, 413);
+    const objectPath = artifact.storage_location.slice('supabase_storage://builder-artifacts/'.length);
+    const { data: object, error: downloadError } = await admin.storage.from('builder-artifacts').download(objectPath);
+    if (downloadError || !object) return json({ error: 'Builder artifact content is unavailable' }, 503);
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    if (bytes.byteLength > ARTIFACT_PREVIEW_LIMIT_BYTES) return json({ error: 'Artifact is too large for browser preview' }, 413);
+    const content = new TextDecoder().decode(bytes);
+    await audit(job.organization_id, 'artifact_previewed', jobId);
+    return json({ artifact: { id: artifact.id, content_type: artifact.content_type, checksum: artifact.checksum, content } });
   }
   if (action === 'advance' || action === 'run') {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) {

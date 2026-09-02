@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, FileCode2, Play, Plus, RefreshCw, ShieldCheck, Workflow, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
+import { BobPanel } from '../components/BobPanel';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
 
 type ReviewMode = 'none' | 'human' | 'independent_ai';
 type RequestedAction = 'prepare_change' | 'prepare_release';
 type TargetEnvironment = 'development' | 'staging' | 'production';
+type WorkspaceView = 'task' | 'evidence' | 'execution';
 
 interface BuilderProject {
   id: string;
@@ -61,6 +63,7 @@ interface BuilderWorkerRun {
   step_id: string;
   profile: string;
   status: string;
+  target_sha: string | null;
   exit_code: number | null;
 }
 interface BuilderApproval {
@@ -98,6 +101,11 @@ const BuilderControlRoomPage: React.FC = () => {
   const [backendFiles, setBackendFiles] = useState('');
   const [reviewerModel, setReviewerModel] = useState('');
   const [approvalComment, setApprovalComment] = useState('');
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('task');
+  const [bobOpen, setBobOpen] = useState(false);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [artifactContent, setArtifactContent] = useState<{ id: string; content: string; checksum: string | null } | null>(null);
+  const [artifactLoading, setArtifactLoading] = useState(false);
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
@@ -217,6 +225,24 @@ const BuilderControlRoomPage: React.FC = () => {
     }
   };
 
+  const openArtifact = async (artifact: BuilderArtifact) => {
+    if (!selectedId || artifactLoading) return;
+    setSelectedArtifactId(artifact.id);
+    setArtifactLoading(true);
+    setError(null);
+    try {
+      const data = await invoke({ action: 'read_artifact', job_id: selectedId, artifact_id: artifact.id });
+      const preview = data?.artifact as { id: string; content: string; checksum: string | null } | undefined;
+      if (!preview) throw new Error('Artifact preview could not be loaded.');
+      setArtifactContent(preview);
+    } catch (artifactError) {
+      setArtifactContent(null);
+      setError(artifactError instanceof Error ? artifactError.message : 'Artifact preview could not be loaded.');
+    } finally {
+      setArtifactLoading(false);
+    }
+  };
+
   const selectedJob = useMemo(() => jobs.find(job => job.id === selectedId) ?? snapshot?.job ?? null, [jobs, selectedId, snapshot]);
 
   return (
@@ -225,6 +251,7 @@ const BuilderControlRoomPage: React.FC = () => {
         <div><span>Bob build system</span><h1>Builder control room</h1><p>Run governed implementation work to the next evidence or approval boundary.</p></div>
         <div className="builder-heading-actions">
           <button type="button" onClick={() => void loadList()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /> Refresh</button>
+          <button type="button" onClick={() => setBobOpen(true)} title="Ask Bob about the selected Builder job"><MessageSquareText size={16} /> Ask Bob</button>
           <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> New job</button>
         </div>
       </header>
@@ -265,6 +292,16 @@ const BuilderControlRoomPage: React.FC = () => {
               <span>{completedSteps}/{snapshot.steps.length} steps satisfied</span>
             </div>
             {selectedJob.last_error && <div className="builder-inline-error"><AlertTriangle size={15} /> {selectedJob.last_error}</div>}
+            <section className="builder-workbench" aria-label="Builder job workspace">
+              <nav className="builder-workbench-tabs" aria-label="Builder workspace views">
+                <button type="button" className={workspaceView === 'task' ? 'is-active' : ''} aria-current={workspaceView === 'task' ? 'page' : undefined} onClick={() => setWorkspaceView('task')}><FileCode2 size={15} /> Task</button>
+                <button type="button" className={workspaceView === 'evidence' ? 'is-active' : ''} aria-current={workspaceView === 'evidence' ? 'page' : undefined} onClick={() => setWorkspaceView('evidence')}><FolderTree size={15} /> Evidence</button>
+                <button type="button" className={workspaceView === 'execution' ? 'is-active' : ''} aria-current={workspaceView === 'execution' ? 'page' : undefined} onClick={() => setWorkspaceView('execution')}><TerminalSquare size={15} /> Execution</button>
+              </nav>
+              {workspaceView === 'task' && <div className="builder-workbench-content"><span>Immutable task brief</span><pre>{selectedJob.task_description || 'No task description was retained for this job.'}</pre></div>}
+              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button></li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
+              {workspaceView === 'execution' && <div className="builder-workbench-content"><span>Durable execution timeline</span><ol className="builder-workbench-runs">{snapshot.workerRuns.length === 0 ? <li>No worker run has started.</li> : snapshot.workerRuns.map(run => <li key={run.id}><TerminalSquare size={15} /><div><strong>{run.profile}</strong><small>{run.status}{run.exit_code == null ? '' : ` · exit ${run.exit_code}`}</small></div><code>{run.target_sha?.slice(0, 12) ?? 'No commit'}</code></li>)}</ol></div>}
+            </section>
             <div className="builder-steps">{snapshot.steps.map(step => (
               <div key={step.id} className={`builder-step state-${step.status}`}>
                 <span>{step.ordinal_position}</span>
@@ -281,12 +318,13 @@ const BuilderControlRoomPage: React.FC = () => {
             {snapshot.approvals.filter(approval => approval.status === 'pending').map(approval => {
               const expired = new Date(approval.expires_at).getTime() <= Date.now();
               const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
+              const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;
               return (
               <section className="builder-approval" key={approval.id}>
                 <div><span>{expired ? 'Approval expired' : 'Human approval required'}</span><strong>{approval.approval_type.replaceAll('_', ' ')}</strong><small>Requested for {approval.triggered_at_status.replaceAll('_', ' ')} at commit {approval.requested_target_sha?.slice(0, 12) ?? 'unavailable'}. {expired ? 'A new evidence review is required.' : `Expires ${new Date(approval.expires_at).toLocaleString('en-NZ')}.`}</small></div>
-                <ul className="builder-approval-artifacts" aria-label="Immutable evidence under review">{reviewedArtifacts.map(artifact => <li key={artifact.id}><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><span>{artifact.checksum?.slice(0, 12) ?? 'Checksum unavailable'}</span></li>)}</ul>
+                <ul className="builder-approval-artifacts" aria-label="Immutable evidence under review">{reviewedArtifacts.map(artifact => <li key={artifact.id}><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><span>{artifact.checksum?.slice(0, 12) ?? 'Checksum unavailable'}</span></li>)}{!evidenceComplete && <li className="is-incomplete"><strong>Evidence unavailable</strong><span>Refresh before deciding</span></li>}</ul>
                 <label>Review rationale<textarea value={approvalComment} onChange={event => setApprovalComment(event.target.value)} rows={3} maxLength={2000} required /></label>
-                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={expired || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={expired || Boolean(busy) || !approvalComment.trim()}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
+                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={expired || !evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={expired || !evidenceComplete || Boolean(busy) || !approvalComment.trim()}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
               </section>
               );
             })}
@@ -309,6 +347,20 @@ const BuilderControlRoomPage: React.FC = () => {
         <label>Optional code review<select value={form.codeReviewMode} onChange={event => setForm({ ...form, codeReviewMode: event.target.value as ReviewMode })} disabled={form.targetEnvironment === 'production'}><option value="none">None</option><option value="human">Human reviewer</option><option value="independent_ai">Independent AI reviewer</option></select></label>
         <div className="builder-modal-actions"><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" className="is-primary" disabled={busy === 'create' || projects.length === 0}>{busy === 'create' ? 'Creating…' : 'Create job'}</button></div>
       </form></div>}
+      <BobPanel
+        open={bobOpen}
+        onClose={() => setBobOpen(false)}
+        context={{
+          surface: 'builder_control_room',
+          job_id: selectedJob?.id ?? null,
+          job_title: selectedJob?.title ?? null,
+          target_sha: selectedJob?.target_sha ?? null,
+          requested_action: selectedJob?.requested_action ?? null,
+          target_environment: selectedJob?.target_environment ?? null,
+          job_status: selectedJob?.status ?? null,
+          workspace_view: workspaceView,
+        }}
+      />
     </div>
   );
 };
