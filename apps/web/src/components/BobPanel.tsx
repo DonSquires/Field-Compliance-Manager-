@@ -18,10 +18,14 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, FileSearch, Maximize2, Minimize2, PanelRightClose, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, FileSearch, FileUp, Maximize2, Mic, Minimize2, Paperclip, PanelRightClose, Plus, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './BobPanel.css';
+
+const MAX_BOB_UPLOAD_BYTES = 48 * 1024 * 1024;
+const ACCEPTED_BOB_UPLOADS = 'image/*,video/*,audio/*,.csv,.txt,.pdf,.doc,.docx,.xls,.xlsx,.json,.md';
+const ACCEPTED_BOB_UPLOAD_LABEL = 'PDF, DOCX, CSV/XLSX, TXT, JSON, images, audio, and video up to 48 MB each';
 
 interface BobMessage {
   id: string;
@@ -40,7 +44,23 @@ interface BobPanelProps {
   mode?: 'operations' | 'builder';
 }
 
-type WorkStateTone = 'idle' | 'drafting' | 'processing' | 'waiting' | 'proposal' | 'completed' | 'failed';
+interface PendingBobFile {
+  id: string;
+  file: File;
+  status: 'queued' | 'uploading' | 'uploaded' | 'failed';
+  error?: string;
+  attachment?: BobAttachmentPayload;
+}
+
+interface BobAttachmentPayload {
+  id: string;
+  name: string;
+  type: string;
+  storage_bucket: string;
+  storage_path: string;
+}
+
+type WorkStateTone = 'idle' | 'working' | 'using-data' | 'waiting' | 'proposal' | 'completed' | 'failed';
 
 interface WorkState {
   tone: WorkStateTone;
@@ -53,15 +73,18 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BobMessage[]>([]);
   const [input, setInput] = useState('');
+  const [pendingFiles, setPendingFiles] = useState<PendingBobFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const contextEntries = useMemo(() => Object.entries(context ?? {})
     .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
     .slice(0, 4), [context]);
-  const workState = derivePanelWorkState({ loading, sending, error, input });
+  const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles });
 
   // ATLAS READS: bob_conversations, bob_messages
   // Operations and Builder retain separate durable threads. Builder context
@@ -127,26 +150,107 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
+  const startNewConversation = useCallback(async () => {
+    if (!profile?.organizationId || !profile?.id) return;
+    try {
+      setLoading(true);
+      setError(null);
+      const { data: created, error: createErr } = await supabase
+        .from('bob_conversations')
+        .insert([{ organization_id: profile.organizationId, user_id: profile.id, module_key: mode, title: mode === 'builder' ? 'Bob Builder' : 'Bob Operations' }])
+        .select('id')
+        .single();
+      if (createErr) throw createErr;
+      setConversationId(created.id);
+      setMessages([]);
+      setPendingFiles([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'New Bob conversation could not be created.');
+    } finally {
+      setLoading(false);
+    }
+  }, [mode, profile?.organizationId, profile?.id]);
+
+  const addFiles = (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    const rejected = files.filter(file => file.size <= 0 || file.size > MAX_BOB_UPLOAD_BYTES);
+    const accepted = files.filter(file => file.size > 0 && file.size <= MAX_BOB_UPLOAD_BYTES).map(file => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+      file,
+      status: 'queued' as const,
+    }));
+    if (rejected.length) setError('One or more files are empty or larger than the 48 MB upload limit.');
+    setPendingFiles(current => [...current, ...accepted].slice(0, 8));
+  };
+
+  const uploadPendingFiles = async (convId: string) => {
+    if (!profile?.organizationId || !profile?.id) return [];
+    const uploaded: BobAttachmentPayload[] = [];
+    for (const pending of pendingFiles) {
+      if (pending.attachment) {
+        uploaded.push(pending.attachment);
+        continue;
+      }
+      setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'uploading' } : item));
+      const safeName = pending.file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180) || 'upload.bin';
+      const attachmentId = crypto.randomUUID();
+      const storagePath = `org/${profile.organizationId}/bob/${convId}/${attachmentId}-${safeName}`;
+      const { error: uploadError } = await supabase.storage.from('bob-uploads').upload(storagePath, pending.file, {
+        contentType: pending.file.type || 'application/octet-stream',
+        upsert: false,
+      });
+      if (uploadError) {
+        setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: uploadError.message } : item));
+        throw uploadError;
+      }
+      const { error: metadataError } = await supabase.from('bob_attachments').insert([{
+        id: attachmentId,
+        organization_id: profile.organizationId,
+        conversation_id: convId,
+        uploaded_by: profile.id,
+        file_name: pending.file.name,
+        file_type: pending.file.type || 'application/octet-stream',
+        file_size_bytes: pending.file.size,
+        storage_bucket: 'bob-uploads',
+        storage_path: storagePath,
+        purpose: pending.file.type.startsWith('image/') ? 'photo_intake' : 'document_intake',
+        processing_state: 'pending',
+      }]);
+      if (metadataError) {
+        await supabase.storage.from('bob-uploads').remove([storagePath]);
+        setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: metadataError.message } : item));
+        throw metadataError;
+      }
+      const attachment = { id: attachmentId, name: pending.file.name, type: pending.file.type || 'application/octet-stream', storage_bucket: 'bob-uploads', storage_path: storagePath };
+      uploaded.push(attachment);
+      setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'uploaded', attachment } : item));
+    }
+    return uploaded;
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const message = input.trim();
-    if (!message || !conversationId) return;
+    if ((!message && pendingFiles.length === 0) || !conversationId) return;
 
     const optimisticId = `optimistic-${Date.now()}`;
+    const attachmentNames = pendingFiles.map(item => item.file.name);
     setMessages((prev) => [
       ...prev,
-      { id: optimisticId, role: 'user', content: message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
+      { id: optimisticId, role: 'user', content: attachmentNames.length ? `${message || 'Please review the attached file(s).'}\n\nAttached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
     ]);
     setInput('');
     setSending(true);
     setError(null);
 
     try {
+      const attachments = await uploadPendingFiles(conversationId);
       // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
       const { data, error: fnError } = await supabase.functions.invoke('onspace-ai-chat', {
         body: {
-          message,
+          message: message || 'Please review the attached file(s).',
           conversation_id: conversationId,
+          attachments,
           context: { ...(context ?? {}), agent_mode: mode },
         },
       });
@@ -164,11 +268,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (history && history.length > 0) {
         setMessages(history as BobMessage[]);
+        setPendingFiles([]);
       } else if (data?.reply) {
         // Fallback: function replied but history read didn't return rows yet
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== optimisticId),
-          { id: optimisticId, role: 'user', content: message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
+          { id: optimisticId, role: 'user', content: attachmentNames.length ? `${message || 'Please review the attached file(s).'}\n\nAttached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
           {
             id: `reply-${Date.now()}`,
             role: 'assistant',
@@ -179,6 +284,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             metadata: {},
           },
         ]);
+        setPendingFiles([]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Bob could not respond. Try again.');
@@ -191,12 +297,18 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   return (
     <div
-      className={`bob-panel ${workspaceExpanded ? 'is-expanded' : ''}`}
+      className={`bob-panel ${workspaceExpanded ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
       aria-label="Bob agent workspace"
+      onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }}
+      onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}
     >
       <header className="bob-panel-header">
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <div className="bob-panel-header-actions">
+          <button type="button" onClick={() => void startNewConversation()} title="New Bob session" aria-label="New Bob session"><Plus size={17} /></button>
+          <button type="button" disabled title="Voice capture is off"><Mic size={17} /><span>Voice off</span></button>
           <button type="button" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
           <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
         </div>
@@ -211,10 +323,11 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       )}
 
       <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
+        {dragging && <div className="bob-drop-target"><FileUp size={17} /> Drop files for Bob to read.</div>}
         {loading ? (
           <div className="bob-agent-status"><Sparkles size={16} /> Loading conversation</div>
         ) : messages.length === 0 ? (
-          <div className="bob-empty-state"><Bot size={24} /><strong>{mode === 'builder' ? 'What should we build?' : 'What should we work through?'}</strong><div>{mode === 'builder' ? <><button type="button" onClick={() => setInput('Inspect the selected Builder job and propose the next implementation step.')}>Inspect job</button><button type="button" onClick={() => setInput('Create an implementation plan with affected files, verification steps, and unknowns.')}>Plan implementation</button><button type="button" onClick={() => setInput('Review the current artifacts and explain the next safe repair or build action.')}>Review evidence</button></> : <><button type="button" onClick={() => setInput('Summarize the current context and identify the next safe action.')}>Summarize context</button><button type="button" onClick={() => setInput('Create a step-by-step plan with unknowns and approval gates.')}>Plan work</button><button type="button" onClick={() => setInput('Check this surface for risks, missing evidence, and tests.')}>Review risk</button></>}</div></div>
+          <div className="bob-empty-state"><Bot size={24} /><strong>{mode === 'builder' ? 'What should we build?' : 'What should we work through?'}</strong><p>{ACCEPTED_BOB_UPLOAD_LABEL}. Attach files with the paperclip or drop them into this panel.</p><div>{mode === 'builder' ? <><button type="button" onClick={() => setInput('Inspect the selected Builder job and propose the next implementation step.')}>Inspect job</button><button type="button" onClick={() => setInput('Create an implementation plan with affected files, verification steps, and unknowns.')}>Plan implementation</button><button type="button" onClick={() => setInput('Review the current artifacts and explain the next safe repair or build action.')}>Review evidence</button></> : <><button type="button" onClick={() => setInput('Summarize the current context and identify the next safe action.')}>Summarize context</button><button type="button" onClick={() => setInput('Create a step-by-step plan with unknowns and approval gates.')}>Plan work</button><button type="button" onClick={() => setInput('Check this surface for risks, missing evidence, and tests.')}>Review risk</button></>}</div></div>
         ) : (
           messages.map((m) => (
             <article key={m.id} className={`bob-message role-${m.role}`}>
@@ -230,7 +343,20 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         )}
       </div>
 
+      {pendingFiles.length > 0 && (
+        <div className="bob-file-tray" aria-label="Attached files">
+          {pendingFiles.map(item => (
+            <button key={item.id} type="button" className={`bob-file-chip is-${item.status}`} onClick={() => setPendingFiles(current => current.filter(file => file.id !== item.id))} disabled={sending} title={item.error || 'Remove file'}>
+              <FileUp size={13} />
+              <span>{item.file.name}</span>
+              <small>{item.status}</small>
+            </button>
+          ))}
+        </div>
+      )}
+
       <form onSubmit={handleSend} className="bob-composer">
+        <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_BOB_UPLOADS} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -239,8 +365,18 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           rows={3}
         />
         <button
+          type="button"
+          className="bob-evidence-button"
+          onClick={() => fileInputRef.current?.click()}
+          title={ACCEPTED_BOB_UPLOAD_LABEL}
+          aria-label="Attach files"
+          disabled={sending || !conversationId}
+        >
+          <Paperclip size={17} />
+        </button>
+        <button
           type="submit"
-          disabled={sending || !input.trim() || !conversationId}
+          disabled={sending || (!input.trim() && pendingFiles.length === 0) || !conversationId}
           title="Send request to Bob"
         >
           {sending ? <Sparkles size={17} className="is-spinning" /> : <Send size={17} />}
@@ -251,12 +387,22 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   );
 };
 
-function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string }): WorkState {
-  if (input.error) return { tone: 'failed', label: 'Failed', detail: 'The last operation did not complete. The transcript is still available; retry after checking the message.' };
-  if (input.sending) return { tone: 'processing', label: 'Processing', detail: 'Bob is working on the request and may be waiting on live data or tool results.' };
-  if (input.loading) return { tone: 'waiting', label: 'Waiting on conversation', detail: 'Loading the durable Bob thread before accepting work.' };
-  if (input.input.trim()) return { tone: 'drafting', label: 'Drafting', detail: 'No request has been sent yet. Edit the instruction or send it to start work.' };
-  return { tone: 'idle', label: 'Ready', detail: 'No work is running. Ask Bob a question or prepare a governed task.' };
+function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string; messages: BobMessage[]; pendingFiles: PendingBobFile[] }): WorkState {
+  if (input.error) return { tone: 'failed', label: 'Failed/paused', detail: `The last operation did not complete: ${input.error}. Check the message and try again.` };
+  if (input.pendingFiles.some(file => file.status === 'uploading')) return { tone: 'using-data', label: 'Using app data', detail: 'Uploading evidence to private storage and registering it for Bob.' };
+  if (input.pendingFiles.some(file => file.status === 'failed')) return { tone: 'failed', label: 'Failed/paused', detail: 'One or more files failed to upload. Remove the failed file or try again.' };
+  if (input.pendingFiles.length) return { tone: 'waiting', label: 'Waiting on you', detail: `${input.pendingFiles.length} file${input.pendingFiles.length === 1 ? '' : 's'} queued. Send when you are ready for Bob to read them.` };
+  if (input.sending) return { tone: 'working', label: 'Working', detail: 'Bob is processing the request. The next change will be an answer, a named blocker, or a proposal state.' };
+  if (input.loading) return { tone: 'using-data', label: 'Using app data', detail: 'Loading the durable Bob thread before accepting work.' };
+
+  const lastAssistant = [...input.messages].reverse().find(message => message.role === 'assistant');
+  if (lastAssistant) {
+    const state = classifyMessageState(lastAssistant);
+    if (state.tone === 'proposal' || state.tone === 'waiting' || state.tone === 'failed' || state.tone === 'using-data') return state;
+  }
+
+  if (input.input.trim()) return { tone: 'idle', label: 'Idle', detail: 'You are drafting locally. Nothing has been sent to Bob yet.' };
+  return { tone: 'idle', label: 'Idle', detail: 'Ready for input. No Bob work is running.' };
 }
 
 function asString(value: unknown) {
@@ -271,14 +417,14 @@ function classifyMessageState(message: BobMessage): WorkState {
   const metadata = message.metadata ?? {};
   const outcome = asString(metadata.outcome);
   const plannedTool = asString(metadata.planned_tool) ?? asString(metadata.tool);
-  const suggestedAction = asString(metadata.suggested_action);
-  const hasProposal = Boolean(suggestedAction || asString(metadata.action_id) || asString(metadata.org_action_id) || asArray(metadata.site_action_ids).length || asArray(metadata.proposed_entities).length || plannedTool?.startsWith('propose_'));
+  const hasProposal = Boolean(asString(metadata.action_id) || asString(metadata.org_action_id) || asArray(metadata.site_action_ids).length || asArray(metadata.proposed_entities).length || plannedTool?.startsWith('propose_'));
   const hasEvidence = Boolean(metadata.document_qa || asArray(metadata.reasoning_steps).length || asArray(metadata.files).length || asArray(metadata.sources).length || asArray(metadata.results).length);
 
-  if (message.flagged || outcome === 'error' || outcome === 'failed') return { tone: 'failed', label: 'Failed', detail: 'Bob recorded a failed or flagged operation for review.' };
-  if (hasProposal) return { tone: 'proposal', label: 'Proposal prepared', detail: 'Nothing has changed yet. Review the governed action and approve it in the approval surface.' };
-  if (outcome === 'need_clarification' || outcome === 'clarifying_questions') return { tone: 'waiting', label: 'Waiting for human input', detail: 'Bob needs a decision or missing detail before work can continue.' };
-  if (hasEvidence) return { tone: 'completed', label: 'Evidence reviewed', detail: 'Bob attached structured evidence or reasoning metadata to this turn.' };
+  if (message.flagged || outcome === 'error' || outcome === 'failed') return { tone: 'failed', label: 'Failed/paused', detail: 'Bob recorded a failed or flagged operation for review.' };
+  if (hasProposal) return { tone: 'proposal', label: 'Draft prepared', detail: 'Nothing has changed yet. Review the governed action and approve it in the approval surface.' };
+  if (outcome === 'need_clarification' || outcome === 'clarifying_questions') return { tone: 'waiting', label: 'Waiting on you', detail: 'Bob needs one decision or missing detail before work can continue.' };
+  if (plannedTool === 'query_records' || plannedTool === 'sql_read' || plannedTool === 'schema_inspect' || plannedTool === 'self_audit') return { tone: 'using-data', label: 'Using app data', detail: `Bob checked ${plannedTool.replaceAll('_', ' ')} for this turn.` };
+  if (hasEvidence) return { tone: 'completed', label: 'Completed', detail: 'Bob attached structured evidence or reasoning metadata to this turn.' };
   if (plannedTool) return { tone: 'completed', label: 'Completed', detail: `Bob completed ${plannedTool.replaceAll('_', ' ')} for this turn.` };
   return { tone: 'completed', label: 'Answered', detail: 'Bob returned assistant prose only; no governed action was prepared.' };
 }

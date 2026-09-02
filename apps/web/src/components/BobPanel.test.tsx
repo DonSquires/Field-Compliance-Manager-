@@ -2,9 +2,10 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BobPanel } from './BobPanel';
 
-const { mockFrom, mockInvoke } = vi.hoisted(() => ({
+const { mockFrom, mockInvoke, mockStorageFrom } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockInvoke: vi.fn(),
+  mockStorageFrom: vi.fn(),
 }));
 let messageHistory: Array<Record<string, unknown>> = [];
 
@@ -18,6 +19,7 @@ vi.mock('../lib/supabase', () => ({
   supabase: {
     from: mockFrom,
     functions: { invoke: mockInvoke },
+    storage: { from: mockStorageFrom },
   },
 }));
 
@@ -25,6 +27,7 @@ describe('BobPanel', () => {
   beforeEach(() => {
     mockFrom.mockReset();
     mockInvoke.mockReset();
+    mockStorageFrom.mockReset();
     messageHistory = [];
 
     mockFrom.mockImplementation((table: string) => {
@@ -57,6 +60,12 @@ describe('BobPanel', () => {
         };
       }
 
+      if (table === 'bob_attachments') {
+        return {
+          insert: vi.fn().mockResolvedValue({ error: null }),
+        };
+      }
+
       return {
         select: () => ({
           eq: () => ({
@@ -67,6 +76,10 @@ describe('BobPanel', () => {
     });
 
     mockInvoke.mockResolvedValue({ data: { reply: 'ok' }, error: null });
+    mockStorageFrom.mockReturnValue({
+      upload: vi.fn().mockResolvedValue({ error: null }),
+      remove: vi.fn().mockResolvedValue({ error: null }),
+    });
   });
 
   it('passes the live relationship context to Bob when sending a message', async () => {
@@ -97,6 +110,7 @@ describe('BobPanel', () => {
         body: {
           message: 'Check the site status',
           conversation_id: 'conversation-1',
+          attachments: [],
           context: {
             agreement: { id: 'agreement-1', name: 'Site Service Agreement' },
             site: { id: 'site-1', name: 'North Plant' },
@@ -118,8 +132,36 @@ describe('BobPanel', () => {
     render(<BobPanel open onClose={() => undefined} />);
 
     expect(await screen.findByText('repo search')).toBeTruthy();
+    expect(screen.getByText('Completed')).toBeTruthy();
     expect(screen.getByText('80% confidence')).toBeTruthy();
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
+  });
+
+  it('uploads attached evidence through bob-uploads and registers bob_attachments', async () => {
+    const storageApi = { upload: vi.fn().mockResolvedValue({ error: null }), remove: vi.fn().mockResolvedValue({ error: null }) };
+    mockStorageFrom.mockReturnValue(storageApi);
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    const file = new File(['site evidence'], 'evidence.txt', { type: 'text/plain' });
+    fireEvent.change(await screen.findByLabelText('Attach evidence files'), { target: { files: [file] } });
+
+    expect(await screen.findByText('evidence.txt')).toBeTruthy();
+    expect(screen.getByText('queued')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mockStorageFrom).toHaveBeenCalledWith('bob-uploads');
+      expect(storageApi.upload).toHaveBeenCalled();
+      expect(mockFrom).toHaveBeenCalledWith('bob_attachments');
+      expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+        body: expect.objectContaining({
+          message: 'Please review the attached file(s).',
+          attachments: [expect.objectContaining({ name: 'evidence.txt', storage_bucket: 'bob-uploads' })],
+        }),
+      }));
+    });
   });
 
   it('separates assistant prose from evidence, proposal, and next-action state', async () => {
@@ -137,11 +179,40 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
 
-    expect(await screen.findByText('Proposal prepared')).toBeTruthy();
+    expect(await screen.findAllByText('Draft prepared')).toHaveLength(2);
     expect(screen.getByText('Governed proposal')).toBeTruthy();
     expect(screen.getByText('Evidence')).toBeTruthy();
     expect(screen.getByText('Next action')).toBeTruthy();
     expect(screen.getByText('Review the approval item before applying it.')).toBeTruthy();
+  });
+
+  it('shows explicit activity state and truthful evidence intake availability', async () => {
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('Idle')).toBeTruthy();
+    expect(screen.getByText('Ready for input. No Bob work is running.')).toBeTruthy();
+    expect(screen.getByText(/PDF, DOCX, CSV\/XLSX, TXT, JSON, images, audio, and video up to 48 MB each/)).toBeTruthy();
+    expect(screen.getByLabelText('Attach files')).toBeTruthy();
+    expect(screen.getByText('Voice off')).toBeTruthy();
+  });
+
+  it('names waiting-on-human and failed states plainly', async () => {
+    messageHistory = [
+      {
+        id: 'message-1', role: 'assistant', content: 'I need one decision.', confidence: null,
+        flagged: false, created_at: '2026-09-02T06:00:00.000Z', metadata: { outcome: 'need_clarification' },
+      },
+      {
+        id: 'message-2', role: 'assistant', content: 'The task paused.', confidence: null,
+        flagged: true, created_at: '2026-09-02T06:01:00.000Z', metadata: { outcome: 'failed' },
+      },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findAllByText('Failed/paused')).toHaveLength(2);
+    expect(screen.getByText('Waiting on you')).toBeTruthy();
+    expect(screen.getAllByText('Bob recorded a failed or flagged operation for review.')).toHaveLength(2);
   });
 
   it('can expand from compact chat into the Bob workspace surface', async () => {
