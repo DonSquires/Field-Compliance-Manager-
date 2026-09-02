@@ -10,6 +10,9 @@ describe('Admin Hub operational data contract', () => {
       expect(source).toContain(`from('${table}')`);
     }
     expect(source).toContain('metricFrom(onDuty)');
+    expect(source).toContain("isModuleEnabled('welfare', { safetyRelevant: true })");
+    expect(source).toContain('admin-hub-welfare-${organizationId}');
+    expect(source).toContain('<SafetyGate');
     expect(source).toContain("import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus'");
     expect(source).toContain(".in('status', ACTIVE_DISPATCH_JOB_STATUSES)");
     expect(source).toContain('welfareRows.error');

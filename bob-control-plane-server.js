@@ -192,10 +192,12 @@ async function route(req, res, body) {
   if (req.method === 'POST' && url.pathname === '/api/bob/builder/jobs') {
     if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
     if (!body.repository || !repositoryAllowed(body.repository)) return json(res, 403, { error: 'repository is not allowed' });
-    if (!body.organizationId || !body.projectId || !body.title || !body.taskDescription || !body.targetSha) {
-      return json(res, 400, { error: 'organizationId, projectId, title, taskDescription, and targetSha are required' });
+    if (!body.organizationId || !body.projectId || !body.title || !body.taskDescription || !body.targetSha || !body.requestedAction || !body.targetEnvironment) {
+      return json(res, 400, { error: 'organizationId, projectId, title, taskDescription, targetSha, requestedAction, and targetEnvironment are required' });
     }
-    const { data, error } = await builderSupabase.rpc('builder_create_job', {
+    if (!['prepare_change', 'prepare_release'].includes(body.requestedAction) || !['development', 'staging', 'production'].includes(body.targetEnvironment)) return json(res, 400, { error: 'unsupported Builder action or target environment' });
+    if (body.targetEnvironment === 'production' && (body.requestedAction !== 'prepare_release' || body.codeReviewMode !== 'human')) return json(res, 400, { error: 'production Builder jobs require release preparation and human code review' });
+    const { data, error } = await builderSupabase.rpc('builder_create_job_v2', {
       _organization_id: body.organizationId,
       _project_id: body.projectId,
       _title: body.title,
@@ -206,7 +208,9 @@ async function route(req, res, body) {
       _frontend_required: body.frontendRequired !== false,
       _backend_required: body.backendRequired === true,
       _code_review_mode: body.codeReviewMode || 'none',
-      _task_run_id: body.taskRunId || null
+      _task_run_id: body.taskRunId || null,
+      _requested_action: body.requestedAction,
+      _target_environment: body.targetEnvironment
     });
     if (error || !data?.id) return json(res, 409, { error: 'Builder job could not be created' });
     return json(res, 201, data);

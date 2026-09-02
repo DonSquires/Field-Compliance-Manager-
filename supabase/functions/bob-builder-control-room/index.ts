@@ -115,9 +115,16 @@ serve(async req => {
   if (action === 'create') {
     if (!canAccessOrganization(requestedOrgId)) return json({ error: 'Organization access denied' }, 403);
     const projectId = typeof body.project_id === 'string' ? body.project_id : '';
+    const requestedAction = typeof body.requested_action === 'string' ? body.requested_action : '';
+    const targetEnvironment = typeof body.target_environment === 'string' ? body.target_environment : '';
+    const codeReviewMode = typeof body.code_review_mode === 'string' ? body.code_review_mode : 'none';
+    if (!['prepare_change', 'prepare_release'].includes(requestedAction)) return json({ error: 'Select a supported Builder action' }, 400);
+    if (!['development', 'staging', 'production'].includes(targetEnvironment)) return json({ error: 'Select a supported target environment' }, 400);
+    if (targetEnvironment === 'production' && requestedAction !== 'prepare_release') return json({ error: 'Production jobs must prepare a release' }, 400);
+    if (targetEnvironment === 'production' && codeReviewMode !== 'human') return json({ error: 'Production jobs require human code review' }, 400);
     const { data: project } = await admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo').eq('id', projectId).eq('organization_id', requestedOrgId).eq('status', 'active').single();
     if (!project) return json({ error: 'Builder project is unavailable' }, 404);
-    const { data: created, error: createError } = await admin.rpc('builder_create_job', {
+    const { data: created, error: createError } = await admin.rpc('builder_create_job_v2', {
       _organization_id: requestedOrgId,
       _project_id: projectId,
       _title: typeof body.title === 'string' ? body.title.slice(0, 200) : '',
@@ -127,8 +134,10 @@ serve(async req => {
       _description: typeof body.description === 'string' ? body.description.slice(0, 2000) : null,
       _frontend_required: body.frontend_required !== false,
       _backend_required: body.backend_required === true,
-      _code_review_mode: body.code_review_mode,
+      _code_review_mode: codeReviewMode,
       _task_run_id: null,
+      _requested_action: requestedAction,
+      _target_environment: targetEnvironment,
     });
     await audit(requestedOrgId, createError ? 'failed' : 'created', String(created?.id ?? '') || null);
     return createError ? json({ error: 'Builder job could not be created' }, 409) : json({ job: safeJob(created) }, 201);

@@ -6,6 +6,13 @@ const source = readFileSync(resolve(process.cwd(), 'src/pages/WelfareAlertsPage.
 const outcomeSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901005000_welfare_outcome_return.sql'), 'utf8');
 
 describe('supervisor welfare response workbench', () => {
+  it('fails closed for welfare reads, subscriptions, and response controls until entitlement is confirmed', () => {
+    expect(source).toContain("isModuleEnabled('welfare', { safetyRelevant: true })");
+    expect(source).toContain('<SafetyGate');
+    expect(source).toContain('!profile?.organizationId || !welfareEnabled');
+    expect(source).toContain('if (!profile?.organizationId || !welfareEnabled) return;');
+  });
+
   it('loads tenant-scoped alerts and subscribes with the same tenant filter', () => {
     expect(source).toContain(".eq('organization_id', profile.organizationId)");
     expect(source).toContain('filter: `organization_id=eq.${profile.organizationId}`');

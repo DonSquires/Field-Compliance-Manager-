@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Crosshair, MapPin, Phone, RefreshCw, ShieldAlert, ShieldCheck, Siren, UserCheck, X } from 'lucide-react';
 import { schemaWelfareAlertStatus, type WelfareAlertStatus } from '../lib/welfareAlertStatus';
 import { useAuth } from '../context/AuthContext';
+import { SafetyGate } from '../components/SafetyGate';
+import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import './WelfareAlertsPage.css';
 
@@ -54,6 +56,8 @@ const FILTERS: Array<{ id: AlertFilter; label: string }> = [
 
 const WelfareAlertsPage: React.FC = () => {
   const { profile } = useAuth();
+  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [alerts, setAlerts] = useState<WelfareAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +69,10 @@ const WelfareAlertsPage: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const loadAlerts = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId || !welfareEnabled) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -85,18 +92,18 @@ const WelfareAlertsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, welfareEnabled]);
 
   useEffect(() => { void loadAlerts(); }, [loadAlerts]);
 
   useEffect(() => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId || !welfareEnabled) return;
     const channel = supabase
       .channel(`welfare_supervisor_${profile.organizationId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'welfare_alerts', filter: `organization_id=eq.${profile.organizationId}` }, () => void loadAlerts())
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [loadAlerts, profile?.organizationId]);
+  }, [loadAlerts, profile?.organizationId, welfareEnabled]);
 
   const visibleAlerts = useMemo(() => alerts.filter((alert) => {
     if (filter === 'all') return true;
@@ -138,7 +145,21 @@ const WelfareAlertsPage: React.FC = () => {
   };
 
   return (
-    <div className="welfare-page">
+    <SafetyGate
+      status={moduleStatus}
+      isEnabled={welfareEnabled}
+      moduleLabel="Welfare response"
+      safetyRelevant
+      renderUnavailable={(message) => (
+        <div className="welfare-page">
+          <div className="welfare-message is-error" role="status">
+            <ShieldAlert size={17} />
+            <div><strong>{message.title}</strong><span>{message.description}</span></div>
+          </div>
+        </div>
+      )}
+    >
+      <div className="welfare-page">
       <header className="welfare-heading">
         <div><span>Safety operations</span><h1>Welfare response</h1><p>Live officer alerts, escalation state, and human response records.</p></div>
         <button type="button" onClick={() => void loadAlerts()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh</button>
@@ -203,7 +224,8 @@ const WelfareAlertsPage: React.FC = () => {
           </form>
         </div>
       )}
-    </div>
+      </div>
+    </SafetyGate>
   );
 };
 

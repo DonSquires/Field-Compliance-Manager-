@@ -17,7 +17,9 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { SafetyGate } from '../components/SafetyGate';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
+import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import './AdminHubPage.css';
 
@@ -76,6 +78,8 @@ function relativeTime(value: string): string {
 
 const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,10 +100,14 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, welfareRows, dispatchRows, breachRows, reportRows] = await Promise.all([
         supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
         supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
-        supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']),
+        welfareEnabled
+          ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
+          : Promise.resolve({ count: null, error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
         supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']),
         supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('observed_at', todayStart),
-        supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6),
+        welfareEnabled
+          ? supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
+          : Promise.resolve({ data: [], error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
         supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6),
         supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
         supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
@@ -192,7 +200,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, welfareEnabled]);
 
   useEffect(() => {
     void loadDashboard();
@@ -205,12 +213,20 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     const organizationId = profile.organizationId;
     const channel = supabase
       .channel(`admin-hub-${organizationId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'welfare_alerts', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'breach_alerts', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_jobs', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
-  }, [loadDashboard, profile?.organizationId]);
+    const welfareChannel = welfareEnabled
+      ? supabase
+          .channel(`admin-hub-welfare-${organizationId}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'welfare_alerts', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
+          .subscribe()
+      : null;
+    return () => {
+      void supabase.removeChannel(channel);
+      if (welfareChannel) void supabase.removeChannel(welfareChannel);
+    };
+  }, [loadDashboard, profile?.organizationId, welfareEnabled]);
 
   const attentionMetrics = [metrics.welfare.value, metrics.breaches.value, metrics.activeDispatch.value];
   const attentionCount = attentionMetrics.reduce<number>((sum, value) => sum + (value ?? 0), 0);
@@ -236,7 +252,15 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       <section className="admin-metric-grid" aria-label="Current operations metrics">
         <Metric icon={Users} label="On duty now" metric={metrics.onDuty} tone="blue" onClick={() => onNavigate?.('roster')} />
         <Metric icon={Radio} label="Active dispatch" metric={metrics.activeDispatch} tone="teal" onClick={() => onNavigate?.('dispatch')} />
-        <Metric icon={HeartPulse} label="Welfare alerts" metric={metrics.welfare} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+        <SafetyGate
+          status={moduleStatus}
+          isEnabled={welfareEnabled}
+          moduleLabel="Welfare monitoring"
+          safetyRelevant
+          renderUnavailable={(message) => <Metric icon={HeartPulse} label="Welfare alerts" metric={{ value: null, error: message.description }} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}
+        >
+          <Metric icon={HeartPulse} label="Welfare alerts" metric={metrics.welfare} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+        </SafetyGate>
         <Metric icon={ShieldAlert} label="Open breaches" metric={metrics.breaches} tone="amber" onClick={() => onNavigate?.('breach-review')} />
         <Metric icon={Binoculars} label="Observations today" metric={metrics.observations} tone="green" onClick={() => onNavigate?.('reports')} />
       </section>

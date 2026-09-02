@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
 
 type ReviewMode = 'none' | 'human' | 'independent_ai';
+type RequestedAction = 'prepare_change' | 'prepare_release';
+type TargetEnvironment = 'development' | 'staging' | 'production';
 
 interface BuilderProject {
   id: string;
@@ -22,6 +24,8 @@ interface BuilderJob {
   status: string;
   current_step_name: string | null;
   target_sha: string;
+  requested_action: RequestedAction;
+  target_environment: TargetEnvironment;
   frontend_required: boolean;
   backend_required: boolean;
   code_review_mode: ReviewMode;
@@ -83,6 +87,7 @@ const BuilderControlRoomPage: React.FC = () => {
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
+    requestedAction: 'prepare_change' as RequestedAction, targetEnvironment: 'development' as TargetEnvironment,
   });
 
   const invoke = useCallback(async (body: Record<string, unknown>) => {
@@ -143,6 +148,7 @@ const BuilderControlRoomPage: React.FC = () => {
         title: form.title.trim(), task_description: form.taskDescription.trim(), target_sha: form.targetSha.trim().toLowerCase(),
         branch_name: form.branchName.trim() || 'main', frontend_required: form.frontendRequired,
         backend_required: form.backendRequired, code_review_mode: form.codeReviewMode,
+        requested_action: form.requestedAction, target_environment: form.targetEnvironment,
       });
       setShowCreate(false);
       setNotice('Builder job created at the pinned commit.');
@@ -223,6 +229,7 @@ const BuilderControlRoomPage: React.FC = () => {
               <span>Commit <code>{selectedJob.target_sha.slice(0, 12)}</code></span>
               <span>{selectedJob.frontend_required ? 'Frontend' : null}{selectedJob.frontend_required && selectedJob.backend_required ? ' + ' : null}{selectedJob.backend_required ? 'Backend' : null}</span>
               <span>Review: {selectedJob.code_review_mode.replaceAll('_', ' ')}</span>
+              <span>{selectedJob.requested_action.replaceAll('_', ' ')} for {selectedJob.target_environment}</span>
               <span>{completedSteps}/{snapshot.steps.length} steps satisfied</span>
             </div>
             {selectedJob.last_error && <div className="builder-inline-error"><AlertTriangle size={15} /> {selectedJob.last_error}</div>}
@@ -253,8 +260,9 @@ const BuilderControlRoomPage: React.FC = () => {
         <label>Title<input value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} maxLength={200} required /></label>
         <label>Task description<textarea value={form.taskDescription} onChange={event => setForm({ ...form, taskDescription: event.target.value })} maxLength={12000} rows={5} required /></label>
         <div className="builder-field-row"><label>Branch<input value={form.branchName} onChange={event => setForm({ ...form, branchName: event.target.value })} /></label><label>Target commit SHA<input value={form.targetSha} onChange={event => setForm({ ...form, targetSha: event.target.value })} pattern="[a-fA-F0-9]{40}" required /></label></div>
+        <div className="builder-field-row"><label>Requested action<select value={form.requestedAction} onChange={event => setForm({ ...form, requestedAction: event.target.value as RequestedAction })}><option value="prepare_change">Prepare change</option><option value="prepare_release">Prepare release</option></select></label><label>Target environment<select value={form.targetEnvironment} onChange={event => { const targetEnvironment = event.target.value as TargetEnvironment; setForm({ ...form, targetEnvironment, requestedAction: targetEnvironment === 'production' ? 'prepare_release' : form.requestedAction, codeReviewMode: targetEnvironment === 'production' ? 'human' : form.codeReviewMode }); }}><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label></div>
         <fieldset><legend>Implementation scope</legend><label><input type="checkbox" checked={form.frontendRequired} onChange={event => setForm({ ...form, frontendRequired: event.target.checked })} /> Frontend</label><label><input type="checkbox" checked={form.backendRequired} onChange={event => setForm({ ...form, backendRequired: event.target.checked })} /> Backend</label></fieldset>
-        <label>Optional code review<select value={form.codeReviewMode} onChange={event => setForm({ ...form, codeReviewMode: event.target.value as ReviewMode })}><option value="none">None</option><option value="human">Human reviewer</option><option value="independent_ai">Independent AI reviewer</option></select></label>
+        <label>Optional code review<select value={form.codeReviewMode} onChange={event => setForm({ ...form, codeReviewMode: event.target.value as ReviewMode })} disabled={form.targetEnvironment === 'production'}><option value="none">None</option><option value="human">Human reviewer</option><option value="independent_ai">Independent AI reviewer</option></select></label>
         <div className="builder-modal-actions"><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" className="is-primary" disabled={busy === 'create' || projects.length === 0}>{busy === 'create' ? 'Creating…' : 'Create job'}</button></div>
       </form></div>}
     </div>

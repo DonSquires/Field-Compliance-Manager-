@@ -15,7 +15,9 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { SafetyGate } from '../components/SafetyGate';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
+import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
@@ -63,6 +65,8 @@ function toMetric(response: { count: number | null; error: { message: string } |
 
 const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -78,13 +82,15 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
     const [onDuty, dispatch, welfare, reports] = await Promise.all([
       supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress']),
       supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
-      supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']),
+      welfareEnabled
+        ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
+        : Promise.resolve({ count: null, error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
       supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted'),
     ]);
     setMetrics({ onDuty: toMetric(onDuty), activeDispatch: toMetric(dispatch), welfareAlerts: toMetric(welfare), reportFollowUp: toMetric(reports) });
     setUpdatedAt(new Date());
     setLoading(false);
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, welfareEnabled]);
 
   useEffect(() => {
     void loadMetrics();
@@ -107,7 +113,15 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
       <section className="field-ops-metrics" aria-label="Current operational workload">
         <MetricButton icon={Users} label="Officers on duty" metric={metrics.onDuty} loading={loading} onClick={() => onNavigate('live-map')} />
         <MetricButton icon={Radio} label="Active dispatch" metric={metrics.activeDispatch} loading={loading} onClick={() => onNavigate('dispatch')} />
-        <MetricButton icon={HeartPulse} label="Welfare alerts" metric={metrics.welfareAlerts} loading={loading} urgent onClick={() => onNavigate('welfare-alerts')} />
+        <SafetyGate
+          status={moduleStatus}
+          isEnabled={welfareEnabled}
+          moduleLabel="Welfare monitoring"
+          safetyRelevant
+          renderUnavailable={(message) => <MetricButton icon={HeartPulse} label="Welfare alerts" metric={{ value: null, error: message.description }} loading={loading} urgent onClick={() => onNavigate('welfare-alerts')} />}
+        >
+          <MetricButton icon={HeartPulse} label="Welfare alerts" metric={metrics.welfareAlerts} loading={loading} urgent onClick={() => onNavigate('welfare-alerts')} />
+        </SafetyGate>
         <MetricButton icon={FileWarning} label="Reports for follow-up" metric={metrics.reportFollowUp} loading={loading} onClick={() => onNavigate('field-reports')} />
       </section>
 
