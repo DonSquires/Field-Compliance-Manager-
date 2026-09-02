@@ -461,6 +461,75 @@
   background: #31191c;
 }
 
+.bob-attachment-results {
+  display: grid;
+  gap: 7px;
+  padding: 8px 11px;
+  border-top: 1px solid #294052;
+  background: #07111c;
+}
+
+.bob-attachment-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid #345a80;
+  border-radius: 5px;
+  background: #0b2033;
+}
+
+.bob-attachment-card > svg {
+  margin-top: 1px;
+  color: #9fc7e8;
+}
+
+.bob-attachment-card strong,
+.bob-attachment-card span,
+.bob-attachment-card p {
+  display: block;
+  min-width: 0;
+}
+
+.bob-attachment-card strong {
+  overflow: hidden;
+  color: #dce8ef;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.bob-attachment-card span {
+  color: #a7cfdb;
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.bob-attachment-card p {
+  margin: 3px 0 0;
+  color: #99b2bf;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.bob-attachment-card.state-processing,
+.bob-attachment-card.state-pending {
+  border-color: #776531;
+  background: #241f10;
+}
+
+.bob-attachment-card.state-extracted {
+  border-color: #47756f;
+  background: #12312f;
+}
+
+.bob-attachment-card.state-failed,
+.bob-attachment-card.state-manual_review_required {
+  border-color: #844141;
+  background: #31191c;
+}
+
 .bob-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px 42px;

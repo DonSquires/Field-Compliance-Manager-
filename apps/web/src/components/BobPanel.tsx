@@ -60,6 +60,17 @@ interface BobAttachmentPayload {
   storage_path: string;
 }
 
+interface BobAttachmentRecord {
+  id: string;
+  file_name: string;
+  file_type: string;
+  file_size_bytes: number;
+  processing_state: 'pending' | 'processing' | 'extracted' | 'failed' | 'manual_review_required' | string;
+  extraction_summary: string | null;
+  confidence: number | null;
+  created_at: string;
+}
+
 type WorkStateTone = 'idle' | 'working' | 'using-data' | 'waiting' | 'proposal' | 'completed' | 'failed';
 type VoiceState = 'off' | 'recording';
 
@@ -75,6 +86,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [messages, setMessages] = useState<BobMessage[]>([]);
   const [input, setInput] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingBobFile[]>([]);
+  const [attachments, setAttachments] = useState<BobAttachmentRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -89,7 +101,18 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const contextEntries = useMemo(() => Object.entries(context ?? {})
     .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
     .slice(0, 4), [context]);
-  const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles });
+  const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles, attachments });
+
+  const loadAttachments = useCallback(async (convId: string) => {
+    const { data, error: attachmentErr } = await supabase
+      .from('bob_attachments')
+      .select('id, file_name, file_type, file_size_bytes, processing_state, extraction_summary, confidence, created_at')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: true });
+
+    if (attachmentErr) throw attachmentErr;
+    setAttachments((data as BobAttachmentRecord[]) ?? []);
+  }, []);
 
   // ATLAS READS: bob_conversations, bob_messages
   // Operations and Builder retain separate durable threads. Builder context
@@ -138,12 +161,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (historyErr) throw historyErr;
       setMessages((history as BobMessage[]) || []);
+      await loadAttachments(convId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load Bob conversation');
     } finally {
       setLoading(false);
     }
-  }, [mode, profile?.organizationId, profile?.id]);
+  }, [mode, profile?.organizationId, profile?.id, loadAttachments]);
 
   useEffect(() => {
     if (open) loadConversation();
@@ -174,6 +198,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setConversationId(created.id);
       setMessages([]);
       setPendingFiles([]);
+      setAttachments([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'New Bob conversation could not be created.');
     } finally {
@@ -321,6 +346,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (history && history.length > 0) {
         setMessages(history as BobMessage[]);
+        await loadAttachments(conversationId);
         setPendingFiles([]);
       } else if (data?.reply) {
         // Fallback: function replied but history read didn't return rows yet
@@ -337,6 +363,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             metadata: {},
           },
         ]);
+        await loadAttachments(conversationId);
         setPendingFiles([]);
       }
     } catch (err) {
@@ -396,6 +423,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         )}
       </div>
 
+      {attachments.length > 0 && (
+        <div className="bob-attachment-results" aria-label="Evidence processing results">
+          {attachments.map(attachment => <AttachmentResultCard key={attachment.id} attachment={attachment} />)}
+        </div>
+      )}
+
       {pendingFiles.length > 0 && (
         <div className="bob-file-tray" aria-label="Attached files">
           {pendingFiles.map(item => (
@@ -440,13 +473,16 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   );
 };
 
-function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string; messages: BobMessage[]; pendingFiles: PendingBobFile[] }): WorkState {
+function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string; messages: BobMessage[]; pendingFiles: PendingBobFile[]; attachments: BobAttachmentRecord[] }): WorkState {
   if (input.error) return { tone: 'failed', label: 'Failed/paused', detail: `The last operation did not complete: ${input.error}. Check the message and try again.` };
   if (input.pendingFiles.some(file => file.status === 'uploading')) return { tone: 'using-data', label: 'Using app data', detail: 'Uploading evidence to private storage and registering it for Bob.' };
   if (input.pendingFiles.some(file => file.status === 'failed')) return { tone: 'failed', label: 'Failed/paused', detail: 'One or more files failed to upload. Remove the failed file or try again.' };
   if (input.pendingFiles.length) return { tone: 'waiting', label: 'Waiting on you', detail: `${input.pendingFiles.length} file${input.pendingFiles.length === 1 ? '' : 's'} queued. Send when you are ready for Bob to read them.` };
   if (input.sending) return { tone: 'working', label: 'Working', detail: 'Bob is processing the request. The next change will be an answer, a named blocker, or a proposal state.' };
   if (input.loading) return { tone: 'using-data', label: 'Using app data', detail: 'Loading the durable Bob thread before accepting work.' };
+  if (input.attachments.some(file => file.processing_state === 'processing' || file.processing_state === 'pending')) return { tone: 'using-data', label: 'Using app data', detail: 'Bob has evidence queued or in extraction. The file cards show the current state.' };
+  if (input.attachments.some(file => file.processing_state === 'manual_review_required')) return { tone: 'waiting', label: 'Waiting on you', detail: 'One or more evidence items needs human review before it can be trusted.' };
+  if (input.attachments.some(file => file.processing_state === 'failed')) return { tone: 'failed', label: 'Failed/paused', detail: 'One or more evidence items failed extraction. Check the file card and retry with a supported file.' };
 
   const lastAssistant = [...input.messages].reverse().find(message => message.role === 'assistant');
   if (lastAssistant) {
@@ -464,6 +500,30 @@ function asString(value: unknown) {
 
 function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
+}
+
+function attachmentStateLabel(state: string) {
+  if (state === 'pending') return 'Queued';
+  if (state === 'processing') return 'Reading/OCR';
+  if (state === 'extracted') return 'Extracted';
+  if (state === 'failed') return 'Failed';
+  if (state === 'manual_review_required') return 'Needs review';
+  return state.replaceAll('_', ' ');
+}
+
+function AttachmentResultCard({ attachment }: { attachment: BobAttachmentRecord }) {
+  const label = attachmentStateLabel(attachment.processing_state);
+  const confidence = typeof attachment.confidence === 'number' ? `${Math.round(attachment.confidence * 100)}% confidence` : null;
+  return (
+    <article className={`bob-attachment-card state-${attachment.processing_state}`}>
+      <FileUp size={14} />
+      <div>
+        <strong>{attachment.file_name}</strong>
+        <span>{label}{confidence ? ` · ${confidence}` : ''}</span>
+        {attachment.extraction_summary && <p>{attachment.extraction_summary}</p>}
+      </div>
+    </article>
+  );
 }
 
 function classifyMessageState(message: BobMessage): WorkState {

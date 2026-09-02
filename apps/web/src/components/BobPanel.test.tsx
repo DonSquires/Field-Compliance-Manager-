@@ -8,6 +8,7 @@ const { mockFrom, mockInvoke, mockStorageFrom } = vi.hoisted(() => ({
   mockStorageFrom: vi.fn(),
 }));
 let messageHistory: Array<Record<string, unknown>> = [];
+let attachmentHistory: Array<Record<string, unknown>> = [];
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
@@ -33,6 +34,7 @@ describe('BobPanel', () => {
     mockInvoke.mockReset();
     mockStorageFrom.mockReset();
     messageHistory = [];
+    attachmentHistory = [];
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'bob_conversations') {
@@ -65,8 +67,22 @@ describe('BobPanel', () => {
       }
 
       if (table === 'bob_attachments') {
+        const attachmentQuery = {
+          eq: () => ({
+            order: async () => ({ data: attachmentHistory, error: null }),
+          }),
+        };
         return {
-          insert: vi.fn().mockResolvedValue({ error: null }),
+          select: () => attachmentQuery,
+          insert: vi.fn().mockImplementation(async (rows: Array<Record<string, unknown>>) => {
+            attachmentHistory.push(...rows.map(row => ({
+              ...row,
+              extraction_summary: null,
+              confidence: null,
+              created_at: '2026-09-02T06:00:00.000Z',
+            })));
+            return { error: null };
+          }),
         };
       }
 
@@ -166,6 +182,25 @@ describe('BobPanel', () => {
         }),
       }));
     });
+  });
+
+  it('renders durable evidence processing states from bob_attachments', async () => {
+    attachmentHistory = [
+      { id: 'att-1', file_name: 'agreement.pdf', file_type: 'application/pdf', file_size_bytes: 1200, processing_state: 'processing', extraction_summary: null, confidence: null, created_at: '2026-09-02T06:00:00.000Z' },
+      { id: 'att-2', file_name: 'site-photo.jpg', file_type: 'image/jpeg', file_size_bytes: 900, processing_state: 'extracted', extraction_summary: 'Detected site frontage and signage.', confidence: 0.84, created_at: '2026-09-02T06:01:00.000Z' },
+      { id: 'att-3', file_name: 'unclear-audio.webm', file_type: 'audio/webm', file_size_bytes: 700, processing_state: 'manual_review_required', extraction_summary: 'Audio quality needs review.', confidence: 0.42, created_at: '2026-09-02T06:02:00.000Z' },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('agreement.pdf')).toBeTruthy();
+    expect(screen.getByText('Reading/OCR')).toBeTruthy();
+    expect(screen.getByText('site-photo.jpg')).toBeTruthy();
+    expect(screen.getByText('Extracted · 84% confidence')).toBeTruthy();
+    expect(screen.getByText('Detected site frontage and signage.')).toBeTruthy();
+    expect(screen.getByText('unclear-audio.webm')).toBeTruthy();
+    expect(screen.getByText('Needs review · 42% confidence')).toBeTruthy();
+    expect(screen.getByText('Using app data')).toBeTruthy();
   });
 
   it('separates assistant prose from evidence, proposal, and next-action state', async () => {
