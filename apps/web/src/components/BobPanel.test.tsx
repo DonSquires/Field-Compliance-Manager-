@@ -11,6 +11,7 @@ const { mockFrom, mockInvoke, mockStorageFrom } = vi.hoisted(() => ({
 }));
 let messageHistory: Array<Record<string, unknown>> = [];
 let attachmentHistory: Array<Record<string, unknown>> = [];
+let conversationList: Array<Record<string, unknown>> = [];
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
@@ -37,16 +38,18 @@ describe('BobPanel', () => {
     mockStorageFrom.mockReset();
     messageHistory = [];
     attachmentHistory = [];
+    conversationList = [];
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'bob_conversations') {
+        // limit() is awaited directly by the session list and unwrapped by maybeSingle() for the active session.
+        const limitResult = {
+          maybeSingle: async () => ({ data: { id: 'conversation-1' }, error: null }),
+          then: (resolve: (value: { data: unknown; error: null }) => unknown) => resolve({ data: conversationList, error: null }),
+        };
         const query = {
           eq: () => query,
-          order: () => ({
-            limit: () => ({
-              maybeSingle: async () => ({ data: { id: 'conversation-1' }, error: null }),
-            }),
-          }),
+          order: () => ({ limit: () => limitResult }),
         };
         return {
           select: () => query,
@@ -55,6 +58,7 @@ describe('BobPanel', () => {
               single: async () => ({ data: { id: 'conversation-1' }, error: null }),
             }),
           }),
+          update: () => ({ eq: async () => ({ error: null }) }),
         };
       }
 
@@ -340,6 +344,42 @@ describe('BobPanel', () => {
 
     expect(container.querySelector('.bob-panel')?.className).toContain('is-expanded');
     expect(screen.getByLabelText('Use compact panel')).toBeTruthy();
+  });
+
+  it('shows session history and a context panel in the expanded workspace', async () => {
+    conversationList = [
+      { id: 'conversation-1', title: 'Zone compliance review', created_at: '2026-09-02T05:00:00.000Z', updated_at: '2026-09-02T06:00:00.000Z' },
+      { id: 'conversation-2', title: 'Roster gap analysis', created_at: '2026-08-20T05:00:00.000Z', updated_at: '2026-08-20T06:00:00.000Z' },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByLabelText('Open full workspace'));
+
+    expect(await screen.findByLabelText('Bob sessions')).toBeTruthy();
+    expect(screen.getByLabelText('Search chats')).toBeTruthy();
+    expect(screen.getByText('Zone compliance review')).toBeTruthy();
+    expect(screen.getByText('Roster gap analysis')).toBeTruthy();
+
+    expect(screen.getByLabelText('Bob context panel')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Files' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Actions' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Audit' })).toBeTruthy();
+  });
+
+  it('filters the session list by search term', async () => {
+    conversationList = [
+      { id: 'conversation-1', title: 'Zone compliance review', created_at: '2026-09-02T05:00:00.000Z', updated_at: '2026-09-02T06:00:00.000Z' },
+      { id: 'conversation-2', title: 'Roster gap analysis', created_at: '2026-08-20T05:00:00.000Z', updated_at: '2026-08-20T06:00:00.000Z' },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByLabelText('Open full workspace'));
+
+    fireEvent.change(await screen.findByLabelText('Search chats'), { target: { value: 'roster' } });
+
+    expect(screen.queryByText('Zone compliance review')).toBeNull();
+    expect(screen.getByText('Roster gap analysis')).toBeTruthy();
   });
 
   it('uses the dedicated Builder mode for coding-oriented agent prompts', async () => {

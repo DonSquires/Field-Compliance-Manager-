@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, FileSearch, FileUp, Maximize2, Mic, Minimize2, Paperclip, PanelRightClose, Plus, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, PanelRightClose, Pencil, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './BobPanel.css';
@@ -71,6 +71,15 @@ interface BobAttachmentRecord {
   created_at: string;
 }
 
+interface BobSessionSummary {
+  id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+type ContextTab = 'context' | 'files' | 'actions' | 'audit';
+
 type WorkStateTone = 'idle' | 'working' | 'using-data' | 'waiting' | 'proposal' | 'completed' | 'failed';
 type VoiceState = 'off' | 'recording';
 
@@ -89,6 +98,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [input, setInput] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingBobFile[]>([]);
   const [attachments, setAttachments] = useState<BobAttachmentRecord[]>([]);
+  const [sessions, setSessions] = useState<BobSessionSummary[]>([]);
+  const [sessionSearch, setSessionSearch] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [contextPanelOpen, setContextPanelOpen] = useState(true);
+  const [contextTab, setContextTab] = useState<ContextTab>('context');
   const [activityPhase, setActivityPhase] = useState<ActivityPhase>('idle');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -115,6 +131,54 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
     if (attachmentErr) throw attachmentErr;
     setAttachments((data as BobAttachmentRecord[]) ?? []);
+  }, []);
+
+  const loadSessions = useCallback(async () => {
+    if (!profile?.organizationId || !profile?.id) return;
+    const { data, error: sessionErr } = await supabase
+      .from('bob_conversations')
+      .select('id, title, created_at, updated_at')
+      .eq('organization_id', profile.organizationId)
+      .eq('user_id', profile.id)
+      .eq('module_key', mode)
+      .order('updated_at', { ascending: false })
+      .limit(100);
+
+    if (sessionErr) throw sessionErr;
+    setSessions((data as BobSessionSummary[]) ?? []);
+  }, [mode, profile?.organizationId, profile?.id]);
+
+  const selectSession = useCallback(async (convId: string) => {
+    try {
+      setLoading(true);
+      setActivityPhase('refreshing');
+      setError(null);
+      setConversationId(convId);
+      setPendingFiles([]);
+
+      const { data: history, error: historyErr } = await supabase
+        .from('bob_messages')
+        .select('id, role, content, confidence, flagged, created_at, metadata')
+        .eq('conversation_id', convId)
+        .order('created_at', { ascending: true });
+
+      if (historyErr) throw historyErr;
+      setMessages((history as BobMessage[]) || []);
+      await loadAttachments(convId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That Bob session could not be opened.');
+    } finally {
+      setActivityPhase('idle');
+      setLoading(false);
+    }
+  }, [loadAttachments]);
+
+  const renameSession = useCallback(async (convId: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setSessions(current => current.map(item => item.id === convId ? { ...item, title: trimmed } : item));
+    const { error: renameErr } = await supabase.from('bob_conversations').update({ title: trimmed }).eq('id', convId);
+    if (renameErr) setError(renameErr.message);
   }, []);
 
   // ATLAS READS: bob_conversations, bob_messages
@@ -166,13 +230,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       if (historyErr) throw historyErr;
       setMessages((history as BobMessage[]) || []);
       await loadAttachments(convId);
+      await loadSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load Bob conversation');
     } finally {
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [mode, profile?.organizationId, profile?.id, loadAttachments]);
+  }, [mode, profile?.organizationId, profile?.id, loadAttachments, loadSessions]);
 
   useEffect(() => {
     if (open) loadConversation();
@@ -205,13 +270,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setMessages([]);
       setPendingFiles([]);
       setAttachments([]);
+      await loadSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'New Bob conversation could not be created.');
     } finally {
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [mode, profile?.organizationId, profile?.id]);
+  }, [mode, profile?.organizationId, profile?.id, loadSessions]);
 
   const addFiles = (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
@@ -390,6 +456,18 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   if (!open) return null;
 
+  const quickActions = mode === 'builder'
+    ? [
+      { label: 'Inspect job', prompt: 'Inspect the selected Builder job and propose the next implementation step.' },
+      { label: 'Plan implementation', prompt: 'Create an implementation plan with affected files, verification steps, and unknowns.' },
+      { label: 'Review evidence', prompt: 'Review the current artifacts and explain the next safe repair or build action.' },
+    ]
+    : [
+      { label: 'Summarize context', prompt: 'Summarize the current context and identify the next safe action.' },
+      { label: 'Plan work', prompt: 'Create a step-by-step plan with unknowns and approval gates.' },
+      { label: 'Review risk', prompt: 'Check this surface for risks, missing evidence, and tests.' },
+    ];
+
   return (
     <div
       className={`bob-panel ${workspaceExpanded ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
@@ -402,99 +480,153 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       <header className="bob-panel-header">
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <div className="bob-panel-header-actions">
+          {workspaceExpanded && (
+            <>
+              <button type="button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'}><PanelLeft size={17} /></button>
+              <button type="button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'}><PanelRight size={17} /></button>
+            </>
+          )}
           <button type="button" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
           <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
         </div>
       </header>
 
-      {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value]) => <span key={key}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
+      <div className="bob-workspace">
+        {workspaceExpanded && sidebarOpen && (
+          <SessionSidebar
+            sessions={sessions}
+            activeId={conversationId}
+            search={sessionSearch}
+            onSearch={setSessionSearch}
+            onSelect={(id) => void selectSession(id)}
+            onNew={() => void startNewConversation()}
+            renamingId={renamingId}
+            renameValue={renameValue}
+            onRenameStart={(id, title) => { setRenamingId(id); setRenameValue(title); }}
+            onRenameChange={setRenameValue}
+            onRenameCommit={(id) => { void renameSession(id, renameValue); setRenamingId(null); }}
+            onRenameCancel={() => setRenamingId(null)}
+            busy={loading || sending}
+          />
+        )}
 
-      <div className={`bob-work-state state-${workState.tone}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
+        <div className="bob-main-pane">
+          {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value]) => <span key={key}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
 
-      {error && (
-        <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
-      )}
+          <div className={`bob-work-state state-${workState.tone}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
 
-      <BobActivityTimeline phase={activityPhase} sending={sending} loading={loading} pendingFiles={pendingFiles} />
+          {error && (
+            <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
+          )}
 
-      <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
-        {dragging && <div className="bob-drop-target"><FileUp size={17} /> Drop files for Bob to read.</div>}
-        {loading ? (
-          <div className="bob-agent-status"><Sparkles size={16} /> Loading conversation</div>
-        ) : messages.length === 0 ? (
-          <div className="bob-empty-state"><Bot size={24} /><strong>{mode === 'builder' ? 'What should we build?' : 'What should we work through?'}</strong><p>{ACCEPTED_BOB_UPLOAD_LABEL}. Attach files with the paperclip or drop them into this panel.</p><div>{mode === 'builder' ? <><button type="button" onClick={() => setInput('Inspect the selected Builder job and propose the next implementation step.')}>Inspect job</button><button type="button" onClick={() => setInput('Create an implementation plan with affected files, verification steps, and unknowns.')}>Plan implementation</button><button type="button" onClick={() => setInput('Review the current artifacts and explain the next safe repair or build action.')}>Review evidence</button></> : <><button type="button" onClick={() => setInput('Summarize the current context and identify the next safe action.')}>Summarize context</button><button type="button" onClick={() => setInput('Create a step-by-step plan with unknowns and approval gates.')}>Plan work</button><button type="button" onClick={() => setInput('Check this surface for risks, missing evidence, and tests.')}>Review risk</button></>}</div></div>
-        ) : (
-          messages.map((m) => (
-            <article key={m.id} className={`bob-message role-${m.role}`}>
-              {m.role !== 'user' && <span className="bob-message-avatar"><Bot size={14} /></span>}
-              <div className="bob-message-body">
-                {m.role === 'assistant' && <AgentMetadata message={m} />}
-                <div className="bob-message-content">{m.content}</div>
-                {m.role === 'assistant' && <OperationalCards message={m} />}
-                <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
+          <BobActivityTimeline phase={activityPhase} sending={sending} loading={loading} pendingFiles={pendingFiles} />
+
+          <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
+            {dragging && <div className="bob-drop-target"><FileUp size={17} /> Drop files for Bob to read.</div>}
+            {loading ? (
+              <div className="bob-agent-status"><Sparkles size={16} /> Loading conversation</div>
+            ) : messages.length === 0 ? (
+              <div className="bob-empty-state">
+                <Bot size={24} />
+                <strong>{mode === 'builder' ? 'What should we build?' : 'What are we working on?'}</strong>
+                <p>Start a new chat, upload documents, or resume recent work from the session list.</p>
+                <div>
+                  <button type="button" className="is-primary" onClick={() => void startNewConversation()}>Start a new chat</button>
+                  <button type="button" onClick={() => fileInputRef.current?.click()}>Upload documents</button>
+                </div>
               </div>
-            </article>
-          ))
+            ) : (
+              messages.map((m) => (
+                <article key={m.id} className={`bob-message role-${m.role}`}>
+                  {m.role !== 'user' && <span className="bob-message-avatar"><Bot size={14} /></span>}
+                  <div className="bob-message-body">
+                    {m.role === 'assistant' && <AgentMetadata message={m} />}
+                    <div className="bob-message-content">{m.content}</div>
+                    {m.role === 'assistant' && <OperationalCards message={m} />}
+                    <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+
+          {!workspaceExpanded && attachments.length > 0 && (
+            <div className="bob-attachment-results" aria-label="Evidence processing results">
+              {attachments.map(attachment => <AttachmentResultCard key={attachment.id} attachment={attachment} />)}
+            </div>
+          )}
+
+          {pendingFiles.length > 0 && (
+            <div className="bob-file-tray" aria-label="Attached files">
+              {pendingFiles.map(item => (
+                <button key={item.id} type="button" className={`bob-file-chip is-${item.status}`} onClick={() => setPendingFiles(current => current.filter(file => file.id !== item.id))} disabled={sending} title={item.error || 'Remove file'}>
+                  <FileUp size={13} />
+                  <span>{item.file.name}</span>
+                  <small>{item.status}</small>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="bob-quick-actions" aria-label="Quick actions">
+            {quickActions.map(action => (
+              <button key={action.label} type="button" onClick={() => setInput(action.prompt)} disabled={sending}>{action.label}</button>
+            ))}
+          </div>
+
+          <p className="bob-composer-hint">{ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.</p>
+
+          <div className="bob-session-actions" aria-label="Bob session and voice controls">
+            <button type="button" className="bob-session-action" onClick={() => void startNewConversation()} disabled={loading || sending}>
+              <Plus size={15} />
+              <span>New chat</span>
+            </button>
+            <button type="button" className={`bob-session-action bob-voice-action ${voiceState === 'recording' ? 'is-recording' : ''}`} onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Hold to talk'}>
+              <Mic size={15} />
+              <span>{voiceState === 'recording' ? 'Stop recording' : 'Hold to talk'}</span>
+            </button>
+          </div>
+
+          <form onSubmit={handleSend} className="bob-composer">
+            <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_BOB_UPLOADS} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={mode === 'builder' ? 'Describe what you want to build, change, or fix' : 'Ask Bob to plan, inspect, explain, or prepare a proposal'}
+              disabled={sending || !conversationId}
+              rows={3}
+            />
+            <button
+              type="button"
+              className="bob-evidence-button"
+              onClick={() => fileInputRef.current?.click()}
+              title={ACCEPTED_BOB_UPLOAD_LABEL}
+              aria-label="Attach files"
+              disabled={sending || !conversationId}
+            >
+              <Paperclip size={17} />
+            </button>
+            <button
+              type="submit"
+              disabled={sending || (!input.trim() && pendingFiles.length === 0) || !conversationId}
+              title="Send request to Bob"
+            >
+              {sending ? <Sparkles size={17} className="is-spinning" /> : <Send size={17} />}
+              <span className="sr-only">Send</span>
+            </button>
+          </form>
+        </div>
+
+        {workspaceExpanded && contextPanelOpen && (
+          <ContextPanel
+            tab={contextTab}
+            onTab={setContextTab}
+            messages={messages}
+            attachments={attachments}
+            contextEntries={contextEntries}
+          />
         )}
       </div>
-
-      {attachments.length > 0 && (
-        <div className="bob-attachment-results" aria-label="Evidence processing results">
-          {attachments.map(attachment => <AttachmentResultCard key={attachment.id} attachment={attachment} />)}
-        </div>
-      )}
-
-      {pendingFiles.length > 0 && (
-        <div className="bob-file-tray" aria-label="Attached files">
-          {pendingFiles.map(item => (
-            <button key={item.id} type="button" className={`bob-file-chip is-${item.status}`} onClick={() => setPendingFiles(current => current.filter(file => file.id !== item.id))} disabled={sending} title={item.error || 'Remove file'}>
-              <FileUp size={13} />
-              <span>{item.file.name}</span>
-              <small>{item.status}</small>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="bob-session-actions" aria-label="Bob session and voice controls">
-        <button type="button" className="bob-session-action" onClick={() => void startNewConversation()} disabled={loading || sending}>
-          <Plus size={15} />
-          <span>New chat</span>
-        </button>
-        <button type="button" className={`bob-session-action bob-voice-action ${voiceState === 'recording' ? 'is-recording' : ''}`} onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Hold to talk'}>
-          <Mic size={15} />
-          <span>{voiceState === 'recording' ? 'Stop recording' : 'Hold to talk'}</span>
-        </button>
-      </div>
-
-      <form onSubmit={handleSend} className="bob-composer">
-        <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_BOB_UPLOADS} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={mode === 'builder' ? 'Describe what you want to build, change, or fix' : 'Ask Bob to plan, inspect, explain, or prepare a proposal'}
-          disabled={sending || !conversationId}
-          rows={3}
-        />
-        <button
-          type="button"
-          className="bob-evidence-button"
-          onClick={() => fileInputRef.current?.click()}
-          title={ACCEPTED_BOB_UPLOAD_LABEL}
-          aria-label="Attach files"
-          disabled={sending || !conversationId}
-        >
-          <Paperclip size={17} />
-        </button>
-        <button
-          type="submit"
-          disabled={sending || (!input.trim() && pendingFiles.length === 0) || !conversationId}
-          title="Send request to Bob"
-        >
-          {sending ? <Sparkles size={17} className="is-spinning" /> : <Send size={17} />}
-          <span className="sr-only">Send</span>
-        </button>
-      </form>
     </div>
   );
 };
@@ -572,6 +704,186 @@ function attachmentStateLabel(state: string) {
   if (state === 'failed') return 'Failed';
   if (state === 'manual_review_required') return 'Needs review';
   return state.replaceAll('_', ' ');
+}
+
+function sessionGroupLabel(updatedAt: string) {
+  const updated = new Date(updatedAt);
+  const now = new Date();
+  const sameDay = updated.toDateString() === now.toDateString();
+  if (sameDay) return 'Today';
+  const dayMs = 24 * 60 * 60 * 1000;
+  return now.getTime() - updated.getTime() < 7 * dayMs ? 'Earlier this week' : 'Older';
+}
+
+function SessionSidebar(props: {
+  sessions: BobSessionSummary[];
+  activeId: string | null;
+  search: string;
+  onSearch: (value: string) => void;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+  renamingId: string | null;
+  renameValue: string;
+  onRenameStart: (id: string, title: string) => void;
+  onRenameChange: (value: string) => void;
+  onRenameCommit: (id: string) => void;
+  onRenameCancel: () => void;
+  busy: boolean;
+}) {
+  const term = props.search.trim().toLowerCase();
+  const filtered = term
+    ? props.sessions.filter(session => (session.title ?? 'Untitled session').toLowerCase().includes(term))
+    : props.sessions;
+
+  const groups = filtered.reduce<Record<string, BobSessionSummary[]>>((acc, session) => {
+    const key = sessionGroupLabel(session.updated_at);
+    (acc[key] ??= []).push(session);
+    return acc;
+  }, {});
+
+  return (
+    <aside className="bob-session-sidebar" aria-label="Bob sessions">
+      <button type="button" className="bob-sidebar-new" onClick={props.onNew} disabled={props.busy}>
+        <Plus size={15} /><span>New chat</span>
+      </button>
+
+      <div className="bob-sidebar-search">
+        <Search size={14} />
+        <input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="Search chats" aria-label="Search chats" />
+      </div>
+
+      <div className="bob-sidebar-list">
+        {filtered.length === 0 ? (
+          <p className="bob-sidebar-empty">{props.sessions.length === 0 ? 'No sessions yet.' : 'No chats match that search.'}</p>
+        ) : (
+          Object.entries(groups).map(([group, rows]) => (
+            <section key={group}>
+              <h3>{group}</h3>
+              {rows.map(session => (
+                <div key={session.id} className={`bob-session-row ${session.id === props.activeId ? 'is-active' : ''}`}>
+                  {props.renamingId === session.id ? (
+                    <input
+                      className="bob-session-rename"
+                      value={props.renameValue}
+                      autoFocus
+                      aria-label="Session title"
+                      onChange={(event) => props.onRenameChange(event.target.value)}
+                      onBlur={() => props.onRenameCommit(session.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') props.onRenameCommit(session.id);
+                        if (event.key === 'Escape') props.onRenameCancel();
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <button type="button" className="bob-session-open" onClick={() => props.onSelect(session.id)} disabled={props.busy}>
+                        <strong>{session.title || 'Untitled session'}</strong>
+                        <small>{new Date(session.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+                      </button>
+                      <button type="button" className="bob-session-rename-trigger" aria-label={`Rename ${session.title || 'Untitled session'}`} onClick={() => props.onRenameStart(session.id, session.title ?? '')}>
+                        <Pencil size={13} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </section>
+          ))
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function ContextPanel(props: {
+  tab: ContextTab;
+  onTab: (tab: ContextTab) => void;
+  messages: BobMessage[];
+  attachments: BobAttachmentRecord[];
+  contextEntries: Array<[string, unknown]>;
+}) {
+  const assistantTurns = props.messages.filter(message => message.role === 'assistant');
+  const proposals = assistantTurns.filter(message => classifyMessageState(message).tone === 'proposal');
+  const tabs: Array<{ id: ContextTab; label: string }> = [
+    { id: 'context', label: 'Context' },
+    { id: 'files', label: 'Files' },
+    { id: 'actions', label: 'Actions' },
+    { id: 'audit', label: 'Audit' },
+  ];
+
+  return (
+    <aside className="bob-context-panel" aria-label="Bob context panel">
+      <div className="bob-context-tabs" role="tablist">
+        {tabs.map(tab => (
+          <button key={tab.id} type="button" role="tab" aria-selected={props.tab === tab.id} className={props.tab === tab.id ? 'is-active' : ''} onClick={() => props.onTab(tab.id)}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="bob-context-body">
+        {props.tab === 'context' && (
+          <section>
+            <h4>Active context</h4>
+            {props.contextEntries.length === 0 ? <p>No page context supplied.</p> : (
+              <ul className="bob-context-entities">
+                {props.contextEntries.map(([key, value]) => <li key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></li>)}
+              </ul>
+            )}
+            <h4>Conversation</h4>
+            <p>{props.messages.length} message{props.messages.length === 1 ? '' : 's'} in this session.</p>
+          </section>
+        )}
+
+        {props.tab === 'files' && (
+          <section>
+            <h4>Attached evidence</h4>
+            {props.attachments.length === 0 ? <p>No files attached to this session.</p> : props.attachments.map(attachment => (
+              <AttachmentResultCard key={attachment.id} attachment={attachment} />
+            ))}
+          </section>
+        )}
+
+        {props.tab === 'actions' && (
+          <section>
+            <h4>Governed actions</h4>
+            {proposals.length === 0 ? <p>No proposals prepared in this session.</p> : proposals.map(message => (
+              <article key={message.id} className="bob-context-action">
+                <ListChecks size={14} />
+                <div>
+                  <strong>Draft prepared</strong>
+                  <small>{new Date(message.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+                  <p>Nothing is applied until a human approves it in the approval surface.</p>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+
+        {props.tab === 'audit' && (
+          <section>
+            <h4>Activity timeline</h4>
+            {assistantTurns.length === 0 ? <p>No Bob activity recorded yet.</p> : (
+              <ol className="bob-context-audit">
+                {assistantTurns.map(message => {
+                  const state = classifyMessageState(message);
+                  return (
+                    <li key={message.id}>
+                      <Clock3 size={12} />
+                      <div>
+                        <strong>{state.label}</strong>
+                        <small>{new Date(message.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
+        )}
+      </div>
+    </aside>
+  );
 }
 
 function AttachmentResultCard({ attachment }: { attachment: BobAttachmentRecord }) {
