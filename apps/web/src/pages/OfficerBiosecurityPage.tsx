@@ -7,7 +7,9 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { Camera, LoaderCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -26,6 +28,18 @@ interface BiosecurityAssessment {
   mpi_referral_number: string | null;
   follow_up_required: boolean;
   notes: string | null;
+  bob_species_id: string | null;
+  bob_confidence: number | null;
+  bob_recommendation: string | null;
+  bob_checklist: {
+    organism_type?: 'plant' | 'insect' | 'other' | 'unknown';
+    common_name?: string | null;
+    threat_level?: string;
+    inference_status?: string;
+    manual_review_required?: boolean;
+    reasoning?: string;
+  } | null;
+  photo_urls: Array<{ id: string; name: string; storage_path: string }>;
   status: string;
   assessed_at: string;
 }
@@ -39,6 +53,8 @@ const OfficerBiosecurityPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     species_name: '',
     species_confirmed: false,
@@ -65,7 +81,7 @@ const OfficerBiosecurityPage: React.FC = () => {
       const [{ data, error: err }, siteResult] = await Promise.all([
         supabase
           .from('biosecurity_assessments')
-          .select('id, species_name, species_confirmed, density_estimate, action_taken, scene_description, location_name, notice_number, mpi_referral_number, follow_up_required, notes, status, assessed_at')
+          .select('id, species_name, species_confirmed, density_estimate, action_taken, scene_description, location_name, notice_number, mpi_referral_number, follow_up_required, notes, bob_species_id, bob_confidence, bob_recommendation, bob_checklist, photo_urls, status, assessed_at')
           .or(`officer_user_id.eq.${profile.id},officer_id.eq.${profile.id}`)
           .order('assessed_at', { ascending: false }),
         supabase.from('client_sites').select('id, name, address').eq('active', true).order('name'),
@@ -90,6 +106,8 @@ const OfficerBiosecurityPage: React.FC = () => {
     if (!profile?.id || !profile?.organizationId) return;
 
     try {
+      setSubmitting(true);
+      setError(null);
       // ATLAS WRITES: biosecurity_assessments
       const { data, error } = await supabase
         .from('biosecurity_assessments')
@@ -119,11 +137,42 @@ const OfficerBiosecurityPage: React.FC = () => {
         .single();
 
       if (error) throw error;
-      setAssessments([data as BiosecurityAssessment, ...assessments]);
+      let savedAssessment = data as BiosecurityAssessment;
+      let inferenceWarning: string | null = null;
+      if (photo) {
+        try {
+          const imageBase64 = await imageFileToBase64(photo);
+          // ATLAS INVOKES: classify-biosecurity-photo
+          const { data: classification, error: classificationError } = await supabase.functions.invoke(
+            'classify-biosecurity-photo',
+            {
+              body: {
+                assessment_id: savedAssessment.id,
+                image_base64: imageBase64,
+                file_name: photo.name,
+                context: form.scene_description,
+              },
+            },
+          );
+          if (classificationError || !classification?.success) {
+            throw classificationError ?? new Error(classification?.error ?? 'Inference did not complete');
+          }
+          savedAssessment = { ...savedAssessment, ...classification.assessment } as BiosecurityAssessment;
+        } catch (classificationError) {
+          inferenceWarning = classificationError instanceof Error
+            ? `Assessment saved, but photo analysis failed: ${classificationError.message}`
+            : 'Assessment saved, but photo analysis failed.';
+        }
+      }
+      setAssessments([savedAssessment, ...assessments]);
       setForm({ species_name: '', species_confirmed: false, density_estimate: 'scattered', action_taken: 'no_action', scene_description: '', location_name: '', site_id: '', protected_land_address: '', protected_land_site_id: '', notice_number: '', mpi_referral_number: '', follow_up_required: false, notes: '' });
+      setPhoto(null);
       setShowForm(false);
+      if (inferenceWarning) setError(inferenceWarning);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit assessment');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -202,6 +251,23 @@ const OfficerBiosecurityPage: React.FC = () => {
             <label>Scene Description</label>
             <textarea rows={3} value={form.scene_description} onChange={(e) => setForm({ ...form, scene_description: e.target.value })} />
           </div>
+          <div className="form-group">
+            <label htmlFor="biosecurity-photo">Evidence photo</label>
+            <label className="btn btn-secondary btn-sm" htmlFor="biosecurity-photo">
+              <Camera size={16} aria-hidden="true" />
+              {photo ? 'Replace photo' : 'Choose photo'}
+            </label>
+            <input
+              id="biosecurity-photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              onChange={(event) => setPhoto(event.target.files?.[0] ?? null)}
+              hidden
+            />
+            {photo && <p className="contact-meta">{photo.name}</p>}
+            <p className="contact-meta">Bob provides an advisory plant or insect identification. An officer must confirm the species.</p>
+          </div>
           <div className="form-row">
             <div className="form-group"><label>Protected land site</label><select value={form.protected_land_site_id} onChange={(e) => { const site = sites.find((candidate) => candidate.id === e.target.value); setForm({ ...form, protected_land_site_id: e.target.value, protected_land_address: site?.address ?? form.protected_land_address }); }}><option value="">No matched site</option>{sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</select></div>
             <div className="form-group"><label>Protected land address</label><input type="text" value={form.protected_land_address} onChange={(e) => setForm({ ...form, protected_land_address: e.target.value })} /></div>
@@ -212,8 +278,9 @@ const OfficerBiosecurityPage: React.FC = () => {
           </div>
           <div className="form-group"><label>Operational notes</label><textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
           <label className="form-checkbox"><input type="checkbox" checked={form.follow_up_required} onChange={(e) => setForm({ ...form, follow_up_required: e.target.checked })} />Follow-up required</label>
-          <button type="submit" className="btn btn-primary btn-block">
-            Submit Assessment
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+            {submitting && <LoaderCircle size={16} className="spinner" aria-hidden="true" />}
+            {submitting ? (photo ? 'Saving and analyzing...' : 'Saving...') : 'Submit Assessment'}
           </button>
         </form>
       )}
@@ -233,6 +300,16 @@ const OfficerBiosecurityPage: React.FC = () => {
               <div className="contact-details">
                 {a.scene_description && <p>{a.scene_description}</p>}
                 <p className="contact-meta">Species: {a.species_confirmed ? 'confirmed' : 'unconfirmed'}</p>
+                {a.bob_checklist && (
+                  <div className="alert alert-info" role="note">
+                    <strong>Bob advisory: {a.bob_checklist.common_name || a.bob_species_id || 'Identification uncertain'}</strong>
+                    <p className="contact-meta">
+                      {a.bob_species_id ? `${a.bob_species_id} · ` : ''}{a.bob_checklist.organism_type || 'organism'} · {Math.round((a.bob_confidence ?? 0) * 100)}% confidence
+                    </p>
+                    {a.bob_checklist.manual_review_required && <p>Manual specialist review required.</p>}
+                    {a.bob_recommendation && <p>{a.bob_recommendation}</p>}
+                  </div>
+                )}
                 {a.location_name && <p className="contact-meta">Location: {a.location_name}</p>}
                 {a.notice_number && <p className="contact-meta">Notice: {a.notice_number}</p>}
                 {a.mpi_referral_number && <p className="contact-meta">MPI referral: {a.mpi_referral_number}</p>}

@@ -28123,3 +28123,110 @@ CREATE FUNCTION "public"."get_crm_operational_place_editor"("p_location_id" uuid
 declare v_actor uuid:=auth.uid();v_provider uuid;v_location public.locations%rowtype;begin select organization_id into v_provider from public.user_profiles where id=v_actor and deactivated_at is null;if v_provider is null or not public.is_admin_for_org(v_provider) or not public.crm_actor_can_manage_location(p_location_id) then raise exception 'Active CRM administrator required for this location';end if;select * into v_location from public.locations l where l.id=p_location_id;if not found then raise exception 'Location not found';end if;return jsonb_build_object('location',jsonb_build_object('id',v_location.id,'name',v_location.name,'organization_id',v_location.organization_id),'sites',(select coalesce(jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'risk_level',s.risk_level,'site_brief',s.site_brief,'access_instructions',s.access_instructions,'hs_notes',s.hs_notes,'active',s.active,'boundary_status',s.boundary_status,'boundary_verification',s.boundary_verification,'configuration_version',s.configuration_version) order by s.name),'[]'::jsonb) from public.client_sites s where s.location_id=v_location.id),'zones',(select coalesce(jsonb_agg(jsonb_build_object('id',z.id,'name',z.name,'zone_type',z.zone_type,'module_key',z.module_key,'rule_type',z.rule_type,'is_active',z.is_active,'nightly_limit_consecutive',z.nightly_limit_consecutive,'nightly_limit_monthly',z.nightly_limit_monthly,'scv_required',z.scv_required,'enforcement_workflow_override',z.enforcement_workflow_override,'boundary_status',z.boundary_status,'boundary_verification',z.boundary_verification,'configuration_version',z.configuration_version) order by z.name),'[]'::jsonb) from public.location_zones z where z.location_id=v_location.id),'modules',(select coalesce(jsonb_agg(jsonb_build_object('module_key',m.module_key,'display_name',initcap(replace(m.module_key,'_',' '))) order by m.module_key),'[]'::jsonb) from public.module_catalog m where m.active),'closures',(select coalesce(jsonb_agg(jsonb_build_object('id',c.id,'zone_id',c.zone_id,'closure_type',c.closure_type,'status',c.status,'effective_from',c.effective_from,'effective_to',c.effective_to,'reason',c.reason,'resolution_notes',c.resolution_notes) order by c.created_at desc),'[]'::jsonb) from public.zone_closures c join public.location_zones z on z.id=c.zone_id where z.location_id=v_location.id));end;$$;
 REVOKE ALL ON FUNCTION "public"."get_crm_operational_place_editor"(uuid) FROM PUBLIC,"anon","authenticated";
 GRANT EXECUTE ON FUNCTION "public"."get_crm_operational_place_editor"(uuid) TO "authenticated","service_role";
+
+CREATE OR REPLACE FUNCTION "public"."finalize_biosecurity_photo_inference"(
+  "p_assessment_id" uuid,
+  "p_actor_user_id" uuid,
+  "p_photo" jsonb,
+  "p_species_id" text,
+  "p_confidence" real,
+  "p_recommendation" text,
+  "p_checklist" jsonb
+)
+RETURNS "public"."biosecurity_assessments"
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_assessment public.biosecurity_assessments%rowtype;
+  v_actor public.user_profiles%rowtype;
+  v_storage_path text := p_photo ->> 'storage_path';
+BEGIN
+  IF auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'Service identity required';
+  END IF;
+
+  SELECT * INTO v_actor
+  FROM public.user_profiles
+  WHERE id = p_actor_user_id;
+
+  IF NOT FOUND OR v_actor.role::text NOT IN ('grand_master', 'master', 'admin', 'admin_officer', 'officer') THEN
+    RAISE EXCEPTION 'Authorized actor required';
+  END IF;
+
+  SELECT * INTO v_assessment
+  FROM public.biosecurity_assessments
+  WHERE id = p_assessment_id
+  FOR UPDATE;
+
+  IF NOT FOUND OR v_assessment.organization_id IS DISTINCT FROM v_actor.organization_id THEN
+    RAISE EXCEPTION 'Assessment not found';
+  END IF;
+  IF v_actor.role::text = 'officer'
+     AND v_assessment.officer_user_id IS DISTINCT FROM p_actor_user_id
+     AND v_assessment.officer_id IS DISTINCT FROM p_actor_user_id THEN
+    RAISE EXCEPTION 'Officer does not own assessment';
+  END IF;
+  IF jsonb_typeof(p_photo) IS DISTINCT FROM 'object'
+     OR COALESCE(p_photo ->> 'id', '') = ''
+     OR COALESCE(p_photo ->> 'storage_bucket', '') <> 'scans'
+     OR v_storage_path NOT LIKE 'org/' || v_assessment.organization_id::text || '/biosecurity/' || v_assessment.id::text || '/%' THEN
+    RAISE EXCEPTION 'Invalid evidence reference';
+  END IF;
+  IF p_confidence < 0 OR p_confidence > 1 OR p_confidence IS NULL THEN
+    RAISE EXCEPTION 'Invalid inference confidence';
+  END IF;
+  IF jsonb_typeof(p_checklist) IS DISTINCT FROM 'object'
+     OR COALESCE(p_checklist ->> 'photo_id', '') <> p_photo ->> 'id' THEN
+    RAISE EXCEPTION 'Invalid inference checklist';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(COALESCE(v_assessment.photo_urls, '[]'::jsonb)) AS existing_photo
+    WHERE existing_photo ->> 'id' = p_photo ->> 'id'
+  ) THEN
+    RETURN v_assessment;
+  END IF;
+
+  UPDATE public.biosecurity_assessments
+  SET photo_url = v_storage_path,
+      photo_urls = COALESCE(photo_urls, '[]'::jsonb) || jsonb_build_array(p_photo),
+      bob_species_id = NULLIF(BTRIM(p_species_id), ''),
+      bob_confidence = p_confidence,
+      bob_species_confirmed = false,
+      bob_recommendation = NULLIF(BTRIM(p_recommendation), ''),
+      bob_checklist = p_checklist
+  WHERE id = v_assessment.id
+  RETURNING * INTO v_assessment;
+
+  INSERT INTO public.audit_log (
+    organization_id,
+    actor_user_id,
+    action,
+    target_table,
+    target_id,
+    metadata
+  )
+  VALUES (
+    v_assessment.organization_id,
+    p_actor_user_id,
+    'biosecurity.photo_classified',
+    'biosecurity_assessments',
+    v_assessment.id,
+    jsonb_build_object(
+      'photo_id', p_photo ->> 'id',
+      'model', p_checklist ->> 'model',
+      'confidence', p_confidence,
+      'manual_review_required', COALESCE((p_checklist ->> 'manual_review_required')::boolean, true)
+    )
+  );
+
+  RETURN v_assessment;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION "public"."finalize_biosecurity_photo_inference"(uuid, uuid, jsonb, text, real, text, jsonb) FROM PUBLIC,"anon","authenticated";
+GRANT EXECUTE ON FUNCTION "public"."finalize_biosecurity_photo_inference"(uuid, uuid, jsonb, text, real, text, jsonb) TO "service_role";
+COMMENT ON FUNCTION "public"."finalize_biosecurity_photo_inference"(uuid, uuid, jsonb, text, real, text, jsonb) IS 'Atomically appends tenant-scoped biosecurity photo evidence, stores advisory inference, and writes its audit event. Service identity only; never confirms species.';
