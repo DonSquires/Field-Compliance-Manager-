@@ -1,7 +1,7 @@
 create table "public"."disputes" (
   "id"              uuid                     not null default gen_random_uuid(),
   "organization_id" uuid                     not null,
-  "notice_id"       uuid                     not null,
+  "notice_id"       uuid,
   "submitter_name"  text,
   "submitter_email" text,
   "submitter_phone" text,
@@ -25,7 +25,7 @@ create table "public"."disputes" (
   "reviewed_at"     timestamp with time zone,
   constraint "disputes_pkey" primary key (id),
   constraint "disputes_status_check" check ((status = ANY (ARRAY['received'::text, 'under_review'::text, 'upheld'::text, 'withdrawn'::text, 'referred'::text, 'dismissed'::text]))),
-  constraint "disputes_notice_id_fkey" foreign key (notice_id) references public.notices(id),
+  constraint "disputes_notice_id_fkey" foreign key (notice_id) references public.infringement_notices(id),
   constraint "disputes_organization_id_fkey" foreign key (organization_id) references public.organizations(id),
   constraint "disputes_decided_by_fkey" foreign key (decided_by) references public.user_profiles(id),
   constraint "disputes_reviewed_by_fkey" foreign key (reviewed_by) references public.user_profiles(id)

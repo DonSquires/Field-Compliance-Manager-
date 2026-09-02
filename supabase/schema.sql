@@ -9313,7 +9313,7 @@ COMMENT ON TABLE "public"."dispatch_resources" IS 'Named patrol runs / callsigns
 CREATE TABLE IF NOT EXISTS "public"."disputes" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "organization_id" "uuid" NOT NULL,
-    "notice_id" "uuid" NOT NULL,
+    "notice_id" "uuid",
     "submitter_name" "text",
     "submitter_email" "text",
     "submitter_phone" "text",
@@ -9343,6 +9343,8 @@ ALTER TABLE "public"."disputes" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."disputes" IS 'Notice disputes (org-scoped via organization_id, linked via notice_id). SELECT: org_access_allowed. UPDATE: admin (review decisions). INSERT is via the submit-dispute service-role edge function, not anon.';
+
+COMMENT ON COLUMN "public"."disputes"."notice_id" IS 'Best-effort match to infringement_notices via the submitter-entered notice_number. Nullable: the notice may not resolve (unknown/mistyped number, or a dispute against a notice type without a notice_number), and the dispute must still be captured for admin triage.';
 
 
 
@@ -18279,7 +18281,7 @@ ALTER TABLE ONLY "public"."disputes"
 
 
 ALTER TABLE ONLY "public"."disputes"
-    ADD CONSTRAINT "disputes_notice_id_fkey" FOREIGN KEY ("notice_id") REFERENCES "public"."notices"("id");
+    ADD CONSTRAINT "disputes_notice_id_fkey" FOREIGN KEY ("notice_id") REFERENCES "public"."infringement_notices"("id");
 
 
 

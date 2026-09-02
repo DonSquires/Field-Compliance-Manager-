@@ -12,8 +12,8 @@
  * INSERT on the disputes table (which would let anyone set an arbitrary
  * organization_id), this function runs with the service role and resolves
  * organization_id + notice_id from the entered notice_number via
- * infringement_notices. Both are nullable when unresolved (the dispute is
- * still captured for admin triage).
+ * infringement_notices. A dispute is only accepted when that lookup
+ * succeeds -- tenant ownership is never guessed or left null.
  *
  * No JWT required (verify_jwt disabled for this function in config).
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -53,6 +53,11 @@ serve(async (req)=>{
         organizationId = notice.organization_id;
       }
     }
+    if (!organizationId || !noticeId) {
+      return json({
+        error: 'A valid infringement notice number is required to submit a dispute'
+      }, 404);
+    }
     const { error: insErr } = await admin.from('disputes').insert({
       organization_id: organizationId,
       notice_id: noticeId,
@@ -77,8 +82,7 @@ serve(async (req)=>{
       }, 500);
     }
     return json({
-      success: true,
-      matched_notice: noticeId !== null
+      success: true
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Internal error';

@@ -85,6 +85,7 @@ const OfficerActivityTimelinePage = React.lazy(() => import('../pages/OfficerAct
 const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
 const VehicleSearchPage = React.lazy(() => import('../pages/VehicleSearchPage'));
 const FieldReportsPage = React.lazy(() => import('../pages/FieldReportsPage'));
+const DisputesPage = React.lazy(() => import('../pages/DisputesPage'));
 const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPage'));
 const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightPage'));
 const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
@@ -99,7 +100,7 @@ type AdminPage =
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
-type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'disputes' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
@@ -113,7 +114,7 @@ const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
   'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
-  'debrief-followup',
+  'disputes', 'debrief-followup',
 ]);
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined): boolean {
@@ -407,6 +408,8 @@ const AdminShell: React.FC = () => {
             return <VehicleSearchPage />;
           case 'field-reports':
             return <FieldReportsPage />;
+          case 'disputes':
+            return <DisputesPage />;
           case 'debrief-followup':
             return <DebriefFollowupPage />;
           case 'parking':

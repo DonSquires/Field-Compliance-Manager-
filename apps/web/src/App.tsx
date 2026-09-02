@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ServiceRelationshipProvider } from './context/ServiceRelationshipContext';
 import { RoleRouter } from './routing/RoleRouter';
 import LoginPage from './pages/LoginPage';
+import DisputePortalPage from './pages/DisputePortalPage';
 
 function AuthGate() {
   const { profile, hasSession, recoveryMode, loading } = useAuth();
@@ -30,15 +31,18 @@ function AuthGate() {
 
 export function App() {
   return (
-    <AuthProvider>
-      <ServiceRelationshipProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="*" element={<AuthGate />} />
-            <Route path="/" element={<Navigate to="/officer" replace />} />
-          </Routes>
-        </BrowserRouter>
-      </ServiceRelationshipProvider>
-    </AuthProvider>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/dispute" element={<DisputePortalPage />} />
+        <Route path="*" element={
+          <AuthProvider>
+            <ServiceRelationshipProvider>
+              <AuthGate />
+            </ServiceRelationshipProvider>
+          </AuthProvider>
+        } />
+        <Route path="/" element={<Navigate to="/officer" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
