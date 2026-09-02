@@ -208,6 +208,8 @@ function collectDdlEntities(rootDir) {
   ];
   const tables = new Set();
   const rpcs = new Set();
+  const columns = new Set();
+  const columnsByTable = new Map();
   const tablePattern = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
   const viewPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+(?:MATERIALIZED\s+)?VIEW\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
   const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
@@ -218,10 +220,22 @@ function collectDdlEntities(rootDir) {
     for (const match of content.matchAll(viewPattern)) tables.add(match[1]);
     for (const match of content.matchAll(functionPattern)) rpcs.add(match[1]);
   }
-  return { tables, rpcs };
+  const schemaPath = path.join(rootDir, 'supabase/schema.sql');
+  const schema = fs.existsSync(schemaPath) ? fs.readFileSync(schemaPath, 'utf8') : '';
+  const tableBodyPattern = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(([\s\S]*?)\n\s*\);/gi;
+  for (const match of schema.matchAll(tableBodyPattern)) {
+    const tableName = match[1];
+    const tableColumns = new Set();
+    for (const column of match[2].matchAll(/^\s*"([a-zA-Z_][a-zA-Z0-9_]*)"\s+/gm)) {
+      tableColumns.add(column[1]);
+      columns.add(`${tableName}.${column[1]}`);
+    }
+    columnsByTable.set(tableName, tableColumns);
+  }
+  return { tables, rpcs, columns, columnsByTable };
 }
 
-function collectSqlFunctionEdges(rootDir) {
+function collectSqlFunctionEdges(rootDir, columnsByTable = new Map()) {
   const files = [
     'supabase/schema.sql',
     ...walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort()
@@ -254,12 +268,24 @@ function collectSqlFunctionEdges(rootDir) {
   };
 
   for (const [rpcName, definition] of latestFunctions) {
+    const aliases = new Map();
     for (const match of definition.body.matchAll(/\b(?:FROM|JOIN)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
       const calledAsFunction = latestFunctions.has(match[1]) && /^\s*\(/.test(definition.body.slice((match.index ?? 0) + match[0].length));
       add(rpcName, calledAsFunction ? 'rpc' : 'table', match[1], calledAsFunction ? 'calls' : 'reads', definition.file, calledAsFunction ? `SQL calls public.${match[1]}` : `SQL reads public.${match[1]}`);
+      if (!calledAsFunction) {
+        const alias = definition.body.slice((match.index ?? 0) + match[0].length).match(/^\s+(?:AS\s+)?([a-zA-Z_][a-zA-Z0-9_]*)/i)?.[1];
+        aliases.set(alias || match[1], match[1]);
+      }
     }
     for (const match of definition.body.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
       add(rpcName, 'table', match[1], 'writes', definition.file, `SQL writes public.${match[1]}`);
+    }
+    for (const [alias, tableName] of aliases) {
+      const tableColumns = columnsByTable.get(tableName) || new Set();
+      const qualifiedColumnPattern = new RegExp(`\\b${alias}\\.([a-zA-Z_][a-zA-Z0-9_]*)`, 'g');
+      for (const match of definition.body.matchAll(qualifiedColumnPattern)) {
+        if (tableColumns.has(match[1])) add(rpcName, 'column', `${tableName}.${match[1]}`, 'reads', definition.file, `SQL reads ${alias}.${match[1]}`);
+      }
     }
   }
   return [...edges.values()];
@@ -296,6 +322,18 @@ function collectSourceEdges(rootDir, knownEntities) {
       const segment = content.slice(match.index, Math.min(content.length, match.index + 1600)).split(';', 1)[0];
       const kind = /\.(?:insert|update|upsert|delete)\s*\(/.test(segment) ? 'writes' : 'reads';
       add(source, 'table', match[1], kind, file, `.from('${match[1]}')`);
+      const tableColumns = knownEntities.columnsByTable.get(match[1]) || new Set();
+      for (const select of segment.matchAll(/\.select\(\s*['"]([^'"]+)['"]/g)) {
+        for (const field of select[1].split(',').map(value => value.trim()).filter(value => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value))) {
+          if (tableColumns.has(field)) add(source, 'column', `${match[1]}.${field}`, 'reads', file, `.select('${field}') from ${match[1]}`);
+        }
+      }
+      const mutation = segment.match(/\.(?:insert|update|upsert)\s*\(\s*(?:\[\s*)?\{([\s\S]*?)\}/);
+      if (mutation) {
+        for (const field of mutation[1].matchAll(/(?:^|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g)) {
+          if (tableColumns.has(field[1])) add(source, 'column', `${match[1]}.${field[1]}`, 'writes', file, `mutation field ${field[1]} on ${match[1]}`);
+        }
+      }
     }
     for (const match of content.matchAll(/\.rpc\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]/g)) {
       add(source, 'rpc', match[1], 'calls', file, `.rpc('${match[1]}')`);
@@ -322,7 +360,7 @@ function collectSourceEdges(rootDir, knownEntities) {
 }
 
 function collectAtlasRefresh(rootDir = process.cwd()) {
-  const { tables, rpcs } = collectDdlEntities(rootDir);
+  const { tables, rpcs, columns, columnsByTable } = collectDdlEntities(rootDir);
   const repositoryFiles = [
     ...walkFiles(rootDir, 'apps/web/src'),
     ...walkFiles(rootDir, 'supabase/functions')
@@ -332,9 +370,9 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
       .map(file => file.match(/^supabase\/functions\/([^/]+)\/index\.ts$/)?.[1])
       .filter(name => name && name !== '_shared')
   );
-  const sourceEdges = collectSourceEdges(rootDir, { tables, rpcs, edgeFunctions });
+  const sourceEdges = collectSourceEdges(rootDir, { tables, rpcs, columnsByTable, edgeFunctions });
   const edgesByKey = new Map();
-  for (const edge of [...sourceEdges, ...collectSqlFunctionEdges(rootDir)]) edgesByKey.set(edgeKey(edge), edge);
+  for (const edge of [...sourceEdges, ...collectSqlFunctionEdges(rootDir, columnsByTable)]) edgesByKey.set(edgeKey(edge), edge);
   const edges = [...edgesByKey.values()].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
   const callersByTarget = new Map();
   for (const edge of edges) {
@@ -360,6 +398,7 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
     }
   };
   addCapabilities('table', tables);
+  addCapabilities('column', columns);
   addCapabilities('rpc', rpcs);
   addCapabilities('edge_function', edgeFunctions);
 
@@ -396,8 +435,8 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     const desired = {
       ...capability,
       exercised: existing?.exercised ?? null,
-      wired: Boolean(capability.wired || existing?.wired),
-      caller_summary: capability.caller_summary || existing?.caller_summary || null,
+      wired: capability.entity_type === 'column' ? capability.wired : Boolean(capability.wired || existing?.wired),
+      caller_summary: capability.entity_type === 'column' ? capability.caller_summary : capability.caller_summary || existing?.caller_summary || null,
       notes: existing && !String(existing.notes || '').startsWith(OWNER_MARKER) ? existing.notes : capability.notes
     };
     if (!existing || !fieldsMatch(existing, desired, [
@@ -408,7 +447,7 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
   }
   for (const existing of existingCapabilities) {
     if (existing.refresh_source === 'ci_generator'
-        && String(existing.notes || '').startsWith(OWNER_MARKER)
+        && (String(existing.notes || '').startsWith(OWNER_MARKER) || existing.entity_type === 'column')
         && existing.retirement_status !== 'legacy'
         && !generatedCapabilityKeys.has(capabilityKey(existing))) {
       plan.capabilityRetireIds.push(existing.id);

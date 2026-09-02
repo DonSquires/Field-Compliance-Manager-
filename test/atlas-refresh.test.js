@@ -23,7 +23,12 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-refresh-'));
   try {
     write(root, 'supabase/schema.sql', `
-      CREATE TABLE IF NOT EXISTS "public"."alpha" ("id" uuid);
+      CREATE TABLE IF NOT EXISTS "public"."alpha" (
+        "id" uuid,
+        "status" text,
+        CONSTRAINT "alpha_status_check" CHECK (status IN ('active'))
+      );
+      ALTER TABLE public.alpha ADD CONSTRAINT alpha_id_check CHECK (id IS NOT NULL);
       CREATE OR REPLACE FUNCTION "public"."get_alpha"() RETURNS jsonb LANGUAGE sql AS $$
         SELECT jsonb_agg(alpha) FROM public.alpha;
       $$;
@@ -53,6 +58,9 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     const manifest = collectAtlasRefresh(root);
 
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'alpha'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'column' && row.entity_name === 'alpha.id'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'column' && row.entity_name === 'alpha.status'));
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'column' && row.entity_name === 'alpha.constraint'), false);
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'get_alpha'));
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'ping'));
     assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
@@ -326,6 +334,28 @@ test('Atlas refresh plan preserves exercised state on CI-owned capabilities', ()
   assert.equal(plan.capabilityUpserts.length, 1);
   assert.equal(plan.capabilityUpserts[0].exercised, true);
   assert.equal(plan.capabilityUpserts[0].wired, true);
+});
+
+test('Atlas refresh replaces stale column wiring without downgrading other capability types', () => {
+  const manifest = {
+    repository_files: [],
+    capabilities: [
+      { entity_type: 'column', entity_name: 'alpha.legacy', present: true, wired: false, exercised: null, caller_summary: null, notes: OWNER_MARKER, refresh_source: 'ci_generator', retirement_status: 'live' },
+      { entity_type: 'table', entity_name: 'alpha', present: true, wired: false, exercised: null, caller_summary: null, notes: OWNER_MARKER, refresh_source: 'ci_generator', retirement_status: 'live' }
+    ],
+    edges: []
+  };
+  const existing = [
+    { id: 'column', entity_type: 'column', entity_name: 'alpha.legacy', present: true, wired: true, exercised: null, caller_summary: 'deleted/Page', notes: 'legacy generator note', refresh_source: 'ci_generator', retirement_status: 'live' },
+    { id: 'table', entity_type: 'table', entity_name: 'alpha', present: true, wired: true, exercised: null, caller_summary: 'external source', notes: 'legacy generator note', refresh_source: 'ci_generator', retirement_status: 'live' }
+  ];
+
+  const plan = buildRefreshPlan(manifest, existing, []);
+  const column = plan.capabilityUpserts.find((row) => row.entity_type === 'column');
+
+  assert.equal(column.wired, false);
+  assert.equal(column.caller_summary, null);
+  assert.equal(plan.capabilityUpserts.some((row) => row.entity_type === 'table'), false);
 });
 
 test('Atlas refresh plan is a no-op when owned rows already match', () => {

@@ -14,10 +14,16 @@ interface BiosecurityAssessment {
   id: string;
   officer_name: string | null;
   species_name: string | null;
+  species_confirmed: boolean;
   density_estimate: string | null;
   action_taken: string | null;
   status: string;
   mpi_referral_number: string | null;
+  location_name: string | null;
+  notice_number: string | null;
+  follow_up_required: boolean;
+  notes: string | null;
+  protected_land_address: string | null;
   assessed_at: string;
 }
 
@@ -38,7 +44,7 @@ const BiosecurityOversightPage: React.FC = () => {
 
         const { data, error: err } = await supabase
           .from('biosecurity_assessments')
-          .select('id, officer_name, species_name, density_estimate, action_taken, status, mpi_referral_number, assessed_at')
+          .select('id, officer_name, species_name, species_confirmed, density_estimate, action_taken, status, mpi_referral_number, location_name, notice_number, follow_up_required, notes, protected_land_address, assessed_at')
           .eq('organization_id', orgId)
           .order('assessed_at', { ascending: false })
           .limit(100);
@@ -96,10 +102,15 @@ const BiosecurityOversightPage: React.FC = () => {
               </div>
               <div className="contact-details">
                 <p className="contact-meta">
-                  {a.officer_name || 'Unknown officer'} · {a.density_estimate} · {a.action_taken} ·{' '}
+                  {a.officer_name || 'Unknown officer'} · {a.species_confirmed ? 'confirmed species' : 'unconfirmed species'} · {a.density_estimate} · {a.action_taken} ·{' '}
                   {new Date(a.assessed_at).toLocaleString()}
                 </p>
                 {a.mpi_referral_number && <p className="contact-meta">MPI referral: {a.mpi_referral_number}</p>}
+                {a.location_name && <p className="contact-meta">Observed at: {a.location_name}</p>}
+                {a.protected_land_address && <p className="contact-meta">Protected land: {a.protected_land_address}</p>}
+                {a.notice_number && <p className="contact-meta">Notice: {a.notice_number}</p>}
+                {a.notes && <p>{a.notes}</p>}
+                {a.follow_up_required && <span className="status-badge status-pending">Follow-up required</span>}
               </div>
             </div>
           ))

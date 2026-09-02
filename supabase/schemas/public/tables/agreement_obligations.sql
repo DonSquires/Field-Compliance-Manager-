@@ -13,6 +13,7 @@ create table "public"."agreement_obligations" (
   "obligation_code"      text,
   "site_id"              uuid,
   "frequency_rule"       jsonb,
+  "updated_at"           timestamp with time zone not null default now(),
   constraint "agreement_obligations_obligation_type_check"
     check
     ((obligation_type = ANY (ARRAY['response_time'::text, 'patrol_frequency'::text, 'report_delivery'::text, 'incident_escalation'::text, 'compliance_check'::text,
@@ -31,6 +32,9 @@ create index idx_agreement_obligations_agreement on public.agreement_obligations
 
 create index idx_agreement_obligations_site on public.agreement_obligations using btree (site_id)
   where (site_id is not null);
+
+create unique index agreement_obligations_agreement_code_key on public.agreement_obligations using btree (service_agreement_id, obligation_code)
+  where (obligation_code is not null);
 
 create policy "agreement_obligations_delete" on "public"."agreement_obligations"
   for delete
@@ -69,6 +73,8 @@ create policy "bob_full_read" on "public"."agreement_obligations"
   using ((( select auth.uid() as uid) = '00000000-0000-0000-0000-00000000b0b0'::uuid));
 
 grant delete, insert, maintain, references, select, trigger, truncate, update on table "public"."agreement_obligations" to "anon", "authenticated", "postgres", "service_role";
+
+revoke insert, update, delete, truncate on table "public"."agreement_obligations" from "anon", "authenticated";
 
 comment on column "public"."agreement_obligations"."frequency_rule" is 'JSON rule payload for frequency/coverage obligations (per day/week, count, template).';
 

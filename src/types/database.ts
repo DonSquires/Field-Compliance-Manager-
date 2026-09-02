@@ -326,6 +326,7 @@ export type Database = {
           service_agreement_id: string
           site_id: string | null
           sla_target_minutes: number | null
+          updated_at: string
         }
         Insert: {
           active?: boolean
@@ -342,6 +343,7 @@ export type Database = {
           service_agreement_id: string
           site_id?: string | null
           sla_target_minutes?: number | null
+          updated_at?: string
         }
         Update: {
           active?: boolean
@@ -358,6 +360,7 @@ export type Database = {
           service_agreement_id?: string
           site_id?: string | null
           sla_target_minutes?: number | null
+          updated_at?: string
         }
         Relationships: [
           {
