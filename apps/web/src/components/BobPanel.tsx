@@ -102,8 +102,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [sessionSearch, setSessionSearch] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [contextPanelOpen, setContextPanelOpen] = useState(true);
+  // Side panes are drawers on narrow screens, so they start closed there.
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === 'undefined' ? true : window.innerWidth >= 1100);
+  const [contextPanelOpen, setContextPanelOpen] = useState(() => typeof window === 'undefined' ? true : window.innerWidth >= 1100);
   const [contextTab, setContextTab] = useState<ContextTab>('context');
   const [activityPhase, setActivityPhase] = useState<ActivityPhase>('idle');
   const [loading, setLoading] = useState(false);
@@ -480,19 +481,15 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       <header className="bob-panel-header">
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <div className="bob-panel-header-actions">
-          {workspaceExpanded && (
-            <>
-              <button type="button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'}><PanelLeft size={17} /></button>
-              <button type="button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'}><PanelRight size={17} /></button>
-            </>
-          )}
+          <button type="button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
+          <button type="button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
           <button type="button" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
           <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
         </div>
       </header>
 
       <div className="bob-workspace">
-        {workspaceExpanded && sidebarOpen && (
+        {sidebarOpen && (
           <SessionSidebar
             sessions={sessions}
             activeId={conversationId}
@@ -507,6 +504,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             onRenameCommit={(id) => { void renameSession(id, renameValue); setRenamingId(null); }}
             onRenameCancel={() => setRenamingId(null)}
             busy={loading || sending}
+            onDismiss={() => setSidebarOpen(false)}
           />
         )}
 
@@ -550,7 +548,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             )}
           </div>
 
-          {!workspaceExpanded && attachments.length > 0 && (
+          {!workspaceExpanded && !contextPanelOpen && attachments.length > 0 && (
             <div className="bob-attachment-results" aria-label="Evidence processing results">
               {attachments.map(attachment => <AttachmentResultCard key={attachment.id} attachment={attachment} />)}
             </div>
@@ -617,13 +615,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
-        {workspaceExpanded && contextPanelOpen && (
+        {contextPanelOpen && (
           <ContextPanel
             tab={contextTab}
             onTab={setContextTab}
             messages={messages}
             attachments={attachments}
             contextEntries={contextEntries}
+            onDismiss={() => setContextPanelOpen(false)}
           />
         )}
       </div>
@@ -729,6 +728,7 @@ function SessionSidebar(props: {
   onRenameCommit: (id: string) => void;
   onRenameCancel: () => void;
   busy: boolean;
+  onDismiss: () => void;
 }) {
   const term = props.search.trim().toLowerCase();
   const filtered = term
@@ -743,6 +743,11 @@ function SessionSidebar(props: {
 
   return (
     <aside className="bob-session-sidebar" aria-label="Bob sessions">
+      <div className="bob-drawer-head">
+        <h2>Sessions</h2>
+        <button type="button" onClick={props.onDismiss} aria-label="Close sessions"><X size={16} /></button>
+      </div>
+
       <button type="button" className="bob-sidebar-new" onClick={props.onNew} disabled={props.busy}>
         <Plus size={15} /><span>New chat</span>
       </button>
@@ -801,6 +806,7 @@ function ContextPanel(props: {
   messages: BobMessage[];
   attachments: BobAttachmentRecord[];
   contextEntries: Array<[string, unknown]>;
+  onDismiss: () => void;
 }) {
   const assistantTurns = props.messages.filter(message => message.role === 'assistant');
   const proposals = assistantTurns.filter(message => classifyMessageState(message).tone === 'proposal');
@@ -813,6 +819,11 @@ function ContextPanel(props: {
 
   return (
     <aside className="bob-context-panel" aria-label="Bob context panel">
+      <div className="bob-drawer-head">
+        <h2>Context</h2>
+        <button type="button" onClick={props.onDismiss} aria-label="Close context panel"><X size={16} /></button>
+      </div>
+
       <div className="bob-context-tabs" role="tablist">
         {tabs.map(tab => (
           <button key={tab.id} type="button" role="tab" aria-selected={props.tab === tab.id} className={props.tab === tab.id ? 'is-active' : ''} onClick={() => props.onTab(tab.id)}>

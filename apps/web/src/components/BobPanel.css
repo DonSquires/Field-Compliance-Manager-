@@ -363,9 +363,77 @@
   font-weight: 700;
 }
 
+.bob-drawer-head {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bob-drawer-head h2 {
+  margin: 0;
+  color: #dce8ef;
+  font-size: 13px;
+}
+
+.bob-drawer-head button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 4px;
+  color: #abc0cd;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Below the three-pane breakpoint the side panes become overlay drawers. */
 @media (max-width: 1100px) {
+  .bob-drawer-head {
+    display: flex;
+  }
+
   .bob-session-sidebar,
   .bob-context-panel {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 6;
+    flex: 0 0 auto;
+    width: min(320px, 86vw);
+    border-right: 1px solid #243848;
+    box-shadow: 0 0 40px rgba(0, 0, 0, .5);
+  }
+
+  .bob-context-panel {
+    inset: 0 0 0 auto;
+    width: min(340px, 90vw);
+    border-right: 0;
+    border-left: 1px solid #243848;
+  }
+
+  .bob-workspace {
+    position: relative;
+  }
+}
+
+@media (max-width: 600px) {
+  .bob-session-sidebar,
+  .bob-context-panel {
+    width: 100%;
+  }
+
+  .bob-quick-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .bob-quick-actions button {
+    flex: 0 0 auto;
+  }
+
+  .bob-composer-hint {
     display: none;
   }
 }

@@ -32,6 +32,10 @@ describe('BobPanel', () => {
     vi.unstubAllGlobals();
   });
 
+  const setViewport = (width: number) => {
+    Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
+  };
+
   beforeEach(() => {
     mockFrom.mockReset();
     mockInvoke.mockReset();
@@ -347,6 +351,7 @@ describe('BobPanel', () => {
   });
 
   it('shows session history and a context panel in the expanded workspace', async () => {
+    setViewport(1400);
     conversationList = [
       { id: 'conversation-1', title: 'Zone compliance review', created_at: '2026-09-02T05:00:00.000Z', updated_at: '2026-09-02T06:00:00.000Z' },
       { id: 'conversation-2', title: 'Roster gap analysis', created_at: '2026-08-20T05:00:00.000Z', updated_at: '2026-08-20T06:00:00.000Z' },
@@ -368,6 +373,7 @@ describe('BobPanel', () => {
   });
 
   it('filters the session list by search term', async () => {
+    setViewport(1400);
     conversationList = [
       { id: 'conversation-1', title: 'Zone compliance review', created_at: '2026-09-02T05:00:00.000Z', updated_at: '2026-09-02T06:00:00.000Z' },
       { id: 'conversation-2', title: 'Roster gap analysis', created_at: '2026-08-20T05:00:00.000Z', updated_at: '2026-08-20T06:00:00.000Z' },
@@ -380,6 +386,29 @@ describe('BobPanel', () => {
 
     expect(screen.queryByText('Zone compliance review')).toBeNull();
     expect(screen.getByText('Roster gap analysis')).toBeTruthy();
+  });
+
+  it('keeps sessions and context reachable as drawers on mobile', async () => {
+    setViewport(430);
+    conversationList = [
+      { id: 'conversation-1', title: 'Zone compliance review', created_at: '2026-09-02T05:00:00.000Z', updated_at: '2026-09-02T06:00:00.000Z' },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByLabelText('Show sessions')).toBeTruthy();
+    expect(screen.queryByLabelText('Bob sessions')).toBeNull();
+    expect(screen.queryByLabelText('Bob context panel')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Show sessions'));
+    expect(await screen.findByLabelText('Bob sessions')).toBeTruthy();
+    expect(screen.getByText('Zone compliance review')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Close sessions'));
+    expect(screen.queryByLabelText('Bob sessions')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Show context panel'));
+    expect(await screen.findByLabelText('Bob context panel')).toBeTruthy();
   });
 
   it('uses the dedicated Builder mode for coding-oriented agent prompts', async () => {
