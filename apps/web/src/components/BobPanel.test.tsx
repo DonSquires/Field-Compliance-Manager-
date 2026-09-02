@@ -122,6 +122,38 @@ describe('BobPanel', () => {
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
   });
 
+  it('separates assistant prose from evidence, proposal, and next-action state', async () => {
+    messageHistory = [{
+      id: 'message-1', role: 'assistant', content: 'I prepared the governed draft.', confidence: 0.91,
+      flagged: false, created_at: '2026-09-02T06:00:00.000Z',
+      metadata: {
+        planned_tool: 'propose_client_onboarding',
+        outcome: 'ok',
+        action_id: 'action-1',
+        suggested_action: 'Review the approval item before applying it.',
+        reasoning_steps: [{ step: 1, tool: 'query_records', outcome: 'ok' }],
+      },
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('Proposal prepared')).toBeTruthy();
+    expect(screen.getByText('Governed proposal')).toBeTruthy();
+    expect(screen.getByText('Evidence')).toBeTruthy();
+    expect(screen.getByText('Next action')).toBeTruthy();
+    expect(screen.getByText('Review the approval item before applying it.')).toBeTruthy();
+  });
+
+  it('can expand from compact chat into the Bob workspace surface', async () => {
+    const { container } = render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByLabelText('Open full workspace')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Open full workspace'));
+
+    expect(container.querySelector('.bob-panel')?.className).toContain('is-expanded');
+    expect(screen.getByLabelText('Use compact panel')).toBeTruthy();
+  });
+
   it('uses the dedicated Builder mode for coding-oriented agent prompts', async () => {
     render(<BobPanel open mode="builder" onClose={() => undefined} context={{ job_title: 'Mobile field reporting' }} />);
 

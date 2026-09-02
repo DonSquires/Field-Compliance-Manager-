@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, FileSearch, PanelRightClose, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, FileSearch, Maximize2, Minimize2, PanelRightClose, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './BobPanel.css';
@@ -40,6 +40,14 @@ interface BobPanelProps {
   mode?: 'operations' | 'builder';
 }
 
+type WorkStateTone = 'idle' | 'drafting' | 'processing' | 'waiting' | 'proposal' | 'completed' | 'failed';
+
+interface WorkState {
+  tone: WorkStateTone;
+  label: string;
+  detail: string;
+}
+
 export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations' }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -48,10 +56,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contextEntries = useMemo(() => Object.entries(context ?? {})
     .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
     .slice(0, 4), [context]);
+  const workState = derivePanelWorkState({ loading, sending, error, input });
 
   // ATLAS READS: bob_conversations, bob_messages
   // Operations and Builder retain separate durable threads. Builder context
@@ -181,15 +191,20 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   return (
     <div
-      className="bob-panel"
+      className={`bob-panel ${workspaceExpanded ? 'is-expanded' : ''}`}
       aria-label="Bob agent workspace"
     >
       <header className="bob-panel-header">
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
-        <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
+        <div className="bob-panel-header-actions">
+          <button type="button" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+          <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
+        </div>
       </header>
 
       {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value]) => <span key={key}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
+
+      <div className={`bob-work-state state-${workState.tone}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
 
       {error && (
         <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
@@ -207,6 +222,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
               <div className="bob-message-body">
                 {m.role === 'assistant' && <AgentMetadata message={m} />}
                 <div className="bob-message-content">{m.content}</div>
+                {m.role === 'assistant' && <OperationalCards message={m} />}
                 <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
               </div>
             </article>
@@ -235,13 +251,84 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   );
 };
 
+function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string }): WorkState {
+  if (input.error) return { tone: 'failed', label: 'Failed', detail: 'The last operation did not complete. The transcript is still available; retry after checking the message.' };
+  if (input.sending) return { tone: 'processing', label: 'Processing', detail: 'Bob is working on the request and may be waiting on live data or tool results.' };
+  if (input.loading) return { tone: 'waiting', label: 'Waiting on conversation', detail: 'Loading the durable Bob thread before accepting work.' };
+  if (input.input.trim()) return { tone: 'drafting', label: 'Drafting', detail: 'No request has been sent yet. Edit the instruction or send it to start work.' };
+  return { tone: 'idle', label: 'Ready', detail: 'No work is running. Ask Bob a question or prepare a governed task.' };
+}
+
+function asString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function asArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function classifyMessageState(message: BobMessage): WorkState {
+  const metadata = message.metadata ?? {};
+  const outcome = asString(metadata.outcome);
+  const plannedTool = asString(metadata.planned_tool) ?? asString(metadata.tool);
+  const suggestedAction = asString(metadata.suggested_action);
+  const hasProposal = Boolean(suggestedAction || asString(metadata.action_id) || asString(metadata.org_action_id) || asArray(metadata.site_action_ids).length || asArray(metadata.proposed_entities).length || plannedTool?.startsWith('propose_'));
+  const hasEvidence = Boolean(metadata.document_qa || asArray(metadata.reasoning_steps).length || asArray(metadata.files).length || asArray(metadata.sources).length || asArray(metadata.results).length);
+
+  if (message.flagged || outcome === 'error' || outcome === 'failed') return { tone: 'failed', label: 'Failed', detail: 'Bob recorded a failed or flagged operation for review.' };
+  if (hasProposal) return { tone: 'proposal', label: 'Proposal prepared', detail: 'Nothing has changed yet. Review the governed action and approve it in the approval surface.' };
+  if (outcome === 'need_clarification' || outcome === 'clarifying_questions') return { tone: 'waiting', label: 'Waiting for human input', detail: 'Bob needs a decision or missing detail before work can continue.' };
+  if (hasEvidence) return { tone: 'completed', label: 'Evidence reviewed', detail: 'Bob attached structured evidence or reasoning metadata to this turn.' };
+  if (plannedTool) return { tone: 'completed', label: 'Completed', detail: `Bob completed ${plannedTool.replaceAll('_', ' ')} for this turn.` };
+  return { tone: 'completed', label: 'Answered', detail: 'Bob returned assistant prose only; no governed action was prepared.' };
+}
+
+function OperationalCards({ message }: { message: BobMessage }) {
+  const metadata = message.metadata ?? {};
+  const state = classifyMessageState(message);
+  const suggestedAction = asString(metadata.suggested_action);
+  const proposalIds = [asString(metadata.action_id), asString(metadata.org_action_id), ...asArray(metadata.site_action_ids).map(asString)].filter(Boolean) as string[];
+  const reasoningSteps = asArray(metadata.reasoning_steps);
+  const files = asArray(metadata.files);
+  const sources = asArray(metadata.sources);
+  const results = asArray(metadata.results);
+  const evidenceCount = reasoningSteps.length + files.length + sources.length + results.length + (metadata.document_qa ? 1 : 0);
+
+  return (
+    <div className="bob-operational-stack" aria-label="Operational state for this Bob response">
+      <section className={`bob-operational-card state-${state.tone}`}>
+        <span>{state.label}</span>
+        <p>{state.detail}</p>
+      </section>
+      {evidenceCount > 0 && (
+        <section className="bob-operational-card is-evidence">
+          <span>Evidence</span>
+          <p>{evidenceCount} evidence signal{evidenceCount === 1 ? '' : 's'} recorded for this turn.</p>
+        </section>
+      )}
+      {proposalIds.length > 0 && (
+        <section className="bob-operational-card is-proposal">
+          <span>Governed proposal</span>
+          <p>{proposalIds.length} approval item{proposalIds.length === 1 ? '' : 's'} prepared. No live record changes occur until a human approves them.</p>
+        </section>
+      )}
+      {suggestedAction && (
+        <section className="bob-operational-card is-primary-action">
+          <span>Next action</span>
+          <p>{suggestedAction}</p>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function AgentMetadata({ message }: { message: BobMessage }) {
   const metadata = message.metadata ?? {};
   const plannedTool = typeof metadata.planned_tool === 'string' ? metadata.planned_tool : null;
   const suggestedAction = typeof metadata.suggested_action === 'string' ? metadata.suggested_action : null;
   const confidence = typeof metadata.confidence === 'number' ? metadata.confidence : message.confidence;
-  if (!plannedTool && !suggestedAction && confidence == null) return null;
-  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}{suggestedAction && <span className="bob-suggested-action">{suggestedAction}</span>}</div>;
+  if (!plannedTool && confidence == null) return null;
+  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}</div>;
 }
 
 export default BobPanel;
