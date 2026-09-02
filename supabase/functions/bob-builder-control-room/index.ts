@@ -53,7 +53,7 @@ function safeSnapshot(value: Record<string, unknown>) {
     })),
     approvals: rows(value.approvals).map(approval => ({
       id: approval.id, approval_type: approval.approval_type, triggered_at_status: approval.triggered_at_status,
-      status: approval.status, requested_at: approval.requested_at, expires_at: approval.expires_at, requested_target_sha: approval.requested_target_sha,
+      status: approval.status, requested_at: approval.requested_at, requested_target_sha: approval.requested_target_sha,
       reviewed_artifact_ids: approval.reviewed_artifact_ids, approval_comment: approval.approval_comment, responded_at: approval.responded_at,
     })),
   };
@@ -174,10 +174,10 @@ serve(async req => {
   if (!job || !canAccessOrganization(job.organization_id)) return json({ error: 'Builder job is unavailable' }, 404);
 
   if (action === 'context_snapshot') {
-    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ context: null, unavailable: true, error: 'Builder execution host is unavailable' });
     const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/context`, 'GET');
     await audit(job.organization_id, result.ok ? 'context_viewed' : 'context_failed', jobId);
-    if (!result.ok) return json({ error: 'Builder context is unavailable' }, result.status);
+    if (!result.ok) return json({ context: null, unavailable: true, error: 'Builder context is unavailable', status: result.status });
     return json({ context: result.payload });
   }
 
@@ -188,7 +188,7 @@ serve(async req => {
       admin.from('builder_job_steps').select('*').eq('job_id', jobId).order('ordinal_position'),
       admin.from('builder_artifacts').select('*').eq('job_id', jobId).order('created_at'),
       admin.from('builder_worker_runs').select('*').eq('job_id', jobId).order('started_at'),
-      admin.from('builder_approvals').select('id, approval_type, triggered_at_status, status, requested_at, expires_at, requested_target_sha, reviewed_artifact_ids, approval_comment, responded_at').eq('job_id', jobId).order('requested_at', { ascending: false }),
+      admin.from('builder_approvals').select('id, approval_type, triggered_at_status, status, requested_at, requested_target_sha, reviewed_artifact_ids, approval_comment, responded_at').eq('job_id', jobId).order('requested_at', { ascending: false }),
     ]);
     const failed = jobResult.error || stepsResult.error || artifactsResult.error || runsResult.error || approvalsResult.error;
     await audit(job.organization_id, failed ? 'failed' : 'viewed', jobId);

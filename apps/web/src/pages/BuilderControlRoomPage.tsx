@@ -78,7 +78,6 @@ interface BuilderApproval {
   triggered_at_status: string;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   requested_at: string;
-  expires_at: string;
   requested_target_sha: string | null;
   reviewed_artifact_ids: string[];
   approval_comment: string | null;
@@ -168,7 +167,6 @@ const BuilderControlRoomPage: React.FC = () => {
       setContextSnapshot(data?.context as BuilderContextSnapshot);
     } catch (contextError) {
       setContextSnapshot(null);
-      setError(contextError instanceof Error ? contextError.message : 'Builder context could not be loaded.');
     } finally { setContextLoading(false); }
   }, [invoke]);
 
@@ -424,15 +422,14 @@ const BuilderControlRoomPage: React.FC = () => {
             </div>
             <div className="builder-evidence"><span>{snapshot.artifacts.length} artifacts</span><span>{snapshot.workerRuns.length} worker runs</span></div>
             {snapshot.approvals.filter(approval => approval.status === 'pending').map(approval => {
-              const expired = new Date(approval.expires_at).getTime() <= Date.now();
               const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
               const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;
               return (
               <section className="builder-approval" key={approval.id}>
-                <div><span>{expired ? 'Approval expired' : 'Human approval required'}</span><strong>{approval.approval_type.replaceAll('_', ' ')}</strong><small>Requested for {approval.triggered_at_status.replaceAll('_', ' ')} at commit {approval.requested_target_sha?.slice(0, 12) ?? 'unavailable'}. {expired ? 'A new evidence review is required.' : `Expires ${new Date(approval.expires_at).toLocaleString('en-NZ')}.`}</small></div>
+                <div><span>Human approval required</span><strong>{approval.approval_type.replaceAll('_', ' ')}</strong><small>Requested for {approval.triggered_at_status.replaceAll('_', ' ')} at commit {approval.requested_target_sha?.slice(0, 12) ?? 'unavailable'}.</small></div>
                 <ul className="builder-approval-artifacts" aria-label="Immutable evidence under review">{reviewedArtifacts.map(artifact => <li key={artifact.id}><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><span>{artifact.checksum?.slice(0, 12) ?? 'Checksum unavailable'}</span></li>)}{!evidenceComplete && <li className="is-incomplete"><strong>Evidence unavailable</strong><span>Refresh before deciding</span></li>}</ul>
                 <label>Review rationale<textarea value={approvalComment} onChange={event => setApprovalComment(event.target.value)} rows={3} maxLength={2000} required /></label>
-                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={expired || !evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={expired || !evidenceComplete || Boolean(busy) || !approvalComment.trim()}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
+                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
               </section>
               );
             })}

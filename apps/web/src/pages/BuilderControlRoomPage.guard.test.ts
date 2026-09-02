@@ -32,14 +32,12 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('Human approval required');
     expect(source).toContain('Review rationale');
     expect(source).toContain("decideApproval(approval, 'approved')");
-    expect(source).toContain('const expired = new Date(approval.expires_at).getTime() <= Date.now();');
-    expect(source).toContain('Approval expired');
-    expect(source).toContain('A new evidence review is required.');
+    expect(source).not.toContain('approval.expires_at');
     expect(source).toContain('approval.reviewed_artifact_ids.includes(artifact.id)');
     expect(source).toContain('Immutable evidence under review');
     expect(source).toContain('const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;');
     expect(source).toContain('Evidence unavailable');
-    expect(source).toContain('!evidenceComplete');
+    expect(source).toContain('disabled={!evidenceComplete');
     expect(source).toContain('Builder job workspace');
     expect(source).toContain('Immutable task brief');
     expect(source).toContain('Verified artifacts');
