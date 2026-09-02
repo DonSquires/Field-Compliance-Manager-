@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BobPanel } from './BobPanel';
@@ -329,5 +331,14 @@ describe('BobPanel', () => {
     expect(screen.getByRole('button', { name: 'Plan implementation' })).toBeTruthy();
     expect(screen.getByPlaceholderText('Describe what you want to build, change, or fix')).toBeTruthy();
     expect(mockFrom).toHaveBeenCalledWith('bob_conversations');
+  });
+
+  it('keeps the native file input hidden and the composer anchored', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/components/BobPanel.css'), 'utf8');
+
+    expect(css).toContain('.bob-panel .sr-only');
+    expect(css).toContain('flex-direction: column;');
+    expect(css).toContain('flex: 1 1 auto;');
+    expect(css).toContain('min-height: 0;');
   });
 });
