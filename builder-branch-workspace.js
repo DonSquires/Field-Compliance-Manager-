@@ -84,16 +84,29 @@ function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha }) 
   return { branchName, head, remote };
 }
 
-function createGithubPullRequest({ workspacePath, branchName, expectedHeadSha, title, body }) {
+function giteaRepositoryPath(remote) {
+  const httpsMatch = String(remote).match(/^https?:\/\/[^/]+\/([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  const sshMatch = String(remote).match(/^[^@\s]+@[^:\s]+:([^/]+\/[^/]+?)(?:\.git)?$/);
+  return (httpsMatch?.[1] || sshMatch?.[1] || '').replace(/\.git$/, '');
+}
+
+async function createGiteaPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, giteaBaseUrl, giteaToken, owner, repo, fetchImpl = globalThis.fetch }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before opening a pull request');
   if (git(workspacePath, ['rev-parse', 'HEAD']) !== expectedHeadSha) throw new Error('Builder workspace head is stale');
+  if (!giteaBaseUrl || !giteaToken || !owner || !repo || typeof fetchImpl !== 'function') throw new Error('Builder Gitea integration is not configured');
   let remote = '';
   try { remote = git(workspacePath, ['remote', 'get-url', 'origin']); } catch {}
-  if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/.test(remote)) throw new Error('Builder workspace origin is not an approved GitHub remote');
-  const output = execFileSync('gh', ['pr', 'create', '--repo', remote.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, ''), '--base', 'main', '--head', branchName, '--title', String(title).slice(0, 200), '--body', String(body).slice(0, 10000)], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  if (!/^https:\/\/github\.com\/.+\/pull\/\d+$/.test(output)) throw new Error('GitHub pull request creation returned an invalid URL');
-  return { branchName, head: expectedHeadSha, url: output };
+  if (giteaRepositoryPath(remote) !== `${owner}/${repo}`) throw new Error('Builder workspace origin is not the configured Gitea repository');
+  const baseUrl = String(giteaBaseUrl).replace(/\/+$/, '');
+  const response = await fetchImpl(`${baseUrl}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`, {
+    method: 'POST',
+    headers: { Authorization: `token ${giteaToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base: 'main', head: branchName, title: String(title).slice(0, 200), body: String(body).slice(0, 10000) })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || typeof data.html_url !== 'string' || !/^https?:\/\/[^\s]+\/pulls\/\d+$/.test(data.html_url)) throw new Error('Gitea pull request creation failed');
+  return { branchName, head: expectedHeadSha, url: data.html_url };
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGithubPullRequest, verifySnapshot };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, verifySnapshot };

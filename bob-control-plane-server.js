@@ -10,7 +10,7 @@ const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
-const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGithubPullRequest, workspacePathForBranch } = require('./builder-branch-workspace');
+const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch } = require('./builder-branch-workspace');
 
 const port = Number(process.env.PORT || 8080);
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
@@ -41,6 +41,10 @@ const builderGateway = {
 const builderWorkerImage = process.env.BOB_WORKER_IMAGE || '';
 const builderRunnerId = process.env.BOB_BUILDER_RUNNER_ID || 'bob-builder-runtime';
 const builderWorkspaceRoot = process.env.BOB_BUILDER_WORKSPACE_ROOT || '/data/builder-workspaces';
+const giteaBaseUrl = process.env.GITEA_BASE_URL || '';
+const giteaToken = process.env.GITEA_TOKEN || '';
+const giteaOwner = process.env.GITEA_OWNER || '';
+const giteaRepo = process.env.GITEA_REPO || '';
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
@@ -366,7 +370,7 @@ async function route(req, res, body) {
       if (!job?.workspace_branch || !job.workspace_head_sha || job.workspace_published_head_sha !== job.workspace_head_sha) return json(res, 409, { error: 'Published Builder workspace is required' });
       if (job.workspace_pull_request_head_sha === job.workspace_head_sha && job.workspace_pull_request_url) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, url: job.workspace_pull_request_url, existing: true });
       const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
-      const pullRequest = createGithubPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: `## Bob Builder review\n\nVerified Builder workspace branch: \`${job.workspace_branch}\`\n\nPinned commit: \`${job.workspace_head_sha}\`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.` });
+      const pullRequest = await createGiteaPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: `## Bob Builder review\n\nVerified Builder workspace branch: \`${job.workspace_branch}\`\n\nPinned commit: \`${job.workspace_head_sha}\`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.`, giteaBaseUrl, giteaToken, owner: giteaOwner, repo: giteaRepo });
       const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_pull_request', { _job_id: job.id, _expected_head_sha: pullRequest.head, _pull_request_url: pullRequest.url });
       if (error || !updated) return json(res, 409, { error: 'Builder pull request could not be recorded' });
       return json(res, 201, { ...pullRequest, existing: false });

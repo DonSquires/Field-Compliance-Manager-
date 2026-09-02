@@ -21,8 +21,8 @@ Goal: make Bob a governed enterprise copilot that can assess, propose, and prepa
 - [x] Keep authorization, tool availability, RLS, artifact access, and approval boundaries server-owned. Builder mode changes planning posture only; it never grants shell, repository-write, deployment, or extra-tool authority.
 - [x] Support interactive Builder iterations on dedicated `bob/job-*` branches. Each verified patch is committed to an isolated worktree; follow-up instructions create a child Builder job pinned to that verified workspace head, preserving the complete immutable iteration chain.
 - [x] Add an explicit reviewable branch-push action after a verified Builder commit. Publication is bound to the current workspace head and generated `bob/job-*` branch; it performs no merge or deployment.
-- [x] Add GitHub pull-request creation after branch publication. It accepts only the generated `bob/job-*` branch at the recorded published head, uses a server-derived title/body and fixed `main` base, and records the review URL without merging or deploying.
-- [ ] Add a separately reviewed provider adapter if Builder projects are hosted outside GitHub. Protected-branch merge and deployment remain separate human approvals.
+- [x] Add self-hosted Gitea pull-request creation after branch publication. It accepts only the generated `bob/job-*` branch at the recorded published head, uses a server-derived title/body and fixed `main` base, and records the review URL without merging or deploying.
+- [x] Keep Builder repository publication self-hosted through the configured Gitea API. Protected-branch merge and deployment remain separate human approvals.
 
 ### Foundation
 

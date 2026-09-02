@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
-const { branchNameForJob, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGithubPullRequest } = require('../builder-branch-workspace');
+const { branchNameForJob, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest } = require('../builder-branch-workspace');
 
 const patch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;', ''].join('\n');
 
@@ -44,10 +44,38 @@ test('Builder publication rejects a workspace whose recorded head is stale', () 
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });
 
-test('Builder pull request creation rejects non-GitHub workspace remotes', () => {
+test('Builder pull request creation requires the configured self-hosted Gitea remote', async () => {
   const repo = fixture();
   try {
     const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '12345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
-    assert.throws(() => createGithubPullRequest({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: repo.sha, title: 'PR', body: 'Review' }), /approved GitHub remote/);
+    await assert.rejects(createGiteaPullRequest({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: repo.sha, title: 'PR', body: 'Review', giteaBaseUrl: 'https://gitea.internal', giteaToken: 'token', owner: 'Iron-Eagle-Security-Ltd', repo: 'field-compliance-manager' }), /configured Gitea repository/);
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test('Builder opens a human-review-only pull request through the configured Gitea API', async () => {
+  const repo = fixture();
+  try {
+    const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '12345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
+    git(workspace.workspacePath, ['remote', 'add', 'origin', 'https://gitea.internal/Iron-Eagle-Security-Ltd/field-compliance-manager.git']);
+    let request;
+    const result = await createGiteaPullRequest({
+      workspacePath: workspace.workspacePath,
+      branchName: workspace.branchName,
+      expectedHeadSha: repo.sha,
+      title: 'Bob Builder: review',
+      body: 'Human review only.',
+      giteaBaseUrl: 'https://gitea.internal',
+      giteaToken: 'token',
+      owner: 'Iron-Eagle-Security-Ltd',
+      repo: 'field-compliance-manager',
+      fetchImpl: async (url, init) => {
+        request = { url, init };
+        return { ok: true, json: async () => ({ html_url: 'https://gitea.internal/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls/42' }) };
+      }
+    });
+    assert.equal(request.url, 'https://gitea.internal/api/v1/repos/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls');
+    assert.equal(request.init.headers.Authorization, 'token token');
+    assert.deepEqual(JSON.parse(request.init.body), { base: 'main', head: workspace.branchName, title: 'Bob Builder: review', body: 'Human review only.' });
+    assert.equal(result.url, 'https://gitea.internal/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls/42');
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });
