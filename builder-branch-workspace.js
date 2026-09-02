@@ -86,8 +86,9 @@ function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha }) 
 
 function giteaRepositoryPath(remote) {
   const httpsMatch = String(remote).match(/^https?:\/\/[^/]+\/([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  const sshUrlMatch = String(remote).match(/^ssh:\/\/[^@\s]+@[^/\s]+\/([^/]+\/[^/]+?)(?:\.git)?\/?$/);
   const sshMatch = String(remote).match(/^[^@\s]+@[^:\s]+:([^/]+\/[^/]+?)(?:\.git)?$/);
-  return (httpsMatch?.[1] || sshMatch?.[1] || '').replace(/\.git$/, '');
+  return (httpsMatch?.[1] || sshUrlMatch?.[1] || sshMatch?.[1] || '').replace(/\.git$/, '');
 }
 
 async function createGiteaPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, giteaBaseUrl, giteaToken, owner, repo, fetchImpl = globalThis.fetch }) {

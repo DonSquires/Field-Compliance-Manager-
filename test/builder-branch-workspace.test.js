@@ -36,6 +36,13 @@ test('Builder branch names are deterministic and cannot target protected branche
   assert.throws(() => branchNameForJob('short'), /invalid/);
 });
 
+test('Builder recognizes HTTPS and SSH Gitea remotes as the same repository identity', () => {
+  const { giteaRepositoryPath } = require('../builder-branch-workspace');
+  assert.equal(giteaRepositoryPath('https://git.fcmanager.co.nz/Iron-Eagle-Security-Ltd/field-compliance-manager.git'), 'Iron-Eagle-Security-Ltd/field-compliance-manager');
+  assert.equal(giteaRepositoryPath('ssh://git@git.fcmanager.co.nz:2222/Iron-Eagle-Security-Ltd/field-compliance-manager.git'), 'Iron-Eagle-Security-Ltd/field-compliance-manager');
+  assert.equal(giteaRepositoryPath('git@git.fcmanager.co.nz:Iron-Eagle-Security-Ltd/field-compliance-manager.git'), 'Iron-Eagle-Security-Ltd/field-compliance-manager');
+});
+
 test('Builder publication rejects a workspace whose recorded head is stale', () => {
   const repo = fixture();
   try {
