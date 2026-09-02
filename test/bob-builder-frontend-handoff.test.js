@@ -33,6 +33,7 @@ function fixture() {
 test('frontend handoff claims, executes, registers evidence, and finishes in order', async () => {
   const repo = fixture();
   const calls = [];
+  let workerOptions;
   try {
     const result = await runFrontendHandoff({
       supabase: {},
@@ -47,6 +48,7 @@ test('frontend handoff claims, executes, registers evidence, and finishes in ord
       resetRetry: async () => { calls.push('reset'); },
       execute: async options => {
         calls.push('execute');
+        workerOptions = options;
         fs.writeFileSync(path.join(options.artifactDir, 'verification.json'), JSON.stringify({ succeeded: true }));
         fs.writeFileSync(path.join(options.artifactDir, 'validated.patch'), patch);
         fs.writeFileSync(path.join(options.artifactDir, 'changed-files.json'), '[]');
@@ -58,6 +60,9 @@ test('frontend handoff claims, executes, registers evidence, and finishes in ord
     assert.equal(result.success, true);
     assert.deepEqual(calls, ['claim', 'reset', 'execute', 'register:build_logs', 'register:code_implementation', 'register:changed_file_manifest', 'finish:true']);
     assert.equal(result.job.status, 'testing');
+    assert.equal(workerOptions.memory, '2g');
+    assert.equal(workerOptions.cpus, '2');
+    assert.equal(workerOptions.pidsLimit, 256);
   } finally {
     fs.rmSync(repo.root, { recursive: true, force: true });
   }

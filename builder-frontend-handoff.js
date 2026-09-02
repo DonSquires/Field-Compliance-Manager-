@@ -167,7 +167,7 @@ async function runFrontendHandoff({
       timeoutMs: timeoutSeconds * 1000,
       memory: '2g',
       cpus: '2',
-      pidsLimit: 128
+      pidsLimit: 256
     });
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
