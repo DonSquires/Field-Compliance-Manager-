@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { dockerArguments, redact, workerCommand } = require('../worker-executor');
-const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, redactLog } = require('../frontend-worker');
+const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
 test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('assessment'), ['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']);
@@ -33,6 +33,14 @@ test('frontend verification runs Playwright serially after build and unit checks
   assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', '--workers=1', '--reporter=line']);
 });
 
+test('frontend verification supplies deterministic non-secret Supabase test values', () => {
+  assert.deepEqual(VERIFICATION_ENV, {
+    VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
+    VITE_SUPABASE_ANON_KEY: 'playwright-anon-key',
+    PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright'
+  });
+});
+
 test('docker arguments enforce worker isolation', () => {
   const args = dockerArguments({
     image: 'fcm/bob-worker:test',
@@ -45,6 +53,8 @@ test('docker arguments enforce worker isolation', () => {
   assert.equal(args.includes('--cap-drop=ALL'), true);
   assert.equal(args.includes('--security-opt=no-new-privileges:true'), true);
   assert.equal(args.includes('--user=1000:1000'), true);
+  assert.equal(args.includes('--memory=2g'), true);
+  assert.equal(args.includes('--pids-limit=256'), true);
   assert.equal(args.includes('npm'), true);
   assert.equal(args.includes('shell'), false);
   assert.equal(args.includes('/var/run/docker.sock'), false);

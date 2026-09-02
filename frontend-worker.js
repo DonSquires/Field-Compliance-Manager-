@@ -6,6 +6,11 @@ const { spawnSync } = require('node:child_process');
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 100;
 const MAX_LOG_BYTES = 512 * 1024;
+const VERIFICATION_ENV = Object.freeze({
+  VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
+  VITE_SUPABASE_ANON_KEY: 'playwright-anon-key',
+  PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright'
+});
 const BLOCKED_FILES = new Set([
   'apps/web/package.json',
   'apps/web/package-lock.json',
@@ -68,7 +73,7 @@ function run(command, args, options) {
     cwd: options.cwd,
     encoding: 'utf8',
     maxBuffer: MAX_LOG_BYTES,
-    env: { PATH: process.env.PATH, HOME: '/tmp', CI: 'true', NODE_ENV: 'test' }
+    env: { PATH: process.env.PATH, HOME: '/tmp', CI: 'true', NODE_ENV: 'test', ...VERIFICATION_ENV }
   });
   return {
     command: [command, ...args].join(' '),
@@ -157,6 +162,7 @@ if (require.main === module) {
 module.exports = {
   MAX_PATCH_BYTES,
   PROTECTED_FRONTEND_PATHS,
+  VERIFICATION_ENV,
   redactLog,
   changedFilesFromPatch,
   validatePatchText,

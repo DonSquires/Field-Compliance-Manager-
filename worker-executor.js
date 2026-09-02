@@ -16,7 +16,7 @@ function workerCommand(profile) {
   return [...command];
 }
 
-function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '1g', cpus = '1', pidsLimit = 128 }) {
+function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g', cpus = '1', pidsLimit = 256 }) {
   if (!image) throw new Error('worker image is required');
   if (!sourceDir || !artifactDir) throw new Error('sourceDir and artifactDir are required');
   const command = workerCommand(profile);
