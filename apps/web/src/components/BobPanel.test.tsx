@@ -85,6 +85,7 @@ describe('BobPanel', () => {
     await waitFor(() => {
       expect(mockFrom).toHaveBeenCalledWith('bob_conversations');
     });
+    expect(mockFrom).toHaveBeenCalledWith('bob_conversations');
 
     expect(screen.getByText('Governed session')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Plan work' })).toBeTruthy();

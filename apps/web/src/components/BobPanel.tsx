@@ -69,7 +69,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         .select('id')
         .eq('organization_id', profile.organizationId)
         .eq('user_id', profile.id)
-        .eq('agent_mode', mode)
+        .eq('module_key', mode)
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -82,7 +82,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         // ATLAS WRITES: bob_conversations
         const { data: created, error: createErr } = await supabase
           .from('bob_conversations')
-          .insert([{ organization_id: profile.organizationId, user_id: profile.id, agent_mode: mode, title: mode === 'builder' ? 'Bob Builder' : 'Bob Operations' }])
+          .insert([{ organization_id: profile.organizationId, user_id: profile.id, module_key: mode, title: mode === 'builder' ? 'Bob Builder' : 'Bob Operations' }])
           .select('id')
           .single();
 
