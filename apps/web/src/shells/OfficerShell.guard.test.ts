@@ -41,4 +41,11 @@ describe('OfficerShell state routing', () => {
   it('routes post-debrief actions through the owning officer shell', () => {
     expect(source).toContain("<OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />");
   });
+
+  it('exposes stateful accessible semantics on persistent controls', () => {
+    expect(source).toContain('aria-expanded={bobOpen}');
+    expect(source).toContain("bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'");
+    expect(source).toContain("aria-current={activeModule === 'modules' ? 'page' : undefined}");
+    expect(source).toContain("aria-current={activeModule === 'report' ? 'page' : undefined}");
+  });
 });

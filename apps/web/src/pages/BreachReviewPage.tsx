@@ -173,8 +173,6 @@ const BreachReviewPage: React.FC = () => {
     );
   }
 
-  const openCount = alerts.filter((a) => a.status === 'open').length;
-
   return (
     <div className="page-container">
       <header className="page-header">
@@ -198,37 +196,37 @@ const BreachReviewPage: React.FC = () => {
             className={`btn btn-sm ${statusFilter === 'open' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('open')}
           >
-            Open ({alerts.filter(a => a.status === 'open').length})
+            Open
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'acknowledged' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('acknowledged')}
           >
-            Acknowledged ({alerts.filter(a => a.status === 'acknowledged').length})
+            Acknowledged
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'actioned' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('actioned')}
           >
-            Actioned ({alerts.filter(a => a.status === 'actioned').length})
+            Actioned
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'dismissed' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('dismissed')}
           >
-            Dismissed ({alerts.filter(a => a.status === 'dismissed').length})
+            Dismissed
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'resolved' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('resolved')}
           >
-            Resolved ({alerts.filter(a => a.status === 'resolved').length})
+            Resolved
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'exempt_homeless' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setStatusFilter('exempt_homeless')}
           >
-            Exempt - Homeless ({alerts.filter(a => a.status === 'exempt_homeless').length})
+            Exempt - Homeless
           </button>
           <button
             className={`btn btn-sm ${statusFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}

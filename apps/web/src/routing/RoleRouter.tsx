@@ -25,7 +25,7 @@ const PORTAL_CHOICE_KEY = 'fcm.admin_officer.portal';
 type PortalChoice = 'admin' | 'field';
 
 export function RoleRouter() {
-  const { profile, loading } = useAuth();
+  const { profile, loading, error, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [portalChoice, setPortalChoice] = useState<PortalChoice | null>(
@@ -34,7 +34,15 @@ export function RoleRouter() {
 
   if (loading) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--color-text-primary)' }}>Loading...</div>;
 
-  if (!profile) return null;
+  if (!profile) {
+    return (
+      <AccountAccessState
+        title="Profile unavailable"
+        message={error ?? 'Your session is active, but your application profile could not be loaded. Sign out and try again, or contact your administrator.'}
+        onSignOut={signOut}
+      />
+    );
+  }
 
   const { role } = profile;
 
@@ -77,14 +85,16 @@ export function RoleRouter() {
     expectedPrefix = '/client';
   } else {
     return (
-      <div style={{ padding: 32, color: 'var(--color-text-primary)' }}>
-        Unknown role: {role}. Contact your administrator.
-      </div>
+      <AccountAccessState
+        title="Unknown role"
+        message={`Unknown role: ${role}. Contact your administrator.`}
+        onSignOut={signOut}
+      />
     );
   }
 
   const path = location.pathname;
-  if (!path.startsWith(expectedPrefix)) {
+  if (!isWithinRolePrefix(path, expectedPrefix)) {
     return <Navigate to={expectedPrefix} replace />;
   }
 
@@ -128,6 +138,28 @@ export function RoleRouter() {
   }
 
   return null;
+}
+
+function isWithinRolePrefix(path: string, expectedPrefix: string) {
+  return path === expectedPrefix || path.startsWith(`${expectedPrefix}/`);
+}
+
+function AccountAccessState({ title, message, onSignOut }: {
+  title: string;
+  message: string;
+  onSignOut: () => Promise<void>;
+}) {
+  return (
+    <div style={ps.page}>
+      <div style={ps.card}>
+        <div style={ps.title}>{title}</div>
+        <div style={ps.hint}>{message}</div>
+        <button type="button" style={ps.action} onClick={() => void onSignOut()}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** Portal chooser shown to admin_officer at login. */
@@ -213,5 +245,14 @@ const ps = {
     fontSize: 12,
     color: 'var(--color-text-secondary)',
     textAlign: 'center',
+  } as React.CSSProperties,
+  action: {
+    border: 0,
+    borderRadius: 8,
+    background: 'var(--color-primary)',
+    color: 'white',
+    cursor: 'pointer',
+    fontWeight: 600,
+    padding: '10px 16px',
   } as React.CSSProperties,
 };

@@ -13,6 +13,11 @@ describe('governed breach outcome return', () => {
     expect(page).not.toMatch(/from\('breach_alerts'\)[\s\S]{0,300}\.update\(/);
   });
 
+  it('does not invent cross-status filter counts from a single-status query', () => {
+    expect(page).toContain("if (statusFilter !== 'all')");
+    expect(page).not.toContain('alerts.filter(a => a.status ===');
+  });
+
   it('shows exact officer-owned breach outcomes', () => {
     expect(officer).toContain("from('breach_alerts')");
     expect(officer).toContain("get('breach')");

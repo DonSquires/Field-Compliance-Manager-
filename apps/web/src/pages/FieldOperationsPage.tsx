@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
@@ -76,7 +77,7 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
     const organizationId = profile.organizationId;
     const [onDuty, dispatch, welfare, reports] = await Promise.all([
       supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress']),
-      supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene']),
+      supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
       supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']),
       supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted'),
     ]);

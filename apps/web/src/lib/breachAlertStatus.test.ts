@@ -1,34 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
-describe('Breach alert schema mapping', () => {
-  it('documents that breach_alerts table has 6 status values but UI only filters 3', () => {
-    // SCHEMA FACT: supabase/schema.sql breach_alerts.status CHECK constraint:
-    // 'open' | 'acknowledged' | 'actioned' | 'dismissed' | 'resolved' | 'exempt_homeless'
-    
-    // BreachReviewPage filter dropdown only supports:
-    // 'open' | 'actioned' | 'all'
-    
-    // MISSING FILTERS: 'acknowledged' | 'dismissed' | 'resolved' | 'exempt_homeless'
-    // This is a gap: users cannot manage the full lifecycle of a breach from submission to resolution.
-    
-    // Status lifecycle per schema docs:
-    // - open → acknowledged (user sees it) 
-    // - open/acknowledged → actioned (action taken)
-    // - actioned → dismissed (withdrawn) OR resolved (resolved via legal/payment)
-    // - special: exempt_homeless (suppresses enforcement, tracks homeless claims)
-    
-    const validStatuses = [
-      'open',
-      'acknowledged', // MISSING from UI filter
-      'actioned',
-      'dismissed',     // MISSING from UI filter
-      'resolved',      // MISSING from UI filter
-      'exempt_homeless' // MISSING from UI filter
-    ];
-    
-    const uiFilters = ['open', 'actioned', 'all'];
-    const missingFilters = validStatuses.filter(s => !uiFilters.includes(s) && s !== 'all');
-    
-    expect(missingFilters).toEqual(['acknowledged', 'dismissed', 'resolved', 'exempt_homeless']);
+const page = readFileSync(resolve(process.cwd(), 'src/pages/BreachReviewPage.tsx'), 'utf8');
+
+describe('Breach alert lifecycle filters', () => {
+  it('exposes every schema-supported status in the review queue', () => {
+    for (const status of ['open', 'acknowledged', 'actioned', 'dismissed', 'resolved', 'exempt_homeless']) {
+      expect(page).toContain(`setStatusFilter('${status}')`);
+    }
   });
 });

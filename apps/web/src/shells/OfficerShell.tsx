@@ -426,8 +426,8 @@ const OfficerShell: React.FC = () => {
             <span>{welfareDisplay.dot}</span><small>Safety</small>
           </button>
           <NotificationCenter onNavigate={navigateFromNotification} />
-          <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
-            <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
+          <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
+            <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
           <div className="officer-profile-chip" title={profile?.displayName ?? 'Officer'}>
             <UserRound size={17} aria-hidden="true" /><span>{profile?.displayName?.split(' ')[0] ?? 'Officer'}</span>
@@ -460,10 +460,10 @@ const OfficerShell: React.FC = () => {
       </main>
 
       <nav className="officer-action-bar" aria-label="Field actions">
-        <button type="button" onClick={() => navigateToModule('modules')} className={activeModule === 'modules' ? 'is-active' : ''}>
+        <button type="button" onClick={() => navigateToModule('modules')} className={activeModule === 'modules' ? 'is-active' : ''} aria-current={activeModule === 'modules' ? 'page' : undefined}>
           <Grid3X3 size={19} aria-hidden="true" /><span>Modules</span>
         </button>
-        <button type="button" onClick={() => navigateToModule('report')} className={activeModule === 'report' ? 'is-active' : ''}>
+        <button type="button" onClick={() => navigateToModule('report')} className={activeModule === 'report' ? 'is-active' : ''} aria-current={activeModule === 'report' ? 'page' : undefined}>
           <FilePlus2 size={19} aria-hidden="true" /><span>Report</span>
         </button>
         <button type="button" className="officer-sos-action" onClick={() => void safety.triggerSOS()} disabled={safety.writeStatus === 'pending' || safety.activeAlert?.kind === 'sos'}>

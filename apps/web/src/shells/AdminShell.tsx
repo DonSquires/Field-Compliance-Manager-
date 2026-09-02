@@ -46,6 +46,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useEnabledModules } from '../hooks/useEnabledModules';
+import { getModuleAccessMessage } from '../lib/moduleAccessMessage';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
@@ -192,7 +193,7 @@ interface NavItemProps {
 
 const NavItem: React.FC<NavItemProps> = ({ label, icon: Icon, active, onClick }) => {
   return (
-    <button type="button" onClick={onClick} className={`admin-nav-item ${active ? 'is-active' : ''}`} title={label}>
+    <button type="button" onClick={onClick} className={`admin-nav-item ${active ? 'is-active' : ''}`} title={label} aria-label={label} aria-current={active ? 'page' : undefined}>
       <span><Icon size={17} aria-hidden="true" /></span>
       <span>{label}</span>
     </button>
@@ -211,7 +212,6 @@ const AdminShell: React.FC = () => {
   const { profile } = useAuth();
   const { status: modulesStatus } = useEnabledModules(profile?.organizationId ?? null);
   const { agreements, sites, zones, selectedAgreement, selectedSite, selectedZone, loading: relationshipLoading } = useServiceRelationships();
-  const modulesLoading = modulesStatus === 'loading';
 
   const [activePage, setActivePage] = useState<AdminPage>('hub');
   const [crmTab, setCrmTab] = useState<CRMTab>('crm');
@@ -331,6 +331,11 @@ const AdminShell: React.FC = () => {
   }, [navigateToFieldOps, navigateToPage]);
 
   const workflowContext = useMemo(() => readWorkflowContext(location.search), [location.search]);
+
+  const moduleAccessNotice = useMemo(() => {
+    if (modulesStatus === 'configured') return null;
+    return getModuleAccessMessage(modulesStatus, false, { moduleLabel: 'Module configuration' });
+  }, [modulesStatus]);
 
   const navigateFromNotification = useCallback((notification: NotificationRecord) => {
     const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
@@ -460,7 +465,7 @@ const AdminShell: React.FC = () => {
           <div className="admin-sidebar-brand">
             <span><Shield size={18} aria-hidden="true" /></span>
             {!sidebarCollapsed && <div><strong>FCM</strong><small>Administration</small></div>}
-            <button type="button" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}>
+            <button type="button" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!sidebarCollapsed}>
               {sidebarCollapsed ? <ChevronRight size={17} aria-hidden="true" /> : <ChevronLeft size={17} aria-hidden="true" />}
             </button>
           </div>
@@ -474,7 +479,7 @@ const AdminShell: React.FC = () => {
                 <NavItem
                   key={item.id}
                   id={item.id}
-                  label={sidebarCollapsed ? '' : item.label}
+                  label={item.label}
                   icon={item.icon}
                   active={activePage === item.id}
                   onClick={() => navigateToPage(item.id as AdminPage)}
@@ -501,8 +506,8 @@ const AdminShell: React.FC = () => {
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>
-              <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
-                <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
+              <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
+                <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
               </button>
               <div className="admin-profile-chip">{profile?.displayName ?? profile?.role ?? 'Administrator'}</div>
             </div>
@@ -510,6 +515,7 @@ const AdminShell: React.FC = () => {
 
           <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
+            {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
             <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
             <React.Suspense fallback={<LazyPageFallback />}>
               {renderPage()}
@@ -535,10 +541,10 @@ const AdminShell: React.FC = () => {
         </div>
         <div className="admin-shell-tools">
           <NotificationCenter onNavigate={navigateFromNotification} />
-          <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant">
-            <Bot size={19} aria-hidden="true" /><span className="sr-only">Open Bob assistant</span>
+          <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
+            <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
-          <button type="button" className="admin-shell-icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} title={mobileMenuOpen ? 'Close navigation' : 'Open navigation'}>
+          <button type="button" className="admin-shell-icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} title={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileMenuOpen}>
             {mobileMenuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
             <span className="sr-only">{mobileMenuOpen ? 'Close navigation' : 'Open navigation'}</span>
           </button>
@@ -554,7 +560,7 @@ const AdminShell: React.FC = () => {
                 {items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role)).map((item) => {
                   const Icon = item.icon;
                   return (
-                    <button key={item.id} onClick={() => navigateToPage(item.id as AdminPage)} className={`admin-mobile-nav-item ${activePage === item.id ? 'is-active' : ''}`}>
+                    <button key={item.id} onClick={() => navigateToPage(item.id as AdminPage)} className={`admin-mobile-nav-item ${activePage === item.id ? 'is-active' : ''}`} aria-current={activePage === item.id ? 'page' : undefined}>
                       <Icon size={17} aria-hidden="true" /><span>{item.label}</span>
                     </button>
                   );
@@ -567,6 +573,7 @@ const AdminShell: React.FC = () => {
 
       <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
+        {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
         <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
         <React.Suspense fallback={<LazyPageFallback />}>
           {renderPage()}
@@ -583,7 +590,7 @@ const AdminShell: React.FC = () => {
         ].map((tab) => {
           const Icon = tab.icon;
           return (
-            <button key={tab.id} onClick={() => navigateToPage(tab.id as AdminPage)} className={activePage === tab.id ? 'is-active' : ''}>
+            <button key={tab.id} onClick={() => navigateToPage(tab.id as AdminPage)} className={activePage === tab.id ? 'is-active' : ''} aria-current={activePage === tab.id ? 'page' : undefined}>
               <Icon size={19} aria-hidden="true" /><span>{tab.label}</span>
             </button>
           );

@@ -10,6 +10,8 @@ describe('Admin Hub operational data contract', () => {
       expect(source).toContain(`from('${table}')`);
     }
     expect(source).toContain('metricFrom(onDuty)');
+    expect(source).toContain("import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus'");
+    expect(source).toContain(".in('status', ACTIVE_DISPATCH_JOB_STATUSES)");
     expect(source).toContain('welfareRows.error');
     expect(source).toContain('dispatchRows.error');
     expect(source).toContain('breachRows.error');
@@ -26,5 +28,7 @@ describe('Admin Hub operational data contract', () => {
   it('shows unavailable metrics instead of silently coercing failed reads to zero', () => {
     expect(source).toContain("{ value: null, error: response.error.message }");
     expect(source).toContain("unavailable ? 'Unavailable' : metric.value");
+    expect(source).toContain('const attentionUnavailable = attentionMetrics.some((value) => value === null);');
+    expect(source).toContain('Some active safety, dispatch, or compliance counts are unavailable.');
   });
 });

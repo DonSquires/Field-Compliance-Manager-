@@ -23,6 +23,8 @@ describe('field operations command surface', () => {
     for (const table of ['shifts', 'dispatch_jobs', 'welfare_alerts', 'officer_field_reports']) {
       expect(page).toContain(`from('${table}')`);
     }
+    expect(page).toContain("import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus'");
+    expect(page).toContain(".in('status', ACTIVE_DISPATCH_JOB_STATUSES)");
     expect(page).toContain('Some operational counts are unavailable');
   });
 });

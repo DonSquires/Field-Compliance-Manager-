@@ -29,6 +29,23 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('This area is not available for your current role.');
   });
 
+  it('uses shared module access wording for configuration state instead of silently ignoring it', () => {
+    expect(source).toContain('getModuleAccessMessage');
+    expect(source).toContain('moduleAccessNotice');
+    expect(source).toContain("if (modulesStatus === 'configured') return null");
+    expect(source).not.toContain("const modulesLoading = modulesStatus === 'loading'");
+  });
+
+  it('exposes stateful accessible names and current-page semantics on shell controls', () => {
+    expect(source).toContain("aria-current={active ? 'page' : undefined}");
+    expect(source).toContain("aria-current={activePage === tab.id ? 'page' : undefined}");
+    expect(source).toContain('aria-expanded={!sidebarCollapsed}');
+    expect(source).toContain('aria-expanded={mobileMenuOpen}');
+    expect(source).toContain('aria-expanded={bobOpen}');
+    expect(source).toContain("label={item.label}");
+    expect(source).not.toContain("label={sidebarCollapsed ? '' : item.label}");
+  });
+
   it('persists field operations subareas in the URL', () => {
     expect(source).toContain('FIELD_OPS_AREAS');
     expect(source).toContain('new URLSearchParams(location.search)');

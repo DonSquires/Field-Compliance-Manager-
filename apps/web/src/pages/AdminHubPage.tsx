@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { supabase } from '../lib/supabase';
 import './AdminHubPage.css';
 
@@ -94,12 +95,12 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     try {
       const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, welfareRows, dispatchRows, breachRows, reportRows] = await Promise.all([
         supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
-        supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene']),
+        supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
         supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']),
         supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']),
         supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('observed_at', todayStart),
         supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6),
-        supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene']).order('created_at', { ascending: false }).limit(6),
+        supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6),
         supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
         supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
       ]);
@@ -211,10 +212,9 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     return () => { void supabase.removeChannel(channel); };
   }, [loadDashboard, profile?.organizationId]);
 
-  const attentionCount = useMemo(
-    () => [metrics.welfare.value, metrics.breaches.value, metrics.activeDispatch.value].reduce<number>((sum, value) => sum + (value ?? 0), 0),
-    [metrics],
-  );
+  const attentionMetrics = [metrics.welfare.value, metrics.breaches.value, metrics.activeDispatch.value];
+  const attentionCount = attentionMetrics.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const attentionUnavailable = attentionMetrics.some((value) => value === null);
 
   return (
     <div className="admin-overview">
@@ -222,7 +222,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         <div>
           <span>Operations control</span>
           <h1>Today at a glance</h1>
-          <p>{attentionCount > 0 ? `${attentionCount} active items across safety, dispatch, and compliance.` : 'No active safety, dispatch, or compliance items.'}</p>
+          <p>{attentionUnavailable ? 'Some active safety, dispatch, or compliance counts are unavailable. Review metric status below.' : attentionCount > 0 ? `${attentionCount} active items across safety, dispatch, and compliance.` : 'No active safety, dispatch, or compliance items.'}</p>
         </div>
         <div className="admin-refresh-block">
           {lastUpdated && <time dateTime={lastUpdated.toISOString()}>Updated {lastUpdated.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</time>}

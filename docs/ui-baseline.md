@@ -122,21 +122,11 @@ The guard test is a **source-text guard, not a behavioural test**. It exists to 
 
 **Implemented**: `useOfficerSafety.ts` now unifies all three original hooks. See the "Implemented"/"Resolved" note under the P0 section immediately below for the exact fix and test coverage.
 
-### Open, important: `welfare_alerts.acknowledged_by` is a SEPARATE column from `resolved_by` — our rebuild may be conflating two distinct actions
+### Resolved: acknowledgement and resolution are distinct governed welfare actions
 
-A schema search surfaced `welfare_alerts_acknowledged_by_fkey | welfare_alerts.acknowledged_by | user_profiles.id` in `docs/db/LIVE_SCHEMA.md`, alongside the already-known `resolved_by`. `WelfareAlertsPage.tsx` (not yet read in full) shows a branch `if (kind === 'acknowledge') { ... } else { ... }`, which strongly suggests the original product distinguishes **two separate actions**: acknowledging an alert (someone has seen it / is responding, without necessarily declaring the officer safe) and resolving it (confirming the officer is safe / closing it out).
+The current schema and [`WelfareAlertsPage.tsx`](../apps/web/src/pages/WelfareAlertsPage.tsx) confirm a two-step supervisor workflow. `manage_welfare_alert` records `acknowledge` as `status='acknowledged'` with `acknowledged_by`, `acknowledged_at`, and `acknowledgement_notes`; it records `resolve` separately with `status='resolved'`, `resolved_by`, `resolved_at`, and `resolution_notes`. The page exposes both actions, requires human notes, passes the current status for optimistic concurrency, and presents separate acknowledgement and resolution evidence.
 
-**This rebuild's `acknowledgeAlert()` currently only implements one action** — it sets `status: 'resolved'`, `resolved_by`, `resolved_at` — i.e. it behaves like a "resolve," not a distinct "acknowledge." If the original genuinely has a two-step model (acknowledge without resolving, then separately resolve), this rebuild is missing a state: a supervisor should be able to say "I've seen this and am responding" without that being indistinguishable from "the officer is confirmed safe." Conflating these could mean an alert looks fully closed the moment anyone taps anything, even if the officer is still in danger and someone is merely en route.
-
-**Also surfaced**: `docs/WELFARE_MODULE_INVESTIGATION.md`, which appears to already contain a product-owner-level assessment of the welfare module's gaps (one visible line: "build has only a thin countdown-timer welfare hook... GPS, metadata. Basis for GPS-inactivity detection"). Also `docs/APP_AUDIT_2026-07.md` (an existing colour-coded page-by-page audit, welfare rated 🟢/🟢/🟠/🟢/🟢) and `docs/REBUILD_TODO.md` (the original team's own rebuild backlog, already mentioning `officer_welfare_settings`). These may already document known gaps faster than further raw source tracing.
-
-**Do not guess at the fix.** Before changing `acknowledgeAlert()`'s behavior or adding a separate `acknowledge()` action to `useOfficerSafety.ts`, this needs source evidence, not inference from a column name and one conditional branch.
-
-**Next Bob reads, in order**:
-1. `docs/WELFARE_MODULE_INVESTIGATION.md` in full — likely the fastest path to understanding what the product team already knows is wrong/incomplete about welfare.
-2. `apps/web/src/pages/WelfareAlertsPage.tsx` in full, specifically the `kind === 'acknowledge'` branch and whatever the other branch does, to confirm the two-action model and exactly what each writes (`acknowledged_by`/`acknowledged_at` vs `resolved_by`/`resolved_at`).
-3. The full `welfare_alerts` column list from `docs/db/LIVE_SCHEMA.md` (we have only fragments via grep) to confirm whether `acknowledged_at` also exists alongside `acknowledged_by`.
-4. `docs/APP_AUDIT_2026-07.md`'s welfare section in full, and `docs/REBUILD_TODO.md`'s welfare-related items, as corroborating/prioritizing context.
+An officer is authorized to resolve their own alert through the same governed command, but is not authorized to acknowledge it as a supervisor. `useOfficerSafety` therefore requests only the `resolve` action; its `acknowledgeAlert()` name is historical, while the command semantics are correctly resolution-only. No separate officer acknowledgement action should be added without a product decision.
 
 ## P0 SAFETY-CRITICAL: man-down alert auto-resolves on movement alone, with no positive human acknowledgement
 

@@ -30,6 +30,7 @@ interface ZoneRow extends HouseMapZone {
   nightly_limit_consecutive: number | null;
   nightly_limit_monthly: number | null;
   scv_required: boolean;
+  configuration_version: number;
 }
 
 interface ClosureRow {
@@ -86,6 +87,8 @@ export default function ZoneDetailPage() {
   const [managing, setManaging] = useState(false);
   const [managerDirty, setManagerDirty] = useState(false);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [complianceForm, setComplianceForm] = useState({ nightly_limit_consecutive: '', nightly_limit_monthly: '', scv_required: false });
+  const [savingCompliance, setSavingCompliance] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -176,6 +179,51 @@ export default function ZoneDetailPage() {
     setSelected(zone);
     navigate(`/admin/zones?zone=${zone.id}`, { replace: true });
     void loadContext(zone);
+  };
+
+  useEffect(() => {
+    setComplianceForm({
+      nightly_limit_consecutive: selected?.nightly_limit_consecutive != null ? String(selected.nightly_limit_consecutive) : '',
+      nightly_limit_monthly: selected?.nightly_limit_monthly != null ? String(selected.nightly_limit_monthly) : '',
+      scv_required: selected?.scv_required ?? false,
+    });
+  }, [selected]);
+
+  const handleSaveCompliance = async () => {
+    if (!selected || savingCompliance) return;
+    if (!selected.location_id) {
+      setError("Compliance limits can only be saved for zones linked to an operational location.");
+      return;
+    }
+    setSavingCompliance(true);
+    setError(null);
+    const nightlyLimitConsecutive = complianceForm.nightly_limit_consecutive.trim() ? Number(complianceForm.nightly_limit_consecutive) : null;
+    const nightlyLimitMonthly = complianceForm.nightly_limit_monthly.trim() ? Number(complianceForm.nightly_limit_monthly) : null;
+    // ATLAS WRITES: location_zones via manage_crm_zone
+    const { data, error: updateError } = await supabase.rpc('manage_crm_zone', {
+      p_action: 'update',
+      p_zone_id: selected.id,
+      p_location_id: selected.location_id,
+      p_expected_version: selected.configuration_version,
+      p_name: selected.name,
+      p_zone_type: selected.zone_type,
+      p_module_key: selected.module_key,
+      p_rule_type: selected.rule_type,
+      p_is_active: selected.is_active,
+      p_nightly_limit_consecutive: nightlyLimitConsecutive,
+      p_nightly_limit_monthly: nightlyLimitMonthly,
+      p_scv_required: complianceForm.scv_required,
+      p_enforcement_workflow_override: selected.enforcement_workflow_override,
+    });
+    if (updateError) {
+      setError(updateError.message);
+    } else {
+      const saved = data as Partial<ZoneRow> | null;
+      const updated = { ...selected, ...saved, nightly_limit_consecutive: nightlyLimitConsecutive, nightly_limit_monthly: nightlyLimitMonthly, scv_required: complianceForm.scv_required };
+      setSelected(updated);
+      setZones(zones.map((z) => (z.id === updated.id ? updated : z)));
+    }
+    setSavingCompliance(false);
   };
 
   if (loading)
@@ -295,19 +343,42 @@ export default function ZoneDetailPage() {
                     : "Always active"}
                 </strong>
               </article>
-              <article>
-                <span>Night limits</span>
-                <strong>
-                  {selected.nightly_limit_consecutive ?? "—"} consecutive ·{" "}
-                  {selected.nightly_limit_monthly ?? "—"} monthly
-                </strong>
-              </article>
-              <article>
-                <span>SCV</span>
-                <strong>
-                  {selected.scv_required ? "Required" : "Not required"}
-                </strong>
-              </article>
+            </section>
+            <section className="reports-section">
+              <h3>Compliance limits</h3>
+              <div className="form-group">
+                <label>Consecutive-night limit</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={complianceForm.nightly_limit_consecutive}
+                  onChange={(e) => setComplianceForm({ ...complianceForm, nightly_limit_consecutive: e.target.value })}
+                  placeholder="No limit"
+                />
+              </div>
+              <div className="form-group">
+                <label>Monthly-night limit</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={complianceForm.nightly_limit_monthly}
+                  onChange={(e) => setComplianceForm({ ...complianceForm, nightly_limit_monthly: e.target.value })}
+                  placeholder="No limit"
+                />
+              </div>
+              <div className="form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={complianceForm.scv_required}
+                    onChange={(e) => setComplianceForm({ ...complianceForm, scv_required: e.target.checked })}
+                  />{' '}
+                  Self-contained vehicle (SCV) certification required
+                </label>
+              </div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => void handleSaveCompliance()} disabled={savingCompliance}>
+                {savingCompliance ? 'Saving…' : 'Save Compliance Limits'}
+              </button>
             </section>
             {(selected.bylaw_clause || selected.bylaw_source_url) && (
               <section className="reports-section">

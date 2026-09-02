@@ -12,41 +12,50 @@ import { supabase } from '../lib/supabase';
 
 export interface WelfareCheckin {
   id: string;
+  organization_id: string;
   officer_user_id: string;
-  status: 'ok' | 'welfare_check_required' | 'escalated';
-  gps_latitude: number | null;
-  gps_longitude: number | null;
-  checked_at: string;
-  metadata?: Record<string, any>;
+  shift_id: string | null;
+  status: 'ok' | 'overdue' | 'man_down' | 'sos';
+  notes: string | null;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  checked_in_at: string;
 }
 
 interface UseWelfareCheckinOptions {
+  organizationId?: string | null;
   intervalMinutes?: number; // Default 30 min
   autoReport?: boolean;
 }
 
 export function useWelfareCheckin(userId: string, options: UseWelfareCheckinOptions = {}) {
-  const { intervalMinutes = 30, autoReport = true } = options;
+  const { organizationId = null, intervalMinutes = 30, autoReport = true } = options;
 
   const [checkin, setCheckin] = useState<WelfareCheckin | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [lastCheckinTime, setLastCheckinTime] = useState<Date | null>(null);
 
   // Record a welfare check-in
-  const recordCheckin = useCallback(async (status: 'ok' | 'welfare_check_required' | 'escalated') => {
+  const recordCheckin = useCallback(async (status: WelfareCheckin['status']) => {
+    if (!userId || !organizationId) {
+      setError('Officer and organization are required before recording welfare check-in.');
+      return false;
+    }
     setIsLoading(true);
+    setError(null);
     try {
-      let gps_latitude: number | null = null;
-      let gps_longitude: number | null = null;
+      let gps_lat: number | null = null;
+      let gps_lng: number | null = null;
 
       // Try to get GPS location if available
-      if (navigator.geolocation) {
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
         try {
           const position = await new Promise<GeolocationPosition>((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
           });
-          gps_latitude = position.coords.latitude;
-          gps_longitude = position.coords.longitude;
+          gps_lat = position.coords.latitude;
+          gps_lng = position.coords.longitude;
         } catch (e) {
           console.warn('Could not get GPS position:', e);
         }
@@ -54,30 +63,32 @@ export function useWelfareCheckin(userId: string, options: UseWelfareCheckinOpti
 
       const { data, error } = await supabase
         .from('welfare_checks')
-        .insert([{
+        .insert({
+          organization_id: organizationId,
           officer_user_id: userId,
           status,
-          gps_latitude,
-          gps_longitude,
-          checked_at: new Date().toISOString(),
-          metadata: {
-            timestamp: Date.now(),
-            userAgent: navigator.userAgent,
-          },
-        }])
+          gps_lat,
+          gps_lng,
+          checked_in_at: new Date().toISOString(),
+          notes: 'Officer welfare check-in',
+        })
         .select()
         .single();
 
       if (error) throw error;
+      if (!data) throw new Error('Welfare check-in was not confirmed.');
 
       setCheckin(data as WelfareCheckin);
       setLastCheckinTime(new Date());
+      return true;
     } catch (err) {
-      console.error('Failed to record welfare checkin:', err);
+      const message = err instanceof Error ? err.message : 'Failed to record welfare check-in.';
+      setError(message);
+      return false;
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, [organizationId, userId]);
 
   // Auto-report if enabled and interval has passed
   useEffect(() => {
@@ -102,6 +113,7 @@ export function useWelfareCheckin(userId: string, options: UseWelfareCheckinOpti
   return {
     checkin,
     isLoading,
+    error,
     recordCheckin,
     lastCheckinTime,
     minutesSinceLastCheckin,
