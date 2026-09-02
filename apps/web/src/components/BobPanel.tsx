@@ -61,6 +61,7 @@ interface BobAttachmentPayload {
 }
 
 type WorkStateTone = 'idle' | 'working' | 'using-data' | 'waiting' | 'proposal' | 'completed' | 'failed';
+type VoiceState = 'off' | 'recording';
 
 interface WorkState {
   tone: WorkStateTone;
@@ -77,10 +78,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceState>('off');
   const [error, setError] = useState<string | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
   const contextEntries = useMemo(() => Object.entries(context ?? {})
     .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
     .slice(0, 4), [context]);
@@ -149,6 +154,11 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     if (!node || typeof node.scrollTo !== 'function') return;
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => () => {
+    mediaRecorderRef.current?.state === 'recording' && mediaRecorderRef.current.stop();
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+  }, []);
 
   const startNewConversation = useCallback(async () => {
     if (!profile?.organizationId || !profile?.id) return;
@@ -226,6 +236,49 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'uploaded', attachment } : item));
     }
     return uploaded;
+  };
+
+  const startVoiceCapture = async () => {
+    if (voiceState !== 'off') return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('Voice capture is not available in this browser.');
+      return;
+    }
+    try {
+      setError(null);
+      audioChunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = event => {
+        if (event.data?.size) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        audioChunksRef.current = [];
+        setVoiceState('off');
+        if (blob.size <= 0) {
+          setError('Voice note was empty. Try recording again.');
+          return;
+        }
+        const file = new File([blob], `voice-note-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`, { type: blob.type || 'audio/webm' });
+        addFiles([file]);
+      };
+      recorder.start();
+      setVoiceState('recording');
+    } catch (err) {
+      mediaStreamRef.current?.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+      setVoiceState('off');
+      setError(err instanceof Error ? err.message : 'Voice capture could not start.');
+    }
+  };
+
+  const stopVoiceCapture = () => {
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
   };
 
   const handleSend = async (e: React.FormEvent) => {
@@ -308,7 +361,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <div className="bob-panel-header-actions">
           <button type="button" onClick={() => void startNewConversation()} title="New Bob session" aria-label="New Bob session"><Plus size={17} /></button>
-          <button type="button" disabled title="Voice capture is off"><Mic size={17} /><span>Voice off</span></button>
+          <button type="button" onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} title={voiceState === 'recording' ? 'Stop voice capture' : 'Record voice note'} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Record voice note'}><Mic size={17} /><span>{voiceState === 'recording' ? 'Recording' : 'Voice off'}</span></button>
           <button type="button" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
           <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
         </div>

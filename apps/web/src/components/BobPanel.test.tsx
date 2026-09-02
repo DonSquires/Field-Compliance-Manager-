@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BobPanel } from './BobPanel';
 
@@ -24,6 +24,10 @@ vi.mock('../lib/supabase', () => ({
 }));
 
 describe('BobPanel', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     mockFrom.mockReset();
     mockInvoke.mockReset();
@@ -194,6 +198,63 @@ describe('BobPanel', () => {
     expect(screen.getByText(/PDF, DOCX, CSV\/XLSX, TXT, JSON, images, audio, and video up to 48 MB each/)).toBeTruthy();
     expect(screen.getByLabelText('Attach files')).toBeTruthy();
     expect(screen.getByText('Voice off')).toBeTruthy();
+  });
+
+  it('records voice as an audio evidence attachment', async () => {
+    const stopTrack = vi.fn();
+    const stream = { getTracks: () => [{ stop: stopTrack }] };
+    const getUserMedia = vi.fn().mockResolvedValue(stream);
+    Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true });
+
+    class FakeMediaRecorder {
+      static isTypeSupported = () => true;
+      state: RecordingState = 'inactive';
+      mimeType = 'audio/webm';
+      ondataavailable: ((event: BlobEvent) => void) | null = null;
+      onstop: (() => void) | null = null;
+
+      constructor(_stream: MediaStream) {}
+
+      start() {
+        this.state = 'recording';
+      }
+
+      stop() {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob(['voice bytes'], { type: 'audio/webm' }) } as BlobEvent);
+        this.onstop?.();
+      }
+    }
+
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
+    const storageApi = { upload: vi.fn().mockResolvedValue({ error: null }), remove: vi.fn().mockResolvedValue({ error: null }) };
+    mockStorageFrom.mockReturnValue(storageApi);
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByLabelText('Record voice note'));
+  expect(await screen.findByText('Recording')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Stop voice capture'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/voice-note-.*\.webm/)).toBeTruthy();
+      expect(screen.getByText('queued')).toBeTruthy();
+    });
+    expect(stopTrack).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mockStorageFrom).toHaveBeenCalledWith('bob-uploads');
+      expect(storageApi.upload).toHaveBeenCalled();
+      expect(mockFrom).toHaveBeenCalledWith('bob_attachments');
+      expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+        body: expect.objectContaining({
+          message: 'Please review the attached file(s).',
+          attachments: [expect.objectContaining({ type: 'audio/webm', storage_bucket: 'bob-uploads' })],
+        }),
+      }));
+    });
   });
 
   it('names waiting-on-human and failed states plainly', async () => {
