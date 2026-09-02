@@ -25,17 +25,19 @@ Goal: make Bob a governed enterprise copilot that can assess, propose, and prepa
 
 ### Safe Worker Execution
 
-- [ ] Launch each worker in a disposable non-root workspace with CPU, memory, wall-clock, and disk limits.
-- [ ] Apply a command allowlist, network policy, secret-redaction layer, and automatic cleanup. Do not expose a host Docker socket or broad production credentials.
+- [x] Launch each worker in a disposable non-root workspace with CPU, memory, wall-clock, and disk limits. `worker-executor.js` enforces read-only source mounts, bounded tmpfs work areas, CPU/memory/PID limits, and a fixed worker profile command.
+- [x] Apply a command allowlist, network policy, secret-redaction layer, and automatic cleanup. The worker has no network, no Docker socket, dropped capabilities, `no-new-privileges`, redacted output, and handoff cleanup in `finally` blocks.
 - [ ] Bind idempotency keys to job step, tool/action, immutable input reference, and worker attempt so retries cannot duplicate effects.
 - [ ] Add verification adapters for focused tests, type checks, lint, dependency audit, secret scanning, and frontend build checks.
 - [ ] Store logs and artifacts with checksums, retention policy, provenance, and job-scoped access control.
 
 ### Human Approval and First Vertical Slice
 
-- [ ] Implement `builder_approvals` request, response, expiry, and immutable audit flow.
+- [x] Expose existing `builder_approvals` request/response decisions in the authenticated Builder Control Room, with tenant-scoped approval lookup, caller-JWT decision RPCs, required human rationale, and refreshed canonical job state.
+- [x] Add immutable seven-day approval expiry and fail-closed decision checks. Expired gates stay visible for audit but require a new evidence review before any decision.
+- [ ] Add approval reminder, reassignment, and explicit cancellation policy to the existing immutable approval audit flow.
 - [ ] Require approval before schema, auth/RLS, dependency, infrastructure, protected-branch, deployment, or destructive work.
-- [ ] Add model adapters with model identity, prompt version, sanitized input/output artifact references, timeout behavior, and usage evidence.
+- [x] Add model adapters with model identity, prompt version, sanitized input/output artifact references, timeout behavior, and usage evidence. Restricted and low-risk workloads route locally; model runs are idempotent by job, step, and request hash; artifacts are checksum-verified before registration.
 - [ ] Implement Product Analyst and QA/Security Reviewer modes before any autonomous coding/deployment mode.
 - [ ] Run one read-only assessment job against an allowlisted test repository: inventory -> product-analysis artifact -> human review -> `approval_required`.
 - [ ] Run one approved isolated implementation job that stops at `release_ready`; deployment remains separately approved.

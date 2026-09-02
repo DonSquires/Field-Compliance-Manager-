@@ -28,6 +28,15 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('frontend_files: fileList(frontendFiles)');
     expect(source).toContain('backend_files: fileList(backendFiles)');
     expect(source).toContain('reviewer_model_name: reviewerModel.trim()');
+    expect(source).toContain("action: 'decide_approval'");
+    expect(source).toContain('Human approval required');
+    expect(source).toContain('Review rationale');
+    expect(source).toContain("decideApproval(approval, 'approved')");
+    expect(source).toContain('const expired = new Date(approval.expires_at).getTime() <= Date.now();');
+    expect(source).toContain('Approval expired');
+    expect(source).toContain('A new evidence review is required.');
+    expect(source).toContain('approval.reviewed_artifact_ids.includes(artifact.id)');
+    expect(source).toContain('Immutable evidence under review');
   });
 
   it('keeps relay authority server-side and organization-scoped', () => {
@@ -40,6 +49,9 @@ describe('Builder control room boundary', () => {
     expect(relay).toContain("failed ? 'failed' : 'listed'");
     expect(relay).toContain("admin.rpc('builder_create_job_v2'");
     expect(relay).toContain('Production jobs require human code review');
+    expect(relay).toContain("action === 'decide_approval'");
+    expect(relay).toContain("callerClient.rpc(rpc");
+    expect(relay).toContain('reviewed_artifact_ids');
     expect(relay).toContain("admin.from('builder_job_steps')");
     expect(relay).not.toContain('storage_location: artifact.storage_location');
   });

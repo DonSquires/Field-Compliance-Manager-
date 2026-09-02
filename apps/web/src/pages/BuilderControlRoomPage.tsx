@@ -63,12 +63,25 @@ interface BuilderWorkerRun {
   status: string;
   exit_code: number | null;
 }
+interface BuilderApproval {
+  id: string;
+  approval_type: string;
+  triggered_at_status: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requested_at: string;
+  expires_at: string;
+  requested_target_sha: string | null;
+  reviewed_artifact_ids: string[];
+  approval_comment: string | null;
+  responded_at: string | null;
+}
 
 interface BuilderSnapshot {
   job: BuilderJob;
   steps: BuilderStep[];
   artifacts: BuilderArtifact[];
   workerRuns: BuilderWorkerRun[];
+  approvals: BuilderApproval[];
 }
 
 const BuilderControlRoomPage: React.FC = () => {
@@ -84,6 +97,7 @@ const BuilderControlRoomPage: React.FC = () => {
   const [frontendFiles, setFrontendFiles] = useState('');
   const [backendFiles, setBackendFiles] = useState('');
   const [reviewerModel, setReviewerModel] = useState('');
+  const [approvalComment, setApprovalComment] = useState('');
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
@@ -185,6 +199,24 @@ const BuilderControlRoomPage: React.FC = () => {
     }
   };
 
+  const decideApproval = async (approval: BuilderApproval, decision: 'approved' | 'rejected') => {
+    if (!selectedId || !approvalComment.trim()) return;
+    setBusy(`approval-${approval.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await invoke({ action: 'decide_approval', job_id: selectedId, approval_id: approval.id, decision, comment: approvalComment.trim() });
+      setApprovalComment('');
+      setNotice(decision === 'approved' ? 'Human approval recorded.' : 'Human rejection recorded and the Builder job was stopped.');
+      await loadList();
+      await loadSnapshot(selectedId);
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : 'Builder approval could not be recorded.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const selectedJob = useMemo(() => jobs.find(job => job.id === selectedId) ?? snapshot?.job ?? null, [jobs, selectedId, snapshot]);
 
   return (
@@ -246,6 +278,18 @@ const BuilderControlRoomPage: React.FC = () => {
               {selectedJob.code_review_mode === 'independent_ai' && <label>Independent reviewer model<input value={reviewerModel} onChange={event => setReviewerModel(event.target.value)} maxLength={200} placeholder="Configured model identity" /></label>}
             </div>
             <div className="builder-evidence"><span>{snapshot.artifacts.length} artifacts</span><span>{snapshot.workerRuns.length} worker runs</span></div>
+            {snapshot.approvals.filter(approval => approval.status === 'pending').map(approval => {
+              const expired = new Date(approval.expires_at).getTime() <= Date.now();
+              const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
+              return (
+              <section className="builder-approval" key={approval.id}>
+                <div><span>{expired ? 'Approval expired' : 'Human approval required'}</span><strong>{approval.approval_type.replaceAll('_', ' ')}</strong><small>Requested for {approval.triggered_at_status.replaceAll('_', ' ')} at commit {approval.requested_target_sha?.slice(0, 12) ?? 'unavailable'}. {expired ? 'A new evidence review is required.' : `Expires ${new Date(approval.expires_at).toLocaleString('en-NZ')}.`}</small></div>
+                <ul className="builder-approval-artifacts" aria-label="Immutable evidence under review">{reviewedArtifacts.map(artifact => <li key={artifact.id}><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><span>{artifact.checksum?.slice(0, 12) ?? 'Checksum unavailable'}</span></li>)}</ul>
+                <label>Review rationale<textarea value={approvalComment} onChange={event => setApprovalComment(event.target.value)} rows={3} maxLength={2000} required /></label>
+                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={expired || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={expired || Boolean(busy) || !approvalComment.trim()}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
+              </section>
+              );
+            })}
             <div className="builder-actions">
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>

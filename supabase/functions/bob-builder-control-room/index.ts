@@ -25,7 +25,7 @@ function strings(value: unknown, maximum: number) {
 
 function safeJob(job: Record<string, unknown> | null) {
   if (!job) return null;
-  const keys = ['id', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'created_at', 'updated_at'];
+  const keys = ['id', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'requested_action', 'target_environment', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'created_at', 'updated_at'];
   return Object.fromEntries(keys.map(key => [key, job[key]]));
 }
 
@@ -48,6 +48,11 @@ function safeSnapshot(value: Record<string, unknown>) {
       id: run.id, step_id: run.step_id, profile: run.profile, status: run.status,
       target_sha: run.target_sha, exit_code: run.exit_code, started_at: run.started_at,
       completed_at: run.completed_at,
+    })),
+    approvals: rows(value.approvals).map(approval => ({
+      id: approval.id, approval_type: approval.approval_type, triggered_at_status: approval.triggered_at_status,
+      status: approval.status, requested_at: approval.requested_at, expires_at: approval.expires_at, requested_target_sha: approval.requested_target_sha,
+      reviewed_artifact_ids: approval.reviewed_artifact_ids, approval_comment: approval.approval_comment, responded_at: approval.responded_at,
     })),
   };
 }
@@ -148,16 +153,31 @@ serve(async req => {
   if (!job || !canAccessOrganization(job.organization_id)) return json({ error: 'Builder job is unavailable' }, 404);
 
   if (action === 'get') {
-    const [jobResult, stepsResult, artifactsResult, runsResult] = await Promise.all([
+    const [jobResult, stepsResult, artifactsResult, runsResult, approvalsResult] = await Promise.all([
       admin.from('builder_jobs').select('*').eq('id', jobId).single(),
       admin.from('builder_job_steps').select('*').eq('job_id', jobId).order('ordinal_position'),
       admin.from('builder_artifacts').select('*').eq('job_id', jobId).order('created_at'),
       admin.from('builder_worker_runs').select('*').eq('job_id', jobId).order('started_at'),
+      admin.from('builder_approvals').select('id, approval_type, triggered_at_status, status, requested_at, expires_at, requested_target_sha, reviewed_artifact_ids, approval_comment, responded_at').eq('job_id', jobId).order('requested_at', { ascending: false }),
     ]);
-    const failed = jobResult.error || stepsResult.error || artifactsResult.error || runsResult.error;
+    const failed = jobResult.error || stepsResult.error || artifactsResult.error || runsResult.error || approvalsResult.error;
     await audit(job.organization_id, failed ? 'failed' : 'viewed', jobId);
     if (failed) return json({ error: 'Builder job could not be loaded' }, 503);
-    return json(safeSnapshot({ job: jobResult.data, steps: stepsResult.data, artifacts: artifactsResult.data, workerRuns: runsResult.data }));
+    return json(safeSnapshot({ job: jobResult.data, steps: stepsResult.data, artifacts: artifactsResult.data, workerRuns: runsResult.data, approvals: approvalsResult.data }));
+  }
+  if (action === 'decide_approval') {
+    const approvalId = typeof body.approval_id === 'string' ? body.approval_id : '';
+    const decision = typeof body.decision === 'string' ? body.decision : '';
+    const comment = typeof body.comment === 'string' ? body.comment.trim() : '';
+    if (!approvalId || !['approved', 'rejected'].includes(decision) || !comment) return json({ error: 'Approval, decision, and review rationale are required' }, 400);
+    const { data: approval, error: approvalError } = await admin.from('builder_approvals').select('id, organization_id, approval_type, status').eq('id', approvalId).eq('job_id', jobId).single();
+    if (approvalError || !approval || !canAccessOrganization(approval.organization_id)) return json({ error: 'Builder approval is unavailable' }, 404);
+    if (approval.status !== 'pending') return json({ error: 'Builder approval is no longer pending' }, 409);
+    const rpc = approval.approval_type === 'implementation_review' ? 'builder_decide_human_code_review' : 'builder_decide_approval';
+    const { data, error: decisionError } = await callerClient.rpc(rpc, { _approval_id: approvalId, _decision: decision, _comment: comment });
+    await audit(approval.organization_id, decisionError ? 'approval_failed' : `approval_${decision}`, jobId);
+    if (decisionError) return json({ error: decisionError.message }, 409);
+    return json({ job: safeJob(data as Record<string, unknown>) });
   }
   if (action === 'advance' || action === 'run') {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) {
