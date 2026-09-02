@@ -14,4 +14,6 @@ test('Bob web research passes bounded redacted source evidence to reasoning', ()
   assert.match(research, /excerpt: redactPII\(s\.content\)\.slice\(0, 1500\)/);
   assert.match(research, /web_research_requires_human_invocation/);
   assert.match(research, /isSafePublicUrl/);
+  assert.match(source, /module_key: agentWorkspaceContext\.agent_mode/);
+  assert.doesNotMatch(source, /agent_mode: agentWorkspaceContext\.agent_mode/);
 });

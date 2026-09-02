@@ -5805,7 +5805,7 @@ serve(async (req)=>{
         id: conversationId,
         organization_id: orgId,
         user_id: user.id,
-        agent_mode: agentWorkspaceContext.agent_mode,
+        module_key: agentWorkspaceContext.agent_mode,
         title: agentWorkspaceContext.agent_mode === 'builder' ? 'Bob Builder' : 'Bob Operations'
       }, {
         onConflict: 'id',
