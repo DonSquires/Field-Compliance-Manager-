@@ -143,6 +143,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'access_presets') { await route.fulfill(fulfillJson(accessPresets)); return; }
     if (table === 'preset_assignments') { await route.fulfill(fulfillJson(presetAssignments.filter((assignment) => assignment.status === 'active'))); return; }
     if (table === 'staff_area_grants') { await route.fulfill(fulfillJson(areaGrants)); return; }
+    if (table === 'organization_modules') { await route.fulfill(fulfillJson([{ module_key: 'welfare', enabled: true }])); return; }
     if (table === 'crm_account_activities') { await route.fulfill(fulfillJson(crmActivities)); return; }
     if (table === 'invoices') { await route.fulfill(fulfillJson(crmInvoices)); return; }
     if (table === 'quotes') { await route.fulfill(fulfillJson(crmQuotes)); return; }

@@ -1,6 +1,8 @@
-FROM node:22-alpine
+FROM mcr.microsoft.com/playwright:v1.62.1-jammy
 
-RUN apk add --no-cache git
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends git \
+	&& rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/bob
 COPY assessment-manifest.js /opt/bob/assessment-manifest.js
@@ -13,9 +15,11 @@ COPY apps/web/package.json apps/web/package-lock.json /opt/bob/web-package/
 RUN cd /opt/bob/web-package \
 	&& npm ci \
 	&& mv node_modules /opt/bob/web-node_modules \
+	&& ln -s /opt/bob/web-node_modules /opt/bob/node_modules \
 	&& rm -rf /opt/bob/web-package
 
-RUN addgroup -S bob && adduser -S bob -G bob
-USER bob
+RUN mkdir -p /workspace \
+	&& chown -R 1000:1000 /opt/bob /workspace
+USER 1000:1000
 
 WORKDIR /workspace
