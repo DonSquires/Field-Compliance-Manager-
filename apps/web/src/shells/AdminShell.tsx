@@ -31,6 +31,7 @@ import {
   FlaskConical,
   Grid3X3,
   KeyRound,
+  LogOut,
   MapPin,
   Menu,
   Network,
@@ -209,7 +210,7 @@ const LazyPageFallback: React.FC = () => (
 const AdminShell: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile } = useAuth();
+  const { profile, signOut } = useAuth();
   const { status: modulesStatus } = useEnabledModules(profile?.organizationId ?? null);
   const { agreements, sites, zones, selectedAgreement, selectedSite, selectedZone, loading: relationshipLoading } = useServiceRelationships();
 
@@ -509,6 +510,7 @@ const AdminShell: React.FC = () => {
               <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
               </button>
+              <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
               <div className="admin-profile-chip">{profile?.displayName ?? profile?.role ?? 'Administrator'}</div>
             </div>
           </header>
@@ -544,6 +546,7 @@ const AdminShell: React.FC = () => {
           <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
+          <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
           <button type="button" className="admin-shell-icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} title={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileMenuOpen}>
             {mobileMenuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
             <span className="sr-only">{mobileMenuOpen ? 'Close navigation' : 'Open navigation'}</span>
