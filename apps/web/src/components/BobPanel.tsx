@@ -37,9 +37,10 @@ interface BobPanelProps {
   open: boolean;
   onClose: () => void;
   context?: Record<string, unknown>;
+  mode?: 'operations' | 'builder';
 }
 
-export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) => {
+export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations' }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BobMessage[]>([]);
@@ -53,10 +54,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
     .slice(0, 4), [context]);
 
   // ATLAS READS: bob_conversations, bob_messages
-  // Verified against live production data: bob_conversations.module_key is
-  // null in every real conversation observed (Bob is one continuous
-  // assistant, not scoped per page/module) — so this continues the user's
-  // most recent conversation rather than forking a new one per screen.
+  // Operations and Builder retain separate durable threads. Builder context
+  // must not pollute operational decisions, and operational history must not
+  // be treated as repository/build evidence.
   const loadConversation = useCallback(async () => {
     if (!profile?.organizationId || !profile?.id) return;
 
@@ -69,6 +69,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
         .select('id')
         .eq('organization_id', profile.organizationId)
         .eq('user_id', profile.id)
+        .eq('agent_mode', mode)
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -81,7 +82,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
         // ATLAS WRITES: bob_conversations
         const { data: created, error: createErr } = await supabase
           .from('bob_conversations')
-          .insert([{ organization_id: profile.organizationId, user_id: profile.id }])
+          .insert([{ organization_id: profile.organizationId, user_id: profile.id, agent_mode: mode, title: mode === 'builder' ? 'Bob Builder' : 'Bob Operations' }])
           .select('id')
           .single();
 
@@ -104,7 +105,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, profile?.id]);
+  }, [mode, profile?.organizationId, profile?.id]);
 
   useEffect(() => {
     if (open) loadConversation();
@@ -136,7 +137,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
         body: {
           message,
           conversation_id: conversationId,
-          context: context ?? {},
+          context: { ...(context ?? {}), agent_mode: mode },
         },
       });
 
@@ -184,7 +185,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
       aria-label="Bob agent workspace"
     >
       <header className="bob-panel-header">
-        <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>Bob</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
+        <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
       </header>
 
@@ -198,7 +199,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
         {loading ? (
           <div className="bob-agent-status"><Sparkles size={16} /> Loading conversation</div>
         ) : messages.length === 0 ? (
-          <div className="bob-empty-state"><Bot size={24} /><strong>What should we work through?</strong><div><button type="button" onClick={() => setInput('Summarize the current context and identify the next safe action.')}>Summarize context</button><button type="button" onClick={() => setInput('Create a step-by-step plan with unknowns and approval gates.')}>Plan work</button><button type="button" onClick={() => setInput('Check this surface for risks, missing evidence, and tests.')}>Review risk</button></div></div>
+          <div className="bob-empty-state"><Bot size={24} /><strong>{mode === 'builder' ? 'What should we build?' : 'What should we work through?'}</strong><div>{mode === 'builder' ? <><button type="button" onClick={() => setInput('Inspect the selected Builder job and propose the next implementation step.')}>Inspect job</button><button type="button" onClick={() => setInput('Create an implementation plan with affected files, verification steps, and unknowns.')}>Plan implementation</button><button type="button" onClick={() => setInput('Review the current artifacts and explain the next safe repair or build action.')}>Review evidence</button></> : <><button type="button" onClick={() => setInput('Summarize the current context and identify the next safe action.')}>Summarize context</button><button type="button" onClick={() => setInput('Create a step-by-step plan with unknowns and approval gates.')}>Plan work</button><button type="button" onClick={() => setInput('Check this surface for risks, missing evidence, and tests.')}>Review risk</button></>}</div></div>
         ) : (
           messages.map((m) => (
             <article key={m.id} className={`bob-message role-${m.role}`}>
@@ -217,7 +218,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context }) =>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask Bob to plan, inspect, explain, or prepare a proposal"
+          placeholder={mode === 'builder' ? 'Describe what you want to build, change, or fix' : 'Ask Bob to plan, inspect, explain, or prepare a proposal'}
           disabled={sending || !conversationId}
           rows={3}
         />

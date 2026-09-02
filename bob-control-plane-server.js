@@ -8,6 +8,7 @@ const { createAssessment } = require('./assessment-manifest');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
+const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGithubPullRequest, workspacePathForBranch } = require('./builder-branch-workspace');
 
 const port = Number(process.env.PORT || 8080);
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
@@ -37,6 +38,7 @@ const builderGateway = {
 };
 const builderWorkerImage = process.env.BOB_WORKER_IMAGE || '';
 const builderRunnerId = process.env.BOB_BUILDER_RUNNER_ID || 'bob-builder-runtime';
+const builderWorkspaceRoot = process.env.BOB_BUILDER_WORKSPACE_ROOT || '/data/builder-workspaces';
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
@@ -105,9 +107,9 @@ function boundedStringArray(value, maximum = 100) {
   return [...new Set(value.filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean))].slice(0, maximum);
 }
 
-function builderRuntimeContext(body) {
+function builderRuntimeContext(body, sourceDir = assessmentRoot) {
   return {
-    sourceDir: assessmentRoot,
+    sourceDir,
     workerImage: builderWorkerImage,
     runnerId: builderRunnerId,
     reviewerModelName: typeof body.reviewerModelName === 'string' ? body.reviewerModelName.slice(0, 200) : null,
@@ -118,6 +120,16 @@ function builderRuntimeContext(body) {
     repositoryContext: body.repositoryContext && typeof body.repositoryContext === 'object' ? body.repositoryContext : {},
     designContext: body.designContext && typeof body.designContext === 'object' ? body.designContext : {}
   };
+}
+
+async function resolveBuilderSourceDir(jobId) {
+  const { data: job, error } = await builderSupabase.from('builder_jobs').select('workspace_branch,workspace_head_sha,target_sha').eq('id', jobId).single();
+  if (error || !job?.target_sha) throw new Error('Builder job source is unavailable');
+  if (!job.workspace_branch) return assessmentRoot;
+  const sourceDir = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
+  if (!fs.existsSync(sourceDir)) throw new Error('Builder workspace is unavailable');
+  if (job.workspace_head_sha !== job.target_sha) throw new Error('Builder job does not match its workspace head');
+  return sourceDir;
 }
 
 function webhookValid(req, rawBody) {
@@ -216,7 +228,7 @@ async function route(req, res, body) {
     return json(res, 201, data);
   }
 
-  const builderMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)(?:\/(advance|run))?$/);
+  const builderMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)(?:\/(advance|run|workspace|commit|publish|pull-request))?$/);
   if (builderMatch && req.method === 'GET' && !builderMatch[2]) {
     if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
     try {
@@ -234,7 +246,7 @@ async function route(req, res, body) {
         supabase: builderSupabase,
         gateway: builderGateway,
         jobId: builderMatch[1],
-        context: builderRuntimeContext(body)
+        context: builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1]))
       });
       return json(res, outcome.advanced ? 202 : 200, outcome);
     } catch {
@@ -250,13 +262,70 @@ async function route(req, res, body) {
         supabase: builderSupabase,
         gateway: builderGateway,
         jobId: builderMatch[1],
-        context: builderRuntimeContext(body),
+        context: builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1])),
         maxActions: body.maxActions
       });
       return json(res, 200, outcome);
     } catch {
       return json(res, 409, { error: 'Builder runtime could not continue' });
     }
+  }
+  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'workspace') {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    try {
+      const { data: job, error } = await builderSupabase.from('builder_jobs').select('id,target_sha,workspace_branch,workspace_head_sha').eq('id', builderMatch[1]).single();
+      if (error || !job?.target_sha) return json(res, 404, { error: 'Builder job is unavailable' });
+      if (job.workspace_branch && job.workspace_head_sha) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, existing: true });
+      const workspace = createBranchWorkspace({ sourceDir: assessmentRoot, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.target_sha });
+      const { data: bound, error: bindError } = await builderSupabase.rpc('builder_bind_workspace', { _job_id: job.id, _workspace_branch: workspace.branchName, _workspace_head_sha: workspace.head });
+      if (bindError || !bound) return json(res, 409, { error: 'Builder workspace could not be bound' });
+      return json(res, 201, { branch: workspace.branchName, head: workspace.head, existing: workspace.existing });
+    } catch {
+      return json(res, 409, { error: 'Builder workspace could not be created' });
+    }
+  }
+  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'commit') {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    try {
+      const artifactId = String(body.artifactId || '');
+      const { data: job } = await builderSupabase.from('builder_jobs').select('id,workspace_branch,workspace_head_sha').eq('id', builderMatch[1]).single();
+      const { data: artifact } = await builderSupabase.from('builder_artifacts').select('id,status,artifact_type,storage_location,checksum').eq('id', artifactId).eq('job_id', builderMatch[1]).single();
+      if (!job?.workspace_branch || !job.workspace_head_sha || !artifact || artifact.status !== 'final' || artifact.artifact_type !== 'code_implementation' || !artifact.storage_location?.startsWith('supabase_storage://builder-artifacts/')) return json(res, 409, { error: 'Verified Builder workspace or patch artifact is unavailable' });
+      const { data: object, error: downloadError } = await builderSupabase.storage.from('builder-artifacts').download(artifact.storage_location.slice('supabase_storage://builder-artifacts/'.length));
+      const patch = object ? Buffer.from(await object.arrayBuffer()).toString('utf8') : '';
+      if (downloadError || !patch || crypto.createHash('sha256').update(patch).digest('hex') !== artifact.checksum) return json(res, 409, { error: 'Verified patch artifact integrity check failed' });
+      const workspace = createBranchWorkspace({ sourceDir: assessmentRoot, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch });
+      const commit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: `Bob Builder: ${artifact.id}` });
+      const { data: updated, error: recordError } = await builderSupabase.rpc('builder_record_workspace_commit', { _job_id: job.id, _expected_head_sha: job.workspace_head_sha, _commit_sha: commit.commitSha });
+      if (recordError || !updated) return json(res, 409, { error: 'Builder workspace commit could not be recorded' });
+      return json(res, 201, { branch: commit.branchName, head: commit.commitSha, changedFiles: commit.changedFiles });
+    } catch { return json(res, 409, { error: 'Builder workspace commit could not be created' }); }
+  }
+  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'publish') {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    try {
+      const { data: job } = await builderSupabase.from('builder_jobs').select('id,workspace_branch,workspace_head_sha,workspace_published_head_sha').eq('id', builderMatch[1]).single();
+      if (!job?.workspace_branch || !job.workspace_head_sha) return json(res, 409, { error: 'Verified Builder workspace is unavailable' });
+      if (job.workspace_published_head_sha === job.workspace_head_sha) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, existing: true });
+      const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
+      const publication = publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha });
+      const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_publication', { _job_id: job.id, _expected_head_sha: publication.head });
+      if (error || !updated) return json(res, 409, { error: 'Builder branch publication could not be recorded' });
+      return json(res, 201, { branch: publication.branchName, head: publication.head, existing: false });
+    } catch { return json(res, 409, { error: 'Builder branch could not be published' }); }
+  }
+  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'pull-request') {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    try {
+      const { data: job } = await builderSupabase.from('builder_jobs').select('id,title,workspace_branch,workspace_head_sha,workspace_published_head_sha,workspace_pull_request_head_sha,workspace_pull_request_url').eq('id', builderMatch[1]).single();
+      if (!job?.workspace_branch || !job.workspace_head_sha || job.workspace_published_head_sha !== job.workspace_head_sha) return json(res, 409, { error: 'Published Builder workspace is required' });
+      if (job.workspace_pull_request_head_sha === job.workspace_head_sha && job.workspace_pull_request_url) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, url: job.workspace_pull_request_url, existing: true });
+      const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
+      const pullRequest = createGithubPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: `## Bob Builder review\n\nVerified Builder workspace branch: \`${job.workspace_branch}\`\n\nPinned commit: \`${job.workspace_head_sha}\`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.` });
+      const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_pull_request', { _job_id: job.id, _expected_head_sha: pullRequest.head, _pull_request_url: pullRequest.url });
+      if (error || !updated) return json(res, 409, { error: 'Builder pull request could not be recorded' });
+      return json(res, 201, { ...pullRequest, existing: false });
+    } catch { return json(res, 409, { error: 'Builder pull request could not be created' }); }
   }
 
   const match = url.pathname.match(/^\/jobs\/([^/]+)(?:\/(approve|cancel))?$/);

@@ -26,6 +26,12 @@ interface BuilderJob {
   status: string;
   current_step_name: string | null;
   target_sha: string;
+  workspace_branch: string | null;
+  workspace_head_sha: string | null;
+  workspace_published_at: string | null;
+  workspace_published_head_sha: string | null;
+  workspace_pull_request_url: string | null;
+  workspace_pull_request_head_sha: string | null;
   requested_action: RequestedAction;
   target_environment: TargetEnvironment;
   frontend_required: boolean;
@@ -106,6 +112,7 @@ const BuilderControlRoomPage: React.FC = () => {
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [artifactContent, setArtifactContent] = useState<{ id: string; content: string; checksum: string | null } | null>(null);
   const [artifactLoading, setArtifactLoading] = useState(false);
+  const [followupTask, setFollowupTask] = useState('');
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
@@ -225,6 +232,74 @@ const BuilderControlRoomPage: React.FC = () => {
     }
   };
 
+  const createWorkspace = async () => {
+    if (!selectedId) return;
+    setBusy('workspace');
+    setError(null);
+    try {
+      const data = await invoke({ action: 'create_workspace', job_id: selectedId });
+      setNotice(`Builder workspace ready on ${data?.workspace?.branch ?? 'its dedicated branch'}.`);
+      await Promise.all([loadList(), loadSnapshot(selectedId)]);
+    } catch (workspaceError) {
+      setError(workspaceError instanceof Error ? workspaceError.message : 'Builder workspace could not be created.');
+    } finally { setBusy(null); }
+  };
+
+  const commitVerifiedPatch = async (artifact: BuilderArtifact) => {
+    if (!selectedId) return;
+    setBusy(`commit-${artifact.id}`);
+    setError(null);
+    try {
+      const data = await invoke({ action: 'commit_verified_patch', job_id: selectedId, artifact_id: artifact.id });
+      setNotice(`Verified patch committed to ${data?.commit?.branch ?? 'the Builder workspace branch'}.`);
+      await Promise.all([loadList(), loadSnapshot(selectedId)]);
+    } catch (commitError) {
+      setError(commitError instanceof Error ? commitError.message : 'Verified Builder patch could not be committed.');
+    } finally { setBusy(null); }
+  };
+
+  const publishWorkspace = async () => {
+    if (!selectedId) return;
+    setBusy('publish');
+    setError(null);
+    try {
+      const data = await invoke({ action: 'publish_workspace', job_id: selectedId });
+      setNotice(`Builder branch ${data?.publication?.branch ?? 'is'} published for review.`);
+      await Promise.all([loadList(), loadSnapshot(selectedId)]);
+    } catch (publishError) {
+      setError(publishError instanceof Error ? publishError.message : 'Builder branch could not be published.');
+    } finally { setBusy(null); }
+  };
+
+  const createPullRequest = async () => {
+    if (!selectedId) return;
+    setBusy('pull-request');
+    setError(null);
+    try {
+      const data = await invoke({ action: 'create_pull_request', job_id: selectedId });
+      setNotice('Builder pull request created for human review.');
+      await Promise.all([loadList(), loadSnapshot(selectedId)]);
+      if (data?.pull_request?.url) window.open(data.pull_request.url, '_blank', 'noopener,noreferrer');
+    } catch (pullRequestError) {
+      setError(pullRequestError instanceof Error ? pullRequestError.message : 'Builder pull request could not be created.');
+    } finally { setBusy(null); }
+  };
+
+  const createFollowup = async () => {
+    if (!selectedId || !selectedJob || !followupTask.trim()) return;
+    setBusy('followup');
+    setError(null);
+    try {
+      const data = await invoke({ action: 'create_followup', job_id: selectedId, title: `Follow-up: ${selectedJob.title}`, task_description: followupTask.trim(), frontend_required: selectedJob.frontend_required, backend_required: selectedJob.backend_required, code_review_mode: selectedJob.code_review_mode });
+      setFollowupTask('');
+      setNotice('Builder follow-up created from the verified workspace commit.');
+      await loadList();
+      if (data?.job?.id) setSelectedId(data.job.id);
+    } catch (followupError) {
+      setError(followupError instanceof Error ? followupError.message : 'Builder follow-up could not be created.');
+    } finally { setBusy(null); }
+  };
+
   const openArtifact = async (artifact: BuilderArtifact) => {
     if (!selectedId || artifactLoading) return;
     setSelectedArtifactId(artifact.id);
@@ -286,6 +361,7 @@ const BuilderControlRoomPage: React.FC = () => {
             <div className="builder-panel-heading"><div><span>Execution</span><h2>{selectedJob.title}</h2></div><span className={`builder-status state-${selectedJob.status}`}>{selectedJob.status.replaceAll('_', ' ')}</span></div>
             <div className="builder-job-meta">
               <span>Commit <code>{selectedJob.target_sha.slice(0, 12)}</code></span>
+              <span>{selectedJob.workspace_branch ?? 'Workspace not created'}</span>
               <span>{selectedJob.frontend_required ? 'Frontend' : null}{selectedJob.frontend_required && selectedJob.backend_required ? ' + ' : null}{selectedJob.backend_required ? 'Backend' : null}</span>
               <span>Review: {selectedJob.code_review_mode.replaceAll('_', ' ')}</span>
               <span>{selectedJob.requested_action.replaceAll('_', ' ')} for {selectedJob.target_environment}</span>
@@ -299,7 +375,7 @@ const BuilderControlRoomPage: React.FC = () => {
                 <button type="button" className={workspaceView === 'execution' ? 'is-active' : ''} aria-current={workspaceView === 'execution' ? 'page' : undefined} onClick={() => setWorkspaceView('execution')}><TerminalSquare size={15} /> Execution</button>
               </nav>
               {workspaceView === 'task' && <div className="builder-workbench-content"><span>Immutable task brief</span><pre>{selectedJob.task_description || 'No task description was retained for this job.'}</pre></div>}
-              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button></li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
+              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
               {workspaceView === 'execution' && <div className="builder-workbench-content"><span>Durable execution timeline</span><ol className="builder-workbench-runs">{snapshot.workerRuns.length === 0 ? <li>No worker run has started.</li> : snapshot.workerRuns.map(run => <li key={run.id}><TerminalSquare size={15} /><div><strong>{run.profile}</strong><small>{run.status}{run.exit_code == null ? '' : ` · exit ${run.exit_code}`}</small></div><code>{run.target_sha?.slice(0, 12) ?? 'No commit'}</code></li>)}</ol></div>}
             </section>
             <div className="builder-steps">{snapshot.steps.map(step => (
@@ -329,9 +405,13 @@ const BuilderControlRoomPage: React.FC = () => {
               );
             })}
             <div className="builder-actions">
+              <button type="button" onClick={() => void createWorkspace()} disabled={Boolean(busy) || Boolean(selectedJob.workspace_branch)}><FolderTree size={15} /> {selectedJob.workspace_branch ? 'Workspace ready' : 'Create workspace'}</button>
+              <button type="button" onClick={() => void publishWorkspace()} disabled={Boolean(busy) || !selectedJob.workspace_branch || selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha}><Workflow size={15} /> {selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha ? 'Published for review' : 'Publish for review'}</button>
+              <button type="button" onClick={() => void createPullRequest()} disabled={Boolean(busy) || selectedJob.workspace_published_head_sha !== selectedJob.workspace_head_sha || selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha}>{selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha ? 'Pull request ready' : 'Create pull request'}</button>
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
             </div>
+            {selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
           </>}
         </section>
       </div>
@@ -350,6 +430,7 @@ const BuilderControlRoomPage: React.FC = () => {
       <BobPanel
         open={bobOpen}
         onClose={() => setBobOpen(false)}
+        mode="builder"
         context={{
           surface: 'builder_control_room',
           job_id: selectedJob?.id ?? null,

@@ -27,7 +27,7 @@ function strings(value: unknown, maximum: number) {
 
 function safeJob(job: Record<string, unknown> | null) {
   if (!job) return null;
-  const keys = ['id', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'requested_action', 'target_environment', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'created_at', 'updated_at'];
+  const keys = ['id', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'workspace_branch', 'workspace_head_sha', 'workspace_published_at', 'workspace_published_head_sha', 'workspace_pull_request_url', 'workspace_pull_request_head_sha', 'requested_action', 'target_environment', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'created_at', 'updated_at'];
   return Object.fromEntries(keys.map(key => [key, job[key]]));
 }
 
@@ -203,6 +203,51 @@ serve(async req => {
     const content = new TextDecoder().decode(bytes);
     await audit(job.organization_id, 'artifact_previewed', jobId);
     return json({ artifact: { id: artifact.id, content_type: artifact.content_type, checksum: artifact.checksum, content } });
+  }
+  if (action === 'create_workspace') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/workspace`, 'POST');
+    await audit(job.organization_id, result.ok ? 'workspace_created' : 'workspace_failed', jobId);
+    if (!result.ok) return json({ error: 'Builder workspace could not be created' }, result.status);
+    return json({ workspace: result.payload });
+  }
+  if (action === 'create_followup') {
+    const title = typeof body.title === 'string' ? body.title.slice(0, 200) : '';
+    const taskDescription = typeof body.task_description === 'string' ? body.task_description.slice(0, 12000) : '';
+    if (!title || !taskDescription) return json({ error: 'Follow-up title and task description are required' }, 400);
+    const { data, error } = await admin.rpc('builder_create_followup_job', {
+      _parent_job_id: jobId,
+      _title: title,
+      _task_description: taskDescription,
+      _frontend_required: body.frontend_required !== false,
+      _backend_required: body.backend_required === true,
+      _code_review_mode: typeof body.code_review_mode === 'string' ? body.code_review_mode : 'none',
+    });
+    await audit(job.organization_id, error ? 'followup_failed' : 'followup_created', jobId);
+    if (error || !data?.id) return json({ error: 'Builder follow-up could not be created' }, 409);
+    return json({ job: safeJob(data) }, 201);
+  }
+  if (action === 'commit_verified_patch') {
+    const artifactId = typeof body.artifact_id === 'string' ? body.artifact_id : '';
+    if (!artifactId || !CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Verified patch and Builder execution host are required' }, 400);
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/commit`, 'POST', { artifactId });
+    await audit(job.organization_id, result.ok ? 'workspace_patch_committed' : 'workspace_commit_failed', jobId);
+    if (!result.ok) return json({ error: 'Verified Builder patch could not be committed' }, result.status);
+    return json({ commit: result.payload });
+  }
+  if (action === 'publish_workspace') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/publish`, 'POST');
+    await audit(job.organization_id, result.ok ? 'workspace_published' : 'workspace_publish_failed', jobId);
+    if (!result.ok) return json({ error: 'Builder branch could not be published' }, result.status);
+    return json({ publication: result.payload });
+  }
+  if (action === 'create_pull_request') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/pull-request`, 'POST');
+    await audit(job.organization_id, result.ok ? 'pull_request_created' : 'pull_request_failed', jobId);
+    if (!result.ok) return json({ error: 'Builder pull request could not be created' }, result.status);
+    return json({ pull_request: result.payload });
   }
   if (action === 'advance' || action === 'run') {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) {

@@ -29,18 +29,16 @@ describe('BobPanel', () => {
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'bob_conversations') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                order: () => ({
-                  limit: () => ({
-                    maybeSingle: async () => ({ data: { id: 'conversation-1' }, error: null }),
-                  }),
-                }),
-              }),
+        const query = {
+          eq: () => query,
+          order: () => ({
+            limit: () => ({
+              maybeSingle: async () => ({ data: { id: 'conversation-1' }, error: null }),
             }),
           }),
+        };
+        return {
+          select: () => query,
           insert: () => ({
             select: () => ({
               single: async () => ({ data: { id: 'conversation-1' }, error: null }),
@@ -102,6 +100,7 @@ describe('BobPanel', () => {
             agreement: { id: 'agreement-1', name: 'Site Service Agreement' },
             site: { id: 'site-1', name: 'North Plant' },
             zone: { id: 'zone-1', name: 'Zone A' },
+            agent_mode: 'operations',
           },
         },
       });
@@ -120,5 +119,15 @@ describe('BobPanel', () => {
     expect(await screen.findByText('repo search')).toBeTruthy();
     expect(screen.getByText('80% confidence')).toBeTruthy();
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
+  });
+
+  it('uses the dedicated Builder mode for coding-oriented agent prompts', async () => {
+    render(<BobPanel open mode="builder" onClose={() => undefined} context={{ job_title: 'Mobile field reporting' }} />);
+
+    expect(await screen.findByText('Bob Builder')).toBeTruthy();
+    expect(screen.getByText('What should we build?')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Plan implementation' })).toBeTruthy();
+    expect(screen.getByPlaceholderText('Describe what you want to build, change, or fix')).toBeTruthy();
+    expect(mockFrom).toHaveBeenCalledWith('bob_conversations');
   });
 });

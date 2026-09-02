@@ -46,7 +46,19 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('Durable execution timeline');
     expect(source).toContain("action: 'read_artifact'");
     expect(source).toContain('Selected artifact content');
+    expect(source).toContain("action: 'create_workspace'");
+    expect(source).toContain('Create workspace');
+    expect(source).toContain("action: 'commit_verified_patch'");
+    expect(source).toContain('Commit verified patch');
+    expect(source).toContain("action: 'publish_workspace'");
+    expect(source).toContain('Publish for review');
+    expect(source).toContain("action: 'create_pull_request'");
+    expect(source).toContain('Create pull request');
+    expect(source).toContain("action: 'create_followup'");
+    expect(source).toContain('Continue on this branch');
+    expect(source).toContain('Continue build');
     expect(source).toContain('<BobPanel');
+    expect(source).toContain('mode="builder"');
     expect(source).toContain("surface: 'builder_control_room'");
   });
 
@@ -64,6 +76,11 @@ describe('Builder control room boundary', () => {
     expect(relay).toContain("callerClient.rpc(rpc");
     expect(relay).toContain('reviewed_artifact_ids');
     expect(relay).toContain("action === 'read_artifact'");
+    expect(relay).toContain("action === 'create_workspace'");
+    expect(relay).toContain("action === 'commit_verified_patch'");
+    expect(relay).toContain("action === 'create_followup'");
+    expect(relay).toContain("action === 'publish_workspace'");
+    expect(relay).toContain("action === 'create_pull_request'");
     expect(relay).toContain('ARTIFACT_PREVIEW_LIMIT_BYTES');
     expect(relay).toContain("admin.storage.from('builder-artifacts').download");
     expect(relay).toContain("admin.from('builder_job_steps')");

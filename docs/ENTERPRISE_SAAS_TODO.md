@@ -15,6 +15,15 @@ Owner: human product owner with Bob as the planning and evidence copilot
 
 Goal: make Bob a governed enterprise copilot that can assess, propose, and prepare work without unapproved repository, infrastructure, or production changes.
 
+### Agent Separation
+
+- [x] Separate Bob Operations from Bob Builder. They use distinct durable conversation modes, UI prompts, and planner context so field/compliance history is not treated as repository/build evidence.
+- [x] Keep authorization, tool availability, RLS, artifact access, and approval boundaries server-owned. Builder mode changes planning posture only; it never grants shell, repository-write, deployment, or extra-tool authority.
+- [x] Support interactive Builder iterations on dedicated `bob/job-*` branches. Each verified patch is committed to an isolated worktree; follow-up instructions create a child Builder job pinned to that verified workspace head, preserving the complete immutable iteration chain.
+- [x] Add an explicit reviewable branch-push action after a verified Builder commit. Publication is bound to the current workspace head and generated `bob/job-*` branch; it performs no merge or deployment.
+- [x] Add GitHub pull-request creation after branch publication. It accepts only the generated `bob/job-*` branch at the recorded published head, uses a server-derived title/body and fixed `main` base, and records the review URL without merging or deploying.
+- [ ] Add a separately reviewed provider adapter if Builder projects are hosted outside GitHub. Protected-branch merge and deployment remain separate human approvals.
+
 ### Foundation
 
 - [ ] Define repository allowlist and action policy: repository, immutable ref, requested action, target environment, and caller identity must be explicit.
