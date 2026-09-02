@@ -80,6 +80,8 @@ interface WorkState {
   detail: string;
 }
 
+type ActivityPhase = 'idle' | 'preparing' | 'uploading' | 'waiting' | 'refreshing' | 'recording';
+
 export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations' }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -87,6 +89,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [input, setInput] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingBobFile[]>([]);
   const [attachments, setAttachments] = useState<BobAttachmentRecord[]>([]);
+  const [activityPhase, setActivityPhase] = useState<ActivityPhase>('idle');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -123,6 +126,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
     try {
       setLoading(true);
+      setActivityPhase('refreshing');
       setError(null);
 
       const { data: existing, error: findErr } = await supabase
@@ -165,6 +169,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load Bob conversation');
     } finally {
+      setActivityPhase('idle');
       setLoading(false);
     }
   }, [mode, profile?.organizationId, profile?.id, loadAttachments]);
@@ -188,6 +193,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     if (!profile?.organizationId || !profile?.id) return;
     try {
       setLoading(true);
+      setActivityPhase('preparing');
       setError(null);
       const { data: created, error: createErr } = await supabase
         .from('bob_conversations')
@@ -202,6 +208,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     } catch (err) {
       setError(err instanceof Error ? err.message : 'New Bob conversation could not be created.');
     } finally {
+      setActivityPhase('idle');
       setLoading(false);
     }
   }, [mode, profile?.organizationId, profile?.id]);
@@ -226,6 +233,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         uploaded.push(pending.attachment);
         continue;
       }
+      setActivityPhase('uploading');
       setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'uploading' } : item));
       const safeName = pending.file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180) || 'upload.bin';
       const attachmentId = crypto.randomUUID();
@@ -291,13 +299,16 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         }
         const file = new File([blob], `voice-note-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`, { type: blob.type || 'audio/webm' });
         addFiles([file]);
+        setActivityPhase('idle');
       };
       recorder.start();
       setVoiceState('recording');
+      setActivityPhase('recording');
     } catch (err) {
       mediaStreamRef.current?.getTracks().forEach(track => track.stop());
       mediaStreamRef.current = null;
       setVoiceState('off');
+      setActivityPhase('idle');
       setError(err instanceof Error ? err.message : 'Voice capture could not start.');
     }
   };
@@ -319,10 +330,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     ]);
     setInput('');
     setSending(true);
+    setActivityPhase('preparing');
     setError(null);
 
     try {
       const attachments = await uploadPendingFiles(conversationId);
+      setActivityPhase('waiting');
       // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
       const { data, error: fnError } = await supabase.functions.invoke('onspace-ai-chat', {
         body: {
@@ -335,6 +348,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (fnError) throw fnError;
 
+  setActivityPhase('refreshing');
       // Refresh from bob_messages so we show the server-persisted, canonical thread
       const { data: history, error: historyErr } = await supabase
         .from('bob_messages')
@@ -369,6 +383,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Bob could not respond. Try again.');
     } finally {
+      setActivityPhase('idle');
       setSending(false);
     }
   };
@@ -401,6 +416,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       {error && (
         <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
       )}
+
+      <BobActivityTimeline phase={activityPhase} sending={sending} loading={loading} pendingFiles={pendingFiles} />
 
       <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
         {dragging && <div className="bob-drop-target"><FileUp size={17} /> Drop files for Bob to read.</div>}
@@ -500,6 +517,43 @@ function asString(value: unknown) {
 
 function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
+}
+
+function BobActivityTimeline({ phase, sending, loading, pendingFiles }: { phase: ActivityPhase; sending: boolean; loading: boolean; pendingFiles: PendingBobFile[] }) {
+  const active = phase !== 'idle' || sending || loading || pendingFiles.some(file => file.status === 'uploading');
+  if (!active) return null;
+
+  const steps = [
+    { id: 'preparing', label: 'Preparing request', detail: pendingFiles.length ? `${pendingFiles.length} file${pendingFiles.length === 1 ? '' : 's'} included` : 'Message context assembled' },
+    { id: 'uploading', label: 'Uploading evidence', detail: 'Files are being stored privately and registered for Bob' },
+    { id: 'waiting', label: 'Waiting for Bob', detail: 'Request is with the Bob conductor' },
+    { id: 'refreshing', label: 'Refreshing transcript', detail: 'Loading the durable response and evidence state' },
+  ];
+  const order = steps.map(step => step.id);
+  const activeIndex = phase === 'recording' ? -1 : Math.max(0, order.indexOf(phase));
+
+  if (phase === 'recording') {
+    return (
+      <section className="bob-working-panel" aria-label="Bob working state">
+        <div><Sparkles size={14} className="is-spinning" /><span>Bob is listening</span></div>
+        <ol><li className="is-active"><strong>Recording voice note</strong><small>Press Stop voice capture to queue the audio as evidence.</small></li></ol>
+      </section>
+    );
+  }
+
+  return (
+    <section className="bob-working-panel" aria-label="Bob working state">
+      <div><Sparkles size={14} className="is-spinning" /><span>Bob is working</span></div>
+      <ol>
+        {steps.map((step, index) => (
+          <li key={step.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>
+            <strong>{step.label}</strong>
+            <small>{step.detail}</small>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 function attachmentStateLabel(state: string) {

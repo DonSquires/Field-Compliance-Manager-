@@ -186,6 +186,22 @@ describe('BobPanel', () => {
     });
   });
 
+  it('shows a named Bob working timeline while a request is in flight', async () => {
+    let resolveInvoke: (value: { data: { reply: string }; error: null }) => void = () => undefined;
+    mockInvoke.mockReturnValue(new Promise(resolve => { resolveInvoke = resolve; }));
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.change(await screen.findByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), { target: { value: 'Check live operations' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('Bob is working')).toBeTruthy();
+    expect(screen.getByText('Preparing request')).toBeTruthy();
+    expect(screen.getByText('Waiting for Bob')).toBeTruthy();
+
+    resolveInvoke({ data: { reply: 'done' }, error: null });
+  });
+
   it('renders durable evidence processing states from bob_attachments', async () => {
     attachmentHistory = [
       { id: 'att-1', file_name: 'agreement.pdf', file_type: 'application/pdf', file_size_bytes: 1200, processing_state: 'processing', extraction_summary: null, confidence: null, created_at: '2026-09-02T06:00:00.000Z' },
@@ -271,6 +287,8 @@ describe('BobPanel', () => {
 
     fireEvent.click(await screen.findByLabelText('Record voice note'));
   expect(await screen.findByText('Recording')).toBeTruthy();
+    expect(screen.getByText('Bob is listening')).toBeTruthy();
+    expect(screen.getByText('Recording voice note')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Stop voice capture'));
 
     await waitFor(() => {
@@ -340,5 +358,6 @@ describe('BobPanel', () => {
     expect(css).toContain('flex-direction: column;');
     expect(css).toContain('flex: 1 1 auto;');
     expect(css).toContain('min-height: 0;');
+    expect(css).toContain('.bob-working-panel');
   });
 });
