@@ -5,11 +5,8 @@
  * These are deterministic helpers that orchestrate persistence + state machine transitions.
  */
 
-// These modules are .js but Deno can import them
-// @ts-ignore (dynamic JS import)
-import * as taskPersistence from './task-persistence.js';
-// @ts-ignore (dynamic JS import)
-import * as taskStateMachine from './task-state-machine.js';
+import * as taskPersistence from './task-persistence.ts';
+import * as taskStateMachine from './task-state-machine.ts';
 
 const { claimStepForExecution, completeStep, failStep, blockStep, updateTaskRunCheckpoint } = taskPersistence;
 const { getTaskCheckpoint } = taskStateMachine;

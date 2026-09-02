@@ -5717,7 +5717,10 @@ serve(async (req)=>{
   // Capture startTime BEFORE the try block so the catch block can compute
   // real elapsed latency on errors (fix: previously re-declared inside catch).
   const startTime = Date.now();
+  let failureStage = 'request_start';
+  let debugModeForError = false;
   try {
+    failureStage = 'auth_setup';
     const authHeader = req.headers.get('Authorization') ?? '';
     if (!authHeader) return json({
       error: 'Unauthorized'
@@ -5734,6 +5737,7 @@ serve(async (req)=>{
     if (authErr || !user) return json({
       error: 'Unauthorized'
     }, 401);
+    failureStage = 'profile_lookup';
     const { data: profile } = await admin.from('user_profiles').select('id, role, organization_id, display_name').eq('id', user.id).single();
     let role = String(profile?.role ?? 'guest');
     const orgId = profile?.organization_id ?? null;
@@ -5752,6 +5756,7 @@ serve(async (req)=>{
       console.log(`[conductor] owner elevation: ${userEmail} -> grand_master`);
     }
     // ── v2 CONTRACT: Unified request envelope parsing + validation ─────────
+    failureStage = 'request_parse';
     const body = await req.json().catch(()=>({}));
     const envelopeValidation = validateRequestEnvelope(body);
     if (!envelopeValidation.valid) {
@@ -5849,7 +5854,9 @@ serve(async (req)=>{
     //   client UI reads. It is intended for CI test artifacts and server-side
     //   log inspection only.
     const debugMode = body.debug === true;
+    debugModeForError = debugMode;
     // LAYER 1 — resolve the gate/envelope.
+    failureStage = 'capability_resolution';
     const caps = await resolveUserCapabilities(admin, role, orgId ?? '', user.id);
     // ── CADDIE: Atlas-generated tool catalogue ──────────────────────────────
     // The caddie generates the catalogue from the Atlas terrain graph
@@ -5861,6 +5868,7 @@ serve(async (req)=>{
     //   filtering. Bob's internal plane is broad across the build.
     //   Enforcement happens at the Conductor's post-selection, pre-effect
     //   seam via isToolEffectPermitted() (caddie.ts, called at dispatch time).
+    failureStage = 'catalogue_generation';
     const caddieResult = await generateToolCatalogue(admin);
     const catalogue = caddieResult.catalogue;
     if (!caddieResult.fromAtlas) {
@@ -5868,6 +5876,7 @@ serve(async (req)=>{
     }
     // ── PILLAR H: derive turn_index now that conversationId is known ────────
     if (conversationId) {
+      failureStage = 'turn_index';
       pillarHTurnIndex = await deriveTurnIndex(admin, conversationId);
     }
     // PILLAR H: auth_resolved event (fires for ALL requests)
@@ -5888,6 +5897,7 @@ serve(async (req)=>{
     console.log(`[conductor] build_tag=${BUILD_TAG} tier=${caps.tier} tools=[${catalogue.map((t)=>t.tool).join(',')}] hasAttachment=${attachments.length > 0} request_id=${requestId ?? 'none'}`);
     // LAYER 2 (perceive) — read any attachment supplied on THIS turn to text for
     // the brain. Only the current turn's own attachment; no cross-turn carry.
+    failureStage = 'attachment_perception';
     const { att, text: attText, sheet_names: attSheetNames, selected_sheet: attSelectedSheet } = await perceiveAttachment(authHeader, attachments);
     // ── v2 CONTRACT: help/status from capability registry ───────────────────
     const helpReply = handleHelpStatus(message, capabilityRegistry, displayName);
@@ -5975,6 +5985,7 @@ serve(async (req)=>{
       const t0 = Date.now();
       let embedMs = 0;
       let constMs = 0;
+      failureStage = 'knowledge_retrieval';
       const [kTraced, constitutional] = await Promise.all([
         retrieveKnowledgeTraced(admin, message, orgId, 6).then((r)=>{
           embedMs = Date.now() - t0;
@@ -9744,7 +9755,7 @@ serve(async (req)=>{
     }
     return json(structured);
   } catch (err) {
-    console.error('[conductor] error:', err);
+    console.error(`[conductor] error stage=${failureStage}:`, err);
     const _errMsg = err instanceof Error ? err.message : String(err);
     // v2 contract: never expose raw internal error detail to clients.
     // Keep detail in server logs (console.error above); return a safe message.
@@ -9760,7 +9771,8 @@ serve(async (req)=>{
     });
     return json({
       ...structured,
-      error: 'Conductor error'
+      error: 'Conductor error',
+      ...(debugModeForError ? { _diagnostics: { failure_stage: failureStage } } : {})
     }, 500);
   }
 });
