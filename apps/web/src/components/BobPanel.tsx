@@ -402,8 +402,6 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       <header className="bob-panel-header">
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <div className="bob-panel-header-actions">
-          <button type="button" onClick={() => void startNewConversation()} title="New Bob session" aria-label="New Bob session"><Plus size={17} /></button>
-          <button type="button" onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} title={voiceState === 'recording' ? 'Stop voice capture' : 'Record voice note'} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Record voice note'}><Mic size={17} /><span>{voiceState === 'recording' ? 'Recording' : 'Voice off'}</span></button>
           <button type="button" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
           <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
         </div>
@@ -457,6 +455,17 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           ))}
         </div>
       )}
+
+      <div className="bob-session-actions" aria-label="Bob session and voice controls">
+        <button type="button" className="bob-session-action" onClick={() => void startNewConversation()} disabled={loading || sending}>
+          <Plus size={15} />
+          <span>New chat</span>
+        </button>
+        <button type="button" className={`bob-session-action bob-voice-action ${voiceState === 'recording' ? 'is-recording' : ''}`} onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Hold to talk'}>
+          <Mic size={15} />
+          <span>{voiceState === 'recording' ? 'Stop recording' : 'Hold to talk'}</span>
+        </button>
+      </div>
 
       <form onSubmit={handleSend} className="bob-composer">
         <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_BOB_UPLOADS} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />

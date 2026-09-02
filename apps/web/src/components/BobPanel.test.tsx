@@ -250,7 +250,8 @@ describe('BobPanel', () => {
     expect(screen.getByText('Ready for input. No Bob work is running.')).toBeTruthy();
     expect(screen.getByText(/PDF, DOCX, CSV\/XLSX, TXT, JSON, images, audio, and video up to 48 MB each/)).toBeTruthy();
     expect(screen.getByLabelText('Attach files')).toBeTruthy();
-    expect(screen.getByText('Voice off')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New chat' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Hold to talk' })).toBeTruthy();
   });
 
   it('records voice as an audio evidence attachment', async () => {
@@ -285,8 +286,8 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
 
-    fireEvent.click(await screen.findByLabelText('Record voice note'));
-  expect(await screen.findByText('Recording')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Hold to talk' }));
+    expect(await screen.findByText('Stop recording')).toBeTruthy();
     expect(screen.getByText('Bob is listening')).toBeTruthy();
     expect(screen.getByText('Recording voice note')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Stop voice capture'));
