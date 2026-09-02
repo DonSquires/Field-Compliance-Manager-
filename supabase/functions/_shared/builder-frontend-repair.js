@@ -10,7 +10,7 @@ const {
 } = require('./builder-frontend-engineer');
 const { redactLog } = require('../../../frontend-worker');
 
-const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v1';
+const FRONTEND_REPAIR_PROMPT_VERSION = 'frontend-repair-v2';
 
 function sanitizeVerificationFailure(verification) {
   const commands = Array.isArray(verification?.commands) ? verification.commands : [];
@@ -73,7 +73,7 @@ async function loadRepairInputs({ supabase, job, uxArtifact, failedPatchArtifact
   return { uxPlan: ux.designPlan, failedProposal, failure };
 }
 
-function buildRepairPrompt({ uxPlan, failedProposal, failure, sourceContext }) {
+function buildRepairPrompt({ uxPlan, failedProposal, failure, sourceContext, liveContext = null }) {
   return {
     systemPrompt: [
       'You are repairing a failed frontend patch for Field Compliance Manager.',
@@ -87,6 +87,8 @@ function buildRepairPrompt({ uxPlan, failedProposal, failure, sourceContext }) {
       failed_proposal: failedProposal,
       verification_failure: failure,
       target_sha: sourceContext.target_sha,
+      repository_context: sourceContext.repository_context,
+      live_context: liveContext,
       source_files: sourceContext.files
     })
   };
@@ -103,6 +105,7 @@ async function runFrontendRepair({
   failedWorkerRunId,
   sourceDir,
   requestedFiles,
+  liveContext = null,
   loadInputs = loadRepairInputs,
   collectSource = collectFrontendSourceContext,
   authorizeRepair = authorizeFrontendRepair,
@@ -127,7 +130,8 @@ async function runFrontendRepair({
     uxPlan: inputs.uxPlan,
     failedProposal: inputs.failedProposal,
     failure: sanitizedFailure,
-    sourceContext
+    sourceContext,
+    liveContext
   });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,

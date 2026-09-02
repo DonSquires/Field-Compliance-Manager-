@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
 import { BobPanel } from '../components/BobPanel';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
@@ -7,7 +7,7 @@ import './BuilderControlRoomPage.css';
 type ReviewMode = 'none' | 'human' | 'independent_ai';
 type RequestedAction = 'prepare_change' | 'prepare_release';
 type TargetEnvironment = 'development' | 'staging' | 'production';
-type WorkspaceView = 'task' | 'evidence' | 'execution';
+type WorkspaceView = 'task' | 'evidence' | 'execution' | 'context';
 
 interface BuilderProject {
   id: string;
@@ -93,11 +93,18 @@ interface BuilderSnapshot {
   approvals: BuilderApproval[];
 }
 
+interface BuilderContextSnapshot {
+  build_map: { file_count: number; schema: { tables: string[] } };
+  live_context: { atlas: { capability_count: number; edge_count: number; wired_capability_count: number; exercised_capability_count: number; capability_last_refreshed_at: string | null }; live_data: { tables: Array<{ table: string; count: number | null; available: boolean }> } };
+}
+
 const BuilderControlRoomPage: React.FC = () => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [jobs, setJobs] = useState<BuilderJob[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<BuilderSnapshot | null>(null);
+  const [contextSnapshot, setContextSnapshot] = useState<BuilderContextSnapshot | null>(null);
+  const [contextLoading, setContextLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,8 +161,19 @@ const BuilderControlRoomPage: React.FC = () => {
     }
   }, [invoke]);
 
+  const loadContext = useCallback(async (jobId: string) => {
+    setContextLoading(true);
+    try {
+      const data = await invoke({ action: 'context_snapshot', job_id: jobId });
+      setContextSnapshot(data?.context as BuilderContextSnapshot);
+    } catch (contextError) {
+      setContextSnapshot(null);
+      setError(contextError instanceof Error ? contextError.message : 'Builder context could not be loaded.');
+    } finally { setContextLoading(false); }
+  }, [invoke]);
+
   useEffect(() => { void loadList(); }, [loadList]);
-  useEffect(() => { if (selectedId) void loadSnapshot(selectedId); else setSnapshot(null); }, [selectedId, loadSnapshot]);
+  useEffect(() => { if (selectedId) { void loadSnapshot(selectedId); void loadContext(selectedId); } else { setSnapshot(null); setContextSnapshot(null); } }, [selectedId, loadSnapshot, loadContext]);
 
   const selectedProject = projects.find(project => project.id === form.projectId) ?? null;
   const pendingJobs = jobs.filter(job => !['release_ready', 'failed', 'cancelled'].includes(job.status)).length;
@@ -300,6 +318,18 @@ const BuilderControlRoomPage: React.FC = () => {
     } finally { setBusy(null); }
   };
 
+  const refreshAtlas = async () => {
+    setBusy('atlas-refresh');
+    setError(null);
+    try {
+      await invoke({ action: 'refresh_atlas' });
+      setNotice('Atlas refreshed from the protected Builder host.');
+      if (selectedId) await loadContext(selectedId);
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : 'Atlas refresh could not be completed.');
+    } finally { setBusy(null); }
+  };
+
   const openArtifact = async (artifact: BuilderArtifact) => {
     if (!selectedId || artifactLoading) return;
     setSelectedArtifactId(artifact.id);
@@ -373,10 +403,12 @@ const BuilderControlRoomPage: React.FC = () => {
                 <button type="button" className={workspaceView === 'task' ? 'is-active' : ''} aria-current={workspaceView === 'task' ? 'page' : undefined} onClick={() => setWorkspaceView('task')}><FileCode2 size={15} /> Task</button>
                 <button type="button" className={workspaceView === 'evidence' ? 'is-active' : ''} aria-current={workspaceView === 'evidence' ? 'page' : undefined} onClick={() => setWorkspaceView('evidence')}><FolderTree size={15} /> Evidence</button>
                 <button type="button" className={workspaceView === 'execution' ? 'is-active' : ''} aria-current={workspaceView === 'execution' ? 'page' : undefined} onClick={() => setWorkspaceView('execution')}><TerminalSquare size={15} /> Execution</button>
+                <button type="button" className={workspaceView === 'context' ? 'is-active' : ''} aria-current={workspaceView === 'context' ? 'page' : undefined} onClick={() => setWorkspaceView('context')}><Database size={15} /> Context</button>
               </nav>
               {workspaceView === 'task' && <div className="builder-workbench-content"><span>Immutable task brief</span><pre>{selectedJob.task_description || 'No task description was retained for this job.'}</pre></div>}
               {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
               {workspaceView === 'execution' && <div className="builder-workbench-content"><span>Durable execution timeline</span><ol className="builder-workbench-runs">{snapshot.workerRuns.length === 0 ? <li>No worker run has started.</li> : snapshot.workerRuns.map(run => <li key={run.id}><TerminalSquare size={15} /><div><strong>{run.profile}</strong><small>{run.status}{run.exit_code == null ? '' : ` · exit ${run.exit_code}`}</small></div><code>{run.target_sha?.slice(0, 12) ?? 'No commit'}</code></li>)}</ol></div>}
+              {workspaceView === 'context' && <div className="builder-workbench-content"><span>Commit-pinned build and live evidence</span>{contextLoading ? <p>Loading Builder context...</p> : !contextSnapshot ? <p>Context is unavailable.</p> : <><p>{contextSnapshot.build_map.file_count} tracked files and {contextSnapshot.build_map.schema.tables.length} schema tables. Atlas has {contextSnapshot.live_context.atlas.capability_count} capabilities and {contextSnapshot.live_context.atlas.edge_count} live edges; {contextSnapshot.live_context.atlas.wired_capability_count} are wired and {contextSnapshot.live_context.atlas.exercised_capability_count} are exercised.</p><ul className="builder-workbench-runs">{contextSnapshot.live_context.live_data.tables.map(row => <li key={row.table}><Database size={15} /><div><strong>{row.table.replaceAll('_', ' ')}</strong><small>Aggregate live row count</small></div><code>{row.available ? row.count ?? 0 : 'Unavailable'}</code></li>)}</ul><button type="button" onClick={() => void refreshAtlas()} disabled={Boolean(busy)}><RefreshCw size={15} className={busy === 'atlas-refresh' ? 'is-spinning' : ''} /> Refresh Atlas</button></>}</div>}
             </section>
             <div className="builder-steps">{snapshot.steps.map(step => (
               <div key={step.id} className={`builder-step state-${step.status}`}>

@@ -5,6 +5,8 @@ const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { createWorkflowClient } = require('./supabase-workflow-client');
 const { createAssessment } = require('./assessment-manifest');
+const { collectRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
+const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
@@ -107,9 +109,11 @@ function boundedStringArray(value, maximum = 100) {
   return [...new Set(value.filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean))].slice(0, maximum);
 }
 
-function builderRuntimeContext(body, sourceDir = assessmentRoot) {
+async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot, targetSha: null }) {
+  const buildMap = source.targetSha ? collectRepositoryContext(source) : null;
+  const liveContext = builderSupabase ? await collectBuilderLiveContext(builderSupabase) : null;
   return {
-    sourceDir,
+    sourceDir: source.sourceDir,
     workerImage: builderWorkerImage,
     runnerId: builderRunnerId,
     reviewerModelName: typeof body.reviewerModelName === 'string' ? body.reviewerModelName.slice(0, 200) : null,
@@ -117,19 +121,38 @@ function builderRuntimeContext(body, sourceDir = assessmentRoot) {
     backendFiles: boundedStringArray(body.backendFiles, 40),
     constraints: boundedStringArray(body.constraints, 100),
     requestedFromUsers: boundedStringArray(body.requestedFromUsers, 100),
-    repositoryContext: body.repositoryContext && typeof body.repositoryContext === 'object' ? body.repositoryContext : {},
-    designContext: body.designContext && typeof body.designContext === 'object' ? body.designContext : {}
+    liveContext,
+    repositoryContext: {
+      ...(body.repositoryContext && typeof body.repositoryContext === 'object' ? body.repositoryContext : {}),
+      build_map: buildMap,
+      live_context: liveContext
+    },
+    designContext: {
+      ...(body.designContext && typeof body.designContext === 'object' ? body.designContext : {}),
+      build_map: buildMap,
+      live_context: liveContext
+    }
   };
+}
+
+function refreshAtlas() {
+  const output = require('node:child_process').execFileSync(process.execPath, ['scripts/atlas-refresh.js', '--apply'], {
+    cwd: assessmentRoot,
+    encoding: 'utf8',
+    env: process.env,
+    maxBuffer: 1024 * 1024
+  });
+  return { refreshed_at: new Date().toISOString(), summary: output.trim().slice(-1000) };
 }
 
 async function resolveBuilderSourceDir(jobId) {
   const { data: job, error } = await builderSupabase.from('builder_jobs').select('workspace_branch,workspace_head_sha,target_sha').eq('id', jobId).single();
   if (error || !job?.target_sha) throw new Error('Builder job source is unavailable');
-  if (!job.workspace_branch) return assessmentRoot;
+  if (!job.workspace_branch) return { sourceDir: assessmentRoot, targetSha: job.target_sha };
   const sourceDir = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   if (!fs.existsSync(sourceDir)) throw new Error('Builder workspace is unavailable');
   if (job.workspace_head_sha !== job.target_sha) throw new Error('Builder job does not match its workspace head');
-  return sourceDir;
+  return { sourceDir, targetSha: job.target_sha };
 }
 
 function webhookValid(req, rawBody) {
@@ -195,6 +218,15 @@ async function route(req, res, body) {
   const workerRoute = req.method === 'POST' && /^\/jobs\/[^/]+\/(pickup|artifacts)$/.test(url.pathname);
   if (!authorized(req) && !workerRoute) return json(res, 401, { error: 'unauthorized' });
 
+  if (req.method === 'POST' && url.pathname === '/api/bob/builder/atlas/refresh') {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    try {
+      return json(res, 200, refreshAtlas());
+    } catch {
+      return json(res, 503, { error: 'Atlas refresh failed' });
+    }
+  }
+
   if (req.method === 'POST' && url.pathname === '/jobs') {
     if (!body.repository) return json(res, 400, { error: 'repository is required' });
     if (!repositoryAllowed(body.repository)) return json(res, 403, { error: 'repository is not allowed' });
@@ -229,6 +261,19 @@ async function route(req, res, body) {
   }
 
   const builderMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)(?:\/(advance|run|workspace|commit|publish|pull-request))?$/);
+  const builderContextMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)\/context$/);
+  if (builderContextMatch && req.method === 'GET') {
+    if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
+    try {
+      const source = await resolveBuilderSourceDir(builderContextMatch[1]);
+      return json(res, 200, {
+        build_map: collectRepositoryContext(source),
+        live_context: await collectBuilderLiveContext(builderSupabase)
+      });
+    } catch {
+      return json(res, 404, { error: 'Builder context is unavailable' });
+    }
+  }
   if (builderMatch && req.method === 'GET' && !builderMatch[2]) {
     if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
     try {
@@ -246,7 +291,7 @@ async function route(req, res, body) {
         supabase: builderSupabase,
         gateway: builderGateway,
         jobId: builderMatch[1],
-        context: builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1]))
+        context: await builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1]))
       });
       return json(res, outcome.advanced ? 202 : 200, outcome);
     } catch {
@@ -262,7 +307,7 @@ async function route(req, res, body) {
         supabase: builderSupabase,
         gateway: builderGateway,
         jobId: builderMatch[1],
-        context: builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1])),
+        context: await builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1])),
         maxActions: body.maxActions
       });
       return json(res, 200, outcome);

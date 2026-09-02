@@ -8,8 +8,9 @@ const {
   executeBuilderModelRun,
   contentMetadata
 } = require('./builder-model-adapter');
+const { collectRepositoryContext } = require('./builder-repository-context');
 
-const FRONTEND_ENGINEER_PROMPT_VERSION = 'frontend-engineer-v1';
+const FRONTEND_ENGINEER_PROMPT_VERSION = 'frontend-engineer-v2';
 const MAX_SOURCE_FILES = 30;
 const MAX_SOURCE_FILE_BYTES = 50000;
 const MAX_SOURCE_TOTAL_BYTES = 300000;
@@ -49,7 +50,11 @@ function collectFrontendSourceContext({ sourceDir, targetSha, requestedFiles }) 
       content
     };
   });
-  return { target_sha: targetSha, files };
+  return {
+    target_sha: targetSha,
+    repository_context: collectRepositoryContext({ sourceDir, targetSha }),
+    files
+  };
 }
 
 async function loadVerifiedUxPlan(supabase, artifactId, jobId) {
@@ -79,9 +84,10 @@ async function loadVerifiedUxPlan(supabase, artifactId, jobId) {
   }
 }
 
-function buildFrontendEngineerPrompt({ designPlan, sourceContext }) {
+function buildFrontendEngineerPrompt({ designPlan, sourceContext, liveContext = null }) {
   const systemPrompt = [
     'You are the Frontend Engineer for Field Compliance Manager.',
+    'Understand the supplied commit-pinned whole-build map before making a module-local change.',
     'Implement only the approved UX plan using only the supplied commit-pinned source files.',
     'Return one JSON object containing summary, patch, changed_files, and tests.',
     'The patch must be a standard unified git diff limited to apps/web and must apply to the supplied files.',
@@ -94,6 +100,8 @@ function buildFrontendEngineerPrompt({ designPlan, sourceContext }) {
     userPrompt: JSON.stringify({
       approved_ux_plan: designPlan,
       target_sha: sourceContext.target_sha,
+      repository_context: sourceContext.repository_context,
+      live_context: liveContext,
       source_files: sourceContext.files,
       required_output: {
         summary: 'string',
@@ -130,6 +138,7 @@ async function runFrontendEngineer({
   uxArtifact,
   sourceDir,
   requestedFiles,
+  liveContext = null,
   loadUxPlan = loadVerifiedUxPlan,
   executeModelRun = executeBuilderModelRun
 }) {
@@ -142,7 +151,7 @@ async function runFrontendEngineer({
     loadUxPlan(supabase, uxArtifact.id, job.id),
     Promise.resolve(collectFrontendSourceContext({ sourceDir, targetSha: job.target_sha, requestedFiles }))
   ]);
-  const prompt = buildFrontendEngineerPrompt({ designPlan: ux.designPlan, sourceContext });
+  const prompt = buildFrontendEngineerPrompt({ designPlan: ux.designPlan, sourceContext, liveContext });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
     jobId: job.id,
@@ -171,6 +180,7 @@ async function runFrontendEngineer({
 module.exports = {
   FRONTEND_ENGINEER_PROMPT_VERSION,
   collectFrontendSourceContext,
+  collectRepositoryContext,
   loadVerifiedUxPlan,
   buildFrontendEngineerPrompt,
   parseFrontendProposal,

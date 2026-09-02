@@ -65,6 +65,8 @@ test('Backend Engineer source context requires a clean commit-pinned repository'
       'supabase/functions/example/index.ts',
       'supabase/migrations/20260830000000_example.sql'
     ]);
+    assert.equal(context.repository_context.target_sha, fixture.sha);
+    assert.equal(context.repository_context.file_count, 3);
     fs.writeFileSync(path.join(fixture.root, 'supabase/functions/example/index.ts'), 'dirty');
     assert.throws(() => collectBackendSourceContext({
       sourceDir: fixture.root,
@@ -133,6 +135,7 @@ test('Backend Engineer routes approved specification and source through governed
       productArtifact: { id: 'spec-1', artifact_type: 'product_specification', status: 'final' },
       sourceDir: fixture.root,
       requestedFiles: ['supabase/migrations/20260830000000_example.sql'],
+      liveContext: { atlas: { capability_count: 1 }, live_data: { scope: 'aggregate row counts only' } },
       loadProductSpecification: async () => ({ specification: { acceptance_criteria: [{ id: 'AC-1' }] } }),
       executeModelRun: async input => {
         captured = input;
@@ -142,6 +145,8 @@ test('Backend Engineer routes approved specification and source through governed
     assert.equal(captured.modelRequest.provider, 'openai');
     assert.equal(captured.modelRequest.prompt_version, BACKEND_ENGINEER_PROMPT_VERSION);
     assert.deepEqual(captured.modelRequest.input_artifact_ids, ['spec-1']);
+    assert.equal(JSON.parse(captured.modelRequest.request.user_prompt).repository_context.target_sha, fixture.sha);
+    assert.equal(JSON.parse(captured.modelRequest.request.user_prompt).live_context.atlas.capability_count, 1);
     assert.equal(result.patch_artifact.id, 'patch-1');
     assert.equal(result.proposal.risk.requires_human_approval, true);
   } finally {

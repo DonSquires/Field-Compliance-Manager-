@@ -44,12 +44,15 @@ test('frontend repair authorizes before model dispatch and uses failure provenan
     failureArtifact: { id: 'log-1' },
     sourceDir: '/repo',
     requestedFiles: ['apps/web/src/example.ts'],
-    collectSource: () => ({ target_sha: 'sha-1', files: [{ path: 'apps/web/src/example.ts', content: 'export const value = 1;' }] }),
+    liveContext: { atlas: { capability_count: 1 }, live_data: { scope: 'aggregate row counts only' } },
+    collectSource: () => ({ target_sha: 'sha-1', repository_context: { target_sha: 'sha-1', tracked_files: ['apps/web/src/example.ts'] }, files: [{ path: 'apps/web/src/example.ts', content: 'export const value = 1;' }] }),
     loadInputs: async () => ({ uxPlan: {}, failedProposal: { patch: 'old' }, failure: { failed_command: 'lint', stdout: 'error', stderr: '' } }),
     authorizeRepair: async () => { calls.push('authorize'); return { success: true, repair_attempt: 2 }; },
     executeModelRun: async input => {
       calls.push('model');
       assert.deepEqual(input.modelRequest.input_artifact_ids, ['ux-1', 'patch-1', 'log-1']);
+      assert.equal(JSON.parse(input.modelRequest.request.user_prompt).repository_context.target_sha, 'sha-1');
+      assert.equal(JSON.parse(input.modelRequest.request.user_prompt).live_context.atlas.capability_count, 1);
       return { ok: true, validated_output: { summary: 'Repair', patch: replacementPatch, changed_files: ['apps/web/src/example.ts'], tests: [] }, artifact: { id: 'patch-2' } };
     }
   });

@@ -4,7 +4,7 @@ const {
   contentMetadata
 } = require('./builder-model-adapter');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v1';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v2';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -22,6 +22,8 @@ const UX_DESIGN_SCHEMA = Object.freeze({
 });
 
 function normalizeDesignContext(context = {}) {
+  const buildMap = context.build_map && typeof context.build_map === 'object' ? context.build_map : {};
+  const liveContext = context.live_context && typeof context.live_context === 'object' ? context.live_context : null;
   return {
     existing_design_system: typeof context.existing_design_system === 'string'
       ? context.existing_design_system.trim().slice(0, 12000)
@@ -34,7 +36,24 @@ function normalizeDesignContext(context = {}) {
       : [],
     viewport_requirements: Array.isArray(context.viewport_requirements)
       ? context.viewport_requirements.filter(value => typeof value === 'string').slice(0, 20)
-      : []
+      : [],
+    build_map: {
+      target_sha: typeof buildMap.target_sha === 'string' ? buildMap.target_sha.slice(0, 64) : '',
+      file_count: Number.isInteger(buildMap.file_count) ? buildMap.file_count : 0,
+      tracked_files: Array.isArray(buildMap.tracked_files) ? buildMap.tracked_files.filter(value => typeof value === 'string').slice(0, 2000) : [],
+      packages: Array.isArray(buildMap.packages) ? buildMap.packages.slice(0, 20) : [],
+      compose: Array.isArray(buildMap.compose) ? buildMap.compose.slice(0, 20) : [],
+      supabase_edge_functions: Array.isArray(buildMap.supabase_edge_functions) ? buildMap.supabase_edge_functions.filter(value => typeof value === 'string').slice(0, 500) : [],
+      schema: {
+        available: buildMap.schema?.available === true,
+        tables: Array.isArray(buildMap.schema?.tables) ? buildMap.schema.tables.filter(value => typeof value === 'string').slice(0, 1000) : [],
+        views: Array.isArray(buildMap.schema?.views) ? buildMap.schema.views.filter(value => typeof value === 'string').slice(0, 1000) : [],
+        functions: Array.isArray(buildMap.schema?.functions) ? buildMap.schema.functions.filter(value => typeof value === 'string').slice(0, 1000) : []
+      },
+      recent_commits: Array.isArray(buildMap.recent_commits) ? buildMap.recent_commits.filter(value => typeof value === 'string').slice(0, 20) : [],
+      secret_files_excluded: buildMap.secret_files_excluded === true
+    },
+    live_context: liveContext
   };
 }
 

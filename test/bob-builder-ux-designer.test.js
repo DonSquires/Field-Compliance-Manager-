@@ -31,12 +31,14 @@ function validDesignPlan() {
 test('UX Designer prompt carries approved specification and forbids invented behavior', () => {
   const prompt = buildUxDesignerPrompt({
     specification: { product_brief: { outcome: 'Governed approvals' }, acceptance_criteria: [{ id: 'AC-1' }] },
-    repositoryContext: { existing_design_system: 'PageStyles.css variables', relevant_components: ['ApprovalList'] }
+    repositoryContext: { existing_design_system: 'PageStyles.css variables', relevant_components: ['ApprovalList'], build_map: { target_sha: 'a'.repeat(64), file_count: 2, tracked_files: ['apps/web/src/App.tsx'], secret_files_excluded: true }, live_context: { atlas: { capability_count: 2 }, live_data: { scope: 'aggregate row counts only' } } }
   });
 
   assert.match(prompt.systemPrompt, /approved product specification/);
   assert.match(prompt.systemPrompt, /Do not invent/);
   assert.equal(JSON.parse(prompt.userPrompt).approved_specification.product_brief.outcome, 'Governed approvals');
+  assert.equal(JSON.parse(prompt.userPrompt).repository_context.build_map.file_count, 2);
+  assert.equal(JSON.parse(prompt.userPrompt).repository_context.live_context.atlas.capability_count, 2);
 });
 
 test('UX Designer parser enforces complete responsive and accessibility output', () => {

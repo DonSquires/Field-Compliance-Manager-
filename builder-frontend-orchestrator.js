@@ -25,6 +25,7 @@ async function runFrontendImplementation({
   requestedFiles,
   workerImage,
   runnerId,
+  liveContext,
   timeoutSeconds = 900,
   generate = runFrontendEngineer,
   repair = runFrontendRepair,
@@ -33,7 +34,7 @@ async function runFrontendImplementation({
 }) {
   let currentStep = step;
   let generation = await generate({
-    supabase, gateway, job, step: currentStep, uxArtifact, sourceDir, requestedFiles
+    supabase, gateway, job, step: currentStep, uxArtifact, sourceDir, requestedFiles, liveContext
   });
   if (!generation.ok || !generation.patch_artifact?.id) {
     return { success: false, phase: 'generation', result: generation, attempts: 0 };
@@ -72,7 +73,8 @@ async function runFrontendImplementation({
       failureArtifact,
       failedWorkerRunId: verification.worker_run_id,
       sourceDir,
-      requestedFiles
+      requestedFiles,
+      liveContext
     });
     if (attempt >= MAX_FRONTEND_ATTEMPTS) {
       return { success: false, phase: 'repair_limit', attempts: attempt, result: generation };

@@ -27,11 +27,16 @@ test('Product Analyst context excludes arbitrary content and secret fields', () 
   const context = normalizeRepositoryContext({
     repository: 'owner/repo',
     relevant_files: ['src/App.tsx'],
+    build_map: { target_sha: 'a'.repeat(64), file_count: 3, tracked_files: ['src/App.tsx'], secret_files_excluded: true },
+    live_context: { atlas: { capability_count: 2 }, live_data: { scope: 'aggregate row counts only' } },
     file_contents: 'private source',
     api_token: 'secret'
   });
 
   assert.deepEqual(context.relevant_files, ['src/App.tsx']);
+  assert.equal(context.build_map.target_sha, 'a'.repeat(64));
+  assert.deepEqual(context.build_map.tracked_files, ['src/App.tsx']);
+  assert.equal(context.live_context.atlas.capability_count, 2);
   assert.equal('file_contents' in context, false);
   assert.equal('api_token' in context, false);
 });
@@ -45,6 +50,7 @@ test('Product Analyst prompt requires grounded JSON and unresolved unknowns', ()
   assert.match(prompt.systemPrompt, /Never invent/);
   assert.match(prompt.systemPrompt, /unresolved_questions/);
   assert.equal(JSON.parse(prompt.userPrompt).task, 'Build a governed approval queue');
+  assert.equal(JSON.parse(prompt.userPrompt).repository_context.build_map.file_count, 0);
 });
 
 test('Product Analyst parser accepts the complete specification contract', () => {

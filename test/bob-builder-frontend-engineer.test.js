@@ -25,7 +25,10 @@ const patch = [
 function repositoryFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-source-'));
   fs.mkdirSync(path.join(root, 'apps/web/src'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'supabase'), { recursive: true });
   fs.writeFileSync(path.join(root, 'apps/web/src/example.ts'), 'export const value = 1;\n');
+  fs.writeFileSync(path.join(root, 'supabase/schema.sql'), 'CREATE TABLE "public"."example" (id uuid);\nCREATE OR REPLACE FUNCTION "public"."example_function"() RETURNS void LANGUAGE sql AS $$ SELECT; $$;\n');
+  fs.writeFileSync(path.join(root, '.env'), 'SHOULD_NOT_APPEAR=true\n');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
@@ -45,6 +48,11 @@ test('Frontend Engineer source context requires a clean commit-pinned repository
     });
     assert.equal(context.target_sha, fixture.sha);
     assert.equal(context.files[0].path, 'apps/web/src/example.ts');
+    assert.equal(context.repository_context.target_sha, fixture.sha);
+    assert.deepEqual(context.repository_context.tracked_files, ['apps/web/src/example.ts', 'supabase/schema.sql']);
+    assert.deepEqual(context.repository_context.schema.tables, ['example']);
+    assert.deepEqual(context.repository_context.schema.functions, ['example_function']);
+    assert.equal(context.repository_context.secret_files_excluded, true);
     fs.writeFileSync(path.join(fixture.root, 'apps/web/src/example.ts'), 'dirty');
     assert.throws(() => collectFrontendSourceContext({
       sourceDir: fixture.root, targetSha: fixture.sha, requestedFiles: ['apps/web/src/example.ts']
@@ -87,6 +95,7 @@ test('Frontend Engineer routes approved UX and bounded source through governed m
       uxArtifact: { id: 'ux-1', artifact_type: 'ui_design_plan', status: 'final' },
       sourceDir: fixture.root,
       requestedFiles: ['apps/web/src/example.ts'],
+      liveContext: { atlas: { capability_count: 1 }, live_data: { scope: 'aggregate row counts only' } },
       loadUxPlan: async () => ({ designPlan: { route_map: [], component_inventory: [] } }),
       executeModelRun: async input => {
         captured = input;
@@ -96,6 +105,8 @@ test('Frontend Engineer routes approved UX and bounded source through governed m
     assert.equal(captured.modelRequest.provider, 'openai');
     assert.equal(captured.modelRequest.prompt_version, FRONTEND_ENGINEER_PROMPT_VERSION);
     assert.deepEqual(captured.modelRequest.input_artifact_ids, ['ux-1']);
+    assert.equal(JSON.parse(captured.modelRequest.request.user_prompt).repository_context.target_sha, fixture.sha);
+    assert.equal(JSON.parse(captured.modelRequest.request.user_prompt).live_context.atlas.capability_count, 1);
     assert.equal(result.patch_artifact.id, 'patch-1');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });

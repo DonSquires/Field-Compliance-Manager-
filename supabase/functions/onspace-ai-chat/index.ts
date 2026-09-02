@@ -1269,8 +1269,8 @@ function computeEgressForbiddenSet(caps, meta) {
     },
     {
       tool: 'web_research',
-      purpose: 'Research legislation/standards online when the user explicitly asks.',
-      governance: 'human-invoked; PII redacted'
+      purpose: 'Research current public data, official guidance, legislation, standards, and technical resources online when the user explicitly asks. Return source-grounded findings only; do not treat a search result as authority for a write or legal conclusion.',
+      governance: 'human-invoked; PII redacted; advisory only; SSRF-protected'
     },
     {
       tool: 'scv_lookup',
@@ -5619,11 +5619,27 @@ async function execWebResearch(authHeader, message) {
     }
   };
   const sources = Array.isArray(r.data.sources) ? r.data.sources : [];
-  return {
-    reply: `Research (advisory; verify before use):\n${sources.map((s, i)=>`${i + 1}. ${s.title || s.url}\n   ${s.url}`).join('\n')}`,
+  if (!sources.length) return {
+    reply: '[INTERNAL: Web research returned no safe sources. Do not infer that the requested information is absent; tell the user no safe source could be retrieved and suggest an official source or explicit URL.]',
     meta: {
       tool: 'web_research',
-      outcome: 'ok'
+      outcome: 'empty'
+    }
+  };
+  const evidence = sources.slice(0, 5).map((source, index) => [
+    `${index + 1}. ${String(source.title || source.url).slice(0, 200)}`,
+    `URL: ${String(source.url || '').slice(0, 1000)}`,
+    `Trust: ${Number(source.trust ?? 0)}`,
+    `Excerpt: ${String(source.excerpt || '').slice(0, 1500)}`
+  ].join('\n')).join('\n\n');
+  return {
+    reply: `[INTERNAL: Web research is advisory and source-grounded. Reason over the redacted excerpts below; distinguish direct source facts from inference, cite the source URLs in the user-facing answer, and do not use research as authority for a write or legal conclusion.]\n\nQuery: ${String(r.data.query || message).slice(0, 2000)}\nConfidence: ${Number(r.data.confidence ?? 0)}\n\n${evidence}`,
+    meta: {
+      tool: 'web_research',
+      outcome: 'ok',
+      source_count: sources.length,
+      confidence: Number(r.data.confidence ?? 0),
+      internal: true
     }
   };
 }

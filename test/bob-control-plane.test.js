@@ -133,6 +133,10 @@ test('Builder runtime routes require the admin token and fixed server configurat
   assert.equal(deniedAdvance.response.status, 401);
   const deniedRun = await request('POST', '/api/bob/builder/jobs/job-1/run', {});
   assert.equal(deniedRun.response.status, 401);
+  const deniedContext = await request('GET', '/api/bob/builder/jobs/job-1/context');
+  assert.equal(deniedContext.response.status, 401);
+  const deniedRefresh = await request('POST', '/api/bob/builder/atlas/refresh', {});
+  assert.equal(deniedRefresh.response.status, 401);
 });
 
 test('job creation rejects repositories outside the allowlist', async () => {

@@ -7,8 +7,9 @@ const {
   executeBuilderModelRun,
   contentMetadata
 } = require('./builder-model-adapter');
+const { collectRepositoryContext } = require('./builder-repository-context');
 
-const BACKEND_ENGINEER_PROMPT_VERSION = 'backend-engineer-v1';
+const BACKEND_ENGINEER_PROMPT_VERSION = 'backend-engineer-v2';
 const MAX_SOURCE_FILES = 40;
 const MAX_SOURCE_FILE_BYTES = 100000;
 const MAX_SOURCE_TOTAL_BYTES = 500000;
@@ -63,7 +64,11 @@ function collectBackendSourceContext({ sourceDir, targetSha, requestedFiles }) {
       content
     };
   });
-  return { target_sha: targetSha, files };
+  return {
+    target_sha: targetSha,
+    repository_context: collectRepositoryContext({ sourceDir, targetSha }),
+    files
+  };
 }
 
 async function loadVerifiedProductSpecification(supabase, artifactId, jobId) {
@@ -191,10 +196,11 @@ function parseBackendProposal(content) {
   };
 }
 
-function buildBackendEngineerPrompt({ specification, sourceContext }) {
+function buildBackendEngineerPrompt({ specification, sourceContext, liveContext = null }) {
   return {
     systemPrompt: [
       'You are the Backend Engineer for Field Compliance Manager.',
+      'Understand the supplied commit-pinned whole-build map before making a module-local change.',
       'Implement only the approved product specification using the supplied commit-pinned backend sources.',
       'Return one JSON object containing summary, patch, changed_files, database_migrations, edge_functions, tests, and rollback_notes.',
       'Use additive schema changes, preserve tenant isolation and provenance, and keep secrets server-side.',
@@ -205,6 +211,8 @@ function buildBackendEngineerPrompt({ specification, sourceContext }) {
     userPrompt: JSON.stringify({
       approved_product_specification: specification,
       target_sha: sourceContext.target_sha,
+      repository_context: sourceContext.repository_context,
+      live_context: liveContext,
       source_files: sourceContext.files,
       required_output: {
         summary: 'string',
@@ -227,6 +235,7 @@ async function runBackendEngineer({
   productArtifact,
   sourceDir,
   requestedFiles,
+  liveContext = null,
   loadProductSpecification = loadVerifiedProductSpecification,
   executeModelRun = executeBuilderModelRun
 }) {
@@ -239,7 +248,7 @@ async function runBackendEngineer({
     loadProductSpecification(supabase, productArtifact.id, job.id),
     Promise.resolve(collectBackendSourceContext({ sourceDir, targetSha: job.target_sha, requestedFiles }))
   ]);
-  const prompt = buildBackendEngineerPrompt({ specification: product.specification, sourceContext });
+  const prompt = buildBackendEngineerPrompt({ specification: product.specification, sourceContext, liveContext });
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
     jobId: job.id,
@@ -273,6 +282,7 @@ module.exports = {
   BACKEND_SOURCE_PATTERNS,
   isAllowedBackendPath,
   collectBackendSourceContext,
+  collectRepositoryContext,
   loadVerifiedProductSpecification,
   changedFilesFromPatch,
   requireAdditiveMigrations,

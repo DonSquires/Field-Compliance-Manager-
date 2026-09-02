@@ -119,8 +119,8 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
   }
   if (action.type === 'run_product_analysis') return run.product({ ...common, repositoryContext: context.repositoryContext, constraints: context.constraints, requestedFromUsers: context.requestedFromUsers });
   if (action.type === 'run_ux_design') return run.ux({ ...common, specificationArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), repositoryContext: context.designContext });
-  if (action.type === 'run_frontend') return run.frontend({ ...common, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId });
-  if (action.type === 'run_backend') return run.backend({ ...common, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId });
+  if (action.type === 'run_frontend') return run.frontend({ ...common, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext });
+  if (action.type === 'run_backend') return run.backend({ ...common, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext });
   const implementation = implementationArtifacts(snapshot);
   const runs = implementationRuns(snapshot);
   const securityArtifact = artifactsFor(snapshot, 'security_review', 'security_review').at(-1);

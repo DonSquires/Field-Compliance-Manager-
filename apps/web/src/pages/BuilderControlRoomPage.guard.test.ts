@@ -44,6 +44,10 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('Immutable task brief');
     expect(source).toContain('Verified artifacts');
     expect(source).toContain('Durable execution timeline');
+    expect(source).toContain('Commit-pinned build and live evidence');
+    expect(source).toContain("action: 'context_snapshot'");
+    expect(source).toContain("action: 'refresh_atlas'");
+    expect(source).toContain('Refresh Atlas');
     expect(source).toContain("action: 'read_artifact'");
     expect(source).toContain('Selected artifact content');
     expect(source).toContain("action: 'create_workspace'");
@@ -76,6 +80,9 @@ describe('Builder control room boundary', () => {
     expect(relay).toContain("callerClient.rpc(rpc");
     expect(relay).toContain('reviewed_artifact_ids');
     expect(relay).toContain("action === 'read_artifact'");
+    expect(relay).toContain("action === 'context_snapshot'");
+    expect(relay).toContain("action === 'refresh_atlas'");
+    expect(relay).toContain('Atlas refresh is restricted to grand master');
     expect(relay).toContain("action === 'create_workspace'");
     expect(relay).toContain("action === 'commit_verified_patch'");
     expect(relay).toContain("action === 'create_followup'");

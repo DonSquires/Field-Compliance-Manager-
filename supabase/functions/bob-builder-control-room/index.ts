@@ -104,6 +104,15 @@ serve(async req => {
     }).catch(() => {});
   };
 
+  if (action === 'refresh_atlas') {
+    if (role !== 'grand_master') return json({ error: 'Atlas refresh is restricted to grand master' }, 403);
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = await relay('/api/bob/builder/atlas/refresh', 'POST');
+    await audit(profile.organization_id, result.ok ? 'atlas_refreshed' : 'atlas_refresh_failed');
+    if (!result.ok) return json({ error: 'Atlas refresh failed' }, result.status);
+    return json({ atlas_refresh: result.payload });
+  }
+
   if (action === 'list') {
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];
     let projectsQuery = admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo, name, status').eq('status', 'active').order('name');
@@ -153,6 +162,14 @@ serve(async req => {
   const jobId = typeof body.job_id === 'string' ? body.job_id : '';
   const { data: job } = await admin.from('builder_jobs').select('id, organization_id').eq('id', jobId).single();
   if (!job || !canAccessOrganization(job.organization_id)) return json({ error: 'Builder job is unavailable' }, 404);
+
+  if (action === 'context_snapshot') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/context`, 'GET');
+    await audit(job.organization_id, result.ok ? 'context_viewed' : 'context_failed', jobId);
+    if (!result.ok) return json({ error: 'Builder context is unavailable' }, result.status);
+    return json({ context: result.payload });
+  }
 
   if (action === 'get') {
     const [jobResult, stepsResult, artifactsResult, runsResult, approvalsResult] = await Promise.all([
