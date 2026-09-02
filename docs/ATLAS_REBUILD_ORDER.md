@@ -118,8 +118,14 @@ Goal: consequential writes are proposed, not silently applied.
 - Any write that changes billing, compliance status, welfare escalation, or
   cross-org data must go through an approval path (Bob proposes, human
   approves) rather than a direct `supabase.from(...).update()` from a page.
-- Simple, low-risk writes (e.g., marking a checkpoint visited) can remain
-  direct, but should still be logged for audit.
+- Operational evidence and lifecycle transitions (including checkpoint visits,
+  assessment submission, dispatch state, and shift completion) must use a
+  caller-derived server boundary that validates assignment and state before the
+  write, is retry-safe where clients can replay, and records an audit event.
+- Human approval is required for legal, commercial, cross-organization, or other
+  consequential decisions. Routine officer evidence capture does not require an
+  approval queue, but it still must not trust browser-computed authority or
+  persist a failed validation before returning an error.
 
 ## Phase 6 — Tests around safety and edge cases
 

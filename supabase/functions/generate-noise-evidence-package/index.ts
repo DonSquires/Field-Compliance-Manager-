@@ -27,10 +27,23 @@
  */ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const ADMIN_ROLES = new Set(["grand_master", "master", "admin", "admin_officer"]);
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
 };
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json"
+    }
+  });
+}
 /* ---- Layout constants (A4 in points: 595 x 842) ---- */ const PAGE_W = 595;
 const PAGE_H = 842;
 const MARGIN = 50;
@@ -165,23 +178,21 @@ function fmtDuration(start, end) {
   return `${hrs}h ${rem}m`;
 }
 async function embedPhoto(ctx, supabase, photoEntry, label) {
-  if (!photoEntry?.storage_path) return ctx;
+  if (!photoEntry?.storage_path) throw new Error(`${label} has no storage path`);
   try {
     // Get a signed URL for the photo
-    const { data: signedData, error: signErr } = await supabase.storage.from("evidence-photos").createSignedUrl(photoEntry.storage_path, 300);
+    if (photoEntry.storage_bucket !== "scans") throw new Error(`${label} is outside the private evidence bucket`);
+    const { data: signedData, error: signErr } = await supabase.storage.from(photoEntry.storage_bucket).createSignedUrl(photoEntry.storage_path, 300);
     if (signErr || !signedData?.signedUrl) {
-      ctx = drawField(ctx, label, `[Photo unavailable: ${signErr?.message ?? "no URL"}]`);
-      return ctx;
+      throw new Error(`${label} is unavailable: ${signErr?.message ?? "no URL"}`);
     }
     const response = await fetch(signedData.signedUrl);
     if (!response.ok) {
-      ctx = drawField(ctx, label, "[Photo could not be fetched]");
-      return ctx;
+      throw new Error(`${label} could not be fetched`);
     }
     const imageBytes = new Uint8Array(await response.arrayBuffer());
     if (imageBytes.length < 10) {
-      ctx = drawField(ctx, label, "[Photo file empty]");
-      return ctx;
+      throw new Error(`${label} is empty`);
     }
     // Detect format from magic bytes
     let embeddedImage;
@@ -192,8 +203,7 @@ async function embedPhoto(ctx, supabase, photoEntry, label) {
     } else if (isPng) {
       embeddedImage = await ctx.doc.embedPng(imageBytes);
     } else {
-      ctx = drawField(ctx, label, "[Unsupported image format]");
-      return ctx;
+      throw new Error(`${label} is not a supported JPEG or PNG`);
     }
     // Scale to fit
     const scale = Math.min(PHOTO_MAX_W / embeddedImage.width, PHOTO_MAX_H / embeddedImage.height, 1);
@@ -230,7 +240,7 @@ async function embedPhoto(ctx, supabase, photoEntry, label) {
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    ctx = drawField(ctx, label, `[Photo embed error: ${msg}]`);
+    throw new Error(`Evidence photo validation failed: ${msg}`);
   }
   return ctx;
 }
@@ -323,35 +333,94 @@ const HS_ITEMS = [
   "Vehicle parked for quick unobstructed departure",
   "Body Worn Camera activated on arrival"
 ];
+const ACTIONS = new Set(["no_noise", "acceptable", "verbal_warning", "end", "seizure"]);
+function hasText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function hasPhotos(value) {
+  return Array.isArray(value) && value.length > 0 && value.every((photo)=>hasText(photo?.storage_path));
+}
+function validateEvidenceReadiness(assessment) {
+  const missing = [];
+  if (!hasText(assessment.job_number)) missing.push("job number");
+  if (!assessment.officer_id || !hasText(assessment.officer_name)) missing.push("attending officer");
+  if (!assessment.received_at) missing.push("complaint received time");
+  if (!assessment.arrived_at || !assessment.departed_at) missing.push("arrival and departure times");
+  if (!hasText(assessment.complaint_address)) missing.push("complaint address");
+  if (!hasText(assessment.noise_source_address)) missing.push("noise source address");
+  if (!hasText(assessment.assessment_location)) missing.push("assessment location");
+  if (assessment.arrival_gps_lat == null || assessment.arrival_gps_lng == null) missing.push("arrival GPS");
+  if (assessment.assessment_gps_lat == null || assessment.assessment_gps_lng == null) missing.push("assessment GPS");
+  if (!assessment.hs_checklist_completed) missing.push("completed H&S checklist");
+  if (!Array.isArray(assessment.hs_checklist_items) || assessment.hs_checklist_items.length < HS_ITEMS.length || !assessment.hs_checklist_items.slice(0, HS_ITEMS.length).every(Boolean)) {
+    missing.push("all H&S checklist confirmations");
+  }
+  if (!hasPhotos(assessment.photo_assessment_point)) missing.push("assessment-point photograph");
+  if (assessment.volume_score == null || assessment.tone_score == null || assessment.matrix_total == null || assessment.volume_score !== 0 && assessment.time_score == null) {
+    missing.push("complete TDC matrix");
+  }
+  if (!ACTIONS.has(assessment.action)) missing.push("supported enforcement action");
+  if (!hasText(assessment.incident_report_text)) missing.push("incident report");
+  if (assessment.action === "end" || assessment.action === "seizure") {
+    if (!hasPhotos(assessment.photo_source_address)) missing.push("source-address photograph");
+    if (!hasPhotos(assessment.photo_service_evidence)) missing.push("service photograph");
+    if (!hasText(assessment.end_number)) missing.push("END number");
+    if (!hasText(assessment.occupant_name)) missing.push("served occupant");
+  }
+  return missing;
+}
+function validateSeizureReadiness(seizure) {
+  const missing = [];
+  if (!seizure) return ["seizure record"];
+  if (!hasText(seizure.item_description)) missing.push("seized item description");
+  if (!seizure.police_present) missing.push("police presence confirmation");
+  if (!hasText(seizure.police_name)) missing.push("police officer name");
+  if (!hasText(seizure.seizure_form_number)) missing.push("seizure form number");
+  if (!hasPhotos(seizure.photo_urls)) missing.push("seizure photograph");
+  return missing;
+}
 /* ==== Main handler ==== */ serve(async (req)=>{
   if (req.method === "OPTIONS") return new Response("ok", {
     headers: corsHeaders
   });
+  if (req.method !== "POST") return json({
+    error: "POST required"
+  }, 405);
   try {
-    const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-    // Auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return new Response(JSON.stringify({
+    const authHeader = req.headers.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) return json({
       error: "Unauthorized"
-    }), {
-      status: 401,
-      headers: corsHeaders
+    }, 401);
+    const caller = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
     });
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (authErr || !user) return new Response(JSON.stringify({
+    const { data: { user }, error: authErr } = await caller.auth.getUser();
+    if (authErr || !user) return json({
       error: "Unauthorized"
-    }), {
-      status: 401,
-      headers: corsHeaders
+    }, 401);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
     });
+    const { data: profile } = await supabase.from("user_profiles").select("organization_id, role, deactivated_at").eq("id", user.id).maybeSingle();
+    if (!profile || profile.deactivated_at || !ADMIN_ROLES.has(String(profile.role))) return json({
+      error: "Forbidden"
+    }, 403);
     const body = await req.json();
-    const { assessment_id } = body;
-    if (!assessment_id) return new Response(JSON.stringify({
+    const assessment_id = String(body.assessment_id ?? "").trim();
+    if (!assessment_id) return json({
       error: "assessment_id is required"
-    }), {
-      status: 400,
-      headers: corsHeaders
-    });
+    }, 400);
     // ---- Load assessment ----
     const { data: assessment, error: assessErr } = await supabase.from("noise_assessments").select(`id, organization_id, job_number, site_id, status, action,
          received_at, arrived_at, departed_at, created_at,
@@ -371,18 +440,37 @@ const HS_ITEMS = [
          incident_report_text, notes, follow_up_required,
          complainant_protected, referred_animal_control,
          evidence_package_url,
-         client_sites(name, address)`).eq("id", assessment_id).single();
-    if (assessErr || !assessment) return new Response(JSON.stringify({
-      error: `Assessment not found: ${assessErr?.message ?? "no data"}`
-    }), {
-      status: 404,
-      headers: corsHeaders
-    });
+         client_sites!noise_assessments_site_id_fkey(name, address)`).eq("id", assessment_id).eq("organization_id", profile.organization_id).maybeSingle();
+    if (assessErr || !assessment) return json({
+      error: "Assessment not found"
+    }, 404);
+    const readinessIssues = validateEvidenceReadiness(assessment);
+    if (readinessIssues.length > 0) return json({
+      error: "Evidence package is not ready",
+      missing: readinessIssues
+    }, 409);
+    if (assessment.action === "end" || assessment.action === "seizure") {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: staff } = await supabase.from("staff_profiles").select("id").eq("user_id", assessment.officer_id).eq("organization_id", assessment.organization_id).maybeSingle();
+      const { data: warrant } = staff ? await supabase.from("staff_credentials").select("id").eq("staff_id", staff.id).eq("organization_id", assessment.organization_id).eq("credential_type", "noise_control_warrant").eq("verified", true).or(`expiry_date.is.null,expiry_date.gte.${today}`).limit(1).maybeSingle() : {
+        data: null
+      };
+      if (!warrant) return json({
+        error: "Attending officer does not hold an active verified Noise Control warrant"
+      }, 409);
+    }
     // ---- Load org ----
     const { data: org } = await supabase.from("organizations").select("name, contact_email, contact_phone, logo_url").eq("id", assessment.organization_id).single();
     const orgName = org?.name ?? "Iron Eagle Field Services";
     // ---- Load seizure record (if any) ----
     const { data: seizure } = await supabase.from("noise_seizures").select("id, item_description, police_present, police_name, seizure_form_number, photo_urls, legal_authority, seized_at, make, model, serial_number").eq("noise_assessment_id", assessment_id).maybeSingle();
+    if (assessment.action === "seizure") {
+      const seizureIssues = validateSeizureReadiness(seizure);
+      if (seizureIssues.length > 0) return json({
+        error: "Evidence package is not ready",
+        missing: seizureIssues
+      }, 409);
+    }
     // ---- Load notice template (for END or seizure) ----
     const noticeType = assessment.action === "seizure" ? "seizure" : "end";
     const { data: template } = await supabase.from("notice_templates").select("*").eq("organization_id", assessment.organization_id).eq("notice_type", noticeType).eq("is_active", true).order("version", {
@@ -681,15 +769,16 @@ const HS_ITEMS = [
     }).eq("id", assessment_id);
     if (updateErr) {
       console.error("Failed to update evidence_package_url:", updateErr.message);
+      await supabase.storage.from("notice-artifacts").remove([
+        storagePath
+      ]);
+      return json({
+        error: "Evidence package could not be recorded"
+      }, 500);
     }
-    return new Response(JSON.stringify({
+    return json({
       ok: true,
       evidence_package_url: storagePath
-    }), {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      }
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

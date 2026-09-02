@@ -10,6 +10,8 @@ The VPS contains the Node-based Field Compliance Manager backend, Bob's control 
 
 The live public Supabase schema is stored in [`supabase/schema.sql`](supabase/schema.sql). It includes organizations, users, staff, sites, patrols, shifts, dispatch, observations, incidents, enforcement, documents, reporting, and Bob/workflow tables.
 
+Read [`docs/WHOLE_SYSTEM_MODEL.md`](docs/WHOLE_SYSTEM_MODEL.md) before rebuilding a module. It defines the shared tenant, authority, place, workforce, operations, evidence, and governance spines, plus the distinct Atlas, Oracle, Caddie, and Conductor responsibilities.
+
 ## Services
 
 - `bob-control-plane-server.js`: Bob control-plane HTTP service

@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { countCompletedCheckpoints, evaluateCheckpointVisit, mapCheckpointVisitScanMethod } from '../lib/checkpointVisit';
+import { countCompletedCheckpoints } from '../lib/checkpointVisit';
 import './PageStyles.css';
 
 interface Shift {
@@ -29,6 +29,7 @@ interface Shift {
 
 interface Checkpoint {
   id: string;
+  kind: 'route' | 'site';
   name: string;
   description: string | null;
   qr_code?: string | null;
@@ -87,6 +88,7 @@ const PatrolPage: React.FC = () => {
           if (routeCheckpoints && routeCheckpoints.length > 0) {
             return routeCheckpoints.map((c) => ({
               id: c.id,
+              kind: 'route',
               name: c.name,
               description: c.description,
               qr_code: c.qr_code_data,
@@ -109,20 +111,11 @@ const PatrolPage: React.FC = () => {
             .order('name', { ascending: true });
 
           if (zoneCheckpoints && zoneCheckpoints.length > 0) {
-            return zoneCheckpoints;
+            return zoneCheckpoints.map((checkpoint) => ({ ...checkpoint, kind: 'site' as const }));
           }
         }
 
-        // Priority 3: Organization-wide active checkpoints
-        const { data: orgCheckpoints } = await supabase
-          .from('patrol_checkpoints')
-          .select('id, name, description, qr_code, gps_lat, gps_lng, radius_meters')
-          .eq('organization_id', profile.organizationId)
-          .eq('active', true)
-          .order('name', { ascending: true })
-          .limit(20);
-
-        return orgCheckpoints || [];
+        return [];
       } catch (err) {
         console.error('Failed to load checkpoints:', err);
         return [];
@@ -135,12 +128,12 @@ const PatrolPage: React.FC = () => {
     // ATLAS READS: patrol_checkpoint_visits
     const { data, error: err } = await supabase
       .from('patrol_checkpoint_visits')
-      .select('id, checkpoint_id, visited_at, scan_method, notes')
+      .select('id, checkpoint_id, route_checkpoint_id, visited_at, scan_method, notes')
       .eq('patrol_id', patrolId)
       .order('visited_at', { ascending: true });
 
     if (err) throw err;
-    return (data as CheckpointVisit[]) || [];
+    return ((data as Array<CheckpointVisit & { route_checkpoint_id?: string | null }>) || []).map((visit) => ({ ...visit, checkpoint_id: visit.checkpoint_id ?? visit.route_checkpoint_id ?? '' }));
   }, []);
 
   const loadOrCreateSession = useCallback(
@@ -265,22 +258,8 @@ const PatrolPage: React.FC = () => {
     if (!session || !profile?.organizationId || !profile?.id) return;
 
     try {
-      const now = new Date().toISOString();
-      // ATLAS WRITES: patrols
-      const { data, error: insertErr } = await supabase
-        .from('patrols')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            shift_id: session.shift.id,
-            officer_user_id: profile.id,
-            zone_id: session.shift.zone_id,
-            status: 'in_progress',
-            started_at: now,
-          },
-        ])
-        .select('id, status, started_at')
-        .single();
+      // ATLAS CALLS: start_patrol_session
+      const { data, error: insertErr } = await supabase.rpc('start_patrol_session', { p_shift_id: session.shift.id });
 
       if (insertErr) throw insertErr;
 
@@ -302,85 +281,27 @@ const PatrolPage: React.FC = () => {
       setRecordingVisit(true);
       setError(null);
 
-      let lat: number | null = null;
-      let lng: number | null = null;
-      let gpsPrecisionMetres: number | null = null;
-
-      // Attempt GPS capture if browser geolocation available
-      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
-        try {
-          const pos = await new Promise<GeolocationPosition>((res, rej) => {
-            navigator.geolocation.getCurrentPosition(res, rej, { timeout: 4000, enableHighAccuracy: true });
-          });
-          lat = pos.coords.latitude;
-          lng = pos.coords.longitude;
-          gpsPrecisionMetres = pos.coords.accuracy ?? null;
-        } catch {
-          // GPS optional for manual visit confirmation
-        }
-      }
+      if (typeof navigator === 'undefined' || !('geolocation' in navigator)) throw new Error('GPS is required to record checkpoint evidence.');
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, enableHighAccuracy: true, maximumAge: 0 });
+      });
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const gpsPrecisionMetres = position.coords.accuracy;
 
       const checkpoint = session.checkpoints.find((item) => item.id === checkpointId);
-      const evaluation = evaluateCheckpointVisit({
-        checkpointLat: checkpoint?.gps_lat ?? null,
-        checkpointLng: checkpoint?.gps_lng ?? null,
-        officerLat: lat,
-        officerLng: lng,
-        checkpointRadiusMetres: checkpoint?.radius_meters ?? 0,
-        gpsPrecisionMetres,
-        allowManualFallback: true,
-      });
-
-      const recordedNotes = [
-        visitNotes.trim(),
-        evaluation.reason === 'gps_missing_manual_allowed'
-          ? 'Manual visit approved: GPS unavailable and manual fallback was allowed.'
-          : evaluation.reason === 'gps_inaccurate'
-            ? 'GPS not accepted: position accuracy was worse than the checkpoint radius.'
-            : evaluation.reason === 'gps_outside_radius'
-              ? `GPS outside checkpoint radius (${evaluation.distanceMetres?.toFixed(1) ?? 'n/a'} m).`
-              : undefined,
-      ].filter(Boolean).join(' ') || null;
-
-      const scanMethod = mapCheckpointVisitScanMethod({
-        mode: evaluation.mode,
-        accepted: evaluation.accepted,
-      });
-
-      // ATLAS WRITES: patrol_checkpoint_visits
+      if (!checkpoint) throw new Error('Assigned checkpoint could not be found.');
+      // ATLAS CALLS: record_patrol_checkpoint_visit
       const { data, error: visitErr } = await supabase
-        .from('patrol_checkpoint_visits')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            patrol_id: session.id,
-            checkpoint_id: checkpointId,
-            officer_user_id: profile.id,
-            scan_method: scanMethod,
-            gps_lat: lat,
-            gps_lng: lng,
-            gps_accuracy: gpsPrecisionMetres,
-            gps_distance_from_checkpoint: evaluation.distanceMetres,
-            within_radius: evaluation.withinRadius,
-            notes: recordedNotes,
-          },
-        ])
-        .select('id, checkpoint_id, visited_at, scan_method, notes')
-        .single();
+        .rpc('record_patrol_checkpoint_visit', { p_patrol_id: session.id, p_checkpoint_kind: checkpoint.kind, p_checkpoint_id: checkpoint.id, p_gps_lat: lat, p_gps_lng: lng, p_gps_accuracy: gpsPrecisionMetres, p_notes: visitNotes.trim() || null });
 
       if (visitErr) throw visitErr;
-
-      if (!evaluation.accepted) {
-        throw new Error(
-          evaluation.reason === 'gps_inaccurate'
-            ? 'GPS accuracy is too poor for this checkpoint.'
-            : 'GPS position is outside the checkpoint radius.'
-        );
-      }
+      const receipt = Array.isArray(data) ? data[0] : data;
+      if (!receipt?.visit_id) throw new Error('Checkpoint receipt was not returned.');
 
       setSession({
         ...session,
-        visits: [...session.visits, data as CheckpointVisit],
+        visits: session.visits.some((visit) => visit.checkpoint_id === checkpointId) ? session.visits : [...session.visits, { id: receipt.visit_id, checkpoint_id: checkpointId, visited_at: receipt.visited_at, scan_method: receipt.scan_method, notes: receipt.notes }],
       });
       setActiveCheckpointId(null);
       setVisitNotes('');
@@ -395,16 +316,12 @@ const PatrolPage: React.FC = () => {
     if (!session || !session.id) return;
 
     try {
-      const now = new Date().toISOString();
-      // ATLAS WRITES: patrols
-      const { error: updateErr } = await supabase
-        .from('patrols')
-        .update({ status: 'completed', ended_at: now })
-        .eq('id', session.id);
+      // ATLAS CALLS: complete_patrol_session
+      const { data, error: updateErr } = await supabase.rpc('complete_patrol_session', { p_patrol_id: session.id, p_notes: null });
 
       if (updateErr) throw updateErr;
 
-      setSession({ ...session, status: 'completed', ended_at: now });
+      setSession({ ...session, status: 'completed', ended_at: data.ended_at });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete patrol');
     }

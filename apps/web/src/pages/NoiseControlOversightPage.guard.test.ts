@@ -18,7 +18,7 @@ describe('governed noise review return', () => {
   it('shows and focuses exact officer review outcomes', () => {
     expect(officer).toContain("get('assessment')");
     expect(officer).toContain('Supervisor review');
-    expect(officer).toContain('officer-noise-${a.id}');
+    expect(officer).toContain('officer-noise-${assessment.id}');
   });
 
   it('locks, audits, personally notifies, and closes direct updates', () => {

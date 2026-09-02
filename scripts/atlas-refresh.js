@@ -338,7 +338,7 @@ function collectSourceEdges(rootDir, knownEntities) {
     for (const match of content.matchAll(/\.rpc\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]/g)) {
       add(source, 'rpc', match[1], 'calls', file, `.rpc('${match[1]}')`);
     }
-    for (const match of content.matchAll(/\.functions\.invoke\(\s*['"]([a-zA-Z0-9_-]+)['"]/g)) {
+    for (const match of content.matchAll(/\.functions\.invoke(?:<[^>]+>)?\(\s*['"]([a-zA-Z0-9_-]+)['"]/g)) {
       add(source, 'edge_function', match[1], 'calls', file, `.functions.invoke('${match[1]}')`);
     }
 
