@@ -7,7 +7,8 @@
  * officer decision — officers review status here, they don't set it.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -30,8 +31,7 @@ const OfficerOvernightVerificationPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // ATLAS READS: vehicle_overnight_sessions
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
       const orgId = profile?.organizationId;
       if (!orgId) return;
 
@@ -51,14 +51,13 @@ const OfficerOvernightVerificationPage: React.FC = () => {
         if (err) throw err;
         setSessions((data as OvernightSession[]) || []);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load overnight sessions');
+        setError(err instanceof Error ? err.message : (err as { message?: string }).message ?? 'Failed to load overnight sessions');
       } finally {
         setLoading(false);
       }
-    };
+    }, [profile?.organizationId]);
 
-    load();
-  }, [profile?.organizationId]);
+  useEffect(() => { void load(); }, [load]);
 
   if (loading) {
     return (
@@ -76,6 +75,7 @@ const OfficerOvernightVerificationPage: React.FC = () => {
       <header className="page-header">
         <h1>Overnight Verification</h1>
         <p className="subtitle">{sessions.length} recent sessions · evening/morning pairing</p>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? 'is-spinning' : ''} aria-hidden="true" /> Refresh</button>
       </header>
 
       {error && (
@@ -88,7 +88,7 @@ const OfficerOvernightVerificationPage: React.FC = () => {
       )}
 
       <div className="contacts-list">
-        {sessions.length === 0 ? (
+        {sessions.length === 0 && !error ? (
           <div className="empty-state">
             <p>No overnight sessions recorded.</p>
           </div>

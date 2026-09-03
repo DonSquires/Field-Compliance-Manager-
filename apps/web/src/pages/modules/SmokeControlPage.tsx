@@ -35,14 +35,22 @@ interface AssessmentForm {
   severity: string;
   scene_description: string;
   notes: string;
+  complaint_address: string;
+  action_taken: string;
+  source_confirmed: boolean;
+  follow_up_required: boolean;
 }
 
 const EMPTY_FORM: AssessmentForm = {
-  complaint_source: 'public',
-  smoke_source_type: 'outdoor_burning',
+  complaint_source: 'neighbour',
+  smoke_source_type: 'nuisance_burning',
   severity: 'moderate',
   scene_description: '',
   notes: '',
+  complaint_address: '',
+  action_taken: 'no_action',
+  source_confirmed: false,
+  follow_up_required: false,
 };
 
 const SmokeControlPage: React.FC = () => {
@@ -107,12 +115,17 @@ const SmokeControlPage: React.FC = () => {
             site_id: selectedSite.id,
             organization_id: profile.organizationId,
             officer_user_id: profile.id,
+            officer_id: profile.id,
             complaint_source: formData.complaint_source,
             smoke_source_type: formData.smoke_source_type,
             severity: formData.severity,
-            scene_description: formData.scene_description || null,
+            scene_description: formData.scene_description.trim(),
             notes: formData.notes || null,
-            address: selectedSite.address,
+            complaint_address: formData.complaint_address.trim() || null,
+            address: formData.complaint_address.trim() || null,
+            action_taken: formData.action_taken,
+            source_confirmed: formData.source_confirmed,
+            follow_up_required: formData.follow_up_required,
             status: 'open',
           },
         ])
@@ -209,34 +222,39 @@ const SmokeControlPage: React.FC = () => {
             {showForm && (
               <form className="assessment-form" onSubmit={handleSubmitAssessment}>
                 <div className="form-group">
-                  <label>Complaint Source</label>
+                  <label htmlFor="smoke-complaint-source">Complaint source</label>
                   <select
+                    id="smoke-complaint-source"
                     value={formData.complaint_source}
                     onChange={(e) => setFormData({ ...formData, complaint_source: e.target.value })}
                   >
-                    <option value="public">Public complaint</option>
-                    <option value="council">Council referral</option>
-                    <option value="patrol">Patrol observation</option>
+                    <option value="neighbour">Neighbour complaint</option>
+                    <option value="council_hotline">Council hotline</option>
+                    <option value="self_report">Self report</option>
+                    <option value="other">Other</option>
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label>Smoke Source Type</label>
+                  <label htmlFor="smoke-source-type">Smoke source type</label>
                   <select
+                    id="smoke-source-type"
                     value={formData.smoke_source_type}
                     onChange={(e) => setFormData({ ...formData, smoke_source_type: e.target.value })}
                   >
-                    <option value="outdoor_burning">Outdoor burning</option>
+                    <option value="nuisance_burning">Nuisance burning</option>
                     <option value="industrial">Industrial</option>
-                    <option value="domestic_fire">Domestic fire</option>
-                    <option value="vehicle">Vehicle</option>
+                    <option value="domestic_solid_fuel">Domestic solid fuel</option>
+                    <option value="vehicle_exhaust">Vehicle exhaust</option>
+                    <option value="agricultural">Agricultural</option>
                     <option value="unknown">Unknown</option>
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label>Severity</label>
+                  <label htmlFor="smoke-severity">Severity</label>
                   <select
+                    id="smoke-severity"
                     value={formData.severity}
                     onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
                   >
@@ -248,8 +266,14 @@ const SmokeControlPage: React.FC = () => {
                 </div>
 
                 <div className="form-group">
-                  <label>Scene Description</label>
+                  <label htmlFor="smoke-complaint-address">Complainant address</label>
+                  <input id="smoke-complaint-address" value={formData.complaint_address} onChange={(e) => setFormData({ ...formData, complaint_address: e.target.value })} placeholder="Affected property, if different from source site" />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="smoke-scene">Scene description</label>
                   <textarea
+                    id="smoke-scene"
+                    required
                     value={formData.scene_description}
                     onChange={(e) => setFormData({ ...formData, scene_description: e.target.value })}
                     rows={3}
@@ -257,15 +281,23 @@ const SmokeControlPage: React.FC = () => {
                 </div>
 
                 <div className="form-group">
-                  <label>Notes</label>
+                  <label htmlFor="smoke-action">Action taken</label>
+                  <select id="smoke-action" value={formData.action_taken} onChange={(e) => setFormData({ ...formData, action_taken: e.target.value })}><option value="no_action">No action</option><option value="verbal_warning">Verbal warning</option><option value="abatement_notice">Abatement notice</option><option value="infringement_notice">Infringement notice</option><option value="prosecution_referral">Prosecution referral</option></select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="smoke-notes">Notes</label>
                   <textarea
+                    id="smoke-notes"
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     rows={3}
                   />
                 </div>
 
-                <button type="submit" className="btn btn-primary btn-block">
+                <label className="form-checkbox"><input type="checkbox" checked={formData.source_confirmed} onChange={(e) => setFormData({ ...formData, source_confirmed: e.target.checked })} /> Source confirmed at the selected site</label>
+                <label className="form-checkbox"><input type="checkbox" checked={formData.follow_up_required} onChange={(e) => setFormData({ ...formData, follow_up_required: e.target.checked })} /> Follow-up required</label>
+
+                <button type="submit" className="btn btn-primary btn-block" disabled={!formData.scene_description.trim() || !formData.source_confirmed}>
                   Submit Assessment
                 </button>
               </form>
