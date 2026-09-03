@@ -18,6 +18,7 @@ See [GITLAB_PLATFORM_SYSTEMS.md](GITLAB_PLATFORM_SYSTEMS.md) for the GitLab-deri
 | `Bob` | Cloned | README-only historical placeholder. Current Bob implementation in this repo is much deeper. |
 | `https-react-9b4t5o.onspace.build` | Cloned | README-only historical UI export placeholder. |
 | `FreedomCamp-Manager` | Not accessible | GitHub returned 403 from this container. Needs read-only credential or Bob/GitLab-assisted recovery. |
+| `preview-react-9b4t5o-efbho4rc5qcj7zhif8e3zw.onspace.build` | Inspected as a live early preview | Freedom Camping admin prototype covering dashboards, zones, patrol activity, breaches, H&S, enforcement, and reporting. It directly queries/writes older tables such as `zones`, `vehicle_records`, `health_safety_reports`, and `enforcement_actions`; use as workflow/UI evidence only, never as a current schema or architecture source. |
 | GitLab `don-squires1/field-compliance-manager` project `83317421`, ref `Main` | Queried through deployed `bob-repo-search` using a grand_master test session | Most recent external build lineage. Searches and targeted reads were used for scan shell, officer shell chrome, live patrol monitor, parking evidence dry-run, mobile TODOs, push tokens, and job/enforcement terms. |
 
 ## Bob/GitLab Evidence
@@ -66,7 +67,7 @@ The current checkout is broader than the main Expo prototype on web and backend:
 - `apps/web` has officer, admin, client, scan, CRM, rostering, dispatch, field reports, vehicle lookup, welfare, parking, freedom camping, noise, biosecurity, smoke, billing, locations, geofence, Bob, Atlas, and reporting pages.
 - `supabase/functions` includes the current centralized scan and AI path: `process-officer-scan`, `classify-photo`, `classify-parking-scene`, `bob-inference`, `bob-voice-transcribe`, `bob-voice-speak`, `bob-resolve-address`, `bob-resolve-geofence`, `linz-lookup`, `motoweb-vehicle-lookup`, and many Bob builder/control-plane functions.
 - `supabase/schema.sql` contains current spines for `officer_gps_log`, `welfare_checks`, `officer_welfare_settings`, `parking_chalk_records`, `vehicle_overnight_sessions`, `ptt_channels`, `ptt_transmissions`, `radio_transcript_segments`, and `radio_translation_segments`.
-- `apps/mobile` is currently a secure Expo shell: Supabase session persistence, profile load, and current active assignment/standby state. It does not yet contain the operational mobile modules that existed in `FreedomCamp-Manager-App`.
+- `apps/mobile` now has secure Supabase session persistence and an initial vehicle scan slice: camera/gallery evidence, foreground GPS, governed `process-officer-scan` submission, and durable retry queue for network failures. It does not yet contain the broader operational mobile modules that existed in `FreedomCamp-Manager-App`.
 
 ## Required GitLab Platform Systems
 
@@ -83,17 +84,35 @@ Implementation rule: if a capability is missing in this checkout but present or 
 
 ## High-Value Missing or Thin Areas
 
+## Early Preview Lessons
+
+The supplied Onspace preview is an early Freedom Camping admin design, not part
+of the GitLab-copy SaaS line. Its visible product intent is useful: daily
+operations dashboard, officer activity, zone activity, breaches, patrols,
+geofencing, H&S, enforcement, and compliance reporting. It demonstrates the
+field operations domain the current build must cover coherently.
+
+Its implementation is specifically not a recovery target. Bundle inspection
+showed direct browser writes to legacy tables and a single-app model, including
+`zones`, `vehicle_records`, `health_safety_reports`, and
+`enforcement_actions`. The current build must use its governed current spines:
+location/site/zone authority, `process-officer-scan`, dispatch and shift stops,
+current welfare/evidence workflows, Atlas, Caddie, Conductor, and Oracle.
+
+Reuse the early preview for task hierarchy and scanability. Do not reuse its
+table names, client-side write patterns, role model, or module boundaries.
+
 ### 1. Mobile Offline Field App
 
 Prototype evidence: `FreedomCamp-Manager-App/services/database.ts`, `syncService.ts`, `uploadQueue.ts`, `complianceService.ts`, `cameraService.ts`, `trackingService.ts`, and `welfareService.ts`.
 
-Current status: present on web in narrower form; mostly missing from `apps/mobile`.
+Current status: initial mobile scan capture/submission and retry queue are present; broader offline field operations remain missing from `apps/mobile`.
 
 Design stance: this is an expected gap in the new build, not a regression to patch by copying the old app. Rebuild it as a first-class mobile client of the current Field Compliance Manager platform.
 
 What is missing or thin:
 
-- Native mobile scan screen and queue screens.
+- A dedicated queue management screen with item inspection, retry state, and discard controls.
 - Local SQLite cache of zones, compliance rules, canonical vehicles, flagged vehicles, monthly stays, and recent observations.
 - Organization data package download equivalent to prototype `sync-organization-data`.
 - Multi-type offline upload queue for observations, updates, deletes, incidents, photos, and notes.

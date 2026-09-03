@@ -5,10 +5,16 @@ slice provides secure Supabase session persistence and an explicit configuration
 state. Operational modules will be added behind the same authenticated RPC, RLS,
 and module-entitlement boundaries used by the web application.
 
-The current signed-in home loads the officer profile and only the officer's
-accepted or in-progress shift that is active at the current time. It presents a
-separate loading, unavailable, active-assignment, or standby state; a failed
-read is never presented as an empty roster.
+The first operational slice is a vehicle scan screen. It captures camera or
+gallery evidence, records a foreground GPS fix, and submits through the same
+governed `process-officer-scan` edge function used by the web app. Network
+failures are stored in a durable local queue and replayed by the officer from
+the scan screen. Server validation, authorization, and evidence errors remain
+visible rather than being queued.
+
+The profile and active-assignment hook remains available for the next mobile
+home/roster slice. Local operational-data caching, background GPS/welfare,
+notifications, jobs, and full offline compliance remain planned work.
 
 ## Local Development
 

@@ -31,6 +31,7 @@ The platform-intelligence systems from the GitLab line are required systems in t
 | [FreedomCamp-Manager-App](https://github.com/DonSquires/FreedomCamp-Manager-App) | Earlier Expo/React Native field application | Public, substantial prototype |
 | [orc-ai-inference-service](https://github.com/DonSquires/orc-ai-inference-service) | Earlier inference prototype | Public, minimal Vite client |
 | [https-react-9b4t5o.onspace.build](https://github.com/DonSquires/https-react-9b4t5o.onspace.build) | Earlier UI export | Public, README only |
+| [Early Freedom Camping preview](https://preview-react-9b4t5o-efbho4rc5qcj7zhif8e3zw.onspace.build/?_q=EFBHo4Rc5QcJ7zhiF8E3Zw) | Early live admin prototype | Public preview; workflow/UI reference only. Bundle uses legacy direct-table access and is not a current architecture source. |
 | [Backup](https://github.com/DonSquires/Backup) | Backup source | Private or unavailable |
 | [nzscv-proxy](https://github.com/DonSquires/nzscv-proxy) | New Zealand vehicle lookup proxy | Public, minimal README |
 

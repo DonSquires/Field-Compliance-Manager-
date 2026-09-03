@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
+import { OfficerScanScreen } from './src/components/OfficerScanScreen';
 import { useFieldContext } from './src/hooks/useFieldContext';
 import { isSupabaseConfigured, supabase } from './src/lib/supabase';
 
@@ -38,7 +39,7 @@ export default function App() {
   if (loading) return <LoadingScreen />;
   if (!isSupabaseConfigured) return <ConfigurationScreen />;
   if (!session) return <SignInScreen email={email} password={password} signingIn={signingIn} onChangeEmail={setEmail} onChangePassword={setPassword} onSignIn={() => void signIn()} />;
-  return <OfficerHome email={session.user.email ?? 'Signed-in officer'} profile={fieldContext.profile} assignment={fieldContext.assignment} loading={fieldContext.loading} error={fieldContext.error} onRefresh={() => void fieldContext.refresh()} onSignOut={() => void signOut()} />;
+  return <OfficerScanScreen onSignOut={() => void signOut()} />;
 }
 
 function LoadingScreen() { return <SafeAreaView style={styles.centered}><ActivityIndicator color="#74d6c8" /><Text style={styles.muted}>Restoring secure session</Text><StatusBar style="light" /></SafeAreaView>; }
