@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin, RefreshCw, Send, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { resolveAddressForCoordinates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 import './OfficerFieldReportPage.css';
 
@@ -10,6 +11,7 @@ type ReportSeverity = 'low' | 'medium' | 'high' | 'critical';
 interface ShiftOption { id: string; service_type: string; scheduled_start: string; status: string; }
 interface ReportRecord { id: string; report_type: ReportType; severity: ReportSeverity; status: string; title: string; description: string; location_name: string | null; reported_at: string; follow_up_required: boolean; review_notes: string | null; reviewed_at: string | null; }
 interface GpsState { status: 'idle' | 'locating' | 'captured' | 'unavailable'; lat: number | null; lng: number | null; accuracy: number | null; }
+type AddressResolution = 'idle' | 'resolving' | 'resolved' | 'unavailable';
 
 const initialForm = { reportType: 'incident' as ReportType, severity: 'medium' as ReportSeverity, shiftId: '', title: '', description: '', locationName: '', address: '', immediateAction: '', followUp: false, followUpNotes: '' };
 
@@ -21,6 +23,7 @@ const OfficerFieldReportPage: React.FC = () => {
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
   const [form, setForm] = useState(initialForm);
   const [gps, setGps] = useState<GpsState>({ status: 'idle', lat: null, lng: null, accuracy: null });
+  const [addressResolution, setAddressResolution] = useState<AddressResolution>('idle');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +51,19 @@ const OfficerFieldReportPage: React.FC = () => {
     if (!navigator.geolocation) { setGps({ status: 'unavailable', lat: null, lng: null, accuracy: null }); return; }
     setGps({ status: 'locating', lat: null, lng: null, accuracy: null });
     navigator.geolocation.getCurrentPosition(
-      (position) => setGps({ status: 'captured', lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy }),
-      () => setGps({ status: 'unavailable', lat: null, lng: null, accuracy: null }),
+      async (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        setGps({ status: 'captured', lat: latitude, lng: longitude, accuracy });
+        setAddressResolution('resolving');
+        try {
+          const resolved = await resolveAddressForCoordinates(latitude, longitude);
+          if (resolved) setForm((current) => current.address.trim() ? current : { ...current, address: resolved.label });
+          setAddressResolution(resolved ? 'resolved' : 'unavailable');
+        } catch {
+          setAddressResolution('unavailable');
+        }
+      },
+      () => { setGps({ status: 'unavailable', lat: null, lng: null, accuracy: null }); setAddressResolution('unavailable'); },
       { enableHighAccuracy: true, maximumAge: 30_000, timeout: 8_000 },
     );
   };
@@ -67,7 +81,7 @@ const OfficerFieldReportPage: React.FC = () => {
     });
     const result = (data as Array<{ id: string; received_at: string; shift_id: string | null }> | null)?.[0];
     if (submitError || !result) setError(submitError?.message ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
-    else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id);setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
+    else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id);setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); setAddressResolution('idle'); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
     setSubmitting(false);
   };
 
@@ -81,7 +95,7 @@ const OfficerFieldReportPage: React.FC = () => {
         <label><span>Related shift</span><select value={form.shiftId} onChange={(e) => setForm({ ...form, shiftId: e.target.value })}><option value="">No related shift</option>{shifts.map((shift) => <option value={shift.id} key={shift.id}>{new Date(shift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} · {shift.service_type.replaceAll('_', ' ')} · {shift.status}</option>)}</select></label>
         <label><span>Title</span><input required minLength={5} maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Short operational summary" /></label>
         <label><span>Description</span><textarea required minLength={10} maxLength={10000} rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What happened, who or what was affected, and current conditions" /></label>
-        <div className="officer-report-grid"><label><span>Location name</span><input value={form.locationName} onChange={(e) => setForm({ ...form, locationName: e.target.value })} placeholder="Site or area" /></label><label><span>Address</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street address" /></label></div>
+        <div className="officer-report-grid"><label><span>Location name</span><input value={form.locationName} onChange={(e) => setForm({ ...form, locationName: e.target.value })} placeholder="Site or area" /></label><label><span>Address {addressResolution === 'resolving' ? '(resolving)' : addressResolution === 'resolved' ? '(GPS resolved)' : ''}</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street address" /></label></div>
         <div className={`officer-report-gps state-${gps.status}`}><Crosshair size={18} /><div><strong>{gps.status === 'captured' ? 'GPS captured' : gps.status === 'locating' ? 'Locating' : gps.status === 'unavailable' ? 'GPS unavailable' : 'Add GPS evidence'}</strong><span>{gps.status === 'captured' ? `${gps.lat?.toFixed(5)}, ${gps.lng?.toFixed(5)} · ±${Math.round(gps.accuracy ?? 0)} m` : 'Optional. Reporting remains available if location services fail.'}</span></div><button type="button" onClick={acquireGps} disabled={gps.status === 'locating'}>{gps.status === 'captured' ? 'Refresh' : 'Capture'}</button></div>
         <label><span>Immediate action taken</span><textarea rows={3} value={form.immediateAction} onChange={(e) => setForm({ ...form, immediateAction: e.target.value })} placeholder="Controls applied, notifications made, or area isolated" /></label>
         <label className="officer-report-followup"><input type="checkbox" checked={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.checked })} /><span><CheckCircle2 size={17} /><b>Follow-up required</b><small>Route this submission into the supervisor follow-up queue</small></span></label>

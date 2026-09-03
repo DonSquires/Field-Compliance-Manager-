@@ -29,6 +29,7 @@ import {
   removeQueuedOfficerScan,
 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
+import { resolveAddressForCoordinates } from '../lib/locationAddress';
 import './PageStyles.css';
 
 interface ObservationSummary {
@@ -94,6 +95,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [capturedAt, setCapturedAt] = useState<string>();
   const [preparingImage, setPreparingImage] = useState(false);
   const [location, setLocation] = useState<LocationState>(INITIAL_LOCATION);
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<OfficerScanResult | null>(null);
@@ -150,15 +152,23 @@ const OfficerFreedomCampingPage: React.FC = () => {
 
   const acquireLocation = useCallback(async () => {
     setLocation(INITIAL_LOCATION);
+    setResolvedAddress(null);
     try {
       const position = await getCurrentPosition();
+      const { latitude, longitude, accuracy } = position.coords;
       setLocation({
         status: 'ready',
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-        message: `Location ready · ±${Math.round(position.coords.accuracy)} m`,
+        latitude,
+        longitude,
+        accuracy,
+        message: `Location ready · ±${Math.round(accuracy)} m`,
       });
+      try {
+        const address = await resolveAddressForCoordinates(latitude, longitude);
+        setResolvedAddress(address?.label ?? null);
+      } catch {
+        setResolvedAddress(null);
+      }
     } catch {
       setLocation({
         status: 'unavailable',
@@ -378,6 +388,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
               <span className="sr-only">Refresh location</span>
             </button>
           </div>
+          {resolvedAddress && <div className="fc-inline-message" role="status"><MapPin size={16} aria-hidden="true" /> GPS-resolved address: {resolvedAddress}</div>}
 
           {submitError && (
             <div className="fc-error" role="alert">

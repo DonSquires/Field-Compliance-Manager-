@@ -6,8 +6,10 @@
  * parking overstay enforcement.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Camera, CheckCircle2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -24,6 +26,7 @@ interface ChalkRecord {
 interface ParkingZone {
   id: string;
   name: string;
+  address: string | null;
 }
 
 interface ParkingScanResult {
@@ -40,10 +43,14 @@ const OfficerParkingPage: React.FC = () => {
   const { profile } = useAuth();
   const [records, setRecords] = useState<ChalkRecord[]>([]);
   const [zones, setZones] = useState<ParkingZone[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ plate: '', zone_id: '' });
+  const [form, setForm] = useState({ zone_id: '' });
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
 
@@ -62,7 +69,7 @@ const OfficerParkingPage: React.FC = () => {
           .order('chalked_at', { ascending: false }),
         supabase
           .from('location_zones')
-          .select('id, name')
+          .select('id, name, address')
           .eq('organization_id', profile.organizationId ?? '')
           .eq('module_key', 'parking_enforcement')
           .eq('is_active', true)
@@ -85,6 +92,33 @@ const OfficerParkingPage: React.FC = () => {
     loadRecords();
   }, [loadRecords]);
 
+  useEffect(() => () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); }, [imagePreviewUrl]);
+
+  const captureVehicle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPreparingImage(true);
+    setError(null);
+    try {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(URL.createObjectURL(file));
+      setImageBase64(await imageFileToBase64(file));
+    } catch (captureError) {
+      setImagePreviewUrl(null);
+      setImageBase64(null);
+      setError(captureError instanceof Error ? captureError.message : 'Vehicle evidence could not be prepared.');
+    } finally {
+      setPreparingImage(false);
+    }
+  };
+
+  const clearVehicleCapture = () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImagePreviewUrl(null);
+    setImageBase64(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleChalk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.id || !profile?.organizationId) return;
@@ -100,7 +134,7 @@ const OfficerParkingPage: React.FC = () => {
         .functions
         .invoke<ParkingScanResult>('process-officer-scan', {
           body: {
-            plate_number: form.plate.trim().toUpperCase(),
+            image_base64: imageBase64,
             zone_id: form.zone_id,
             module_key: 'parking_enforcement',
             captured_at: new Date().toISOString(),
@@ -109,7 +143,8 @@ const OfficerParkingPage: React.FC = () => {
 
       if (error) throw error;
       if (!data?.success || !data.chalk_record_id) throw new Error('Parking chalk receipt was not confirmed.');
-      setForm({ plate: '', zone_id: '' });
+      setForm({ zone_id: '' });
+      clearVehicleCapture();
       setShowForm(false);
       setReceipt(`Chalk recorded for ${data.zone_name ?? 'selected Zone'}: ${data.verdict.replace(/_/g, ' ')}. Return policy: ${data.effective_limit_minutes} minutes.`);
       if (data.breach_write_error) setError(data.breach_write_error);
@@ -170,15 +205,10 @@ const OfficerParkingPage: React.FC = () => {
 
       {showForm && (
         <form className="assessment-form" onSubmit={handleChalk}>
+          <input ref={fileInputRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={captureVehicle} />
           <div className="form-group">
-            <label htmlFor="parking-plate">Plate</label>
-            <input
-              id="parking-plate"
-              type="text"
-              required
-              value={form.plate}
-              onChange={(e) => setForm({ ...form, plate: e.target.value.toUpperCase() })}
-            />
+            <label>Vehicle evidence</label>
+            {imagePreviewUrl ? <div className="scan-preview"><img src={imagePreviewUrl} alt="Vehicle evidence preview" /><span><CheckCircle2 size={15} /> Evidence ready for ALPR</span><button type="button" onClick={clearVehicleCapture} title="Remove image"><X size={18} /><span className="sr-only">Remove image</span></button></div> : <button type="button" className="scan-camera-target" onClick={() => fileInputRef.current?.click()} disabled={preparingImage}><Camera size={28} /><strong>{preparingImage ? 'Preparing image' : 'Capture vehicle'}</strong><span>Plate must be visible for ALPR</span></button>}
           </div>
           <div className="form-group">
             <label htmlFor="parking-zone">Verified parking Zone</label>
@@ -186,9 +216,10 @@ const OfficerParkingPage: React.FC = () => {
               <option value="">Select a Zone</option>
               {zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
             </select>
+              {form.zone_id && zones.find((zone) => zone.id === form.zone_id)?.address && <small className="form-hint">Canonical address: {zones.find((zone) => zone.id === form.zone_id)?.address}</small>}
             {zones.length === 0 && <small className="form-hint">No verified parking Zones are available. Contact your administrator.</small>}
           </div>
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || zones.length === 0}>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || zones.length === 0}>
             {submitting ? 'Saving chalk record' : 'Chalk Vehicle'}
           </button>
         </form>
