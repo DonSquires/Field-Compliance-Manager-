@@ -35,7 +35,19 @@ const OfficerBiosecurityPage: React.FC = () => {
     density_estimate: 'scattered' as DensityEstimate,
     action_taken: 'no_action' as ActionTaken,
     scene_description: '',
+    location_name: '',
+    protected_land_address: '',
+    notice_number: '',
+    mpi_referral_number: '',
+    follow_up_required: false,
   });
+  const [submitting, setSubmitting] = useState(false);
+  const actionNeedsNotice = form.action_taken === 'notice_of_direction' || form.action_taken === 'infringement_notice';
+  const actionNeedsReferral = form.action_taken === 'mpi_referral';
+  const canSubmit = Boolean(form.location_name.trim())
+    && (form.density_estimate === 'not_found' || Boolean(form.species_name.trim()))
+    && (!actionNeedsNotice || Boolean(form.notice_number.trim()))
+    && (!actionNeedsReferral || Boolean(form.mpi_referral_number.trim()));
 
   // ATLAS READS: biosecurity_assessments
   const loadAssessments = useCallback(async () => {
@@ -68,6 +80,8 @@ const OfficerBiosecurityPage: React.FC = () => {
     if (!profile?.id || !profile?.organizationId) return;
 
     try {
+      setSubmitting(true);
+      setError(null);
       // ATLAS WRITES: biosecurity_assessments
       const { data, error } = await supabase
         .from('biosecurity_assessments')
@@ -79,6 +93,11 @@ const OfficerBiosecurityPage: React.FC = () => {
             density_estimate: form.density_estimate,
             action_taken: form.action_taken,
             scene_description: form.scene_description || null,
+            location_name: form.location_name || null,
+            protected_land_address: form.protected_land_address || null,
+            notice_number: form.notice_number || null,
+            mpi_referral_number: form.mpi_referral_number || null,
+            follow_up_required: form.follow_up_required,
             status: 'open',
           },
         ])
@@ -87,10 +106,12 @@ const OfficerBiosecurityPage: React.FC = () => {
 
       if (error) throw error;
       setAssessments([data as BiosecurityAssessment, ...assessments]);
-      setForm({ species_name: '', density_estimate: 'scattered', action_taken: 'no_action', scene_description: '' });
+      setForm({ species_name: '', density_estimate: 'scattered', action_taken: 'no_action', scene_description: '', location_name: '', protected_land_address: '', notice_number: '', mpi_referral_number: '', follow_up_required: false });
       setShowForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit assessment');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -128,13 +149,23 @@ const OfficerBiosecurityPage: React.FC = () => {
       {showForm && (
         <form className="assessment-form" onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>Species</label>
-            <input type="text" value={form.species_name} onChange={(e) => setForm({ ...form, species_name: e.target.value })} />
+            <label htmlFor="biosecurity-species">Species</label>
+            <input id="biosecurity-species" type="text" required={form.density_estimate !== 'not_found'} value={form.species_name} onChange={(e) => setForm({ ...form, species_name: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="biosecurity-location">Observed location</label>
+            <input id="biosecurity-location" type="text" required value={form.location_name} onChange={(e) => setForm({ ...form, location_name: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="biosecurity-protected-land">Protected land address</label>
+            <input id="biosecurity-protected-land" type="text" value={form.protected_land_address} onChange={(e) => setForm({ ...form, protected_land_address: e.target.value })} />
+            <small className="form-hint">Record this when the threatened land differs from where the risk was observed.</small>
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label>Density</label>
+              <label htmlFor="biosecurity-density">Density</label>
               <select
+                id="biosecurity-density"
                 value={form.density_estimate}
                 onChange={(e) => setForm({ ...form, density_estimate: e.target.value as DensityEstimate })}
               >
@@ -147,8 +178,9 @@ const OfficerBiosecurityPage: React.FC = () => {
               </select>
             </div>
             <div className="form-group">
-              <label>Action Taken</label>
+              <label htmlFor="biosecurity-action">Action Taken</label>
               <select
+                id="biosecurity-action"
                 value={form.action_taken}
                 onChange={(e) => setForm({ ...form, action_taken: e.target.value as ActionTaken })}
               >
@@ -160,18 +192,31 @@ const OfficerBiosecurityPage: React.FC = () => {
               </select>
             </div>
           </div>
+          {actionNeedsNotice && (
+            <div className="form-group">
+              <label htmlFor="biosecurity-notice">Notice number</label>
+              <input id="biosecurity-notice" type="text" required value={form.notice_number} onChange={(e) => setForm({ ...form, notice_number: e.target.value })} />
+            </div>
+          )}
+          {actionNeedsReferral && (
+            <div className="form-group">
+              <label htmlFor="biosecurity-referral">MPI referral number</label>
+              <input id="biosecurity-referral" type="text" required value={form.mpi_referral_number} onChange={(e) => setForm({ ...form, mpi_referral_number: e.target.value })} />
+            </div>
+          )}
           <div className="form-group">
-            <label>Scene Description</label>
-            <textarea rows={3} value={form.scene_description} onChange={(e) => setForm({ ...form, scene_description: e.target.value })} />
+            <label htmlFor="biosecurity-scene">Scene Description</label>
+            <textarea id="biosecurity-scene" rows={3} value={form.scene_description} onChange={(e) => setForm({ ...form, scene_description: e.target.value })} />
           </div>
-          <button type="submit" className="btn btn-primary btn-block">
-            Submit Assessment
+          <label className="form-checkbox"><input type="checkbox" checked={form.follow_up_required} onChange={(e) => setForm({ ...form, follow_up_required: e.target.checked })} /> Follow-up required</label>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || !canSubmit}>
+            {submitting ? 'Saving assessment' : 'Submit Assessment'}
           </button>
         </form>
       )}
 
       <div className="contacts-list" style={{ marginTop: '12px' }}>
-        {assessments.length === 0 ? (
+        {assessments.length === 0 && !error ? (
           <div className="empty-state">
             <p>No assessments recorded yet.</p>
           </div>

@@ -21,14 +21,31 @@ interface ChalkRecord {
   notes: string | null;
 }
 
+interface ParkingZone {
+  id: string;
+  name: string;
+}
+
+interface ParkingScanResult {
+  success: boolean;
+  chalk_record_id: string;
+  verdict: string;
+  effective_limit_minutes: number;
+  recommended_action: string;
+  zone_name: string | null;
+  breach_write_error?: string;
+}
+
 const OfficerParkingPage: React.FC = () => {
   const { profile } = useAuth();
   const [records, setRecords] = useState<ChalkRecord[]>([]);
+  const [zones, setZones] = useState<ParkingZone[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ plate: '', location_name: '', return_hours: '2' });
+  const [form, setForm] = useState({ plate: '', zone_id: '' });
   const [submitting, setSubmitting] = useState(false);
+  const [receipt, setReceipt] = useState<string | null>(null);
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
@@ -37,14 +54,26 @@ const OfficerParkingPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const { data, error: err } = await supabase
+      const [{ data, error: err }, { data: zoneData, error: zoneError }] = await Promise.all([
+        supabase
         .from('parking_chalk_records')
         .select('id, plate, chalked_at, return_by, status, location_name, notes')
         .eq('officer_id', profile.id)
-        .order('chalked_at', { ascending: false });
+          .order('chalked_at', { ascending: false }),
+        supabase
+          .from('location_zones')
+          .select('id, name')
+          .eq('organization_id', profile.organizationId ?? '')
+          .eq('module_key', 'parking_enforcement')
+          .eq('is_active', true)
+          .eq('boundary_verification', 'verified')
+          .order('name'),
+      ]);
 
       if (err) throw err;
+      if (zoneError) throw zoneError;
       setRecords((data as ChalkRecord[]) || []);
+      setZones((zoneData as ParkingZone[]) || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load parking records');
     } finally {
@@ -63,28 +92,28 @@ const OfficerParkingPage: React.FC = () => {
     try {
       setSubmitting(true);
       setError(null);
-      const returnBy = new Date(Date.now() + parseFloat(form.return_hours) * 60 * 60 * 1000).toISOString();
+      setReceipt(null);
 
-      // ATLAS WRITES: parking_chalk_records
+      // The scan function owns Zone validation, policy timing, geofence evidence,
+      // compliance evaluation, and the parking_chalk_records write.
       const { data, error } = await supabase
-        .from('parking_chalk_records')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            officer_id: profile.id,
-            plate: form.plate.toUpperCase(),
-            location_name: form.location_name || null,
-            return_by: returnBy,
-            status: 'active',
+        .functions
+        .invoke<ParkingScanResult>('process-officer-scan', {
+          body: {
+            plate_number: form.plate.trim().toUpperCase(),
+            zone_id: form.zone_id,
+            module_key: 'parking_enforcement',
+            captured_at: new Date().toISOString(),
           },
-        ])
-        .select()
-        .single();
+        });
 
       if (error) throw error;
-      setRecords([data as ChalkRecord, ...records]);
-      setForm({ plate: '', location_name: '', return_hours: '2' });
+      if (!data?.success || !data.chalk_record_id) throw new Error('Parking chalk receipt was not confirmed.');
+      setForm({ plate: '', zone_id: '' });
       setShowForm(false);
+      setReceipt(`Chalk recorded for ${data.zone_name ?? 'selected Zone'}: ${data.verdict.replace(/_/g, ' ')}. Return policy: ${data.effective_limit_minutes} minutes.`);
+      if (data.breach_write_error) setError(data.breach_write_error);
+      await loadRecords();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to chalk vehicle');
     } finally {
@@ -133,6 +162,7 @@ const OfficerParkingPage: React.FC = () => {
           {error}
         </div>
       )}
+      {receipt && <div className="alert alert-success" role="status">{receipt}</div>}
 
       <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
         {showForm ? 'Cancel' : '+ Chalk Vehicle'}
@@ -151,22 +181,14 @@ const OfficerParkingPage: React.FC = () => {
             />
           </div>
           <div className="form-group">
-            <label htmlFor="parking-location">Location</label>
-            <input id="parking-location" type="text" value={form.location_name} onChange={(e) => setForm({ ...form, location_name: e.target.value })} />
+            <label htmlFor="parking-zone">Verified parking Zone</label>
+            <select id="parking-zone" required value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value })}>
+              <option value="">Select a Zone</option>
+              {zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
+            </select>
+            {zones.length === 0 && <small className="form-hint">No verified parking Zones are available. Contact your administrator.</small>}
           </div>
-          <div className="form-group">
-            <label htmlFor="parking-return-hours">Return check in (hours)</label>
-            <input
-              id="parking-return-hours"
-              type="number"
-              min="0.5"
-              max="24"
-              step="0.5"
-              value={form.return_hours}
-              onChange={(e) => setForm({ ...form, return_hours: e.target.value })}
-            />
-          </div>
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || zones.length === 0}>
             {submitting ? 'Saving chalk record' : 'Chalk Vehicle'}
           </button>
         </form>

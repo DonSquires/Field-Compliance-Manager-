@@ -6,7 +6,8 @@
  * wired yet — see LiveMapPage for the same honesty note).
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -15,7 +16,7 @@ interface GpsPing {
   officer_id: string;
   gps_lat: number;
   gps_lng: number;
-  created_at: string;
+  recorded_at: string;
 }
 
 const OfficerMapPage: React.FC = () => {
@@ -23,10 +24,10 @@ const OfficerMapPage: React.FC = () => {
   const [positions, setPositions] = useState<(GpsPing & { officer_name: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
 
   // ATLAS READS: officer_gps_log, user_profiles
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
       const orgId = profile?.organizationId;
       if (!orgId) return;
 
@@ -37,7 +38,7 @@ const OfficerMapPage: React.FC = () => {
         const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
         const { data, error: err } = await supabase
           .from('officer_gps_log')
-          .select('officer_id, gps_lat, gps_lng, created_at')
+          .select('officer_id, gps_lat, gps_lng, recorded_at')
           .eq('organization_id', orgId)
           .gte('created_at', since)
           .order('created_at', { ascending: false });
@@ -53,7 +54,8 @@ const OfficerMapPage: React.FC = () => {
         const officerIds = Array.from(latestByOfficer.keys());
         const names: Record<string, string> = {};
         if (officerIds.length > 0) {
-          const { data: profiles } = await supabase.from('user_profiles').select('id, display_name').in('id', officerIds);
+          const { data: profiles, error: profileError } = await supabase.from('user_profiles').select('id, display_name').in('id', officerIds);
+          if (profileError) throw profileError;
           (profiles || []).forEach((p: { id: string; display_name: string | null }) => {
             names[p.id] = p.display_name || p.id;
           });
@@ -65,15 +67,15 @@ const OfficerMapPage: React.FC = () => {
             officer_name: names[row.officer_id] || (row.officer_id === profile.id ? 'You' : row.officer_id),
           }))
         );
+        setRefreshedAt(new Date());
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load positions');
+        setError(err instanceof Error ? err.message : (err as { message?: string }).message ?? 'Failed to load positions');
       } finally {
         setLoading(false);
       }
-    };
+    }, [profile?.id, profile?.organizationId]);
 
-    load();
-  }, [profile?.organizationId, profile?.id]);
+  useEffect(() => { void load(); }, [load]);
 
   if (loading) {
     return (
@@ -90,7 +92,10 @@ const OfficerMapPage: React.FC = () => {
     <div className="page-container">
       <header className="page-header">
         <h1>Team Map</h1>
-        <p className="subtitle">{positions.length} colleagues seen in the last hour</p>
+        <p className="subtitle">{positions.length} colleagues seen in the last hour{refreshedAt ? ` · updated ${refreshedAt.toLocaleTimeString('en-NZ')}` : ''}</p>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void load()} disabled={loading}>
+          <RefreshCw size={15} className={loading ? 'is-spinning' : ''} aria-hidden="true" /> Refresh
+        </button>
       </header>
 
       {error && (
@@ -103,7 +108,7 @@ const OfficerMapPage: React.FC = () => {
       )}
 
       <div className="contacts-list">
-        {positions.length === 0 ? (
+        {positions.length === 0 && !error ? (
           <div className="empty-state">
             <p>No recent GPS positions.</p>
           </div>
@@ -117,7 +122,7 @@ const OfficerMapPage: React.FC = () => {
                 <p className="contact-meta">
                   {p.gps_lat.toFixed(5)}, {p.gps_lng.toFixed(5)}
                 </p>
-                <p className="contact-meta">Last seen {new Date(p.created_at).toLocaleTimeString()}</p>
+                <p className="contact-meta">Device capture {new Date(p.recorded_at).toLocaleTimeString()}</p>
               </div>
             </div>
           ))
