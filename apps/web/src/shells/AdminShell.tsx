@@ -464,7 +464,11 @@ const AdminShell: React.FC = () => {
       <div className="admin-shell admin-shell-desktop">
         <aside className={`admin-sidebar ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
           <div className="admin-sidebar-brand">
-            <span><Shield size={18} aria-hidden="true" /></span>
+            <img
+              src="https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg"
+              alt="Iron Eagle Security"
+              className="admin-brand-logo"
+            />
             {!sidebarCollapsed && <div><strong>FCM</strong><small>Administration</small></div>}
             <button type="button" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!sidebarCollapsed}>
               {sidebarCollapsed ? <ChevronRight size={17} aria-hidden="true" /> : <ChevronLeft size={17} aria-hidden="true" />}
@@ -539,7 +543,12 @@ const AdminShell: React.FC = () => {
     <div className="admin-shell admin-shell-mobile">
       <header className="admin-mobile-header">
         <div className="admin-mobile-brand">
-          <span><Shield size={17} aria-hidden="true" /></span><strong>{orgName || 'Field Compliance Manager'}</strong>
+          <img
+            src="https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg"
+            alt="Iron Eagle Security"
+            className="admin-brand-logo"
+          />
+          <strong>{orgName || 'Field Compliance Manager'}</strong>
         </div>
         <div className="admin-shell-tools">
           <NotificationCenter onNavigate={navigateFromNotification} />

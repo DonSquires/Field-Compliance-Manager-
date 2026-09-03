@@ -1,0 +1,49 @@
+/**
+ * tokens.css — Field Compliance Manager Canonical Design Tokens
+ *
+ * Single source of truth for all color palette, status scale, typography,
+ * elevation, border radius, and touch target definitions per docs/PRODUCT_DESIGN.md §2.
+ */
+
+:root {
+  /* Surface Tokens (§2.1) */
+  --color-bg-base: #121212;
+  --color-bg-surface: #1E1E1E;
+  --color-bg-elevated: #2A2A2A;
+
+  /* Brand Tokens (§2.1) */
+  --color-brand-primary: #D32F2F;
+  --color-brand-hover: #B71C1C;
+  --color-accent-silver: #9E9E9E;
+  --color-accent-silver-light: #BDBDBD;
+
+  /* Text Tokens (§2.1) */
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #E0E0E0;
+
+  /* Status Scale Tokens (§2.2) */
+  --color-status-normal: #4CAF50;
+  --color-status-watch: #FFC107;
+  --color-status-action: #FF9800;
+  --color-status-critical: #C62828;
+
+  /* Reserved Tokens (§2.3) */
+  --color-critical-alert: #C62828;
+  --color-critical-border: #EF5350;
+
+  /* Touch Targets (§2.7) */
+  --touch-target-officer: 44px;
+  --touch-target-admin: 32px;
+
+  /* Legacy Bridge Mappings */
+  --color-bg-primary: var(--color-bg-base);
+  --color-bg-secondary: var(--color-bg-surface);
+  --color-primary: var(--color-brand-primary);
+  --color-primary-hover: var(--color-brand-hover);
+  --color-success: var(--color-status-normal);
+  --color-warning: var(--color-status-action);
+  --color-danger: var(--color-status-critical);
+
+  /* Canonical Logo Asset URL */
+  --ies-logo-url: url('https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg');
+}

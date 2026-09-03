@@ -442,7 +442,11 @@ const OfficerShell: React.FC = () => {
     <div className="officer-shell">
       <header className="officer-shell-header">
         <button type="button" className="officer-shell-brand" onClick={() => navigateToModule(null)} title="Officer home">
-          <span><Shield size={19} aria-hidden="true" /></span>
+          <img
+            src="https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg"
+            alt="Iron Eagle Security"
+            className="officer-brand-logo"
+          />
           <div><strong>Field Compliance Manager</strong><small>{activeShift ? `${activeShift.shift_type} shift` : 'Officer operations'}</small></div>
         </button>
 

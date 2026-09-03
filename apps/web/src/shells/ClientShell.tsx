@@ -67,7 +67,11 @@ export function ClientShell() {
   const navigation = (
     <>
       <button type="button" className="client-shell-brand" onClick={() => openPage('overview')} title="Client portal home">
-        <span><Shield size={20} aria-hidden="true" /></span>
+        <img
+          src="https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg"
+          alt="Iron Eagle Security"
+          className="client-brand-logo"
+        />
         {!collapsed && <div><strong>Field Compliance</strong><small>Client portal</small></div>}
       </button>
 

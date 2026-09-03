@@ -32,6 +32,14 @@
   text-align: left;
 }
 
+.officer-brand-logo {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 7px;
+  object-fit: contain;
+}
+
 .officer-shell-brand > span {
   display: grid;
   place-items: center;

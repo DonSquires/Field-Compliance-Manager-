@@ -40,6 +40,14 @@
   text-align: left;
 }
 
+.client-brand-logo {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 7px;
+  object-fit: contain;
+}
+
 .client-shell-brand > span {
   display: grid;
   place-items: center;

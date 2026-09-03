@@ -244,7 +244,14 @@ export function ScanShell() {
   return (
     <div className="scan-shell">
       <header className="scan-shell-header">
-        <div className="scan-shell-brand"><span><Shield size={19} /></span><div><strong>Field Compliance Manager</strong><small>Standalone scan station</small></div></div>
+        <div className="scan-shell-brand">
+          <img
+            src="https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg"
+            alt="Iron Eagle Security"
+            className="scan-brand-logo"
+          />
+          <div><strong>Field Compliance Manager</strong><small>Standalone scan station</small></div>
+        </div>
         <div className="scan-shell-user"><span>{profile.displayName}</span><button type="button" onClick={() => void handleSignOut()} title="Sign out"><LogOut size={18} /><span className="sr-only">Sign out</span></button></div>
       </header>
 

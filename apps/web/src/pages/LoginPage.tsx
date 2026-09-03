@@ -68,8 +68,12 @@ const LoginPage: React.FC = () => {
       <div className="login-atmosphere" aria-hidden="true" />
       <section className="login-shell" aria-labelledby="login-title">
         <header className="login-brand">
-          <span><Shield size={22} strokeWidth={1.8} aria-hidden="true" /></span>
-          <div><strong>Field Compliance Manager</strong><small>Secure operations access</small></div>
+          <img
+            src="https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/Logo/IES%20Logo.jpg"
+            alt="Iron Eagle Security"
+            className="login-logo-img"
+          />
+          <div><strong>Field Compliance Manager</strong><small>Iron Eagle Security · Secure operations access</small></div>
         </header>
 
         <div className="login-rule" />

@@ -38,6 +38,13 @@
   gap: 10px;
 }
 
+.login-logo-img {
+  height: 38px;
+  width: auto;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
 .login-brand > span {
   display: grid;
   place-items: center;
