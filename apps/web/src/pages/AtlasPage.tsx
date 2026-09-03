@@ -23,14 +23,25 @@ type Edge = {
 
 const inferredCapabilities: Capability[] = [
   { entity_type: 'edge_function', entity_name: 'bob-query-atlas', present: true, wired: true, exercised: null, notes: 'Atlas query boundary', refresh_source: 'manual_seed', retirement_status: 'live' },
+  { entity_type: 'edge_function', entity_name: 'onspace-ai-chat', present: true, wired: true, exercised: null, notes: 'Bob Conductor turn gate and dispatcher', refresh_source: 'manual_seed', retirement_status: 'live' },
   { entity_type: 'table', entity_name: 'bob_capability_map', present: true, wired: true, exercised: null, notes: 'Capability truth map', refresh_source: 'schema_fk', retirement_status: 'live' },
   { entity_type: 'table', entity_name: 'bob_app_map_edges', present: true, wired: true, exercised: null, notes: 'Directed application terrain', refresh_source: 'schema_fk', retirement_status: 'live' },
-  { entity_type: 'feature', entity_name: 'oracle-welfare-safety', present: true, wired: false, exercised: null, notes: 'Oracle truth-state seam requires live conductor integration', refresh_source: 'manual_seed', retirement_status: 'live' },
+  { entity_type: 'feature', entity_name: 'atlas-blast-radius', present: true, wired: true, exercised: null, notes: 'Impact analysis keeps flow_reach separate from fk_reach', refresh_source: 'manual_seed', retirement_status: 'live' },
+  { entity_type: 'feature', entity_name: 'caddie-tool-catalogue', present: true, wired: true, exercised: null, notes: 'Atlas-generated tool catalogue for Bob capability awareness', refresh_source: 'manual_seed', retirement_status: 'live' },
+  { entity_type: 'feature', entity_name: 'conductor-effect-enforcement', present: true, wired: true, exercised: null, notes: 'Post-selection, pre-effect governance boundary', refresh_source: 'manual_seed', retirement_status: 'live' },
+  { entity_type: 'feature', entity_name: 'oracle-truth-state', present: true, wired: true, exercised: null, notes: 'General turn/caller/effect/proof/domain truth-state describer', refresh_source: 'manual_seed', retirement_status: 'live' },
+  { entity_type: 'feature', entity_name: 'oracle-welfare-safety', present: true, wired: true, exercised: null, notes: 'Welfare safety is one Oracle application wired into the Conductor seam', refresh_source: 'manual_seed', retirement_status: 'live' },
 ];
 
 const inferredEdges: Edge[] = [
   { source_type: 'edge_function', source_name: 'bob-query-atlas', target_type: 'table', target_name: 'bob_capability_map', edge_kind: 'reads', retirement_status: 'live' },
   { source_type: 'edge_function', source_name: 'bob-query-atlas', target_type: 'table', target_name: 'bob_app_map_edges', edge_kind: 'reads', retirement_status: 'live' },
+  { source_type: 'edge_function', source_name: 'onspace-ai-chat', target_type: 'feature', target_name: 'caddie-tool-catalogue', edge_kind: 'calls', retirement_status: 'live' },
+  { source_type: 'feature', source_name: 'caddie-tool-catalogue', target_type: 'table', target_name: 'bob_capability_map', edge_kind: 'reads', retirement_status: 'live' },
+  { source_type: 'feature', source_name: 'caddie-tool-catalogue', target_type: 'table', target_name: 'bob_app_map_edges', edge_kind: 'reads', retirement_status: 'live' },
+  { source_type: 'edge_function', source_name: 'onspace-ai-chat', target_type: 'feature', target_name: 'conductor-effect-enforcement', edge_kind: 'calls', retirement_status: 'live' },
+  { source_type: 'feature', source_name: 'conductor-effect-enforcement', target_type: 'feature', target_name: 'oracle-truth-state', edge_kind: 'references', retirement_status: 'live' },
+  { source_type: 'feature', source_name: 'oracle-welfare-safety', target_type: 'feature', target_name: 'oracle-truth-state', edge_kind: 'references', retirement_status: 'live' },
   { source_type: 'feature', source_name: 'oracle-welfare-safety', target_type: 'table', target_name: 'welfare_alerts', edge_kind: 'writes', retirement_status: 'live' },
 ];
 

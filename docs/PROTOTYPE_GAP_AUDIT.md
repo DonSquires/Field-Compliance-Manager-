@@ -2,7 +2,11 @@
 
 Date: 2026-09-03
 
-This audit compares the current Field Compliance Manager checkout against the accessible historical prototype repositories listed in [historical-sources.md](historical-sources.md). Treat this as a capability recovery and product-gap map, not an instruction to copy prototype code. The earlier Freedom Camping app was close to the desired field workflow, but it failed as a coherent platform because modules were bolted on rather than designed into a shared enterprise SaaS spine. The current checkout and Bob's GitLab source are the new purpose-designed development line; gaps in this line are expected and should be filled with coherent SaaS-grade design against the current schema, Atlas, and module architecture.
+This audit compares the current Field Compliance Manager checkout against the accessible historical prototype repositories listed in [historical-sources.md](historical-sources.md). Treat this as a capability recovery and product-gap map, not an instruction to copy prototype code. The earlier Freedom Camping app was close to the desired field workflow, but it failed as a coherent platform because modules were bolted on rather than designed into a shared enterprise SaaS spine. The current checkout is intended to be a copy/mirror of Bob's GitLab source with additional rebuild work layered here; both are the new purpose-designed development line. Gaps in this line are expected and should be filled with coherent SaaS-grade design against the current schema, Atlas, and module architecture.
+
+Required platform systems from the GitLab line: Atlas, Caddie, Conductor, and Oracle. These are not prototype-only ideas. They should be present, wired, and used in this build repo wherever their responsibilities apply.
+
+See [GITLAB_PLATFORM_SYSTEMS.md](GITLAB_PLATFORM_SYSTEMS.md) for the GitLab-derived system specs. Oracle is broader than welfare: it is the truth-state describer for the current turn, caller, candidate effect, proof grade, and any domain state the Conductor needs before enforcement.
 
 ## Sources Checked
 
@@ -63,6 +67,19 @@ The current checkout is broader than the main Expo prototype on web and backend:
 - `supabase/functions` includes the current centralized scan and AI path: `process-officer-scan`, `classify-photo`, `classify-parking-scene`, `bob-inference`, `bob-voice-transcribe`, `bob-voice-speak`, `bob-resolve-address`, `bob-resolve-geofence`, `linz-lookup`, `motoweb-vehicle-lookup`, and many Bob builder/control-plane functions.
 - `supabase/schema.sql` contains current spines for `officer_gps_log`, `welfare_checks`, `officer_welfare_settings`, `parking_chalk_records`, `vehicle_overnight_sessions`, `ptt_channels`, `ptt_transmissions`, `radio_transcript_segments`, and `radio_translation_segments`.
 - `apps/mobile` is currently a secure Expo shell: Supabase session persistence, profile load, and current active assignment/standby state. It does not yet contain the operational mobile modules that existed in `FreedomCamp-Manager-App`.
+
+## Required GitLab Platform Systems
+
+These systems are part of the intended GitLab-copy build line and should be treated as load-bearing in this repository:
+
+| System | Role in this build repo | Current local anchor |
+| --- | --- | --- |
+| Atlas | Capability map, terrain graph, gap report, and blast-radius impact analysis. Used before changing shared tables, hooks, components, functions, or module spines. | `bob_capability_map`, `bob_app_map_edges`, `bob-query-atlas`, `scripts/atlas-*`, [docs/ATLAS_BUILD_REPORT.md](ATLAS_BUILD_REPORT.md), [docs/ATLAS_REBUILD_ORDER.md](ATLAS_REBUILD_ORDER.md), [docs/ATLAS_WIRING_STATUS.md](ATLAS_WIRING_STATUS.md) |
+| Caddie | Generates Bob's tool catalogue from Atlas-wired/reachable capabilities; describes available tools but does not select them. | `supabase/functions/onspace-ai-chat/caddie.ts` |
+| Conductor | Bob's turn gate/dispatcher: manages routing, tool dispatch, governance, egress enforcement, task/memory/fact state, and safety seams. | `supabase/functions/onspace-ai-chat/index.ts` |
+| Oracle | Truth-state evaluation layer used by policy/safety decisions; describes state so the Conductor can enforce at the right boundary. | `supabase/functions/onspace-ai-chat/conductor-welfare-seam.ts`, `oracle-welfare-safety` Atlas feature |
+
+Implementation rule: if a capability is missing in this checkout but present or specified in GitLab, fill it through these systems rather than bypassing them. For example, a new mobile scan feature should still be checked through Atlas blast-radius, routed through current scan/geofence/evidence contracts, and avoid creating a parallel bolt-on spine.
 
 ## High-Value Missing or Thin Areas
 

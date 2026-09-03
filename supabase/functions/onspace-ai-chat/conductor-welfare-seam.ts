@@ -263,6 +263,8 @@ function buildWelfareSafetyAuditRecord(input) {
  *   - explicit_hold: from detectExplicitWriteRefusal() in the conductor
  *   - effect_class: from classifyToolEffect() in caddie.ts, overridden to
  *     'safety_signal' when the action is a safety-signal candidate
+ *   - turn_scope: caller tier, org scope, and user/org ids supplied by the conductor
+ *   - proof_grade: epistemic grade of the candidate effect grounding
  *   - welfare: from the welfare context supplied by the conductor
  *
  * PURE function — no I/O.
@@ -270,8 +272,18 @@ function buildWelfareSafetyAuditRecord(input) {
   return {
     explicit_hold: input.explicit_hold,
     effect_class: input.effect_class,
+    turn_scope: input.turn_scope ?? null,
+    proof_grade: normalizeProofGrade(input.proof_grade),
     welfare: input.welfare_context ? resolveWelfareTruthState(input.welfare_context) : null
   };
+}
+function normalizeProofGrade(value) {
+  return [
+    'observed',
+    'inferred',
+    'alleged',
+    'determined'
+  ].includes(value) ? value : 'inferred';
 }
 // ── Safety-signal candidate construction ─────────────────────────────────────
 /**
@@ -338,6 +350,8 @@ function buildWelfareSafetyAuditRecord(input) {
   const oracle = buildOracleTurnTruthState({
     explicit_hold: input.explicit_hold,
     effect_class: effectClass,
+    turn_scope: input.turn_scope,
+    proof_grade: input.proof_grade,
     welfare_context: input.welfare_context
   });
   // If welfare context is present but the action is NOT a safety signal,
@@ -475,6 +489,8 @@ function buildWelfareSafetyAuditRecord(input) {
   const oracle = buildOracleTurnTruthState({
     explicit_hold: input.explicit_hold,
     effect_class: 'draft_governed_write',
+    turn_scope: input.turn_scope,
+    proof_grade: input.proof_grade,
     welfare_context: input.welfare_context
   });
   const decision = conductorSafetyPrecedence(oracle, null);

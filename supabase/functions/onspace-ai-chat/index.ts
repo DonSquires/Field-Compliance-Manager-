@@ -8012,6 +8012,8 @@ serve(async (req)=>{
           args: selectedArgs,
           explicit_hold: userExplicitlyRefusedWrite,
           effect_class: effectClass,
+          turn_scope: { tier: caps.tier, scope_org_ids: caps.scopeOrgIds, organization_id: orgId, user_id: user.id },
+          proof_grade: 'observed',
           welfare_context: welfareCtx
         });
         if (welfareResult.applicable && welfareResult.decision) {
@@ -8255,7 +8257,9 @@ serve(async (req)=>{
           action: chosenTool,
           args: selectedArgs,
           welfare_context: welfareCtx,
-          explicit_hold: true
+          explicit_hold: true,
+          turn_scope: { tier: caps.tier, scope_org_ids: caps.scopeOrgIds, organization_id: orgId, user_id: user.id },
+          proof_grade: 'observed'
         });
         console.warn(`[conductor][write-refusal+welfare] BLOCKED write tool=${chosenTool}: user explicitly refused write this turn — welfare truth-state captured`);
         await emitEvent("write_refusal_detected", {
