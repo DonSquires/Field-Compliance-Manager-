@@ -143,6 +143,9 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
   const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
   const [invoiceReason, setInvoiceReason] = useState('');
+  const [showGenerateInvoice, setShowGenerateInvoice] = useState(false);
+  const [selectedAgreementId, setSelectedAgreementId] = useState('');
+  const [quoteLines, setQuoteLines] = useState<Array<{ id: string; kind: string; description: string; quantity: number; unit_cost: number; unit_charge: number }>>([]);
   const [organizationDialog, setOrganizationDialog] = useState<EditableCrmOrganization | 'create' | null>(null);
   const [siteAccount, setSiteAccount] = useState<{ id: string; name: string } | null>(null);
   const openedContextAccountId = useRef<string | null>(null);
@@ -324,6 +327,59 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     loadCrm();
   }, [loadCrm]);
 
+  const loadQuoteLines = useCallback(async (quoteId: string) => {
+    const { data } = await supabase.from('quote_lines').select('id,kind,description,quantity,unit_cost,unit_charge').eq('quote_id', quoteId).order('created_at', { ascending: true });
+    setQuoteLines((data as any) ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (pricingQuote) void loadQuoteLines(pricingQuote.id);
+    else setQuoteLines([]);
+  }, [pricingQuote, loadQuoteLines]);
+
+  const removeQuoteLine = async (lineId: string) => {
+    if (!pricingQuote) return;
+    setQuoteSaving(true);
+    const { data, error } = await supabase.rpc('remove_crm_quote_line', {
+      p_client_request_id: crypto.randomUUID(),
+      p_quote_id: pricingQuote.id,
+      p_line_id: lineId,
+      p_expected_status: pricingQuote.status,
+    });
+    if (error) setState((s) => ({ ...s, error: error.message }));
+    else {
+      const receipt = Array.isArray(data) ? data[0] : data;
+      if (receipt) {
+        setPricingReceipt({ totalCost: Number(receipt.total_cost), totalCharge: Number(receipt.total_charge) });
+      }
+      setNotice('Quote line removed.');
+      await loadQuoteLines(pricingQuote.id);
+    }
+    setQuoteSaving(false);
+  };
+
+  const generateInvoiceFromAgreement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAgreementId) return;
+    setQuoteSaving(true);
+    const now = new Date();
+    const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const { error } = await supabase.rpc('generate_crm_invoice_from_agreement', {
+      p_client_request_id: crypto.randomUUID(),
+      p_service_agreement_id: selectedAgreementId,
+      p_service_period_start: startDate,
+      p_service_period_end: endDate,
+    });
+    if (error) setState((s) => ({ ...s, error: s.error ? `${s.error} · ${error.message}` : error.message }));
+    else {
+      setNotice('Invoice generated from agreement with line items.');
+      setShowGenerateInvoice(false);
+      await loadCrm();
+    }
+    setQuoteSaving(false);
+  };
+
   const openQuote = (client: AccountRow) => {
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + 30);
@@ -411,6 +467,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       });
       setNotice(`Pricing line added to ${pricingQuote.title}.`);
       lineRequestId.current = crypto.randomUUID();
+      await loadQuoteLines(pricingQuote.id);
       await loadCrm();
     }
     setQuoteSaving(false);
@@ -488,6 +545,19 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               Total charge{' '}
               <strong>${pricingReceipt.totalCharge.toFixed(2)}</strong>
             </span>
+          </div>
+        )}
+        {quoteLines.length > 0 && (
+          <div className="crm-quote-lines-list" style={{ marginBottom: '1rem', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '6px', padding: '0.5rem' }}>
+            <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Existing quote lines ({quoteLines.length}):</strong>
+            {quoteLines.map((line) => (
+              <div key={line.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '0.25rem 0', borderBottom: '1px border-subtle' }}>
+                <span><strong>[{line.kind}]</strong> {line.description} — {line.quantity} × ${Number(line.unit_charge).toFixed(2)}</span>
+                {pricingQuote.status === 'draft' && (
+                  <button type="button" className="btn btn-sm btn-secondary" style={{ color: 'var(--danger-color, #e53e3e)', padding: '0.1rem 0.4rem', fontSize: '0.75rem' }} disabled={quoteSaving} onClick={() => void removeQuoteLine(line.id)}>Remove</button>
+                )}
+              </div>
+            ))}
           </div>
         )}
         <div>
@@ -690,7 +760,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       )}
 
       <section className="reports-section crm-finance-section">
-        <div className="crm-section-heading"><div><h2>Accounts receivable</h2><p className="subtitle">Invoice status, collection actions, and retained finance decisions.</p></div><div className="crm-finance-kpis"><span>Open <strong>{openReceivables.length}</strong></span><span>Receivable <strong>NZ${receivableTotal.toFixed(2)}</strong></span><span>Overdue <strong>{state.invoices.filter((invoice) => invoice.status === 'overdue').length}</strong></span></div></div>
+        <div className="crm-section-heading"><div><h2>Accounts receivable</h2><p className="subtitle">Invoice status, collection actions, and retained finance decisions.</p></div><div className="crm-finance-kpis"><span>Open <strong>{openReceivables.length}</strong></span><span>Receivable <strong>NZ${receivableTotal.toFixed(2)}</strong></span><span>Overdue <strong>{state.invoices.filter((invoice) => invoice.status === 'overdue').length}</strong></span><button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowGenerateInvoice(true)}>Generate from agreement</button></div></div>
         {state.invoices.length === 0 ? <div className="empty-state"><p>No invoice headers exist yet. Invoice generation remains blocked until line-level billing evidence is implemented.</p></div> : <div className="crm-invoice-table" role="table" aria-label="Accounts receivable"><div className="crm-invoice-row is-header" role="row"><span>Invoice</span><span>Account</span><span>Due</span><span>Total</span><span>Status</span><span>Action</span></div>{state.invoices.map((invoice) => <div className="crm-invoice-row" role="row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.client?.name ?? 'Unknown account'}</span><time dateTime={invoice.due_date}>{new Date(`${invoice.due_date}T00:00:00`).toLocaleDateString('en-NZ')}</time><span>{invoice.currency} {Number(invoice.total_amount).toFixed(2)}</span><span className={`crm-invoice-status status-${invoice.status}`}>{invoice.status}</span><div>{invoice.status === 'draft' && <button type="button" onClick={() => setInvoiceAction({ invoice, action: 'send' })}>Send</button>}{(invoice.status === 'sent' || invoice.status === 'overdue') && <button type="button" onClick={() => setInvoiceAction({ invoice, action: 'mark_paid' })}>Mark paid</button>}{!['paid','void'].includes(invoice.status) && <button type="button" onClick={() => { setInvoiceReason(''); setInvoiceAction({ invoice, action: 'void' }); }}>Void</button>}</div></div>)}</div>}
       </section>
 
@@ -911,6 +981,30 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       {organizationDialog && <CrmOrganizationDialog organization={organizationDialog === 'create' ? null : organizationDialog} onClose={() => { setOrganizationDialog(null); void loadCrm(); }} onUpdated={(name) => { setOrganizationDialog(null); setNotice(`${name} organization details updated. Review its readiness steps next.`); void loadCrm(); }} onOpenAccount={(account) => { setOrganizationDialog(null); setWorkspaceAccount(account); }} />}
       {siteAccount && <CrmSiteDialog account={siteAccount} onClose={() => setSiteAccount(null)} onCreated={(site) => { setSiteAccount(null); setNotice(`${site.name} created with a provisional boundary. Operations boundary review is required before activation.`); void loadCrm(); }} />}
       {invoiceAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-invoice-action-title" onSubmit={manageInvoice}><header><div><span>Invoice lifecycle</span><h2 id="crm-invoice-action-title">{invoiceAction.action === 'send' ? 'Send invoice' : invoiceAction.action === 'mark_paid' ? 'Confirm payment' : 'Void invoice'}</h2></div><button type="button" onClick={() => setInvoiceAction(null)} aria-label="Close invoice action">×</button></header><p>{invoiceAction.invoice.invoice_number} · {invoiceAction.invoice.client?.name ?? 'Unknown account'} · {invoiceAction.invoice.currency} {Number(invoiceAction.invoice.total_amount).toFixed(2)}</p>{invoiceAction.action === 'void' && <label><span>Void reason</span><textarea required rows={4} value={invoiceReason} onChange={(event) => setInvoiceReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setInvoiceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (invoiceAction.action === 'void' && !invoiceReason.trim())}>{quoteSaving ? 'Saving' : 'Confirm action'}</button></footer></form></div>}
+      {showGenerateInvoice && (
+        <div className="crm-quote-backdrop">
+          <form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-gen-inv-title" onSubmit={generateInvoiceFromAgreement}>
+            <header>
+              <div><span>Accounts receivable</span><h2 id="crm-gen-inv-title">Generate invoice from agreement</h2></div>
+              <button type="button" onClick={() => setShowGenerateInvoice(false)} aria-label="Close invoice generator">×</button>
+            </header>
+            <p>Draft invoice will be populated with line items directly from accepted service agreement quotes or commercial rates.</p>
+            <label>
+              <span>Service agreement</span>
+              <select required value={selectedAgreementId} onChange={(e) => setSelectedAgreementId(e.target.value)}>
+                <option value="">Select an agreement...</option>
+                {[...state.platformSubscribers, ...state.contractedOrgs].map((ag) => (
+                  <option key={ag.id} value={ag.id}>{ag.counterparty_name} — {ag.name}</option>
+                ))}
+              </select>
+            </label>
+            <footer>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowGenerateInvoice(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
+            </footer>
+          </form>
+        </div>
+      )}
       {pricingQuote && quoteAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog crm-lifecycle-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-lifecycle-title" onSubmit={manageQuote}><header><div><span>Quote lifecycle</span><h2 id="crm-lifecycle-title">{quoteAction === 'send' ? 'Send quote?' : quoteAction === 'accept' ? 'Accept quote?' : 'Decline quote?'}</h2></div><button type="button" onClick={() => setQuoteAction(null)} aria-label="Close quote action">×</button></header><p>{quoteAction === 'send' ? 'The server will recheck labour pricing, positive totals, validity, and achieved margin before sending.' : quoteAction === 'accept' ? 'Acceptance creates or links the operational service agreement and writes canonical commercial settings.' : 'The quote will close as declined and the reason will remain in its audit history.'}</p>{quoteAction === 'decline' && <label><span>Decline reason</span><textarea rows={4} required value={quoteActionReason} onChange={(event) => setQuoteActionReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setQuoteAction(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (quoteAction === 'decline' && !quoteActionReason.trim())}>{quoteSaving ? 'Saving' : quoteAction === 'send' ? 'Confirm send' : quoteAction === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></footer></form></div>}
     </div>
   );
