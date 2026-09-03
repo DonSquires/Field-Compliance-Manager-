@@ -198,6 +198,7 @@ What is missing or thin:
 - Mobile read-only credential status is now available with verification state and expiry warnings. Credential renewal remains a governed HR workflow.
 - Mobile leave request and personal leave status are now available through the idempotent `submit_officer_leave_request` RPC. Leave approval remains a governed supervisor workflow.
 - Mobile timesheet submission and personal status are now available through the idempotent `submit_officer_timesheet` RPC. Timesheet review and approval remain governed HR workflows.
+- Mobile end-of-shift debrief is now available through `submit_shift_debrief`, followed by separately confirmed `complete_officer_shift` lifecycle completion once server checks pass.
 - Mobile zone/site creation or provisional boundary capture, if this remains an officer workflow.
 
 Current overlap:

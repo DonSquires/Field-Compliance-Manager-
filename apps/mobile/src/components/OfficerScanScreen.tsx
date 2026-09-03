@@ -22,13 +22,14 @@ import { OfficerLeavePanel } from './OfficerLeavePanel';
 import { OfficerTimesheetPanel } from './OfficerTimesheetPanel';
 import { OfficerCheckpointScanner } from './OfficerCheckpointScanner';
 import { OfficerCredentialsPanel } from './OfficerCredentialsPanel';
+import { OfficerDebriefPanel } from './OfficerDebriefPanel';
 import { NotificationInbox } from './NotificationInbox';
 import { OfficerStopPanel } from './OfficerStopPanel';
 import { OfficerVehicleLookup } from './OfficerVehicleLookup';
 
-type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null };
+type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null; shiftStatus: string | null };
 
-export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftId }: Props) {
+export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftId, shiftStatus }: Props) {
   const [moduleKey, setModuleKey] = useState<ScanModuleKey>('freedom_camping');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
@@ -93,6 +94,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <OfficerFieldReportPanel shiftId={shiftId} />
     <OfficerLeavePanel officerId={officerId} />
     <OfficerTimesheetPanel officerId={officerId} />
+    <OfficerDebriefPanel shiftId={shiftId} shiftStatus={shiftStatus} />
     <OfficerCredentialsPanel officerId={officerId} />
     <OfficerVehicleLookup organizationId={organizationId} />
     <View style={styles.moduleRow}>{(['freedom_camping', 'parking_enforcement'] as ScanModuleKey[]).map((key) => <Pressable key={key} onPress={() => { setModuleKey(key); setResult(null); }} style={[styles.module, moduleKey === key && styles.moduleActive]}><Text style={styles.moduleText}>{key === 'freedom_camping' ? 'Freedom camping' : 'Parking'}</Text></Pressable>)}</View>
