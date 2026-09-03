@@ -16,7 +16,10 @@ The scan screen also has a persistent safety bar. Officers can record a
 foreground GPS-backed check-in or explicitly confirm an SOS. Both actions check
 their database responses before showing confirmation. The mobile app does not
 yet run background GPS, man-down detection, or client-side escalation timing;
-those remain server-owned or future mobile capability.
+those remain server-owned or future mobile capability. While the app is open,
+the safety bar records a two-minute GPS heartbeat through the canonical
+`record_officer_breadcrumb` RPC and keeps unconfirmed events in a durable local
+queue for retry.
 
 The profile and active-assignment hook remains available for the next mobile
 home/roster slice. Local operational-data caching, background GPS/welfare,

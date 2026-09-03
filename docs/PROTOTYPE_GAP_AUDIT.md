@@ -112,7 +112,7 @@ Design stance: this is an expected gap in the new build, not a regression to pat
 
 What is missing or thin:
 
-- A dedicated queue management screen with item inspection, retry state, and discard controls.
+- Queue inspection, retry state, and discard controls are now available inline on the mobile scan screen. A dedicated queue screen remains optional until additional queued action types exist.
 - Local SQLite cache of zones, compliance rules, canonical vehicles, flagged vehicles, monthly stays, and recent observations.
 - Organization data package download equivalent to prototype `sync-organization-data`.
 - Multi-type offline upload queue for observations, updates, deletes, incidents, photos, and notes.
@@ -139,8 +139,8 @@ Current status: backend and web support exist; mobile implementation is missing.
 
 What is missing or thin:
 
-- Mobile foreground/background location permissions and periodic GPS heartbeat.
-- Mobile calls to current `record_officer_breadcrumb` RPC or equivalent write path.
+- Background location permissions and periodic GPS heartbeat while the app is not active. The mobile safety bar now sends a foreground two-minute heartbeat through `record_officer_breadcrumb` and retains unconfirmed events for retry.
+- Mobile calls to current `record_officer_breadcrumb` RPC or equivalent write path are now present for foreground heartbeats.
 - Mobile welfare check-in prompts and overdue state handling. Foreground self check-in and confirmed SOS are now available from the mobile scan safety bar; timer/overdue presentation remains follow-up work.
 - Mobile man-down/inactivity timers integrated with the current `officer_welfare_settings` schema.
 - Offline retention of GPS breadcrumbs with client event IDs for retry provenance.

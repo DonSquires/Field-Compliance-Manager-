@@ -17,4 +17,5 @@ test('mobile scan queue preserves capture time and retry provenance', () => {
   assert.match(source, /synced_at: new Date\(\)\.toISOString\(\)/);
   assert.match(source, /AsyncStorage\.setItem\(QUEUE_KEY/);
   assert.match(source, /export function isNetworkFailure/);
+  assert.match(source, /export async function removeQueuedOfficerScan/);
 });

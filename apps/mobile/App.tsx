@@ -39,7 +39,7 @@ export default function App() {
   if (loading) return <LoadingScreen />;
   if (!isSupabaseConfigured) return <ConfigurationScreen />;
   if (!session) return <SignInScreen email={email} password={password} signingIn={signingIn} onChangeEmail={setEmail} onChangePassword={setPassword} onSignIn={() => void signIn()} />;
-  return <OfficerScanScreen onSignOut={() => void signOut()} officerId={session.user.id} organizationId={fieldContext.profile?.organizationId ?? null} />;
+  return <OfficerScanScreen onSignOut={() => void signOut()} officerId={session.user.id} organizationId={fieldContext.profile?.organizationId ?? null} shiftId={fieldContext.assignment?.id ?? null} />;
 }
 
 function LoadingScreen() { return <SafeAreaView style={styles.centered}><ActivityIndicator color="#74d6c8" /><Text style={styles.muted}>Restoring secure session</Text><StatusBar style="light" /></SafeAreaView>; }

@@ -86,6 +86,11 @@ export async function queueOfficerScan(payload: OfficerScanPayload): Promise<voi
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
 }
 
+export async function removeQueuedOfficerScan(id: string): Promise<void> {
+  const queue = await listQueuedOfficerScans();
+  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue.filter((item) => item.id !== id)));
+}
+
 export async function syncQueuedOfficerScans(): Promise<{ synced: number; pending: number }> {
   const queue = await listQueuedOfficerScans();
   const pending: QueuedOfficerScan[] = [];

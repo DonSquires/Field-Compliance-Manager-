@@ -8,6 +8,7 @@ interface MobileProfile {
 }
 
 interface ActiveAssignment {
+  id: string;
   serviceType: string;
   scheduledStart: string;
   scheduledEnd: string;
@@ -38,7 +39,7 @@ export function useFieldContext(userId: string | null) {
       const now = new Date().toISOString();
       const { data: shiftRow, error: shiftError } = await supabase
         .from('shifts')
-        .select('service_type, scheduled_start, scheduled_end, status, total_stops, completed_stops')
+        .select('id, service_type, scheduled_start, scheduled_end, status, total_stops, completed_stops')
         .eq('organization_id', profileRow.organization_id)
         .eq('officer_user_id', userId)
         .in('status', ['accepted', 'in_progress'])
@@ -47,7 +48,7 @@ export function useFieldContext(userId: string | null) {
         .order('scheduled_start', { ascending: false })
         .maybeSingle();
       if (shiftError && shiftError.code !== 'PGRST116') throw shiftError;
-      setAssignment(shiftRow ? { serviceType: shiftRow.service_type, scheduledStart: shiftRow.scheduled_start, scheduledEnd: shiftRow.scheduled_end, status: shiftRow.status, totalStops: shiftRow.total_stops, completedStops: shiftRow.completed_stops } : null);
+      setAssignment(shiftRow ? { id: shiftRow.id, serviceType: shiftRow.service_type, scheduledStart: shiftRow.scheduled_start, scheduledEnd: shiftRow.scheduled_end, status: shiftRow.status, totalStops: shiftRow.total_stops, completedStops: shiftRow.completed_stops } : null);
     } catch (loadError) {
       setProfile(null);
       setAssignment(null);
