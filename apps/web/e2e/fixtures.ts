@@ -110,6 +110,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
   });
   await page.route('**/auth/v1/user', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(authenticatedUser) }));
   await page.route('**/auth/v1/token?grant_type=refresh_token', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'e2e-access-token', refresh_token: 'e2e-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: authenticatedUser }) }));
+  await page.route('**/auth/v1/logout**', async (route) => route.fulfill({ status: 204, body: '' }));
   await page.route('https://*.tile.openstreetmap.org/**', async (route) => route.fulfill({ status: 204, body: '' }));
 
   await page.route('**/rest/v1/**', async (route) => {

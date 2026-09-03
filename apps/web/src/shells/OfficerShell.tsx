@@ -31,6 +31,8 @@ import {
   FilePlus2,
   FileText,
   Grid3X3,
+  KeyRound,
+  LogOut,
   Map,
   MapPin,
   MessageSquare,
@@ -43,6 +45,7 @@ import {
   UserRound,
   Volume2,
   Wind,
+  X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -132,7 +135,7 @@ const LazyPageFallback: React.FC = () => (
 const OfficerShell: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile } = useAuth();
+  const { profile, signOut, updatePassword } = useAuth();
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
@@ -159,6 +162,10 @@ const OfficerShell: React.FC = () => {
   const [officerState, setOfficerState] = useState<OfficerState>('home');
   const [offeredCount, setOfferedCount] = useState(0);
   const [bobOpen, setBobOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [accountMessage, setAccountMessage] = useState<string | null>(null);
+  const [savingPassword, setSavingPassword] = useState(false);
   const [grantedModules, setGrantedModules] = useState<string[]>([]);
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
@@ -320,6 +327,24 @@ const OfficerShell: React.FC = () => {
     return false;
   }, [navigate, navigateToModule, profile?.role]);
 
+  const savePassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (newPassword.length < 8) {
+      setAccountMessage('Use at least 8 characters for your new password.');
+      return;
+    }
+    setSavingPassword(true);
+    setAccountMessage(null);
+    const result = await updatePassword(newPassword);
+    setSavingPassword(false);
+    if (result.error) {
+      setAccountMessage(result.error);
+      return;
+    }
+    setNewPassword('');
+    setAccountMessage('Password updated.');
+  };
+
   // Get welfare status
   const currentWelfareStatus: WelfareStatus = safety.activeAlert?.kind === 'sos'
     ? 'sos'
@@ -430,9 +455,9 @@ const OfficerShell: React.FC = () => {
           <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
-          <div className="officer-profile-chip" title={profile?.displayName ?? 'Officer'}>
+          <button type="button" className="officer-profile-chip" onClick={() => { setAccountOpen(true); setAccountMessage(null); }} title="Account settings" aria-label="Account settings">
             <UserRound size={17} aria-hidden="true" /><span>{profile?.displayName?.split(' ')[0] ?? 'Officer'}</span>
-          </div>
+          </button>
         </div>
       </header>
 
@@ -477,6 +502,17 @@ const OfficerShell: React.FC = () => {
         onClose={() => setBobOpen(false)}
         context={bobContext}
       />
+      {accountOpen && (
+        <div className="officer-account-backdrop" onClick={() => setAccountOpen(false)}>
+          <section className="officer-account-dialog" role="dialog" aria-modal="true" aria-labelledby="officer-account-title" onClick={(event) => event.stopPropagation()}>
+            <header><div><span>Account</span><h2 id="officer-account-title">{profile?.displayName ?? 'Officer'}</h2><p>{profile?.email ?? profile?.role ?? 'Officer account'}</p></div><button type="button" onClick={() => setAccountOpen(false)} aria-label="Close account settings"><X size={18} /></button></header>
+            <div className="officer-account-role">{profile?.role?.replaceAll('_', ' ') ?? 'Officer'}</div>
+            <form onSubmit={(event) => void savePassword(event)}><label><span>New password</span><input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="At least 8 characters" /></label><button type="submit" disabled={savingPassword || newPassword.length < 8}><KeyRound size={16} />{savingPassword ? 'Updating password' : 'Update password'}</button></form>
+            {accountMessage && <p className="officer-account-message" role="status">{accountMessage}</p>}
+            <button type="button" className="officer-account-signout" onClick={() => void signOut()}><LogOut size={16} />Sign out</button>
+          </section>
+        </div>
+      )}
     </div>
   );
 };
