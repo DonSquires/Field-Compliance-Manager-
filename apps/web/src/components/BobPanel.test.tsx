@@ -167,6 +167,41 @@ describe('BobPanel', () => {
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
   });
 
+  it('renders Bob headings, bold text, and lists as structured elements', async () => {
+    messageHistory = [{
+      id: 'message-1', role: 'assistant', flagged: false, confidence: null,
+      created_at: '2026-09-02T06:00:00.000Z',
+      content: '### Findings\n\nThe build is **partway** to enterprise-grade.\n\n- First risk\n- Second risk\n\n1. Fix state clarity\n2. Add evidence intake',
+      metadata: {},
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    const heading = await screen.findByRole('heading', { name: 'Findings' });
+    expect(heading.tagName).toBe('H4');
+    expect(screen.getByText('partway').tagName).toBe('STRONG');
+    expect(screen.getAllByRole('listitem')).toHaveLength(4);
+    expect(screen.getAllByRole('list')).toHaveLength(2);
+  });
+
+  it('renders Bob links and code spans safely, and blocks unsafe hrefs', async () => {
+    messageHistory = [{
+      id: 'message-1', role: 'assistant', flagged: false, confidence: null,
+      created_at: '2026-09-02T06:00:00.000Z',
+      content: 'Run `npm test` then see [the source](https://example.com/docs) or [bad link](javascript:alert(1)).',
+      metadata: {},
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('npm test')).toHaveProperty('tagName', 'CODE');
+    const link = screen.getByRole('link', { name: 'the source' });
+    expect(link.getAttribute('href')).toBe('https://example.com/docs');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(screen.queryByRole('link', { name: 'bad link' })).toBeNull();
+    expect(screen.getByText(/bad link/)).toBeTruthy();
+  });
+
   it('uploads attached evidence through bob-uploads and registers bob_attachments', async () => {
     const storageApi = { upload: vi.fn().mockResolvedValue({ error: null }), remove: vi.fn().mockResolvedValue({ error: null }) };
     mockStorageFrom.mockReturnValue(storageApi);

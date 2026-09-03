@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { AlertTriangle, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, PanelRightClose, Pencil, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { BobMarkdown } from './BobMarkdown';
 import './BobPanel.css';
 
 const MAX_BOB_UPLOAD_BYTES = 48 * 1024 * 1024;
@@ -539,7 +540,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                   {m.role !== 'user' && <span className="bob-message-avatar"><Bot size={14} /></span>}
                   <div className="bob-message-body">
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
-                    <div className="bob-message-content">{m.content}</div>
+                    <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
                     {m.role === 'assistant' && <OperationalCards message={m} />}
                     <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
                   </div>

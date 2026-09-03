@@ -814,7 +814,78 @@
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.bob-message-content p {
+  margin: 0 0 10px;
   white-space: pre-wrap;
+}
+
+.bob-message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.bob-message-content h4,
+.bob-message-content h5,
+.bob-message-content h6 {
+  margin: 14px 0 6px;
+  color: #f0f6f9;
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.bob-message-content h4:first-child,
+.bob-message-content h5:first-child,
+.bob-message-content h6:first-child {
+  margin-top: 0;
+}
+
+.bob-message-content ul,
+.bob-message-content ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+
+.bob-message-content li {
+  margin-bottom: 4px;
+}
+
+.bob-message-content li:last-child {
+  margin-bottom: 0;
+}
+
+.bob-message-content strong {
+  color: #f0f6f9;
+  font-weight: 700;
+}
+
+.bob-message-content code {
+  padding: 1px 5px;
+  border: 1px solid #294052;
+  border-radius: 3px;
+  color: #a7cfdb;
+  background: #050d15;
+  font-size: 11px;
+}
+
+.bob-message-content pre {
+  margin: 0 0 10px;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid #294052;
+  border-radius: 5px;
+  background: #050d15;
+}
+
+.bob-message-content pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.bob-message-content a {
+  color: #7dd3c7;
+  text-decoration: underline;
 }
 
 .bob-operational-stack {
