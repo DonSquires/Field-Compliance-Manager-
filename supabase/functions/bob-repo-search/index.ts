@@ -189,15 +189,23 @@ serve(async (req)=>{
         if (!r.ok) {
           // A term we COULD NOT SEARCH is not evidence of absence (Bob criterion
           // 1/5): record it as could_not_verify, never fold it into not_found.
+          // Include only upstream status and opaque request ID, never credentials
+          // or a response body, so operators can distinguish auth, project, ref,
+          // and GitLab service failures without exposing protected information.
+          const failure = {
+            status: r.status,
+            request_id: r.headers.get('x-request-id') ?? r.headers.get('x-gitlab-request-id') ?? null
+          };
           couldNotVerify = true;
-          failedTerms.push(term);
+          failedTerms.push(`${term} (GitLab HTTP ${failure.status}${failure.request_id ? `; request ${failure.request_id}` : ''})`);
           termStatus.push({
             term,
             status: deriveTermStatus({
               failed: true,
               hitCount: 0
             }),
-            count: 0
+            count: 0,
+            failure
           });
           continue;
         }
