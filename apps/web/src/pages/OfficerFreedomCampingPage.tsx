@@ -23,7 +23,6 @@ import {
   isNetworkFailure,
   listQueuedOfficerScans,
   markQueuedOfficerScanAttempt,
-  normalizePlate,
   OfficerScanResult,
   queueOfficerScan,
   removeQueuedOfficerScan,
@@ -88,7 +87,6 @@ const OfficerFreedomCampingPage: React.FC = () => {
     const [breaches, setBreaches] = useState<BreachOutcome[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [plateNumber, setPlateNumber] = useState('');
   const [zoneId, setZoneId] = useState('');
   const [imageBase64, setImageBase64] = useState<string>();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string>();
@@ -227,20 +225,18 @@ const OfficerFreedomCampingPage: React.FC = () => {
   }, [imagePreviewUrl]);
 
   const payload = useMemo(() => buildOfficerScanPayload({
-    plateNumber,
     imageBase64,
     latitude: location.latitude,
     longitude: location.longitude,
     zoneId,
     capturedAt,
-  }), [capturedAt, imageBase64, location.latitude, location.longitude, plateNumber, zoneId]);
+  }), [capturedAt, imageBase64, location.latitude, location.longitude, zoneId]);
 
   const clearCapture = useCallback(() => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(undefined);
     setImageBase64(undefined);
     setCapturedAt(undefined);
-    setPlateNumber('');
     setSubmitError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [imagePreviewUrl]);
@@ -362,13 +358,6 @@ const OfficerFreedomCampingPage: React.FC = () => {
 
           <div className="fc-field-grid">
             <label className="fc-field">
-              <span>Plate number <small>optional with photo</small></span>
-              <div className="fc-plate-input">
-                <input value={plateNumber} onChange={(event) => setPlateNumber(normalizePlate(event.target.value))} placeholder="ABC123" inputMode="text" autoCapitalize="characters" autoComplete="off" maxLength={10} />
-              </div>
-            </label>
-
-            <label className="fc-field">
               <span>Zone <small>{location.status === 'ready' ? 'auto-detected when blank' : 'required without GPS'}</small></span>
               <div className="fc-select-wrap">
                 <MapPin size={17} aria-hidden="true" />
@@ -397,7 +386,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
             </div>
           )}
 
-          <button className="fc-submit" type="submit" disabled={!canSubmitOfficerScan(payload) || preparingImage || submitting}>
+          <button className="fc-submit" type="submit" disabled={!imageBase64 || !canSubmitOfficerScan(payload) || preparingImage || submitting}>
             {submitting ? <RefreshCw size={19} className="is-spinning" aria-hidden="true" /> : imageBase64 ? <Upload size={19} aria-hidden="true" /> : <ImagePlus size={19} aria-hidden="true" />}
             {submitting ? 'Processing scan' : 'Process scan'}
           </button>

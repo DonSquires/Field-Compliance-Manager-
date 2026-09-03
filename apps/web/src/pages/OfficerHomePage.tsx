@@ -171,6 +171,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
         <div className="officer-notice is-error" role="alert">
           <AlertTriangle size={18} aria-hidden="true" />
           <span>Shift status could not be verified: {shiftError.message}</span>
+          <button type="button" onClick={() => void onRefreshShift()} disabled={shiftLoading}>Try again</button>
         </div>
       )}
 

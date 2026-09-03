@@ -117,7 +117,7 @@ export function useActiveShift(userId: string, organizationId: string) {
       }
     } catch (err) {
       console.error('Error fetching active shift:', err);
-      setError(err instanceof Error ? err : new Error('Unknown error'));
+      setError(err instanceof Error ? err : new Error((err as { message?: string }).message ?? 'Shift status could not be verified.'));
     } finally {
       setIsLoading(false);
     }

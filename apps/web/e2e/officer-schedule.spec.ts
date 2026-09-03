@@ -26,6 +26,18 @@ test('officer standby keeps safety available and exposes only self-service work'
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
+test('officer standby keeps self-service and safety available when shift status cannot load', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await page.route('**/rest/v1/shifts**', async (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'Roster service is unavailable.' }) }));
+  await signInAsOfficer(page, '/officer');
+
+  await expect(page.getByRole('alert')).toContainText('Roster service is unavailable.');
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check in now' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^My schedule/ })).toBeVisible();
+  expect(browserErrors.filter((error) => !error.includes('Roster service is unavailable.') && !error.includes('status of 500'))).toEqual([]);
+});
+
 test('officer schedule and coverage claim are visually correct and operational', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsOfficer(page);

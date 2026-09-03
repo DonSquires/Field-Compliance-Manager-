@@ -11,7 +11,6 @@ import {
   isNetworkFailure,
   listQueuedOfficerScans,
   markQueuedOfficerScanAttempt,
-  normalizePlate,
   queueOfficerScan,
   removeQueuedOfficerScan,
   type ScanModuleKey,
@@ -53,7 +52,6 @@ export function ScanShell() {
   const [moduleKey, setModuleKey] = useState<ScanModuleKey>('freedom_camping');
   const [entitlementLoading, setEntitlementLoading] = useState(true);
   const [entitlementError, setEntitlementError] = useState<string | null>(null);
-  const [plateNumber, setPlateNumber] = useState('');
   const [zoneId, setZoneId] = useState('');
   const [imageBase64, setImageBase64] = useState<string>();
   const [previewUrl, setPreviewUrl] = useState<string>();
@@ -133,21 +131,19 @@ export function ScanShell() {
   }), [moduleKey, relationships.zones]);
 
   const payload = useMemo(() => buildOfficerScanPayload({
-    plateNumber,
     imageBase64,
     latitude: location.lat,
     longitude: location.lng,
     zoneId,
     capturedAt,
     moduleKey,
-  }), [capturedAt, imageBase64, location.lat, location.lng, moduleKey, plateNumber, zoneId]);
+  }), [capturedAt, imageBase64, location.lat, location.lng, moduleKey, zoneId]);
 
   const clearCapture = useCallback(() => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(undefined);
     setImageBase64(undefined);
     setCapturedAt(undefined);
-    setPlateNumber('');
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [previewUrl]);
@@ -261,7 +257,7 @@ export function ScanShell() {
           <div className="scan-shell-state"><ScanLine size={28} /><strong>No standalone scan module is enabled</strong><span>An administrator must enable standalone scanning on a service-agreement module.</span></div>
         ) : (
           <div className="scan-workspace">
-            <header className="scan-workspace-heading"><div><span>Capture station</span><h1>Vehicle scan</h1><p>Capture evidence or enter a plate manually.</p></div>{queuedCount > 0 && <button type="button" className="scan-queue-chip" onClick={() => void syncQueue()}><WifiOff size={15} /> {queuedCount} queued</button>}</header>
+            <header className="scan-workspace-heading"><div><span>Capture station</span><h1>Vehicle scan</h1><p>Capture vehicle evidence for ALPR and policy assessment.</p></div>{queuedCount > 0 && <button type="button" className="scan-queue-chip" onClick={() => void syncQueue()}><WifiOff size={15} /> {queuedCount} queued</button>}</header>
 
             {entitledModules.length > 1 && <div className="scan-module-tabs" role="tablist">{entitledModules.map((module) => <button type="button" role="tab" aria-selected={moduleKey === module} className={moduleKey === module ? 'is-active' : ''} onClick={() => { setModuleKey(module); setZoneId(''); setResult(null); }} key={module}>{MODULE_LABEL[module]}</button>)}</div>}
             {queueMessage && <div className="scan-inline-message" role="status">{queueMessage}</div>}
@@ -272,13 +268,12 @@ export function ScanShell() {
                 {previewUrl ? <div className="scan-preview"><img src={previewUrl} alt="Vehicle evidence preview" /><span><CheckCircle2 size={15} /> Evidence ready</span><button type="button" onClick={clearCapture} title="Remove image"><X size={18} /><span className="sr-only">Remove image</span></button></div> : <button type="button" className="scan-camera-target" onClick={() => fileInputRef.current?.click()} disabled={preparingImage}><Camera size={34} /><strong>{preparingImage ? 'Preparing image' : 'Capture vehicle'}</strong><span>Use rear camera</span></button>}
 
                 <div className="scan-input-grid">
-                  <label><span>Plate number <small>optional with photo</small></span><input value={plateNumber} onChange={(event) => setPlateNumber(normalizePlate(event.target.value))} placeholder="ABC123" autoCapitalize="characters" maxLength={10} /></label>
                   <label><span>Zone <small>{location.status === 'ready' ? 'automatic when blank' : 'select a location'}</small></span><div><MapPin size={16} /><select value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">Automatic from GPS</option>{availableZones.map((zone) => <option value={zone.id} key={zone.id}>{zone.name}</option>)}</select></div></label>
                 </div>
 
                 <div className={`scan-location location-${location.status}`}><Crosshair size={17} /><span>{location.status === 'ready' ? `Location ready · ±${Math.round(location.accuracy ?? 0)} m` : location.status === 'locating' ? 'Acquiring location' : 'Location unavailable · select a zone'}</span><button type="button" onClick={() => void acquireLocation()} disabled={location.status === 'locating'}><RefreshCw size={16} className={location.status === 'locating' ? 'is-spinning' : ''} /><span className="sr-only">Refresh location</span></button></div>
                 {error && <div className="scan-error" role="alert"><AlertTriangle size={18} /> {error}</div>}
-                <button type="submit" className="scan-submit" disabled={!canSubmitOfficerScan(payload) || submitting || preparingImage}>{submitting ? <RefreshCw size={19} className="is-spinning" /> : <Upload size={19} />}{submitting ? 'Processing scan' : `Process ${MODULE_LABEL[moduleKey]} scan`}</button>
+                <button type="submit" className="scan-submit" disabled={!imageBase64 || !canSubmitOfficerScan(payload) || submitting || preparingImage}>{submitting ? <RefreshCw size={19} className="is-spinning" /> : <Upload size={19} />}{submitting ? 'Processing scan' : `Process ${MODULE_LABEL[moduleKey]} scan`}</button>
               </form>
 
               <aside className="scan-result-panel">

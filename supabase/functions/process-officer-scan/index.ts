@@ -701,9 +701,12 @@ serve(async (req)=>{
     const officerId = profile.id;
     // Step 2: Parse input
     const body = await req.json();
-    const { plate_number: rawPlate, image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
+    const { image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
     if (!['freedom_camping', 'parking_enforcement'].includes(moduleKey)) return json({
       error: 'Unsupported scan module'
+    }, 400);
+    if (!imageBase64) return json({
+      error: 'Photo evidence is required for this scan. Capture a clear vehicle image for ALPR.'
     }, 400);
     const hasLatitude = gpsLat !== null && gpsLat !== undefined;
     const hasLongitude = gpsLng !== null && gpsLng !== undefined;
@@ -754,12 +757,12 @@ serve(async (req)=>{
       }
       alprUsed = alprResult !== null;
     }
-    const plateNumber = (alprResult?.plate ?? rawPlate ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const plateNumber = (alprResult?.plate ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!plateNumber) return json({
-      error: 'plate_number is required (or provide image_base64 for ALPR)'
+      error: 'A plate could not be confirmed from the photo. Capture a clearer image and try again.'
     }, 400);
     const plateConfidence = alprResult?.confidence ?? null;
-    const plateSource = alprUsed ? 'alpr' : 'manual';
+    const plateSource = 'alpr';
     const alprProvider = alprResult?.provider ?? null;
     console.log(`[scan] plate=${plateNumber} source=${plateSource} org=${orgId}`);
     // Step 5: Geofence resolution from GPS via resolve_operational_context().
