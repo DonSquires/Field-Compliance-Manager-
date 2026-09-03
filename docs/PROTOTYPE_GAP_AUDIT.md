@@ -190,7 +190,7 @@ Current status: web/admin/officer surfaces exist, but mobile operational screens
 
 What is missing or thin:
 
-- Mobile job list/detail/completion flow.
+- Active-shift mobile dispatch list and status progression are now available. Broader cross-shift job history/detail workflows remain missing.
 - Mobile patrol route/stops view.
 - Mobile enforcement action/notice capture from a scan or breach.
 - Mobile vehicle detail page with canonical vehicle, breach history, SCV/homeless status, and flags.
