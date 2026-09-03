@@ -1613,12 +1613,7 @@ async function callPlan(planPayload, allowFallback = true) {
   // BUDGET CEILING: direct + fallback bob-inference must stay under the ~150s
   // edge limit. 90000 (direct) + 55000 (fallback) = 145s = OK. Do NOT set both
   // this AND the fallback to 90s. Set as a Supabase edge secret, not /opt/fcm/.env.
-  const isBuilderRequest = planPayload.agent_mode === 'builder';
-  const configuredTimeout = parseInt(Deno.env.get(isBuilderRequest ? 'BOB_BUILDER_PLAN_TIMEOUT_MS' : 'BOB_PLAN_TIMEOUT_MS') ?? '', 10);
-  const maximumTimeout = isBuilderRequest ? 55_000 : 25_000;
-  const _PLAN_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeout > 0
-    ? Math.min(configuredTimeout, maximumTimeout)
-    : maximumTimeout;
+  const _PLAN_TIMEOUT_MS = parseInt(Deno.env.get('BOB_PLAN_TIMEOUT_MS') ?? '55000', 10);
   const controller = new AbortController();
   const timer = setTimeout(()=>controller.abort(), _PLAN_TIMEOUT_MS);
   try {
@@ -7852,7 +7847,6 @@ serve(async (req)=>{
     }
     const planPayload = {
       action: 'plan',
-      agent_mode: agentWorkspaceContext.agent_mode,
       message: message || (att ? `The user uploaded ${att.name}.` : ''),
       attachment: att ? {
         name: att.name,
@@ -7884,7 +7878,7 @@ serve(async (req)=>{
         steps: taskLedger.steps
       } : null
     };
-    const plan = await callPlan(planPayload, agentWorkspaceContext.agent_mode === 'builder');
+    const plan = await callPlan(planPayload);
     if (!plan.ok) {
       const failReply = `I had trouble reasoning about that (${plan.data?.error ?? plan.status}). Try rephrasing, or upload the file again.`;
       await persist(admin, orgId, conversationId, [
