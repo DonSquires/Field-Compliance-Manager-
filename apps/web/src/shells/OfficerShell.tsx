@@ -133,7 +133,7 @@ const OfficerShell: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile } = useAuth();
-  const { shift: activeShift, isLoading: shiftLoading, error: shiftError } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
+  const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
 
@@ -450,7 +450,7 @@ const OfficerShell: React.FC = () => {
         )}
         {(officerState === 'standby' || officerState === 'home') && (
           <React.Suspense fallback={<LazyPageFallback />}>
-            <OfficerHomePage shift={activeShift} shiftLoading={shiftLoading} shiftError={shiftError} safety={safety} onNavigate={navigateToModule} />
+            <OfficerHomePage shift={activeShift} shiftLoading={shiftLoading} shiftError={shiftError} safety={safety} onNavigate={navigateToModule} onRefreshShift={refreshShift} />
           </React.Suspense>
         )}
         {(officerState === 'selector' || officerState === 'portal') && (

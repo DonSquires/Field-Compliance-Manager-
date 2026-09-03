@@ -19,11 +19,12 @@ interface Credential {
   verified: boolean;
 }
 
-const isExpiringSoon = (expiryDate: string | null) => {
-  if (!expiryDate) return false;
+function credentialExpiryState(expiryDate: string | null): 'expired' | 'expiring' | 'current' | 'none' {
+  if (!expiryDate) return 'none';
   const days = (new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-  return days <= 30;
-};
+  if (days < 0) return 'expired';
+  return days <= 30 ? 'expiring' : 'current';
+}
 
 const OfficerCredentialsPage: React.FC = () => {
   const { profile } = useAuth();
@@ -48,7 +49,7 @@ const OfficerCredentialsPage: React.FC = () => {
         if (err) throw err;
         setCredentials((data as Credential[]) || []);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load credentials');
+        setError(err instanceof Error ? err.message : (err as { message?: string }).message ?? 'Failed to load credentials');
       } finally {
         setLoading(false);
       }
@@ -85,12 +86,14 @@ const OfficerCredentialsPage: React.FC = () => {
       )}
 
       <div className="contacts-list">
-        {credentials.length === 0 ? (
+        {credentials.length === 0 && !error ? (
           <div className="empty-state">
             <p>No credentials on file.</p>
           </div>
         ) : (
-          credentials.map((c) => (
+          credentials.map((c) => {
+            const expiryState = credentialExpiryState(c.expiry_date);
+            return (
             <div key={c.id} className="contact-card">
               <div className="contact-header">
                 <h3>{c.credential_type}</h3>
@@ -101,12 +104,13 @@ const OfficerCredentialsPage: React.FC = () => {
               <div className="contact-details">
                 {c.credential_number && <p>{c.credential_number}</p>}
                 {c.issuing_authority && <p className="contact-meta">{c.issuing_authority}</p>}
-                <p className={isExpiringSoon(c.expiry_date) ? 'severity-badge severity-high' : 'contact-meta'}>
-                  {c.expiry_date ? `Expires ${new Date(c.expiry_date).toLocaleDateString()}` : 'No expiry'}
+                <p className={expiryState === 'expired' || expiryState === 'expiring' ? 'severity-badge severity-high' : 'contact-meta'}>
+                  {expiryState === 'expired' ? `Expired ${new Date(c.expiry_date!).toLocaleDateString()}` : c.expiry_date ? `Expires ${new Date(c.expiry_date).toLocaleDateString()}` : 'No expiry'}
                 </p>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

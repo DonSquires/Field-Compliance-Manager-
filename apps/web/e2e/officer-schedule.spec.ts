@@ -6,6 +6,26 @@ test.beforeEach(async ({ page }) => {
   await installOfficerScheduleFixtures(page);
 });
 
+test('officer standby keeps safety available and exposes only self-service work', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsOfficer(page, '/officer');
+
+  await expect(page.getByRole('heading', { name: 'Standby' })).toBeVisible();
+  await expect(page.getByText('No shift assigned', { exact: true })).toBeVisible();
+  await expect(page.getByText('You are not currently rostered for a shift. Contact your supervisor if this is incorrect.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check in now' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'SOS' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^My schedule/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Vehicle lookup/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^My credentials/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Field report/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Request leave/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Submit timesheet/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Patrol/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Dispatch/ })).toHaveCount(0);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
 test('officer schedule and coverage claim are visually correct and operational', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsOfficer(page);

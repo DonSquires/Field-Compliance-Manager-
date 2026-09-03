@@ -86,6 +86,11 @@ const OfficerVehicleLookupPage: React.FC = () => {
       setLoading(true);
       setError(null);
       setSearched(true);
+      setVehicle(null);
+      setScv(null);
+      setFlags([]);
+      setObservations([]);
+      setBreaches([]);
 
       // ATLAS READS: canonical_vehicles, canonical_scv, observations, breach_alerts
       const [vehRes, scvRes, obsRes, breachRes] = await Promise.all([
@@ -115,7 +120,8 @@ const OfficerVehicleLookupPage: React.FC = () => {
           .limit(10),
       ]);
 
-      if (vehRes.error) throw vehRes.error;
+      const queryError = vehRes.error ?? scvRes.error ?? obsRes.error ?? breachRes.error;
+      if (queryError) throw new Error(queryError.message);
       const vehData = vehRes.data as Vehicle | null;
       setVehicle(vehData);
       setScv((scvRes.data as ScvRecord) || null);
@@ -202,9 +208,9 @@ const OfficerVehicleLookupPage: React.FC = () => {
         </button>
       </form>
 
-      {searched && !loading && (
+      {searched && !loading && !error && (
         <div style={{ marginTop: '20px' }}>
-          {!vehicle && !scv && observations.length === 0 ? (
+          {!vehicle && !scv && observations.length === 0 && breaches.length === 0 ? (
             <div className="empty-state">
               <p>No vehicle records, SCV certifications, or observations found for "{plate}".</p>
             </div>

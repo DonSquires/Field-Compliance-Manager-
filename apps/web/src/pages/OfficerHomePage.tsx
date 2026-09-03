@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  BadgeCheck,
   CalendarDays,
+  Car,
   CheckCircle2,
   ClipboardPlus,
   Clock3,
@@ -36,7 +38,7 @@ interface OpenShift {
   site_name: string | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'map' | 'report' | 'modules' | 'schedule';
+type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'map' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'credentials' | 'leave' | 'timesheet';
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -44,6 +46,7 @@ interface OfficerHomePageProps {
   shiftError: Error | null;
   safety: UseOfficerSafetyApi;
   onNavigate: (destination: HomeDestination) => void;
+  onRefreshShift: () => Promise<void>;
 }
 
 function localDateIso(): string {
@@ -134,7 +137,7 @@ function useOpenShifts(organizationId: string | null | undefined) {
   return { openShifts, loading, error, notice, claimingId, claim, reload: load };
 }
 
-export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNavigate }: OfficerHomePageProps) {
+export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNavigate, onRefreshShift }: OfficerHomePageProps) {
   const { profile } = useAuth();
   const online = useConnectionState();
   const { openShifts, loading: openShiftsLoading, error: openShiftsError, notice, claimingId, claim, reload } = useOpenShifts(profile?.organizationId);
@@ -201,7 +204,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           ) : (
             <div className="officer-standby-copy">
               <CalendarDays size={26} aria-hidden="true" />
-              <div><strong>No accepted or active shift today</strong><span>Review your schedule or claim available coverage below.</span></div>
+              <div><strong>No shift assigned</strong><span>You are not currently rostered for a shift. Contact your supervisor if this is incorrect.</span></div>
               <button type="button" onClick={() => onNavigate('schedule')}>View schedule</button>
             </div>
           )}
@@ -227,11 +230,20 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
       <section className="officer-quick-actions" aria-labelledby="quick-actions-heading">
         <div className="officer-section-heading">
           <div><span className="officer-kicker">Work tools</span><h2 id="quick-actions-heading">Quick actions</h2></div>
+          {!shift && <button type="button" className="fc-icon-button" onClick={() => void onRefreshShift()} disabled={shiftLoading} title="Refresh shift status"><RefreshCw size={17} className={shiftLoading ? 'is-spinning' : ''} aria-hidden="true" /><span className="sr-only">Refresh shift status</span></button>}
         </div>
         <div className="officer-action-grid">
-          <QuickAction icon={<Route />} label="Patrol" detail="Route and checkpoints" onClick={() => onNavigate('patrol')} />
-          <QuickAction icon={<Radio />} label="Dispatch" detail="Assigned jobs" onClick={() => onNavigate('dispatch')} />
-          <QuickAction icon={<Map />} label="Live map" detail="Sites and zones" onClick={() => onNavigate('map')} />
+          {shift ? <>
+            <QuickAction icon={<Route />} label="Patrol" detail="Route and checkpoints" onClick={() => onNavigate('patrol')} />
+            <QuickAction icon={<Radio />} label="Dispatch" detail="Assigned jobs" onClick={() => onNavigate('dispatch')} />
+            <QuickAction icon={<Map />} label="Live map" detail="Sites and zones" onClick={() => onNavigate('map')} />
+          </> : <>
+            <QuickAction icon={<CalendarDays />} label="My schedule" detail="Assignments and offers" onClick={() => onNavigate('schedule')} />
+            <QuickAction icon={<Car />} label="Vehicle lookup" detail="Registry and compliance history" onClick={() => onNavigate('vehicle_lookup')} />
+            <QuickAction icon={<BadgeCheck />} label="My credentials" detail="Current licences and evidence" onClick={() => onNavigate('credentials')} />
+            <QuickAction icon={<CalendarDays />} label="Request leave" detail="Submit a leave request" onClick={() => onNavigate('leave')} />
+            <QuickAction icon={<Clock3 />} label="Submit timesheet" detail="Record time for approval" onClick={() => onNavigate('timesheet')} />
+          </>}
           <QuickAction icon={<ClipboardPlus />} label="Field report" detail="Record an incident" onClick={() => onNavigate('report')} />
         </div>
         <button type="button" className="officer-all-modules" onClick={() => onNavigate('modules')}>All enabled modules <ArrowRight size={16} aria-hidden="true" /></button>

@@ -28,6 +28,7 @@ const OfficerParkingPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ plate: '', location_name: '', return_hours: '2' });
+  const [submitting, setSubmitting] = useState(false);
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
@@ -60,6 +61,8 @@ const OfficerParkingPage: React.FC = () => {
     if (!profile?.id || !profile?.organizationId) return;
 
     try {
+      setSubmitting(true);
+      setError(null);
       const returnBy = new Date(Date.now() + parseFloat(form.return_hours) * 60 * 60 * 1000).toISOString();
 
       // ATLAS WRITES: parking_chalk_records
@@ -84,6 +87,8 @@ const OfficerParkingPage: React.FC = () => {
       setShowForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to chalk vehicle');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -136,8 +141,9 @@ const OfficerParkingPage: React.FC = () => {
       {showForm && (
         <form className="assessment-form" onSubmit={handleChalk}>
           <div className="form-group">
-            <label>Plate</label>
+            <label htmlFor="parking-plate">Plate</label>
             <input
+              id="parking-plate"
               type="text"
               required
               value={form.plate}
@@ -145,26 +151,29 @@ const OfficerParkingPage: React.FC = () => {
             />
           </div>
           <div className="form-group">
-            <label>Location</label>
-            <input type="text" value={form.location_name} onChange={(e) => setForm({ ...form, location_name: e.target.value })} />
+            <label htmlFor="parking-location">Location</label>
+            <input id="parking-location" type="text" value={form.location_name} onChange={(e) => setForm({ ...form, location_name: e.target.value })} />
           </div>
           <div className="form-group">
-            <label>Return check in (hours)</label>
+            <label htmlFor="parking-return-hours">Return check in (hours)</label>
             <input
+              id="parking-return-hours"
               type="number"
+              min="0.5"
+              max="24"
               step="0.5"
               value={form.return_hours}
               onChange={(e) => setForm({ ...form, return_hours: e.target.value })}
             />
           </div>
-          <button type="submit" className="btn btn-primary btn-block">
-            Chalk Vehicle
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+            {submitting ? 'Saving chalk record' : 'Chalk Vehicle'}
           </button>
         </form>
       )}
 
       <div className="contacts-list" style={{ marginTop: '12px' }}>
-        {records.length === 0 ? (
+        {records.length === 0 && !error ? (
           <div className="empty-state">
             <p>No chalk records yet.</p>
           </div>
