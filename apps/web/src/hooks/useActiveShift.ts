@@ -100,7 +100,7 @@ export function useActiveShift(userId: string, organizationId: string) {
           route_id: data.patrol_route_id,
           status: data.status,
           created_at: data.created_at,
-          updated_at: data.updated_at,
+          updated_at: data.updated_at ?? data.created_at,
           stops: (data.shift_stops || []).map((stop: any) => ({
             id: stop.id,
             shift_id: stop.shift_id,

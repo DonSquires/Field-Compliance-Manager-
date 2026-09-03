@@ -13290,6 +13290,7 @@ CREATE TABLE IF NOT EXISTS "public"."shifts" (
     "status" "text" DEFAULT 'scheduled'::"text" NOT NULL,
     "notes" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "patrol_route_id" "uuid",
     "generated_at" timestamp with time zone,
     "shift_health" "text",
