@@ -109,45 +109,61 @@ const OfficerBiosecurityPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.id || !profile?.organizationId) return;
+    if (!profile?.id || !profile?.organizationId || !imageBase64) return;
 
     try {
       setSubmitting(true);
       setError(null);
       setEvidenceNotice(null);
-      // ATLAS WRITES: biosecurity_assessments
-      const { data, error } = await supabase
-        .from('biosecurity_assessments')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            officer_user_id: profile.id,
-            species_name: form.species_name || null,
-            density_estimate: form.density_estimate,
-            action_taken: form.action_taken,
-            scene_description: form.scene_description || null,
-            location_name: form.location_name || null,
-            protected_land_address: form.protected_land_address || null,
-            notice_number: form.notice_number || null,
-            mpi_referral_number: form.mpi_referral_number || null,
-            follow_up_required: form.follow_up_required,
-            status: 'open',
-          },
-        ])
-        .select()
-        .single();
+      const requestId = crypto.randomUUID();
 
-      if (error) throw error;
-      if (!data?.id) throw new Error('Assessment receipt was not confirmed.');
-      const { data: evidenceData, error: evidenceError } = await supabase.functions.invoke<{ classification?: { classification?: string } }>('capture-environmental-evidence', {
-        body: { module: 'biosecurity', assessment_id: data.id, image_base64: imageBase64, address: form.location_name.trim() },
+      // ATLAS WRITES: submit-biosecurity-assessment
+      const { data, error: fnError } = await supabase.functions.invoke<{
+        success?: boolean;
+        assessment_id?: string;
+        review_state?: string;
+        classification?: { classification?: string };
+        error?: string;
+      }>('submit-biosecurity-assessment', {
+        body: {
+          client_request_id: requestId,
+          assessed_at: new Date().toISOString(),
+          species_name: form.species_name.trim() || null,
+          density_estimate: form.density_estimate,
+          action_taken: form.action_taken,
+          scene_description: form.scene_description.trim() || null,
+          location_name: form.location_name.trim(),
+          protected_land_address: form.protected_land_address.trim() || null,
+          notice_number: form.notice_number.trim() || null,
+          mpi_referral_number: form.mpi_referral_number.trim() || null,
+          follow_up_required: form.follow_up_required,
+          image_base64: imageBase64,
+        },
       });
-      setAssessments([data as BiosecurityAssessment, ...assessments]);
-      setForm({ species_name: '', density_estimate: 'scattered', action_taken: 'no_action', scene_description: '', location_name: '', protected_land_address: '', notice_number: '', mpi_referral_number: '', follow_up_required: false });
+
+      if (fnError || data?.error || !data?.assessment_id) {
+        throw new Error(fnError?.message || data?.error || 'Biosecurity assessment submission was not confirmed.');
+      }
+
+      setEvidenceNotice(
+        `Assessment confirmed · Review state: ${data.review_state ?? 'submitted'}${
+          data.classification?.classification ? ` · ${data.classification.classification}` : ''
+        }.`
+      );
+      setForm({
+        species_name: '',
+        density_estimate: 'scattered',
+        action_taken: 'no_action',
+        scene_description: '',
+        location_name: '',
+        protected_land_address: '',
+        notice_number: '',
+        mpi_referral_number: '',
+        follow_up_required: false,
+      });
       clearEvidence();
       setShowForm(false);
-      if (evidenceError) setError(`Assessment saved, but evidence processing was not confirmed: ${evidenceError.message}`);
-      else setEvidenceNotice(`Evidence confirmed${evidenceData?.classification?.classification ? ` · ${evidenceData.classification.classification}` : ''}.`);
+      await loadAssessments();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit assessment');
     } finally {

@@ -7493,8 +7493,16 @@ CREATE TABLE IF NOT EXISTS "public"."biosecurity_assessments" (
     "location_name" "text",
     "protected_land_address" "text",
     "protected_land_site_id" "uuid",
+    "client_request_id" "uuid",
+    "evidence_state" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "review_state" "text" DEFAULT 'submitted'::"text" NOT NULL,
+    "reviewed_by" "uuid",
+    "reviewed_at" timestamp with time zone,
+    "review_notes" "text",
     CONSTRAINT "biosecurity_assessments_action_taken_check" CHECK (("action_taken" = ANY (ARRAY['no_action'::"text", 'advisory_notice'::"text", 'notice_of_direction'::"text", 'infringement_notice'::"text", 'mpi_referral'::"text"]))),
-    CONSTRAINT "biosecurity_assessments_density_estimate_check" CHECK (("density_estimate" = ANY (ARRAY['isolated'::"text", 'scattered'::"text", 'moderate'::"text", 'dense'::"text", 'severe'::"text", 'not_found'::"text"])))
+    CONSTRAINT "biosecurity_assessments_density_estimate_check" CHECK (("density_estimate" = ANY (ARRAY['isolated'::"text", 'scattered'::"text", 'moderate'::"text", 'dense'::"text", 'severe'::"text", 'not_found'::"text"]))),
+    CONSTRAINT "biosecurity_assessments_evidence_state_check" CHECK (("evidence_state" = ANY (ARRAY['pending'::"text", 'verified'::"text", 'unavailable'::"text", 'rejected'::"text"]))),
+    CONSTRAINT "biosecurity_assessments_review_state_check" CHECK (("review_state" = ANY (ARRAY['submitted'::"text", 'requires_supervisor_review'::"text", 'triaged'::"text", 'closed'::"text"])))
 );
 
 
