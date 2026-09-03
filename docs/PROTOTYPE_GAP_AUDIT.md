@@ -139,7 +139,7 @@ Current status: backend and web support exist; mobile implementation is missing.
 
 What is missing or thin:
 
-- Background location permissions and periodic GPS heartbeat while the app is not active. The mobile safety bar now sends a foreground two-minute heartbeat through `record_officer_breadcrumb` and retains unconfirmed events for retry.
+- Background location permissions and periodic GPS heartbeat while the app is not active are now available as an officer-controlled active-shift task. It uses the same two-minute `record_officer_breadcrumb` path and retains unconfirmed events for retry.
 - Mobile calls to current `record_officer_breadcrumb` RPC or equivalent write path are now present for foreground heartbeats.
 - Mobile welfare check-in prompts and overdue state handling. Foreground self check-in and confirmed SOS are now available from the mobile scan safety bar; timer/overdue presentation remains follow-up work.
 - Mobile man-down/inactivity timers integrated with the current `officer_welfare_settings` schema.

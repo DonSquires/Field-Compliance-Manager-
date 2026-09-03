@@ -11,7 +11,9 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Capture vehicle evidence for field compliance scans.",
         "NSPhotoLibraryUsageDescription": "Select vehicle evidence for field compliance scans.",
-        "NSLocationWhenInUseUsageDescription": "Capture the location for field compliance scans."
+        "NSLocationWhenInUseUsageDescription": "Capture the location for field compliance scans.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Record location during an active field shift, including while the app is in the background.",
+        "UIBackgroundModes": ["location"]
       }
     },
     "android": {
@@ -19,7 +21,10 @@
       "permissions": [
         "CAMERA",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -34,7 +39,12 @@
     },
     "plugins": [
       "expo-image-picker",
-      "expo-location"
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Record location during an active field shift, including while the app is in the background."
+        }
+      ]
     ]
   }
 }
