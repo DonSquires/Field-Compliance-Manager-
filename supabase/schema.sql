@@ -13438,6 +13438,12 @@ CREATE TABLE IF NOT EXISTS "public"."smoke_assessments" (
     "address" "text",
     "complaint_address" "text",
     "complainant_site_id" "uuid",
+    "client_request_id" "uuid",
+    "evidence_state" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "review_state" "text" DEFAULT 'submitted'::"text" NOT NULL,
+    "reviewed_by" "uuid",
+    "reviewed_at" timestamp with time zone,
+    "review_notes" "text",
     CONSTRAINT "smoke_assessments_action_taken_check" CHECK (("action_taken" = ANY (ARRAY['no_action'::"text", 'verbal_warning'::"text", 'abatement_notice'::"text", 'infringement_notice'::"text", 'prosecution_referral'::"text"]))),
     CONSTRAINT "smoke_assessments_complaint_source_check" CHECK (("complaint_source" = ANY (ARRAY['neighbour'::"text", 'council_hotline'::"text", 'self_report'::"text", 'other'::"text"]))),
     CONSTRAINT "smoke_assessments_smoke_source_type_check" CHECK (("smoke_source_type" = ANY (ARRAY['domestic_solid_fuel'::"text", 'industrial'::"text", 'vehicle_exhaust'::"text", 'agricultural'::"text", 'nuisance_burning'::"text", 'unknown'::"text"])))

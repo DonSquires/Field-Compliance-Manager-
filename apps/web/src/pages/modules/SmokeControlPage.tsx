@@ -123,46 +123,51 @@ const SmokeControlPage: React.FC = () => {
 
   const handleSubmitAssessment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedSite || !profile?.organizationId) return;
+    if (!selectedSite || !profile?.organizationId || !imageBase64) return;
 
     try {
       setEvidenceNotice(null);
-      // ATLAS WRITES: smoke_assessments
-      const { data, error } = await supabase
-        .from('smoke_assessments')
-        .insert([
-          {
-            site_id: selectedSite.id,
-            organization_id: profile.organizationId,
-            officer_user_id: profile.id,
-            officer_id: profile.id,
-            complaint_source: formData.complaint_source,
-            smoke_source_type: formData.smoke_source_type,
-            severity: formData.severity,
-            scene_description: formData.scene_description.trim(),
-            notes: formData.notes || null,
-            complaint_address: formData.complaint_address.trim() || null,
-            address: formData.complaint_address.trim() || null,
-            action_taken: formData.action_taken,
-            source_confirmed: formData.source_confirmed,
-            follow_up_required: formData.follow_up_required,
-            status: 'open',
-          },
-        ])
-        .select();
+      setError(null);
+      const requestId = crypto.randomUUID();
 
-      if (error) throw error;
-      if (!data?.[0]?.id) throw new Error('Assessment receipt was not confirmed.');
-      const { data: evidenceData, error: evidenceError } = await supabase.functions.invoke<{ classification?: { classification?: string } }>('capture-environmental-evidence', {
-        body: { module: 'smoke', assessment_id: data[0].id, image_base64: imageBase64, address: selectedSite.address ?? formData.complaint_address.trim() },
+      // ATLAS WRITES: submit-smoke-assessment
+      const { data, error: fnError } = await supabase.functions.invoke<{
+        success?: boolean;
+        assessment_id?: string;
+        review_state?: string;
+        is_out_of_hours?: boolean;
+        classification?: { classification?: string };
+        error?: string;
+      }>('submit-smoke-assessment', {
+        body: {
+          client_request_id: requestId,
+          assessed_at: new Date().toISOString(),
+          site_id: selectedSite.id,
+          address: selectedSite.address ?? formData.complaint_address.trim(),
+          complaint_address: formData.complaint_address.trim() || null,
+          complaint_source: formData.complaint_source,
+          smoke_source_type: formData.smoke_source_type,
+          severity: formData.severity,
+          action_taken: formData.action_taken,
+          scene_description: formData.scene_description.trim() || null,
+          follow_up_required: formData.follow_up_required,
+          image_base64: imageBase64,
+        },
       });
 
-      setAssessments([data[0] as SmokeAssessment, ...assessments]);
+      if (fnError || data?.error || !data?.assessment_id) {
+        throw new Error(fnError?.message || data?.error || 'Smoke assessment submission was not confirmed.');
+      }
+
+      setEvidenceNotice(
+        `Smoke assessment confirmed · Review state: ${data.review_state ?? 'submitted'}${
+          data.is_out_of_hours ? ' · Out-of-hours coverage' : ''
+        }${data.classification?.classification ? ` · ${data.classification.classification}` : ''}.`
+      );
       setFormData(EMPTY_FORM);
       clearEvidence();
       setShowForm(false);
-      if (evidenceError) setError(`Assessment saved, but evidence processing was not confirmed: ${evidenceError.message}`);
-      else setEvidenceNotice(`Evidence confirmed${evidenceData?.classification?.classification ? ` · ${evidenceData.classification.classification}` : ''}.`);
+      await loadAssessments(selectedSite.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit assessment');
     }
