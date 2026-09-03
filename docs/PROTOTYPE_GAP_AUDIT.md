@@ -201,6 +201,8 @@ Current overlap:
 - Web officer pages cover dispatch, debrief, field report, parking, freedom camping, biosecurity, noise, vehicle lookup, credentials, leave, timesheets, and schedule.
 - Admin web covers dispatch console, roster, patrol oversight, breach review, field reports, and operational places.
 
+Current implementation: mobile now shows the active shift's materialized patrol stops and completes a stop through `complete_shift_stop`, carrying officer notes and a foreground GPS fix when available. QR/NFC checkpoint capture remains a separate native evidence capability.
+
 Recommended recovery:
 
 1. Map prototype `jobs` to current `dispatch_jobs` plus `shift_stops`; do not recreate `investigation_jobs` unless schema review confirms a real missing domain.
