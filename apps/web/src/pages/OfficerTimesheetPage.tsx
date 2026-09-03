@@ -10,6 +10,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { loadOfficerTimesheetWork, submitOfficerTimesheetFromWork, type TimesheetWorkEntry } from '../lib/officerTimesheetWork';
 import './PageStyles.css';
 
 interface Timesheet {
@@ -33,7 +34,8 @@ const OfficerTimesheetPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ periodStart: '', periodEnd: '', actualHours: '', overtimeHours: '0', notes: '' });
+  const [form, setForm] = useState({ periodStart: '', periodEnd: '', adjustmentHours: '0', notes: '' });
+  const [workEntries, setWorkEntries] = useState<TimesheetWorkEntry[]>([]);
   const eventIdRef = useRef(crypto.randomUUID());
 
   // ATLAS READS: timesheets
@@ -64,21 +66,21 @@ const OfficerTimesheetPage: React.FC = () => {
 
   useEffect(() => { if (requestedTimesheetId) document.getElementById(`officer-timesheet-${requestedTimesheetId}`)?.scrollIntoView({ block: 'center' }); }, [requestedTimesheetId, timesheets]);
 
+  const previewWork = async () => {
+    if (!form.periodStart || !form.periodEnd || form.periodStart > form.periodEnd) { setWorkEntries([]); return; }
+    try { setWorkEntries(await loadOfficerTimesheetWork(form.periodStart, form.periodEnd)); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Completed work could not be loaded.'); }
+  };
+
   const submitTimesheet = async (event: React.FormEvent) => {
     event.preventDefault();
     setSubmitting(true); setError(null); setNotice(null);
-    const { data, error: submitError } = await supabase.rpc('submit_officer_timesheet', {
-      p_client_event_id: eventIdRef.current,
-      p_period_start: form.periodStart,
-      p_period_end: form.periodEnd,
-      p_actual_hours: Number(form.actualHours),
-      p_overtime_hours: Number(form.overtimeHours || 0),
-      p_notes: form.notes.trim() || null,
-    });
-    const result = (data as Array<{ id: string }> | null)?.[0];
-    if (submitError || !result) setError(submitError?.message ?? 'Timesheet receipt was not confirmed. Your entries remain available for retry.');
-    else { setNotice(`Timesheet submitted · receipt ${result.id.slice(0, 8)}`); setForm({ periodStart: '', periodEnd: '', actualHours: '', overtimeHours: '0', notes: '' }); eventIdRef.current = crypto.randomUUID(); }
-    setSubmitting(false);
+    try {
+      const result = await submitOfficerTimesheetFromWork(eventIdRef.current, form.periodStart, form.periodEnd, Number(form.adjustmentHours || 0), form.notes);
+      setNotice(`Timesheet submitted · receipt ${result.id.slice(0, 8)} · ${result.actual_hours} hours from ${result.source_count} work records`);
+      setForm({ periodStart: '', periodEnd: '', adjustmentHours: '0', notes: '' }); setWorkEntries([]); eventIdRef.current = crypto.randomUUID();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Timesheet receipt was not confirmed. Your entries remain available for retry.'); }
+    finally { setSubmitting(false); }
   };
 
   if (loading) {
@@ -111,11 +113,12 @@ const OfficerTimesheetPage: React.FC = () => {
       {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
       <form className="assessment-form" onSubmit={submitTimesheet}>
-        <h2>Submit timesheet</h2>
-        <div className="form-row"><div className="form-group"><label htmlFor="period-start">Period start</label><input id="period-start" type="date" required value={form.periodStart} onChange={(event) => setForm({ ...form, periodStart: event.target.value })} /></div><div className="form-group"><label htmlFor="period-end">Period end</label><input id="period-end" type="date" required value={form.periodEnd} onChange={(event) => setForm({ ...form, periodEnd: event.target.value })} /></div></div>
-        <div className="form-row"><div className="form-group"><label htmlFor="actual-hours">Actual hours</label><input id="actual-hours" type="number" min="0" max="744" step="0.25" required value={form.actualHours} onChange={(event) => setForm({ ...form, actualHours: event.target.value })} /></div><div className="form-group"><label htmlFor="overtime-hours">Overtime hours</label><input id="overtime-hours" type="number" min="0" max={form.actualHours || '0'} step="0.25" required value={form.overtimeHours} onChange={(event) => setForm({ ...form, overtimeHours: event.target.value })} /></div></div>
+        <h2>Submit timesheet from completed work</h2>
+        <div className="form-row"><div className="form-group"><label htmlFor="period-start">Period start</label><input id="period-start" type="date" required value={form.periodStart} onChange={(event) => setForm({ ...form, periodStart: event.target.value })} onBlur={() => void previewWork()} /></div><div className="form-group"><label htmlFor="period-end">Period end</label><input id="period-end" type="date" required value={form.periodEnd} onChange={(event) => setForm({ ...form, periodEnd: event.target.value })} onBlur={() => void previewWork()} /></div></div>
+        <div className="form-group"><label htmlFor="adjustment-hours">Payroll adjustment hours</label><input id="adjustment-hours" type="number" min="-744" max="744" step="0.25" value={form.adjustmentHours} onChange={(event) => setForm({ ...form, adjustmentHours: event.target.value })} /><small className="form-hint">Optional exception only. Actual hours come from completed or partially completed shifts and dispatch jobs.</small></div>
+        <div className="form-group"><strong>Derived work: {workEntries.reduce((total, entry) => total + entry.calculated_minutes, 0) / 60} hours across {workEntries.length} records</strong><button type="button" className="btn btn-secondary btn-sm" onClick={() => void previewWork()}>Refresh completed work</button>{workEntries.map((entry) => <small className="form-hint" key={`${entry.source_type}-${entry.source_id}`}>{entry.label} · {entry.work_status} · {entry.calculated_minutes} minutes</small>)}</div>
         <div className="form-group"><label htmlFor="timesheet-notes">Notes</label><textarea id="timesheet-notes" rows={3} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Exceptions, allowances, or context for payroll review" /></div>
-        <button type="submit" className="btn btn-primary" disabled={submitting || !form.periodStart || !form.periodEnd || form.actualHours === ''}>{submitting ? 'Submitting' : 'Submit for approval'}</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting || !form.periodStart || !form.periodEnd || form.periodStart > form.periodEnd}>{submitting ? 'Submitting' : 'Submit derived hours for approval'}</button>
       </form>
 
       <div className="reports-table-wrapper">

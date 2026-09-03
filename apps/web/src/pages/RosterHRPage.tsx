@@ -85,6 +85,9 @@ interface TimesheetRow {
   period_end: string;
   scheduled_hours: number | null;
   actual_hours: number | null;
+  work_derived_hours: number | null;
+  adjustment_hours: number;
+  work_summary: { source_count?: number } | null;
   status: string;
 }
 
@@ -170,7 +173,7 @@ const RosterHRPage: React.FC = () => {
             .order('starts_on', { ascending: false }),
           supabase
             .from('timesheets')
-            .select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, status')
+            .select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, work_derived_hours, adjustment_hours, work_summary, status')
             .eq('organization_id', orgId)
             .order('period_start', { ascending: false }),
           supabase
@@ -605,6 +608,8 @@ const RosterHRPage: React.FC = () => {
                   <th>Staff</th>
                   <th>Period</th>
                   <th>Scheduled</th>
+                  <th>Derived work</th>
+                  <th>Adjustment</th>
                   <th>Actual</th>
                   <th>Status</th>
                   <th></th>
@@ -613,7 +618,7 @@ const RosterHRPage: React.FC = () => {
               <tbody>
                 {timesheets.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center">
+                    <td colSpan={8} className="text-center">
                       No timesheets
                     </td>
                   </tr>
@@ -626,6 +631,8 @@ const RosterHRPage: React.FC = () => {
                         {new Date(t.period_end).toLocaleDateString()}
                       </td>
                       <td>{t.scheduled_hours ?? '-'}</td>
+                      <td>{t.work_derived_hours ?? '-'}{t.work_summary?.source_count !== undefined ? ` · ${t.work_summary.source_count} sources` : ''}</td>
+                      <td>{t.adjustment_hours || 0}</td>
                       <td>{t.actual_hours ?? '-'}</td>
                       <td>
                         <span className={`status-badge status-${t.status}`}>{t.status}</span>

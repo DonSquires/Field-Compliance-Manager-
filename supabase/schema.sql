@@ -13913,6 +13913,10 @@ CREATE TABLE IF NOT EXISTS "public"."timesheets" (
     "submitted_at" timestamp with time zone,
     "payroll_export_batch_id" "uuid",
     "client_event_id" "uuid",
+    "review_notes" "text",
+    "work_derived_hours" numeric(6,2),
+    "adjustment_hours" numeric(6,2) DEFAULT 0 NOT NULL,
+    "work_summary" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
     CONSTRAINT "timesheets_status_check" CHECK (("status" = ANY (ARRAY['draft'::"text", 'submitted'::"text", 'approved'::"text", 'rejected'::"text", 'paid'::"text"])))
 );
 
@@ -13921,6 +13925,31 @@ ALTER TABLE "public"."timesheets" OWNER TO "postgres";
 
 
 COMMENT ON TABLE "public"."timesheets" IS 'Timesheet records per staff member per period. Feeds into invoicing and payroll export.';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."timesheet_work_entries" (
+  "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+  "organization_id" "uuid" NOT NULL,
+  "timesheet_id" "uuid" NOT NULL,
+  "source_type" "text" NOT NULL,
+  "source_id" "uuid" NOT NULL,
+  "work_status" "text" NOT NULL,
+  "started_at" timestamp with time zone,
+  "ended_at" timestamp with time zone,
+  "calculated_minutes" integer DEFAULT 0 NOT NULL,
+  "metadata" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+  "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+  CONSTRAINT "timesheet_work_entries_source_check" CHECK (("source_type" = ANY (ARRAY['shift'::"text", 'dispatch_job'::"text"]))),
+  CONSTRAINT "timesheet_work_entries_status_check" CHECK (("work_status" = ANY (ARRAY['completed'::"text", 'partial'::"text"]))),
+  CONSTRAINT "timesheet_work_entries_minutes_check" CHECK (("calculated_minutes" >= 0))
+);
+
+
+ALTER TABLE "public"."timesheet_work_entries" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."timesheet_work_entries" IS 'Immutable source snapshot explaining timesheet hours by completed or partially completed shift and dispatch job.';
 
 
 
