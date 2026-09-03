@@ -20,6 +20,7 @@ import { OfficerDispatchPanel } from './OfficerDispatchPanel';
 import { OfficerCheckpointScanner } from './OfficerCheckpointScanner';
 import { NotificationInbox } from './NotificationInbox';
 import { OfficerStopPanel } from './OfficerStopPanel';
+import { OfficerVehicleLookup } from './OfficerVehicleLookup';
 
 type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null };
 
@@ -85,6 +86,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <OfficerDispatchPanel shiftId={shiftId} />
     <OfficerStopPanel shiftId={shiftId} />
     <OfficerCheckpointScanner officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
+    <OfficerVehicleLookup organizationId={organizationId} />
     <View style={styles.moduleRow}>{(['freedom_camping', 'parking_enforcement'] as ScanModuleKey[]).map((key) => <Pressable key={key} onPress={() => { setModuleKey(key); setResult(null); }} style={[styles.module, moduleKey === key && styles.moduleActive]}><Text style={styles.moduleText}>{key === 'freedom_camping' ? 'Freedom camping' : 'Parking'}</Text></Pressable>)}</View>
     <View style={styles.photoPanel}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.photo} /> : <Text style={styles.photoEmpty}>Capture a clear rear vehicle image with the plate visible.</Text>}<View style={styles.actionRow}><Pressable onPress={() => void setPhoto(captureVehiclePhoto)} style={styles.primary}><Text style={styles.primaryText}>Open camera</Text></Pressable><Pressable onPress={() => void setPhoto(chooseVehiclePhoto)} style={styles.secondary}><Text style={styles.secondaryText}>Choose photo</Text></Pressable></View></View>
     <View style={styles.location}><Text style={styles.label}>Location</Text><Text style={styles.detail}>{coordinates ? `${coordinates.lat.toFixed(5)}, ${coordinates.lng.toFixed(5)}` : 'No location captured'}</Text><Pressable onPress={() => void locate()} style={styles.secondary}><Text style={styles.secondaryText}>{coordinates ? 'Refresh GPS' : 'Capture GPS'}</Text></Pressable></View>

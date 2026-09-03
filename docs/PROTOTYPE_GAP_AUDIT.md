@@ -201,6 +201,8 @@ Current overlap:
 - Web officer pages cover dispatch, debrief, field report, parking, freedom camping, biosecurity, noise, vehicle lookup, credentials, leave, timesheets, and schedule.
 - Admin web covers dispatch console, roster, patrol oversight, breach review, field reports, and operational places.
 
+Current implementation: mobile now provides a read-only vehicle lookup for canonical vehicle compliance, SCV status, recent observations, breach history, and organization-scoped active flags. It does not mutate vehicle, flag, or enforcement records.
+
 Current implementation: mobile now shows the active shift's materialized patrol stops and completes a stop through `complete_shift_stop`, carrying officer notes and a foreground GPS fix when available. QR/NFC checkpoint capture remains a separate native evidence capability.
 
 Current implementation: mobile QR checkpoint capture is now available for active shifts. It resolves an active organization checkpoint, verifies GPS accuracy and checkpoint radius when the checkpoint has coordinates, creates or reuses the shift patrol session, and records `patrol_checkpoint_visits.scan_method='qr_camera'`. NFC and non-QR checkpoint modes remain follow-up work.
