@@ -270,31 +270,26 @@ These sources did not add meaningful recoverable implementation in this pass:
 - `Bob`: README-only; current Bob control plane and edge functions in this repo are the authoritative implementation surface.
 - `https-react-9b4t5o.onspace.build`: README-only.
 
-## Priority Gap Backlog
+## Priority Gap Backlog & Completion Status
 
-| Priority | Gap | Why it matters | Suggested first validation |
+| Priority | Gap | Status | Implementation Details |
 | --- | --- | --- | --- |
-| P0 | Mobile offline scan shell using current `process-officer-scan` | Field officers need reliable capture away from network. | Mobile unit/TS check plus one mocked scan submission test. |
-| P0 | Mobile GPS/welfare heartbeat against current schema | Lone-worker safety depends on continuous, retry-safe signal. | Mobile service test for queued breadcrumb payload shape. |
-| P1 | Current-schema offline data package | Enables provisional local compliance without old table drift. | Edge function test proves package only reads current tables and RLS-safe scope. |
-| P1 | Mobile job/dispatch list and completion | Prototype had jobs; current mobile has only assignment summary. | Mobile screen test with mocked `dispatch_jobs`/shift stop data. |
-| P1 | Push notification token + delivery spine | Assignments, welfare, and breaches need app-closed delivery. | Schema guard and mocked Expo token registration flow. |
-| P2 | Unified evidence media spine | Court-ready evidence should not be module-specific JSON. | Schema migration guard plus process-officer-scan media write check. |
-| P2 | PTT health/UI/runtime completion | Current schema/server pieces exist but app integration is unfinished. | `ptt-server` health test plus officer/mobile PTT guard. |
+| P0 | Mobile offline scan shell using current `process-officer-scan` | **COMPLETE ✓** | `apps/mobile` scan screen with camera, location, `process-officer-scan` integration, and durable AsyncStorage queue. |
+| P0 | Mobile GPS/welfare heartbeat against current schema | **COMPLETE ✓** | `record_officer_breadcrumb` RPC + Expo background location task + `OfficerSafetyBar` with confirmed SOS & check-in. |
+| P1 | Current-schema offline data package | **COMPLETE ✓** | `get_officer_data_package` SECURITY DEFINER RPC (`20260903140000_officer_offline_data_package.sql`) + `officerOfflinePackage.ts` with AsyncStorage caching. |
+| P1 | Mobile job/dispatch list and completion | **COMPLETE ✓** | `OfficerDispatchPanel` (`advance_dispatch_job_status`) + `OfficerStopPanel` (`complete_shift_stop`). |
+| P1 | Push notification token + delivery spine | **COMPLETE ✓** | `officer_device_tokens` table & RPCs (`20260903130000_officer_device_tokens_push_spine.sql`) + `officerNotifications.ts`. |
+| P2 | Unified evidence media spine | **IN PROGRESS / SHIPPED FOR BIO/SMOKE** | Junction tables `biosecurity_assessment_evidence` and `smoke_assessment_evidence` link module assessments to `evidence_items`. |
+| P2 | PTT health/UI/runtime completion | **COMPLETE ✓** | `ptt-server` JSON `/health` endpoint + `open_ptt_transmission`, `close_ptt_transmission`, `record_radio_transcript_segment` RPCs (`20260903150000_govern_ptt_transmissions.sql`) + `officerPtt.ts`. |
 
-## Governed Module Gaps
+## Governed Module Implementations
 
-Biosecurity is not yet added to mobile. The current officer web flow writes
-`biosecurity_assessments` directly, then separately invokes
-`capture-environmental-evidence`. Atlas confirms both edges. That split would
-recreate the older bolt-on pattern in the mobile app: an assessment can succeed
-while evidence processing is unconfirmed. Before adding mobile biosecurity,
-create one idempotent governed submission command that owns the assessment
-record, evidence attachment, audit record, and partial-failure receipt together.
-The selected design, domain invariants, delivery sequence, and acceptance tests
-are in [BIOSECURITY_GOVERNED_MODULE.md](design/BIOSECURITY_GOVERNED_MODULE.md).
-Apply the same rule to other module flows that still require separate browser
-writes and evidence calls.
+All field compliance module submission flows have been refactored from unconfirmed direct browser inserts to single-transaction governed commands:
+
+1. **Biosecurity (`biosecurity`):** Governed `submit-biosecurity-assessment` Edge Function + `submit_biosecurity_assessment_receipt` RPC + `manage_biosecurity_assessment_review` RPC + `biosecurity_assessment_evidence` junction table + `OfficerBiosecurityPanel` mobile UI & `OfficerBiosecurityPage` web UI.
+2. **Noise Control (`noise_control`):** Governed `submit_officer_noise_assessment` RPC with 3-axis matrix calculation (Volume + Time + Tone) + `manage_noise_assessment_review` RPC + `OfficerNoiseControlPanel` mobile UI & `OfficerNoiseControlPage` web UI.
+3. **Smoke Complaints (`smoke_complaints`):** Governed `submit-smoke-assessment` Edge Function + `submit_smoke_assessment_receipt` RPC + `manage_smoke_assessment_review` RPC + `smoke_assessment_evidence` junction table + NZ out-of-hours coverage calculation + `OfficerSmokeControlPanel` mobile UI & `SmokeControlPage` web UI.
+
 
 ## Recommended Next Step
 
