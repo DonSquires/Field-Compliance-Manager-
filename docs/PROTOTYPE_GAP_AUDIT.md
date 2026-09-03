@@ -162,6 +162,8 @@ Prototype evidence: `notificationService.ts` registers Expo push tokens, stores 
 
 Current status: not found in current mobile; current schema search did not show `push_token` or `notification_preferences` in `supabase/schema.sql`.
 
+Current implementation: the mobile scan screen now includes an in-app inbox that reads the existing canonical `notifications` stream, receives realtime refreshes, and marks items read through the RLS-permitted update path. This is not device push delivery.
+
 What is missing:
 
 - Expo notification dependency and device registration in `apps/mobile`.

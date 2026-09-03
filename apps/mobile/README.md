@@ -22,6 +22,11 @@ records a two-minute GPS heartbeat through the canonical
 queue for retry. During an active shift, the officer can explicitly enable
 background tracking; the native task uses that same RPC and durable queue.
 
+The scan screen includes an in-app notification inbox backed by the canonical
+`notifications` table. It refreshes in realtime and marks a notification read
+only after the write is confirmed. Device push notification registration and
+delivery remain a separate platform capability.
+
 The profile and active-assignment hook remains available for the next mobile
 home/roster slice. Local operational-data caching, background GPS/welfare,
 notifications, jobs, and full offline compliance remain planned work.
