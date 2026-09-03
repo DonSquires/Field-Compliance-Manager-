@@ -49,6 +49,13 @@ export async function chooseVehiclePhoto(): Promise<string | null> {
   return result.assets[0]?.uri ?? null;
 }
 
+export async function captureEvidencePhoto(source: 'camera' | 'library'): Promise<{ uri: string; base64: string }> {
+  const uri = source === 'camera' ? await captureVehiclePhoto() : await chooseVehiclePhoto();
+  if (!uri) throw new Error('No photo was selected.');
+  const base64 = await imageUriToBase64(uri);
+  return { uri, base64 };
+}
+
 export async function imageUriToBase64(uri: string): Promise<string> {
   return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
 }

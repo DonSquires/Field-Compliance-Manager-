@@ -26,6 +26,7 @@ import { OfficerDebriefPanel } from './OfficerDebriefPanel';
 import { NotificationInbox } from './NotificationInbox';
 import { OfficerStopPanel } from './OfficerStopPanel';
 import { OfficerVehicleLookup } from './OfficerVehicleLookup';
+import { OfficerBiosecurityPanel } from './OfficerBiosecurityPanel';
 
 type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null; shiftStatus: string | null };
 
@@ -92,6 +93,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <OfficerStopPanel shiftId={shiftId} />
     <OfficerCheckpointScanner officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
     <OfficerFieldReportPanel shiftId={shiftId} />
+    <OfficerBiosecurityPanel shiftId={shiftId} />
     <OfficerLeavePanel officerId={officerId} />
     <OfficerTimesheetPanel officerId={officerId} />
     <OfficerDebriefPanel shiftId={shiftId} shiftStatus={shiftStatus} />
