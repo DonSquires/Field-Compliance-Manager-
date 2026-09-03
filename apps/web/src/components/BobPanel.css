@@ -38,6 +38,26 @@
   flex-direction: column;
 }
 
+.bob-pane-divider {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 7px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.bob-pane-divider::after {
+  position: absolute;
+  inset: 0 2px;
+  content: '';
+  background: #243848;
+}
+
+.bob-pane-divider:hover::after,
+.bob-pane-divider:focus-visible::after {
+  background: #7dd3c7;
+}
+
 .bob-session-sidebar {
   flex: 0 0 296px;
   min-height: 0;
@@ -87,6 +107,108 @@
   background: transparent;
   font: inherit;
   font-size: 12px;
+}
+
+.bob-session-filters {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.bob-session-filters button {
+  min-height: 28px;
+  border: 1px solid #294052;
+  border-radius: 4px;
+  color: #7e95a5;
+  background: #0b1b28;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.bob-session-filters button.is-active {
+  border-color: #47756f;
+  color: #d6fff8;
+  background: #12312f;
+}
+
+.bob-search-scopes {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #294052;
+  border-radius: 5px;
+  background: #0b1b28;
+}
+
+.bob-search-scopes button {
+  flex: 1 1 0;
+  min-height: 26px;
+  border: 0;
+  border-radius: 3px;
+  color: #7e95a5;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.bob-search-scopes button.is-active {
+  color: #dce8ef;
+  background: #1b3342;
+}
+
+.bob-global-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.bob-global-results button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 7px;
+  padding: 9px;
+  border: 1px solid #294052;
+  border-radius: 5px;
+  color: #dce8ef;
+  background: #0b1b28;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.bob-global-results button:disabled {
+  cursor: default;
+  opacity: .72;
+}
+
+.bob-global-results span {
+  grid-row: 1 / span 2;
+  color: #6eabaf;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.bob-global-results strong,
+.bob-global-results small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bob-global-results strong {
+  font-size: 11px;
+}
+
+.bob-global-results small {
+  color: #7e95a5;
+  font-size: 10px;
 }
 
 .bob-sidebar-list {
@@ -144,6 +266,9 @@
 }
 
 .bob-session-open strong {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   font-size: 12px;
   text-overflow: ellipsis;
@@ -155,23 +280,33 @@
   font-size: 10px;
 }
 
-.bob-session-rename-trigger {
+.bob-session-row-actions {
+  display: flex;
+  gap: 2px;
+  margin-right: 6px;
+  opacity: 0;
+}
+
+.bob-session-row:hover .bob-session-row-actions,
+.bob-session-row-actions:focus-within {
+  opacity: 1;
+}
+
+.bob-session-row-actions button {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  margin-right: 6px;
+  width: 26px;
+  height: 26px;
   border: 0;
   border-radius: 4px;
   color: #7e95a5;
   background: transparent;
   cursor: pointer;
-  opacity: 0;
 }
 
-.bob-session-row:hover .bob-session-rename-trigger,
-.bob-session-rename-trigger:focus-visible {
-  opacity: 1;
+.bob-session-row-actions button:hover {
+  color: #dce8ef;
+  background: #1b3342;
 }
 
 .bob-session-rename {
@@ -390,6 +525,10 @@
 
 /* Below the three-pane breakpoint the side panes become overlay drawers. */
 @media (max-width: 1100px) {
+  .bob-pane-divider {
+    display: none;
+  }
+
   .bob-drawer-head {
     display: flex;
   }

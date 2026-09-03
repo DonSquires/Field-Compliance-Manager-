@@ -7840,6 +7840,8 @@ CREATE TABLE IF NOT EXISTS "public"."bob_conversations" (
     "user_id" "uuid" NOT NULL,
     "module_key" "text",
     "title" "text",
+    "pinned" boolean DEFAULT false NOT NULL,
+    "archived_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );

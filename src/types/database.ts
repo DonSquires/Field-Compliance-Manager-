@@ -1502,28 +1502,34 @@ export type Database = {
       }
       bob_conversations: {
         Row: {
+          archived_at: string | null
           created_at: string
           id: string
           module_key: string | null
           organization_id: string
+          pinned: boolean
           title: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          archived_at?: string | null
           created_at?: string
           id?: string
           module_key?: string | null
           organization_id: string
+          pinned?: boolean
           title?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          archived_at?: string | null
           created_at?: string
           id?: string
           module_key?: string | null
           organization_id?: string
+          pinned?: boolean
           title?: string | null
           updated_at?: string
           user_id?: string

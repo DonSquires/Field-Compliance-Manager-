@@ -4,6 +4,8 @@ create table "public"."bob_conversations" (
   "user_id"         uuid                     not null,
   "module_key"      text,
   "title"           text,
+  "pinned"          boolean                  not null default false,
+  "archived_at"     timestamp with time zone,
   "created_at"      timestamp with time zone not null default now(),
   "updated_at"      timestamp with time zone not null default now(),
   constraint "bob_conversations_pkey" primary key (id),

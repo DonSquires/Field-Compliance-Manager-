@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, PanelRightClose, Pencil, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, PanelRightClose, Pencil, Pin, PinOff, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { BobMarkdown } from './BobMarkdown';
@@ -75,11 +75,23 @@ interface BobAttachmentRecord {
 interface BobSessionSummary {
   id: string;
   title: string | null;
+  pinned: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 type ContextTab = 'context' | 'files' | 'actions' | 'audit';
+type SessionFilter = 'all' | 'pinned' | 'archived';
+type SearchScope = 'chats' | 'files' | 'actions';
+
+interface GlobalSearchResult {
+  id: string;
+  type: 'file' | 'action';
+  title: string;
+  detail: string;
+  conversationId: string | null;
+}
 
 type WorkStateTone = 'idle' | 'working' | 'using-data' | 'waiting' | 'proposal' | 'completed' | 'failed';
 type VoiceState = 'off' | 'recording';
@@ -101,11 +113,16 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [attachments, setAttachments] = useState<BobAttachmentRecord[]>([]);
   const [sessions, setSessions] = useState<BobSessionSummary[]>([]);
   const [sessionSearch, setSessionSearch] = useState('');
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>('all');
+  const [searchScope, setSearchScope] = useState<SearchScope>('chats');
+  const [globalResults, setGlobalResults] = useState<GlobalSearchResult[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   // Side panes are drawers on narrow screens, so they start closed there.
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === 'undefined' ? true : window.innerWidth >= 1100);
   const [contextPanelOpen, setContextPanelOpen] = useState(() => typeof window === 'undefined' ? true : window.innerWidth >= 1100);
+  const [sidebarWidth, setSidebarWidth] = useState(296);
+  const [contextPanelWidth, setContextPanelWidth] = useState(344);
   const [contextTab, setContextTab] = useState<ContextTab>('context');
   const [activityPhase, setActivityPhase] = useState<ActivityPhase>('idle');
   const [loading, setLoading] = useState(false);
@@ -139,7 +156,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     if (!profile?.organizationId || !profile?.id) return;
     const { data, error: sessionErr } = await supabase
       .from('bob_conversations')
-      .select('id, title, created_at, updated_at')
+      .select('id, title, pinned, archived_at, created_at, updated_at')
       .eq('organization_id', profile.organizationId)
       .eq('user_id', profile.id)
       .eq('module_key', mode)
@@ -182,6 +199,69 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     const { error: renameErr } = await supabase.from('bob_conversations').update({ title: trimmed }).eq('id', convId);
     if (renameErr) setError(renameErr.message);
   }, []);
+
+  const searchWorkspace = useCallback(async (value: string, scope: SearchScope) => {
+    setSessionSearch(value);
+    if (scope === 'chats' || value.trim().length < 2 || !profile?.organizationId) {
+      setGlobalResults([]);
+      return;
+    }
+    const pattern = `%${value.trim().replace(/[%_,]/g, '')}%`;
+    if (scope === 'files') {
+      const { data, error: searchErr } = await supabase
+        .from('bob_attachments')
+        .select('id, file_name, processing_state, conversation_id')
+        .eq('organization_id', profile.organizationId)
+        .ilike('file_name', pattern)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (searchErr) {
+        setError(searchErr.message);
+        return;
+      }
+      setGlobalResults((data ?? []).map((item: { id: string; file_name: string; processing_state: string; conversation_id: string | null }) => ({ id: item.id, type: 'file', title: item.file_name, detail: attachmentStateLabel(item.processing_state), conversationId: item.conversation_id })));
+      return;
+    }
+    const { data, error: searchErr } = await supabase
+      .from('bob_agentic_actions')
+      .select('id, action_type, status, context_summary, conversation_id')
+      .eq('organization_id', profile.organizationId)
+      .or(`action_type.ilike.${pattern},context_summary.ilike.${pattern}`)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (searchErr) {
+      setError(searchErr.message);
+      return;
+    }
+    setGlobalResults((data ?? []).map((item: { id: string; action_type: string; status: string; context_summary: string | null; conversation_id: string | null }) => ({ id: item.id, type: 'action', title: item.action_type.replaceAll('_', ' '), detail: item.context_summary || item.status, conversationId: item.conversation_id })));
+  }, [profile?.organizationId]);
+
+  const updateSession = useCallback(async (convId: string, patch: Partial<Pick<BobSessionSummary, 'pinned' | 'archived_at'>>) => {
+    const previous = sessions;
+    setSessions(current => current.map(item => item.id === convId ? { ...item, ...patch } : item));
+    const { error: updateErr } = await supabase.from('bob_conversations').update(patch).eq('id', convId);
+    if (updateErr) {
+      setSessions(previous);
+      setError(updateErr.message);
+    }
+  }, [sessions]);
+
+  const beginPaneResize = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
+    if (!workspaceExpanded || window.innerWidth < 1100) return;
+    event.preventDefault();
+    const move = (pointerEvent: PointerEvent) => {
+      const clientX = Number(pointerEvent.clientX);
+      if (!Number.isFinite(clientX)) return;
+      if (side === 'left') setSidebarWidth(Math.min(420, Math.max(240, clientX - 18)));
+      else setContextPanelWidth(Math.min(460, Math.max(280, window.innerWidth - clientX - 18)));
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop, { once: true });
+  };
 
   // ATLAS READS: bob_conversations, bob_messages
   // Operations and Builder retain separate durable threads. Builder context
@@ -495,7 +575,11 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             sessions={sessions}
             activeId={conversationId}
             search={sessionSearch}
-            onSearch={setSessionSearch}
+            searchScope={searchScope}
+            onScope={(scope) => { setSearchScope(scope); void searchWorkspace(sessionSearch, scope); }}
+            onSearch={(value) => void searchWorkspace(value, searchScope)}
+            results={globalResults}
+            onResult={(result) => { if (result.conversationId) void selectSession(result.conversationId); }}
             onSelect={(id) => void selectSession(id)}
             onNew={() => void startNewConversation()}
             renamingId={renamingId}
@@ -504,10 +588,17 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             onRenameChange={setRenameValue}
             onRenameCommit={(id) => { void renameSession(id, renameValue); setRenamingId(null); }}
             onRenameCancel={() => setRenamingId(null)}
+            filter={sessionFilter}
+            onFilter={setSessionFilter}
+            onTogglePin={(session) => void updateSession(session.id, { pinned: !session.pinned })}
+            onArchive={(session) => void updateSession(session.id, { archived_at: session.archived_at ? null : new Date().toISOString() })}
             busy={loading || sending}
             onDismiss={() => setSidebarOpen(false)}
+            width={sidebarWidth}
           />
         )}
+
+        {workspaceExpanded && sidebarOpen && <div className="bob-pane-divider is-left" role="separator" aria-orientation="vertical" aria-label="Resize sessions pane" onPointerDown={(event) => beginPaneResize('left', event)} />}
 
         <div className="bob-main-pane">
           {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value]) => <span key={key}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
@@ -616,6 +707,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
+        {workspaceExpanded && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
         {contextPanelOpen && (
           <ContextPanel
             tab={contextTab}
@@ -624,6 +716,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             attachments={attachments}
             contextEntries={contextEntries}
             onDismiss={() => setContextPanelOpen(false)}
+            width={contextPanelWidth}
           />
         )}
       </div>
@@ -719,7 +812,11 @@ function SessionSidebar(props: {
   sessions: BobSessionSummary[];
   activeId: string | null;
   search: string;
+  searchScope: SearchScope;
+  onScope: (scope: SearchScope) => void;
   onSearch: (value: string) => void;
+  results: GlobalSearchResult[];
+  onResult: (result: GlobalSearchResult) => void;
   onSelect: (id: string) => void;
   onNew: () => void;
   renamingId: string | null;
@@ -728,22 +825,30 @@ function SessionSidebar(props: {
   onRenameChange: (value: string) => void;
   onRenameCommit: (id: string) => void;
   onRenameCancel: () => void;
+  filter: SessionFilter;
+  onFilter: (filter: SessionFilter) => void;
+  onTogglePin: (session: BobSessionSummary) => void;
+  onArchive: (session: BobSessionSummary) => void;
   busy: boolean;
   onDismiss: () => void;
+  width: number;
 }) {
   const term = props.search.trim().toLowerCase();
+  const visible = props.filter === 'archived'
+    ? props.sessions.filter(session => Boolean(session.archived_at))
+    : props.sessions.filter(session => !session.archived_at && (props.filter !== 'pinned' || session.pinned));
   const filtered = term
-    ? props.sessions.filter(session => (session.title ?? 'Untitled session').toLowerCase().includes(term))
-    : props.sessions;
+    ? visible.filter(session => (session.title ?? 'Untitled session').toLowerCase().includes(term))
+    : visible;
 
   const groups = filtered.reduce<Record<string, BobSessionSummary[]>>((acc, session) => {
-    const key = sessionGroupLabel(session.updated_at);
+    const key = session.pinned && props.filter !== 'archived' ? 'Pinned' : sessionGroupLabel(session.updated_at);
     (acc[key] ??= []).push(session);
     return acc;
   }, {});
 
   return (
-    <aside className="bob-session-sidebar" aria-label="Bob sessions">
+    <aside className="bob-session-sidebar" aria-label="Bob sessions" style={{ flexBasis: props.width }}>
       <div className="bob-drawer-head">
         <h2>Sessions</h2>
         <button type="button" onClick={props.onDismiss} aria-label="Close sessions"><X size={16} /></button>
@@ -758,11 +863,35 @@ function SessionSidebar(props: {
         <input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="Search chats" aria-label="Search chats" />
       </div>
 
-      <div className="bob-sidebar-list">
+      <div className="bob-search-scopes" aria-label="Search scope">
+        {(['chats', 'files', 'actions'] as SearchScope[]).map(scope => (
+          <button key={scope} type="button" className={props.searchScope === scope ? 'is-active' : ''} onClick={() => props.onScope(scope)}>{scope}</button>
+        ))}
+      </div>
+
+      <div className="bob-session-filters" aria-label="Session filters">
+        {(['all', 'pinned', 'archived'] as SessionFilter[]).map(filter => (
+          <button key={filter} type="button" className={props.filter === filter ? 'is-active' : ''} onClick={() => props.onFilter(filter)}>
+            {filter}
+          </button>
+        ))}
+      </div>
+
+      {props.searchScope !== 'chats' && props.search.trim().length >= 2 ? (
+        <div className="bob-global-results" aria-label="Search results">
+          {props.results.length === 0 ? <p className="bob-sidebar-empty">No {props.searchScope} match that search.</p> : props.results.map(result => (
+            <button key={`${result.type}-${result.id}`} type="button" onClick={() => props.onResult(result)} disabled={!result.conversationId}>
+              <span>{result.type}</span>
+              <strong>{result.title}</strong>
+              <small>{result.detail}</small>
+            </button>
+          ))}
+        </div>
+      ) : <div className="bob-sidebar-list">
         {filtered.length === 0 ? (
           <p className="bob-sidebar-empty">{props.sessions.length === 0 ? 'No sessions yet.' : 'No chats match that search.'}</p>
         ) : (
-          Object.entries(groups).map(([group, rows]) => (
+          Object.entries(groups).sort(([left], [right]) => left === 'Pinned' ? -1 : right === 'Pinned' ? 1 : 0).map(([group, rows]) => (
             <section key={group}>
               <h3>{group}</h3>
               {rows.map(session => (
@@ -783,12 +912,14 @@ function SessionSidebar(props: {
                   ) : (
                     <>
                       <button type="button" className="bob-session-open" onClick={() => props.onSelect(session.id)} disabled={props.busy}>
-                        <strong>{session.title || 'Untitled session'}</strong>
+                        <strong>{session.pinned && <Pin size={11} />} {session.title || 'Untitled session'}</strong>
                         <small>{new Date(session.updated_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
                       </button>
-                      <button type="button" className="bob-session-rename-trigger" aria-label={`Rename ${session.title || 'Untitled session'}`} onClick={() => props.onRenameStart(session.id, session.title ?? '')}>
-                        <Pencil size={13} />
-                      </button>
+                      <div className="bob-session-row-actions">
+                        <button type="button" aria-label={`Rename ${session.title || 'Untitled session'}`} onClick={() => props.onRenameStart(session.id, session.title ?? '')}><Pencil size={13} /></button>
+                        <button type="button" aria-label={session.pinned ? `Unpin ${session.title || 'Untitled session'}` : `Pin ${session.title || 'Untitled session'}`} onClick={() => props.onTogglePin(session)}>{session.pinned ? <PinOff size={13} /> : <Pin size={13} />}</button>
+                        <button type="button" aria-label={session.archived_at ? `Restore ${session.title || 'Untitled session'}` : `Archive ${session.title || 'Untitled session'}`} onClick={() => props.onArchive(session)}>{session.archived_at ? <ArchiveRestore size={13} /> : <Archive size={13} />}</button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -796,7 +927,7 @@ function SessionSidebar(props: {
             </section>
           ))
         )}
-      </div>
+      </div>}
     </aside>
   );
 }
@@ -808,6 +939,7 @@ function ContextPanel(props: {
   attachments: BobAttachmentRecord[];
   contextEntries: Array<[string, unknown]>;
   onDismiss: () => void;
+  width: number;
 }) {
   const assistantTurns = props.messages.filter(message => message.role === 'assistant');
   const proposals = assistantTurns.filter(message => classifyMessageState(message).tone === 'proposal');
@@ -819,7 +951,7 @@ function ContextPanel(props: {
   ];
 
   return (
-    <aside className="bob-context-panel" aria-label="Bob context panel">
+    <aside className="bob-context-panel" aria-label="Bob context panel" style={{ flexBasis: props.width }}>
       <div className="bob-drawer-head">
         <h2>Context</h2>
         <button type="button" onClick={props.onDismiss} aria-label="Close context panel"><X size={16} /></button>

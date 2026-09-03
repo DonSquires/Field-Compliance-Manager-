@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BobPanel } from './BobPanel';
 
 const { mockFrom, mockInvoke, mockStorageFrom } = vi.hoisted(() => ({
@@ -421,6 +421,25 @@ describe('BobPanel', () => {
 
     expect(screen.queryByText('Zone compliance review')).toBeNull();
     expect(screen.getByText('Roster gap analysis')).toBeTruthy();
+  });
+
+  it('resizes expanded desktop panes within their bounded widths', async () => {
+    setViewport(1400);
+    conversationList = [
+      { id: 'conversation-1', title: 'Zone compliance review', pinned: false, archived_at: null, created_at: '2026-09-02T05:00:00.000Z', updated_at: '2026-09-02T06:00:00.000Z' },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByLabelText('Open full workspace'));
+
+    const sessions = await screen.findByLabelText('Bob sessions');
+    fireEvent.pointerDown(screen.getByLabelText('Resize sessions pane'), { clientX: 300 });
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 380, bubbles: true }));
+      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    });
+
+    expect(sessions.getAttribute('style')).toContain('flex-basis: 362px');
   });
 
   it('keeps sessions and context reachable as drawers on mobile', async () => {
