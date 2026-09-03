@@ -9687,6 +9687,10 @@ CREATE TABLE IF NOT EXISTS "public"."evidence_items" (
     "captured_by_user_id" "uuid",
     "captured_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "metadata" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "sha256_hash" "text",
+    "retention_days" integer,
+    "is_court_ready" boolean DEFAULT false NOT NULL,
+    "locked_at" timestamp with time zone,
     CONSTRAINT "evidence_items_evidence_kind_check" CHECK (("evidence_kind" = ANY (ARRAY['photo'::"text", 'video'::"text", 'audio'::"text", 'document'::"text", 'note'::"text"])))
 );
 
