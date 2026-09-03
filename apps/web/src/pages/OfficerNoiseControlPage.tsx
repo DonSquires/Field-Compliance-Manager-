@@ -118,38 +118,30 @@ const OfficerNoiseControlPage: React.FC = () => {
     try {
       setSubmitting(true);
       setError(null);
-      // ATLAS WRITES: noise_assessments
-      const { data, error } = await supabase
-        .from('noise_assessments')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            officer_user_id: profile.id,
-            officer_id: profile.id,
-            decibel_reading: form.decibel_reading ? parseFloat(form.decibel_reading) : null,
-            noise_source: form.noise_source.trim(),
-            noise_source_address: form.noise_source_address.trim(),
-            assessment_location: form.assessment_location.trim() || null,
-            assessment_gps_lat: gps.lat,
-            assessment_gps_lng: gps.lng,
-            assessment_gps_accuracy: gps.accuracy,
-            scene_description: form.scene_description.trim(),
-            action_taken: form.action_taken,
-            volume_score: volumeScore,
-            time_score: volumeScore === 0 ? null : currentTimeScore(),
-            tone_score: volumeScore === 0 ? 0 : Number(form.tone_score),
-            matrix_total: matrixTotal,
-            hs_checklist_completed: form.hs_checklist_completed,
-          },
-        ])
-        .select()
-        .single();
+      const requestId = crypto.randomUUID();
 
-      if (error) throw error;
-      setAssessments([data as NoiseAssessment, ...assessments]);
+      // ATLAS WRITES: submit_officer_noise_assessment
+      const { data, error } = await supabase.rpc('submit_officer_noise_assessment', {
+        p_client_request_id: requestId,
+        p_assessed_at: new Date().toISOString(),
+        p_noise_source: form.noise_source.trim(),
+        p_noise_source_address: form.noise_source_address.trim(),
+        p_action_taken: form.action_taken,
+        p_volume_score: Number(volumeScore) || 0,
+        p_time_score: volumeScore === 0 ? 1 : currentTimeScore(),
+        p_tone_score: volumeScore === 0 ? 0 : Number(form.tone_score),
+        p_scene_description: form.scene_description.trim() || null,
+        p_gps_lat: gps.lat,
+        p_gps_lng: gps.lng,
+      });
+
+      const receipt = (data as Array<{ id: string }> | null)?.[0];
+      if (error || !receipt?.id) throw error ?? new Error('Noise assessment receipt was not confirmed.');
+
       setForm({ decibel_reading: '', noise_source: '', noise_source_address: '', assessment_location: '', scene_description: '', action_taken: 'no_action', volume_score: '', tone_score: '0', hs_checklist_completed: false });
       setGps({ lat: null, lng: null, accuracy: null, status: 'idle' });
       setShowForm(false);
+      await loadAssessments();
     } catch (err) {
       setError(err instanceof Error ? err.message : (err as { message?: string }).message ?? 'Failed to submit assessment');
     } finally {

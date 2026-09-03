@@ -10831,6 +10831,7 @@ CREATE TABLE IF NOT EXISTS "public"."noise_assessments" (
     "photo_urls" "jsonb" DEFAULT '[]'::"jsonb",
     "complaint_address" "text",
     "complainant_site_id" "uuid",
+    "client_request_id" "uuid",
     "external_refs" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
     "review_status" "text" DEFAULT 'open'::"text" NOT NULL,
     "reviewed_by" "uuid",
