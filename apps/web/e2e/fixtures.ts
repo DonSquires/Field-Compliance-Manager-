@@ -50,6 +50,7 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
 }
 
 export async function installSupabaseFixtures(page: Page): Promise<void> {
+  let authenticatedUser = user;
   let adminSlotStatus = 'published';
   let adminSlotStaffId = OFFICER_ID;
   let holidayRegion = 'AUK';
@@ -103,10 +104,12 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     { id: '23232323-2323-4323-8323-232323232323', name: 'Roster Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: workplaces[0].id, team_id: null, cost_centre_id: costCentres[0].id },
   ];
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'e2e-access-token', refresh_token: 'e2e-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user }) });
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    authenticatedUser = payload.email === officerUser.email ? officerUser : user;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'e2e-access-token', refresh_token: 'e2e-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: authenticatedUser }) });
   });
-  await page.route('**/auth/v1/user', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(user) }));
-  await page.route('**/auth/v1/token?grant_type=refresh_token', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'e2e-access-token', refresh_token: 'e2e-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user }) }));
+  await page.route('**/auth/v1/user', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(authenticatedUser) }));
+  await page.route('**/auth/v1/token?grant_type=refresh_token', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'e2e-access-token', refresh_token: 'e2e-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: authenticatedUser }) }));
   await page.route('https://*.tile.openstreetmap.org/**', async (route) => route.fulfill({ status: 204, body: '' }));
 
   await page.route('**/rest/v1/**', async (route) => {
@@ -127,7 +130,10 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'user_profiles') {
       const select = url.searchParams.get('select') ?? '';
       const identityQuery = select.includes('module_access') || select.includes('updated_at');
-      const body = identityQuery ? identityUsers : select.includes('organization_id')
+      const requestedId = url.searchParams.get('id')?.replace(/^eq\./, '');
+      const body = identityQuery && requestedId
+        ? identityUsers.filter((identity) => identity.id === requestedId)
+        : identityQuery ? identityUsers : select.includes('organization_id')
         ? [{ id: ADMIN_ID, display_name: 'Morgan Reed', email: user.email, role: 'admin', organization_id: ORG_ID }]
         : [{ id: OFFICER_ID, display_name: 'Ana Ngata', email: 'ana@fcm.test', role: 'officer' }, { id: SECOND_OFFICER_ID, display_name: 'Jordan Lee', email: 'jordan@fcm.test', role: 'officer' }];
       await route.fulfill(fulfillJson(body));

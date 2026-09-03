@@ -20,6 +20,7 @@ export interface AppProfile {
   email?: string;
   role: AppRole;
   organizationId: string | null;
+  moduleAccess?: string[];
 }
 
 interface AuthContextValue {
@@ -50,7 +51,7 @@ export const AuthContext = createContext<AuthContextValue>({
 async function loadProfile(userId: string): Promise<AppProfile | null> {
   const { data, error } = await supabase
     .from('user_profiles')
-    .select('id, display_name, email, role, organization_id')
+    .select('id, display_name, email, role, organization_id, module_access')
     .eq('id', userId)
     .maybeSingle();
 
@@ -62,6 +63,7 @@ async function loadProfile(userId: string): Promise<AppProfile | null> {
     email: data.email ?? undefined,
     role: (data.role as AppRole) ?? 'unknown',
     organizationId: data.organization_id ?? null,
+    moduleAccess: data.module_access ?? [],
   };
 }
 

@@ -190,10 +190,11 @@ const OfficerShell: React.FC = () => {
     }
   }, [location.pathname, activeShift, grantedModules, moduleFromUrl]);
 
-  // Load granted modules
+  // Direct module access requires both the officer's grant and the organisation entitlement.
   useEffect(() => {
-    setGrantedModules(Array.from(enabledModules));
-  }, [enabledModules]);
+    const directAccess = profile?.moduleAccess ?? [];
+    setGrantedModules(Array.from(enabledModules).filter((module) => directAccess.includes(module)));
+  }, [enabledModules, profile?.moduleAccess]);
 
   useEffect(() => {
     if (!profile?.id || typeof navigator === 'undefined' || !navigator.geolocation) return;
