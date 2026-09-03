@@ -19,6 +19,7 @@ import { OfficerSafetyBar } from './OfficerSafetyBar';
 import { OfficerDispatchPanel } from './OfficerDispatchPanel';
 import { OfficerFieldReportPanel } from './OfficerFieldReportPanel';
 import { OfficerLeavePanel } from './OfficerLeavePanel';
+import { OfficerTimesheetPanel } from './OfficerTimesheetPanel';
 import { OfficerCheckpointScanner } from './OfficerCheckpointScanner';
 import { OfficerCredentialsPanel } from './OfficerCredentialsPanel';
 import { NotificationInbox } from './NotificationInbox';
@@ -91,6 +92,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <OfficerCheckpointScanner officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
     <OfficerFieldReportPanel shiftId={shiftId} />
     <OfficerLeavePanel officerId={officerId} />
+    <OfficerTimesheetPanel officerId={officerId} />
     <OfficerCredentialsPanel officerId={officerId} />
     <OfficerVehicleLookup organizationId={organizationId} />
     <View style={styles.moduleRow}>{(['freedom_camping', 'parking_enforcement'] as ScanModuleKey[]).map((key) => <Pressable key={key} onPress={() => { setModuleKey(key); setResult(null); }} style={[styles.module, moduleKey === key && styles.moduleActive]}><Text style={styles.moduleText}>{key === 'freedom_camping' ? 'Freedom camping' : 'Parking'}</Text></Pressable>)}</View>
