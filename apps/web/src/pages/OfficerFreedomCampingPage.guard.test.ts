@@ -20,6 +20,12 @@ describe('Officer Freedom Camping interaction boundary', () => {
     }
   });
 
+  it('lets typed addresses feed the existing coordinate-based scan path', () => {
+    expect(source).toContain('resolveAddressCandidates(addressQuery, 5)');
+    expect(source).toContain('latitude: candidate.lat');
+    expect(source).toContain('longitude: candidate.lng');
+  });
+
   it('preserves capture time separately from queue synchronization time', () => {
     expect(scanFunction).toContain('captured_at: capturedAt');
     expect(scanFunction).toContain('const observedAt = capturedDate.toISOString()');

@@ -1,8 +1,16 @@
 import { supabase } from './supabase';
 
+type AddressSource = 'linz_address' | 'google_address' | 'google_reverse';
+
 export interface ResolvedAddress {
   label: string;
-  source: 'linz_address' | 'google_reverse';
+  source: AddressSource;
+}
+
+export interface AddressCandidate extends ResolvedAddress {
+  lat: number;
+  lng: number;
+  address_id?: string | null;
 }
 
 export async function resolveAddressForCoordinates(lat: number, lng: number): Promise<ResolvedAddress | null> {
@@ -11,4 +19,14 @@ export async function resolveAddressForCoordinates(lat: number, lng: number): Pr
   });
   if (error) throw error;
   return data?.candidates?.[0] ?? null;
+}
+
+export async function resolveAddressCandidates(query: string, max = 5): Promise<AddressCandidate[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const { data, error } = await supabase.functions.invoke<{ candidates?: AddressCandidate[] }>('linz-lookup', {
+    body: { action: 'address_autocomplete', q, max },
+  });
+  if (error) throw error;
+  return (data?.candidates ?? []).filter((candidate) => Number.isFinite(candidate.lat) && Number.isFinite(candidate.lng));
 }

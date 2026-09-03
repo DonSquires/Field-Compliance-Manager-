@@ -7,8 +7,9 @@
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Camera, CheckCircle2, X } from 'lucide-react';
+import { Camera, CheckCircle2, MapPin, Search, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
 import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -48,6 +49,11 @@ const OfficerParkingPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ zone_id: '' });
+  const [addressQuery, setAddressQuery] = useState('');
+  const [addressCandidates, setAddressCandidates] = useState<AddressCandidate[]>([]);
+  const [addressPoint, setAddressPoint] = useState<AddressCandidate | null>(null);
+  const [resolvingAddress, setResolvingAddress] = useState(false);
+  const [addressError, setAddressError] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [preparingImage, setPreparingImage] = useState(false);
@@ -119,6 +125,23 @@ const OfficerParkingPage: React.FC = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handleAddressResolve = async () => {
+    setResolvingAddress(true);
+    setAddressError(null);
+    setAddressPoint(null);
+    try {
+      const candidates = await resolveAddressCandidates(addressQuery, 5);
+      setAddressCandidates(candidates);
+      if (candidates.length === 0) setAddressError('No address match was returned.');
+      else setAddressPoint(candidates[0]);
+    } catch (resolveError) {
+      setAddressCandidates([]);
+      setAddressError(resolveError instanceof Error ? resolveError.message : 'Address could not be resolved.');
+    } finally {
+      setResolvingAddress(false);
+    }
+  };
+
   const handleChalk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.id || !profile?.organizationId) return;
@@ -135,7 +158,9 @@ const OfficerParkingPage: React.FC = () => {
         .invoke<ParkingScanResult>('process-officer-scan', {
           body: {
             image_base64: imageBase64,
-            zone_id: form.zone_id,
+            ...(form.zone_id ? { zone_id: form.zone_id } : {}),
+            gps_lat: addressPoint?.lat ?? null,
+            gps_lng: addressPoint?.lng ?? null,
             module_key: 'parking_enforcement',
             captured_at: new Date().toISOString(),
           },
@@ -144,6 +169,9 @@ const OfficerParkingPage: React.FC = () => {
       if (error) throw error;
       if (!data?.success || !data.chalk_record_id) throw new Error('Parking chalk receipt was not confirmed.');
       setForm({ zone_id: '' });
+      setAddressQuery('');
+      setAddressCandidates([]);
+      setAddressPoint(null);
       clearVehicleCapture();
       setShowForm(false);
       setReceipt(`Chalk recorded for ${data.zone_name ?? 'selected Zone'}: ${data.verdict.replace(/_/g, ' ')}. Return policy: ${data.effective_limit_minutes} minutes.`);
@@ -212,14 +240,24 @@ const OfficerParkingPage: React.FC = () => {
           </div>
           <div className="form-group">
             <label htmlFor="parking-zone">Verified parking Zone</label>
-            <select id="parking-zone" required value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value })}>
-              <option value="">Select a Zone</option>
+            <select id="parking-zone" value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value })}>
+              <option value="">Resolve from address</option>
               {zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
             </select>
               {form.zone_id && zones.find((zone) => zone.id === form.zone_id)?.address && <small className="form-hint">Canonical address: {zones.find((zone) => zone.id === form.zone_id)?.address}</small>}
             {zones.length === 0 && <small className="form-hint">No verified parking Zones are available. Contact your administrator.</small>}
           </div>
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || zones.length === 0}>
+          <div className="form-group">
+            <label htmlFor="parking-address">Address</label>
+            <div className="form-row">
+              <input id="parking-address" value={addressQuery} onChange={(event) => { setAddressQuery(event.target.value); setAddressPoint(null); }} placeholder="Street address or place" />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleAddressResolve()} disabled={resolvingAddress || !addressQuery.trim()}><Search size={15} />{resolvingAddress ? 'Resolving' : 'Resolve'}</button>
+            </div>
+            {addressPoint && <small className="form-hint"><MapPin size={13} /> {addressPoint.label}</small>}
+            {addressError && <small className="form-hint">{addressError}</small>}
+            {addressCandidates.length > 1 && <div className="form-row">{addressCandidates.map((candidate) => <button type="button" className="btn btn-secondary btn-sm" key={`${candidate.source}-${candidate.lat}-${candidate.lng}`} onClick={() => setAddressPoint(candidate)}>{candidate.label}</button>)}</div>}
+          </div>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !imageBase64 || (!form.zone_id && !addressPoint)}>
             {submitting ? 'Saving chalk record' : 'Chalk Vehicle'}
           </button>
         </form>

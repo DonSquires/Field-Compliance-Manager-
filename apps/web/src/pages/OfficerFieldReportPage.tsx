@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin, RefreshCw, Send, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin, RefreshCw, Search, Send, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { resolveAddressForCoordinates } from '../lib/locationAddress';
+import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 import './OfficerFieldReportPage.css';
 
@@ -24,6 +24,7 @@ const OfficerFieldReportPage: React.FC = () => {
   const [form, setForm] = useState(initialForm);
   const [gps, setGps] = useState<GpsState>({ status: 'idle', lat: null, lng: null, accuracy: null });
   const [addressResolution, setAddressResolution] = useState<AddressResolution>('idle');
+  const [addressResolutionMessage, setAddressResolutionMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +69,27 @@ const OfficerFieldReportPage: React.FC = () => {
     );
   };
 
+  const resolveTypedAddress = async () => {
+    const query = form.address.trim() || form.locationName.trim();
+    if (!query) return;
+    setAddressResolution('resolving');
+    setAddressResolutionMessage(null);
+    try {
+      const candidate = (await resolveAddressCandidates(query, 1))[0];
+      if (!candidate) {
+        setAddressResolution('unavailable');
+        setAddressResolutionMessage('No address match was returned.');
+        return;
+      }
+      setForm((current) => ({ ...current, address: candidate.label }));
+      setAddressResolution('resolved');
+      setAddressResolutionMessage(candidate.label);
+    } catch (error) {
+      setAddressResolution('unavailable');
+      setAddressResolutionMessage(error instanceof Error ? error.message : 'Address could not be resolved.');
+    }
+  };
+
   const canSubmit = form.title.trim().length >= 5 && form.description.trim().length >= 10 && (!form.followUp || form.followUpNotes.trim().length > 0) && !submitting;
   const submitReport = async (event: React.FormEvent) => {
     event.preventDefault(); if (!canSubmit) return;
@@ -95,7 +117,8 @@ const OfficerFieldReportPage: React.FC = () => {
         <label><span>Related shift</span><select value={form.shiftId} onChange={(e) => setForm({ ...form, shiftId: e.target.value })}><option value="">No related shift</option>{shifts.map((shift) => <option value={shift.id} key={shift.id}>{new Date(shift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} · {shift.service_type.replaceAll('_', ' ')} · {shift.status}</option>)}</select></label>
         <label><span>Title</span><input required minLength={5} maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Short operational summary" /></label>
         <label><span>Description</span><textarea required minLength={10} maxLength={10000} rows={5} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What happened, who or what was affected, and current conditions" /></label>
-        <div className="officer-report-grid"><label><span>Location name</span><input value={form.locationName} onChange={(e) => setForm({ ...form, locationName: e.target.value })} placeholder="Site or area" /></label><label><span>Address {addressResolution === 'resolving' ? '(resolving)' : addressResolution === 'resolved' ? '(GPS resolved)' : ''}</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street address" /></label></div>
+        <div className="officer-report-grid"><label><span>Location name</span><input value={form.locationName} onChange={(e) => setForm({ ...form, locationName: e.target.value })} placeholder="Site or area" /></label><label><span>Address {addressResolution === 'resolving' ? '(resolving)' : addressResolution === 'resolved' ? '(resolved)' : ''}</span><input value={form.address} onChange={(e) => { setForm({ ...form, address: e.target.value }); setAddressResolution('idle'); setAddressResolutionMessage(null); }} placeholder="Street address" /></label></div>
+        <div className={`officer-report-gps state-${addressResolution === 'unavailable' ? 'unavailable' : addressResolution === 'resolved' ? 'captured' : 'idle'}`}><MapPin size={18} /><div><strong>{addressResolution === 'resolving' ? 'Resolving address' : addressResolution === 'resolved' ? 'Address resolved' : addressResolution === 'unavailable' ? 'Address unavailable' : 'Resolve address'}</strong><span>{addressResolutionMessage ?? 'Ready to resolve from the entered place.'}</span></div><button type="button" onClick={() => void resolveTypedAddress()} disabled={addressResolution === 'resolving' || !(form.address.trim() || form.locationName.trim())}>{addressResolution === 'resolving' ? <RefreshCw size={15} className="is-spinning" /> : <Search size={15} />}Resolve</button></div>
         <div className={`officer-report-gps state-${gps.status}`}><Crosshair size={18} /><div><strong>{gps.status === 'captured' ? 'GPS captured' : gps.status === 'locating' ? 'Locating' : gps.status === 'unavailable' ? 'GPS unavailable' : 'Add GPS evidence'}</strong><span>{gps.status === 'captured' ? `${gps.lat?.toFixed(5)}, ${gps.lng?.toFixed(5)} · ±${Math.round(gps.accuracy ?? 0)} m` : 'Optional. Reporting remains available if location services fail.'}</span></div><button type="button" onClick={acquireGps} disabled={gps.status === 'locating'}>{gps.status === 'captured' ? 'Refresh' : 'Capture'}</button></div>
         <label><span>Immediate action taken</span><textarea rows={3} value={form.immediateAction} onChange={(e) => setForm({ ...form, immediateAction: e.target.value })} placeholder="Controls applied, notifications made, or area isolated" /></label>
         <label className="officer-report-followup"><input type="checkbox" checked={form.followUp} onChange={(e) => setForm({ ...form, followUp: e.target.checked })} /><span><CheckCircle2 size={17} /><b>Follow-up required</b><small>Route this submission into the supervisor follow-up queue</small></span></label>

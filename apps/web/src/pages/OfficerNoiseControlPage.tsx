@@ -7,10 +7,10 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Crosshair, RefreshCw } from 'lucide-react';
+import { Crosshair, MapPin, RefreshCw, Search } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { resolveAddressForCoordinates } from '../lib/locationAddress';
+import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -48,6 +48,7 @@ const OfficerNoiseControlPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ decibel_reading: '', noise_source: '', noise_source_address: '', assessment_location: '', scene_description: '', action_taken: 'no_action', volume_score: '', tone_score: '0', hs_checklist_completed: false });
   const [gps, setGps] = useState<{ lat: number | null; lng: number | null; accuracy: number | null; status: 'idle' | 'locating' | 'captured' | 'unavailable' }>({ lat: null, lng: null, accuracy: null, status: 'idle' });
+  const [addressResolution, setAddressResolution] = useState<{ status: 'idle' | 'resolving' | 'resolved' | 'unavailable'; message: string | null }>({ status: 'idle', message: null });
   const [submitting, setSubmitting] = useState(false);
   const volumeScore = form.volume_score === '' ? null : Number(form.volume_score);
   const matrixTotal = volumeScore === null ? null : volumeScore === 0 ? 0 : volumeScore + currentTimeScore() + Number(form.tone_score);
@@ -91,6 +92,23 @@ const OfficerNoiseControlPage: React.FC = () => {
         if (address) setForm((current) => current.assessment_location.trim() ? current : { ...current, assessment_location: address.label });
       } catch { /* GPS evidence is still retained if address resolution is unavailable. */ }
     }, () => setGps({ lat: null, lng: null, accuracy: null, status: 'unavailable' }), { enableHighAccuracy: true, maximumAge: 30_000, timeout: 8_000 });
+  };
+
+  const resolveNoiseSourceAddress = async () => {
+    const query = form.noise_source_address.trim() || form.noise_source.trim();
+    if (!query) return;
+    setAddressResolution({ status: 'resolving', message: null });
+    try {
+      const candidate = (await resolveAddressCandidates(query, 1))[0];
+      if (!candidate) {
+        setAddressResolution({ status: 'unavailable', message: 'No address match was returned.' });
+        return;
+      }
+      setForm((current) => ({ ...current, noise_source_address: candidate.label }));
+      setAddressResolution({ status: 'resolved', message: candidate.label });
+    } catch (error) {
+      setAddressResolution({ status: 'unavailable', message: error instanceof Error ? error.message : 'Address could not be resolved.' });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -192,7 +210,9 @@ const OfficerNoiseControlPage: React.FC = () => {
           </div>
           <div className="form-group">
             <label htmlFor="noise-source-address">Noise source address</label>
-            <input id="noise-source-address" required value={form.noise_source_address} onChange={(e) => setForm({ ...form, noise_source_address: e.target.value })} placeholder="Address producing the noise" />
+            <input id="noise-source-address" required value={form.noise_source_address} onChange={(e) => { setForm({ ...form, noise_source_address: e.target.value }); setAddressResolution({ status: 'idle', message: null }); }} placeholder="Address producing the noise" />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void resolveNoiseSourceAddress()} disabled={addressResolution.status === 'resolving' || !(form.noise_source_address.trim() || form.noise_source.trim())}>{addressResolution.status === 'resolving' ? <RefreshCw size={15} className="is-spinning" /> : <Search size={15} />} Resolve address</button>
+            {addressResolution.message && <small className="form-hint"><MapPin size={13} /> {addressResolution.message}</small>}
           </div>
           <div className="form-group">
             <label htmlFor="noise-assessment-location">Assessment location</label>

@@ -7,6 +7,7 @@ import {
   ImagePlus,
   MapPin,
   RefreshCw,
+  Search,
   ShieldCheck,
   Upload,
   WifiOff,
@@ -15,6 +16,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from 'react-router-dom';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
+import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
 import {
   buildOfficerScanPayload,
   canSubmitOfficerScan,
@@ -93,6 +95,10 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [capturedAt, setCapturedAt] = useState<string>();
   const [preparingImage, setPreparingImage] = useState(false);
   const [location, setLocation] = useState<LocationState>(INITIAL_LOCATION);
+  const [addressQuery, setAddressQuery] = useState('');
+  const [addressCandidates, setAddressCandidates] = useState<AddressCandidate[]>([]);
+  const [resolvingAddress, setResolvingAddress] = useState(false);
+  const [addressError, setAddressError] = useState<string | null>(null);
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -177,6 +183,33 @@ const OfficerFreedomCampingPage: React.FC = () => {
       });
     }
   }, []);
+
+  const applyAddressCandidate = useCallback((candidate: AddressCandidate) => {
+    setLocation({
+      status: 'ready',
+      latitude: candidate.lat,
+      longitude: candidate.lng,
+      accuracy: 0,
+      message: 'Address ready',
+    });
+    setResolvedAddress(candidate.label);
+  }, []);
+
+  const resolveTypedAddress = useCallback(async () => {
+    setResolvingAddress(true);
+    setAddressError(null);
+    try {
+      const candidates = await resolveAddressCandidates(addressQuery, 5);
+      setAddressCandidates(candidates);
+      if (candidates.length === 0) setAddressError('No address match was returned.');
+      else applyAddressCandidate(candidates[0]);
+    } catch (error) {
+      setAddressCandidates([]);
+      setAddressError(error instanceof Error ? error.message : 'Address could not be resolved.');
+    } finally {
+      setResolvingAddress(false);
+    }
+  }, [addressQuery, applyAddressCandidate]);
 
   const syncQueuedScans = useCallback(async () => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
@@ -367,7 +400,24 @@ const OfficerFreedomCampingPage: React.FC = () => {
                 </select>
               </div>
             </label>
+            <label className="fc-field">
+              <span>Address <small>search</small></span>
+              <div className="fc-select-wrap">
+                <MapPin size={17} aria-hidden="true" />
+                <input value={addressQuery} onChange={(event) => setAddressQuery(event.target.value)} placeholder="Street address or place" />
+              </div>
+            </label>
           </div>
+
+          <div className="fc-location-row location-ready">
+            <Search size={17} aria-hidden="true" />
+            <span>{addressError ?? (resolvedAddress ? `Resolved address · ${resolvedAddress}` : 'Address resolver ready')}</span>
+            <button type="button" onClick={() => void resolveTypedAddress()} disabled={resolvingAddress || !addressQuery.trim()} title="Resolve address">
+              <RefreshCw size={16} className={resolvingAddress ? 'is-spinning' : ''} aria-hidden="true" />
+              <span className="sr-only">Resolve address</span>
+            </button>
+          </div>
+          {addressCandidates.length > 1 && <div className="fc-field-grid">{addressCandidates.map((candidate) => <button type="button" className="fc-new-scan" key={`${candidate.source}-${candidate.lat}-${candidate.lng}`} onClick={() => applyAddressCandidate(candidate)}><MapPin size={15} aria-hidden="true" />{candidate.label}</button>)}</div>}
 
           <div className={`fc-location-row location-${location.status}`}>
             <Crosshair size={17} aria-hidden="true" />
