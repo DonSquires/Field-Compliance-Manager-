@@ -41,7 +41,8 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
         SELECT * FROM public.get_alpha();
       $$;
     `);
-    write(root, 'supabase/functions/ping/index.ts', 'Deno.serve(() => new Response("ok"));');
+    write(root, 'supabase/functions/ping/index.ts', 'fetch(`${SUPABASE_URL}/functions/v1/echo`);');
+    write(root, 'supabase/functions/echo/index.ts', 'Deno.serve(() => new Response("ok"));');
     write(root, 'apps/web/src/pages/TestPage.tsx', `
       supabase.from('alpha').select('id');
       supabase.from('alpha').update({ active: true }).eq('id', id);
@@ -51,6 +52,7 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
         { id },
       );
       supabase.functions.invoke('ping');
+      supabase.functions.invoke<{ id: string }>('echo');
       if (ready) return null;
     `);
     write(root, 'apps/web/src/pages/TestPage.test.tsx', `supabase.from('test_noise').select('*');`);
@@ -60,11 +62,14 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'alpha'));
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'get_alpha'));
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'ping'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'echo'));
     assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
     assert.ok(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'get_alpha'));
     assert.ok(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'update_alpha'));
     assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'ping'));
+    assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'echo'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'ping' && row.target_type === 'edge_function' && row.target_name === 'echo'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));

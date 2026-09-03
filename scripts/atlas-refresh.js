@@ -300,8 +300,13 @@ function collectSourceEdges(rootDir, knownEntities) {
     for (const match of content.matchAll(/\.rpc\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]/g)) {
       add(source, 'rpc', match[1], 'calls', file, `.rpc('${match[1]}')`);
     }
-    for (const match of content.matchAll(/\.functions\.invoke\(\s*['"]([a-zA-Z0-9_-]+)['"]/g)) {
+    for (const match of content.matchAll(/\.functions\.invoke(?:\s*<[^>]*>)?\(\s*['"]([a-zA-Z0-9_-]+)['"]/g)) {
       add(source, 'edge_function', match[1], 'calls', file, `.functions.invoke('${match[1]}')`);
+    }
+    for (const match of content.matchAll(/fetch\(\s*(?:`[^`]*\/functions\/v1\/|['"][^'"]*\/functions\/v1\/)([a-zA-Z0-9_-]+)/g)) {
+      if (knownEntities.edgeFunctions.has(match[1])) {
+        add(source, 'edge_function', match[1], 'calls', file, `fetch('/functions/v1/${match[1]}')`);
+      }
     }
 
     for (const match of content.matchAll(/ATLAS\s+(READS|WRITES|CALLS|INVOKES):\s*([^\n]+)/gi)) {
