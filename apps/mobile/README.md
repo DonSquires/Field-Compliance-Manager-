@@ -12,6 +12,12 @@ failures are stored in a durable local queue and replayed by the officer from
 the scan screen. Server validation, authorization, and evidence errors remain
 visible rather than being queued.
 
+The scan screen also has a persistent safety bar. Officers can record a
+foreground GPS-backed check-in or explicitly confirm an SOS. Both actions check
+their database responses before showing confirmation. The mobile app does not
+yet run background GPS, man-down detection, or client-side escalation timing;
+those remain server-owned or future mobile capability.
+
 The profile and active-assignment hook remains available for the next mobile
 home/roster slice. Local operational-data caching, background GPS/welfare,
 notifications, jobs, and full offline compliance remain planned work.

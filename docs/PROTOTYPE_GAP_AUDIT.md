@@ -141,7 +141,7 @@ What is missing or thin:
 
 - Mobile foreground/background location permissions and periodic GPS heartbeat.
 - Mobile calls to current `record_officer_breadcrumb` RPC or equivalent write path.
-- Mobile welfare check-in prompts and overdue state handling.
+- Mobile welfare check-in prompts and overdue state handling. Foreground self check-in and confirmed SOS are now available from the mobile scan safety bar; timer/overdue presentation remains follow-up work.
 - Mobile man-down/inactivity timers integrated with the current `officer_welfare_settings` schema.
 - Offline retention of GPS breadcrumbs with client event IDs for retry provenance.
 
