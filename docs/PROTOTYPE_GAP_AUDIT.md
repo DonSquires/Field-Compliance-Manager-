@@ -279,7 +279,7 @@ These sources did not add meaningful recoverable implementation in this pass:
 | P1 | Current-schema offline data package | **COMPLETE ✓** | `get_officer_data_package` SECURITY DEFINER RPC (`20260903140000_officer_offline_data_package.sql`) + `officerOfflinePackage.ts` with AsyncStorage caching. |
 | P1 | Mobile job/dispatch list and completion | **COMPLETE ✓** | `OfficerDispatchPanel` (`advance_dispatch_job_status`) + `OfficerStopPanel` (`complete_shift_stop`). |
 | P1 | Push notification token + delivery spine | **COMPLETE ✓** | `officer_device_tokens` table & RPCs (`20260903130000_officer_device_tokens_push_spine.sql`) + `officerNotifications.ts`. |
-| P2 | Unified evidence media spine | **IN PROGRESS / SHIPPED FOR BIO/SMOKE** | Junction tables `biosecurity_assessment_evidence` and `smoke_assessment_evidence` link module assessments to `evidence_items`. |
+| P2 | Unified evidence media spine | **COMPLETE ✓** | `register_evidence_media_item` & `seal_court_ready_evidence` RPCs (`20260903160000_unified_evidence_media_spine.sql`) with SHA-256 integrity hash, court-ready lock, and retention policy calculation. |
 | P2 | PTT health/UI/runtime completion | **COMPLETE ✓** | `ptt-server` JSON `/health` endpoint + `open_ptt_transmission`, `close_ptt_transmission`, `record_radio_transcript_segment` RPCs (`20260903150000_govern_ptt_transmissions.sql`) + `officerPtt.ts`. |
 
 ## Governed Module Implementations
