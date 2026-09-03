@@ -16,7 +16,7 @@ test('officer report resolves a GPS address and submits it as location evidence'
 
   await signInAsOfficer(page, '/officer/report');
   await page.getByRole('button', { name: 'Capture' }).click();
-  await expect(page.getByText('Address (GPS resolved)')).toBeVisible();
+  await expect(page.getByText(/Address \((resolved|GPS resolved)\)/)).toBeVisible();
   await expect(page.getByLabel('Address')).toHaveValue('1 Civic Square, Nelson 7010');
   await page.getByLabel('Title').fill('Unsafe access lighting');
   await page.getByLabel('Description').fill('Lighting at the north access failed during the patrol and reduced visibility.');

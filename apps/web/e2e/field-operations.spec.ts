@@ -40,7 +40,7 @@ test('operations landing is visually stable and every command is interactive', a
   for (const [label, area] of commands) {
     await page.getByRole('button', { name: new RegExp(`^${label}`) }).click();
     await expect(page).toHaveURL(new RegExp(`area=${area}`));
-    await page.goto('/admin/field-ops?area=landing');
+    await page.goBack();
     await expect(page.getByRole('heading', { name: 'Field Operations' })).toBeVisible();
   }
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);

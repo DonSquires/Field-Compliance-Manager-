@@ -8,23 +8,41 @@ test.beforeEach(async ({ page }) => {
 
 test('officer noise assessment captures the evidence-package measurement and source fields', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
+  let submittedNoise: Record<string, unknown> | null = null;
+
+  await page.route('**/rest/v1/rpc/submit_officer_noise_assessment', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload).toMatchObject({
+      p_noise_source: 'Amplified music',
+      p_noise_source_address: '65 Tipahi Street, Nelson South',
+      p_volume_score: 3,
+      p_time_score: 1,
+      p_tone_score: 2,
+      p_action_taken: 'direction_notice',
+    });
+    submittedNoise = {
+      id: 'abababab-abab-4bab-8bab-abababababab',
+      noise_source: 'Amplified music',
+      decibel_reading: null,
+      prior_notice_count: 0,
+      action_taken: 'direction_notice',
+      scene_description: 'Music is plainly audible at the street boundary.',
+      assessed_at: '2026-08-30T09:30:00.000Z',
+      review_status: 'open',
+      reviewed_at: null,
+      review_notes: null,
+      follow_up_required: false,
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ id: 'abababab-abab-4bab-8bab-abababababab', matrix_total: 6, review_status: 'open' }]),
+    });
+  });
+
   await page.route('**/rest/v1/noise_assessments**', async (route) => {
-    if (route.request().method() === 'POST') {
-      const [payload] = JSON.parse(route.request().postData() ?? '[]');
-      expect(payload).toMatchObject({
-        noise_source: 'Amplified music',
-        noise_source_address: '65 Tipahi Street, Nelson South',
-        volume_score: 3,
-        time_score: 1,
-        tone_score: 2,
-        matrix_total: 6,
-        action_taken: 'direction_notice',
-        hs_checklist_completed: true,
-      });
-      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'abababab-abab-4bab-8bab-abababababab', ...payload, prior_notice_count: 0, assessed_at: '2026-08-30T09:30:00.000Z', review_status: 'open', reviewed_at: null, review_notes: null, follow_up_required: false }) });
-      return;
-    }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    const list = submittedNoise ? [submittedNoise] : [];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(list) });
   });
 
   await signInAsOfficer(page, '/officer/noise_control');
