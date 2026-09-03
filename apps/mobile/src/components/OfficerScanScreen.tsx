@@ -29,6 +29,7 @@ import { OfficerVehicleLookup } from './OfficerVehicleLookup';
 import { OfficerBiosecurityPanel } from './OfficerBiosecurityPanel';
 import { OfficerNoiseControlPanel } from './OfficerNoiseControlPanel';
 import { OfficerSmokeControlPanel } from './OfficerSmokeControlPanel';
+import { registerOfficerDeviceToken, unregisterOfficerDeviceToken } from '../lib/officerNotifications';
 
 type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null; shiftStatus: string | null };
 
@@ -43,7 +44,10 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
   const [result, setResult] = useState<OfficerScanResult | null>(null);
 
   const refreshQueue = async () => { const items = await listQueuedOfficerScans(); setQueued(items.length); setQueueItems(items); };
-  useEffect(() => { void refreshQueue(); }, []);
+  useEffect(() => {
+    void refreshQueue();
+    void registerOfficerDeviceToken().catch(() => {});
+  }, []);
 
   const setPhoto = async (source: () => Promise<string | null>) => {
     try { const uri = await source(); if (uri) { setPhotoUri(uri); setResult(null); } } catch (error) { Alert.alert('Evidence unavailable', error instanceof Error ? error.message : 'Vehicle evidence could not be captured.'); }

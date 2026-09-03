@@ -11486,6 +11486,25 @@ CREATE TABLE IF NOT EXISTS "public"."officer_command_requests" (
 ALTER TABLE "public"."officer_command_requests" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."officer_device_tokens" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "organization_id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "push_token" "text" NOT NULL,
+    "platform" "text" DEFAULT 'expo'::"text" NOT NULL,
+    "device_name" "text",
+    "app_version" "text",
+    "is_active" boolean DEFAULT true NOT NULL,
+    "last_seen_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "officer_device_tokens_platform_check" CHECK (("platform" = ANY (ARRAY['expo'::"text", 'ios'::"text", 'android'::"text", 'web'::"text"])))
+);
+
+
+ALTER TABLE "public"."officer_device_tokens" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."officer_field_reports" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "organization_id" "uuid" NOT NULL,
