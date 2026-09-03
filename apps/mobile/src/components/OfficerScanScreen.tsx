@@ -19,6 +19,7 @@ import { OfficerSafetyBar } from './OfficerSafetyBar';
 import { OfficerDispatchPanel } from './OfficerDispatchPanel';
 import { OfficerFieldReportPanel } from './OfficerFieldReportPanel';
 import { OfficerCheckpointScanner } from './OfficerCheckpointScanner';
+import { OfficerCredentialsPanel } from './OfficerCredentialsPanel';
 import { NotificationInbox } from './NotificationInbox';
 import { OfficerStopPanel } from './OfficerStopPanel';
 import { OfficerVehicleLookup } from './OfficerVehicleLookup';
@@ -88,6 +89,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <OfficerStopPanel shiftId={shiftId} />
     <OfficerCheckpointScanner officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
     <OfficerFieldReportPanel shiftId={shiftId} />
+    <OfficerCredentialsPanel officerId={officerId} />
     <OfficerVehicleLookup organizationId={organizationId} />
     <View style={styles.moduleRow}>{(['freedom_camping', 'parking_enforcement'] as ScanModuleKey[]).map((key) => <Pressable key={key} onPress={() => { setModuleKey(key); setResult(null); }} style={[styles.module, moduleKey === key && styles.moduleActive]}><Text style={styles.moduleText}>{key === 'freedom_camping' ? 'Freedom camping' : 'Parking'}</Text></Pressable>)}</View>
     <View style={styles.photoPanel}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.photo} /> : <Text style={styles.photoEmpty}>Capture a clear rear vehicle image with the plate visible.</Text>}<View style={styles.actionRow}><Pressable onPress={() => void setPhoto(captureVehiclePhoto)} style={styles.primary}><Text style={styles.primaryText}>Open camera</Text></Pressable><Pressable onPress={() => void setPhoto(chooseVehiclePhoto)} style={styles.secondary}><Text style={styles.secondaryText}>Choose photo</Text></Pressable></View></View>

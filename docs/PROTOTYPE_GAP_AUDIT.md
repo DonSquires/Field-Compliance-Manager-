@@ -195,6 +195,7 @@ What is missing or thin:
 - Governed mobile field reporting is now available for incident, maintenance, and health-and-safety reports with active-shift attribution, idempotency, optional GPS evidence, immediate action, and follow-up requirements.
 - Mobile enforcement action/notice capture from a scan or breach.
 - Mobile vehicle detail page with canonical vehicle, breach history, SCV/homeless status, and flags.
+- Mobile read-only credential status is now available with verification state and expiry warnings. Credential renewal remains a governed HR workflow.
 - Mobile zone/site creation or provisional boundary capture, if this remains an officer workflow.
 
 Current overlap:
