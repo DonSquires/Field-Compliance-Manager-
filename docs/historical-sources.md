@@ -11,11 +11,11 @@ These repositories are historical references for the current Field Compliance Ma
 
 The current VPS checkout was imported into this repository. It contains the Bob control plane, PTT server, Supabase Edge Functions, Docker deployment definitions, and Gitea runner workflow.
 
-## Two distinct codebases — do not conflate them
+## Source lineage — do not conflate build attempts
 
-An independent tool inspection ("Vercel AI") of this GitHub repo's `main` checkout confirmed: no React, `react-router-dom`, or `@supabase/supabase-js` in the root manifest/lockfile, and no `BrowserRouter` entrypoint anywhere in the checkout. This matches what we already established directly in this repo (`src/` contains only generated types, no frontend `package.json` dependency exists here) — it is **not** new information and **not** a contradiction of anything Bob has found.
+Earlier inspections saw a GitHub checkout that did not include the frontend. This workspace now does include the active `apps/web` frontend and Supabase function surface. Treat the current checkout as the working rebuild base, and treat prior build attempts as recovery evidence only.
 
-Bob's frontend evidence (`main.tsx`, `App.tsx`, `RoleRouter.tsx`, `AdminShell.tsx`, `AdminHubPage.tsx`, `lib/supabase.ts`, etc., all with real, non-empty content) comes from the **separate GitLab repository** (project ID `83317421`, referenced elsewhere as `don-squires1/field-compliance-manager`), read at ref `Main` via `bob-repo-search`. That repository is where the actual frontend source lives — this GitHub repo never had it.
+Bob's most recent external source evidence comes from the **separate GitLab repository** (project ID `83317421`, referenced elsewhere as `don-squires1/field-compliance-manager`), read at ref `Main` via `bob-repo-search`. Per owner direction on 2026-09-03, that GitLab build is the same new purpose-designed development lineage as this rebuild. Missing capability in this line is expected and should be filled as enterprise SaaS-grade product design, not patched by bolting old modules on.
 
 **Open question, not yet resolved:** which Git source does the live `iron-eagle-security/field-compliance-manager` Vercel project actually build from? It has not been confirmed to be the same GitLab repo/ref Bob is reading, the same branch even if it is, or this GitHub repo. Until that is confirmed, do not assume the code Bob is auditing is what is currently live in production — it may be a newer, older, or divergent version. Verify the Vercel project's connected Git integration (provider, repo, branch) before treating the rebuild spec as production-equivalent.
 
@@ -35,7 +35,7 @@ Bob's frontend evidence (`main.tsx`, `App.tsx`, `RoleRouter.tsx`, `AdminShell.ts
 ## Recovery notes
 
 - Do not overwrite current VPS source with prototype code.
-- `FreedomCamp-Manager-App` is the strongest historical UI reference. It includes camera/GPS workflows, offline sync, plate recognition, patrols, jobs, observations, zones, welfare, and Supabase integrations.
+- `FreedomCamp-Manager-App` and the earlier Freedom Camping build are the strongest historical product references. They were close to the desired field workflow, but failed as a coherent platform because modules were bolted on rather than designed into a shared SaaS spine. Reuse requirements and lessons; do not port structure wholesale.
 - `fieldops-railway-stt` is a separate Python service and may inform the current `fcm-voice` integration, but it should remain independently deployed.
 - The historical app contains a committed `.env` file. Do not copy it or reuse any credentials from it; rotate any values that were ever exposed.
 - Recover private repositories using a GitHub credential or deploy key with read-only access.

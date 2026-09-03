@@ -1,7 +1,7 @@
 # UI Baseline
 
 Status: rebuild specification
-Source: Bob's read-only, verified findings from the original GitLab repository (project ID 83317421, ref `Main`) via `bob-repo-search` — NOT this GitHub repo, which has never contained a frontend. See [historical-sources.md](historical-sources.md) for the open question of whether this GitLab ref matches what is actually live on Vercel.
+Source: Bob's read-only, verified findings from the original GitLab repository (project ID 83317421, ref `Main`) via `bob-repo-search`. Earlier inspections saw a GitHub checkout without the frontend; this workspace now contains the active rebuild frontend. The GitLab source and this checkout are the new purpose-designed development line, distinct from the older Freedom Camping prototype that was close functionally but incoherent architecturally. See [historical-sources.md](historical-sources.md) for source-lineage cautions and the open question of whether the GitLab ref matches what is actually live on Vercel.
 Last reviewed: 2026-08-28
 
 ## Purpose
