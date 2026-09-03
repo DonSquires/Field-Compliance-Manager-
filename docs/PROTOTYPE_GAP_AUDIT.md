@@ -203,6 +203,8 @@ Current overlap:
 
 Current implementation: mobile now shows the active shift's materialized patrol stops and completes a stop through `complete_shift_stop`, carrying officer notes and a foreground GPS fix when available. QR/NFC checkpoint capture remains a separate native evidence capability.
 
+Current implementation: mobile QR checkpoint capture is now available for active shifts. It resolves an active organization checkpoint, verifies GPS accuracy and checkpoint radius when the checkpoint has coordinates, creates or reuses the shift patrol session, and records `patrol_checkpoint_visits.scan_method='qr_camera'`. NFC and non-QR checkpoint modes remain follow-up work.
+
 Recommended recovery:
 
 1. Map prototype `jobs` to current `dispatch_jobs` plus `shift_stops`; do not recreate `investigation_jobs` unless schema review confirms a real missing domain.
