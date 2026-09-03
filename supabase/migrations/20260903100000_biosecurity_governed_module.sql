@@ -273,5 +273,5 @@ begin
 end;
 $$;
 
-revoke all on function public.manage_biosecurity_assessment_review from public, anon;
-grant execute on function public.manage_biosecurity_assessment_review to authenticated, service_role;
+revoke all on function public.manage_biosecurity_assessment_review(uuid, text, text, text) from public, anon;
+grant execute on function public.manage_biosecurity_assessment_review(uuid, text, text, text) to authenticated, service_role;
