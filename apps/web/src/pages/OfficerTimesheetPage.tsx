@@ -47,6 +47,7 @@ const OfficerTimesheetPage: React.FC = () => {
         const { data, error: err } = await supabase
           .from('timesheets')
           .select('id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, status, review_notes, approved_at')
+          .eq('staff_id', profile.id)
           .order('period_start', { ascending: false });
 
         if (err) throw err;

@@ -347,6 +347,14 @@ const PatrolPage: React.FC = () => {
         accepted: evaluation.accepted,
       });
 
+      if (!evaluation.accepted) {
+        throw new Error(
+          evaluation.reason === 'gps_inaccurate'
+            ? 'GPS accuracy is too poor for this checkpoint.'
+            : 'GPS position is outside the checkpoint radius.'
+        );
+      }
+
       // ATLAS WRITES: patrol_checkpoint_visits
       const { data, error: visitErr } = await supabase
         .from('patrol_checkpoint_visits')
@@ -369,14 +377,6 @@ const PatrolPage: React.FC = () => {
         .single();
 
       if (visitErr) throw visitErr;
-
-      if (!evaluation.accepted) {
-        throw new Error(
-          evaluation.reason === 'gps_inaccurate'
-            ? 'GPS accuracy is too poor for this checkpoint.'
-            : 'GPS position is outside the checkpoint radius.'
-        );
-      }
 
       setSession({
         ...session,

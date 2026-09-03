@@ -22,7 +22,7 @@ export function mapCheckpointVisitScanMethod({
   accepted: boolean;
 }): CheckpointVisitScanMethod {
   if (mode === 'manual') return 'manual_code';
-  return accepted ? 'qr_camera' : 'url_deep_link';
+  return 'url_deep_link';
 }
 
 export function countCompletedCheckpoints(

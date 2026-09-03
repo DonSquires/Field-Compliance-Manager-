@@ -8,10 +8,12 @@
  * those were a screen-first guess and have been removed.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Camera, CheckCircle2, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useServiceRelationships, type ServiceLocationSite } from '../../context/ServiceRelationshipContext';
 import { supabase } from '../../lib/supabase';
+import { imageFileToBase64 } from '../../lib/officerScan';
 import '../PageStyles.css';
 
 interface SmokeAssessment {
@@ -61,6 +63,11 @@ const SmokeControlPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState<AssessmentForm>(EMPTY_FORM);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
+  const [evidenceNotice, setEvidenceNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (relationshipLoading) return;
@@ -102,11 +109,24 @@ const SmokeControlPage: React.FC = () => {
     selectSite(site.id);
   };
 
+  useEffect(() => () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); }, [imagePreviewUrl]);
+
+  const captureEvidence = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; if (!file) return;
+    setPreparingImage(true); setError(null);
+    try { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); setImagePreviewUrl(URL.createObjectURL(file)); setImageBase64(await imageFileToBase64(file)); }
+    catch (captureError) { setImagePreviewUrl(null); setImageBase64(null); setError(captureError instanceof Error ? captureError.message : 'Evidence photo could not be prepared.'); }
+    finally { setPreparingImage(false); }
+  };
+
+  const clearEvidence = () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); setImagePreviewUrl(null); setImageBase64(null); if (fileInputRef.current) fileInputRef.current.value = ''; };
+
   const handleSubmitAssessment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSite || !profile?.organizationId) return;
 
     try {
+      setEvidenceNotice(null);
       // ATLAS WRITES: smoke_assessments
       const { data, error } = await supabase
         .from('smoke_assessments')
@@ -132,10 +152,17 @@ const SmokeControlPage: React.FC = () => {
         .select();
 
       if (error) throw error;
+      if (!data?.[0]?.id) throw new Error('Assessment receipt was not confirmed.');
+      const { data: evidenceData, error: evidenceError } = await supabase.functions.invoke<{ classification?: { classification?: string } }>('capture-environmental-evidence', {
+        body: { module: 'smoke', assessment_id: data[0].id, image_base64: imageBase64, address: selectedSite.address ?? formData.complaint_address.trim() },
+      });
 
       setAssessments([data[0] as SmokeAssessment, ...assessments]);
       setFormData(EMPTY_FORM);
+      clearEvidence();
       setShowForm(false);
+      if (evidenceError) setError(`Assessment saved, but evidence processing was not confirmed: ${evidenceError.message}`);
+      else setEvidenceNotice(`Evidence confirmed${evidenceData?.classification?.classification ? ` · ${evidenceData.classification.classification}` : ''}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit assessment');
     }
@@ -185,6 +212,7 @@ const SmokeControlPage: React.FC = () => {
           {error}
         </div>
       )}
+      {evidenceNotice && <div className="alert alert-success" role="status">{evidenceNotice}</div>}
 
       <div className="smoke-layout">
         <div className="site-selector">
@@ -221,6 +249,8 @@ const SmokeControlPage: React.FC = () => {
 
             {showForm && (
               <form className="assessment-form" onSubmit={handleSubmitAssessment}>
+                <input ref={fileInputRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={captureEvidence} />
+                <div className="form-group"><label>Smoke evidence</label>{imagePreviewUrl ? <div className="scan-preview"><img src={imagePreviewUrl} alt="Smoke evidence preview" /><span><CheckCircle2 size={15} /> Ready for inference and watermarking</span><button type="button" onClick={clearEvidence} title="Remove image"><X size={18} /><span className="sr-only">Remove image</span></button></div> : <button type="button" className="scan-camera-target" onClick={() => fileInputRef.current?.click()} disabled={preparingImage}><Camera size={28} /><strong>{preparingImage ? 'Preparing image' : 'Capture smoke evidence'}</strong><span>Photo evidence is required</span></button>}</div>
                 <div className="form-group">
                   <label htmlFor="smoke-complaint-source">Complaint source</label>
                   <select
@@ -297,7 +327,7 @@ const SmokeControlPage: React.FC = () => {
                 <label className="form-checkbox"><input type="checkbox" checked={formData.source_confirmed} onChange={(e) => setFormData({ ...formData, source_confirmed: e.target.checked })} /> Source confirmed at the selected site</label>
                 <label className="form-checkbox"><input type="checkbox" checked={formData.follow_up_required} onChange={(e) => setFormData({ ...formData, follow_up_required: e.target.checked })} /> Follow-up required</label>
 
-                <button type="submit" className="btn btn-primary btn-block" disabled={!formData.scene_description.trim() || !formData.source_confirmed}>
+                <button type="submit" className="btn btn-primary btn-block" disabled={preparingImage || !imageBase64 || !formData.scene_description.trim() || !formData.source_confirmed}>
                   Submit Assessment
                 </button>
               </form>

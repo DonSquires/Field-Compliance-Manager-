@@ -78,8 +78,8 @@ describe('evaluateCheckpointVisit', () => {
     expect(result.withinRadius).toBe(false);
   });
 
-  it('maps checkpoint evaluation to schema-safe visit methods', () => {
-    expect(mapCheckpointVisitScanMethod({ mode: 'gps', accepted: true })).toBe('qr_camera');
+  it('maps checkpoint evaluation to truthful schema-safe visit methods', () => {
+    expect(mapCheckpointVisitScanMethod({ mode: 'gps', accepted: true })).toBe('url_deep_link');
     expect(mapCheckpointVisitScanMethod({ mode: 'manual', accepted: true })).toBe('manual_code');
     expect(mapCheckpointVisitScanMethod({ mode: 'gps', accepted: false })).toBe('url_deep_link');
   });

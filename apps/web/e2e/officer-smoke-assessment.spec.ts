@@ -22,9 +22,16 @@ test('officer smoke assessment records valid source, location, action, and follo
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
+  await page.route('**/functions/v1/capture-environmental-evidence', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload).toMatchObject({ module: 'smoke', assessment_id: 'abababab-abab-4bab-8bab-abababababab', address: '1 Civic Square, Nelson' });
+    expect(typeof payload.image_base64).toBe('string');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, classification: { classification: 'Nuisance burning' } }) });
+  });
 
   await signInAsOfficer(page, '/officer/smoke_control');
   await page.getByRole('button', { name: /New Assessment/ }).click();
+  await page.locator('input[type="file"]').setInputFiles('node_modules/leaflet/dist/images/marker-icon.png');
   await page.getByLabel('Complaint source').selectOption('council_hotline');
   await page.getByLabel('Smoke source type').selectOption('nuisance_burning');
   await page.getByLabel('Complainant address').fill('14 Harbour Road, Nelson');
@@ -35,5 +42,6 @@ test('officer smoke assessment records valid source, location, action, and follo
   await page.getByRole('button', { name: 'Submit Assessment' }).click();
 
   await expect(page.getByText('Source: nuisance_burning')).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Evidence confirmed');
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

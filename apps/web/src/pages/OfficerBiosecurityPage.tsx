@@ -6,8 +6,10 @@
  * signed-in officer's own assessments.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Camera, CheckCircle2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -26,6 +28,7 @@ interface BiosecurityAssessment {
 
 const OfficerBiosecurityPage: React.FC = () => {
   const { profile } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [assessments, setAssessments] = useState<BiosecurityAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,12 +45,17 @@ const OfficerBiosecurityPage: React.FC = () => {
     follow_up_required: false,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
+  const [evidenceNotice, setEvidenceNotice] = useState<string | null>(null);
   const actionNeedsNotice = form.action_taken === 'notice_of_direction' || form.action_taken === 'infringement_notice';
   const actionNeedsReferral = form.action_taken === 'mpi_referral';
   const canSubmit = Boolean(form.location_name.trim())
     && (form.density_estimate === 'not_found' || Boolean(form.species_name.trim()))
     && (!actionNeedsNotice || Boolean(form.notice_number.trim()))
-    && (!actionNeedsReferral || Boolean(form.mpi_referral_number.trim()));
+    && (!actionNeedsReferral || Boolean(form.mpi_referral_number.trim()))
+    && Boolean(imageBase64);
 
   // ATLAS READS: biosecurity_assessments
   const loadAssessments = useCallback(async () => {
@@ -75,6 +83,30 @@ const OfficerBiosecurityPage: React.FC = () => {
     loadAssessments();
   }, [loadAssessments]);
 
+  useEffect(() => () => { if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl); }, [imagePreviewUrl]);
+
+  const captureEvidence = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPreparingImage(true);
+    setError(null);
+    try {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(URL.createObjectURL(file));
+      setImageBase64(await imageFileToBase64(file));
+    } catch (captureError) {
+      setImagePreviewUrl(null);
+      setImageBase64(null);
+      setError(captureError instanceof Error ? captureError.message : 'Evidence photo could not be prepared.');
+    } finally { setPreparingImage(false); }
+  };
+
+  const clearEvidence = () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImagePreviewUrl(null); setImageBase64(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.id || !profile?.organizationId) return;
@@ -82,6 +114,7 @@ const OfficerBiosecurityPage: React.FC = () => {
     try {
       setSubmitting(true);
       setError(null);
+      setEvidenceNotice(null);
       // ATLAS WRITES: biosecurity_assessments
       const { data, error } = await supabase
         .from('biosecurity_assessments')
@@ -105,9 +138,16 @@ const OfficerBiosecurityPage: React.FC = () => {
         .single();
 
       if (error) throw error;
+      if (!data?.id) throw new Error('Assessment receipt was not confirmed.');
+      const { data: evidenceData, error: evidenceError } = await supabase.functions.invoke<{ classification?: { classification?: string } }>('capture-environmental-evidence', {
+        body: { module: 'biosecurity', assessment_id: data.id, image_base64: imageBase64, address: form.location_name.trim() },
+      });
       setAssessments([data as BiosecurityAssessment, ...assessments]);
       setForm({ species_name: '', density_estimate: 'scattered', action_taken: 'no_action', scene_description: '', location_name: '', protected_land_address: '', notice_number: '', mpi_referral_number: '', follow_up_required: false });
+      clearEvidence();
       setShowForm(false);
+      if (evidenceError) setError(`Assessment saved, but evidence processing was not confirmed: ${evidenceError.message}`);
+      else setEvidenceNotice(`Evidence confirmed${evidenceData?.classification?.classification ? ` · ${evidenceData.classification.classification}` : ''}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit assessment');
     } finally {
@@ -141,6 +181,7 @@ const OfficerBiosecurityPage: React.FC = () => {
           {error}
         </div>
       )}
+      {evidenceNotice && <div className="alert alert-success" role="status">{evidenceNotice}</div>}
 
       <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
         {showForm ? 'Cancel' : '+ New Assessment'}
@@ -148,6 +189,8 @@ const OfficerBiosecurityPage: React.FC = () => {
 
       {showForm && (
         <form className="assessment-form" onSubmit={handleSubmit}>
+          <input ref={fileInputRef} className="sr-only" type="file" accept="image/*" capture="environment" onChange={captureEvidence} />
+          <div className="form-group"><label>Plant or pest evidence</label>{imagePreviewUrl ? <div className="scan-preview"><img src={imagePreviewUrl} alt="Biosecurity evidence preview" /><span><CheckCircle2 size={15} /> Ready for inference and watermarking</span><button type="button" onClick={clearEvidence} title="Remove image"><X size={18} /><span className="sr-only">Remove image</span></button></div> : <button type="button" className="scan-camera-target" onClick={() => fileInputRef.current?.click()} disabled={preparingImage}><Camera size={28} /><strong>{preparingImage ? 'Preparing image' : 'Capture plant or pest'}</strong><span>Photo evidence is required</span></button>}</div>
           <div className="form-group">
             <label htmlFor="biosecurity-species">Species</label>
             <input id="biosecurity-species" type="text" required={form.density_estimate !== 'not_found'} value={form.species_name} onChange={(e) => setForm({ ...form, species_name: e.target.value })} />
@@ -209,7 +252,7 @@ const OfficerBiosecurityPage: React.FC = () => {
             <textarea id="biosecurity-scene" rows={3} value={form.scene_description} onChange={(e) => setForm({ ...form, scene_description: e.target.value })} />
           </div>
           <label className="form-checkbox"><input type="checkbox" checked={form.follow_up_required} onChange={(e) => setForm({ ...form, follow_up_required: e.target.checked })} /> Follow-up required</label>
-          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || !canSubmit}>
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting || preparingImage || !canSubmit}>
             {submitting ? 'Saving assessment' : 'Submit Assessment'}
           </button>
         </form>

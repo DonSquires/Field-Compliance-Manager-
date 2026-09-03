@@ -21,6 +21,18 @@ interface StaticPostReceipt {
   handover_recorded: boolean;
 }
 
+function requireReceipt(data: unknown, expectedAction: StaticPostReceipt['action']): StaticPostReceipt {
+  const receipt = data as Partial<StaticPostReceipt> | null;
+  if (!receipt?.reference || receipt.action !== expectedAction || !receipt.occurred_at || !receipt.gps_result || !receipt.timing_status) {
+    throw new Error('Attendance receipt was not confirmed. Your action was not recorded locally.');
+  }
+  return receipt as StaticPostReceipt;
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : (error as { message?: string }).message ?? fallback;
+}
+
 function formatDateTime(value: string | null) {
   return value ? new Date(value).toLocaleString('en-NZ', { dateStyle: 'medium', timeStyle: 'short' }) : 'Not recorded';
 }
@@ -51,7 +63,7 @@ export default function OfficerStaticGuardPage() {
       const next = data as StaticPost | null;
       setPost(next);setNotes(next?.stop.officer_notes ?? '');
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Static post could not be loaded.');
+      setError(errorMessage(loadError, 'Static post could not be loaded.'));
     } finally { setLoading(false); }
   }, []);
 
@@ -65,9 +77,9 @@ export default function OfficerStaticGuardPage() {
       pendingRequests.arrive ??= crypto.randomUUID();
       const { data, error: rpcError } = await supabase.rpc('manage_officer_static_post', { p_stop_id: post.stop.id, p_expected_status: post.stop.status, p_action: 'arrive', p_request_id: pendingRequests.arrive, p_notes: null, p_gps_lat: position.latitude, p_gps_lng: position.longitude, p_gps_accuracy_metres: position.accuracy });
       if (rpcError) throw rpcError;
-      setReceipt(data as StaticPostReceipt);pendingRequests.arrive=null;
+      setReceipt(requireReceipt(data, 'arrive'));pendingRequests.arrive=null;
       await load();
-    } catch (actionError) { setError(actionError instanceof Error ? actionError.message : 'Arrival could not be confirmed.'); }
+    } catch (actionError) { setError(errorMessage(actionError, 'Arrival could not be confirmed.')); }
     finally { setSaving(false); }
   };
 
@@ -80,9 +92,9 @@ export default function OfficerStaticGuardPage() {
       pendingRequests.depart ??= crypto.randomUUID();
       const { data, error: rpcError } = await supabase.rpc('manage_officer_static_post', { p_stop_id: post.stop.id, p_expected_status: post.stop.status, p_action: 'depart', p_request_id: pendingRequests.depart, p_notes: notes, p_gps_lat: position.latitude, p_gps_lng: position.longitude, p_gps_accuracy_metres: position.accuracy });
       if (rpcError) throw rpcError;
-      setReceipt(data as StaticPostReceipt);pendingRequests.depart=null;
+      setReceipt(requireReceipt(data, 'depart'));pendingRequests.depart=null;
       await load();
-    } catch (actionError) { setError(actionError instanceof Error ? actionError.message : 'Departure could not be confirmed.'); }
+    } catch (actionError) { setError(errorMessage(actionError, 'Departure could not be confirmed.')); }
     finally { setSaving(false); }
   };
 

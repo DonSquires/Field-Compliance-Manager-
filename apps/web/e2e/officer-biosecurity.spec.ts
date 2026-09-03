@@ -21,9 +21,16 @@ test('officer records a biosecurity assessment with source, protected-land, and 
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
+  await page.route('**/functions/v1/capture-environmental-evidence', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload).toMatchObject({ module: 'biosecurity', assessment_id: 'abababab-abab-4bab-8bab-abababababab', address: 'North boundary track' });
+    expect(typeof payload.image_base64).toBe('string');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, classification: { classification: 'Pinus contorta' } }) });
+  });
 
   await signInAsOfficer(page, '/officer/biosecurity');
   await page.getByRole('button', { name: /New Assessment/ }).click();
+  await page.locator('input[type="file"]').setInputFiles('node_modules/leaflet/dist/images/marker-icon.png');
   await page.getByLabel('Species').fill('Wilding pine');
   await page.getByLabel('Observed location').fill('North boundary track');
   await page.getByLabel('Protected land address').fill('14 Harbour Road');
@@ -35,5 +42,6 @@ test('officer records a biosecurity assessment with source, protected-land, and 
   await page.getByRole('button', { name: 'Submit Assessment' }).click();
 
   await expect(page.getByText('Wilding pine', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Evidence confirmed');
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

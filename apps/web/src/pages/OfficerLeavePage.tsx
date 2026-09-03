@@ -45,6 +45,7 @@ const OfficerLeavePage: React.FC = () => {
       const { data, error: err } = await supabase
         .from('leave_requests')
         .select('id, leave_type, starts_on, ends_on, status, reason, decision_notes, approved_at')
+          .eq('staff_id', profile.id)
         .order('starts_on', { ascending: false });
 
       if (err) throw err;
