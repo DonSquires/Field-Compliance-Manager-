@@ -282,6 +282,20 @@ These sources did not add meaningful recoverable implementation in this pass:
 | P2 | Unified evidence media spine | Court-ready evidence should not be module-specific JSON. | Schema migration guard plus process-officer-scan media write check. |
 | P2 | PTT health/UI/runtime completion | Current schema/server pieces exist but app integration is unfinished. | `ptt-server` health test plus officer/mobile PTT guard. |
 
+## Governed Module Gaps
+
+Biosecurity is not yet added to mobile. The current officer web flow writes
+`biosecurity_assessments` directly, then separately invokes
+`capture-environmental-evidence`. Atlas confirms both edges. That split would
+recreate the older bolt-on pattern in the mobile app: an assessment can succeed
+while evidence processing is unconfirmed. Before adding mobile biosecurity,
+create one idempotent governed submission command that owns the assessment
+record, evidence attachment, audit record, and partial-failure receipt together.
+The selected design, domain invariants, delivery sequence, and acceptance tests
+are in [BIOSECURITY_GOVERNED_MODULE.md](design/BIOSECURITY_GOVERNED_MODULE.md).
+Apply the same rule to other module flows that still require separate browser
+writes and evidence calls.
+
 ## Recommended Next Step
 
 Start with a focused mobile offline scan rebuild, because it uses the highest-value prototype concepts while leaning on the stronger current server contracts:
