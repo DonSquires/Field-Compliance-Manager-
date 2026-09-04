@@ -133,6 +133,12 @@ function sourceIdentity(file) {
       source_name: file.replace(/^apps\/web\/src\//, '').replace(/\.[jt]sx?$/, '').replace(/\/index$/, '')
     };
   }
+  if (file.startsWith('apps/mobile/src/')) {
+    return {
+      source_type: 'component',
+      source_name: `mobile/${file.replace(/^apps\/mobile\/src\//, '').replace(/\.[jt]sx?$/, '').replace(/\/index$/, '')}`
+    };
+  }
   return {
     source_type: 'component',
     source_name: file.replace(/^supabase\/functions\//, 'functions/').replace(/\.[jt]sx?$/, '').replace(/\/index$/, '')
@@ -297,6 +303,7 @@ function collectSqlFunctionEdges(rootDir) {
 function collectSourceEdges(rootDir, knownEntities) {
   const sourceFiles = [
     ...walkFiles(rootDir, 'apps/web/src'),
+    ...walkFiles(rootDir, 'apps/mobile/src'),
     ...walkFiles(rootDir, 'supabase/functions')
   ].filter(isSourceFile);
   const edges = new Map();
@@ -359,6 +366,7 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   const { tables, rpcs } = collectDdlEntities(rootDir);
   const repositoryFiles = [
     ...walkFiles(rootDir, 'apps/web/src'),
+    ...walkFiles(rootDir, 'apps/mobile/src'),
     ...walkFiles(rootDir, 'supabase/functions')
   ].sort();
   const edgeFunctions = new Set(
