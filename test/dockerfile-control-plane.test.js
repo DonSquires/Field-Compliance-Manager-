@@ -10,7 +10,7 @@ test('control-plane image provides locked production dependencies outside the re
   assert.match(dockerfile, /COPY package\.json package-lock\.json \.\//);
   assert.match(dockerfile, /npm ci --omit=dev/);
   assert.match(dockerfile, /ENV NODE_PATH=\/opt\/bob\/node_modules/);
-  assert.match(dockerfile, /COPY --chown=bob:bob \. \/app/);
-  assert.match(dockerfile, /USER bob/);
+  assert.match(dockerfile, /COPY --chown=node:node \. \/app/);
+  assert.match(dockerfile, /USER node/);
   assert.match(dockerfile, /CMD \["node", "\/app\/bob-control-plane-server\.js"\]/);
 });
