@@ -46,5 +46,10 @@ describe('governed staff onboarding', () => {
     expect(page).toContain("get_staff_onboarding_readiness");
     expect(page).toContain("start_staff_onboarding");
     expect(page).toContain("manage_staff_onboarding");
+    expect(page).toContain("manage_staff_onboarding_evidence");
+    expect(page).toContain("'add_skill'");
+    expect(page).toContain("'assign_line_manager'");
+    expect(page).toContain("'record_induction'");
+    expect(page).toContain("'record_document'");
   });
 });
