@@ -124,6 +124,16 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft (client_site_patrol_config); needs approval; parent-first (site must exist)',
     effect_class: 'draft_governed_write'
   },
+  propose_roster_fill: {
+    purpose: 'PROPOSE filling open DRAFT roster slots for a period. Bob ranks only work-ready staff who are available, fatigue-clear, and not already rostered. It creates a PENDING plan only; a human must approve it, may edit the resulting draft assignments, and must publish slots separately. Args: { period_start, period_end, organization_id? }.',
+    governance: 'WRITE-draft; needs approval; applies editable draft slots only; never publishes',
+    effect_class: 'draft_governed_write'
+  },
+  propose_roster_rollback: {
+    purpose: 'PROPOSE rolling back a previously applied Bob roster plan. It creates a PENDING rollback action only. A human must approve; the rollback fails closed if any assignment was edited or published after Bob applied it. Args: { plan_id, reason? }.',
+    governance: 'WRITE-draft; needs approval; unchanged draft assignments only',
+    effect_class: 'draft_governed_write'
+  },
   resolve_geofence: {
     purpose: "Resolve a place NAME or address (e.g. a named reserve or a street address) to its AUTHORITATIVE location: canonical LINZ address + point, and (by default) the LINZ parcel BOUNDARY polygon. Use this to GET THE GEOFENCE before proposing a freedom-camping zone or a site — you resolve the geometry yourself, then supply zone.boundary (polygon, preferred) or zone.gps_lat/gps_lng (point) to propose_freedom_camping_zone. Args: { query, want_polygon? (default true) }. If no polygon is found you still get the point (use it as a provisional fence). Reason over the result — confirm the resolved address is the right place before proposing.",
     governance: 'read-only; LINZ authoritative + Google-seeded; writes nothing; external queries carry ONLY the minimal search criteria the source requires (owner ruling 2026-08-19)',
@@ -547,6 +557,8 @@ const TOOL_REGISTRY = {
     propose_client_onboarding: 'bob-propose-client-onboarding',
     propose_freedom_camping_zone: 'bob-propose-freedom-camping-zone',
     propose_patrol_route_assignment: 'bob-propose-patrol-route-assignment',
+    propose_roster_fill: 'bob-propose-roster-fill',
+    propose_roster_rollback: 'bob-propose-roster-rollback',
     propose_zone_patrol_stop: 'bob-propose-zone-patrol-stop',
     propose_freedom_camping_org_strategy: 'bob-propose-freedom-camping-org-strategy',
     propose_location_setup: 'bob-propose-location-setup',

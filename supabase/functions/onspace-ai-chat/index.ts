@@ -574,6 +574,8 @@ function budgetKnowledgeCards(cards) {
     'propose_client_onboarding',
     'propose_freedom_camping_zone',
     'propose_patrol_route_assignment',
+    'propose_roster_fill',
+    'propose_roster_rollback',
     'propose_zone_patrol_stop',
     'promote_action',
     'confirm_import'
@@ -680,6 +682,8 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'propose_client_onboarding',
   'propose_freedom_camping_zone',
   'propose_patrol_route_assignment',
+  'propose_roster_fill',
+  'propose_roster_rollback',
   'propose_zone_patrol_stop',
   'propose_freedom_camping_org_strategy',
   'job_plan_create',
@@ -840,7 +844,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_roster_fill', 'propose_roster_rollback', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -4690,6 +4694,29 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
     }
   };
 }
+async function execProposeRosterFill(authHeader, caps, orgId, args) {
+  if (!caps.canPromote) return { reply: 'Roster-fill proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_fill', outcome: 'forbidden' } };
+  const periodStart = String(args.period_start ?? '').trim();
+  const periodEnd = String(args.period_end ?? '').trim();
+  if (!periodStart || !periodEnd) return { reply: 'Tell me the roster planning period start and end. I will only propose draft assignments; a human must review and publish.', meta: { tool: 'propose_roster_fill', outcome: 'need_period' } };
+  const payload = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, period_start: periodStart, period_end: periodEnd };
+  if (typeof args._idempotency_key === 'string' && args._idempotency_key) payload.idempotency_key = args._idempotency_key;
+  const result = await callFn('bob-propose-roster-fill', authHeader, payload);
+  if (!result.ok) return { reply: `I could not prepare the roster proposal (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_roster_fill', outcome: 'failed', error: result.data?.error ?? null } };
+  return { reply: `I proposed ${result.data?.assignments_proposed ?? 0} draft roster assignments. Nothing is published: approve the plan in the bell, review or edit draft slots, then publish separately.`, meta: { tool: 'propose_roster_fill', outcome: 'ok', action_id: result.data?.action_id ?? null } };
+}
+
+async function execProposeRosterRollback(authHeader, caps, args) {
+  if (!caps.canPromote) return { reply: 'Roster-plan rollback proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_rollback', outcome: 'forbidden' } };
+  const planId = String(args.plan_id ?? '').trim();
+  if (!planId) return { reply: 'Tell me the Bob roster plan ID to roll back. I will not roll back slots that a human has edited or published.', meta: { tool: 'propose_roster_rollback', outcome: 'need_plan' } };
+  const payload = { plan_id: planId, reason: typeof args.reason === 'string' ? args.reason : undefined };
+  if (typeof args._idempotency_key === 'string' && args._idempotency_key) payload.idempotency_key = args._idempotency_key;
+  const result = await callFn('bob-propose-roster-rollback', authHeader, payload);
+  if (!result.ok) return { reply: `I could not prepare the rollback proposal (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_roster_rollback', outcome: 'failed', error: result.data?.error ?? null } };
+  return { reply: 'I created a pending rollback proposal. Human approval is required, and it will fail closed for any edited or published slot.', meta: { tool: 'propose_roster_rollback', outcome: 'ok', action_id: result.data?.action_id ?? null } };
+}
+
 // Bob PROPOSES adding a site to a patrol route (client_site_patrol_config) into
 // the bell. Calls bob-propose-patrol-route-assignment. Parent-first: the site
 // must exist (site_id) or be a just-proposed create_client_site (parent_action_id);
@@ -7489,6 +7516,10 @@ serve(async (req)=>{
           return execProposeFreedomCampingZone(authHeader, caps, orgId, toolArgs);
         case 'propose_patrol_route_assignment':
           return execProposePatrolRouteAssignment(authHeader, caps, orgId, toolArgs);
+        case 'propose_roster_fill':
+          return execProposeRosterFill(authHeader, caps, orgId, toolArgs);
+        case 'propose_roster_rollback':
+          return execProposeRosterRollback(authHeader, caps, toolArgs);
         case 'propose_zone_patrol_stop':
           return execProposeZonePatrolStop(authHeader, caps, toolArgs);
         case 'propose_freedom_camping_org_strategy':
@@ -9557,6 +9588,8 @@ serve(async (req)=>{
       'propose_client_onboarding',
       'propose_freedom_camping_zone',
       'propose_patrol_route_assignment',
+      'propose_roster_fill',
+      'propose_roster_rollback',
       'propose_zone_patrol_stop',
       'resolve_geofence',
       'resolve_address',
