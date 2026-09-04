@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Deploy and verify control plane
         env:
           VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
@@ -35,6 +38,14 @@ jobs:
           if ! ssh-keygen -y -f "$key_file" >/dev/null 2>&1; then
             echo 'VPS_SSH_PRIVATE_KEY is not a valid private SSH key. Replace the GitHub secret with the complete PEM/OpenSSH private key, including BEGIN/END lines.' >&2
             exit 2
+          fi
+          # Public half of the deploy key; must be present in the VPS root authorized_keys.
+          echo 'Deploy key public half:'
+          ssh-keygen -y -f "$key_file"
+          if ! ssh -i "$key_file" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 root@72.61.123.97 true; then
+            echo 'VPS rejected the deploy key. Append the public key printed above to /root/.ssh/authorized_keys on 72.61.123.97.' >&2
+            exit 3
           fi
           tar \
             --exclude='./.git' \
