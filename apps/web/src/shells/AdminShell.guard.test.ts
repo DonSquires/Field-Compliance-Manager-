@@ -58,4 +58,14 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('return <RosterHRPage />');
     expect(source).toContain("'roster_hr': { page: 'people-hr' }");
   });
+
+  it('keeps primary navigation at the enterprise workspace level', () => {
+    expect(source).toContain("'Workspaces': [");
+    expect(source).toContain("{ id: 'crm', label: 'Commercial'");
+    expect(source).toContain("{ id: 'roster', label: 'Workforce'");
+    expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");
+    expect(source).toContain("{ id: 'reports', label: 'Reports'");
+    expect(source).not.toContain("{ id: 'testing', label: 'E2E Testing'");
+    expect(source).not.toContain("{ id: 'onboarding', label: 'Account Onboarding'");
+  });
 });

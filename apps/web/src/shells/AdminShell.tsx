@@ -151,38 +151,24 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
 };
 
 const NAVIGATION_MAP = {
-  'Core': [
+  'Workspaces': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
+    { id: 'crm', label: 'Commercial', icon: DollarSign },
     { id: 'relationships', label: 'Relationships', icon: Network },
-    { id: 'onboarding', label: 'Account Onboarding', icon: ClipboardCheck },
-    { id: 'handoffs', label: 'Activation Handoffs', icon: ClipboardCheck },
-    { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
-    { id: 'rate-rules', label: 'Rate Rules', icon: DollarSign },
-    { id: 'roster', label: 'Roster', icon: Users },
+    { id: 'roster', label: 'Workforce', icon: Users },
     { id: 'people-hr', label: 'People & HR', icon: Users },
-    { id: 'roster-targets', label: 'Work Units', icon: Route },
     { id: 'field-ops', label: 'Field Operations', icon: Radio },
     { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
-  'Config': [
+  'Configure': [
     { id: 'locations', label: 'Locations', icon: MapPin },
-    { id: 'site-360', label: 'Sites', icon: Building2 },
-    { id: 'zones', label: 'Zones', icon: MapPin },
-    { id: 'sites', label: 'Boundary Review', icon: ClipboardCheck },
-    { id: 'users', label: 'Users', icon: Users },
+    { id: 'users', label: 'People & Access', icon: Users },
     { id: 'access-control', label: 'Access Control', icon: KeyRound },
-    { id: 'org-setup', label: 'Organization Setup', icon: Settings },
     { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
-  ],
-  'System': [
-    { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
-    { id: 'test-data', label: 'Test Data', icon: Package },
   ],
   'Platform': [
     { id: 'platform', label: 'Platform Overview', icon: Shield },
     { id: 'builder', label: 'Builder', icon: Bot },
-    { id: 'platform-catalog', label: 'Module Pricing', icon: Package },
-    { id: 'platform-subscriptions', label: 'Provider Billing', icon: CreditCard },
   ],
 };
 
