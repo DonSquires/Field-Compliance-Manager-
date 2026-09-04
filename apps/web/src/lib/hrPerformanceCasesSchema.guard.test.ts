@@ -28,5 +28,9 @@ describe('private HR performance and case management', () => {
     expect(page).toContain('create_performance_review');
     expect(page).toContain('complete_performance_review');
     expect(page).toContain('manage_hr_case');
+    expect(page).toContain("action: 'review'");
+    expect(page).toContain("action: 'note'");
+    expect(page).toContain("action: 'resolve'");
+    expect(page).toContain("action: 'withdraw'");
   });
 });
