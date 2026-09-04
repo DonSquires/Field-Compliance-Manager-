@@ -32,6 +32,8 @@
 
 .crm-account-register-row:first-child { border-top: 0; }
 .crm-account-register-row.is-header { min-height: 34px; color: #87a7b5; background: #0c202b; cursor: default; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.crm-account-register-row.is-static { cursor: default; }
+.crm-account-register.is-compact .crm-account-register-row { grid-template-columns: minmax(160px, 1.3fr) minmax(160px, 1.4fr) minmax(100px, 0.8fr); }
 .crm-account-register-row:not(.is-header):hover, .crm-account-register-row.is-context-focus { background: #102b37; }
 .crm-account-register-row:not(.is-header):focus-visible { position: relative; outline: 2px solid #14c8d4; outline-offset: -2px; }
 .crm-account-register-row strong, .crm-account-register-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -45,6 +47,7 @@
 	.crm-account-register-row { grid-template-columns: minmax(0, 1fr) auto; min-height: 72px; border: 1px solid #244654; border-radius: 5px; background: #0a1b25; }
 	.crm-account-register-row > span:nth-child(2), .crm-account-register-row > span:nth-child(5) { display: none; }
 	.crm-account-register-row > span:last-child { grid-column: 1 / -1; color: #9cb5c0; }
+	.crm-account-register.is-compact .crm-account-register-row > span:nth-child(2) { display: block; }
 }
 
 .crm-page .page-header h1,

@@ -819,19 +819,21 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           Organizations subscribed via Iron Eagle (Layer-1 financial
           agreements).
         </p>
-        <div className="contacts-list">
-          {state.platformSubscribers.map((agreement) => (
-            <div key={agreement.id} className="contact-card">
-              <div className="contact-header">
-                <h3>{agreement.counterparty_name}</h3>
-                <span className="contact-type-badge">Subscriber</span>
-              </div>
-              <div className="contact-details">
-                <p>{agreement.name}</p>
-                <p className="contact-meta">{agreement.counterparty_type}</p>
-              </div>
+        <div className="crm-account-register is-compact" role="table" aria-label="Platform subscribers">
+          {state.platformSubscribers.length === 0 ? (
+            <div className="empty-state">
+              <p>No platform subscribers yet.</p>
             </div>
-          ))}
+          ) : (
+            <>
+              <div className="crm-account-register-row is-header" role="row"><span>Organization</span><span>Agreement</span><span>Type</span></div>
+              {state.platformSubscribers.map((agreement) => (
+                <div key={agreement.id} role="row" className="crm-account-register-row is-static">
+                  <strong>{agreement.counterparty_name}</strong><span>{agreement.name}</span><span>{agreement.counterparty_type}</span>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </section>
 
@@ -841,7 +843,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           Organizations linked via operational service agreements (Layer-2
           fieldwork) — not part of your branch hierarchy.
         </p>
-        <div className="contacts-list">
+        <div className="crm-account-register is-compact" role="table" aria-label="Contracted organizations">
           {state.contractedOrgs.length === 0 ? (
             <div className="empty-state">
               <p>
@@ -850,19 +852,14 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               </p>
             </div>
           ) : (
-            state.contractedOrgs.map((agreement) => (
-              <div key={agreement.id} className="contact-card">
-                <div className="contact-header">
-                  <h3>{agreement.counterparty_name}</h3>
-                  <span className="contact-type-badge">
-                    {agreement.counterparty_type}
-                  </span>
+            <>
+              <div className="crm-account-register-row is-header" role="row"><span>Organization</span><span>Agreement</span><span>Type</span></div>
+              {state.contractedOrgs.map((agreement) => (
+                <div key={agreement.id} role="row" className="crm-account-register-row is-static">
+                  <strong>{agreement.counterparty_name}</strong><span>{agreement.name}</span><span>{agreement.counterparty_type}</span>
                 </div>
-                <div className="contact-details">
-                  <p>{agreement.name}</p>
-                </div>
-              </div>
-            ))
+              ))}
+            </>
           )}
         </div>
       </section>
