@@ -160,7 +160,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     const requestedAccount = [...state.clients, ...state.branches].find((account) => account.id === requestedAccountId);
     if (!requestedAccount || openedContextAccountId.current === requestedAccountId) return;
     openedContextAccountId.current = requestedAccountId;
-    setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name });
+    setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name, status: requestedAccount.status, primaryContactName: requestedAccount.primary_contact_name, siteCount: requestedAccount.site_count, readinessBlockers: requestedAccount.blockers, nextAction: requestedAccount.next_action, latestQuoteStatus: requestedAccount.latest_quote_status });
     document.getElementById(`crm-account-${requestedAccountId}`)?.scrollIntoView({ block: 'center' });
   }, [requestedAccountId, state.branches, state.clients]);
 
@@ -766,33 +766,20 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
 
       <section className="reports-section">
         <h2>Our Clients ({state.clients.length})</h2>
-        <div className="contacts-list">
+        <div className="crm-account-register" role="table" aria-label="Client accounts">
           {state.clients.length === 0 ? (
             <div className="empty-state">
               <p>No client accounts yet.</p>
             </div>
           ) : (
-            state.clients.map((client) => (
-              <div id={`crm-account-${client.id}`} key={client.id} className={`contact-card ${client.id === requestedAccountId ? 'is-context-focus' : ''}`}>
-                <div className="contact-header">
-                  <h3>{client.name}</h3>
-                  <span className="contact-type-badge">Client</span>
-                </div>
-                <div className="contact-details">
-                  <p>{client.primary_contact_name ?? 'No primary contact'}</p>
-                  <p className="contact-meta">
-                    {client.status} ·{' '}
-                    {client.site_count} site
-                    {client.site_count === 1 ? '' : 's'}
-                  </p>
-                  <div className={`crm-readiness ${client.blockers.length ? 'is-blocked' : 'is-ready'}`}><strong>{client.next_action}</strong><span>{client.blockers.length ? `${client.blockers.length} readiness ${client.blockers.length === 1 ? 'step' : 'steps'} remaining` : 'All current readiness evidence is complete'}</span></div>
-                  <div className="crm-account-actions">
-                    <span>Quote: {client.latest_quote_status ?? 'none'}</span>
-                    <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setOrganizationDialog(client)}>Edit organization</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => setWorkspaceAccount({ id: client.id, name: client.name })}>Manage account</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => setSiteAccount({ id: client.id, name: client.name })}>Add site</button><button type="button" className="btn btn-sm btn-primary" onClick={() => openQuote(client)}>New quote</button></div>
-                  </div>
-                </div>
-              </div>
-            ))
+            <>
+              <div className="crm-account-register-row is-header" role="row"><span>Client</span><span>Primary contact</span><span>Sites</span><span>Readiness</span><span>Quote</span><span>Next action</span></div>
+              {state.clients.map((client) => (
+                <button id={`crm-account-${client.id}`} type="button" role="row" key={client.id} className={`crm-account-register-row ${client.id === requestedAccountId ? 'is-context-focus' : ''}`} onClick={() => setWorkspaceAccount({ id: client.id, name: client.name, status: client.status, primaryContactName: client.primary_contact_name, siteCount: client.site_count, readinessBlockers: client.blockers, nextAction: client.next_action, latestQuoteStatus: client.latest_quote_status })}>
+                  <strong>{client.name}</strong><span>{client.primary_contact_name ?? 'Not assigned'}</span><span>{client.site_count}</span><span className={client.blockers.length ? 'is-attention' : 'is-ready'}>{client.blockers.length ? `${client.blockers.length} open` : 'Ready'}</span><span>{client.latest_quote_status ?? 'None'}</span><span>{client.next_action}</span>
+                </button>
+              ))}
+            </>
           )}
         </div>
       </section>
@@ -977,7 +964,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         </div>
       )}
       {pricingDialog}
-      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} />}
+      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} onNavigate={onNavigate} />}
       {organizationDialog && <CrmOrganizationDialog organization={organizationDialog === 'create' ? null : organizationDialog} onClose={() => { setOrganizationDialog(null); void loadCrm(); }} onUpdated={(name) => { setOrganizationDialog(null); setNotice(`${name} organization details updated. Review its readiness steps next.`); void loadCrm(); }} onOpenAccount={(account) => { setOrganizationDialog(null); setWorkspaceAccount(account); }} />}
       {siteAccount && <CrmSiteDialog account={siteAccount} onClose={() => setSiteAccount(null)} onCreated={(site) => { setSiteAccount(null); setNotice(`${site.name} created with a provisional boundary. Operations boundary review is required before activation.`); void loadCrm(); }} />}
       {invoiceAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-invoice-action-title" onSubmit={manageInvoice}><header><div><span>Invoice lifecycle</span><h2 id="crm-invoice-action-title">{invoiceAction.action === 'send' ? 'Send invoice' : invoiceAction.action === 'mark_paid' ? 'Confirm payment' : 'Void invoice'}</h2></div><button type="button" onClick={() => setInvoiceAction(null)} aria-label="Close invoice action">×</button></header><p>{invoiceAction.invoice.invoice_number} · {invoiceAction.invoice.client?.name ?? 'Unknown account'} · {invoiceAction.invoice.currency} {Number(invoiceAction.invoice.total_amount).toFixed(2)}</p>{invoiceAction.action === 'void' && <label><span>Void reason</span><textarea required rows={4} value={invoiceReason} onChange={(event) => setInvoiceReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setInvoiceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (invoiceAction.action === 'void' && !invoiceReason.trim())}>{quoteSaving ? 'Saving' : 'Confirm action'}</button></footer></form></div>}

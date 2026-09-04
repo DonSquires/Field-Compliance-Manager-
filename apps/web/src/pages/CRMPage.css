@@ -3,6 +3,50 @@
 	border-bottom: 1px solid #244654;
 }
 
+.crm-account-register {
+	display: grid;
+	margin-top: 12px;
+	overflow: hidden;
+	border: 1px solid #244654;
+	border-radius: 6px;
+	background: #0a1b25;
+}
+
+.crm-account-register-row {
+	display: grid;
+	grid-template-columns: minmax(160px, 1.3fr) minmax(130px, 1fr) 60px 84px 90px minmax(180px, 1.4fr);
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	min-height: 48px;
+	padding: 8px 12px;
+	border: 0;
+	border-top: 1px solid #203f4c;
+	color: #b8cad4;
+	background: transparent;
+	cursor: pointer;
+	font: inherit;
+	font-size: 11px;
+	text-align: left;
+}
+
+.crm-account-register-row:first-child { border-top: 0; }
+.crm-account-register-row.is-header { min-height: 34px; color: #87a7b5; background: #0c202b; cursor: default; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.crm-account-register-row:not(.is-header):hover, .crm-account-register-row.is-context-focus { background: #102b37; }
+.crm-account-register-row:not(.is-header):focus-visible { position: relative; outline: 2px solid #14c8d4; outline-offset: -2px; }
+.crm-account-register-row strong, .crm-account-register-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-account-register-row strong { color: #e6f0f4; font-size: 12px; }
+.crm-account-register-row .is-ready { color: #83ddae; }
+.crm-account-register-row .is-attention { color: #f7d77a; }
+
+@media (max-width: 760px) {
+	.crm-account-register { gap: 8px; overflow: visible; border: 0; background: transparent; }
+	.crm-account-register-row.is-header { display: none; }
+	.crm-account-register-row { grid-template-columns: minmax(0, 1fr) auto; min-height: 72px; border: 1px solid #244654; border-radius: 5px; background: #0a1b25; }
+	.crm-account-register-row > span:nth-child(2), .crm-account-register-row > span:nth-child(5) { display: none; }
+	.crm-account-register-row > span:last-child { grid-column: 1 / -1; color: #9cb5c0; }
+}
+
 .crm-page .page-header h1,
 .crm-section-heading h2 {
 	color: #e6f0f4;
