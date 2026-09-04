@@ -7,16 +7,16 @@
 
 :root {
   /* Brand colors */
-  --color-primary-50: #f0f6ff;
-  --color-primary-100: #e0ecff;
-  --color-primary-200: #bfe1ff;
-  --color-primary-300: #9ed3ff;
-  --color-primary-400: #6eb9ff;
-  --color-primary-500: #3e96ff;
-  --color-primary-600: #2e7dd4;
-  --color-primary-700: #2463b8;
-  --color-primary-800: #1f5399;
-  --color-primary-900: #1a427d;
+  --color-primary-50: #e7fbfc;
+  --color-primary-100: #c5f3f5;
+  --color-primary-200: #8ee4e9;
+  --color-primary-300: #55d7de;
+  --color-primary-400: #2dced7;
+  --color-primary-500: #14c8d4;
+  --color-primary-600: #0ba5b8;
+  --color-primary-700: #087f93;
+  --color-primary-800: #075f70;
+  --color-primary-900: #064957;
   --color-primary: var(--color-primary-500);
 
   /* Neutral */

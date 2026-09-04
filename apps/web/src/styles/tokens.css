@@ -7,29 +7,34 @@
 
 :root {
   /* Surface Tokens (§2.1) */
-  --color-bg-base: #121212;
-  --color-bg-surface: #1E1E1E;
-  --color-bg-elevated: #2A2A2A;
+  --color-bg-base: #07131b;
+  --color-bg-surface: #0c202b;
+  --color-bg-elevated: #112c3a;
 
   /* Brand Tokens (§2.1) */
-  --color-brand-primary: #D32F2F;
-  --color-brand-hover: #B71C1C;
-  --color-accent-silver: #9E9E9E;
-  --color-accent-silver-light: #BDBDBD;
+  --color-brand-primary: #14c8d4;
+  --color-brand-hover: #0ba5b8;
+  --color-brand-cobalt: #1768d8;
+  --color-brand-gold: #f2bf3a;
+  --color-accent-silver: #9bb1bf;
+  --color-accent-silver-light: #d4e0e6;
 
   /* Text Tokens (§2.1) */
-  --color-text-primary: #FFFFFF;
-  --color-text-secondary: #E0E0E0;
+  --color-text-primary: #f5f9fb;
+  --color-text-secondary: #b8cad4;
 
   /* Status Scale Tokens (§2.2) */
-  --color-status-normal: #4CAF50;
-  --color-status-watch: #FFC107;
-  --color-status-action: #FF9800;
-  --color-status-critical: #C62828;
+  --color-status-normal: #4cc38a;
+  --color-status-watch: #f2bf3a;
+  --color-status-action: #ef9b37;
+  --color-status-critical: #d85050;
 
   /* Reserved Tokens (§2.3) */
-  --color-critical-alert: #C62828;
-  --color-critical-border: #EF5350;
+  --color-critical-alert: #d85050;
+  --color-critical-border: #f08080;
+
+  --font-sans: 'IBM Plex Sans', 'Aptos', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Cascadia Code', monospace;
 
   /* Touch Targets (§2.7) */
   --touch-target-officer: 44px;
