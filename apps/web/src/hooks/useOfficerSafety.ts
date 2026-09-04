@@ -230,39 +230,31 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
       if (activeAlertRef.current) return false; // duplicate-fire guard
       setWriteStatus('pending');
       const pos = lastPositionRef.current;
-      const nowIso = new Date().toISOString();
-      const { data, error } = await supabase
-        .from('welfare_alerts')
-        .insert({
-          officer_user_id: officerId,
-          organization_id: organizationId,
-          alert_type: kind === 'sos' ? 'sos' : kind === 'timeout' ? 'man_down' : kind === 'motion' ? 'man_down' : kind,
-          status: 'pending',
-          triggered_at: nowIso,
-          gps_lat: pos?.lat ?? null,
-          gps_lng: pos?.lng ?? null,
-          last_activity_at: nowIso,
-          escalation_level: 1,
-          notes:
-            kind === 'sos'
-              ? 'SOS triggered by officer'
-              : kind === 'timeout'
-                ? 'Missed check-in: no check-in received within the expected interval'
-                : kind === 'motion'
-                  ? 'GPS-stationary: no movement detected'
-                  : kind === 'gps_lost'
-                    ? 'No GPS fix received within the inactivity threshold'
-                    : 'No officer movement within the inactivity threshold',
-        })
-        .select('id')
-        .single();
-
-      if (error || !data) {
+      const alertType = kind === 'sos' ? 'sos' : kind === 'timeout' ? 'man_down' : kind === 'motion' ? 'man_down' : kind;
+      const notes =
+        kind === 'sos'
+          ? 'SOS triggered by officer'
+          : kind === 'timeout'
+            ? 'Missed check-in: no check-in received within the expected interval'
+            : kind === 'motion'
+              ? 'GPS-stationary: no movement detected'
+              : kind === 'gps_lost'
+                ? 'No GPS fix received within the inactivity threshold'
+                : 'No officer movement within the inactivity threshold';
+      const { data, error } = await supabase.rpc('raise_officer_welfare_alert', {
+        p_client_request_id: crypto.randomUUID(),
+        p_alert_type: alertType,
+        p_gps_lat: pos?.lat ?? null,
+        p_gps_lng: pos?.lng ?? null,
+        p_notes: notes,
+      });
+      const receipt = Array.isArray(data) ? data[0] : data;
+      if (error || !receipt) {
         setWriteStatus('error');
         setLastError(error?.message ?? 'Alert could not be recorded');
         return false;
       }
-      setActiveAlert({ id: data.id, kind, triggeredAt: new Date() });
+      setActiveAlert({ id: receipt.alert_id, kind, triggeredAt: new Date(receipt.triggered_at) });
       setStatus('alerting');
       setWriteStatus('idle');
       setLastError(null);
@@ -274,36 +266,18 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
   const checkIn = useCallback(async () => {
     if (!officerId || !organizationId) return false;
     setWriteStatus('pending');
-    const now = new Date();
     const gps = await getGps();
 
-    const { error: checkinError } = await supabase.from('welfare_checks').insert({
-      organization_id: organizationId,
-      officer_user_id: officerId,
-      status: 'ok',
-      gps_lat: gps?.lat ?? null,
-      gps_lng: gps?.lng ?? null,
-      checked_in_at: now.toISOString(),
-      notes: 'Officer self check-in',
+    const { data, error: checkinError } = await supabase.rpc('record_officer_welfare_checkin', {
+      p_client_request_id: crypto.randomUUID(),
+      p_gps_lat: gps?.lat ?? null,
+      p_gps_lng: gps?.lng ?? null,
+      p_notes: 'Officer self check-in',
     });
-    if (checkinError) {
+    const receipt = Array.isArray(data) ? data[0] : data;
+    if (checkinError || !receipt) {
       setWriteStatus('error');
-      setLastError(checkinError.message);
-      return false;
-    }
-
-    const { error: settingsError } = await supabase.from('officer_welfare_settings').upsert(
-      {
-        organization_id: organizationId,
-        officer_user_id: officerId,
-        check_interval_minutes: checkinIntervalMinutes,
-        last_checkin_at: now.toISOString(),
-      },
-      { onConflict: 'officer_user_id,organization_id' },
-    );
-    if (settingsError) {
-      setWriteStatus('error');
-      setLastError(settingsError.message);
+      setLastError(checkinError?.message ?? 'Check-in could not be recorded');
       return false;
     }
 
@@ -331,12 +305,12 @@ export function useOfficerSafety(options: UseOfficerSafetyOptions): UseOfficerSa
       setActiveAlert(null);
     }
 
-    lastCheckinRef.current = now;
+    lastCheckinRef.current = new Date(receipt.checked_in_at);
     setStatus('ok');
     setWriteStatus('idle');
     setLastError(null);
     return true;
-  }, [officerId, organizationId, checkinIntervalMinutes, getGps]);
+  }, [officerId, organizationId, getGps]);
 
   const triggerSOS = useCallback(async () => fireAlert('sos'), [fireAlert]);
 

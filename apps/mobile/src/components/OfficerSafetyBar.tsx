@@ -56,7 +56,7 @@ export function OfficerSafetyBar({ officerId, organizationId, shiftId }: Props) 
     if (!organizationId) { Alert.alert('Safety unavailable', 'Your organization context is not available.'); return; }
     setPending('checkin');
     try {
-      await recordMobileCheckIn({ organizationId, officerId, coordinates: await getCoordinates() });
+      await recordMobileCheckIn({ coordinates: await getCoordinates(), shiftId });
       setStatus(`Checked in at ${new Date().toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}`);
     } catch (error) {
       Alert.alert('Check-in not confirmed', error instanceof Error ? error.message : 'Retry your check-in.');
@@ -75,7 +75,7 @@ export function OfficerSafetyBar({ officerId, organizationId, shiftId }: Props) 
     if (!organizationId) return;
     setPending('sos');
     try {
-      await triggerMobileSos({ organizationId, officerId, coordinates: await getCoordinates() });
+      await triggerMobileSos({ coordinates: await getCoordinates(), shiftId });
       setStatus('SOS confirmed. Supervisors have been alerted.');
     } catch (error) {
       Alert.alert('SOS not confirmed', error instanceof Error ? error.message : 'Retry SOS or use your emergency procedure.');

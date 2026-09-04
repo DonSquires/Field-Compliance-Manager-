@@ -6,12 +6,13 @@ const test = require('node:test');
 const safety = readFileSync(resolve(__dirname, '../apps/mobile/src/lib/officerSafety.ts'), 'utf8');
 const bar = readFileSync(resolve(__dirname, '../apps/mobile/src/components/OfficerSafetyBar.tsx'), 'utf8');
 
-test('mobile welfare writes use canonical tables and check every response', () => {
-  assert.match(safety, /from\('welfare_checks'\)\.insert/);
-  assert.match(safety, /from\('officer_welfare_settings'\)\.upsert/);
-  assert.match(safety, /from\('welfare_alerts'\)\.insert/);
-  assert.match(safety, /if \(checkInError\) throw checkInError/);
-  assert.match(safety, /if \(settingsError\) throw settingsError/);
+test('mobile welfare writes go through governed RPCs and check every response', () => {
+  assert.match(safety, /supabase\.rpc\('record_officer_welfare_checkin'/);
+  assert.match(safety, /supabase\.rpc\('raise_officer_sos'/);
+  assert.match(safety, /p_client_request_id: crypto\.randomUUID\(\)/);
+  assert.doesNotMatch(safety, /from\('welfare_checks'\)/);
+  assert.doesNotMatch(safety, /from\('officer_welfare_settings'\)/);
+  assert.doesNotMatch(safety, /from\('welfare_alerts'\)/);
   assert.match(safety, /if \(error\) throw error/);
 });
 

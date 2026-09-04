@@ -17,6 +17,14 @@ function mockTable(handlers: Record<string, (...args: unknown[]) => unknown>) {
   });
 }
 
+function mockRpc(handlers: Record<string, (params: unknown) => { data: unknown; error: unknown }>) {
+  (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockImplementation((fn: string, params: unknown) => {
+    const impl = handlers[fn];
+    if (!impl) throw new Error(`No mock configured for rpc "${fn}"`);
+    return Promise.resolve(impl(params));
+  });
+}
+
 function baseOptions(overrides: Partial<Parameters<typeof useOfficerSafety>[0]> = {}) {
   return {
     officerId: 'officer-1',
@@ -53,15 +61,8 @@ describe('useOfficerSafety', () => {
     vi.useRealTimers();
   });
   it('never resolves an active alert from recordMovement alone — the core P0 fix', async () => {
-    mockTable({
-      welfare_alerts: () => ({
-        insert: () => ({
-          select: () => ({
-            single: () => Promise.resolve({ data: { id: 'alert-1' }, error: null }),
-          }),
-        }),
-        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'acknowledged' }, error: null }) }) }),
-      }),
+    mockRpc({
+      raise_officer_welfare_alert: () => ({ data: [{ alert_id: 'alert-1', triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
 
@@ -109,14 +110,12 @@ describe('useOfficerSafety', () => {
   });
 
   it('does not clear the active alert if the resolve write fails', async () => {
-    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: null, error: { message: 'network error' } });
+    mockRpc({
+      raise_officer_welfare_alert: () => ({ data: [{ alert_id: 'alert-3', triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null }),
+      manage_welfare_alert: () => ({ data: null, error: { message: 'network error' } }),
+    });
     mockTable({
       welfare_alerts: () => ({
-        insert: () => ({
-          select: () => ({
-            single: () => Promise.resolve({ data: { id: 'alert-3' }, error: null }),
-          }),
-        }),
         select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
       }),
     });
@@ -134,15 +133,8 @@ describe('useOfficerSafety', () => {
   });
 
   it('triggerSOS surfaces a write failure instead of silently appearing to succeed', async () => {
-    mockTable({
-      welfare_alerts: () => ({
-        insert: () => ({
-          select: () => ({
-            single: () => Promise.resolve({ data: null, error: { message: 'insert failed' } }),
-          }),
-        }),
-        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
-      }),
+    mockRpc({
+      raise_officer_welfare_alert: () => ({ data: null, error: { message: 'insert failed' } }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
     await act(async () => {
@@ -154,28 +146,19 @@ describe('useOfficerSafety', () => {
     expect(result.current.lastError).toMatch(/insert failed/);
   });
 
-  it('checkIn checks errors on both writes and only clears an active alert on full success', async () => {
-    let checksInsertCalled = false;
-    let settingsUpsertCalled = false;
-    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [{ alert_id: 'alert-4', alert_status: 'resolved' }], error: null });
+  it('checkIn checks the check-in write and only clears an active alert on full success', async () => {
+    let checkinRpcCalled = false;
+    mockRpc({
+      raise_officer_welfare_alert: () => ({ data: [{ alert_id: 'alert-4', triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null }),
+      record_officer_welfare_checkin: () => {
+        checkinRpcCalled = true;
+        return { data: [{ check_id: 'check-1', checked_in_at: '2026-09-01T08:05:00.000Z', created: true }], error: null };
+      },
+      manage_welfare_alert: () => ({ data: [{ alert_id: 'alert-4', alert_status: 'resolved' }], error: null }),
+    });
     mockTable({
       welfare_alerts: () => ({
-        insert: () => ({
-          select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-4' }, error: null }) }),
-        }),
         select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
-      }),
-      welfare_checks: () => ({
-        insert: () => {
-          checksInsertCalled = true;
-          return Promise.resolve({ error: null });
-        },
-      }),
-      officer_welfare_settings: () => ({
-        upsert: () => {
-          settingsUpsertCalled = true;
-          return Promise.resolve({ error: null });
-        },
       }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
@@ -187,29 +170,21 @@ describe('useOfficerSafety', () => {
       const ok = await result.current.checkIn();
       expect(ok).toBe(true);
     });
-    expect(checksInsertCalled).toBe(true);
-    expect(settingsUpsertCalled).toBe(true);
+    expect(checkinRpcCalled).toBe(true);
     expect(supabase.rpc).toHaveBeenCalledWith('manage_welfare_alert', expect.objectContaining({ p_alert_id: 'alert-4', p_action: 'resolve' }));
     expect(result.current.activeAlert).toBeNull();
     expect(result.current.status).toBe('ok');
   });
 
   it('checkIn keeps an active alert when its resolution write fails', async () => {
-    (supabase.rpc as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: null, error: { message: 'alert update failed' } });
+    mockRpc({
+      raise_officer_welfare_alert: () => ({ data: [{ alert_id: 'alert-4b', triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null }),
+      record_officer_welfare_checkin: () => ({ data: [{ check_id: 'check-2', checked_in_at: '2026-09-01T08:05:00.000Z', created: true }], error: null }),
+      manage_welfare_alert: () => ({ data: null, error: { message: 'alert update failed' } }),
+    });
     mockTable({
       welfare_alerts: () => ({
-        insert: () => ({
-          select: () => ({
-            single: () => Promise.resolve({ data: { id: 'alert-4b' }, error: null }),
-          }),
-        }),
         select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'pending' }, error: null }) }) }),
-      }),
-      welfare_checks: () => ({
-        insert: () => Promise.resolve({ error: null }),
-      }),
-      officer_welfare_settings: () => ({
-        upsert: () => Promise.resolve({ error: null }),
       }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
@@ -227,11 +202,9 @@ describe('useOfficerSafety', () => {
     expect(result.current.lastError).toMatch(/alert update failed/);
   });
 
-  it('checkIn fails visibly (does not silently succeed) when the check-in insert errors', async () => {
-    mockTable({
-      welfare_checks: () => ({
-        insert: () => Promise.resolve({ error: { message: 'rls denied' } }),
-      }),
+  it('checkIn fails visibly (does not silently succeed) when the check-in write errors', async () => {
+    mockRpc({
+      record_officer_welfare_checkin: () => ({ data: null, error: { message: 'rls denied' } }),
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
     await act(async () => {
@@ -261,14 +234,12 @@ describe('useOfficerSafety', () => {
   });
 
   it('duplicate-fire guard: a second trigger while an alert is already active does not fire again', async () => {
-    let insertCallCount = 0;
-    mockTable({
-      welfare_alerts: () => ({
-        insert: () => {
-          insertCallCount += 1;
-          return { select: () => ({ single: () => Promise.resolve({ data: { id: `alert-${insertCallCount}` }, error: null }) }) };
-        },
-      }),
+    let rpcCallCount = 0;
+    mockRpc({
+      raise_officer_welfare_alert: () => {
+        rpcCallCount += 1;
+        return { data: [{ alert_id: `alert-${rpcCallCount}`, triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null };
+      },
     });
     const { result } = renderHook(() => useOfficerSafety(baseOptions()));
     await act(async () => {
@@ -278,20 +249,18 @@ describe('useOfficerSafety', () => {
       const ok = await result.current.triggerSOS();
       expect(ok).toBe(false);
     });
-    expect(insertCallCount).toBe(1);
+    expect(rpcCallCount).toBe(1);
   });
 
   it('gps_lost fires automatically when no GPS fix arrives within the inactivity threshold', async () => {
     vi.useFakeTimers();
     try {
       let insertedType: string | undefined;
-      mockTable({
-        welfare_alerts: () => ({
-          insert: (payload: { alert_type: string }) => {
-            insertedType = payload.alert_type;
-            return { select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-gl' }, error: null }) }) };
-          },
-        }),
+      mockRpc({
+        raise_officer_welfare_alert: (params: unknown) => {
+          insertedType = (params as { p_alert_type: string }).p_alert_type;
+          return { data: [{ alert_id: 'alert-gl', triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null };
+        },
       });
       const { result } = renderHook(() =>
         useOfficerSafety(baseOptions({ stationaryMinutes: 1000, inactivityMinutes: 0.2 })),
@@ -316,13 +285,11 @@ describe('useOfficerSafety', () => {
     vi.useFakeTimers();
     try {
       let insertedType: string | undefined;
-      mockTable({
-        welfare_alerts: () => ({
-          insert: (payload: { alert_type: string }) => {
-            insertedType = payload.alert_type;
-            return { select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-ia' }, error: null }) }) };
-          },
-        }),
+      mockRpc({
+        raise_officer_welfare_alert: (params: unknown) => {
+          insertedType = (params as { p_alert_type: string }).p_alert_type;
+          return { data: [{ alert_id: 'alert-ia', triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null };
+        },
       });
       const { result } = renderHook(() =>
         useOfficerSafety(baseOptions({ stationaryMinutes: 1000, inactivityMinutes: 0.2 })),
@@ -349,12 +316,8 @@ describe('useOfficerSafety', () => {
   it('recordMovement below MOVEMENT_THRESHOLD_M does not reset the stationary timer (fixes the original unused-threshold bug)', async () => {
     vi.useFakeTimers();
     try {
-      mockTable({
-        welfare_alerts: () => ({
-          insert: () => ({
-            select: () => ({ single: () => Promise.resolve({ data: { id: 'alert-mv' }, error: null }) }),
-          }),
-        }),
+      mockRpc({
+        raise_officer_welfare_alert: () => ({ data: [{ alert_id: 'alert-mv', triggered_at: '2026-09-01T08:00:00.000Z', created: true }], error: null }),
       });
       const { result } = renderHook(() =>
         useOfficerSafety(baseOptions({ stationaryMinutes: 0.2, inactivityMinutes: 1000 })),

@@ -6,10 +6,12 @@
  * that must never regress silently:
  *
  *   1. Escalation timing (L1→L2→L3) stays server-authoritative, owned by
- *      the `welfare-escalation-tick` edge function. The client may set
- *      `escalation_level: 1` on the initial alert insert only — it must
- *      never write `escalation_level` again, and must never write
- *      `escalated_at` at all.
+ *      the `welfare-escalation-tick` edge function. Alert-raising is itself
+ *      now governed by the `raise_officer_welfare_alert` RPC
+ *      (supabase/migrations/20260904250000_govern_officer_welfare_alerts.sql),
+ *      which owns `escalation_level: 1` on the initial insert server-side.
+ *      The client must never reference `escalation_level` or `escalated_at`
+ *      at all — it has no direct write path to either table anymore.
  *   2. The P0 fix itself: recordMovement must never be able to clear an
  *      active alert. This guard is not present in the original test (its
  *      scope was escalation ownership only, not resolve-on-movement) but is
@@ -41,10 +43,16 @@ describe('useOfficerSafety — server-authoritative escalation guard', () => {
     expect(executableSource).not.toContain('escalated_at');
   });
 
-  it('only references escalation_level once, on the initial insert', () => {
-    const refs = executableSource.split('\n').filter((line) => line.includes('escalation_level'));
-    expect(refs).toHaveLength(1);
-    expect(refs[0].trim()).toMatch(/escalation_level:\s*1,?$/);
+  it('never references escalation_level — alert-raising and its escalation_level are owned by the raise_officer_welfare_alert RPC', () => {
+    expect(executableSource).not.toContain('escalation_level');
+  });
+
+  it('raises alerts and check-ins only through the governed RPCs, never direct table writes', () => {
+    expect(executableSource).toContain("supabase.rpc('raise_officer_welfare_alert'");
+    expect(executableSource).toContain("supabase.rpc('record_officer_welfare_checkin'");
+    expect(executableSource).not.toMatch(/from\('welfare_alerts'\)[\s\S]*?\.insert/);
+    expect(executableSource).not.toMatch(/from\('welfare_checks'\)[\s\S]*?\.insert/);
+    expect(executableSource).not.toMatch(/from\('officer_welfare_settings'\)[\s\S]*?\.upsert/);
   });
 
   it('still contains GPS movement detection (haversineMetres, MOVEMENT_THRESHOLD_M)', () => {
