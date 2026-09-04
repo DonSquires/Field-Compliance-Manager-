@@ -3256,13 +3256,19 @@ async function execSchemaInspect(authHeader, args) {
       outcome: 'failed'
     }
   };
-  const lines = (r.data.tables ?? []).slice(0, 40).map((t)=>{
+  const tableRows = Array.isArray(r.data.tables) ? r.data.tables : [];
+  const shownTables = tableRows.slice(0, 60);
+  const lines = shownTables.map((t)=>{
     const cols = (t.columns ?? []).map((c)=>`${c.name}${c.nullable ? '' : ' required'} (${c.data_type})`).join(', ');
     const fks = wantRels && Array.isArray(t.foreign_keys) && t.foreign_keys.length ? `\nFKs: ${t.foreign_keys.map((f)=>`${f.column} -> ${f.references_table}.${f.references_column}`).join(', ')}` : '';
     return `### ${t.table}\n${cols}${fks}`;
   }).join('\n\n');
+  const totalTables = r.data.table_count ?? tableRows.length;
+  const continuation = totalTables > shownTables.length
+    ? ` ${totalTables - shownTables.length} further table(s) remain. Use query_atlas capability_map with pagination to obtain their names, then inspect them in explicit batches of up to 60.`
+    : '';
   return {
-    reply: `Schema (read-only):\n\n${lines || '(no tables matched)'}`,
+    reply: `Schema (read-only, ${shownTables.length} of ${totalTables} table(s)):${continuation}\n\n${lines || '(no tables matched)'}`,
     meta: {
       tool: 'schema_inspect',
       outcome: 'ok',
