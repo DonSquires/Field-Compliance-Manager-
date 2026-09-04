@@ -13,6 +13,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/UserManagementPage.tsx',
   'apps/web/src/pages/AccessControlPage.tsx',
   'apps/web/src/pages/CRMPage.tsx',
+  'apps/web/src/pages/RateRulesPage.tsx',
   'apps/web/src/pages/SiteBoundaryReviewPage.tsx',
   'apps/web/src/pages/AccountOnboardingPage.tsx',
   'apps/web/src/pages/ActivationHandoffsPage.tsx',

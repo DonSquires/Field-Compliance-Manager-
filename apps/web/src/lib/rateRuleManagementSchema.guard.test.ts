@@ -17,6 +17,8 @@ describe('governed rate rule management', () => {
   });
   it('exposes create and activate/deactivate only through the governed RPC', () => {
     expect(page).toContain("supabase.rpc('manage_rate_rule'");
+    expect(page).toContain("supabase.rpc('resolve_dispatch_job_pay_lines'");
+    expect(page).toContain('Completed Jobs Awaiting Rate Resolution');
     expect(page).not.toContain(".from('rate_rules').insert");
     expect(page).not.toContain(".from('rate_rules').update");
   });
