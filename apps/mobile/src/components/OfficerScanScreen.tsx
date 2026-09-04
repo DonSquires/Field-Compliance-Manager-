@@ -23,6 +23,7 @@ import { OfficerTimesheetPanel } from './OfficerTimesheetPanel';
 import { OfficerCheckpointScanner } from './OfficerCheckpointScanner';
 import { OfficerCredentialsPanel } from './OfficerCredentialsPanel';
 import { OfficerDebriefPanel } from './OfficerDebriefPanel';
+import { OfficerShiftClockPanel } from './OfficerShiftClockPanel';
 import { NotificationInbox } from './NotificationInbox';
 import { OfficerStopPanel } from './OfficerStopPanel';
 import { OfficerVehicleLookup } from './OfficerVehicleLookup';
@@ -95,6 +96,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <View style={styles.header}><View><Text style={styles.eyebrow}>Field operations</Text><Text style={styles.title}>Vehicle scan</Text></View><Pressable onPress={onSignOut} style={styles.secondary}><Text style={styles.secondaryText}>Sign out</Text></Pressable></View>
     <OfficerSafetyBar officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
     <NotificationInbox organizationId={organizationId} userId={officerId} />
+    <OfficerShiftClockPanel shiftId={shiftId} shiftStatus={shiftStatus} />
     <OfficerDispatchPanel shiftId={shiftId} />
     <OfficerStopPanel shiftId={shiftId} />
     <OfficerCheckpointScanner officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
