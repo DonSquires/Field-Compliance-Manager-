@@ -53,7 +53,10 @@
  *   The live conductor (index.ts) calls these at the enforcement seam.
  *
  * Ref: #342, #341, #340, docs/enforcement-architecture.md §6, §9, §12.
- */ // ── Inline type mirrors ─────────────────────────────────────────────────────
+ */
+import { buildOracleTurnTruthState as buildGenericOracleTurnTruthState } from './conductor-oracle.ts';
+
+// ── Inline type mirrors ─────────────────────────────────────────────────────
 // Deno edge functions use remote https imports and cannot resolve workspace
 // packages. These types mirror packages/shared/src/welfareSafetySignal.ts
 // exactly. The canonical definitions live there; these are runtime mirrors.
@@ -269,21 +272,18 @@ function buildWelfareSafetyAuditRecord(input) {
  *
  * PURE function — no I/O.
  */ export function buildOracleTurnTruthState(input) {
-  return {
+  const base = buildGenericOracleTurnTruthState({
     explicit_hold: input.explicit_hold,
     effect_class: input.effect_class,
-    turn_scope: input.turn_scope ?? null,
-    proof_grade: normalizeProofGrade(input.proof_grade),
+    turn_scope: input.turn_scope,
+    proof_grade: ['observed', 'inferred', 'alleged', 'determined'].includes(input.proof_grade)
+      ? input.proof_grade
+      : 'inferred'
+  });
+  return {
+    ...base,
     welfare: input.welfare_context ? resolveWelfareTruthState(input.welfare_context) : null
   };
-}
-function normalizeProofGrade(value) {
-  return [
-    'observed',
-    'inferred',
-    'alleged',
-    'determined'
-  ].includes(value) ? value : 'inferred';
 }
 // ── Safety-signal candidate construction ─────────────────────────────────────
 /**
