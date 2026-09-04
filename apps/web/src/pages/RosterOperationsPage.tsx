@@ -19,6 +19,7 @@ interface Leave { staff_id: string; starts_on: string; ends_on: string; }
 interface Availability { staff_id: string; day_of_week: number | null; specific_date: string | null; available_from: string | null; available_to: string | null; all_day: boolean; availability_type: string; }
 interface Coverage { id: string; shift_date: string; }
 interface CommercialReadiness { slot_id: string; pay_status: string; billing_status: string; quote_status: string; geofence_status: string; cost_centre_status: string; }
+interface LabourCost { slot_id: string; work_unit_name: string; scheduled_hours: number; pay_cost: number; billable: number; margin: number; rate_status: string; }
 type ReadinessFilter = 'all' | 'ready' | 'risk';
 
 const startOfWeek = (date: Date) => { const value = new Date(date); value.setDate(value.getDate() - ((value.getDay() + 6) % 7)); value.setHours(0, 0, 0, 0); return value; };
@@ -42,6 +43,7 @@ const RosterOperationsPage: React.FC = () => {
   const [availability, setAvailability] = useState<Availability[]>([]);
   const [coverage, setCoverage] = useState<Coverage[]>([]);
   const [commercialReadiness, setCommercialReadiness] = useState<CommercialReadiness[]>([]);
+  const [labourCost, setLabourCost] = useState<LabourCost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -53,6 +55,7 @@ const RosterOperationsPage: React.FC = () => {
   const [slotReason, setSlotReason] = useState('');
   const [replacementStaffId, setReplacementStaffId] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [editingSlot, setEditingSlot] = useState<RosterSlot | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ officerId: '', workUnitId: '', start: '', end: '', notes: '', publish: true });
 
@@ -76,8 +79,9 @@ const RosterOperationsPage: React.FC = () => {
       supabase.from('shift_coverage_requests').select('id,shift_date').eq('organization_id', org).eq('status', 'open').gte('shift_date', isoDate(weekStart)).lt('shift_date', isoDate(weekEnd)),
       supabase.from('organization_calendar_settings').select('region_code').eq('organization_id', org),
       supabase.rpc('get_roster_commercial_readiness', { p_organization_id: org, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
+      supabase.rpc('get_roster_labour_cost', { p_organization_id: org, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
     ]);
-    const [usersRes, staffRes, credentialRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes] = responses;
+    const [usersRes, staffRes, credentialRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes, labourRes] = responses;
     const failures = responses.filter((response) => response.error).map((response) => response.error?.message);
     if (failures.length) setError(failures.join(' · '));
     const staffRows = (staffRes.data ?? []) as Array<{ id: string; user_id: string | null; employment_type: string | null; work_ready: boolean }>;
@@ -91,7 +95,7 @@ const RosterOperationsPage: React.FC = () => {
       else if (ownCredentials.some((credential) => credential.expiry_date && new Date(credential.expiry_date).getTime() - now < 30 * 86_400_000)) credentialRisk = 'expiring';
       return { id: user.id, staffId, name: user.display_name || user.email || 'Unnamed staff', workReady: Boolean(employment?.work_ready), employmentType: employment?.employment_type ?? null, credentialRisk };
     }));
-    setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLoading(false);
+    setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setLoading(false);
   }, [profile?.organizationId, weekEnd, weekStart]);
   useEffect(() => { void load(); }, [load]);
   const syncOfficerResponses = useCallback(async () => {
@@ -119,6 +123,14 @@ const RosterOperationsPage: React.FC = () => {
   const requestedWorkUnit = workUnits.find((unit) => unit.id === workflowContext.workUnitId) ?? null;
   const riskCount = staff.filter((person) => !person.workReady || person.credentialRisk !== 'clear').length;
   const totalHours = [...shifts, ...slots.filter((slot) => !slot.linked_shift_id)].reduce((sum, item) => sum + Math.max(0, (new Date(item.scheduled_end).getTime() - new Date(item.scheduled_start).getTime()) / 3_600_000), 0);
+  const labourCostTotals = labourCost.reduce(
+    (acc, row) => ({
+      pay: acc.pay + Number(row.pay_cost ?? 0),
+      margin: acc.margin + Number(row.margin ?? 0),
+      unpriced: acc.unpriced + (row.rate_status === 'resolved' ? 0 : 1),
+    }),
+    { pay: 0, margin: 0, unpriced: 0 },
+  );
   const restrictionsForDay = (staffId: string, day: Date) => availability.filter((record) => record.staff_id === staffId && (record.specific_date === isoDate(day) || (record.specific_date === null && record.day_of_week === ((day.getDay() + 6) % 7) + 1)));
   const availabilityOccurrences = days.flatMap((day) => staff.flatMap((person) => restrictionsForDay(person.staffId, day).map((record) => ({ day, person, record }))));
   const commercialExceptions = commercialReadiness.filter((item) => [item.pay_status, item.billing_status, item.quote_status, item.geofence_status, item.cost_centre_status].some((status) => !['ready', 'accepted', 'verified', 'not_applicable'].includes(status)));
@@ -137,11 +149,53 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const openCreate = (person?: Staff, day?: Date) => {
+    if (selectedSlot?.status === 'draft') {
+      openEdit(selectedSlot);
+      return;
+    }
     const start = day ? new Date(day) : new Date(); start.setHours(8, 0, 0, 0); const end = new Date(start); end.setHours(16, 0, 0, 0);
     setForm({ officerId: person?.id ?? '', workUnitId: requestedWorkUnit?.id ?? workUnits[0]?.id ?? '', start: localInput(start), end: localInput(end), notes: '', publish: true }); setShowCreate(true);
   };
 
+  const openEdit = (slot: RosterSlot) => {
+    const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
+      setEditingSlot(slot); 
+    setForm({
+      officerId: staffMember?.id ?? '',
+      workUnitId: slot.work_unit_id,
+      start: localInput(new Date(slot.scheduled_start)),
+      end: localInput(new Date(slot.scheduled_end)),
+      notes: slot.notes ?? '',
+      publish: false,
+    });
+    setSelectedSlotId(null);
+    setShowCreate(true);
+  };
+
+  const updateDraft = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingSlot) return;
+    setSaving(true); setError(null); setNotice(null);
+    const person = staff.find((candidate) => candidate.id === form.officerId);
+    if (!person) { setError('A work-ready staff member is required.'); setSaving(false); return; }
+    const { error: updateError } = await supabase.rpc('update_roster_slot', {
+      p_slot_id: editingSlot.id,
+      p_expected_status: editingSlot.status,
+      p_staff_id: person.staffId,
+      p_scheduled_start: new Date(form.start).toISOString(),
+      p_scheduled_end: new Date(form.end).toISOString(),
+      p_notes: form.notes.trim() || null,
+    });
+    if (updateError) setError(updateError.message);
+    else { setNotice('Draft roster slot updated. Review it before publishing.'); setEditingSlot(null); setShowCreate(false); await load(); }
+    setSaving(false);
+  };
+
   const createAssignment = async (event: React.FormEvent) => {
+    if (editingSlot) {
+      await updateDraft(event);
+      return;
+    }
     event.preventDefault(); setSaving(true); setError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId); const unit = workUnits.find((candidate) => candidate.id === form.workUnitId);
     if (person && hasAvailabilityConflict(person.staffId, form.start, form.end)) { setError(`${person.name} is unavailable during the selected assignment time.`); setSaving(false); return; }
@@ -236,7 +290,7 @@ const RosterOperationsPage: React.FC = () => {
     <header className="roster-ops-header"><div><span>Workforce operations</span><h1>Roster</h1><p>Live field shifts, workforce constraints, and public holidays across selectable planning horizons.</p></div><div><button onClick={() => void load()} disabled={loading} title="Refresh roster"><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /></button><button onClick={() => void generateFromTemplates()} disabled={saving} title="Generate draft slots from templates">From templates</button><button onClick={() => void batchPublishPeriod()} disabled={saving} title="Publish all draft slots in current period">Publish period</button><button onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button><button className="is-primary" onClick={() => openCreate()}><Plus size={16} />Create shift</button></div></header>
     {workflowContext.workUnitId&&<section className="roster-context-banner" role="status"><div><span>{workflowContext.handoffId?'Mobilisation handoff · roster evidence':'Account flow · roster action'}</span><strong>{requestedWorkUnit?.name??'Loading requested work unit'}</strong><p>{requestedWorkUnit?'Schedule the next officer assignment against the work unit selected during mobilisation.':'The requested work unit is not active in this provider roster.'}</p></div><div><button onClick={()=>navigate('/admin/roster')}>Clear focus</button>{workflowContext.handoffId&&<button onClick={()=>navigate(`/admin/handoffs${workflowContextQuery(workflowContext)}`)}>Return to handoff</button>}<button onClick={()=>navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Open work unit</button><button className="is-primary" onClick={()=>openCreate()} disabled={!requestedWorkUnit}><Plus size={15}/>Create shift for this work unit</button></div></section>}
     {error && <div className="roster-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button onClick={() => setError(null)}><X size={16} /></button></div>}{notice && <div className="roster-message is-success" role="status"><ShieldCheck size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
-    <section className="roster-metrics"><div><Users size={18} /><span>Rosterable staff</span><strong>{staff.length}</strong></div><div className={riskCount ? 'is-warning' : ''}><AlertTriangle size={18} /><span>Readiness risks</span><strong>{riskCount}</strong></div><div><Clock3 size={18} /><span>Scheduled hours</span><strong>{Math.round(totalHours)}</strong></div><div className={coverage.length ? 'is-warning' : ''}><CalendarDays size={18} /><span>Open coverage</span><strong>{coverage.length}</strong></div></section>
+    <section className="roster-metrics"><div><Users size={18} /><span>Rosterable staff</span><strong>{staff.length}</strong></div><div className={riskCount ? 'is-warning' : ''}><AlertTriangle size={18} /><span>Readiness risks</span><strong>{riskCount}</strong></div><div><Clock3 size={18} /><span>Scheduled hours</span><strong>{Math.round(totalHours)}</strong></div><div className={coverage.length ? 'is-warning' : ''}><CalendarDays size={18} /><span>Open coverage</span><strong>{coverage.length}</strong></div>{labourCost.length > 0 && <><div><Clock3 size={18} /><span>Labour cost</span><strong>NZ${labourCostTotals.pay.toFixed(0)}</strong></div><div className={labourCostTotals.unpriced ? 'is-warning' : ''}><AlertTriangle size={18} /><span>{labourCostTotals.unpriced ? 'Unpriced slots' : 'Forecast margin'}</span><strong>{labourCostTotals.unpriced ? labourCostTotals.unpriced : `NZ$${labourCostTotals.margin.toFixed(0)}`}</strong></div></>}</section>
     <div className="roster-horizon-bar"><div className="roster-horizon" aria-label="Roster horizon">{([['week', 'Week'], ['fortnight', '2 weeks'], ['month', 'Month']] as const).map(([value, label]) => <button type="button" className={horizon === value ? 'is-active' : ''} aria-pressed={horizon === value} onClick={() => { setHorizon(value); setPeriodAnchor(new Date()); }} key={value}>{label}</button>)}</div><label><span>Regional holidays</span><select value={calendarRegion ?? ''} disabled={saving} onChange={(event) => void updateCalendarRegion(event.target.value)}><option value="">National only</option>{NZ_HOLIDAY_REGIONS.map(([code, name]) => <option value={code} key={code}>{name}</option>)}</select></label></div>
     <div className="roster-toolbar"><div className="roster-week-nav"><button onClick={() => setPeriodAnchor(moveRosterPeriod(periodAnchor, horizon, -1))} title="Previous period"><ChevronLeft /></button><button onClick={() => setPeriodAnchor(new Date())}>Today</button><strong>{weekStart.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} – {addDays(weekEnd, -1).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><button onClick={() => setPeriodAnchor(moveRosterPeriod(periodAnchor, horizon, 1))} title="Next period"><ChevronRight /></button></div><label><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search staff" /></label><div className="roster-readiness"><Filter size={14} />{(['all', 'ready', 'risk'] as ReadinessFilter[]).map((item) => <button className={readiness === item ? 'is-active' : ''} onClick={() => setReadiness(item)} key={item}>{item}</button>)}</div></div>
     {holidays.length > 0 && <section className="roster-holidays" aria-label="Public holidays">{holidays.map((holiday) => <div className={`is-${holiday.scope}`} key={`${holiday.date}-${holiday.name}`}><CalendarDays size={14} /><span>{new Date(`${holiday.date}T12:00:00`).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })}</span><strong>{holiday.name}</strong><i>{holiday.scope}</i></div>)}</section>}

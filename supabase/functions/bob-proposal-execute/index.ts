@@ -119,7 +119,9 @@ const SUPPORTED_ACTIONS = new Set([
   'create_zone_patrol_stop',
   'propose_freedom_camping_org_strategy',
   'set_org_corporate_profile',
-  'assign_human_id'
+  'assign_human_id',
+  'apply_roster_fill_plan',
+  'rollback_bob_roster_plan'
 ]);
 // NZ Territorial Authority (council) boundaries: NZTA hosts a PUBLIC ArcGIS
 // FeatureServer (no API key) for TA Boundaries. ArcGIS REST supports name-based
@@ -413,6 +415,40 @@ serve(async (req)=>{
         error: msg
       }, 422);
     };
+    // Bob's roster output is deliberately limited to editable draft-slot
+    // assignments. The database function rejects published or human-edited slots.
+    if (action.action_type === 'apply_roster_fill_plan' || action.action_type === 'rollback_bob_roster_plan') {
+      const rpcName = action.action_type === 'apply_roster_fill_plan'
+        ? 'apply_bob_roster_fill_plan'
+        : 'rollback_bob_roster_fill_plan';
+      const { data: result, error: rosterError } = await admin.rpc(rpcName, {
+        p_action_id: action.id
+      });
+      const receipt = Array.isArray(result) ? result[0] : result;
+      if (rosterError || !receipt?.plan_id) {
+        return await failAction(`${rpcName} failed: ${rosterError?.message ?? 'missing receipt'}`);
+      }
+      const count = action.action_type === 'apply_roster_fill_plan'
+        ? receipt.assignments_applied
+        : receipt.assignments_rolled_back;
+      await admin.from('bob_agentic_actions').update({
+        status: 'applied',
+        result_table: 'bob_roster_plans',
+        result_record_id: receipt.plan_id,
+        applied_at: new Date().toISOString(),
+        error_message: null
+      }).eq('id', action.id);
+      return json({
+        success: true,
+        action_id: action.id,
+        result_table: 'bob_roster_plans',
+        result_record_id: receipt.plan_id,
+        assignments: count,
+        note: action.action_type === 'apply_roster_fill_plan'
+          ? 'Bob roster plan applied as editable draft assignments. A human must publish slots separately.'
+          : 'Bob roster plan rolled back from unchanged draft assignments.'
+      });
+    }
     // ── set_org_jurisdiction ──
     // payload: { target_org_id, district_names: string[] }. Fetch each TA polygon
     // from Stats NZ, union into one MultiPolygon, write organizations.jurisdiction_geom.
