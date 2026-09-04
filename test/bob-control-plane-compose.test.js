@@ -8,5 +8,6 @@ const compose = readFileSync(resolve(__dirname, '../deploy/bob-control-plane/doc
 test('Bob control-plane deployment builds the production dependency image', () => {
   assert.match(compose, /build:\s+context: \.\.\/\.\.\s+dockerfile: Dockerfile/);
   assert.match(compose, /image: fcm-control-plane:current/);
-  assert.match(compose, /- \/var\/lib\/bob\/control-plane-source:\/app:ro/);
+  assert.match(compose, /- \/var\/lib\/bob:\/data/);
+  assert.doesNotMatch(compose, /control-plane-source/);
 });

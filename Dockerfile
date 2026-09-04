@@ -9,6 +9,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 RUN addgroup -S bob && adduser -S bob -G bob
+COPY --chown=bob:bob . /app
 USER bob
 
 WORKDIR /app
