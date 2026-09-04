@@ -15,6 +15,7 @@ import {
   submitOfficerScan,
   syncQueuedOfficerScans,
 } from '../lib/officerScan';
+import { CollapsibleSection } from './CollapsibleSection';
 import { OfficerSafetyBar } from './OfficerSafetyBar';
 import { OfficerDispatchPanel } from './OfficerDispatchPanel';
 import { OfficerFieldReportPanel } from './OfficerFieldReportPanel';
@@ -93,28 +94,38 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
   };
 
   return <SafeAreaView style={styles.screen}><ScrollView contentContainerStyle={styles.content}>
-    <View style={styles.header}><View><Text style={styles.eyebrow}>Field operations</Text><Text style={styles.title}>Vehicle scan</Text></View><Pressable onPress={onSignOut} style={styles.secondary}><Text style={styles.secondaryText}>Sign out</Text></Pressable></View>
+    <View style={styles.header}><View><Text style={styles.eyebrow}>Field operations</Text><Text style={styles.title}>Officer console</Text></View><Pressable onPress={onSignOut} style={styles.secondary}><Text style={styles.secondaryText}>Sign out</Text></Pressable></View>
     <OfficerSafetyBar officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
     <NotificationInbox organizationId={organizationId} userId={officerId} />
-    <OfficerShiftClockPanel shiftId={shiftId} shiftStatus={shiftStatus} />
-    <OfficerDispatchPanel shiftId={shiftId} />
-    <OfficerStopPanel shiftId={shiftId} />
-    <OfficerCheckpointScanner officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
-    <OfficerFieldReportPanel shiftId={shiftId} />
-    <OfficerBiosecurityPanel shiftId={shiftId} />
-    <OfficerNoiseControlPanel shiftId={shiftId} />
-    <OfficerSmokeControlPanel shiftId={shiftId} />
-    <OfficerLeavePanel officerId={officerId} />
-    <OfficerTimesheetPanel officerId={officerId} />
-    <OfficerDebriefPanel shiftId={shiftId} shiftStatus={shiftStatus} />
-    <OfficerCredentialsPanel officerId={officerId} />
-    <OfficerVehicleLookup organizationId={organizationId} />
-    <View style={styles.moduleRow}>{(['freedom_camping', 'parking_enforcement'] as ScanModuleKey[]).map((key) => <Pressable key={key} onPress={() => { setModuleKey(key); setResult(null); }} style={[styles.module, moduleKey === key && styles.moduleActive]}><Text style={styles.moduleText}>{key === 'freedom_camping' ? 'Freedom camping' : 'Parking'}</Text></Pressable>)}</View>
-    <View style={styles.photoPanel}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.photo} /> : <Text style={styles.photoEmpty}>Capture a clear rear vehicle image with the plate visible.</Text>}<View style={styles.actionRow}><Pressable onPress={() => void setPhoto(captureVehiclePhoto)} style={styles.primary}><Text style={styles.primaryText}>Open camera</Text></Pressable><Pressable onPress={() => void setPhoto(chooseVehiclePhoto)} style={styles.secondary}><Text style={styles.secondaryText}>Choose photo</Text></Pressable></View></View>
-    <View style={styles.location}><Text style={styles.label}>Location</Text><Text style={styles.detail}>{coordinates ? `${coordinates.lat.toFixed(5)}, ${coordinates.lng.toFixed(5)}` : 'No location captured'}</Text><Pressable onPress={() => void locate()} style={styles.secondary}><Text style={styles.secondaryText}>{coordinates ? 'Refresh GPS' : 'Capture GPS'}</Text></Pressable></View>
-    <Pressable disabled={!photoUri || !coordinates || working} onPress={() => void submit()} style={[styles.submit, (!photoUri || !coordinates || working) && styles.disabled]}>{working ? <ActivityIndicator color="#04211e" /> : <Text style={styles.submitText}>Process scan</Text>}</Pressable>
-    <View style={styles.queuePanel}><Pressable disabled={working} onPress={() => void sync()} style={styles.queue}><Text style={styles.queueText}>Queued scans: {queued}. Sync now</Text></Pressable>{queued > 0 && <Pressable onPress={() => setShowQueue((current) => !current)} style={styles.queue}><Text style={styles.queueText}>{showQueue ? 'Hide queued scans' : 'Review queued scans'}</Text></Pressable>}{showQueue && <View style={styles.queueList}>{queueItems.map((item) => <View key={item.id} style={styles.queueItem}><View><Text style={styles.queueItemTitle}>{item.payload.module_key.replaceAll('_', ' ')}</Text><Text style={styles.detail}>Captured {new Date(item.payload.captured_at).toLocaleString('en-NZ')} · {item.attempts} retry attempt{item.attempts === 1 ? '' : 's'}</Text></View><Pressable onPress={() => void discardQueuedScan(item.id)} style={styles.discard}><Text style={styles.discardText}>Discard</Text></Pressable></View>)}</View>}</View>
-    {result && <View style={styles.result}><Text style={styles.resultStatus}>{result.compliance_status.replaceAll('_', ' ')}</Text><Text style={styles.resultPlate}>{result.plate_number}</Text><Text style={styles.detail}>{result.zone_name ?? 'No verified zone matched'}{result.compliance_reason ? ` · ${result.compliance_reason}` : ''}</Text></View>}
+    <CollapsibleSection title="Shift &amp; dispatch" defaultOpen>
+      <OfficerShiftClockPanel shiftId={shiftId} shiftStatus={shiftStatus} />
+      <OfficerDispatchPanel shiftId={shiftId} />
+      <OfficerStopPanel shiftId={shiftId} />
+    </CollapsibleSection>
+    <CollapsibleSection title="Patrol &amp; reporting" defaultOpen>
+      <OfficerCheckpointScanner officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
+      <OfficerFieldReportPanel shiftId={shiftId} />
+    </CollapsibleSection>
+    <CollapsibleSection title="Vehicle scan" defaultOpen>
+      <View style={styles.moduleRow}>{(['freedom_camping', 'parking_enforcement'] as ScanModuleKey[]).map((key) => <Pressable key={key} onPress={() => { setModuleKey(key); setResult(null); }} style={[styles.module, moduleKey === key && styles.moduleActive]}><Text style={styles.moduleText}>{key === 'freedom_camping' ? 'Freedom camping' : 'Parking'}</Text></Pressable>)}</View>
+      <View style={styles.photoPanel}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.photo} /> : <Text style={styles.photoEmpty}>Capture a clear rear vehicle image with the plate visible.</Text>}<View style={styles.actionRow}><Pressable onPress={() => void setPhoto(captureVehiclePhoto)} style={styles.primary}><Text style={styles.primaryText}>Open camera</Text></Pressable><Pressable onPress={() => void setPhoto(chooseVehiclePhoto)} style={styles.secondary}><Text style={styles.secondaryText}>Choose photo</Text></Pressable></View></View>
+      <View style={styles.location}><Text style={styles.label}>Location</Text><Text style={styles.detail}>{coordinates ? `${coordinates.lat.toFixed(5)}, ${coordinates.lng.toFixed(5)}` : 'No location captured'}</Text><Pressable onPress={() => void locate()} style={styles.secondary}><Text style={styles.secondaryText}>{coordinates ? 'Refresh GPS' : 'Capture GPS'}</Text></Pressable></View>
+      <Pressable disabled={!photoUri || !coordinates || working} onPress={() => void submit()} style={[styles.submit, (!photoUri || !coordinates || working) && styles.disabled]}>{working ? <ActivityIndicator color="#04211e" /> : <Text style={styles.submitText}>Process scan</Text>}</Pressable>
+      <View style={styles.queuePanel}><Pressable disabled={working} onPress={() => void sync()} style={styles.queue}><Text style={styles.queueText}>Queued scans: {queued}. Sync now</Text></Pressable>{queued > 0 && <Pressable onPress={() => setShowQueue((current) => !current)} style={styles.queue}><Text style={styles.queueText}>{showQueue ? 'Hide queued scans' : 'Review queued scans'}</Text></Pressable>}{showQueue && <View style={styles.queueList}>{queueItems.map((item) => <View key={item.id} style={styles.queueItem}><View><Text style={styles.queueItemTitle}>{item.payload.module_key.replaceAll('_', ' ')}</Text><Text style={styles.detail}>Captured {new Date(item.payload.captured_at).toLocaleString('en-NZ')} · {item.attempts} retry attempt{item.attempts === 1 ? '' : 's'}</Text></View><Pressable onPress={() => void discardQueuedScan(item.id)} style={styles.discard}><Text style={styles.discardText}>Discard</Text></Pressable></View>)}</View>}</View>
+      {result && <View style={styles.result}><Text style={styles.resultStatus}>{result.compliance_status.replaceAll('_', ' ')}</Text><Text style={styles.resultPlate}>{result.plate_number}</Text><Text style={styles.detail}>{result.zone_name ?? 'No verified zone matched'}{result.compliance_reason ? ` · ${result.compliance_reason}` : ''}</Text></View>}
+    </CollapsibleSection>
+    <CollapsibleSection title="Specialist compliance">
+      <OfficerBiosecurityPanel shiftId={shiftId} />
+      <OfficerNoiseControlPanel shiftId={shiftId} />
+      <OfficerSmokeControlPanel shiftId={shiftId} />
+    </CollapsibleSection>
+    <CollapsibleSection title="My work">
+      <OfficerLeavePanel officerId={officerId} />
+      <OfficerTimesheetPanel officerId={officerId} />
+      <OfficerDebriefPanel shiftId={shiftId} shiftStatus={shiftStatus} />
+      <OfficerCredentialsPanel officerId={officerId} />
+      <OfficerVehicleLookup organizationId={organizationId} />
+    </CollapsibleSection>
   </ScrollView></SafeAreaView>;
 }
 
