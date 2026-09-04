@@ -1,0 +1,104 @@
+.operating-spine {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 58px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid #244654;
+  border-radius: 6px;
+  background: #0a1b25;
+}
+
+.operating-spine-title {
+  flex: 0 0 auto;
+  color: #7192a2;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.operating-spine-track {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.operating-spine-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.operating-spine-step > svg {
+  flex: 0 0 auto;
+  color: #527281;
+}
+
+.operating-spine button {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #c7d8df;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.operating-spine button:hover {
+  background: #102b37;
+}
+
+.operating-spine button.is-active {
+  border-color: #1e9eaa;
+  color: #67e4e8;
+  background: #0b2f3c;
+}
+
+.operating-spine button > svg {
+  flex: 0 0 auto;
+}
+
+.operating-spine button span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.operating-spine button strong,
+.operating-spine button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operating-spine button strong {
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.operating-spine button small {
+  max-width: 110px;
+  color: #7f9dab;
+  font-size: 9px;
+}
+
+@media (max-width: 760px) {
+  .operating-spine {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 0;
+    margin: 0 0 10px;
+  }
+
+  .operating-spine-track {
+    width: 100%;
+  }
+}
