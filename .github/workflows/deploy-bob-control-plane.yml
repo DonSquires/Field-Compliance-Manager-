@@ -21,9 +21,21 @@ jobs:
         run: |
           set -euo pipefail
           key_file="$RUNNER_TEMP/fcm-vps-key"
-          trap 'rm -f "$key_file"' EXIT
+          decoded_key="$RUNNER_TEMP/fcm-vps-key-decoded"
+          trap 'rm -f "$key_file" "$decoded_key"' EXIT
           umask 077
-          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$key_file"
+          key_value="$VPS_SSH_PRIVATE_KEY"
+          if [[ "$key_value" == *'\\n'* ]]; then
+            key_value="${key_value//\\n/$'\n'}"
+          fi
+          printf '%s\n' "$key_value" | tr -d '\r' > "$key_file"
+          if ! grep -q 'PRIVATE KEY' "$key_file" && printf '%s' "$key_value" | base64 -d > "$decoded_key" 2>/dev/null && grep -q 'PRIVATE KEY' "$decoded_key"; then
+            mv "$decoded_key" "$key_file"
+          fi
+          if ! ssh-keygen -y -f "$key_file" >/dev/null 2>&1; then
+            echo 'VPS_SSH_PRIVATE_KEY is not a valid private SSH key. Replace the GitHub secret with the complete PEM/OpenSSH private key, including BEGIN/END lines.' >&2
+            exit 2
+          fi
           tar \
             --exclude='./.git' \
             --exclude='./.env' \
