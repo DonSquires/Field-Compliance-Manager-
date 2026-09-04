@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
-type RosterTab = 'staff' | 'onboarding' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'assets' | 'oncall' | 'court';
+type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'assets' | 'oncall' | 'court';
 
 interface StaffRow {
   id: string;
@@ -104,6 +104,28 @@ interface StaffOnboardingRow {
   next_action: string;
 }
 
+interface RecruitmentVacancy {
+  id: string;
+  title: string;
+  employment_type: string;
+  location_summary: string | null;
+  status: string;
+  opens_on: string | null;
+  closes_on: string | null;
+}
+
+interface RecruitmentCandidate {
+  id: string;
+  vacancy_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  stage: string;
+  status: string;
+  offer_role: string | null;
+  offer_start_date: string | null;
+}
+
 interface AssetRow {
   id: string;
   asset_type: string;
@@ -152,6 +174,7 @@ interface CourtRow {
 
 const TABS: { id: RosterTab; label: string }[] = [
   { id: 'staff', label: 'Staff' },
+  { id: 'recruitment', label: 'Recruitment' },
   { id: 'onboarding', label: 'Onboarding' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'shift-templates', label: 'Shift Templates' },
@@ -173,6 +196,13 @@ const RosterHRPage: React.FC = () => {
 
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [onboarding, setOnboarding] = useState<StaffOnboardingRow[]>([]);
+  const [vacancies, setVacancies] = useState<RecruitmentVacancy[]>([]);
+  const [candidates, setCandidates] = useState<RecruitmentCandidate[]>([]);
+  const [showVacancyForm, setShowVacancyForm] = useState(false);
+  const [showCandidateForm, setShowCandidateForm] = useState(false);
+  const [vacancyForm, setVacancyForm] = useState({ title: '', employmentType: 'permanent', location: '' });
+  const [candidateForm, setCandidateForm] = useState({ vacancyId: '', firstName: '', lastName: '', email: '', phone: '' });
+  const [candidateAction, setCandidateAction] = useState<{ candidate: RecruitmentCandidate; nextStage: string; note: string } | null>(null);
   const [readinessAssessments, setReadinessAssessments] = useState<ReadinessAssessment[]>([]);
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplateRow[]>([]);
@@ -227,7 +257,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes] =
+      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -271,6 +301,8 @@ const RosterHRPage: React.FC = () => {
           supabase.from('callout_shifts').select('id,on_call_period_id,officer_user_id,status,minimum_pay_hours,callout_received_at,work_started_at,work_ended_at').eq('organization_id', orgId).order('callout_received_at', { ascending: false }).limit(50),
           supabase.from('court_appearances').select('id,officer_user_id,court_name,case_reference,appearance_type,scheduled_at,estimated_hours,status,is_overtime').eq('organization_id', orgId).order('scheduled_at', { ascending: false }).limit(50),
           supabase.rpc('get_staff_onboarding_readiness', { p_organization_id: orgId }),
+          supabase.from('recruitment_vacancies').select('id,title,employment_type,location_summary,status,opens_on,closes_on').eq('organization_id', orgId).order('created_at', { ascending: false }),
+          supabase.from('recruitment_candidates').select('id,vacancy_id,first_name,last_name,email,stage,status,offer_role,offer_start_date').eq('organization_id', orgId).order('created_at', { ascending: false }),
         ]);
 
       if (profilesRes.error) throw profilesRes.error;
@@ -283,12 +315,16 @@ const RosterHRPage: React.FC = () => {
       if (readinessRes.error) throw readinessRes.error;
   if(workUnitsRes.error)throw workUnitsRes.error;
         if (onboardingRes.error) throw onboardingRes.error;
+        if (vacanciesRes.error) throw vacanciesRes.error;
+        if (candidatesRes.error) throw candidatesRes.error;
 
       setAssets((assetsRes.data as AssetRow[]) ?? []);
       setOnCallPeriods((onCallRes.data as OnCallRow[]) ?? []);
       setCallouts((calloutRes.data as CalloutRow[]) ?? []);
       setCourtAppearances((courtRes.data as CourtRow[]) ?? []);
       setOnboarding((onboardingRes.data as StaffOnboardingRow[]) ?? []);
+      setVacancies((vacanciesRes.data as RecruitmentVacancy[]) ?? []);
+      setCandidates((candidatesRes.data as RecruitmentCandidate[]) ?? []);
 
       const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.user_id ?? s.id, s]));
       const merged: StaffRow[] = (profilesRes.data || []).map((p: any) => ({
@@ -488,6 +524,39 @@ const RosterHRPage: React.FC = () => {
 
   const nextOnboardingStage = (stage: string) => ({ identity: 'employment', employment: 'evidence', evidence: 'supervision', supervision: 'induction', induction: 'review', review: 'ready' } as Record<string, string>)[stage] ?? null;
 
+  const createVacancy = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true); setError(null); setNotice(null);
+    const { error: createError } = await supabase.rpc('manage_recruitment_vacancy', { p_client_request_id: crypto.randomUUID(), p_action: 'create', p_vacancy_id: null, p_title: vacancyForm.title.trim(), p_employment_type: vacancyForm.employmentType, p_location_summary: vacancyForm.location.trim() || null, p_opens_on: null, p_closes_on: null, p_description: null, p_required_skills: [] });
+    if (createError) setError(createError.message);
+    else { setNotice('Vacancy created as draft. Open it when ready to receive candidates.'); setVacancyForm({ title: '', employmentType: 'permanent', location: '' }); setShowVacancyForm(false); await loadAll(); }
+    setSaving(false);
+  };
+
+  const createCandidate = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true); setError(null); setNotice(null);
+    const { error: createError } = await supabase.rpc('create_recruitment_candidate', { p_client_request_id: crypto.randomUUID(), p_vacancy_id: candidateForm.vacancyId, p_first_name: candidateForm.firstName.trim(), p_last_name: candidateForm.lastName.trim(), p_email: candidateForm.email.trim(), p_phone: candidateForm.phone.trim() || null, p_source: null, p_resume_storage_path: null, p_notes: null });
+    if (createError) setError(createError.message);
+    else { setNotice('Candidate added at applied stage.'); setCandidateForm({ vacancyId: '', firstName: '', lastName: '', email: '', phone: '' }); setShowCandidateForm(false); await loadAll(); }
+    setSaving(false);
+  };
+
+  const manageVacancy = async (vacancy: RecruitmentVacancy, action: 'open' | 'close') => {
+    setSaving(true); setError(null); setNotice(null);
+    const { error: manageError } = await supabase.rpc('manage_recruitment_vacancy', { p_client_request_id: crypto.randomUUID(), p_action: action, p_vacancy_id: vacancy.id, p_title: null, p_employment_type: null, p_location_summary: null, p_opens_on: null, p_closes_on: null, p_description: null, p_required_skills: [] });
+    if (manageError) setError(manageError.message); else { setNotice(`Vacancy ${action}ed.`); await loadAll(); }
+    setSaving(false);
+  };
+
+  const advanceCandidate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!candidateAction) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: advanceError } = await supabase.rpc('manage_recruitment_candidate', { p_candidate_id: candidateAction.candidate.id, p_expected_stage: candidateAction.candidate.stage, p_next_stage: candidateAction.nextStage, p_note: candidateAction.note.trim(), p_offer_role: null, p_offer_employment_type: null, p_offer_start_date: null });
+    if (advanceError) setError(advanceError.message);
+    else { setNotice(`Candidate moved to ${candidateAction.nextStage.replaceAll('_', ' ')}.`); setCandidateAction(null); await loadAll(); }
+    setSaving(false);
+  };
+
   const isExpiringSoon = (expiryDate: string | null) => {
     if (!expiryDate) return false;
     const days = (new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
@@ -562,6 +631,17 @@ const RosterHRPage: React.FC = () => {
               ))
             )}
           </div>
+        </section>
+      )}
+
+      {tab === 'recruitment' && (
+        <section className="reports-section">
+          <h2>Recruitment</h2>
+          <div className="assessment-actions" style={{ marginBottom: '1rem' }}><button type="button" className="btn btn-sm btn-primary" onClick={() => setShowVacancyForm((value) => !value)}>{showVacancyForm ? 'Cancel' : 'New vacancy'}</button><button type="button" className="btn btn-sm btn-secondary" disabled={!vacancies.some((vacancy) => vacancy.status === 'open')} onClick={() => setShowCandidateForm((value) => !value)}>{showCandidateForm ? 'Cancel' : 'Add candidate'}</button></div>
+          {showVacancyForm && <form className="assessment-form" onSubmit={createVacancy}><div className="form-row"><label><span>Role title</span><input required value={vacancyForm.title} onChange={(event) => setVacancyForm({ ...vacancyForm, title: event.target.value })} /></label><label><span>Employment type</span><select value={vacancyForm.employmentType} onChange={(event) => setVacancyForm({ ...vacancyForm, employmentType: event.target.value })}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option><option value="volunteer">Volunteer</option></select></label></div><label><span>Location summary</span><input value={vacancyForm.location} onChange={(event) => setVacancyForm({ ...vacancyForm, location: event.target.value })} /></label><button type="submit" className="btn btn-primary" disabled={saving || !vacancyForm.title.trim()}>{saving ? 'Saving' : 'Create draft vacancy'}</button></form>}
+          {showCandidateForm && <form className="assessment-form" onSubmit={createCandidate}><label><span>Open vacancy</span><select required value={candidateForm.vacancyId} onChange={(event) => setCandidateForm({ ...candidateForm, vacancyId: event.target.value })}><option value="">Select vacancy</option>{vacancies.filter((vacancy) => vacancy.status === 'open').map((vacancy) => <option value={vacancy.id} key={vacancy.id}>{vacancy.title}</option>)}</select></label><div className="form-row"><label><span>First name</span><input required value={candidateForm.firstName} onChange={(event) => setCandidateForm({ ...candidateForm, firstName: event.target.value })} /></label><label><span>Last name</span><input required value={candidateForm.lastName} onChange={(event) => setCandidateForm({ ...candidateForm, lastName: event.target.value })} /></label></div><div className="form-row"><label><span>Email</span><input type="email" required value={candidateForm.email} onChange={(event) => setCandidateForm({ ...candidateForm, email: event.target.value })} /></label><label><span>Phone</span><input value={candidateForm.phone} onChange={(event) => setCandidateForm({ ...candidateForm, phone: event.target.value })} /></label></div><button type="submit" className="btn btn-primary" disabled={saving || !candidateForm.vacancyId || !candidateForm.firstName.trim() || !candidateForm.lastName.trim() || !candidateForm.email.trim()}>{saving ? 'Saving' : 'Add candidate'}</button></form>}
+          <h3>Vacancies ({vacancies.length})</h3><div className="contacts-list">{vacancies.length === 0 ? <div className="empty-state"><p>No vacancies. Create a draft vacancy to begin recruitment.</p></div> : vacancies.map((vacancy) => <div key={vacancy.id} className="contact-card"><div className="contact-header"><h3>{vacancy.title}</h3><span className={`status-badge status-${vacancy.status}`}>{vacancy.status}</span></div><div className="contact-details"><p>{vacancy.employment_type.replaceAll('_', ' ')}{vacancy.location_summary ? ` · ${vacancy.location_summary}` : ''}</p></div>{vacancy.status === 'draft' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void manageVacancy(vacancy, 'open')}>Open vacancy</button>}{vacancy.status === 'open' && <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void manageVacancy(vacancy, 'close')}>Close vacancy</button>}</div>)}</div>
+          <h3 style={{ marginTop: '1.5rem' }}>Candidates ({candidates.length})</h3><div className="contacts-list">{candidates.length === 0 ? <div className="empty-state"><p>No candidates recorded.</p></div> : candidates.map((candidate) => { const vacancy = vacancies.find((item) => item.id === candidate.vacancy_id); const nextStage = ({ applied: 'screening', screening: 'interview', interview: 'reference_check', reference_check: 'offer' } as Record<string, string>)[candidate.stage]; return <div key={candidate.id} className="contact-card"><div className="contact-header"><h3>{candidate.first_name} {candidate.last_name}</h3><span className={`status-badge status-${candidate.status}`}>{candidate.stage.replaceAll('_', ' ')}</span></div><div className="contact-details"><p>{candidate.email} · {vacancy?.title ?? 'Vacancy unavailable'}</p>{candidate.offer_start_date && <p className="contact-meta">Offer: {candidate.offer_role ?? 'role'} · starts {new Date(candidate.offer_start_date).toLocaleDateString()}</p>}</div>{nextStage && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setCandidateAction({ candidate, nextStage, note: '' })}>Move to {nextStage.replaceAll('_', ' ')}</button>}</div>; })}</div>
         </section>
       )}
 
@@ -1049,6 +1129,8 @@ const RosterHRPage: React.FC = () => {
       {payrollExport && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="payroll-export-title" onSubmit={handlePayrollExport}><header><div><span>Payroll</span><h2 id="payroll-export-title">Export approved timesheets</h2></div><button type="button" onClick={() => setPayrollExport(null)} aria-label="Close payroll export">×</button></header><p>Every approved, unexported timesheet whose period falls inside this range is batched and marked paid. This cannot be undone from this screen.</p><div className="form-row"><label><span>Period from</span><input type="date" required value={payrollExport.from} onChange={(e) => setPayrollExport({ ...payrollExport, from: e.target.value })} /></label><label><span>Period to</span><input type="date" required value={payrollExport.to} onChange={(e) => setPayrollExport({ ...payrollExport, to: e.target.value })} /></label></div><footer><button type="button" className="btn btn-secondary" onClick={() => setPayrollExport(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Exporting' : 'Create payroll batch'}</button></footer></form></div>}
 
       {onboardingAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-onboarding-title" onSubmit={manageOnboarding}><header><div><span>Staff onboarding</span><h2 id="staff-onboarding-title">{onboardingAction.ledgerId ? `Advance to ${onboardingAction.nextStage}` : 'Start onboarding'}</h2></div><button type="button" onClick={() => setOnboardingAction(null)} aria-label="Close staff onboarding">×</button></header><p>{onboardingAction.name}. The server will recheck canonical evidence before advancing.</p><label><span>Stage note</span><textarea required rows={4} value={onboardingAction.note} onChange={(event) => setOnboardingAction({ ...onboardingAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOnboardingAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !onboardingAction.note.trim()}>{saving ? 'Saving' : onboardingAction.ledgerId ? 'Advance stage' : 'Start onboarding'}</button></footer></form></div>}
+
+      {candidateAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="candidate-stage-title" onSubmit={advanceCandidate}><header><div><span>Recruitment</span><h2 id="candidate-stage-title">Move to {candidateAction.nextStage.replaceAll('_', ' ')}</h2></div><button type="button" onClick={() => setCandidateAction(null)} aria-label="Close candidate stage">×</button></header><p>{candidateAction.candidate.first_name} {candidateAction.candidate.last_name}. Stage history is retained for every candidate decision.</p><label><span>Stage note</span><textarea required rows={4} value={candidateAction.note} onChange={(event) => setCandidateAction({ ...candidateAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setCandidateAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !candidateAction.note.trim()}>{saving ? 'Saving' : 'Advance candidate'}</button></footer></form></div>}
 
       {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
