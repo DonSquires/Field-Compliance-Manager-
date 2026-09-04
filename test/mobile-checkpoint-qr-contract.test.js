@@ -17,7 +17,9 @@ test('mobile checkpoint evidence verifies GPS and records canonical attendance',
   assert.match(source, /Location\.getCurrentPositionAsync/);
   assert.match(source, /GPS accuracy is too poor/);
   assert.match(source, /outside the checkpoint radius/);
-  assert.match(source, /from\('patrol_checkpoint_visits'\)\.insert/);
-  assert.match(source, /scan_method: 'qr_camera'/);
-  assert.match(source, /shift_stop_id: stopId/);
+  assert.match(source, /supabase\.rpc\('record_officer_checkpoint_visit'/);
+  assert.match(source, /p_client_request_id: requestIdRef\.current/);
+  assert.match(source, /p_checkpoint_id: typedCheckpoint\.id/);
+  assert.doesNotMatch(source, /from\('patrols'\)/);
+  assert.doesNotMatch(source, /from\('patrol_checkpoint_visits'\)/);
 });

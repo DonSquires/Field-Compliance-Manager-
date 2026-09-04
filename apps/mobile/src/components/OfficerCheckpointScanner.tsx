@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -6,6 +6,12 @@ import { supabase } from '../lib/supabase';
 
 type Props = { officerId: string; organizationId: string | null; shiftId: string | null };
 type Checkpoint = { id: string; name: string; gps_lat: number | null; gps_lng: number | null; radius_meters: number; client_site_id: string | null; zone_id: string | null };
+
+function checkpointErrorMessage(error: unknown): string {
+  if (error instanceof Error && /QR code|GPS accuracy|outside the checkpoint radius|Patrol session/.test(error.message)) return error.message;
+  console.error('Checkpoint scan failed', error);
+  return 'The checkpoint could not be recorded. Check your connection and GPS, then try again.';
+}
 
 function distanceMetres(from: Location.LocationObject, checkpoint: Checkpoint): number | null {
   if (checkpoint.gps_lat == null || checkpoint.gps_lng == null) return null;
@@ -22,8 +28,14 @@ export function OfficerCheckpointScanner({ officerId, organizationId, shiftId }:
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [scanned, setScanned] = useState(false);
+  const requestIdRef = useRef(crypto.randomUUID());
 
-  useEffect(() => { if (!open) setScanned(false); }, [open]);
+  useEffect(() => {
+    if (!open) {
+      setScanned(false);
+      requestIdRef.current = crypto.randomUUID();
+    }
+  }, [open]);
 
   const recordVisit = async (rawCode: string) => {
     if (!supabase || !organizationId || !shiftId || busy || scanned) return;
@@ -42,36 +54,46 @@ export function OfficerCheckpointScanner({ officerId, organizationId, shiftId }:
       if (distance !== null && accuracy !== null && accuracy > typedCheckpoint.radius_meters) throw new Error('GPS accuracy is too poor for this checkpoint. Move to open sky and retry.');
       if (distance !== null && distance > typedCheckpoint.radius_meters) throw new Error('You are outside the checkpoint radius. Move closer and retry.');
 
-      const { data: existingPatrol, error: patrolReadError } = await supabase.from('patrols').select('id').eq('shift_id', shiftId).eq('officer_user_id', officerId).eq('status', 'in_progress').maybeSingle();
-      if (patrolReadError) throw patrolReadError;
-      let patrolId = existingPatrol?.id as string | undefined;
-      if (!patrolId) {
-        const { data: patrol, error: patrolCreateError } = await supabase.from('patrols').insert({ organization_id: organizationId, shift_id: shiftId, officer_user_id: officerId, zone_id: typedCheckpoint.zone_id, status: 'in_progress', started_at: new Date().toISOString() }).select('id').single();
-        if (patrolCreateError || !patrol) throw patrolCreateError ?? new Error('Patrol session was not confirmed.');
-        patrolId = patrol.id;
-      }
-
-      let stopId: string | null = null;
-      if (typedCheckpoint.client_site_id || typedCheckpoint.zone_id) {
-        const filters = [typedCheckpoint.client_site_id && `site_id.eq.${typedCheckpoint.client_site_id}`, typedCheckpoint.zone_id && `zone_id.eq.${typedCheckpoint.zone_id}`].filter(Boolean).join(',');
-        const { data: stops, error: stopError } = await supabase.from('shift_stops').select('id').eq('shift_id', shiftId).in('status', ['pending', 'en_route', 'on_scene']).or(filters).order('stop_order').limit(2);
-        if (stopError) throw stopError;
-        if (stops?.length === 1) stopId = stops[0].id;
-      }
-
-      const { error: visitError } = await supabase.from('patrol_checkpoint_visits').insert({ organization_id: organizationId, patrol_id: patrolId, checkpoint_id: typedCheckpoint.id, officer_user_id: officerId, gps_lat: location.coords.latitude, gps_lng: location.coords.longitude, gps_accuracy: accuracy, gps_distance_from_checkpoint: distance, within_radius: distance === null ? null : true, scan_method: 'qr_camera', shift_stop_id: stopId, notes: 'QR checkpoint scan from mobile app' });
-      if (visitError) throw visitError;
+      const { data, error: visitError } = await supabase.rpc('record_officer_checkpoint_visit', {
+        p_client_request_id: requestIdRef.current,
+        p_shift_id: shiftId,
+        p_checkpoint_id: typedCheckpoint.id,
+        p_gps_lat: location.coords.latitude,
+        p_gps_lng: location.coords.longitude,
+        p_gps_accuracy: accuracy,
+        p_gps_distance_from_checkpoint: distance,
+        p_within_radius: distance === null ? null : true,
+      });
+      if (visitError || !data) throw visitError ?? new Error('Checkpoint visit was not confirmed.');
       setOpen(false);
       Alert.alert('Checkpoint confirmed', `${typedCheckpoint.name} was recorded.`);
     } catch (error) {
       setScanned(false);
-      Alert.alert('Checkpoint not confirmed', error instanceof Error ? error.message : 'The checkpoint visit could not be recorded.');
+      Alert.alert('Checkpoint not confirmed', checkpointErrorMessage(error));
     } finally { setBusy(false); }
   };
 
   if (!shiftId) return null;
-  const openScanner = async () => { if (!permission?.granted) await requestPermission(); setOpen(true); };
-  return <View><Pressable onPress={() => void openScanner()} style={styles.trigger}><Text style={styles.triggerText}>Scan checkpoint QR</Text></Pressable><Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}><View style={styles.modal}><View style={styles.header}><Text style={styles.title}>Scan checkpoint</Text><Pressable onPress={() => setOpen(false)}><Text style={styles.close}>Close</Text></Pressable></View>{permission?.granted ? <CameraView style={styles.camera} onBarcodeScanned={busy || scanned ? undefined : ({ data }) => void recordVisit(data)} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} /> : <View style={styles.permission}><Text style={styles.message}>Camera permission is required to scan a checkpoint.</Text><Pressable onPress={() => void requestPermission()} style={styles.trigger}><Text style={styles.triggerText}>Allow camera</Text></Pressable></View>}{busy && <View style={styles.busy}><ActivityIndicator color="#7dd3c7" /><Text style={styles.message}>Verifying GPS and recording attendance</Text></View>}</View></Modal></View>;
+  const openScanner = async () => {
+    if (!permission?.granted) await requestPermission();
+    setOpen(true);
+  };
+
+  return <View>
+    <Pressable accessibilityRole="button" accessibilityLabel="Scan checkpoint QR" onPress={() => void openScanner()} style={styles.trigger}>
+      <Text style={styles.triggerText}>Scan checkpoint</Text>
+    </Pressable>
+    <Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}>
+      <View style={styles.modal}>
+        <View style={styles.header}>
+          <View><Text style={styles.title}>Checkpoint scan</Text><Text style={styles.message}>Point the camera at the checkpoint QR code.</Text></View>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close checkpoint scanner" onPress={() => setOpen(false)}><Text style={styles.close}>Close</Text></Pressable>
+        </View>
+        {permission?.granted ? <CameraView style={styles.camera} onBarcodeScanned={busy || scanned ? undefined : ({ data }) => void recordVisit(data)} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} /> : <View style={styles.permission}><Text style={styles.message}>Camera permission is required to scan a checkpoint.</Text><Pressable accessibilityRole="button" onPress={() => void requestPermission()} style={styles.trigger}><Text style={styles.triggerText}>Allow camera</Text></Pressable></View>}
+        {busy && <View style={styles.busy}><ActivityIndicator color="#7dd3c7" /><Text style={styles.message}>Checking your location and recording this checkpoint</Text></View>}
+      </View>
+    </Modal>
+  </View>;
 }
 
 const styles = StyleSheet.create({
