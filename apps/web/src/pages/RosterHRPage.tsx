@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
-type RosterTab = 'staff' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'assets' | 'oncall' | 'court';
+type RosterTab = 'staff' | 'onboarding' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'assets' | 'oncall' | 'court';
 
 interface StaffRow {
   id: string;
@@ -91,6 +91,19 @@ interface TimesheetRow {
   status: string;
 }
 
+interface StaffOnboardingRow {
+  ledger_id: string;
+  staff_id: string;
+  user_id: string;
+  display_name: string;
+  current_stage: string;
+  status: string;
+  version: number;
+  target_start: string | null;
+  blockers: string[];
+  next_action: string;
+}
+
 interface AssetRow {
   id: string;
   asset_type: string;
@@ -139,6 +152,7 @@ interface CourtRow {
 
 const TABS: { id: RosterTab; label: string }[] = [
   { id: 'staff', label: 'Staff' },
+  { id: 'onboarding', label: 'Onboarding' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'shift-templates', label: 'Shift Templates' },
   { id: 'coverage', label: 'Open Shifts' },
@@ -158,6 +172,7 @@ const RosterHRPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [onboarding, setOnboarding] = useState<StaffOnboardingRow[]>([]);
   const [readinessAssessments, setReadinessAssessments] = useState<ReadinessAssessment[]>([]);
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplateRow[]>([]);
@@ -191,6 +206,7 @@ const RosterHRPage: React.FC = () => {
   const [courtAppearances, setCourtAppearances] = useState<CourtRow[]>([]);
   const [assetCheck, setAssetCheck] = useState<{ asset: AssetRow; condition: string; odometer: string; fuel: string; defects: string } | null>(null);
   const [payrollExport, setPayrollExport] = useState<{ from: string; to: string } | null>(null);
+  const [onboardingAction, setOnboardingAction] = useState<{ staffId: string; ledgerId?: string; version?: number; nextStage?: string; name: string; note: string } | null>(null);
   const [templateForm, setTemplateForm] = useState({
     name: '',
     shift_type: 'day',
@@ -211,7 +227,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes] =
+      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -254,6 +270,7 @@ const RosterHRPage: React.FC = () => {
           supabase.from('on_call_periods').select('id,officer_user_id,period_type,starts_at,ends_at,flat_rate,status').eq('organization_id', orgId).order('starts_at', { ascending: false }).limit(50),
           supabase.from('callout_shifts').select('id,on_call_period_id,officer_user_id,status,minimum_pay_hours,callout_received_at,work_started_at,work_ended_at').eq('organization_id', orgId).order('callout_received_at', { ascending: false }).limit(50),
           supabase.from('court_appearances').select('id,officer_user_id,court_name,case_reference,appearance_type,scheduled_at,estimated_hours,status,is_overtime').eq('organization_id', orgId).order('scheduled_at', { ascending: false }).limit(50),
+          supabase.rpc('get_staff_onboarding_readiness', { p_organization_id: orgId }),
         ]);
 
       if (profilesRes.error) throw profilesRes.error;
@@ -265,11 +282,13 @@ const RosterHRPage: React.FC = () => {
       if (coverageRes.error) throw coverageRes.error;
       if (readinessRes.error) throw readinessRes.error;
   if(workUnitsRes.error)throw workUnitsRes.error;
+        if (onboardingRes.error) throw onboardingRes.error;
 
       setAssets((assetsRes.data as AssetRow[]) ?? []);
       setOnCallPeriods((onCallRes.data as OnCallRow[]) ?? []);
       setCallouts((calloutRes.data as CalloutRow[]) ?? []);
       setCourtAppearances((courtRes.data as CourtRow[]) ?? []);
+      setOnboarding((onboardingRes.data as StaffOnboardingRow[]) ?? []);
 
       const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.user_id ?? s.id, s]));
       const merged: StaffRow[] = (profilesRes.data || []).map((p: any) => ({
@@ -455,6 +474,20 @@ const RosterHRPage: React.FC = () => {
     setSaving(false);
   };
 
+  const manageOnboarding = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!onboardingAction) return;
+    setSaving(true); setError(null); setNotice(null);
+    const response = onboardingAction.ledgerId
+      ? await supabase.rpc('manage_staff_onboarding', { p_ledger_id: onboardingAction.ledgerId, p_expected_version: onboardingAction.version, p_action: 'advance', p_stage: onboardingAction.nextStage, p_note: onboardingAction.note.trim(), p_assigned_to: null, p_target_start: null })
+      : await supabase.rpc('start_staff_onboarding', { p_client_request_id: crypto.randomUUID(), p_staff_id: onboardingAction.staffId, p_assigned_to: null, p_target_start: null, p_note: onboardingAction.note.trim() });
+    if (response.error) setError(response.error.message);
+    else { setNotice(onboardingAction.ledgerId ? 'Onboarding stage advanced.' : 'Staff onboarding started.'); setOnboardingAction(null); await loadAll(); }
+    setSaving(false);
+  };
+
+  const nextOnboardingStage = (stage: string) => ({ identity: 'employment', employment: 'evidence', evidence: 'supervision', supervision: 'induction', induction: 'review', review: 'ready' } as Record<string, string>)[stage] ?? null;
+
   const isExpiringSoon = (expiryDate: string | null) => {
     if (!expiryDate) return false;
     const days = (new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
@@ -528,6 +561,26 @@ const RosterHRPage: React.FC = () => {
                 </div>
               ))
             )}
+          </div>
+        </section>
+      )}
+
+      {tab === 'onboarding' && (
+        <section className="reports-section">
+          <h2>Staff Onboarding ({onboarding.length})</h2>
+          <div className="contacts-list">
+            {staff.filter((person) => person.staff_id).map((person) => {
+              const ledger = onboarding.find((item) => item.staff_id === person.staff_id);
+              const nextStage = ledger ? nextOnboardingStage(ledger.current_stage) : null;
+              return <div key={person.id} className="contact-card">
+                <div className="contact-header"><h3>{person.display_name ?? person.email ?? 'Staff member'}</h3><span className={`status-badge status-${ledger?.status ?? 'not_started'}`}>{ledger?.status?.replaceAll('_', ' ') ?? 'Not started'}</span></div>
+                <div className="contact-details">
+                  <p>{ledger ? `Stage: ${ledger.current_stage.replaceAll('_', ' ')}${ledger.target_start ? ` · target ${new Date(ledger.target_start).toLocaleDateString()}` : ''}` : 'Create a durable onboarding record after the identity invitation is sent.'}</p>
+                  {ledger?.blockers?.length ? <p className="contact-meta">{ledger.blockers.join(' · ')}</p> : null}
+                </div>
+                {!ledger ? <button type="button" className="btn btn-sm btn-primary" onClick={() => setOnboardingAction({ staffId: person.staff_id!, name: person.display_name ?? person.email ?? 'Staff member', note: 'Onboarding started' })}>Start onboarding</button> : nextStage && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setOnboardingAction({ staffId: person.staff_id!, ledgerId: ledger.ledger_id, version: ledger.version, nextStage, name: ledger.display_name, note: '' })}>Advance to {nextStage}</button>}
+              </div>;
+            })}
           </div>
         </section>
       )}
@@ -994,6 +1047,8 @@ const RosterHRPage: React.FC = () => {
       {assetCheck && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-check-title" onSubmit={handleAssetCheck}><header><div><span>Fleet evidence</span><h2 id="asset-check-title">Record check</h2></div><button type="button" onClick={() => setAssetCheck(null)} aria-label="Close asset check">×</button></header><p>{assetCheck.asset.name}{assetCheck.asset.registration ? ` · ${assetCheck.asset.registration}` : ''}. Major issues move the asset to maintenance and alert administrators.</p><label><span>Condition</span><select value={assetCheck.condition} onChange={(e) => setAssetCheck({ ...assetCheck, condition: e.target.value })}><option value="good">Good</option><option value="minor_issue">Minor issue</option><option value="major_issue">Major issue</option><option value="unserviceable">Unserviceable</option></select></label>{assetCheck.asset.asset_type === 'vehicle' && <div className="form-row"><label><span>Odometer</span><input type="number" min={0} value={assetCheck.odometer} onChange={(e) => setAssetCheck({ ...assetCheck, odometer: e.target.value })} /></label><label><span>Fuel level</span><select value={assetCheck.fuel} onChange={(e) => setAssetCheck({ ...assetCheck, fuel: e.target.value })}><option value="">Not recorded</option><option value="full">Full</option><option value="three_quarter">Three quarter</option><option value="half">Half</option><option value="quarter">Quarter</option><option value="empty">Empty</option></select></label></div>}<label><span>Defects noted</span><textarea rows={3} value={assetCheck.defects} onChange={(e) => setAssetCheck({ ...assetCheck, defects: e.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setAssetCheck(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving' : 'Record check'}</button></footer></form></div>}
 
       {payrollExport && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="payroll-export-title" onSubmit={handlePayrollExport}><header><div><span>Payroll</span><h2 id="payroll-export-title">Export approved timesheets</h2></div><button type="button" onClick={() => setPayrollExport(null)} aria-label="Close payroll export">×</button></header><p>Every approved, unexported timesheet whose period falls inside this range is batched and marked paid. This cannot be undone from this screen.</p><div className="form-row"><label><span>Period from</span><input type="date" required value={payrollExport.from} onChange={(e) => setPayrollExport({ ...payrollExport, from: e.target.value })} /></label><label><span>Period to</span><input type="date" required value={payrollExport.to} onChange={(e) => setPayrollExport({ ...payrollExport, to: e.target.value })} /></label></div><footer><button type="button" className="btn btn-secondary" onClick={() => setPayrollExport(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Exporting' : 'Create payroll batch'}</button></footer></form></div>}
+
+      {onboardingAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-onboarding-title" onSubmit={manageOnboarding}><header><div><span>Staff onboarding</span><h2 id="staff-onboarding-title">{onboardingAction.ledgerId ? `Advance to ${onboardingAction.nextStage}` : 'Start onboarding'}</h2></div><button type="button" onClick={() => setOnboardingAction(null)} aria-label="Close staff onboarding">×</button></header><p>{onboardingAction.name}. The server will recheck canonical evidence before advancing.</p><label><span>Stage note</span><textarea required rows={4} value={onboardingAction.note} onChange={(event) => setOnboardingAction({ ...onboardingAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOnboardingAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !onboardingAction.note.trim()}>{saving ? 'Saving' : onboardingAction.ledgerId ? 'Advance stage' : 'Start onboarding'}</button></footer></form></div>}
 
       {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
