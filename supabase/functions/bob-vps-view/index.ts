@@ -1,7 +1,11 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
 const FN = 'bob-vps-view';
-const BASE = Deno.env.get('STACK_RELAY_BASE_URL');
-const TOKEN = Deno.env.get('STACK_RELAY_TOKEN');
+const BASE = Deno.env.get('STACK_RELAY_BASE_URL') ?? Deno.env.get('BOB_CONTROL_PLANE_URL');
+const TOKEN = Deno.env.get('STACK_RELAY_TOKEN') ?? Deno.env.get('BOB_ADMIN_TOKEN');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const RAW = Deno.env.get('SUPABASE_SECRET_KEYS');
 if (!BASE) throw new Error('STACK_RELAY_BASE_URL is required');
 if (!TOKEN) throw new Error('STACK_RELAY_TOKEN is required');
@@ -43,6 +47,15 @@ function claims(req) {
 function isBob(c) {
   return c?.app_metadata?.role === 'bob' || Array.isArray(c?.app_metadata?.roles) && c.app_metadata.roles.includes('bob');
 }
+async function isVerifiedGrandMaster(req, claimsValue) {
+  if (!claimsValue?.sub || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) return false;
+  const caller = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: req.headers.get('authorization') ?? '' } } });
+  const { data: { user }, error: authError } = await caller.auth.getUser();
+  if (authError || !user || user.id !== claimsValue.sub) return false;
+  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const { data: profile } = await admin.from('user_profiles').select('role, deactivated_at').eq('id', user.id).maybeSingle();
+  return profile?.deactivated_at == null && profile.role === 'grand_master';
+}
 async function audit(req, ep, res) {
   const c = claims(req);
   await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
@@ -65,31 +78,23 @@ async function audit(req, ep, res) {
   }).catch(()=>{});
 }
 async function relay(path) {
-  const r = await fetch(`${BASE}${path}`, {
-    headers: {
-      authorization: `Bearer ${TOKEN}`
-    }
-  });
-  const t = await r.text();
-  let b = {};
-  try {
-    b = t ? JSON.parse(t) : {};
-  } catch  {
-    b = {};
+  const normalizedBase = BASE.replace(/\/+$/, '').replace(/\/api(?:\/bob)?(?:\/builder)?$/, '');
+  const urls = [`${normalizedBase}${path}`, `${normalizedBase}/api/bob${path}`, `${normalizedBase}/api/bob/builder${path}`];
+  for (const url of urls) {
+    const r = await fetch(url, { headers: { authorization: `Bearer ${TOKEN}` } });
+    const t = await r.text();
+    let b = {};
+    try { b = t ? JSON.parse(t) : {}; } catch { b = {}; }
+    if (r.status !== 404 || url === urls[urls.length - 1]) return { ok: r.ok, status: r.status, body: b };
   }
-  ;
-  return {
-    ok: r.ok,
-    status: r.status,
-    body: b
-  };
+  return { ok: false, status: 502, body: {} };
 }
 Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response(null, {
     status: 204
   });
   const c = claims(req);
-  if (!c || !isBob(c)) return json(403, {
+  if (!c || (!isBob(c) && !(await isVerifiedGrandMaster(req, c)))) return json(403, {
     ok: false,
     code: 'FORBIDDEN'
   });

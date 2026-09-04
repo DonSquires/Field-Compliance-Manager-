@@ -213,7 +213,8 @@ async function route(req, res, body) {
     const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig });
     return json(res, result.status, result.body);
   }
-  if (req.method === 'GET' && url.pathname === '/assessment') {
+  const isAssessmentRoute = url.pathname === '/assessment' || ['/api/bob/assessment', '/api/bob/builder/assessment'].includes(url.pathname);
+  if (req.method === 'GET' && isAssessmentRoute) {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
     const assessment = createAssessment(assessmentRoot);
     const atlas = buildAtlasGraph(assessmentRoot);

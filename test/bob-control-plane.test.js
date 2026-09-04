@@ -81,6 +81,17 @@ test('assessment is authenticated and read-only', async () => {
   assert.ok(allowed.body.atlas.edges.some(edge => edge.source === 'platform' && edge.target === 'deployment'));
 });
 
+test('assessment aliases retain the same authentication and read-only contract', async () => {
+  for (const route of ['/api/bob/assessment', '/api/bob/builder/assessment']) {
+    const denied = await request('GET', route);
+    assert.equal(denied.response.status, 401);
+    const allowed = await request('GET', route, undefined, { authorization: `Bearer ${adminToken}` });
+    assert.equal(allowed.response.status, 200);
+    assert.equal(allowed.body.sourceRoot, root);
+    assert.equal(allowed.body.secretFilesExcluded, true);
+  }
+});
+
 test('request bodies are bounded and malformed requests do not expose internal errors', async () => {
   const oversized = await fetch(`${baseUrl}/jobs`, {
     method: 'POST',
