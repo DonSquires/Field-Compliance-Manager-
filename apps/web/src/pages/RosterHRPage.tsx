@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
-type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'assets' | 'oncall' | 'court';
+type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'assets' | 'oncall' | 'court';
 
 interface StaffRow {
   id: string;
@@ -126,6 +126,10 @@ interface RecruitmentCandidate {
   offer_start_date: string | null;
 }
 
+interface PerformanceCycle { id: string; name: string; period_start: string; period_end: string; due_date: string; status: string; }
+interface PerformanceReview { id: string; staff_id: string; reviewer_user_id: string; status: string; rating: number | null; cycle_id: string; }
+interface HrCase { id: string; staff_id: string; case_type: string; severity: string; status: string; subject: string; opened_at: string; }
+
 interface AssetRow {
   id: string;
   asset_type: string;
@@ -176,6 +180,8 @@ const TABS: { id: RosterTab; label: string }[] = [
   { id: 'staff', label: 'Staff' },
   { id: 'recruitment', label: 'Recruitment' },
   { id: 'onboarding', label: 'Onboarding' },
+  { id: 'performance', label: 'Performance' },
+  { id: 'cases', label: 'HR Cases' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'shift-templates', label: 'Shift Templates' },
   { id: 'coverage', label: 'Open Shifts' },
@@ -198,6 +204,13 @@ const RosterHRPage: React.FC = () => {
   const [onboarding, setOnboarding] = useState<StaffOnboardingRow[]>([]);
   const [vacancies, setVacancies] = useState<RecruitmentVacancy[]>([]);
   const [candidates, setCandidates] = useState<RecruitmentCandidate[]>([]);
+  const [performanceCycles, setPerformanceCycles] = useState<PerformanceCycle[]>([]);
+  const [performanceReviews, setPerformanceReviews] = useState<PerformanceReview[]>([]);
+  const [hrCases, setHrCases] = useState<HrCase[]>([]);
+  const [showCycleForm, setShowCycleForm] = useState(false);
+  const [showCaseForm, setShowCaseForm] = useState(false);
+  const [cycleForm, setCycleForm] = useState({ name: '', start: '', end: '', due: '' });
+  const [caseForm, setCaseForm] = useState({ staffId: '', type: 'conduct', severity: 'standard', subject: '', summary: '' });
   const [showVacancyForm, setShowVacancyForm] = useState(false);
   const [showCandidateForm, setShowCandidateForm] = useState(false);
   const [vacancyForm, setVacancyForm] = useState({ title: '', employmentType: 'permanent', location: '' });
@@ -257,7 +270,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes] =
+      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -303,6 +316,9 @@ const RosterHRPage: React.FC = () => {
           supabase.rpc('get_staff_onboarding_readiness', { p_organization_id: orgId }),
           supabase.from('recruitment_vacancies').select('id,title,employment_type,location_summary,status,opens_on,closes_on').eq('organization_id', orgId).order('created_at', { ascending: false }),
           supabase.from('recruitment_candidates').select('id,vacancy_id,first_name,last_name,email,stage,status,offer_role,offer_start_date').eq('organization_id', orgId).order('created_at', { ascending: false }),
+          supabase.from('performance_review_cycles').select('id,name,period_start,period_end,due_date,status').eq('organization_id', orgId).order('due_date', { ascending: false }),
+          supabase.from('performance_reviews').select('id,staff_id,reviewer_user_id,status,rating,cycle_id').eq('organization_id', orgId).order('created_at', { ascending: false }),
+          supabase.from('hr_cases').select('id,staff_id,case_type,severity,status,subject,opened_at').eq('organization_id', orgId).order('opened_at', { ascending: false }),
         ]);
 
       if (profilesRes.error) throw profilesRes.error;
@@ -317,6 +333,9 @@ const RosterHRPage: React.FC = () => {
         if (onboardingRes.error) throw onboardingRes.error;
         if (vacanciesRes.error) throw vacanciesRes.error;
         if (candidatesRes.error) throw candidatesRes.error;
+        if (cyclesRes.error) throw cyclesRes.error;
+        if (reviewsRes.error) throw reviewsRes.error;
+        if (casesRes.error) throw casesRes.error;
 
       setAssets((assetsRes.data as AssetRow[]) ?? []);
       setOnCallPeriods((onCallRes.data as OnCallRow[]) ?? []);
@@ -325,6 +344,9 @@ const RosterHRPage: React.FC = () => {
       setOnboarding((onboardingRes.data as StaffOnboardingRow[]) ?? []);
       setVacancies((vacanciesRes.data as RecruitmentVacancy[]) ?? []);
       setCandidates((candidatesRes.data as RecruitmentCandidate[]) ?? []);
+      setPerformanceCycles((cyclesRes.data as PerformanceCycle[]) ?? []);
+      setPerformanceReviews((reviewsRes.data as PerformanceReview[]) ?? []);
+      setHrCases((casesRes.data as HrCase[]) ?? []);
 
       const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.user_id ?? s.id, s]));
       const merged: StaffRow[] = (profilesRes.data || []).map((p: any) => ({
@@ -557,6 +579,20 @@ const RosterHRPage: React.FC = () => {
     setSaving(false);
   };
 
+  const createPerformanceCycle = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true); setError(null); setNotice(null);
+    const { error: createError } = await supabase.rpc('manage_performance_review_cycle', { p_client_request_id: crypto.randomUUID(), p_action: 'create', p_cycle_id: null, p_name: cycleForm.name.trim(), p_period_start: cycleForm.start, p_period_end: cycleForm.end, p_due_date: cycleForm.due });
+    if (createError) setError(createError.message); else { setNotice('Performance review cycle created as draft.'); setCycleForm({ name: '', start: '', end: '', due: '' }); setShowCycleForm(false); await loadAll(); }
+    setSaving(false);
+  };
+
+  const createHrCase = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true); setError(null); setNotice(null);
+    const { error: createError } = await supabase.rpc('manage_hr_case', { p_client_request_id: crypto.randomUUID(), p_action: 'open', p_case_id: null, p_staff_id: caseForm.staffId, p_case_type: caseForm.type, p_severity: caseForm.severity, p_subject: caseForm.subject.trim(), p_summary: caseForm.summary.trim(), p_note: null, p_assigned_to: null });
+    if (createError) setError(createError.message); else { setNotice('Private HR case opened and audit recorded.'); setCaseForm({ staffId: '', type: 'conduct', severity: 'standard', subject: '', summary: '' }); setShowCaseForm(false); await loadAll(); }
+    setSaving(false);
+  };
+
   const isExpiringSoon = (expiryDate: string | null) => {
     if (!expiryDate) return false;
     const days = (new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
@@ -644,6 +680,10 @@ const RosterHRPage: React.FC = () => {
           <h3 style={{ marginTop: '1.5rem' }}>Candidates ({candidates.length})</h3><div className="contacts-list">{candidates.length === 0 ? <div className="empty-state"><p>No candidates recorded.</p></div> : candidates.map((candidate) => { const vacancy = vacancies.find((item) => item.id === candidate.vacancy_id); const nextStage = ({ applied: 'screening', screening: 'interview', interview: 'reference_check', reference_check: 'offer' } as Record<string, string>)[candidate.stage]; return <div key={candidate.id} className="contact-card"><div className="contact-header"><h3>{candidate.first_name} {candidate.last_name}</h3><span className={`status-badge status-${candidate.status}`}>{candidate.stage.replaceAll('_', ' ')}</span></div><div className="contact-details"><p>{candidate.email} · {vacancy?.title ?? 'Vacancy unavailable'}</p>{candidate.offer_start_date && <p className="contact-meta">Offer: {candidate.offer_role ?? 'role'} · starts {new Date(candidate.offer_start_date).toLocaleDateString()}</p>}</div>{nextStage && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setCandidateAction({ candidate, nextStage, note: '' })}>Move to {nextStage.replaceAll('_', ' ')}</button>}</div>; })}</div>
         </section>
       )}
+
+      {tab === 'performance' && <section className="reports-section"><h2>Performance Reviews</h2><button type="button" className="btn btn-sm btn-primary" onClick={() => setShowCycleForm((value) => !value)}>{showCycleForm ? 'Cancel' : 'New review cycle'}</button>{showCycleForm && <form className="assessment-form" onSubmit={createPerformanceCycle}><label><span>Cycle name</span><input required value={cycleForm.name} onChange={(event) => setCycleForm({ ...cycleForm, name: event.target.value })} /></label><div className="form-row"><label><span>Period start</span><input type="date" required value={cycleForm.start} onChange={(event) => setCycleForm({ ...cycleForm, start: event.target.value })} /></label><label><span>Period end</span><input type="date" required value={cycleForm.end} onChange={(event) => setCycleForm({ ...cycleForm, end: event.target.value })} /></label><label><span>Due</span><input type="date" required value={cycleForm.due} onChange={(event) => setCycleForm({ ...cycleForm, due: event.target.value })} /></label></div><button type="submit" className="btn btn-primary" disabled={saving}>Create draft cycle</button></form>}<div className="contacts-list">{performanceCycles.length === 0 ? <div className="empty-state"><p>No performance cycles configured.</p></div> : performanceCycles.map((cycle) => <div className="contact-card" key={cycle.id}><div className="contact-header"><h3>{cycle.name}</h3><span className={`status-badge status-${cycle.status}`}>{cycle.status}</span></div><div className="contact-details"><p>{new Date(cycle.period_start).toLocaleDateString()} – {new Date(cycle.period_end).toLocaleDateString()} · due {new Date(cycle.due_date).toLocaleDateString()}</p><p className="contact-meta">{performanceReviews.filter((review) => review.cycle_id === cycle.id).length} assigned reviews</p></div></div>)}</div></section>}
+
+      {tab === 'cases' && <section className="reports-section"><h2>Private HR Cases</h2><button type="button" className="btn btn-sm btn-primary" onClick={() => setShowCaseForm((value) => !value)}>{showCaseForm ? 'Cancel' : 'Open HR case'}</button>{showCaseForm && <form className="assessment-form" onSubmit={createHrCase}><label><span>Staff member</span><select required value={caseForm.staffId} onChange={(event) => setCaseForm({ ...caseForm, staffId: event.target.value })}><option value="">Select staff member</option>{staff.filter((person) => person.staff_id).map((person) => <option key={person.staff_id} value={person.staff_id!}>{person.display_name ?? person.email}</option>)}</select></label><div className="form-row"><label><span>Case type</span><select value={caseForm.type} onChange={(event) => setCaseForm({ ...caseForm, type: event.target.value })}><option value="disciplinary">Disciplinary</option><option value="grievance">Grievance</option><option value="wellbeing">Wellbeing</option><option value="conduct">Conduct</option><option value="other">Other</option></select></label><label><span>Severity</span><select value={caseForm.severity} onChange={(event) => setCaseForm({ ...caseForm, severity: event.target.value })}><option value="low">Low</option><option value="standard">Standard</option><option value="high">High</option><option value="critical">Critical</option></select></label></div><label><span>Subject</span><input required value={caseForm.subject} onChange={(event) => setCaseForm({ ...caseForm, subject: event.target.value })} /></label><label><span>Summary</span><textarea required rows={4} value={caseForm.summary} onChange={(event) => setCaseForm({ ...caseForm, summary: event.target.value })} /></label><button type="submit" className="btn btn-primary" disabled={saving}>Open private case</button></form>}<div className="contacts-list">{hrCases.length === 0 ? <div className="empty-state"><p>No private HR cases recorded.</p></div> : hrCases.map((item) => <div className="contact-card" key={item.id}><div className="contact-header"><h3>{item.subject}</h3><span className={`status-badge status-${item.status}`}>{item.status}</span></div><div className="contact-details"><p>{staffNames[item.staff_id] ?? 'Staff member'} · {item.case_type} · {item.severity}</p><p className="contact-meta">Opened {new Date(item.opened_at).toLocaleString()}</p></div></div>)}</div></section>}
 
       {tab === 'onboarding' && (
         <section className="reports-section">
