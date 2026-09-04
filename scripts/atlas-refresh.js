@@ -443,8 +443,11 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     }
   }
   for (const existing of existingCapabilities) {
+    const isManual = existing.refresh_source === 'manual_seed';
+    const isGeneratedType = ['table', 'rpc', 'edge_function'].includes(existing.entity_type);
     if (existing.retirement_status !== 'legacy'
-        && !generatedCapabilityKeys.has(capabilityKey(existing))) {
+        && !generatedCapabilityKeys.has(capabilityKey(existing))
+        && (isManual || isGeneratedType)) {
       plan.capabilityRetireIds.push(existing.id);
     }
   }
@@ -571,7 +574,7 @@ async function main() {
     serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     allowLargeRetirement: args.has('--allow-large-retirement')
   });
-  console.log(`Atlas refreshed: ${plan.capabilityUpserts.length} capabilities, ${plan.edgeUpserts.length} edges, ${plan.capabilityRetireIds.length + plan.edgeRetireIds.length} retired, ${plan.skippedManualCapabilities + plan.skippedManualEdges} manual rows preserved`);
+  console.log(`Atlas refreshed: ${plan.capabilityUpserts.length} capabilities, ${plan.edgeUpserts.length} edges, ${plan.capabilityRetireIds.length + plan.edgeRetireIds.length} retired`);
 }
 
 if (require.main === module) {

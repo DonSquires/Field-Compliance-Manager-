@@ -289,6 +289,15 @@ test('Atlas refresh replaces matching manual rows and retires stale manual rows'
   assert.equal(plan.edgeRetireIds.includes('unmanaged-pre-marker'), false);
 });
 
+test('Atlas refresh retains generated column inventory until column derivation is available', () => {
+  const plan = buildRefreshPlan({ capabilities: [], edges: [] }, [{
+    id: 'generated-column', entity_type: 'column', entity_name: 'observations.locked_at',
+    refresh_source: 'ci_generator', retirement_status: 'live'
+  }], []);
+
+  assert.deepEqual(plan.capabilityRetireIds, []);
+});
+
 test('Atlas refresh retires stale generated and manual edges when their source is deleted', () => {
   const manifest = {
     repository_files: ['apps/web/src/pages/CurrentPage.tsx'],
