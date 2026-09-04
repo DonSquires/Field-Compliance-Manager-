@@ -1,3 +1,125 @@
+.crm-page .page-header {
+	padding-bottom: 14px;
+	border-bottom: 1px solid #244654;
+}
+
+.crm-page .page-header h1,
+.crm-section-heading h2 {
+	color: #e6f0f4;
+	letter-spacing: 0;
+}
+
+.crm-account-actions {
+	border-color: #244654;
+}
+
+.crm-account-actions > span,
+.crm-readiness span,
+.crm-finance-kpis span {
+	color: #9cb5c0;
+}
+
+.crm-readiness {
+	border-left-color: #f2bf3a;
+	background: #30250d;
+}
+
+.crm-readiness strong {
+	color: #f7d77a;
+}
+
+.crm-readiness.is-ready {
+	border-left-color: #4cc38a;
+	background: #0d2b26;
+}
+
+.crm-readiness.is-ready strong {
+	color: #c5f3df;
+}
+
+.crm-finance-kpis span {
+	border-color: #244654;
+	border-top: 3px solid #1768d8;
+	border-radius: 5px;
+	background: #0a1b25;
+}
+
+.crm-finance-kpis span:first-child { border-top-color: #14c8d4; }
+.crm-finance-kpis span:last-child { border-top-color: #f2bf3a; }
+
+.crm-quote-dialog {
+	border-color: #244654;
+	border-radius: 6px;
+	color: #e6f0f4;
+	background: #0a1b25;
+}
+
+.crm-quote-dialog header {
+	border-color: #244654;
+}
+
+.crm-quote-dialog header span {
+	color: #67e4e8;
+}
+
+.crm-quote-dialog > p {
+	border-left-color: #14c8d4;
+	color: #b8cad4;
+	background: #0b2f3c;
+}
+
+.crm-quote-dialog input,
+.crm-quote-dialog select,
+.crm-quote-dialog textarea {
+	border-color: #315969;
+	color: #e6f0f4;
+	background: #071820;
+}
+
+.crm-quote-dialog input:focus,
+.crm-quote-dialog select:focus,
+.crm-quote-dialog textarea:focus {
+	border-color: #14c8d4;
+	outline: 2px solid rgba(20, 200, 212, 0.22);
+	outline-offset: 0;
+}
+
+.crm-pricing-receipt {
+	border-color: #4cc38a;
+	color: #c5f3df;
+	background: #0d2b26;
+}
+
+.crm-invoice-table {
+	border-color: #244654;
+	border-radius: 6px;
+}
+
+.crm-invoice-row {
+	border-color: #203f4c;
+	color: #c7d8df;
+}
+
+.crm-invoice-row.is-header {
+	color: #87a7b5;
+	background: #0c202b;
+}
+
+.crm-invoice-row button {
+	border-color: #315969;
+	color: #d8e6eb;
+	background: #102b37;
+}
+
+.crm-invoice-row button:hover {
+	border-color: #1e9eaa;
+	color: #67e4e8;
+	background: #0b2f3c;
+}
+
+.crm-invoice-status.status-paid { color: #c5f3df; background: #0d2b26; }
+.crm-invoice-status.status-overdue { color: #ffd4d4; background: #351719; }
+.crm-invoice-status.status-sent { color: #c7ddff; background: #112b4a; }
 .crm-quote-acceptance {
 	display: flex;
 	align-items: center;
