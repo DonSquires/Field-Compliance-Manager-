@@ -17,8 +17,8 @@ if [[ ! -f "$env_file" ]]; then
   exit 1
 fi
 
-git -C "$app_dir" fetch --prune "$git_remote" "$git_ref"
-git -C "$app_dir" merge --ff-only FETCH_HEAD
+git -c safe.directory="$app_dir" -C "$app_dir" fetch --prune "$git_remote" "$git_ref"
+git -c safe.directory="$app_dir" -C "$app_dir" merge --ff-only FETCH_HEAD
 
 if [[ ! -f "$compose_file" || ! -f "$app_dir/bob-control-plane-server.js" ]]; then
   echo "The checked-out source is missing Bob control-plane deployment files." >&2
