@@ -24,6 +24,12 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain('dispatch job was not confirmed');
   });
 
+  it('records phone or email provenance for manual alarm responses', () => {
+    expect(source).toContain("type AlarmIntakeChannel = 'phone' | 'email'");
+    expect(source).toContain('[Manual alarm intake: ${formAlarmIntakeChannel}; received ${new Date(formAlarmReceivedAt).toISOString()}]');
+    expect(source).toContain("formJobType === 'alarm_response' && !formAlarmReceivedAt");
+  });
+
   it('retains one client request id across retries and rotates it after success', () => {
     expect(source).toContain('p_client_request_id: formRequestId');
     expect(source).toContain('setFormRequestId(crypto.randomUUID())');

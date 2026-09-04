@@ -32,6 +32,7 @@ import { supabase } from '../lib/supabase';
 // Type definitions
 type JobType = 'alarm_response' | 'event' | 'incident' | 'patrol_support' | 'welfare_check';
 type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
+type AlarmIntakeChannel = 'phone' | 'email';
 type JobStatus = 'pending' | 'pending_approval' | 'dispatched' | 'acknowledged' | 'en_route' | 'on_scene' | 'completed' | 'cancelled';
 type ShiftStatus = 'scheduled' | 'published' | 'accepted' | 'declined' | 'in_progress' | 'completed' | 'cancelled';
 type StopStatus = 'pending' | 'en_route' | 'on_scene' | 'completed' | 'skipped' | 'cancelled';
@@ -300,6 +301,8 @@ const DispatchConsolePage: React.FC = () => {
   const [formResourceId, setFormResourceId] = useState<string>('');
   const [formSlaMinutes, setFormSlaMinutes] = useState(15);
   const [formNotes, setFormNotes] = useState('');
+  const [formAlarmIntakeChannel, setFormAlarmIntakeChannel] = useState<AlarmIntakeChannel>('phone');
+  const [formAlarmReceivedAt, setFormAlarmReceivedAt] = useState(() => new Date().toISOString().slice(0, 16));
   const [formZoneId, setFormZoneId] = useState<string>('');
   const [formRequestId, setFormRequestId] = useState(() => crypto.randomUUID());
   const [saving, setSaving] = useState(false);
@@ -525,6 +528,9 @@ const DispatchConsolePage: React.FC = () => {
       if (relationshipLoading) throw new Error('Service agreement access is still loading.');
       if (relationshipError) throw new Error(`Service agreement access could not be verified: ${relationshipError}`);
       if (!selectedAgreement) throw new Error('Select a service agreement before creating a dispatch job.');
+      const briefingNotes = formJobType === 'alarm_response'
+        ? `[Manual alarm intake: ${formAlarmIntakeChannel}; received ${new Date(formAlarmReceivedAt).toISOString()}]${formNotes.trim() ? `\n${formNotes.trim()}` : ''}`
+        : formNotes || null;
 
       const { data, error } = await supabase
         .rpc('create_dispatch_job', {
@@ -536,7 +542,7 @@ const DispatchConsolePage: React.FC = () => {
           p_priority: schemaDispatchJobPriority(formPriority),
           p_sla_minutes: formSlaMinutes,
           p_dispatch_resource_id: formResourceId || null,
-          p_briefing_notes: formNotes || null,
+          p_briefing_notes: briefingNotes,
           p_shift_id: formShiftId || null,
         });
 
@@ -551,6 +557,8 @@ const DispatchConsolePage: React.FC = () => {
       setFormResourceId('');
       setFormSlaMinutes(15);
       setFormNotes('');
+      setFormAlarmIntakeChannel('phone');
+      setFormAlarmReceivedAt(new Date().toISOString().slice(0, 16));
       setFormZoneId('');
       setFormRequestId(crypto.randomUUID());
 
@@ -868,6 +876,35 @@ const DispatchConsolePage: React.FC = () => {
               </select>
             </div>
 
+            {formJobType === 'alarm_response' && (
+              <>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
+                    Intake channel
+                  </label>
+                  <select
+                    value={formAlarmIntakeChannel}
+                    onChange={(e) => setFormAlarmIntakeChannel(e.target.value as AlarmIntakeChannel)}
+                    style={{ width: '100%', padding: '6px', marginTop: '4px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px' }}
+                  >
+                    <option value="phone">Phone call</option>
+                    <option value="email">Email</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
+                    Alarm received at
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={formAlarmReceivedAt}
+                    onChange={(e) => setFormAlarmReceivedAt(e.target.value)}
+                    style={{ width: '100%', padding: '6px', marginTop: '4px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </>
+            )}
+
             {/* Site */}
             <div>
               <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
@@ -992,7 +1029,7 @@ const DispatchConsolePage: React.FC = () => {
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
                 onClick={handleCreateJob}
-                disabled={saving || !formSiteId || (Boolean(formResourceId) && !formShiftId)}
+                disabled={saving || !formSiteId || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
                 style={{
                   flex: 1,
                   padding: '8px',
