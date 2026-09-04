@@ -3817,6 +3817,7 @@ async function execAssessSystem(authHeader, caps) {
       outcome: 'forbidden'
     }
   };
+  // ATLAS CALLS: bob-vps-view
   const r = await callFn('bob-vps-view/assessment', authHeader, {});
   if (!r.ok || r.data?.ok === false) return {
     reply: `I could not complete the system assessment (${r.data?.error ?? r.status}).`,
