@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const producer = readFileSync(resolve(process.cwd(), '../../supabase/functions/bob-propose-roster-fill/index.ts'), 'utf8');
+const rollbackProducer = readFileSync(resolve(process.cwd(), '../../supabase/functions/bob-propose-roster-rollback/index.ts'), 'utf8');
 const executor = readFileSync(resolve(process.cwd(), '../../supabase/functions/bob-proposal-execute/index.ts'), 'utf8');
 
 describe('Bob roster proposal function', () => {
@@ -20,5 +21,12 @@ describe('Bob roster proposal function', () => {
     expect(executor).toContain('apply_bob_roster_fill_plan');
     expect(executor).toContain('rollback_bob_roster_fill_plan');
     expect(executor).toContain('A human must publish slots separately');
+  });
+
+  it('creates rollback proposals without mutating the roster directly', () => {
+    expect(rollbackProducer).toContain("action_type: 'rollback_bob_roster_plan'");
+    expect(rollbackProducer).toContain("status: 'pending'");
+    expect(rollbackProducer).toContain("Only an applied roster plan can be rolled back");
+    expect(rollbackProducer).not.toContain("from('roster_slots').update");
   });
 });
