@@ -1,6 +1,9 @@
 services:
   bob-control-plane:
-    image: node:22-alpine
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: fcm-control-plane:current
     container_name: bob-control-plane
     working_dir: /app
     command: ["node", "/app/bob-control-plane-server.js"]
