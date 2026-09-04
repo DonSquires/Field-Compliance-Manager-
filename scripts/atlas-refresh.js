@@ -522,7 +522,7 @@ async function retireRows(baseUrl, serviceKey, table, ids) {
   for (let index = 0; index < ids.length; index += BATCH_SIZE) {
     const batch = ids.slice(index, index + BATCH_SIZE);
     const filter = batch.join(',');
-    const response = await fetch(`${baseUrl}/rest/v1/${table}?id=in.(${filter})&refresh_source=eq.ci_generator`, {
+    const response = await fetch(`${baseUrl}/rest/v1/${table}?id=in.(${filter})`, {
       method: 'PATCH',
       headers: {
         apikey: serviceKey,

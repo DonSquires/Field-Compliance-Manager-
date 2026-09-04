@@ -298,6 +298,11 @@ test('Atlas refresh retains generated column inventory until column derivation i
   assert.deepEqual(plan.capabilityRetireIds, []);
 });
 
+test('Atlas retirement applies to plan-selected manual records', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../scripts/atlas-refresh.js'), 'utf8');
+  assert.doesNotMatch(source, /id=in\.\(\$\{filter\}\)&refresh_source=eq\.ci_generator/);
+});
+
 test('Atlas refresh retires stale generated and manual edges when their source is deleted', () => {
   const manifest = {
     repository_files: ['apps/web/src/pages/CurrentPage.tsx'],
