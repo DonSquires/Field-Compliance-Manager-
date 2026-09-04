@@ -53,18 +53,20 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('<AdminHubPage onNavigate={navigateFromHub} />');
   });
 
-  it('exposes governed people and HR separately from roster operations', () => {
-    expect(source).toContain("{ id: 'people-hr', label: 'People & HR'");
+  it('preserves the governed people and HR route beneath the consolidated workspace', () => {
+    expect(source).not.toContain("{ id: 'people-hr', label: 'People & HR'");
     expect(source).toContain('return <RosterHRPage />');
     expect(source).toContain("'roster_hr': { page: 'people-hr' }");
   });
 
   it('keeps primary navigation at the enterprise workspace level', () => {
     expect(source).toContain("'Workspaces': [");
-    expect(source).toContain("{ id: 'crm', label: 'Commercial'");
-    expect(source).toContain("{ id: 'roster', label: 'Workforce'");
+    expect(source).toContain("{ id: 'crm', label: 'CRM & Finance'");
+    expect(source).toContain("{ id: 'roster', label: 'Roster & HR'");
     expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
+    expect(source).toContain("'Places': [");
+    expect(source).toContain("'Administration': [");
     expect(source).not.toContain("{ id: 'testing', label: 'E2E Testing'");
     expect(source).not.toContain("{ id: 'onboarding', label: 'Account Onboarding'");
   });

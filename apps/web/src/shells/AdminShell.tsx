@@ -153,17 +153,20 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
 const NAVIGATION_MAP = {
   'Workspaces': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
-    { id: 'crm', label: 'Commercial', icon: DollarSign },
-    { id: 'relationships', label: 'Relationships', icon: Network },
-    { id: 'roster', label: 'Workforce', icon: Users },
-    { id: 'people-hr', label: 'People & HR', icon: Users },
+    { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
+    { id: 'roster', label: 'Roster & HR', icon: Users },
     { id: 'field-ops', label: 'Field Operations', icon: Radio },
     { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
-  'Configure': [
+  'Places': [
+    { id: 'site-360', label: 'Sites', icon: Building2 },
     { id: 'locations', label: 'Locations', icon: MapPin },
+    { id: 'sites', label: 'Site Review', icon: ClipboardCheck },
+  ],
+  'Administration': [
     { id: 'users', label: 'People & Access', icon: Users },
     { id: 'access-control', label: 'Access Control', icon: KeyRound },
+    { id: 'org-setup', label: 'Organization Setup', icon: Settings },
     { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
   ],
   'Platform': [
