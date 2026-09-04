@@ -576,6 +576,7 @@ function budgetKnowledgeCards(cards) {
     'propose_patrol_route_assignment',
     'propose_roster_fill',
     'propose_roster_rollback',
+    'propose_rate_rule',
     'propose_zone_patrol_stop',
     'promote_action',
     'confirm_import'
@@ -684,6 +685,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'propose_patrol_route_assignment',
   'propose_roster_fill',
   'propose_roster_rollback',
+  'propose_rate_rule',
   'propose_zone_patrol_stop',
   'propose_freedom_camping_org_strategy',
   'job_plan_create',
@@ -844,7 +846,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_roster_fill', 'propose_roster_rollback', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -4718,6 +4720,14 @@ async function execProposeRosterRollback(authHeader, caps, args) {
   return { reply: 'I created a pending rollback proposal. Human approval is required, and it will fail closed for any edited or published slot.', meta: { tool: 'propose_roster_rollback', outcome: 'ok', action_id: result.data?.action_id ?? null } };
 }
 
+async function execProposeRateRule(authHeader, caps, orgId, args) {
+  if (!caps.canPromote) return { reply: 'Rate-rule proposals require an administrator.', meta: { tool: 'propose_rate_rule', outcome: 'forbidden' } };
+  const payload = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, name: args.name, rule_kind: args.rule_kind, rate_type: args.rate_type, amount: args.amount, pay_code: args.pay_code, service_type: args.service_type, job_type: args.job_type, day_category: args.day_category, priority: args.priority };
+  const result = await callFn('bob-propose-rate-rule', authHeader, payload);
+  if (!result.ok) return { reply: `I could not prepare the rate rule (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_rate_rule', outcome: 'failed', error: result.data?.error ?? null } };
+  return { reply: 'I created a pending rate-rule proposal. A finance administrator must approve it before it affects roster, dispatch, or billing calculations.', meta: { tool: 'propose_rate_rule', outcome: 'ok', action_id: result.data?.action_id ?? null } };
+}
+
 // Bob PROPOSES adding a site to a patrol route (client_site_patrol_config) into
 // the bell. Calls bob-propose-patrol-route-assignment. Parent-first: the site
 // must exist (site_id) or be a just-proposed create_client_site (parent_action_id);
@@ -7521,6 +7531,8 @@ serve(async (req)=>{
           return execProposeRosterFill(authHeader, caps, orgId, toolArgs);
         case 'propose_roster_rollback':
           return execProposeRosterRollback(authHeader, caps, toolArgs);
+        case 'propose_rate_rule':
+          return execProposeRateRule(authHeader, caps, orgId, toolArgs);
         case 'propose_zone_patrol_stop':
           return execProposeZonePatrolStop(authHeader, caps, toolArgs);
         case 'propose_freedom_camping_org_strategy':
@@ -9591,6 +9603,7 @@ serve(async (req)=>{
       'propose_patrol_route_assignment',
       'propose_roster_fill',
       'propose_roster_rollback',
+      'propose_rate_rule',
       'propose_zone_patrol_stop',
       'resolve_geofence',
       'resolve_address',

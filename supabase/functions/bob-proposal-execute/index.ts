@@ -121,7 +121,8 @@ const SUPPORTED_ACTIONS = new Set([
   'set_org_corporate_profile',
   'assign_human_id',
   'apply_roster_fill_plan',
-  'rollback_bob_roster_plan'
+  'rollback_bob_roster_plan',
+  'create_rate_rule'
 ]);
 // NZ Territorial Authority (council) boundaries: NZTA hosts a PUBLIC ArcGIS
 // FeatureServer (no API key) for TA Boundaries. ArcGIS REST supports name-based
@@ -448,6 +449,12 @@ serve(async (req)=>{
           ? 'Bob roster plan applied as editable draft assignments. A human must publish slots separately.'
           : 'Bob roster plan rolled back from unchanged draft assignments.'
       });
+    }
+    if (action.action_type === 'create_rate_rule') {
+      const { data: rateRuleId, error: rateError } = await admin.rpc('apply_bob_rate_rule_proposal', { p_action_id: action.id });
+      if (rateError || !rateRuleId) return await failAction(`apply_bob_rate_rule_proposal failed: ${rateError?.message ?? 'missing receipt'}`);
+      await admin.from('bob_agentic_actions').update({ status: 'applied', result_table: 'rate_rules', result_record_id: rateRuleId, applied_at: new Date().toISOString(), error_message: null }).eq('id', action.id);
+      return json({ success: true, action_id: action.id, result_table: 'rate_rules', result_record_id: rateRuleId, note: 'Approved rate rule applied.' });
     }
     // ── set_org_jurisdiction ──
     // payload: { target_org_id, district_names: string[] }. Fetch each TA polygon
