@@ -122,7 +122,8 @@ const SUPPORTED_ACTIONS = new Set([
   'assign_human_id',
   'apply_roster_fill_plan',
   'rollback_bob_roster_plan',
-  'create_rate_rule'
+  'create_rate_rule',
+  'start_staff_onboarding'
 ]);
 // NZ Territorial Authority (council) boundaries: NZTA hosts a PUBLIC ArcGIS
 // FeatureServer (no API key) for TA Boundaries. ArcGIS REST supports name-based
@@ -455,6 +456,12 @@ serve(async (req)=>{
       if (rateError || !rateRuleId) return await failAction(`apply_bob_rate_rule_proposal failed: ${rateError?.message ?? 'missing receipt'}`);
       await admin.from('bob_agentic_actions').update({ status: 'applied', result_table: 'rate_rules', result_record_id: rateRuleId, applied_at: new Date().toISOString(), error_message: null }).eq('id', action.id);
       return json({ success: true, action_id: action.id, result_table: 'rate_rules', result_record_id: rateRuleId, note: 'Approved rate rule applied.' });
+    }
+    if (action.action_type === 'start_staff_onboarding') {
+      const { data: ledgerId, error: onboardingError } = await admin.rpc('apply_bob_staff_onboarding_proposal', { p_action_id: action.id });
+      if (onboardingError || !ledgerId) return await failAction(`apply_bob_staff_onboarding_proposal failed: ${onboardingError?.message ?? 'missing receipt'}`);
+      await admin.from('bob_agentic_actions').update({ status: 'applied', result_table: 'staff_onboarding_ledgers', result_record_id: ledgerId, applied_at: new Date().toISOString(), error_message: null }).eq('id', action.id);
+      return json({ success: true, action_id: action.id, result_table: 'staff_onboarding_ledgers', result_record_id: ledgerId, note: 'Approved staff onboarding started.' });
     }
     // ── set_org_jurisdiction ──
     // payload: { target_org_id, district_names: string[] }. Fetch each TA polygon

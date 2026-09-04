@@ -686,6 +686,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'propose_roster_fill',
   'propose_roster_rollback',
   'propose_rate_rule',
+  'propose_staff_onboarding',
   'propose_zone_patrol_stop',
   'propose_freedom_camping_org_strategy',
   'job_plan_create',
@@ -846,7 +847,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -4727,6 +4728,13 @@ async function execProposeRateRule(authHeader, caps, orgId, args) {
   if (!result.ok) return { reply: `I could not prepare the rate rule (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_rate_rule', outcome: 'failed', error: result.data?.error ?? null } };
   return { reply: 'I created a pending rate-rule proposal. A finance administrator must approve it before it affects roster, dispatch, or billing calculations.', meta: { tool: 'propose_rate_rule', outcome: 'ok', action_id: result.data?.action_id ?? null } };
 }
+async function execProposeStaffOnboarding(authHeader, caps, args) {
+  if (!caps.canPromote) return { reply: 'Staff onboarding proposals require an administrator.', meta: { tool: 'propose_staff_onboarding', outcome: 'forbidden' } };
+  const staffId = String(args.staff_id ?? '').trim();
+  if (!staffId) return { reply: 'Tell me the staff profile ID to start onboarding. I will only create a pending HR proposal.', meta: { tool: 'propose_staff_onboarding', outcome: 'need_staff' } };
+  const result = await callFn('bob-propose-staff-onboarding', authHeader, { staff_id: staffId, target_start: args.target_start, note: args.note });
+  return result.ok ? { reply: 'I created a pending staff-onboarding proposal. A human HR administrator must approve it; evidence and work readiness remain human controlled.', meta: { tool: 'propose_staff_onboarding', outcome: 'ok', action_id: result.data?.action_id ?? null } } : { reply: `I could not prepare staff onboarding (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_staff_onboarding', outcome: 'failed' } };
+}
 
 // Bob PROPOSES adding a site to a patrol route (client_site_patrol_config) into
 // the bell. Calls bob-propose-patrol-route-assignment. Parent-first: the site
@@ -7533,6 +7541,8 @@ serve(async (req)=>{
           return execProposeRosterRollback(authHeader, caps, toolArgs);
         case 'propose_rate_rule':
           return execProposeRateRule(authHeader, caps, orgId, toolArgs);
+        case 'propose_staff_onboarding':
+          return execProposeStaffOnboarding(authHeader, caps, toolArgs);
         case 'propose_zone_patrol_stop':
           return execProposeZonePatrolStop(authHeader, caps, toolArgs);
         case 'propose_freedom_camping_org_strategy':
