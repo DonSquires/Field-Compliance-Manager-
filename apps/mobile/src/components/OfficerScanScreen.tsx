@@ -85,8 +85,21 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
   };
 
   const sync = async () => {
+    if (queued === 0) {
+      Alert.alert('Queue is clear', 'There are no saved scans waiting to send.');
+      return;
+    }
     setWorking(true);
-    try { const status = await syncQueuedOfficerScans(); await refreshQueue(); Alert.alert('Queue sync', `${status.synced} sent, ${status.pending} still pending.`); } finally { setWorking(false); }
+    try {
+      const status = await syncQueuedOfficerScans();
+      await refreshQueue();
+      Alert.alert(
+        'Queue sync',
+        status.pending
+          ? `${status.synced} scan${status.synced === 1 ? '' : 's'} sent. ${status.pending} still waiting for a connection.`
+          : `${status.synced} scan${status.synced === 1 ? '' : 's'} sent. Your queue is clear.`,
+      );
+    } finally { setWorking(false); }
   };
 
   const discardQueuedScan = async (id: string) => {
@@ -112,7 +125,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
       <View style={styles.photoPanel}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.photo} /> : <Text style={styles.photoEmpty}>Capture a clear rear vehicle image with the plate visible.</Text>}<View style={styles.actionRow}><Pressable onPress={() => void setPhoto(captureVehiclePhoto)} style={styles.primary}><Text style={styles.primaryText}>Open camera</Text></Pressable><Pressable onPress={() => void setPhoto(chooseVehiclePhoto)} style={styles.secondary}><Text style={styles.secondaryText}>Choose photo</Text></Pressable></View></View>
       <View style={styles.location}><Text style={styles.label}>Location</Text><Text style={styles.detail}>{coordinates ? `${coordinates.lat.toFixed(5)}, ${coordinates.lng.toFixed(5)}` : 'No location captured'}</Text><Pressable onPress={() => void locate()} style={styles.secondary}><Text style={styles.secondaryText}>{coordinates ? 'Refresh GPS' : 'Capture GPS'}</Text></Pressable></View>
       <Pressable disabled={!photoUri || !coordinates || working} onPress={() => void submit()} style={[styles.submit, (!photoUri || !coordinates || working) && styles.disabled]}>{working ? <ActivityIndicator color="#04211e" /> : <Text style={styles.submitText}>Process scan</Text>}</Pressable>
-      <View style={styles.queuePanel}><Pressable disabled={working} onPress={() => void sync()} style={styles.queue}><Text style={styles.queueText}>Queued scans: {queued}. Sync now</Text></Pressable>{queued > 0 && <Pressable onPress={() => setShowQueue((current) => !current)} style={styles.queue}><Text style={styles.queueText}>{showQueue ? 'Hide queued scans' : 'Review queued scans'}</Text></Pressable>}{showQueue && <View style={styles.queueList}>{queueItems.map((item) => <View key={item.id} style={styles.queueItem}><View><Text style={styles.queueItemTitle}>{item.payload.module_key.replaceAll('_', ' ')}</Text><Text style={styles.detail}>Captured {new Date(item.payload.captured_at).toLocaleString('en-NZ')} · {item.attempts} retry attempt{item.attempts === 1 ? '' : 's'}</Text></View><Pressable onPress={() => void discardQueuedScan(item.id)} style={styles.discard}><Text style={styles.discardText}>Discard</Text></Pressable></View>)}</View>}</View>
+      <View style={styles.queuePanel}><Pressable disabled={working || queued === 0} onPress={() => void sync()} style={[styles.queue, (working || queued === 0) && styles.disabled]}><Text style={styles.queueText}>{queued ? `Sync ${queued} queued scan${queued === 1 ? '' : 's'}` : 'No scans waiting to sync'}</Text></Pressable>{queued > 0 && <Pressable onPress={() => setShowQueue((current) => !current)} style={styles.queue}><Text style={styles.queueText}>{showQueue ? 'Hide queued scans' : 'Review queued scans'}</Text></Pressable>}{showQueue && <View style={styles.queueList}>{queueItems.map((item) => <View key={item.id} style={styles.queueItem}><View><Text style={styles.queueItemTitle}>{item.payload.module_key.replaceAll('_', ' ')}</Text><Text style={styles.detail}>Captured {new Date(item.payload.captured_at).toLocaleString('en-NZ')} · {item.attempts} retry attempt{item.attempts === 1 ? '' : 's'}</Text></View><Pressable onPress={() => void discardQueuedScan(item.id)} style={styles.discard}><Text style={styles.discardText}>Discard</Text></Pressable></View>)}</View>}</View>
       {result && <View style={styles.result}><Text style={styles.resultStatus}>{result.compliance_status.replaceAll('_', ' ')}</Text><Text style={styles.resultPlate}>{result.plate_number}</Text><Text style={styles.detail}>{result.zone_name ?? 'No verified zone matched'}{result.compliance_reason ? ` · ${result.compliance_reason}` : ''}</Text></View>}
     </CollapsibleSection>
     <CollapsibleSection title="Specialist compliance">
