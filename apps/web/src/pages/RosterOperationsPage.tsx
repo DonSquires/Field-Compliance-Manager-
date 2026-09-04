@@ -159,7 +159,7 @@ const RosterOperationsPage: React.FC = () => {
 
   const openEdit = (slot: RosterSlot) => {
     const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
-      setEditingSlot(slot); 
+      setEditingSlot(slot);
     setForm({
       officerId: staffMember?.id ?? '',
       workUnitId: slot.work_unit_id,
