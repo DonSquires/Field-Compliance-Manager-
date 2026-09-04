@@ -4697,7 +4697,7 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
     }
   };
 }
-// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule
+// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding
 async function execProposeRosterFill(authHeader, caps, orgId, args) {
   if (!caps.canPromote) return { reply: 'Roster-fill proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_fill', outcome: 'forbidden' } };
   const periodStart = String(args.period_start ?? '').trim();
