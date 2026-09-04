@@ -18,6 +18,7 @@ The live public Supabase schema is stored in [`supabase/schema.sql`](supabase/sc
 - `docker-compose.api.yml`: API and inference image deployment
 - `docker-compose.full.yml`: full stack with voice, planner, OSRM, and Ollama
 - `deploy/bob-control-plane/docker-compose.yml`: active VPS Bob deployment manifest, using a non-root runtime user
+- `deploy/bob-control-plane/deploy.sh`: HPanel/VPS deployment command; fast-forwards the configured Gitea checkout and verifies Bob health
 - `.gitea/workflows/runner-test.yml`: private Git runner verification
 
 ## Local validation
@@ -31,6 +32,8 @@ node --check bob-control-plane-server.js
 ```
 
 The production control plane requires `BOB_ALLOWED_REPOSITORIES` as a comma-separated list of exact Gitea repository names. Copy [`.env.example`](.env.example) to `.env` and replace every placeholder before starting it.
+
+On the protected VPS, keep the production environment at `/var/lib/bob/control-plane.env` with owner `1000:1000` and mode `0600`. Deploy from the HPanel terminal using `bash /root/field-compliance-manager/deploy/bob-control-plane/deploy.sh`. It uses the checkout's configured Gitea remote and performs a fast-forward-only update; set `FCM_GIT_REMOTE` or `FCM_GIT_REF` only when intentionally deploying a different configured remote or ref.
 
 `BOB_WORKFLOW_MODE=local` keeps development jobs in the VPS JSON state file. Set `BOB_WORKFLOW_MODE=remote` only in the protected VPS environment after supplying `SUPABASE_SERVICE_ROLE_KEY`; Bob will then create workflow jobs through the Supabase `wf-create-job` Edge Function. Never expose the service-role key to a browser, worker, or repository.
 
