@@ -135,6 +135,16 @@ const RosterHRPage: React.FC = () => {
     urgency: 'normal',
     notes: '',
   });
+  const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [templateForm, setTemplateForm] = useState({
+    name: '',
+    shift_type: 'day',
+    start_time: '08:00',
+    end_time: '16:00',
+    recurrence_type: 'weekly',
+    required_staff_count: '1',
+    notes: '',
+  });
 
   // ATLAS READS: user_profiles, staff_profiles, staff_credentials,
   // shift_templates, leave_requests, timesheets, shift_coverage_requests
@@ -298,6 +308,45 @@ const RosterHRPage: React.FC = () => {
   };
 
   const finalizeCoverage=async(event:React.FormEvent)=>{event.preventDefault();if(!coverageFinalization)return;setSaving(true);setError(null);setNotice(null);const{data,error:finalizeError}=await supabase.rpc('finalize_shift_coverage',{p_request_id:coverageFinalization.request.id,p_expected_status:coverageFinalization.request.status,p_work_unit_id:coverageFinalization.workUnitId,p_notes:coverageFinalization.notes.trim()||null});const receipt=(data as Array<{request_id:string;roster_slot_id:string;shift_id:string|null}>|null)?.[0];if(finalizeError||!receipt)setError(finalizeError?.message??'Coverage finalization receipt was not confirmed.');else{setNotice(`Coverage finalized for ${staffNames[coverageFinalization.request.claimed_by??'']??'claimant'} · roster ${receipt.roster_slot_id.slice(0,8)}${receipt.shift_id?` · shift ${receipt.shift_id.slice(0,8)}`:''}.`);setCoverageFinalization(null);await loadAll();}setSaving(false);};
+
+  const handleCreateTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true); setError(null); setNotice(null);
+    const { error: tplError } = await supabase.rpc('manage_shift_template', {
+      p_client_request_id: crypto.randomUUID(),
+      p_action: 'create',
+      p_name: templateForm.name.trim(),
+      p_shift_type: templateForm.shift_type,
+      p_start_time: templateForm.start_time,
+      p_end_time: templateForm.end_time,
+      p_recurrence_type: templateForm.recurrence_type,
+      p_required_staff_count: Number(templateForm.required_staff_count),
+      p_notes: templateForm.notes.trim() || null,
+    });
+    if (tplError) setError(tplError.message);
+    else {
+      setNotice(`Shift template '${templateForm.name}' created.`);
+      setShowTemplateForm(false);
+      setTemplateForm({ name: '', shift_type: 'day', start_time: '08:00', end_time: '16:00', recurrence_type: 'weekly', required_staff_count: '1', notes: '' });
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const handleToggleTemplate = async (templateId: string) => {
+    setSaving(true); setError(null); setNotice(null);
+    const { error: tplError } = await supabase.rpc('manage_shift_template', {
+      p_client_request_id: crypto.randomUUID(),
+      p_template_id: templateId,
+      p_action: 'toggle_active',
+    });
+    if (tplError) setError(tplError.message);
+    else {
+      setNotice('Shift template status toggled.');
+      await loadAll();
+    }
+    setSaving(false);
+  };
 
   const isExpiringSoon = (expiryDate: string | null) => {
     if (!expiryDate) return false;
@@ -532,6 +581,61 @@ const RosterHRPage: React.FC = () => {
       {tab === 'shift-templates' && (
         <section className="reports-section">
           <h2>Shift Templates ({shiftTemplates.length})</h2>
+          <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => setShowTemplateForm(!showTemplateForm)}>
+            {showTemplateForm ? 'Cancel' : '+ New Shift Template'}
+          </button>
+
+          {showTemplateForm && (
+            <form className="assessment-form" onSubmit={handleCreateTemplate} style={{ marginBottom: '1.5rem' }}>
+              <div className="form-group">
+                <label htmlFor="tpl-name">Template Name</label>
+                <input id="tpl-name" required value={templateForm.name} onChange={(e) => setTemplateForm({ ...templateForm, name: e.target.value })} placeholder="e.g. Morning Static Guard" />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="tpl-shift-type">Shift Type</label>
+                  <select id="tpl-shift-type" value={templateForm.shift_type} onChange={(e) => setTemplateForm({ ...templateForm, shift_type: e.target.value })}>
+                    <option value="day">Day</option>
+                    <option value="swing">Swing</option>
+                    <option value="night">Night</option>
+                    <option value="overnight">Overnight</option>
+                    <option value="split">Split</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="tpl-recurrence">Recurrence</label>
+                  <select id="tpl-recurrence" value={templateForm.recurrence_type} onChange={(e) => setTemplateForm({ ...templateForm, recurrence_type: e.target.value })}>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="fortnightly">Fortnightly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="tpl-start">Start Time</label>
+                  <input id="tpl-start" type="time" required value={templateForm.start_time} onChange={(e) => setTemplateForm({ ...templateForm, start_time: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="tpl-end">End Time</label>
+                  <input id="tpl-end" type="time" required value={templateForm.end_time} onChange={(e) => setTemplateForm({ ...templateForm, end_time: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="tpl-staff-count">Required Staff</label>
+                  <input id="tpl-staff-count" type="number" min={1} required value={templateForm.required_staff_count} onChange={(e) => setTemplateForm({ ...templateForm, required_staff_count: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label htmlFor="tpl-notes">Notes</label>
+                <textarea id="tpl-notes" rows={2} value={templateForm.notes} onChange={(e) => setTemplateForm({ ...templateForm, notes: e.target.value })} />
+              </div>
+              <button type="submit" className="btn btn-primary btn-block" disabled={saving}>
+                {saving ? 'Creating...' : 'Create Shift Template'}
+              </button>
+            </form>
+          )}
+
           <div className="contacts-list">
             {shiftTemplates.length === 0 ? (
               <div className="empty-state">
@@ -552,6 +656,9 @@ const RosterHRPage: React.FC = () => {
                       Requires {t.required_staff_count} staff · {t.is_active ? 'Active' : 'Inactive'}
                     </p>
                   </div>
+                  <button type="button" className={`btn btn-sm ${t.is_active ? 'btn-secondary' : 'btn-primary'}`} style={{ marginTop: '0.5rem' }} disabled={saving} onClick={() => void handleToggleTemplate(t.id)}>
+                    {t.is_active ? 'Deactivate' : 'Activate'}
+                  </button>
                 </div>
               ))
             )}
