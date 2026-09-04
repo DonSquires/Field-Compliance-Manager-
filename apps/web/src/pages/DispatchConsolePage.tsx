@@ -28,6 +28,7 @@ import {
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { supabase } from '../lib/supabase';
+import './DispatchConsolePage.css';
 
 // Type definitions
 type JobType = 'alarm_response' | 'event' | 'incident' | 'patrol_support' | 'welfare_check';
@@ -219,53 +220,20 @@ const JobCard: React.FC<{ job: DispatchJob }> = ({ job }) => {
 
   return (
     <div
-      style={{
-        padding: '12px',
-        backgroundColor: 'var(--color-bg-secondary)',
-        border: `1px solid ${job.slaBreached ? '#EF5350' : 'var(--color-border)'}`,
-        borderRadius: '4px',
-        marginBottom: '8px',
-      }}
+      className={`dispatch-job-card ${job.slaBreached ? 'is-sla-breached' : ''}`}
+      style={{ '--dispatch-priority': priorityColor } as React.CSSProperties}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-        <div>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            {job.siteName}
-          </div>
-          <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-            {JOB_TYPES.find((t) => t.id === job.jobType)?.label}
-          </div>
+      <div className="dispatch-job-card-header">
+        <div className="dispatch-job-card-title">
+          <strong>{job.siteName}</strong>
+          <span>{JOB_TYPES.find((t) => t.id === job.jobType)?.label}</span>
         </div>
-        <div
-          style={{
-            fontSize: '11px',
-            fontWeight: 600,
-            color: 'white',
-            padding: '4px 8px',
-            backgroundColor: priorityColor,
-            borderRadius: '3px',
-          }}
-        >
-          {job.priority.toUpperCase()}
-        </div>
+        <span className="dispatch-job-priority">{job.priority}</span>
       </div>
       {job.slaBreached && (
-        <div
-          style={{
-            fontSize: '11px',
-            color: '#EF5350',
-            padding: '4px',
-            backgroundColor: '#3A0000',
-            borderRadius: '3px',
-            marginBottom: '6px',
-          }}
-        >
-          ⚠️ SLA Breached
-        </div>
+        <div className="dispatch-job-breach">SLA breached</div>
       )}
-      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-        SLA: {job.slaMinutes} min
-      </div>
+      <div className="dispatch-job-card-sla">Response SLA: {job.slaMinutes} min</div>
     </div>
   );
 };

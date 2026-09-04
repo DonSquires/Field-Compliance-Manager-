@@ -1,0 +1,73 @@
+.dispatch-job-card {
+  padding: 12px;
+  margin-bottom: 8px;
+  border: 1px solid #244654;
+  border-left: 3px solid var(--dispatch-priority, #527f94);
+  border-radius: 5px;
+  background: #0a1b25;
+}
+
+.dispatch-job-card.is-sla-breached {
+  border-color: #d85050;
+  border-left-color: #d85050;
+}
+
+.dispatch-job-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.dispatch-job-card-title {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.dispatch-job-card-title strong {
+  overflow: hidden;
+  color: #e6f0f4;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dispatch-job-card-title span,
+.dispatch-job-card-sla {
+  color: #9cb5c0;
+  font-size: 11px;
+}
+
+.dispatch-job-priority,
+.dispatch-job-breach {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.dispatch-job-priority {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  color: #04151c;
+  background: var(--dispatch-priority, #527f94);
+}
+
+.dispatch-job-breach {
+  margin-bottom: 8px;
+  padding: 5px 7px;
+  color: #ffd4d4;
+  background: #351719;
+}
+
+@media (max-width: 720px) {
+  .dispatch-job-card-header {
+    gap: 8px;
+  }
+}
