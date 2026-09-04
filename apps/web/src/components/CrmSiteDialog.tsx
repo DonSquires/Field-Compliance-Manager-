@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, MapPin, Search, X } from 'lucide-react';
+import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 import './CrmOrganizationDialog.css';
 
@@ -30,7 +31,21 @@ export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: 
   const [searched, setSearched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedAddress, setResolvedAddress] = useState<AddressCandidate | null>(null);
+  const [resolvingAddress, setResolvingAddress] = useState(false);
   const requestId = useRef(crypto.randomUUID());
+
+  const resolveAddress = async () => {
+    if (address.trim().length < 4) return;
+    setResolvingAddress(true); setError(null); setResolvedAddress(null);
+    try {
+      const candidate = (await resolveAddressCandidates(address, 1))[0];
+      if (!candidate) { setError('No canonical address match was found. Check the address and try again.'); return; }
+      setResolvedAddress(candidate);
+      setAddress(candidate.label);
+    } catch { setError('Address resolution is unavailable. Check the address and try again.'); }
+    finally { setResolvingAddress(false); }
+  };
 
   const searchSites = async (event: FormEvent) => {
     event.preventDefault();
@@ -73,9 +88,10 @@ export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: 
     </form> : <form className="crm-org-form" onSubmit={createSite}>
       <p>The site will start with a provisional, unverified boundary. Operations must review its geofence before activation.</p>
       <label><span>Site name</span><input required maxLength={200} value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <label><span>Street address</span><input required maxLength={500} value={address} onChange={(event) => setAddress(event.target.value)} /></label>
+      <label><span>Street address</span><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input required maxLength={500} value={address} onChange={(event) => { setAddress(event.target.value); setResolvedAddress(null); }} /><button type="button" onClick={() => void resolveAddress()} disabled={resolvingAddress || address.trim().length < 4} style={{ minHeight: 34, padding: '0 10px', border: '1px solid #3e796e', borderRadius: 4, color: '#e6fff9', background: '#1b493f', fontSize: 9, fontWeight: 850, whiteSpace: 'nowrap' }}>{resolvingAddress ? 'Resolving' : 'Resolve address'}</button></div></label>
+      {resolvedAddress && <div className="crm-org-message is-success" role="status"><CheckCircle2 size={16} /><span>Canonical address ready: {resolvedAddress.label} · {resolvedAddress.source.replaceAll('_', ' ')}</span></div>}
       <label><span>Site type</span><select value={siteType} onChange={(event) => setSiteType(event.target.value)}><option value="commercial_premises">Commercial premises</option><option value="government_facility">Government facility</option><option value="education_facility">Education facility</option><option value="hospital">Hospital</option><option value="industrial_site">Industrial site</option><option value="residential_complex">Residential complex</option><option value="parking_area">Parking area</option><option value="public_space">Public space</option><option value="other">Other</option></select></label>
-      <footer><button type="button" onClick={() => setStage('search')}>Back to matches</button><button type="submit" disabled={saving || !name.trim() || address.trim().length < 4}>{saving ? 'Creating' : 'Create site for boundary review'}</button></footer>
+      <footer><button type="button" onClick={() => setStage('search')}>Back to matches</button><button type="submit" disabled={saving || resolvingAddress || !name.trim() || !resolvedAddress}>{saving ? 'Creating' : 'Create site for boundary review'}</button></footer>
     </form>}
   </section></div>;
 }
