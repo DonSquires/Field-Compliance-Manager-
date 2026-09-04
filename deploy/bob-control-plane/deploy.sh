@@ -26,4 +26,12 @@ if [[ ! -f "$compose_file" || ! -f "$app_dir/bob-control-plane-server.js" ]]; th
 fi
 
 docker compose -f "$compose_file" up -d --force-recreate bob-control-plane
-curl --fail --silent --show-error http://172.16.0.1:8091/health
+for attempt in {1..30}; do
+  if curl --fail --silent --show-error http://172.16.0.1:8091/health; then
+    exit 0
+  fi
+  sleep 1
+done
+
+docker compose -f "$compose_file" logs --tail 100 bob-control-plane >&2
+exit 1
