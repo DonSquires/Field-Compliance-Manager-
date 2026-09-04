@@ -15,8 +15,11 @@ describe('governed rate rule management', () => {
     expect(sql).toContain('Rate rule changed since it was opened');
     expect(sql).toContain("'rate_rule_managed'");
   });
-  it('exposes create and activate/deactivate only through the governed RPC', () => {
+  it('exposes create, update, and activate/deactivate only through the governed RPC', () => {
     expect(page).toContain("supabase.rpc('manage_rate_rule'");
+    expect(page).toContain("p_action: 'update'");
+    expect(page).toContain('p_expected_updated_at: editingRule.updated_at');
+    expect(page).toContain('Edit rule');
     expect(page).toContain("supabase.rpc('resolve_dispatch_job_pay_lines'");
     expect(page).toContain('Completed Jobs Awaiting Rate Resolution');
     expect(page).not.toContain(".from('rate_rules').insert");
