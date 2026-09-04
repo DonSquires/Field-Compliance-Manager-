@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { captureCoordinates } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
+import { userFacingError } from '../lib/userFacingError';
 
 type Props = { shiftId: string | null };
 type ReportType = 'incident' | 'maintenance' | 'health_safety';
@@ -48,7 +49,7 @@ export function OfficerFieldReportPanel({ shiftId }: Props) {
       Alert.alert('Report confirmed', `Receipt ${receipt.id.slice(0, 8)}. Your report is available for supervisor review.`);
       setTitle(''); setDescription(''); setLocationName(''); setImmediateAction(''); setFollowUp(false); setFollowUpNotes('');
       eventId.current = crypto.randomUUID(); capturedAt.current = new Date().toISOString(); setOpen(false);
-    } catch (error) { Alert.alert('Report not confirmed', error instanceof Error ? error.message : 'Your report remains available for retry.'); } finally { setBusy(false); }
+    } catch (error) { Alert.alert('Report not confirmed', userFacingError(error, 'Your report remains available for retry.')); } finally { setBusy(false); }
   };
 
   const valid = title.trim().length >= 5 && description.trim().length >= 10 && (!followUp || Boolean(followUpNotes.trim()));

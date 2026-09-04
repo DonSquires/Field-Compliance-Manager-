@@ -32,6 +32,7 @@ import { OfficerBiosecurityPanel } from './OfficerBiosecurityPanel';
 import { OfficerNoiseControlPanel } from './OfficerNoiseControlPanel';
 import { OfficerSmokeControlPanel } from './OfficerSmokeControlPanel';
 import { registerOfficerDeviceToken, unregisterOfficerDeviceToken } from '../lib/officerNotifications';
+import { userFacingError } from '../lib/userFacingError';
 
 type Props = { onSignOut: () => void; officerId: string; organizationId: string | null; shiftId: string | null; shiftStatus: string | null };
 
@@ -52,7 +53,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
   }, []);
 
   const setPhoto = async (source: () => Promise<string | null>) => {
-    try { const uri = await source(); if (uri) { setPhotoUri(uri); setResult(null); } } catch (error) { Alert.alert('Evidence unavailable', error instanceof Error ? error.message : 'Vehicle evidence could not be captured.'); }
+    try { const uri = await source(); if (uri) { setPhotoUri(uri); setResult(null); } } catch (error) { Alert.alert('Evidence unavailable', userFacingError(error, 'Vehicle evidence could not be captured.')); }
   };
 
   const locate = async () => {
@@ -79,7 +80,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
         Alert.alert('Queued for sync', 'The scan is stored securely on this device and will be retried from the queue.');
       }
     } catch (error) {
-      Alert.alert('Scan unavailable', error instanceof Error ? error.message : 'The scan could not be prepared.');
+      Alert.alert('Scan unavailable', userFacingError(error, 'The scan could not be prepared.'));
     } finally { setWorking(false); }
   };
 

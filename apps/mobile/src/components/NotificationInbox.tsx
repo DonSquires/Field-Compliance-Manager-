@@ -14,6 +14,13 @@ type Notification = {
 
 type Props = { organizationId: string | null; userId: string };
 
+function notificationErrorMessage(error: unknown, action: 'load' | 'markRead'): string {
+  console.error(`Notification ${action} failed`, error);
+  return action === 'load'
+    ? "We couldn't load notifications. Try refreshing."
+    : "We couldn't mark that notification as read. Try again.";
+}
+
 export function NotificationInbox({ organizationId, userId }: Props) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Notification[]>([]);
@@ -29,7 +36,7 @@ export function NotificationInbox({ organizationId, userId }: Props) {
       if (queryError) throw queryError;
       setRows((data as Notification[]) ?? []);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Notifications could not be loaded.');
+      setError(notificationErrorMessage(cause, 'load'));
     } finally { setLoading(false); }
   }, [organizationId]);
 
@@ -46,7 +53,7 @@ export function NotificationInbox({ organizationId, userId }: Props) {
     if (!supabase) return;
     const readAt = new Date().toISOString();
     const { error: updateError } = await supabase.from('notifications').update({ read_at: readAt }).eq('id', id).is('read_at', null);
-    if (updateError) { Alert.alert('Notification not updated', updateError.message); return; }
+    if (updateError) { Alert.alert('Notification not updated', notificationErrorMessage(updateError, 'markRead')); return; }
     setRows((current) => current.map((item) => item.id === id ? { ...item, read_at: readAt } : item));
   };
 

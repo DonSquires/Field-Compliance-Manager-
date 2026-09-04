@@ -4,6 +4,7 @@ import { isMobileBackgroundTrackingActive, startMobileBackgroundTracking, stopMo
 import { BREADCRUMB_INTERVAL_MS, flushMobileBreadcrumbs, recordMobileBreadcrumb } from '../lib/officerBreadcrumb';
 import { captureCoordinates } from '../lib/officerScan';
 import { recordMobileCheckIn, triggerMobileSos } from '../lib/officerSafety';
+import { userFacingError } from '../lib/userFacingError';
 
 type Props = { officerId: string; organizationId: string | null; shiftId: string | null };
 
@@ -48,7 +49,7 @@ export function OfficerSafetyBar({ officerId, organizationId, shiftId }: Props) 
         setStatus('Background tracking active for this shift.');
       }
     } catch (error) {
-      Alert.alert('Tracking not confirmed', error instanceof Error ? error.message : 'Background tracking could not be updated.');
+      Alert.alert('Tracking not confirmed', userFacingError(error, 'Background tracking could not be updated.'));
     }
   };
 
@@ -59,7 +60,7 @@ export function OfficerSafetyBar({ officerId, organizationId, shiftId }: Props) 
       await recordMobileCheckIn({ coordinates: await getCoordinates(), shiftId });
       setStatus(`Checked in at ${new Date().toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}`);
     } catch (error) {
-      Alert.alert('Check-in not confirmed', error instanceof Error ? error.message : 'Retry your check-in.');
+      Alert.alert('Check-in not confirmed', userFacingError(error, 'Retry your check-in.'));
     } finally { setPending(null); }
   };
 
@@ -78,7 +79,7 @@ export function OfficerSafetyBar({ officerId, organizationId, shiftId }: Props) 
       await triggerMobileSos({ coordinates: await getCoordinates(), shiftId });
       setStatus('SOS confirmed. Supervisors have been alerted.');
     } catch (error) {
-      Alert.alert('SOS not confirmed', error instanceof Error ? error.message : 'Retry SOS or use your emergency procedure.');
+      Alert.alert('SOS not confirmed', userFacingError(error, 'Retry SOS or use your emergency procedure.'));
     } finally { setPending(null); }
   };
 
