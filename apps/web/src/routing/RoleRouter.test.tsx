@@ -1,8 +1,45 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { RoleRouter } from './RoleRouter';
+
+// AdminShell/OfficerShell and their descendant pages/hooks reach into
+// Supabase directly (queries, realtime channels, function invokes). This is
+// a full-tree smoke render, not a unit test of any one query, so every call
+// is answered with an inert, always-chainable/thenable stand-in rather than
+// mocking each call site individually.
+function chainable(): unknown {
+  return new Proxy(function chainableTarget() { /* callable no-op */ }, {
+    get(_target, prop) {
+      if (prop === 'then') return (resolve: (value: unknown) => void) => resolve({ data: [], error: null });
+      return () => chainable();
+    },
+    apply() {
+      return chainable();
+    },
+  });
+}
+
+vi.mock('../lib/supabase', () => ({
+  supabase: new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === 'auth') {
+          return {
+            getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+            onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => undefined } } }),
+          };
+        }
+        if (prop === 'functions') return { invoke: () => Promise.resolve({ data: null, error: null }) };
+        if (prop === 'storage') return { from: () => chainable() };
+        if (prop === 'removeChannel') return () => undefined;
+        return () => chainable();
+      },
+    },
+  ),
+}));
 
 describe('RoleRouter', () => {
   it('renders the admin shell for admin roles', () => {
