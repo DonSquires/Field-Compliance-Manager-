@@ -6,7 +6,7 @@ services:
     command: ["node", "/app/bob-control-plane-server.js"]
     user: "1000:1000"
     env_file:
-      - /root/field-compliance-manager/.env
+      - /var/lib/bob/control-plane.env
     environment:
       PORT: "8080"
       BOB_STATE_DIR: /data

@@ -21,6 +21,7 @@ jobs:
       - name: Deploy and verify control plane
         env:
           VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          BOB_CONTROL_PLANE_ENV: ${{ secrets.BOB_CONTROL_PLANE_ENV }}
         run: |
           set -euo pipefail
           key_file="$RUNNER_TEMP/fcm-vps-key"
@@ -52,6 +53,13 @@ jobs:
             echo 'Runner workspace is missing deploy sources. Start a fresh "Run workflow" on main rather than re-running an older run.' >&2
             exit 4
           fi
+          if [[ -z "$BOB_CONTROL_PLANE_ENV" ]]; then
+            echo 'BOB_CONTROL_PLANE_ENV is not configured. Add it as a GitHub Actions secret containing the complete control-plane environment file.' >&2
+            exit 5
+          fi
+          printf '%s\n' "$BOB_CONTROL_PLANE_ENV" | tr -d '\r' | ssh -i "$key_file" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            root@72.61.123.97 \
+            'install -d -m 700 -o 1000 -g 1000 /var/lib/bob && umask 077 && cat > /var/lib/bob/control-plane.env && chown 1000:1000 /var/lib/bob/control-plane.env && chmod 600 /var/lib/bob/control-plane.env'
           tar \
             --exclude='./.git' \
             --exclude='./.env' \
