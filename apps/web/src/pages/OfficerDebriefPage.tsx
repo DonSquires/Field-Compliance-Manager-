@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock3, Home, RefreshCw, Send, ShieldAlert, Wrench, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from 'react-router-dom';
+import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import './OfficerDebriefPage.css';
 
@@ -43,10 +44,10 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
     const debriefRows = (debriefResponse.data as DebriefRecord[]) ?? [];
     setShifts(shiftRows);
     setDebriefs(debriefRows);
-    if(debriefRows.length){const{data:followupRows,error:followupError}=await supabase.from('debrief_followups').select('id,debrief_id,status,priority,owner_user_id,latest_note,resolved_at').in('debrief_id',debriefRows.map((debrief)=>debrief.id));if(followupError)setError(`Debriefs loaded, but follow-up status is unavailable: ${followupError.message}`);else setFollowups(Object.fromEntries(((followupRows as DebriefFollowup[])??[]).map((item)=>[item.debrief_id,item])));}else setFollowups({});
+    if(debriefRows.length){const{data:followupRows,error:followupError}=await supabase.from('debrief_followups').select('id,debrief_id,status,priority,owner_user_id,latest_note,resolved_at').in('debrief_id',debriefRows.map((debrief)=>debrief.id));if(followupError)setError(describeLoadFailures([['debrief follow-up status', followupError]]));else setFollowups(Object.fromEntries(((followupRows as DebriefFollowup[])??[]).map((item)=>[item.debrief_id,item])));}else setFollowups({});
     setShiftId((current) => current || shiftRows.find((shift) => !debriefRows.some((debrief) => debrief.shift_id === shift.id))?.id || '');
-    const failures = [shiftResponse.error && `Shifts: ${shiftResponse.error.message}`, debriefResponse.error && `Debriefs: ${debriefResponse.error.message}`].filter(Boolean);
-    if (failures.length) setError(failures.join(' · '));
+    const failure = describeLoadFailures([['shifts', shiftResponse.error], ['debriefs', debriefResponse.error]]);
+    if (failure) setError(failure);
     setLoading(false);
   }, [profile?.id, profile?.organizationId]);
 

@@ -3,6 +3,7 @@ import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, MapPin, RefreshCw, S
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { claimShiftCoverage } from '../lib/shiftCoverage';
+import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import './OfficerSchedulePage.css';
 import './OfficerScheduleActions.css';
@@ -93,8 +94,13 @@ const OfficerSchedulePage: React.FC = () => {
       ...request,
       site: Array.isArray(request.site) ? request.site[0] ?? null : request.site,
     })));
-    const failures = [shiftResponse.error && `Assigned shifts: ${shiftResponse.error.message}`, coverageResponse.error && `Open coverage: ${coverageResponse.error.message}`, staffResponse.error && `Staff identity: ${staffResponse.error.message}`, slotError && `Roster slots: ${slotError.message}`].filter(Boolean);
-    if (failures.length) setError(failures.join(' · '));
+    const failure = describeLoadFailures([
+      ['assigned shifts', shiftResponse.error],
+      ['open coverage', coverageResponse.error],
+      ['your roster profile', staffResponse.error],
+      ['roster slots', slotError],
+    ]);
+    if (failure) setError(failure);
     setLoading(false);
   }, [profile?.id, profile?.organizationId]);
 

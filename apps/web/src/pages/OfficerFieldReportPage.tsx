@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
+import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import './OfficerFieldReportPage.css';
 
@@ -42,8 +43,8 @@ const OfficerFieldReportPage: React.FC = () => {
     ]);
     setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts((shiftResponse.data as ShiftOption[]) ?? []);
     setForm((current) => ({ ...current, shiftId: current.shiftId || (shiftResponse.data as ShiftOption[] | null)?.[0]?.id || '' }));
-    const failures = [reportResponse.error && `Reports: ${reportResponse.error.message}`, shiftResponse.error && `Shifts: ${shiftResponse.error.message}`].filter(Boolean);
-    if (failures.length) setError(failures.join(' · ')); setLoading(false);
+    const failure = describeLoadFailures([['reports', reportResponse.error], ['shifts', shiftResponse.error]]);
+    if (failure) setError(failure); setLoading(false);
   }, [profile?.id, profile?.organizationId]);
   useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => { if (requestedReportId) document.getElementById(`officer-report-${requestedReportId}`)?.scrollIntoView({ block: 'center' }); }, [reports, requestedReportId]);

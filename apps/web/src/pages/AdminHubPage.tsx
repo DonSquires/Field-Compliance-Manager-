@@ -19,6 +19,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SafetyGate } from '../components/SafetyGate';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
+import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import './AdminHubPage.css';
@@ -121,10 +122,10 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         observations: metricFrom(observationCount),
       });
 
-      const warnings: string[] = [];
+      const warnings: Array<[string, { message: string } | null | undefined]> = [];
       const items: QueueItem[] = [];
 
-      if (welfareRows.error) warnings.push(`Welfare alerts: ${welfareRows.error.message}`);
+      if (welfareRows.error) warnings.push(['welfare alerts', welfareRows.error]);
       else {
         for (const alert of welfareRows.data ?? []) {
           items.push({
@@ -140,7 +141,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         }
       }
 
-      if (dispatchRows.error) warnings.push(`Dispatch jobs: ${dispatchRows.error.message}`);
+      if (dispatchRows.error) warnings.push(['dispatch jobs', dispatchRows.error]);
       else {
         for (const job of dispatchRows.data ?? []) {
           const deadline = job.sla_respond_by ? new Date(job.sla_respond_by).getTime() : null;
@@ -157,7 +158,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         }
       }
 
-      if (breachRows.error) warnings.push(`Breach alerts: ${breachRows.error.message}`);
+      if (breachRows.error) warnings.push(['breach alerts', breachRows.error]);
       else {
         for (const breach of breachRows.data ?? []) {
           items.push({
@@ -173,7 +174,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         }
       }
 
-      if (reportRows.error) warnings.push(`Field reports: ${reportRows.error.message}`);
+      if (reportRows.error) warnings.push(['field reports', reportRows.error]);
       else {
         for (const report of reportRows.data ?? []) {
           items.push({
@@ -190,7 +191,8 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       }
 
       setQueue(items.sort((left, right) => right.priority - left.priority || right.occurredAt.localeCompare(left.occurredAt)).slice(0, 12));
-      setQueueWarnings(warnings);
+      const failure = describeLoadFailures(warnings);
+      setQueueWarnings(failure ? [failure] : []);
       setLastUpdated(new Date());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Operations data could not be loaded.';
