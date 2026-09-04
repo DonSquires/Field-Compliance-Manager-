@@ -12,6 +12,34 @@ const hotfix = read('20260904090000_fix_roster_slots_updated_at.sql');
 const tier1 = read('20260904100000_workforce_time_attendance_core.sql');
 const tier2 = read('20260904110000_oncall_callout_activation.sql');
 const tier3 = read('20260904120000_seniority_court_assets.sql');
+const unfilled = read('20260904130000_fix_unfilled_roster_slots.sql');
+
+describe('unfilled roster slot fix', () => {
+  it('makes staff_id nullable so an open slot is representable', () => {
+    expect(unfilled).toContain('ALTER COLUMN "staff_id" DROP NOT NULL');
+    expect(unfilled).toContain('idx_roster_slots_unfilled');
+  });
+
+  it('skips availability and fatigue checks when nobody is assigned', () => {
+    expect(unfilled).toContain('if new.staff_id is not null and new.status not in');
+  });
+
+  it('drops functions before changing their return signature', () => {
+    expect(unfilled).toContain('DROP FUNCTION IF EXISTS "public"."generate_roster_from_templates"');
+    expect(unfilled).toContain('DROP FUNCTION IF EXISTS "public"."batch_publish_roster_slots"');
+  });
+
+  it('generates open slots with an explicit null staff_id and honours required headcount', () => {
+    expect(unfilled).toContain('organization_id, work_unit_id, staff_id, scheduled_start, scheduled_end');
+    expect(unfilled).toContain('for v_slot in 1..greatest(v_tpl.required_staff_count, 1) loop');
+    expect(unfilled).toContain('templates_skipped');
+  });
+
+  it('refuses to publish a slot that still has nobody assigned', () => {
+    expect(unfilled).toContain('unfilled_count');
+    expect(unfilled).toContain('if v_slot.staff_id is null then');
+  });
+});
 
 describe('roster_slots.updated_at hotfix', () => {
   it('adds the column the roster RPCs already write', () => {
