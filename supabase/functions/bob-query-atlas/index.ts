@@ -48,10 +48,11 @@ serve(async (req)=>{
     const action = String(body.action ?? 'capability_map').trim();
     const filter = String(body.filter ?? '').trim();
     const limit = Math.min(Math.max(Number(body.limit ?? 100), 1), 500);
+    const offset = Math.min(Math.max(Number(body.offset ?? 0), 0), 100_000);
     if (action === 'capability_map') {
-      let q = admin.from('bob_capability_map').select('entity_type, entity_name, present, wired, exercised, notes, refresh_source, retirement_status').order('entity_type').order('entity_name').limit(limit);
+      let q = admin.from('bob_capability_map').select('entity_type, entity_name, present, wired, exercised, notes, refresh_source, retirement_status', { count: 'exact' }).order('entity_type').order('entity_name').range(offset, offset + limit - 1);
       if (filter) q = q.ilike('entity_name', `%${filter}%`);
-      const { data, error } = await q;
+      const { data, error, count } = await q;
       if (error) return json({
         error: error.message
       }, 500);
@@ -59,13 +60,16 @@ serve(async (req)=>{
         ok: true,
         action,
         count: (data ?? []).length,
+        total: count ?? null,
+        offset,
+        next_offset: count !== null && offset + (data ?? []).length < count ? offset + (data ?? []).length : null,
         results: data ?? []
       });
     }
     if (action === 'terrain_edges') {
-      let q = admin.from('bob_app_map_edges').select('source_type, source_name, target_type, target_name, edge_kind, retirement_status').eq('retirement_status', 'live').order('source_name').limit(limit);
+      let q = admin.from('bob_app_map_edges').select('source_type, source_name, target_type, target_name, edge_kind, retirement_status', { count: 'exact' }).eq('retirement_status', 'live').order('source_name').range(offset, offset + limit - 1);
       if (filter) q = q.or(`source_name.ilike.%${filter}%,target_name.ilike.%${filter}%`);
-      const { data, error } = await q;
+      const { data, error, count } = await q;
       if (error) return json({
         error: error.message
       }, 500);
@@ -73,11 +77,14 @@ serve(async (req)=>{
         ok: true,
         action,
         count: (data ?? []).length,
+        total: count ?? null,
+        offset,
+        next_offset: count !== null && offset + (data ?? []).length < count ? offset + (data ?? []).length : null,
         results: data ?? []
       });
     }
     if (action === 'gap_report') {
-      const { data, error } = await admin.from('bob_capability_map').select('entity_type, entity_name, present, wired, exercised, notes, retirement_status').or('wired.eq.false,exercised.is.null').neq('retirement_status', 'retired').order('entity_type').limit(limit);
+      const { data, error, count } = await admin.from('bob_capability_map').select('entity_type, entity_name, present, wired, exercised, notes, retirement_status', { count: 'exact' }).or('wired.eq.false,exercised.is.null').neq('retirement_status', 'retired').order('entity_type').range(offset, offset + limit - 1);
       if (error) return json({
         error: error.message
       }, 500);
@@ -85,6 +92,9 @@ serve(async (req)=>{
         ok: true,
         action,
         count: (data ?? []).length,
+        total: count ?? null,
+        offset,
+        next_offset: count !== null && offset + (data ?? []).length < count ? offset + (data ?? []).length : null,
         results: data ?? []
       });
     }

@@ -3769,7 +3769,8 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
   const r = await callFn('bob-query-atlas', authHeader, {
     action,
     filter: String(toolArgs.filter ?? '').trim() || undefined,
-    limit: typeof toolArgs.limit === 'number' ? toolArgs.limit : 100
+    limit: Math.min(Math.max(typeof toolArgs.limit === 'number' ? toolArgs.limit : 100, 1), 100),
+    offset: Math.max(typeof toolArgs.offset === 'number' ? toolArgs.offset : 0, 0)
   });
   if (!r.ok || r.data?.ok === false) return {
     reply: `I could not query the Atlas (${r.data?.error ?? r.status}).`,
@@ -3789,18 +3790,21 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       internal: true
     }
   };
-  const summary = results.slice(0, 50).map((row)=>{
+  const summary = results.map((row)=>{
     if (action === 'capability_map') return `  ${row.entity_type}:${row.entity_name} present=${row.present} wired=${row.wired} exercised=${row.exercised ?? '?'}`;
     if (action === 'terrain_edges') return `  ${row.source_type}:${row.source_name} -[${row.edge_kind}]-> ${row.target_type}:${row.target_name}`;
     return `  ${row.entity_type}:${row.entity_name} wired=${row.wired} exercised=${row.exercised ?? '?'} notes=${row.notes ?? '-'}`;
   }).join('\n');
   return {
-    reply: `[INTERNAL: Atlas ${action} (${results.length} results). Reason over this to understand the terrain. Do NOT dump raw to the user.]\n\n${summary}`,
+    reply: `[INTERNAL: Atlas ${action} returned ${results.length} result(s) at offset ${r.data?.offset ?? 0} of ${r.data?.total ?? 'unknown'}.${r.data?.next_offset !== null && r.data?.next_offset !== undefined ? ` More results begin at offset ${r.data.next_offset}; call query_atlas again with that offset to continue surveying the terrain.` : ' This is the final page.'} Reason over this to understand the terrain. Do NOT dump raw to the user.]\n\n${summary}`,
     meta: {
       tool: 'query_atlas',
       outcome: 'ok',
       action,
       count: results.length,
+      total: r.data?.total ?? null,
+      offset: r.data?.offset ?? 0,
+      next_offset: r.data?.next_offset ?? null,
       internal: true
     }
   };
