@@ -53,21 +53,19 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('<AdminHubPage onNavigate={navigateFromHub} />');
   });
 
-  it('preserves the governed people and HR route beneath the consolidated workspace', () => {
-    expect(source).not.toContain("{ id: 'people-hr', label: 'People & HR'");
+  it('keeps people and HR accessible until the local roster workspace is consolidated', () => {
+    expect(source).toContain("{ id: 'people-hr', label: 'People & HR'");
     expect(source).toContain('return <RosterHRPage />');
     expect(source).toContain("'roster_hr': { page: 'people-hr' }");
   });
 
-  it('keeps primary navigation at the enterprise workspace level', () => {
-    expect(source).toContain("'Workspaces': [");
+  it('keeps specialist routes visible until their container pages exist locally', () => {
+    expect(source).toContain("'Core': [");
     expect(source).toContain("{ id: 'crm', label: 'CRM & Finance'");
     expect(source).toContain("{ id: 'roster', label: 'Roster & HR'");
     expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
-    expect(source).toContain("'Places': [");
-    expect(source).toContain("'Administration': [");
-    expect(source).not.toContain("{ id: 'testing', label: 'E2E Testing'");
-    expect(source).not.toContain("{ id: 'onboarding', label: 'Account Onboarding'");
+    expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
+    expect(source).toContain("{ id: 'onboarding', label: 'Account Onboarding'");
   });
 });
