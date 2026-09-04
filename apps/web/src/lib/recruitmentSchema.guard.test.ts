@@ -40,5 +40,9 @@ describe('governed recruitment ATS', () => {
     expect(page).toContain('manage_recruitment_vacancy');
     expect(page).toContain('create_recruitment_candidate');
     expect(page).toContain('manage_recruitment_candidate');
+    expect(page).toContain('p_offer_employment_type');
+    expect(page).toContain("functions.invoke('create-user'");
+    expect(page).toContain('convert_recruitment_candidate_to_staff');
+    expect(page).toContain('Candidate has accepted this offer');
   });
 });

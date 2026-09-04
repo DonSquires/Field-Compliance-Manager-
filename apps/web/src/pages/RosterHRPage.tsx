@@ -123,6 +123,7 @@ interface RecruitmentCandidate {
   stage: string;
   status: string;
   offer_role: string | null;
+  offer_employment_type: string | null;
   offer_start_date: string | null;
 }
 
@@ -220,7 +221,8 @@ const RosterHRPage: React.FC = () => {
   const [showCandidateForm, setShowCandidateForm] = useState(false);
   const [vacancyForm, setVacancyForm] = useState({ title: '', employmentType: 'permanent', location: '' });
   const [candidateForm, setCandidateForm] = useState({ vacancyId: '', firstName: '', lastName: '', email: '', phone: '' });
-  const [candidateAction, setCandidateAction] = useState<{ candidate: RecruitmentCandidate; nextStage: string; note: string } | null>(null);
+  const [candidateAction, setCandidateAction] = useState<{ candidate: RecruitmentCandidate; nextStage: string; note: string; offerRole?: string; offerEmploymentType?: string; offerStartDate?: string } | null>(null);
+  const [offerAction, setOfferAction] = useState<{ candidate: RecruitmentCandidate; role: string; employmentType: string; startDate: string; note: string; accepted: boolean } | null>(null);
   const [readinessAssessments, setReadinessAssessments] = useState<ReadinessAssessment[]>([]);
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplateRow[]>([]);
@@ -321,7 +323,7 @@ const RosterHRPage: React.FC = () => {
           supabase.from('court_appearances').select('id,officer_user_id,court_name,case_reference,appearance_type,scheduled_at,estimated_hours,status,is_overtime').eq('organization_id', orgId).order('scheduled_at', { ascending: false }).limit(50),
           supabase.rpc('get_staff_onboarding_readiness', { p_organization_id: orgId }),
           supabase.from('recruitment_vacancies').select('id,title,employment_type,location_summary,status,opens_on,closes_on').eq('organization_id', orgId).order('created_at', { ascending: false }),
-          supabase.from('recruitment_candidates').select('id,vacancy_id,first_name,last_name,email,stage,status,offer_role,offer_start_date').eq('organization_id', orgId).order('created_at', { ascending: false }),
+          supabase.from('recruitment_candidates').select('id,vacancy_id,first_name,last_name,email,stage,status,offer_role,offer_employment_type,offer_start_date').eq('organization_id', orgId).order('created_at', { ascending: false }),
           supabase.from('performance_review_cycles').select('id,name,period_start,period_end,due_date,status').eq('organization_id', orgId).order('due_date', { ascending: false }),
           supabase.from('performance_reviews').select('id,staff_id,reviewer_user_id,status,rating,cycle_id').eq('organization_id', orgId).order('created_at', { ascending: false }),
           supabase.from('hr_cases').select('id,staff_id,case_type,severity,status,subject,opened_at').eq('organization_id', orgId).order('opened_at', { ascending: false }),
@@ -598,10 +600,36 @@ const RosterHRPage: React.FC = () => {
   const advanceCandidate = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!candidateAction) return;
+    if (candidateAction.nextStage === 'offer') {
+      setOfferAction({ candidate: candidateAction.candidate, role: 'officer', employmentType: 'permanent', startDate: '', note: candidateAction.note, accepted: false });
+      setCandidateAction(null);
+      return;
+    }
     setSaving(true); setError(null); setNotice(null);
-    const { error: advanceError } = await supabase.rpc('manage_recruitment_candidate', { p_candidate_id: candidateAction.candidate.id, p_expected_stage: candidateAction.candidate.stage, p_next_stage: candidateAction.nextStage, p_note: candidateAction.note.trim(), p_offer_role: null, p_offer_employment_type: null, p_offer_start_date: null });
+    const { error: advanceError } = await supabase.rpc('manage_recruitment_candidate', { p_candidate_id: candidateAction.candidate.id, p_expected_stage: candidateAction.candidate.stage, p_next_stage: candidateAction.nextStage, p_note: candidateAction.note.trim(), p_offer_role: candidateAction.nextStage === 'offer' ? candidateAction.offerRole : null, p_offer_employment_type: candidateAction.nextStage === 'offer' ? candidateAction.offerEmploymentType : null, p_offer_start_date: candidateAction.nextStage === 'offer' ? candidateAction.offerStartDate : null });
     if (advanceError) setError(advanceError.message);
     else { setNotice(`Candidate moved to ${candidateAction.nextStage.replaceAll('_', ' ')}.`); setCandidateAction(null); await loadAll(); }
+    setSaving(false);
+  };
+
+  const sendOffer = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!offerAction) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: offerError } = await supabase.rpc('manage_recruitment_candidate', { p_candidate_id: offerAction.candidate.id, p_expected_stage: offerAction.candidate.stage, p_next_stage: 'offer', p_note: offerAction.note.trim(), p_offer_role: offerAction.role, p_offer_employment_type: offerAction.employmentType, p_offer_start_date: offerAction.startDate });
+    if (offerError) setError(offerError.message);
+    else if (offerAction.accepted && profile?.organizationId) {
+      try {
+        const candidate = offerAction.candidate;
+        const { data: provisioned, error: provisionError } = await supabase.functions.invoke('create-user', { body: { email: candidate.email, display_name: `${candidate.first_name} ${candidate.last_name}`.trim(), role: offerAction.role, organization_id: profile.organizationId, staff: { employment_type: offerAction.employmentType, start_date: offerAction.startDate } } });
+        if (provisionError || !provisioned?.user_id || !provisioned?.staff_id) throw provisionError ?? new Error('Identity provisioning receipt was not confirmed.');
+        const { error: convertError } = await supabase.rpc('convert_recruitment_candidate_to_staff', { p_candidate_id: candidate.id, p_user_id: provisioned.user_id, p_staff_id: provisioned.staff_id, p_note: offerAction.note.trim() });
+        if (convertError) throw convertError;
+        setNotice(`${candidate.first_name} ${candidate.last_name} provisioned and handed to staff onboarding.`);
+      } catch (conversionError) {
+        setError(conversionError instanceof Error ? conversionError.message : 'Offer was recorded, but staff provisioning could not be confirmed.');
+      }
+      setOfferAction(null); await loadAll();
+    } else { setNotice('Offer recorded. Provision only after acceptance is confirmed.'); setOfferAction(null); await loadAll(); }
     setSaving(false);
   };
 
@@ -1240,6 +1268,8 @@ const RosterHRPage: React.FC = () => {
       {onboardingAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-onboarding-title" onSubmit={manageOnboarding}><header><div><span>Staff onboarding</span><h2 id="staff-onboarding-title">{onboardingAction.ledgerId ? `Advance to ${onboardingAction.nextStage}` : 'Start onboarding'}</h2></div><button type="button" onClick={() => setOnboardingAction(null)} aria-label="Close staff onboarding">×</button></header><p>{onboardingAction.name}. The server will recheck canonical evidence before advancing.</p><label><span>Stage note</span><textarea required rows={4} value={onboardingAction.note} onChange={(event) => setOnboardingAction({ ...onboardingAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOnboardingAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !onboardingAction.note.trim()}>{saving ? 'Saving' : onboardingAction.ledgerId ? 'Advance stage' : 'Start onboarding'}</button></footer></form></div>}
 
       {candidateAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="candidate-stage-title" onSubmit={advanceCandidate}><header><div><span>Recruitment</span><h2 id="candidate-stage-title">Move to {candidateAction.nextStage.replaceAll('_', ' ')}</h2></div><button type="button" onClick={() => setCandidateAction(null)} aria-label="Close candidate stage">×</button></header><p>{candidateAction.candidate.first_name} {candidateAction.candidate.last_name}. Stage history is retained for every candidate decision.</p><label><span>Stage note</span><textarea required rows={4} value={candidateAction.note} onChange={(event) => setCandidateAction({ ...candidateAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setCandidateAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !candidateAction.note.trim()}>{saving ? 'Saving' : 'Advance candidate'}</button></footer></form></div>}
+
+      {offerAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="offer-title" onSubmit={sendOffer}><header><div><span>Recruitment offer</span><h2 id="offer-title">Record offer</h2></div><button type="button" onClick={() => setOfferAction(null)} aria-label="Close offer form">×</button></header><p>{offerAction.candidate.first_name} {offerAction.candidate.last_name}. Recording an offer does not provision an application account; provision only after the candidate has accepted.</p><label><span>Application role</span><select value={offerAction.role} onChange={(event) => setOfferAction({ ...offerAction, role: event.target.value })}><option value="officer">Officer</option><option value="admin_officer">Senior officer</option></select></label><div className="form-row"><label><span>Employment type</span><select value={offerAction.employmentType} onChange={(event) => setOfferAction({ ...offerAction, employmentType: event.target.value })}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option><option value="volunteer">Volunteer</option></select></label><label><span>Proposed start</span><input type="date" required value={offerAction.startDate} onChange={(event) => setOfferAction({ ...offerAction, startDate: event.target.value })} /></label></div><label><span>Offer note</span><textarea required rows={4} value={offerAction.note} onChange={(event) => setOfferAction({ ...offerAction, note: event.target.value })} /></label><label className="roster-publish"><input type="checkbox" checked={offerAction.accepted} onChange={(event) => setOfferAction({ ...offerAction, accepted: event.target.checked })} /><span><b>Candidate has accepted this offer</b><small>Provision an application identity and start staff onboarding only after verified acceptance.</small></span></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOfferAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !offerAction.startDate || !offerAction.note.trim()}>{saving ? 'Saving' : offerAction.accepted ? 'Confirm acceptance and provision' : 'Record offer'}</button></footer></form></div>}
 
       {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
