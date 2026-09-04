@@ -47,6 +47,11 @@ jobs:
             echo 'VPS rejected the deploy key. Append the public key printed above to /root/.ssh/authorized_keys on 72.61.123.97.' >&2
             exit 3
           fi
+          # Guards against re-runs of commits that predate the checkout step, which shipped an empty archive.
+          if [[ ! -f deploy/bob-control-plane/docker-compose.yml || ! -f bob-control-plane-server.js ]]; then
+            echo 'Runner workspace is missing deploy sources. Start a fresh "Run workflow" on main rather than re-running an older run.' >&2
+            exit 4
+          fi
           tar \
             --exclude='./.git' \
             --exclude='./.env' \
