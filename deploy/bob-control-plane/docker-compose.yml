@@ -23,7 +23,7 @@ services:
     ports:
       - "172.16.0.1:8091:8080"
     volumes:
-      - /root/field-compliance-manager:/app:ro
+      - /var/lib/bob/control-plane-source:/app:ro
       - /var/lib/bob:/data
     networks:
       - default

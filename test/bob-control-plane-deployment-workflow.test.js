@@ -11,6 +11,9 @@ test('Bob control-plane deployment fast-forwards its Gitea checkout and preserve
   assert.match(deployment, /git -c safe\.directory="\$app_dir" -C "\$app_dir" fetch --prune "\$git_remote" "\$git_ref"/);
   assert.match(deployment, /git -c safe\.directory="\$app_dir" -C "\$app_dir" merge --ff-only FETCH_HEAD/);
   assert.match(deployment, /\/var\/lib\/bob\/control-plane\.env/);
+  assert.match(deployment, /runtime_source_dir="\/var\/lib\/bob\/control-plane-source"/);
+  assert.match(deployment, /tar -C "\$app_dir".*--exclude='\.\/\.env'/);
+  assert.match(deployment, /chown -R 1000:1000 "\$runtime_source_dir"/);
   assert.match(deployment, /docker compose -f "\$compose_file" up -d --force-recreate bob-control-plane/);
   assert.match(deployment, /for attempt in \{1\.\.30\}/);
   assert.match(deployment, /docker compose -f "\$compose_file" logs --tail 100 bob-control-plane/);
