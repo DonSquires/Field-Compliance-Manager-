@@ -90,7 +90,7 @@ test('calibration update writes a fresh status artifact across all surfaces', ()
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
 
-test('atlas graph maps app, platform, deployment, and governance domains with change-impact edges', () => {
+test('atlas graph inventories app, platform, deployment, and governance without synthetic concrete edges', () => {
   const rootDir = path.resolve(__dirname, '..');
   const graph = buildAtlasGraph(rootDir);
 
@@ -99,14 +99,12 @@ test('atlas graph maps app, platform, deployment, and governance domains with ch
   assert.ok(graph.domains.includes('platform'));
   assert.ok(graph.domains.includes('deployment'));
   assert.ok(graph.domains.includes('governance'));
-  assert.ok(graph.edges.some((edge) => edge.source === 'app' && edge.target === 'platform'));
-  assert.ok(graph.edges.some((edge) => edge.source === 'platform' && edge.target === 'deployment'));
+  assert.equal(graph.edges.length, 0);
   assert.ok(graph.nodes.some((node) => node.type === 'route' && node.name === '/assessment'));
   assert.ok(graph.nodes.some((node) => node.type === 'edge_function' && node.name === 'bob-query-atlas'));
   assert.ok(graph.nodes.some((node) => node.type === 'table' && node.name === 'bob_capability_map'));
   assert.ok(graph.nodes.some((node) => node.type === 'service' && node.name === 'bob-control-plane'));
-  assert.ok(graph.concreteEdges.some((edge) => edge.source === 'route:/assessment' && edge.target === 'service:bob-control-plane'));
-  assert.ok(graph.concreteEdges.some((edge) => edge.source === 'edge_function:bob-query-atlas' && edge.target === 'table:bob_app_map_edges'));
+  assert.equal(graph.concreteEdges.length, 0);
 
   const synced = syncAtlasGraph(rootDir);
   assert.equal(synced.ok, true);

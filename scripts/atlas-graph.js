@@ -69,28 +69,9 @@ function collectConcreteNodes(rootDir, files) {
   return nodes.sort((a, b) => `${a.type}:${a.name}`.localeCompare(`${b.type}:${b.name}`));
 }
 
-function collectConcreteEdges(rootDir, nodes) {
-  const edges = [];
-  const hasNode = (type, name) => nodes.some((node) => node.type === type && node.name === name);
-  const add = (sourceType, source, targetType, target, kind, evidence) => {
-    if (hasNode(sourceType, source) && hasNode(targetType, target)) {
-      edges.push({ source: `${sourceType}:${source}`, target: `${targetType}:${target}`, kind, evidence });
-    }
-  };
-
-  add('route', '/assessment', 'service', 'bob-control-plane', 'reads', 'authenticated assessment route builds the control-plane inventory');
-  add('edge_function', 'bob-query-atlas', 'table', 'bob_capability_map', 'reads', 'capability_map and gap_report queries');
-  add('edge_function', 'bob-query-atlas', 'table', 'bob_app_map_edges', 'reads', 'terrain_edges and blast_radius queries');
-  add('edge_function', 'bob-query-atlas', 'table', 'bob_capability_map', 'reads', 'blast_radius flow and capability origin');
-  add('edge_function', 'bob-query-atlas', 'table', 'bob_app_map_edges', 'reads', 'blast_radius flow and FK reach');
-
-  return edges.sort((a, b) => `${a.source}:${a.target}:${a.kind}`.localeCompare(`${b.source}:${b.target}:${b.kind}`));
-}
-
 function buildAtlasGraph(rootDir = process.cwd()) {
   const domainSet = new Set(['app', 'platform', 'deployment', 'governance']);
   const files = [];
-  const edges = [];
 
   const walk = (currentDir) => {
     for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
@@ -114,7 +95,6 @@ function buildAtlasGraph(rootDir = process.cwd()) {
     return files.some((file) => classifyDomain(file) === domain);
   });
   const nodes = collectConcreteNodes(rootDir, files);
-  const concreteEdges = collectConcreteEdges(rootDir, nodes);
 
   const byDomain = new Map();
   for (const domain of domains) {
@@ -128,47 +108,13 @@ function buildAtlasGraph(rootDir = process.cwd()) {
     }
   }
 
-  const domainMap = {
-    app: ['src', 'supabase', 'apps'],
-    platform: ['bob-control-plane-server.js', 'bob-runner.js', 'scripts', 'assessment-manifest.js', 'worker-executor.js'],
-    deployment: ['docker-compose', 'Dockerfile', 'deploy'],
-    governance: ['README.md', 'Build-Plan', 'docs', '.gitignore']
-  };
-
-  for (const [source, markers] of Object.entries(domainMap)) {
-    if (!domains.includes(source)) continue;
-    for (const target of domains) {
-      if (source === target) continue;
-      const sourcePresent = byDomain.get(source)?.length > 0;
-      const targetPresent = byDomain.get(target)?.length > 0;
-      if (!sourcePresent || !targetPresent) continue;
-      const shouldAdd =
-        (source === 'app' && (target === 'platform' || target === 'deployment' || target === 'governance')) ||
-        (source === 'platform' && (target === 'deployment' || target === 'governance' || target === 'app')) ||
-        (source === 'deployment' && (target === 'platform' || target === 'app' || target === 'governance')) ||
-        (source === 'governance' && (target === 'app' || target === 'platform' || target === 'deployment'));
-      if (shouldAdd) {
-        const exists = edges.some((edge) => edge.source === source && edge.target === target);
-        if (!exists) {
-          edges.push({
-            source,
-            target,
-            kind: 'depends_on',
-            evidence: `${markers.join(', ')} -> ${target}`
-          });
-        }
-      }
-    }
-  }
-
-  const sortedEdges = edges.sort((a, b) => `${a.source}:${a.target}`.localeCompare(`${b.source}:${b.target}`));
   return {
     ok: true,
     updatedAt: new Date().toISOString(),
     domains,
-    edges: sortedEdges,
+    edges: [],
     nodes,
-    concreteEdges,
+    concreteEdges: [],
     files: files.length,
     coverage: Object.fromEntries(Array.from(domainSet).map((domain) => [domain, byDomain.has(domain) ? byDomain.get(domain).length : 0]))
   };

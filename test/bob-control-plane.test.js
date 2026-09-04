@@ -77,8 +77,9 @@ test('assessment is authenticated and read-only', async () => {
   assert.ok(Array.isArray(allowed.body.files));
   assert.equal(allowed.body.atlas.ok, true);
   assert.deepEqual(allowed.body.atlas.domains.sort(), ['app', 'deployment', 'governance', 'platform']);
-  assert.ok(allowed.body.atlas.edges.some(edge => edge.source === 'app' && edge.target === 'platform'));
-  assert.ok(allowed.body.atlas.edges.some(edge => edge.source === 'platform' && edge.target === 'deployment'));
+  assert.equal(allowed.body.atlas.edges.length, 0);
+  assert.equal(allowed.body.atlas.concreteEdges.length, 0);
+  assert.ok(allowed.body.atlas.nodes.length > 0);
 });
 
 test('assessment aliases retain the same authentication and read-only contract', async () => {

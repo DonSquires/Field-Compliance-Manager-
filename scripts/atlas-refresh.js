@@ -424,23 +424,17 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     capabilityUpserts: [],
     edgeUpserts: [],
     capabilityRetireIds: [],
-    edgeRetireIds: [],
-    skippedManualCapabilities: 0,
-    skippedManualEdges: 0
+    edgeRetireIds: []
   };
 
   for (const capability of manifest.capabilities) {
     const existing = capabilityByKey.get(capabilityKey(capability));
-    if (existing?.refresh_source === 'manual_seed') {
-      plan.skippedManualCapabilities += 1;
-      continue;
-    }
     const desired = {
       ...capability,
       exercised: existing?.exercised ?? null,
-      wired: Boolean(capability.wired || existing?.wired),
-      caller_summary: capability.caller_summary || existing?.caller_summary || null,
-      notes: existing && !String(existing.notes || '').startsWith(OWNER_MARKER) ? existing.notes : capability.notes
+      wired: capability.wired,
+      caller_summary: capability.caller_summary,
+      notes: capability.notes
     };
     if (!existing || !fieldsMatch(existing, desired, [
       'present', 'wired', 'exercised', 'caller_summary', 'notes', 'refresh_source', 'retirement_status'
@@ -449,9 +443,7 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     }
   }
   for (const existing of existingCapabilities) {
-    if (existing.refresh_source === 'ci_generator'
-        && String(existing.notes || '').startsWith(OWNER_MARKER)
-        && existing.retirement_status !== 'legacy'
+    if (existing.retirement_status !== 'legacy'
         && !generatedCapabilityKeys.has(capabilityKey(existing))) {
       plan.capabilityRetireIds.push(existing.id);
     }
@@ -459,15 +451,9 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
 
   for (const edge of manifest.edges) {
     const existing = edgeByKey.get(edgeKey(edge));
-    if (existing?.refresh_source === 'manual_seed') {
-      plan.skippedManualEdges += 1;
-      continue;
-    }
     const desired = {
       ...edge,
-      caller_context: existing && !String(existing.caller_context || '').startsWith(OWNER_MARKER)
-        ? existing.caller_context
-        : edge.caller_context
+      caller_context: edge.caller_context
     };
     if (!existing || !fieldsMatch(existing, desired, [
       'evidence_class', 'retirement_status', 'migration_name', 'caller_context', 'refresh_source'
@@ -482,8 +468,7 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
       && (String(existing.source_file || '').startsWith('apps/web/src/')
         || String(existing.source_file || '').startsWith('supabase/functions/'))
       && !repositoryFiles.has(existing.source_file);
-    if (existing.refresh_source === 'ci_generator'
-        && (String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext || deletedRepositorySource)
+    if ((String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext || deletedRepositorySource || existing.refresh_source === 'manual_seed')
         && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);

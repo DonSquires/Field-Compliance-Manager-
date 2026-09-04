@@ -231,7 +231,7 @@ test('managed user spine routes identity and access through governed RPCs', () =
   assert.equal(atlas.edges.some((edge) => ['components/UserIdentityWorkspace', 'pages/UserManagementPage', 'pages/AccessControlPage'].includes(edge.source_name) && ['user_profiles', 'preset_assignments', 'staff_area_grants'].includes(edge.target_name) && edge.edge_kind === 'writes'), false);
 });
 
-test('Atlas refresh plan preserves manual truth and retires only owned stale rows', () => {
+test('Atlas refresh replaces matching manual rows and retires stale manual rows', () => {
   const manifest = {
     capabilities: [{
       entity_type: 'table', entity_name: 'alpha', present: true, wired: true,
@@ -281,17 +281,15 @@ test('Atlas refresh plan preserves manual truth and retires only owned stale row
 
   const plan = buildRefreshPlan(manifest, existingCapabilities, existingEdges);
 
-  assert.equal(plan.capabilityUpserts.length, 0);
+  assert.equal(plan.capabilityUpserts.length, 1);
   assert.deepEqual(plan.capabilityRetireIds, ['stale-cap']);
-  assert.equal(plan.edgeUpserts.length, 0);
+  assert.equal(plan.edgeUpserts.length, 1);
   assert.deepEqual(plan.edgeRetireIds, ['owned-stale', 'managed-pre-marker']);
-  assert.equal(plan.skippedManualCapabilities, 1);
-  assert.equal(plan.skippedManualEdges, 1);
   assert.equal(plan.edgeRetireIds.includes('legacy-generator'), false);
   assert.equal(plan.edgeRetireIds.includes('unmanaged-pre-marker'), false);
 });
 
-test('Atlas refresh retires legacy CI edges only when their repository source was deleted', () => {
+test('Atlas refresh retires stale generated and manual edges when their source is deleted', () => {
   const manifest = {
     repository_files: ['apps/web/src/pages/CurrentPage.tsx'],
     capabilities: [],
@@ -320,7 +318,7 @@ test('Atlas refresh retires legacy CI edges only when their repository source wa
 
   const plan = buildRefreshPlan(manifest, [], existingEdges);
 
-  assert.deepEqual(plan.edgeRetireIds, ['deleted-source']);
+  assert.deepEqual(plan.edgeRetireIds, ['deleted-source', 'manual-deleted-source']);
 });
 
 test('Atlas refresh plan preserves exercised state on CI-owned capabilities', () => {
@@ -369,7 +367,7 @@ test('Atlas refresh plan is a no-op when owned rows already match', () => {
   assert.equal(plan.edgeRetireIds.length, 0);
 });
 
-test('Atlas refresh preserves caller context owned by another generator', () => {
+test('Atlas refresh replaces stale caller context with the current derived context', () => {
   const edge = {
     id: 'edge-1', source_type: 'component', source_name: 'pages/TestPage', target_type: 'table',
     target_name: 'alpha', edge_kind: 'reads', evidence_class: 'live-code', retirement_status: 'live',
@@ -383,7 +381,7 @@ test('Atlas refresh preserves caller context owned by another generator', () => 
 
   const plan = buildRefreshPlan(manifest, [], [edge]);
 
-  assert.equal(plan.edgeUpserts.length, 0);
+  assert.equal(plan.edgeUpserts.length, 1);
   assert.equal(plan.edgeRetireIds.length, 0);
 });
 
