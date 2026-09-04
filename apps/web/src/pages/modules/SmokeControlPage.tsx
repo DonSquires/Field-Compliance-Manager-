@@ -4,8 +4,7 @@
  * Canonical schema: client_sites (site selector) + smoke_assessments
  * (organization_id, site_id, complaint_source, smoke_source_type, severity,
  * status, scene_description, action_taken, notes, address, assessed_at).
- * There is no smoke_level/weather_conditions/complainant_site_id column —
- * those were a screen-first guess and have been removed.
+ * Optional complainant_site_id anchors the affected property when it is a known site.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -38,6 +37,7 @@ interface AssessmentForm {
   scene_description: string;
   notes: string;
   complaint_address: string;
+  complainant_site_id: string;
   action_taken: string;
   source_confirmed: boolean;
   follow_up_required: boolean;
@@ -50,6 +50,7 @@ const EMPTY_FORM: AssessmentForm = {
   scene_description: '',
   notes: '',
   complaint_address: '',
+  complainant_site_id: '',
   action_taken: 'no_action',
   source_confirmed: false,
   follow_up_required: false,
@@ -145,6 +146,7 @@ const SmokeControlPage: React.FC = () => {
           site_id: selectedSite.id,
           address: selectedSite.address ?? formData.complaint_address.trim(),
           complaint_address: formData.complaint_address.trim() || null,
+          complainant_site_id: formData.complainant_site_id || null,
           complaint_source: formData.complaint_source,
           smoke_source_type: formData.smoke_source_type,
           severity: formData.severity,
@@ -303,6 +305,13 @@ const SmokeControlPage: React.FC = () => {
                 <div className="form-group">
                   <label htmlFor="smoke-complaint-address">Complainant address</label>
                   <input id="smoke-complaint-address" value={formData.complaint_address} onChange={(e) => setFormData({ ...formData, complaint_address: e.target.value })} placeholder="Affected property, if different from source site" />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="smoke-complainant-site">Known affected site</label>
+                  <select id="smoke-complainant-site" value={formData.complainant_site_id} onChange={(e) => setFormData({ ...formData, complainant_site_id: e.target.value })}>
+                    <option value="">Not a known site</option>
+                    {selectedAgreementSites.filter((site) => site.id !== selectedSite.id).map((site) => <option key={site.id} value={site.id}>{site.name}{site.address ? ` - ${site.address}` : ''}</option>)}
+                  </select>
                 </div>
                 <div className="form-group">
                   <label htmlFor="smoke-scene">Scene description</label>
