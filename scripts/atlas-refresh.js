@@ -60,6 +60,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260903180000_timesheet_work_ledger.sql',
   'supabase/functions/process-officer-scan/index.ts',
   'supabase/functions/resolve-point-context/index.ts',
+  'supabase/functions/onspace-ai-chat/index.ts',
   'supabase/migrations/20260830128000_roster_work_units.sql',
   'supabase/migrations/20260830129000_materialize_roster_slots.sql',
   'supabase/migrations/20260830130500_roster_slot_response.sql',

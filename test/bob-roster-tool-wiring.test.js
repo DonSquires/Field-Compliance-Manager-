@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const conductor = fs.readFileSync(path.join(root, 'supabase/functions/onspace-ai-chat/index.ts'), 'utf8');
 const caddie = fs.readFileSync(path.join(root, 'supabase/functions/onspace-ai-chat/caddie.ts'), 'utf8');
+const atlasRefresh = fs.readFileSync(path.join(root, 'scripts/atlas-refresh.js'), 'utf8');
 
 test('Bob roster proposal tools are discoverable but remain draft-only', () => {
   for (const tool of ['propose_roster_fill', 'propose_roster_rollback']) {
@@ -17,4 +18,6 @@ test('Bob roster proposal tools are discoverable but remain draft-only', () => {
   assert.ok(conductor.includes("callFn('bob-propose-roster-fill'"));
   assert.ok(conductor.includes("callFn('bob-propose-roster-rollback'"));
   assert.ok(conductor.includes('a human must review and publish'));
+  assert.ok(conductor.includes('ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback'));
+  assert.ok(atlasRefresh.includes("'supabase/functions/onspace-ai-chat/index.ts'"));
 });
