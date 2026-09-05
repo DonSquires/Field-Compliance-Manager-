@@ -12,6 +12,7 @@ interface AgreementSite {
   linked: boolean;
   link_status: string | null;
 }
+interface AgreementZone extends AgreementSite {}
 
 interface AgreementModule {
   module_key: string;
@@ -24,6 +25,7 @@ interface AgreementModule {
 interface AgreementSetup {
   agreement: { id: string; name: string; invitation_status: string; enabled_modules: string[] };
   sites: AgreementSite[];
+  zones: AgreementZone[];
   modules: AgreementModule[];
 }
 
@@ -50,20 +52,15 @@ export function CrmAgreementSetupDialog({ agreement, onClose }: { agreement: { i
   const runAction = async (key: string, action: string, payload: Record<string, unknown>) => {
     if (!setup) return;
     setSavingKey(key); setError(null); setNotice(null);
-    const { error: actionError } = await supabase.rpc('manage_crm_agreement_setup', {
+    const { error: actionError } = await supabase.rpc(action.endsWith('_zone') ? 'manage_crm_agreement_zone_coverage' : 'manage_crm_agreement_setup', {
       p_agreement_id: agreement.id,
       p_expected_invitation_status: setup.agreement.invitation_status,
       p_action: action,
-      p_site_id: null,
-      p_module_key: null,
-      p_enabled: true,
-      p_sla_minutes: null,
-      p_allows_client_submission: false,
-      p_allows_auto_dispatch: false,
+      ...(action.endsWith('_zone') ? {} : { p_site_id: null, p_module_key: null, p_enabled: true, p_sla_minutes: null, p_allows_client_submission: false, p_allows_auto_dispatch: false }),
       ...payload,
     });
     if (actionError) setError(actionError.message);
-    else { await loadSetup(); setNotice(action === 'link_site' ? 'Covered site linked to the agreement.' : action === 'unlink_site' ? 'Covered site removed from active coverage.' : 'Service module settings saved.'); }
+    else { await loadSetup(); setNotice(action === 'link_site' ? 'Covered site linked to the agreement.' : action === 'unlink_site' ? 'Covered site removed from active coverage.' : action === 'link_zone' ? 'Covered zone linked to the agreement.' : action === 'unlink_zone' ? 'Covered zone removed from active coverage.' : 'Service module settings saved.'); }
     setSavingKey(null);
   };
 
@@ -71,12 +68,17 @@ export function CrmAgreementSetupDialog({ agreement, onClose }: { agreement: { i
     <header><div><span>Operational contract setup</span><h2 id="agreement-setup-title">{agreement.name}</h2><p>{agreement.clientName} · {agreement.invitationStatus} agreement</p></div><button type="button" onClick={onClose} aria-label="Close agreement setup"><X size={18} /></button></header>
     {error && <div className="agreement-setup-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>}
     {notice && <div className="agreement-setup-message is-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
-    <nav aria-label="Agreement setup sections"><button type="button" className={view === 'coverage' ? 'is-active' : ''} onClick={() => setView('coverage')}><MapPin size={16} />Covered sites {setup && <em>{setup.sites.filter((site) => site.linked && site.link_status === 'active').length}</em>}</button><button type="button" className={view === 'modules' ? 'is-active' : ''} onClick={() => setView('modules')}><Settings2 size={16} />Service modules {setup && <em>{setup.modules.filter((module) => module.enabled).length}</em>}</button></nav>
+    <nav aria-label="Agreement setup sections"><button type="button" className={view === 'coverage' ? 'is-active' : ''} onClick={() => setView('coverage')}><MapPin size={16} />Covered places {setup && <em>{[...setup.sites, ...setup.zones].filter((place) => place.linked && place.link_status === 'active').length}</em>}</button><button type="button" className={view === 'modules' ? 'is-active' : ''} onClick={() => setView('modules')}><Settings2 size={16} />Service modules {setup && <em>{setup.modules.filter((module) => module.enabled).length}</em>}</button></nav>
     {loading && !setup ? <div className="agreement-setup-loading"><RefreshCw size={20} className="is-spinning" />Loading contract evidence</div> : setup && <main>
-      {view === 'coverage' ? <section className="agreement-coverage"><div className="agreement-section-heading"><div><h3>Covered sites</h3><p>Choose the client places this contract authorizes. Boundary state remains visible and independent.</p></div></div><div>{setup.sites.length ? setup.sites.map((site) => { const active = site.linked && site.link_status === 'active'; return <article key={site.id}><span className={`agreement-site-icon is-${site.boundary_verification}`}><MapPin size={17} /></span><div><strong>{site.name}</strong><span>{site.address ?? 'Address not recorded'}</span><small>{site.boundary_verification === 'verified' ? <><ShieldCheck size={12} />Verified {site.boundary_status} boundary</> : <><Clock3 size={12} />{site.boundary_status} boundary requires review</>}</small></div><button type="button" className={active ? 'is-remove' : ''} disabled={savingKey === site.id} onClick={() => void runAction(site.id, active ? 'unlink_site' : 'link_site', { p_site_id: site.id })}>{savingKey === site.id ? 'Saving' : active ? 'Remove coverage' : 'Add coverage'}</button></article>; }) : <div className="agreement-setup-empty">No active client sites are available. Create and review a site before configuring coverage.</div>}</div></section> : <section className="agreement-modules"><div className="agreement-section-heading"><div><h3>Service modules</h3><p>Set contract scope and operational handoff controls from the active module catalog.</p></div></div><div>{setup.modules.length ? setup.modules.map((module) => <ModuleRow key={module.module_key} module={module} saving={savingKey === module.module_key} onSave={(next) => void runAction(module.module_key, 'set_module', { p_module_key: module.module_key, p_enabled: next.enabled, p_sla_minutes: next.sla_minutes, p_allows_client_submission: next.allows_client_submission, p_allows_auto_dispatch: next.allows_auto_dispatch })} />) : <div className="agreement-setup-empty">No active service modules are available in the catalog.</div>}</div></section>}
+      {view === 'coverage' ? <section className="agreement-coverage"><div className="agreement-section-heading"><div><h3>Covered places</h3><p>Choose the client Sites and Zones this contract authorizes. Boundary state remains visible and independent.</p></div></div><div>{setup.sites.length ? <><h4>Sites</h4>{setup.sites.map((site) => <CoveragePlace key={site.id} place={site} kind="Site" saving={savingKey === site.id} onChange={() => void runAction(site.id, site.linked && site.link_status === 'active' ? 'unlink_site' : 'link_site', { p_site_id: site.id })} />)}</> : <div className="agreement-setup-empty">No active client Sites are available.</div>}{setup.zones.length ? <><h4>Zones</h4>{setup.zones.map((zone) => <CoveragePlace key={zone.id} place={zone} kind="Zone" saving={savingKey === zone.id} onChange={() => void runAction(zone.id, zone.linked && zone.link_status === 'active' ? 'unlink_zone' : 'link_zone', { p_zone_id: zone.id })} />)}</> : <div className="agreement-setup-empty">No active client Zones are available.</div>}</div></section> : <section className="agreement-modules"><div className="agreement-section-heading"><div><h3>Service modules</h3><p>Set contract scope and operational handoff controls from the active module catalog.</p></div></div><div>{setup.modules.length ? setup.modules.map((module) => <ModuleRow key={module.module_key} module={module} saving={savingKey === module.module_key} onSave={(next) => void runAction(module.module_key, 'set_module', { p_module_key: module.module_key, p_enabled: next.enabled, p_sla_minutes: next.sla_minutes, p_allows_client_submission: next.allows_client_submission, p_allows_auto_dispatch: next.allows_auto_dispatch })} />) : <div className="agreement-setup-empty">No active service modules are available in the catalog.</div>}</div></section>}
     </main>}
     <footer><span>Changes are tenant-scoped and recorded in the audit log.</span><button type="button" onClick={onClose}>Done</button></footer>
   </section></div>;
+}
+
+function CoveragePlace({ place, kind, saving, onChange }: { place: AgreementSite; kind: 'Site' | 'Zone'; saving: boolean; onChange: () => void }) {
+  const active = place.linked && place.link_status === 'active';
+  return <article><span className={`agreement-site-icon is-${place.boundary_verification}`}><MapPin size={17} /></span><div><strong>{place.name}</strong><span>{kind} | {place.address ?? 'Address not recorded'}</span><small>{place.boundary_verification === 'verified' ? <><ShieldCheck size={12} />Verified {place.boundary_status} boundary</> : <><Clock3 size={12} />{place.boundary_status} boundary requires review</>}</small></div><button type="button" className={active ? 'is-remove' : ''} disabled={saving} onClick={onChange}>{saving ? 'Saving' : active ? 'Remove coverage' : 'Add coverage'}</button></article>;
 }
 
 function ModuleRow({ module, saving, onSave }: { module: AgreementModule; saving: boolean; onSave: (module: AgreementModule) => void }) {

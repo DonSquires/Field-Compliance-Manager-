@@ -160,7 +160,9 @@ const RosterTargetsPage: React.FC = () => {
     setBusy(false);
   };
   const locationLabel = (l: AgreementLocation) => names.get(l.site_id ?? l.zone_id ?? '') ?? `Agreement location ${l.id.slice(0, 8)}`;
-  const matchingModules = modules.filter((m) => m.service_agreement_id === locations.find((l) => l.id === form.locationId)?.service_agreement_id);
+  const scopedLocations = workflowContext.agreementId ? locations.filter((location) => location.service_agreement_id === workflowContext.agreementId) : locations;
+  const scopedModules = workflowContext.agreementId ? modules.filter((module) => module.service_agreement_id === workflowContext.agreementId) : modules;
+  const matchingModules = scopedModules.filter((module) => module.service_agreement_id === scopedLocations.find((location) => location.id === form.locationId)?.service_agreement_id);
   return (
     <div className="targets-page">
       <header className="targets-header">
@@ -359,7 +361,7 @@ const RosterTargetsPage: React.FC = () => {
                     }
                   >
                     <option value="">Select active agreement location</option>
-                    {locations.map((v) => (
+                    {scopedLocations.map((v) => (
                       <option value={v.id} key={v.id}>
                         {locationLabel(v)}
                       </option>

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-const page = readFileSync(resolve(process.cwd(), 'src/pages/RosterTargetsPage.tsx'), 'utf8');
-const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
+const page = readFileSync(resolve(import.meta.dirname, 'RosterTargetsPage.tsx'), 'utf8');
+const shell = readFileSync(resolve(import.meta.dirname, '../shells/AdminShell.tsx'), 'utf8');
 describe('roster target catalog', () => {
   it('is a first-class admin route', () => {
     expect(shell).toContain("'roster-targets'");
@@ -15,7 +15,7 @@ describe('roster target catalog', () => {
     expect(page).toContain("supabase.rpc('create_operating_roster_work_unit'");
     expect(page).toContain("'create_operating_organization_workplace'");
     expect(page).toContain("'create_operating_cost_centre'");
-    expect(page).toContain('p_operating_organization_id: operatingOrganizationId');
+    expect(page).toContain('p_operating_organization_id: activeOperatingOrganizationId');
     expect(page).toContain('Client and contract attribution remains at each generated stop-module attendance.');
     expect(page).toContain('Internal work is provider-owned and never linked to a client agreement.');
   });
@@ -25,5 +25,10 @@ describe('roster target catalog', () => {
     expect(page.includes("' is-focused'")).toBe(true);
     expect(page.includes('Create assignment')).toBe(true);
     expect(page.includes('workflowContextQuery(workflowContext)')).toBe(true);
+  });
+  it('scopes contract locations and modules when opened from an agreement', () => {
+    expect(page).toContain('workflowContext.agreementId');
+    expect(page).toContain('const scopedLocations');
+    expect(page).toContain('const scopedModules');
   });
 });

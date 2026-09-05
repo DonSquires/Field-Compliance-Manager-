@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260831082000_govern_crm_agreement_setup.sql'), 'utf8');
+const sql = readFileSync(resolve(import.meta.dirname, '../../../../supabase/migrations/20260831082000_govern_crm_agreement_setup.sql'), 'utf8');
+const zoneCoverageSql = readFileSync(resolve(import.meta.dirname, '../../../../supabase/migrations/20260905006800_govern_crm_agreement_zone_coverage.sql'), 'utf8');
 
 describe('governed CRM agreement setup', () => {
   it('loads only provider-admin agreement setup evidence', () => {
@@ -32,5 +33,13 @@ describe('governed CRM agreement setup', () => {
     expect(sql).toContain("'crm_agreement_'||p_action");
     expect(sql).toContain('revoke insert,update,delete,truncate on public.service_agreement_locations');
     expect(sql).toContain('revoke insert,update,delete,truncate on public.service_agreement_modules');
+  });
+
+  it('governs explicit active client Zone coverage alongside Site coverage', () => {
+    expect(zoneCoverageSql).toContain("'zones'");
+    expect(zoneCoverageSql).toContain('sal.zone_id=z.id');
+    expect(zoneCoverageSql).toContain('manage_crm_agreement_zone_coverage');
+    expect(zoneCoverageSql).toContain("p_action NOT IN ('link_zone','unlink_zone')");
+    expect(zoneCoverageSql).toContain('z.organization_id=v_agreement.client_organization_id AND z.is_active');
   });
 });
