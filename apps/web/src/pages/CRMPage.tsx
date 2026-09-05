@@ -102,7 +102,7 @@ interface InvoiceRow {
 interface InvoiceReadiness {
   accountName: string;
   agreementName: string;
-  source: 'accepted_quote' | 'commercial_rate' | 'missing';
+  source: 'accepted_quote' | 'commercial_rate' | 'client_approval_required' | 'missing';
   detail: string;
   billingCycle: string | null;
   paymentTermsDays: number | null;
@@ -611,8 +611,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       setInvoiceReadiness({
         accountName: agreement.counterparty_name,
         agreementName: agreement.name,
-        source: quoteLineCount > 0 ? 'accepted_quote' : settings?.base_rate_per_hour != null ? 'commercial_rate' : 'missing',
-        detail: quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)}.` : 'No accepted quote lines or commercial base rate are configured.',
+        source: agreement.invitation_status !== 'accepted' ? 'client_approval_required' : quoteLineCount > 0 ? 'accepted_quote' : settings?.base_rate_per_hour != null ? 'commercial_rate' : 'missing',
+        detail: agreement.invitation_status !== 'accepted' ? 'The client has not approved this service agreement yet. Invoicing remains blocked.' : quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)}.` : 'No accepted quote lines or commercial base rate are configured.',
         billingCycle: settings?.billing_cycle ?? null,
         paymentTermsDays: settings?.payment_terms_days ?? null,
       });
@@ -1329,7 +1329,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             {invoiceReadiness && <div className={`crm-invoice-readiness is-${invoiceReadiness.source}`}><strong>{invoiceReadiness.accountName}</strong><span>{invoiceReadiness.agreementName}</span><p>{invoiceReadiness.detail}</p>{invoiceReadiness.billingCycle && <small>{invoiceReadiness.billingCycle} billing · {invoiceReadiness.paymentTermsDays} day payment terms</small>}{invoiceReadiness.source === 'missing' && <small>Configure accepted quote lines or commercial settings before creating a draft invoice.</small>}</div>}
             <footer>
               <button type="button" className="btn btn-secondary" onClick={() => setShowGenerateInvoice(false)}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing'}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
+              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing' || invoiceReadiness?.source === 'client_approval_required'}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
             </footer>
           </form>
         </div>
