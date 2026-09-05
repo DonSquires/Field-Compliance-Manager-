@@ -58,6 +58,13 @@ interface LocationNote {
   created_at: string;
 }
 
+interface PatrolRoute { id: string; name: string; route_type: string; default_shift: string | null; is_active: boolean; guards_required: number; }
+interface RosterShift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; officer: Array<{ display_name: string | null; email: string | null }> | null; }
+interface SiteContact { id: string; first_name: string; last_name: string; role_title: string | null; email: string | null; phone: string | null; mobile: string | null; is_primary: boolean; is_emergency: boolean; }
+interface SiteContract { id: string; status: string; share_contract_price: boolean | null; share_actual_cost: boolean | null; agreement: Array<{ name: string; agreement_type: string; invitation_status: string }> | null; }
+
+type SiteWorkspaceTab = 'overview' | 'services' | 'zones' | 'routes' | 'roster' | 'contacts' | 'contracts' | 'finance' | 'notes';
+
 const SiteDetailPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -67,6 +74,11 @@ const SiteDetailPage: React.FC = () => {
   const [services, setServices] = useState<SiteService[]>([]);
   const [financial, setFinancial] = useState<FinancialConfig | null>(null);
   const [notes, setNotes] = useState<LocationNote[]>([]);
+  const [patrolRoutes, setPatrolRoutes] = useState<PatrolRoute[]>([]);
+  const [rosterShifts, setRosterShifts] = useState<RosterShift[]>([]);
+  const [contacts, setContacts] = useState<SiteContact[]>([]);
+  const [contracts, setContracts] = useState<SiteContract[]>([]);
+  const [workspaceTab, setWorkspaceTab] = useState<SiteWorkspaceTab>('overview');
   const [newNote, setNewNote] = useState('');
   const [house, setHouse] = useState<{ name: string; address: string | null } | null>(null);
   const [zones, setZones] = useState<HouseMapZone[]>([]);
@@ -107,8 +119,8 @@ const SiteDetailPage: React.FC = () => {
 
   const loadSiteDetail = async (siteId: string, site?: ClientSite) => {
     try {
-      // ATLAS READS: site_services, site_financial_config, location_notes
-      const [servicesRes, financialRes, notesRes] = await Promise.all([
+      // ATLAS READS: site_services, site_financial_config, location_notes, patrol_routes, shifts, crm_contacts, service_agreement_locations
+      const [servicesRes, financialRes, notesRes, routesRes, contactsRes, contractsRes] = await Promise.all([
         supabase
           .from('site_services')
           .select('id, module_key, enabled, response_sla_minutes, special_instructions')
@@ -123,29 +135,42 @@ const SiteDetailPage: React.FC = () => {
           .select('id, body, created_at')
           .eq('site_id', siteId)
           .order('created_at', { ascending: false }),
+        supabase.from('patrol_routes').select('id,name,route_type,default_shift,is_active,guards_required').eq('site_id', siteId).order('name'),
+        supabase.from('crm_contacts').select('id,first_name,last_name,role_title,email,phone,mobile,is_primary,is_emergency').eq('organization_id', (site ?? sites.find((row) => row.id === siteId))?.client_organization_id ?? '').order('is_primary', { ascending: false }).order('last_name'),
+        supabase.from('service_agreement_locations').select('id,status,share_contract_price,share_actual_cost,agreement:service_agreement_id(name,agreement_type,invitation_status)').eq('site_id', siteId).order('created_at', { ascending: false }),
       ]);
 
       if (servicesRes.error) throw servicesRes.error;
       if (financialRes.error) throw financialRes.error;
       if (notesRes.error) throw notesRes.error;
+      if (routesRes.error) throw routesRes.error;
+      if (contactsRes.error) throw contactsRes.error;
+      if (contractsRes.error) throw contractsRes.error;
 
       setServices((servicesRes.data as SiteService[]) || []);
       setFinancial((financialRes.data as FinancialConfig) || null);
       setNotes((notesRes.data as LocationNote[]) || []);
+      setPatrolRoutes((routesRes.data as PatrolRoute[]) || []);
+      setContacts((contactsRes.data as SiteContact[]) || []);
+      setContracts((contractsRes.data as SiteContract[]) || []);
       const currentSite = site ?? sites.find((row) => row.id === siteId);
       if (currentSite?.location_id) {
-        const [houseRes, zonesRes] = await Promise.all([
+        const [houseRes, zonesRes, shiftsRes] = await Promise.all([
           supabase.from('locations').select('name,address,suburb,postcode').eq('id', currentSite.location_id).single(),
           supabase.from('location_zones').select('id,name,boundary,center_point,boundary_status,boundary_verification').eq('location_id', currentSite.location_id),
+          supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,officer:officer_user_id(display_name,email)').eq('location_id', currentSite.location_id).in('status', ['scheduled','published','accepted','in_progress']).order('scheduled_start').limit(50),
         ]);
         if (houseRes.error) throw houseRes.error;
         if (zonesRes.error) throw zonesRes.error;
+        if (shiftsRes.error) throw shiftsRes.error;
         const row = houseRes.data as { name: string; address: string | null; suburb: string | null; postcode: string | null };
         setHouse({ name: row.name, address: [row.address, row.suburb, row.postcode].filter(Boolean).join(', ') || null });
         setZones((zonesRes.data as HouseMapZone[]) ?? []);
+        setRosterShifts((shiftsRes.data as RosterShift[]) ?? []);
       } else {
         setHouse({ name: currentSite?.name ?? 'Unlinked site', address: currentSite?.address ?? null });
         setZones([]);
+        setRosterShifts([]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load site detail');
@@ -154,6 +179,7 @@ const SiteDetailPage: React.FC = () => {
 
   const handleSelectSite = (site: ClientSite) => {
     setSelectedSite(site);
+    setWorkspaceTab('overview');
     navigate(`/admin/site-360?site=${site.id}`, { replace: true });
     loadSiteDetail(site.id, site);
   };
@@ -254,112 +280,23 @@ const SiteDetailPage: React.FC = () => {
         {selectedSite && (
           <div className="assessment-details">
             <div className="details-header">
-              <h2>{selectedSite.name}</h2>
+              <div><span className="site-workspace-eyebrow">{house?.name ?? 'Operational place'}</span><h2>{selectedSite.name}</h2><p>{selectedSite.address ?? 'Address not recorded'} · {selectedSite.site_type ?? 'Site'}</p></div>
               <span className={`status-badge status-${selectedSite.active ? 'active' : 'inactive'}`}>
                 {selectedSite.active ? 'Active' : 'Inactive'}
               </span>
             </div>
-
-            <div className="site-info">
-              <div className="info-item">
-                <label>Address</label>
-                <p>{selectedSite.address || '—'}</p>
-              </div>
-              <div className="info-item">
-                <label>Risk Level</label>
-                <p>{selectedSite.risk_level || 'Not assessed'}</p>
-              </div>
-              {selectedSite.site_brief && (
-                <div className="info-item">
-                  <label>Briefing</label>
-                  <p>{selectedSite.site_brief}</p>
-                </div>
-              )}
-              {selectedSite.access_instructions && (
-                <div className="info-item">
-                  <label>Access Instructions</label>
-                  <p>{selectedSite.access_instructions}</p>
-                </div>
-              )}
-              {selectedSite.hs_notes && (
-                <div className="info-item">
-                  <label>Health & Safety Notes</label>
-                  <p>{selectedSite.hs_notes}</p>
-                </div>
-              )}
+            <nav className="site-workspace-tabs" aria-label="Site workspace"><button type="button" className={workspaceTab === 'overview' ? 'is-active' : ''} onClick={() => setWorkspaceTab('overview')}>Overview</button><button type="button" className={workspaceTab === 'services' ? 'is-active' : ''} onClick={() => setWorkspaceTab('services')}>Services <strong>{services.length}</strong></button><button type="button" className={workspaceTab === 'zones' ? 'is-active' : ''} onClick={() => setWorkspaceTab('zones')}>Zones <strong>{zones.length}</strong></button><button type="button" className={workspaceTab === 'routes' ? 'is-active' : ''} onClick={() => setWorkspaceTab('routes')}>Patrol routes <strong>{patrolRoutes.length}</strong></button><button type="button" className={workspaceTab === 'roster' ? 'is-active' : ''} onClick={() => setWorkspaceTab('roster')}>Active roster <strong>{rosterShifts.length}</strong></button><button type="button" className={workspaceTab === 'contacts' ? 'is-active' : ''} onClick={() => setWorkspaceTab('contacts')}>Contacts <strong>{contacts.length}</strong></button><button type="button" className={workspaceTab === 'contracts' ? 'is-active' : ''} onClick={() => setWorkspaceTab('contracts')}>Contracts <strong>{contracts.length}</strong></button><button type="button" className={workspaceTab === 'finance' ? 'is-active' : ''} onClick={() => setWorkspaceTab('finance')}>Finance</button><button type="button" className={workspaceTab === 'notes' ? 'is-active' : ''} onClick={() => setWorkspaceTab('notes')}>Notes <strong>{notes.length}</strong></button></nav>
+            <div className="site-workspace-body">
+              {workspaceTab === 'overview' && <><div className="site-info"><div className="info-item"><label>Risk level</label><p>{selectedSite.risk_level || 'Not assessed'}</p></div><div className="info-item"><label>Boundary</label><p>{selectedSite.boundary_status} · {selectedSite.boundary_verification}</p></div><div className="info-item"><label>Services</label><p>{services.filter((service) => service.enabled).length} active</p></div><div className="info-item"><label>Rostered staff</label><p>{new Set(rosterShifts.map((shift) => shift.officer_user_id)).size}</p></div><div className="info-item"><label>Site brief</label><p>{selectedSite.site_brief || 'No site brief recorded.'}</p></div><div className="info-item"><label>Access instructions</label><p>{selectedSite.access_instructions || 'No access instructions recorded.'}</p></div><div className="info-item"><label>H&S notes</label><p>{selectedSite.hs_notes || 'No H&S notes recorded.'}</p></div></div>{house && <LocationHouseMap organizationId={profile?.organizationId ?? ''} house={house} sites={[selectedSite]} zones={zones} />}</>}
+              {workspaceTab === 'services' && <section className="reports-section"><h3>Services required at this site</h3><div className="contacts-list">{services.length === 0 ? <div className="empty-state"><p>No services configured for this site.</p></div> : services.map((service) => <div key={service.id} className="contact-card"><div className="contact-header"><h3>{service.module_key}</h3><button className={`btn btn-sm ${service.enabled ? 'btn-primary' : 'btn-secondary'}`} onClick={() => handleToggleService(service)}>{service.enabled ? 'Enabled' : 'Disabled'}</button></div>{service.response_sla_minutes && <p className="contact-meta">SLA: {service.response_sla_minutes} minutes</p>}{service.special_instructions && <p>{service.special_instructions}</p>}</div>)}</div></section>}
+              {workspaceTab === 'zones' && <section className="reports-section"><h3>Sibling zone facets at this location</h3><div className="contacts-list">{zones.length === 0 ? <div className="empty-state"><p>No zones configured. Manage them in Locations.</p></div> : zones.map((zone) => <div className="contact-card" key={zone.id}><div className="contact-header"><h3>{zone.name}</h3><span className={`status-badge status-${zone.boundary_verification === 'verified' ? 'active' : 'inactive'}`}>{zone.boundary_verification}</span></div><button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(`/admin/zones${workflowContextQuery({ accountId: selectedSite.client_organization_id, locationId: selectedSite.location_id ?? undefined, siteId: selectedSite.id, zoneId: zone.id })}`)}>Open zone</button></div>)}</div></section>}
+              {workspaceTab === 'routes' && <section className="reports-section"><h3>Patrol routes</h3><div className="contacts-list">{patrolRoutes.length === 0 ? <div className="empty-state"><p>No patrol routes configured for this site.</p></div> : patrolRoutes.map((route) => <div className="contact-card" key={route.id}><div className="contact-header"><h3>{route.name}</h3><span className={`status-badge status-${route.is_active ? 'active' : 'inactive'}`}>{route.is_active ? 'Active' : 'Inactive'}</span></div><p>{route.route_type} · {route.guards_required} required</p><p className="contact-meta">{route.default_shift ?? 'No default shift'}</p></div>)}</div></section>}
+              {workspaceTab === 'roster' && <section className="reports-section"><h3>Staff currently rostered here</h3><div className="contacts-list">{rosterShifts.length === 0 ? <div className="empty-state"><p>No active roster assignments at this location.</p></div> : rosterShifts.map((shift) => <div className="contact-card" key={shift.id}><div className="contact-header"><h3>{shift.officer?.[0]?.display_name ?? shift.officer?.[0]?.email ?? 'Officer'}</h3><span className={`status-badge status-${shift.status}`}>{shift.status}</span></div><p>{shift.service_type} · {new Date(shift.scheduled_start).toLocaleString('en-NZ')}</p><p className="contact-meta">Ends {new Date(shift.scheduled_end).toLocaleString('en-NZ')}</p></div>)}</div></section>}
+              {workspaceTab === 'contacts' && <section className="reports-section"><h3>Account contacts</h3><div className="contacts-list">{contacts.length === 0 ? <div className="empty-state"><p>No contacts recorded for this site's organization.</p></div> : contacts.map((contact) => <div className="contact-card" key={contact.id}><div className="contact-header"><h3>{contact.first_name} {contact.last_name}</h3>{contact.is_primary && <span className="contact-type-badge">Primary</span>}</div><p>{contact.role_title ?? 'Role not recorded'}</p><p className="contact-meta">{contact.email ?? contact.mobile ?? contact.phone ?? 'No contact method recorded'}</p></div>)}</div></section>}
+              {workspaceTab === 'contracts' && <section className="reports-section"><h3>Contracts anchored to this site</h3><div className="contacts-list">{contracts.length === 0 ? <div className="empty-state"><p>No location-level contracts. Self-managed services may still be active.</p></div> : contracts.map((contract) => <div className="contact-card" key={contract.id}><div className="contact-header"><h3>{contract.agreement?.[0]?.name ?? 'Agreement unavailable'}</h3><span className={`status-badge status-${contract.status}`}>{contract.status}</span></div><p>{contract.agreement?.[0]?.agreement_type ?? 'Agreement'} · {contract.agreement?.[0]?.invitation_status ?? 'Unknown'}</p><p className="contact-meta">Contract price: {contract.share_contract_price ? 'shared' : 'private'} · Actual cost: {contract.share_actual_cost ? 'shared' : 'private'}</p></div>)}</div></section>}
+              {workspaceTab === 'finance' && <section className="reports-section"><h3>Site financial configuration</h3>{financial ? <div className="site-info"><div className="info-item"><label>Billing model</label><p>{financial.billing_model}</p></div><div className="info-item"><label>Payment terms</label><p>{financial.payment_terms_days} days</p></div>{financial.hourly_rate != null && <div className="info-item"><label>Hourly rate</label><p>NZ${financial.hourly_rate}</p></div>}{financial.per_visit_rate != null && <div className="info-item"><label>Per visit</label><p>NZ${financial.per_visit_rate}</p></div>}{financial.flat_rate_monthly != null && <div className="info-item"><label>Monthly rate</label><p>NZ${financial.flat_rate_monthly}</p></div>}</div> : <div className="empty-state"><p>No site financial configuration recorded.</p></div>}</section>}
+              {workspaceTab === 'notes' && <section className="reports-section"><h3>Operational notes</h3><form className="assessment-form" onSubmit={handleAddNote}><div className="form-group"><textarea value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Add a note about this site..." rows={3} /></div><button type="submit" className="btn btn-primary btn-sm">Add note</button></form><div className="contacts-list" style={{ marginTop: '12px' }}>{notes.length === 0 ? <div className="empty-state"><p>No notes recorded.</p></div> : notes.map((note) => <div key={note.id} className="contact-card"><p>{note.body}</p><p className="contact-meta">{new Date(note.created_at).toLocaleString()}</p></div>)}</div></section>}
             </div>
-
-            {house && <LocationHouseMap organizationId={profile?.organizationId ?? ''} house={house} sites={[selectedSite]} zones={zones} />}
-
-            {zones.length > 0 && <section className="reports-section"><h3>Zone facets ({zones.length})</h3><div className="contacts-list">{zones.map((zone) => <div className="contact-card" key={zone.id}><div className="contact-header"><h3>{zone.name}</h3><span className={`status-badge status-${zone.boundary_verification === 'verified' ? 'active' : 'inactive'}`}>{zone.boundary_verification}</span></div><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate(`/admin/zones${workflowContextQuery({ accountId: selectedSite.client_organization_id, locationId: selectedSite.location_id ?? undefined, siteId: selectedSite.id, zoneId: zone.id })}`)}>Open zone</button></div></div>)}</div></section>}
-
-            <section className="reports-section">
-              <h3>Services ({services.length})</h3>
-              {services.length === 0 ? (
-                <div className="empty-state">
-                  <p>No services configured for this site.</p>
-                </div>
-              ) : (
-                <div className="contacts-list">
-                  {services.map((service) => (
-                    <div key={service.id} className="contact-card">
-                      <div className="contact-header">
-                        <h3>{service.module_key}</h3>
-                        <button
-                          className={`btn btn-sm ${service.enabled ? 'btn-primary' : 'btn-secondary'}`}
-                          onClick={() => handleToggleService(service)}
-                        >
-                          {service.enabled ? 'Enabled' : 'Disabled'}
-                        </button>
-                      </div>
-                      {service.response_sla_minutes && (
-                        <p className="contact-meta">SLA: {service.response_sla_minutes} minutes</p>
-                      )}
-                      {service.special_instructions && <p>{service.special_instructions}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {financial && (
-              <section className="reports-section">
-                <h3>Billing</h3>
-                <div className="contact-card">
-                  <p>
-                    Model: {financial.billing_model} · Terms: {financial.payment_terms_days} days
-                  </p>
-                  {financial.hourly_rate && <p>Hourly rate: ${financial.hourly_rate}</p>}
-                  {financial.per_visit_rate && <p>Per visit: ${financial.per_visit_rate}</p>}
-                  {financial.flat_rate_monthly && <p>Flat monthly: ${financial.flat_rate_monthly}</p>}
-                </div>
-              </section>
-            )}
-
-            <section className="reports-section">
-              <h3>Notes ({notes.length})</h3>
-              <form className="assessment-form" onSubmit={handleAddNote}>
-                <div className="form-group">
-                  <textarea
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    placeholder="Add a note about this site..."
-                    rows={3}
-                  />
-                </div>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  Add Note
-                </button>
-              </form>
-              <div className="contacts-list" style={{ marginTop: '12px' }}>
-                {notes.map((note) => (
-                  <div key={note.id} className="contact-card">
-                    <p>{note.body}</p>
-                    <p className="contact-meta">{new Date(note.created_at).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
           </div>
         )}
       </div>
