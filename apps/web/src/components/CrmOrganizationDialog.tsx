@@ -271,6 +271,14 @@ export function CrmOrganizationDialog({
                         ? "Managed account"
                         : "Existing record"}
                     </span>
+                    {candidate.manageable && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenAccount(candidate)}
+                      >
+                        Open account
+                      </button>
+                    )}
                   </article>
                 ))}
                 <button type="button" onClick={continueToCreate}>

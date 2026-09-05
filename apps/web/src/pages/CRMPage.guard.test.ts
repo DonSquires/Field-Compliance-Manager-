@@ -101,6 +101,9 @@ describe('governed CRM accounts', () => {
     expect(organizationDialog).toContain('close spellings are included');
     expect(organizationDialog).toContain('Search Companies Register');
     expect(organizationDialog).toContain('companies/app/ui/pages/companies/search?advancedPanel=true');
+    expect(organizationDialog).toContain('candidate.manageable &&');
+    expect(organizationDialog).toContain('onClick={() => onOpenAccount(candidate)}');
+    expect(organizationDialog).toContain('Open account');
     expect(page).not.toMatch(/\.from\(["']organizations["']\)\.insert/);
   });
 });
