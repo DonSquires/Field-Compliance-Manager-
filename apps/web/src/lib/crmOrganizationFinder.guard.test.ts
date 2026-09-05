@@ -14,6 +14,10 @@ const manageableBooleanMigration = readFileSync(
   resolve(process.cwd(), '../../supabase/migrations/20260905003200_crm_organization_finder_manageable_boolean.sql'),
   'utf8',
 );
+const placeNamesMigration = readFileSync(
+  resolve(process.cwd(), '../../supabase/migrations/20260905003400_crm_organization_finder_place_names.sql'),
+  'utf8',
+);
 
 describe('CRM organization finder', () => {
   it('allows active CRM administrators to discover all organization identities for duplicate prevention', () => {
@@ -45,5 +49,13 @@ describe('CRM organization finder', () => {
     expect(manageableBooleanMigration).toContain('coalesce(match.id = v_provider or match.parent_organization_id = v_provider or public.crm_actor_can_manage_account(match.id), false)');
     expect(manageableBooleanMigration).not.toContain('First Security');
     expect(manageableBooleanMigration).not.toContain('LINZ');
+  });
+
+  it('finds the organization owning a named site or location without exposing private records', () => {
+    expect(placeNamesMigration).toContain('lower(site.name) like');
+    expect(placeNamesMigration).toContain('lower(location.name) like');
+    expect(placeNamesMigration).toContain("'Matched owned site'");
+    expect(placeNamesMigration).toContain("'Matched owned location'");
+    expect(placeNamesMigration).not.toMatch(/crm_contacts|external_ref|internal_client_ref|company_registration_number/i);
   });
 });

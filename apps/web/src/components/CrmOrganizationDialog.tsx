@@ -30,6 +30,7 @@ interface Candidate {
   organization_type: string;
   status: string;
   nzbn: string | null;
+  parent_organization_id: string | null;
   match_reason: string;
   manageable: boolean;
 }
@@ -51,11 +52,13 @@ export function CrmOrganizationDialog({
   onClose,
   onUpdated,
   onOpenAccount,
+  onUseOrganization,
 }: {
   organization?: EditableCrmOrganization | null;
   onClose: () => void;
   onUpdated: (name: string) => void;
   onOpenAccount: (organization: { id: string; name: string }) => void;
+  onUseOrganization: (organization: Candidate) => void;
 }) {
   const editing = Boolean(organization);
   const [stage, setStage] = useState<"search" | "form">(
@@ -277,6 +280,14 @@ export function CrmOrganizationDialog({
                         onClick={() => onOpenAccount(candidate)}
                       >
                         Open account
+                      </button>
+                    )}
+                    {!candidate.manageable && (
+                      <button
+                        type="button"
+                        onClick={() => onUseOrganization(candidate)}
+                      >
+                        Use for proposal
                       </button>
                     )}
                   </article>

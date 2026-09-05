@@ -105,6 +105,11 @@ describe('governed CRM accounts', () => {
     expect(organizationDialog).toContain('candidate.manageable &&');
     expect(organizationDialog).toContain('onClick={() => onOpenAccount(candidate)}');
     expect(organizationDialog).toContain('Open account');
+    expect(organizationDialog).toContain('!candidate.manageable &&');
+    expect(organizationDialog).toContain('onClick={() => onUseOrganization(candidate)}');
+    expect(organizationDialog).toContain('Use for proposal');
+    expect(page).toContain('onUseOrganization={(organization) =>');
+    expect(page).toContain("next_action: 'Prepare service proposal'");
     expect(page).not.toMatch(/\.from\(["']organizations["']\)\.insert/);
   });
 });
