@@ -9,6 +9,7 @@ describe('governed CRM accounts', () => {
     expect(page).toMatch(/\.from\(["']crm_contacts["']\)/);
     expect(page).toMatch(/\.from\(["']client_sites["']\)/);
     expect(page).toContain(".in('client_organization_id', accountIds)");
+    expect(page).toContain('site.client_organization_id === acct.id');
     expect(page).toMatch(/\.from\(["']quotes["']\)/);
     expect(page).not.toContain('for (const acct of (accounts ?? []))');
     expect(page).not.toContain('primary_contact_name: null');

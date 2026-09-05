@@ -255,7 +255,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         primary_contact_name: primaryContacts.get(acct.id) ?? null,
         latest_quote_status: latestQuotes.get(acct.id) ?? null,
         sites: (sitesRes.data ?? [])
-          .filter((site) => site.organization_id === acct.id)
+          .filter((site) => site.client_organization_id === acct.id)
           .map((site) => ({ id: site.id, name: site.name })),
         blockers: readiness.get(acct.id)?.blockers ?? [],
         next_action: readiness.get(acct.id)?.next_action ?? 'Review account readiness',
