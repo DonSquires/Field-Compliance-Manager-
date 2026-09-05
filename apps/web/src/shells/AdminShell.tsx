@@ -112,7 +112,7 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
-  'relationships', 'onboarding', 'handoffs', 'crm', 'sites',
+  'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'sites',
 ]);
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
@@ -153,35 +153,39 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
 };
 
 const NAVIGATION_MAP = {
-  'Core': [
+  'Start Here': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
-    { id: 'crm', label: 'CRM & Finance', icon: DollarSign },
-    { id: 'relationships', label: 'Relationships', icon: Network },
-    { id: 'onboarding', label: 'Account Onboarding', icon: ClipboardCheck },
-    { id: 'handoffs', label: 'Activation Handoffs', icon: ClipboardCheck },
-    { id: 'rate-rules', label: 'Rate Rules', icon: DollarSign },
-    { id: 'finance-bureau', label: 'Finance Bureau', icon: DollarSign },
-    { id: 'roster', label: 'Roster & HR', icon: Users },
-    { id: 'people-hr', label: 'People & HR', icon: Users },
-    { id: 'roster-targets', label: 'Work Units', icon: Route },
+  ],
+  'Clients & Commercial': [
+    { id: 'crm', label: 'Accounts & Proposals', icon: DollarSign },
+    { id: 'relationships', label: 'Agreements & Relationships', icon: Network },
+    { id: 'onboarding', label: 'New Account Setup', icon: ClipboardCheck },
+    { id: 'handoffs', label: 'Activation Checklists', icon: ClipboardCheck },
+    { id: 'finance-bureau', label: 'Pricing, Discounts & Tenders', icon: DollarSign },
+    { id: 'rate-rules', label: 'Pay & Billing Rate Rules', icon: DollarSign },
+  ],
+  'Workforce & Operations': [
+    { id: 'roster', label: 'Schedules & Rosters', icon: Users },
+    { id: 'people-hr', label: 'People, Pay & HR', icon: Users },
+    { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
     { id: 'field-ops', label: 'Field Operations', icon: Radio },
     { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
-  'Configure': [
-    { id: 'site-360', label: 'Sites', icon: Building2 },
-    { id: 'locations', label: 'Locations', icon: MapPin },
-    { id: 'zones', label: 'Zones', icon: MapPin },
-    { id: 'sites', label: 'Boundary Review', icon: ClipboardCheck },
+  'Organization Setup': [
+    { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
+    { id: 'locations', label: 'Location Houses', icon: MapPin },
+    { id: 'zones', label: 'Zone Facets', icon: MapPin },
+    { id: 'sites', label: 'Boundary Validation', icon: ClipboardCheck },
     { id: 'users', label: 'People & Access', icon: Users },
-    { id: 'access-control', label: 'Access Control', icon: KeyRound },
-    { id: 'org-setup', label: 'Organization Setup', icon: Settings },
+    { id: 'access-control', label: 'Access Rules', icon: KeyRound },
+    { id: 'org-setup', label: 'Organization Settings', icon: Settings },
     { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
   ],
-  'System': [
+  'Engineering': [
     { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
     { id: 'test-data', label: 'Test Data', icon: Package },
   ],
-  'Platform': [
+  'Platform Owner': [
     { id: 'platform', label: 'Platform Overview', icon: Shield },
     { id: 'builder', label: 'Builder', icon: Bot },
     { id: 'platform-catalog', label: 'Module Pricing', icon: Package },

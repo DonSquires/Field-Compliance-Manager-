@@ -18,7 +18,7 @@ describe('AdminShell access and routing boundaries', () => {
 
   it('aligns CRM management pages with server administrator roles', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
-    expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'sites'");
+    expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'sites'");
     expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
     expect(source).toContain('items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role))');
   });
@@ -54,18 +54,20 @@ describe('AdminShell access and routing boundaries', () => {
   });
 
   it('keeps people and HR accessible until the local roster workspace is consolidated', () => {
-    expect(source).toContain("{ id: 'people-hr', label: 'People & HR'");
+    expect(source).toContain("{ id: 'people-hr', label: 'People, Pay & HR'");
     expect(source).toContain('return <RosterHRPage />');
     expect(source).toContain("'roster_hr': { page: 'people-hr' }");
   });
 
   it('keeps specialist routes visible until their container pages exist locally', () => {
-    expect(source).toContain("'Core': [");
-    expect(source).toContain("{ id: 'crm', label: 'CRM & Finance'");
-    expect(source).toContain("{ id: 'roster', label: 'Roster & HR'");
+    expect(source).toContain("'Clients & Commercial': [");
+    expect(source).toContain("{ id: 'crm', label: 'Accounts & Proposals'");
+    expect(source).toContain("{ id: 'finance-bureau', label: 'Pricing, Discounts & Tenders'");
+    expect(source).toContain("'Workforce & Operations': [");
+    expect(source).toContain("{ id: 'roster', label: 'Schedules & Rosters'");
     expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
     expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
-    expect(source).toContain("{ id: 'onboarding', label: 'Account Onboarding'");
+    expect(source).toContain("{ id: 'onboarding', label: 'New Account Setup'");
   });
 });

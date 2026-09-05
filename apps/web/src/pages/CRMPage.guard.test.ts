@@ -14,7 +14,7 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('site.client_organization_id === acct.id');
     expect(page).toMatch(/\.from\(["']quotes["']\)/);
     expect(page).not.toContain('for (const acct of (accounts ?? []))');
-    expect(page).not.toContain('primary_contact_name: null');
+    expect(page).toContain('primary_contact_name: primaryContacts.get(acct.id) ?? null');
   });
 
   it('creates draft quotes only through the governed RPC', () => {
@@ -52,23 +52,24 @@ describe('governed CRM accounts', () => {
   });
 
   it('groups organization-owned place records as house, site, and zone facets', () => {
-    expect(workspace).toContain(".from('locations')");
-    expect(workspace).toContain(".eq('organization_id', account.id)");
-    expect(workspace).toContain(".from('client_sites')");
-    expect(workspace).toContain(".eq('client_organization_id', account.id)");
-    expect(workspace).toContain(".from('location_zones')");
+    expect(workspace).toMatch(/\.from\(["']locations["']\)/);
+    expect(workspace).toMatch(/\.eq\(["']organization_id["'], account\.id\)/);
+    expect(workspace).toMatch(/\.from\(["']client_sites["']\)/);
+    expect(workspace).toMatch(/\.eq\(["']client_organization_id["'], account\.id\)/);
+    expect(workspace).toMatch(/\.from\(["']location_zones["']\)/);
     expect(workspace).toContain('Location / house');
     expect(workspace).toContain('Client-owned houses with their sibling site and zone facets.');
   });
 
   it('keeps real child organizations, module scope, and geofence defaults in the organization workspace', () => {
-    expect(workspace).toContain(".from('organizations').select('id,name,organization_type,status').eq('parent_organization_id', account.id)");
-    expect(workspace).toContain(".from('organization_modules')");
-    expect(workspace).toContain(".from('org_geofence_config')");
-    expect(workspace).toContain("view === 'structure'");
-    expect(workspace).toContain('Branches and divisions');
-    expect(workspace).toContain('A service agreement, not the organization tree, authorizes a provider');
-    expect(workspace).toContain('onOpenAccount?.({ id: child.id, name: child.name, status: child.status })');
+    expect(workspace).toMatch(/\.from\(["']organizations["']\)[\s\S]*\.eq\(["']parent_organization_id["'], account\.id\)/);
+    expect(workspace).toMatch(/\.from\(["']organization_modules["']\)/);
+    expect(workspace).toMatch(/\.from\(["']org_geofence_config["']\)/);
+    expect(workspace).toMatch(/view === ["']structure["']/);
+    expect(workspace).toContain('Add child organization');
+    expect(workspace).toContain("supabase.rpc('manage_crm_organization_child'");
+    expect(workspace).toContain('Client department');
+    expect(workspace).toMatch(/onOpenAccount\?\.\(\{[\s\S]*id: child\.id,[\s\S]*name: child\.name,[\s\S]*status: child\.status/);
   });
 
   it('shows agreement billing readiness before generating an invoice and does not offer fallback billing', () => {
@@ -97,8 +98,8 @@ describe('governed CRM accounts', () => {
     expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
     expect(page).toContain('Add organization');
     expect(page).toContain('client.next_action');
-    expect(organizationDialog).toContain('Search all FCM organizations by name, NZBN, or an owned-place');
-    expect(organizationDialog).toContain('Search results reveal identity details only; service-specific contacts are added during setup.');
+    expect(organizationDialog).toMatch(/Search all FCM organizations by name, NZBN, or an owned-place[\s\S]*address before creating/);
+    expect(organizationDialog).toMatch(/Search results reveal identity details[\s\S]*service-specific contacts are added during setup/);
     expect(organizationDialog).toContain('Organization name or address');
     expect(organizationDialog).toContain('Search Companies Register');
     expect(organizationDialog).toContain('companies/app/ui/pages/companies/search?advancedPanel=true');

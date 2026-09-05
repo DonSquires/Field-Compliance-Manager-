@@ -16,8 +16,16 @@ describe('CRM proposal package', () => {
 
   it('keeps provider-rule pricing explicit and blocks an unselected standard rate', () => {
     expect(page).toContain("value=\"standard_rate_rule\"");
-    expect(page).toContain('Select provider rate');
+    expect(page).toContain('Choose provider rate');
     expect(page).toContain("module.pricingBasis === 'standard_rate_rule' && !module.rateRuleId");
     expect(page).toContain('p_rate_rule_id: module.rateRuleId || null');
+  });
+
+  it('renders a readable responsive proposal register instead of raw module keys', () => {
+    expect(page).toContain('const formatModuleLabel');
+    expect(page).toContain("access_control: 'Access Control'");
+    expect(page).toContain("bob_assistant: 'Bob Assistant'");
+    expect(page).toContain('crm-proposal-module-register');
+    expect(page).toContain('Price with quote lines');
   });
 });

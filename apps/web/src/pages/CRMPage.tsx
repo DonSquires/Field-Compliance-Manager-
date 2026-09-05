@@ -117,6 +117,24 @@ interface ProposalModuleDraft {
 interface ProposalScopePlace { id: string; name: string; kind: 'Site' | 'Zone'; }
 interface ProposalServiceScope { id: string; module_key: string; site_id: string | null; zone_id: string | null; }
 
+const MODULE_LABELS: Record<string, string> = {
+  access_control: 'Access Control',
+  biosecurity: 'Biosecurity',
+  bob_assistant: 'Bob Assistant',
+  client_reporting: 'Client Reporting',
+  ems: 'Emergency Management System',
+  freedom_camping: 'Freedom Camping',
+  invoicing: 'Invoicing',
+  noise_control: 'Noise Control',
+  parking: 'Parking Enforcement',
+  smoke_complaints: 'Smoke Complaints',
+  static_guarding: 'Static Guarding',
+  welfare: 'Welfare Check',
+};
+
+const formatModuleLabel = (moduleKey: string) => MODULE_LABELS[moduleKey]
+  ?? moduleKey.split('_').map((word) => word.slice(0, 1).toUpperCase() + word.slice(1)).join(' ');
+
 interface CrmState {
   ownOrg: Organization | null;
   clients: AccountRow[];
@@ -142,7 +160,6 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     loading: true,
     error: null,
   });
-  const [branchFilter, setBranchFilter] = useState<string>('all');
   const [quoteClient, setQuoteClient] = useState<AccountRow | null>(null);
   const [quoteForm, setQuoteForm] = useState({
     title: '',
@@ -887,21 +904,6 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         </section>
       )}
 
-      <div className="crm-branch-filter">
-        <label>Branch</label>
-        <select
-          value={branchFilter}
-          onChange={(e) => setBranchFilter(e.target.value)}
-        >
-          <option value="all">All branches</option>
-          {state.branches.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {state.ownOrg && (
         <section className="reports-section">
           <h2>{state.ownOrg.name}</h2>
@@ -1102,8 +1104,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               {moduleCatalog.length === 0 ? (
                 <p>No active modules are available to quote.</p>
               ) : (
-                <div className="crm-account-register" role="table" aria-label="Quoted modules">
-                  <div className="crm-account-register-row is-header" role="row">
+                <div className="crm-proposal-module-register" role="table" aria-label="Quoted modules">
+                  <div className="crm-proposal-module-row is-header" role="row">
                     <span>Include</span>
                     <span>Module</span>
                     <span>Service level</span>
@@ -1112,7 +1114,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                   {moduleCatalog.map((module) => {
                     const proposalModule = proposalModules.find((item) => item.moduleKey === module.module_key);
                     return (
-                      <div key={module.module_key} className="crm-account-register-row" role="row">
+                      <div key={module.module_key} className="crm-proposal-module-row" role="row">
                         <span>
                           <input
                             type="checkbox"
@@ -1123,12 +1125,12 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                             aria-label={`Include ${module.module_key}`}
                           />
                         </span>
-                        <strong>{module.module_key} ({module.billing_period})</strong>
+                        <strong>{formatModuleLabel(module.module_key)}<small>{module.billing_period}</small></strong>
                         <span>
-                          {proposalModule ? <div className="crm-proposal-service-window"><input type="number" min="1" max="10080" placeholder="Optional SLA minutes" value={proposalModule.slaMinutes} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, slaMinutes: event.target.value } : item))} aria-label={`${module.module_key} SLA minutes`} /><div><input type="time" value={proposalModule.startTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, startTime: event.target.value } : item))} aria-label={`${module.module_key} service start time`} /><input type="time" value={proposalModule.endTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, endTime: event.target.value } : item))} aria-label={`${module.module_key} service end time`} /></div><div>{['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => <label key={day}><input type="checkbox" checked={proposalModule.activeDays.includes(day)} onChange={() => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, activeDays: item.activeDays.includes(day) ? item.activeDays.filter((activeDay) => activeDay !== day) : [...item.activeDays, day] } : item))} />{day.slice(0, 1).toUpperCase()}</label>)}</div></div> : 'Not included'}
+                          {proposalModule ? <div className="crm-proposal-service-window"><label><span>Response SLA</span><input type="number" min="1" max="10080" placeholder="Not set" value={proposalModule.slaMinutes} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, slaMinutes: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} SLA minutes`} /></label><div><input type="time" value={proposalModule.startTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, startTime: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} service start time`} /><span>to</span><input type="time" value={proposalModule.endTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, endTime: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} service end time`} /></div><div className="crm-proposal-days">{['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => <label key={day}><input type="checkbox" checked={proposalModule.activeDays.includes(day)} onChange={() => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, activeDays: item.activeDays.includes(day) ? item.activeDays.filter((activeDay) => activeDay !== day) : [...item.activeDays, day] } : item))} />{day.slice(0, 1).toUpperCase()}</label>)}</div></div> : <span className="crm-proposal-empty">Select module first</span>}
                         </span>
                         <span>
-                          {proposalModule ? <><select value={proposalModule.pricingBasis} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, pricingBasis: event.target.value as ProposalModuleDraft['pricingBasis'], rateRuleId: event.target.value === 'standard_rate_rule' ? item.rateRuleId : '' } : item))} aria-label={`${module.module_key} pricing basis`}><option value="quote_lines">Quoted line items</option><option value="standard_rate_rule">Provider rate rule</option><option value="site_override_pending">Site rate to confirm</option></select>{proposalModule.pricingBasis === 'standard_rate_rule' && <select required value={proposalModule.rateRuleId} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, rateRuleId: event.target.value } : item))} aria-label={`${module.module_key} provider rate rule`}><option value="">Select provider rate</option>{providerBillingRules.filter((rule) => rule.module_key === null || rule.module_key === module.module_key).map((rule) => <option key={rule.id} value={rule.id}>{rule.name} ({rule.rate_type}, ${Number(rule.amount).toFixed(2)})</option>)}</select>}</> : 'Not included'}
+                          {proposalModule ? <><select value={proposalModule.pricingBasis} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, pricingBasis: event.target.value as ProposalModuleDraft['pricingBasis'], rateRuleId: event.target.value === 'standard_rate_rule' ? item.rateRuleId : '' } : item))} aria-label={`${formatModuleLabel(module.module_key)} pricing basis`}><option value="quote_lines">Price with quote lines</option><option value="standard_rate_rule">Use provider rate</option><option value="site_override_pending">Confirm rate by place</option></select>{proposalModule.pricingBasis === 'standard_rate_rule' && <select required value={proposalModule.rateRuleId} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, rateRuleId: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} provider rate rule`}><option value="">Choose provider rate</option>{providerBillingRules.filter((rule) => rule.module_key === null || rule.module_key === module.module_key).map((rule) => <option key={rule.id} value={rule.id}>{rule.name} ({rule.rate_type}, ${Number(rule.amount).toFixed(2)})</option>)}</select>}</> : <span className="crm-proposal-empty">Select module first</span>}
                         </span>
                       </div>
                     );
