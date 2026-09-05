@@ -69,6 +69,8 @@ export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: 
       p_name: name.trim(),
       p_address: address.trim(),
       p_site_type: siteType,
+      p_center_lat: resolvedAddress?.lat ?? null,
+      p_center_lng: resolvedAddress?.lng ?? null,
     });
     const receipt = Array.isArray(data) ? data[0] : data;
     if (createError || !receipt) setError(createError?.message ?? 'Site creation receipt was not confirmed. Your entries remain available.');
