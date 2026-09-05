@@ -4,12 +4,13 @@ These repositories are historical references for the current Field Compliance Ma
 
 ## Current authoritative source
 
-- VPS checkout: `/root/field-compliance-manager`
-- Current Git remote: private Gitea at `git.fcmanager.co.nz:2222`
+- GitHub repository: `DonSquires/Field-Compliance-Manager-`, branch `main`
+- Vercel deployment: `iron-eagle-security/field-compliance-manager`, deployed from GitHub `main`
+- Gitea mirror: `Iron-Eagle-Security-Ltd/field-compliance-manager` at `git.fcmanager.co.nz:2222`
+- VPS checkout: `/root/field-compliance-manager`, deployed from the Gitea mirror for Bob control-plane services
 - Supabase project: `dotczcyyzgabmtmnglqj`
-- Vercel project: `iron-eagle-security/field-compliance-manager`
 
-The current VPS checkout was imported into this repository. It contains the Bob control plane, PTT server, Supabase Edge Functions, Docker deployment definitions, and Gitea runner workflow.
+The current VPS checkout was imported into this repository. GitHub `main` remains the primary dispatch source; Gitea must mirror it rather than become an independent source line. The checkout contains the Bob control plane, PTT server, Supabase Edge Functions, Docker deployment definitions, and Gitea runner workflow.
 
 ## Source lineage — do not conflate build attempts
 
@@ -19,7 +20,7 @@ Bob's most recent external source evidence comes from the **separate GitLab repo
 
 The platform-intelligence systems from the GitLab line are required systems in this build repo, not optional references: **Atlas** (capability/terrain graph and blast-radius), **Caddie** (Atlas-generated tool catalogue), **Conductor** (`onspace-ai-chat` turn gate/dispatcher and egress enforcement), and **Oracle** (general truth-state description for turns, callers, candidate effects, proof grade, and domain state; welfare safety is one Oracle application, not the whole system). When comparing or filling gaps, verify that these systems remain wired in this checkout rather than treating them as GitLab-only design notes. See [GITLAB_PLATFORM_SYSTEMS.md](GITLAB_PLATFORM_SYSTEMS.md).
 
-**Open question, not yet resolved:** which Git source does the live `iron-eagle-security/field-compliance-manager` Vercel project actually build from? It has not been confirmed to be the same GitLab repo/ref Bob is reading, the same branch even if it is, or this GitHub repo. Until that is confirmed, do not assume the code Bob is auditing is what is currently live in production — it may be a newer, older, or divergent version. Verify the Vercel project's connected Git integration (provider, repo, branch) before treating the rebuild spec as production-equivalent.
+Vercel deploys the live `iron-eagle-security/field-compliance-manager` project from this GitHub repository's `main` branch. GitLab remains historical read-only evidence for prior implementation decisions, and Gitea is a direct mirror for VPS/Bob services; neither is the Vercel source of truth.
 
 ## Historical references
 

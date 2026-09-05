@@ -1,7 +1,7 @@
 # UI Baseline
 
 Status: rebuild specification
-Source: Bob's read-only, verified findings from the original GitLab repository (project ID 83317421, ref `Main`) via `bob-repo-search`. Earlier inspections saw a GitHub checkout without the frontend; this workspace now contains the active rebuild frontend. This repository is intended to be the GitLab build's copy/mirror line with additional rebuild work layered here. The GitLab source and this checkout are the new purpose-designed development line, distinct from the older Freedom Camping prototype that was close functionally but incoherent architecturally. Atlas, Caddie, Conductor, and Oracle are required platform systems in this line, not optional references. See [historical-sources.md](historical-sources.md) for source-lineage cautions and the open question of whether the GitLab ref matches what is actually live on Vercel.
+Source: Bob's read-only, verified findings from the original GitLab repository (project ID 83317421, ref `Main`) via `bob-repo-search`. GitHub `DonSquires/Field-Compliance-Manager-` on `main` is the active rebuild and Vercel deployment source; Gitea is its downstream VPS/Bob mirror. The GitLab source is historical evidence for this purpose-designed development line, distinct from the older Freedom Camping prototype that was close functionally but incoherent architecturally. Atlas, Caddie, Conductor, and Oracle are required platform systems in this line, not optional references. See [historical-sources.md](historical-sources.md) for source-lineage cautions.
 Last reviewed: 2026-08-28
 
 ## Purpose
