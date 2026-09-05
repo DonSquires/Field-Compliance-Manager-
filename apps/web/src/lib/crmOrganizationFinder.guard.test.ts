@@ -10,6 +10,10 @@ const wordSimilarityMigration = readFileSync(
   resolve(process.cwd(), '../../supabase/migrations/20260905003100_crm_organization_finder_word_similarity.sql'),
   'utf8',
 );
+const manageableBooleanMigration = readFileSync(
+  resolve(process.cwd(), '../../supabase/migrations/20260905003200_crm_organization_finder_manageable_boolean.sql'),
+  'utf8',
+);
 
 describe('CRM organization finder', () => {
   it('allows active CRM administrators to discover all organization identities for duplicate prevention', () => {
@@ -35,5 +39,11 @@ describe('CRM organization finder', () => {
     expect(wordSimilarityMigration).toContain("extensions.word_similarity(v_query, lower(organization.name)) >= 0.5");
     expect(wordSimilarityMigration).toContain("case when match.match_rank = 5 then extensions.word_similarity(v_query, lower(match.name))");
     expect(wordSimilarityMigration).not.toMatch(/crm_contacts|external_ref|internal_client_ref|company_registration_number/i);
+  });
+
+  it('returns an explicit manageability result from the caller and relationship data', () => {
+    expect(manageableBooleanMigration).toContain('coalesce(match.id = v_provider or match.parent_organization_id = v_provider or public.crm_actor_can_manage_account(match.id), false)');
+    expect(manageableBooleanMigration).not.toContain('First Security');
+    expect(manageableBooleanMigration).not.toContain('LINZ');
   });
 });
