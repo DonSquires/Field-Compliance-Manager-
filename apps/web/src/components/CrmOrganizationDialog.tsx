@@ -201,18 +201,18 @@ export function CrmOrganizationDialog({
         ) : stage === "search" ? (
           <form className="crm-org-search" onSubmit={searchCandidates}>
             <p>
-              Search FCM records by organization name or NZBN before creating.
-              For an organization not yet in FCM, use the Companies Register
-              lookup, then create a prospect with its verified identifiers.
+              Search all FCM organizations by name, NZBN, or an owned-place
+              address before creating. Search results reveal identity details
+              only; service-specific contacts are added during setup.
             </p>
             <label>
-              <span>Organization name</span>
+              <span>Organization name or address</span>
               <div>
                 <Search size={16} />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="e.g. security or nelson city council"
+                  placeholder="e.g. security, nelson city council, or 100 Test Avenue"
                 />
               </div>
             </label>

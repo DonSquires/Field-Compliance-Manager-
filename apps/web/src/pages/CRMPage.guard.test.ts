@@ -97,9 +97,9 @@ describe('governed CRM accounts', () => {
     expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
     expect(page).toContain('Add organization');
     expect(page).toContain('client.next_action');
-    expect(organizationDialog).toContain('Search FCM records by organization name or NZBN before creating.');
-    expect(organizationDialog).toContain('For an organization not yet in FCM, use the Companies Register');
-    expect(organizationDialog).toContain('No matching FCM record. Search the Companies Register before creating a new prospect.');
+    expect(organizationDialog).toContain('Search all FCM organizations by name, NZBN, or an owned-place');
+    expect(organizationDialog).toContain('Search results reveal identity details only; service-specific contacts are added during setup.');
+    expect(organizationDialog).toContain('Organization name or address');
     expect(organizationDialog).toContain('Search Companies Register');
     expect(organizationDialog).toContain('companies/app/ui/pages/companies/search?advancedPanel=true');
     expect(organizationDialog).toContain('candidate.manageable &&');
