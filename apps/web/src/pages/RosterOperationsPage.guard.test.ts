@@ -13,6 +13,7 @@ describe('enterprise roster operations', () => {
   it('combines authorized branch staff, leave, availability, and coverage demand', () => {
     expect(page).toContain("supabase.rpc('get_operating_branch_roster_staff'");
     expect(page).toContain('operatingOrganizationId ?? profile?.organizationId');
+    expect(page).toContain('p_organization_id: operatingBranchId');
     for (const table of ['leave_requests', 'staff_availability', 'shift_coverage_requests', 'roster_work_units']) expect(page).toContain(`from('${table}')`);
     expect(page).toContain('hasAvailabilityConflict');
     expect(page).toContain('Availability restrictions');

@@ -218,11 +218,12 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const batchPublishPeriod = async () => {
-    if (!profile?.organizationId) return;
+    const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
+    if (!operatingBranchId) return;
     setSaving(true); setError(null); setNotice(null);
     const { data, error: rpcError } = await supabase.rpc('batch_publish_roster_slots', {
       p_client_request_id: crypto.randomUUID(),
-      p_organization_id: profile.organizationId,
+      p_organization_id: operatingBranchId,
       p_from: weekStart.toISOString(),
       p_to: weekEnd.toISOString(),
     });
@@ -254,11 +255,12 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const generateFromTemplates = async () => {
-    if (!profile?.organizationId) return;
+    const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
+    if (!operatingBranchId) return;
     setSaving(true); setError(null); setNotice(null);
     const { data, error: rpcError } = await supabase.rpc('generate_roster_from_templates', {
       p_client_request_id: crypto.randomUUID(),
-      p_organization_id: profile.organizationId,
+      p_organization_id: operatingBranchId,
       p_from_date: isoDate(weekStart),
       p_to_date: isoDate(addDays(weekEnd, -1)),
     });
@@ -272,10 +274,11 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const updateCalendarRegion = async (regionCode: string) => {
-    if (!profile?.organizationId) return;
+    const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
+    if (!operatingBranchId) return;
     setSaving(true); setError(null);
     const nextRegion = regionCode || null;
-    const { error: regionError } = await supabase.rpc('set_organization_calendar_region', { p_organization_id: profile.organizationId, p_region_code: nextRegion });
+    const { error: regionError } = await supabase.rpc('set_organization_calendar_region', { p_organization_id: operatingBranchId, p_region_code: nextRegion });
     if (regionError) setError(regionError.message); else { setCalendarRegion(nextRegion); setNotice('Regional public holiday calendar updated.'); }
     setSaving(false);
   };
