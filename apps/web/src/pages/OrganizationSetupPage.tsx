@@ -10,9 +10,12 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './OrganizationSetupPage.css';
 
 interface OrgProfile {
   id: string;
@@ -68,6 +71,10 @@ const OrganizationSetupPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [jurisdictionName, setJurisdictionName] = useState('Nelson City');
+  const [jurisdictionPreview, setJurisdictionPreview] = useState<GeoJSON.GeoJsonObject | null>(null);
+  const [jurisdictionPreviewLoading, setJurisdictionPreviewLoading] = useState(false);
+  const [jurisdictionPreviewMessage, setJurisdictionPreviewMessage] = useState<string | null>(null);
 
   // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config
   const loadAll = useCallback(async () => {
@@ -197,6 +204,22 @@ const OrganizationSetupPage: React.FC = () => {
     }
   };
 
+  const previewJurisdiction = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!jurisdictionName.trim()) return;
+    setJurisdictionPreviewLoading(true);
+    setJurisdictionPreviewMessage(null);
+    setJurisdictionPreview(null);
+    const { data, error: previewError } = await supabase.functions.invoke('bob-jurisdiction-preview', { body: { district_names: [jurisdictionName.trim()] } });
+    if (previewError || !data?.results?.[0]?.matched) {
+      setJurisdictionPreviewMessage(previewError?.message ?? `No verified Territorial Authority boundary matched "${jurisdictionName.trim()}".`);
+    } else {
+      setJurisdictionPreview(data.results[0].geometry as GeoJSON.GeoJsonObject);
+      setJurisdictionPreviewMessage(`Read-only boundary preview loaded for ${jurisdictionName.trim()}. Nothing has been saved.`);
+    }
+    setJurisdictionPreviewLoading(false);
+  };
+
   if (loading) {
     return (
       <div className="page-container">
@@ -297,6 +320,17 @@ const OrganizationSetupPage: React.FC = () => {
             {saving ? 'Saving…' : 'Save Profile'}
           </button>
         </form>
+      </section>
+
+      <section className="reports-section organization-jurisdiction-section">
+        <h2>Branch Jurisdiction Map</h2>
+        <p className="contact-meta">Resolve the branch Territorial Authority boundary before Bob proposes it for approval. This preview is read-only; it does not write or verify the jurisdiction.</p>
+        <form className="settings-form organization-jurisdiction-form" onSubmit={previewJurisdiction}>
+          <div className="form-row"><div className="form-group"><label htmlFor="jurisdiction-name">Territorial Authority</label><input id="jurisdiction-name" value={jurisdictionName} onChange={(event) => setJurisdictionName(event.target.value)} placeholder="e.g. Nelson City" /></div><button type="submit" className="btn btn-secondary" disabled={jurisdictionPreviewLoading}>{jurisdictionPreviewLoading ? 'Resolving…' : 'Preview boundary'}</button></div>
+        </form>
+        {jurisdictionPreviewMessage && <div className={`organization-jurisdiction-message ${jurisdictionPreview ? 'is-success' : 'is-error'}`} role="status">{jurisdictionPreviewMessage}</div>}
+        <JurisdictionPreviewMap geometry={jurisdictionPreview} label={jurisdictionName} />
+        <p className="contact-meta">Next step: Bob submits the resolved boundary to the Approvals page. A human must approve it and then visually verify it before branch routing uses it.</p>
       </section>
 
       <section className="reports-section">
@@ -453,5 +487,20 @@ const OrganizationSetupPage: React.FC = () => {
     </div>
   );
 };
+
+function JurisdictionPreviewMap({ geometry, label }: { geometry: GeoJSON.GeoJsonObject | null; label: string }) {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!containerRef.current || !geometry) return;
+    const map = L.map(containerRef.current, { zoomControl: true }).setView([-41.27, 173.28], 9);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 18 }).addTo(map);
+    const layer = L.geoJSON(geometry, { style: { color: '#14c8d4', weight: 2, fillColor: '#14c8d4', fillOpacity: 0.16 } }).bindTooltip(label).addTo(map);
+    const bounds = layer.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.08));
+    const timer = window.setTimeout(() => map.invalidateSize(), 0);
+    return () => { window.clearTimeout(timer); map.remove(); };
+  }, [geometry, label]);
+  return geometry ? <div className="organization-jurisdiction-map" ref={containerRef} aria-label={`${label} jurisdiction preview`} /> : <div className="organization-jurisdiction-map-empty">Enter a Territorial Authority and preview its boundary here.</div>;
+}
 
 export default OrganizationSetupPage;

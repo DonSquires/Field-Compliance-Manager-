@@ -1,0 +1,9 @@
+.organization-jurisdiction-section { display: grid; gap: 10px; }
+.organization-jurisdiction-form .form-row { align-items: end; }
+.organization-jurisdiction-form button { min-height: 38px; white-space: nowrap; }
+.organization-jurisdiction-map,
+.organization-jurisdiction-map-empty { min-height: 380px; border: 1px solid #2b4a59; border-radius: 6px; overflow: hidden; background: #0a1b25; }
+.organization-jurisdiction-map-empty { display: grid; place-items: center; color: #8fa9b5; font-size: 11px; }
+.organization-jurisdiction-message { padding: 10px 12px; border-left: 3px solid #f2bf3a; color: #f2d58a; background: #30250d; font-size: 11px; }
+.organization-jurisdiction-message.is-success { border-left-color: #4cc38a; color: #c5f3df; background: #0d2b26; }
+@media (max-width: 650px) { .organization-jurisdiction-form .form-row { display: grid; } .organization-jurisdiction-map, .organization-jurisdiction-map-empty { min-height: 300px; } }
