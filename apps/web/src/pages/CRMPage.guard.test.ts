@@ -47,6 +47,14 @@ describe('governed CRM accounts', () => {
     expect(page).not.toMatch(/\.from\(["']invoices["']\)\.update/);
   });
 
+  it('shows agreement billing readiness before generating an invoice and does not offer fallback billing', () => {
+    expect(page).toContain("supabase.from('crm_commercial_settings')");
+    expect(page).toContain(".eq('status', 'accepted')");
+    expect(page).toContain("agreement.invitation_status === 'accepted'");
+    expect(page).toContain("invoiceReadiness?.source === 'missing'");
+    expect(page).toContain('Configure accepted quote lines or commercial settings before creating a draft invoice.');
+  });
+
   it('opens the exact account workspace once from explicit URL context', () => {
     expect(page).toContain('openedContextAccountId');
     expect(page).toContain('account.id === requestedAccountId');

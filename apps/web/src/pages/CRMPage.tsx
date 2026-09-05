@@ -88,6 +88,15 @@ interface InvoiceRow {
   client: { name: string } | null;
 }
 
+interface InvoiceReadiness {
+  accountName: string;
+  agreementName: string;
+  source: 'accepted_quote' | 'commercial_rate' | 'missing';
+  detail: string;
+  billingCycle: string | null;
+  paymentTermsDays: number | null;
+}
+
 interface CrmState {
   ownOrg: Organization | null;
   clients: AccountRow[];
@@ -144,6 +153,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
   const [invoiceReason, setInvoiceReason] = useState('');
   const [showGenerateInvoice, setShowGenerateInvoice] = useState(false);
+  const [invoiceReadiness, setInvoiceReadiness] = useState<InvoiceReadiness | null>(null);
+  const [invoiceReadinessLoading, setInvoiceReadinessLoading] = useState(false);
   const [selectedAgreementId, setSelectedAgreementId] = useState('');
   const [quoteLines, setQuoteLines] = useState<Array<{ id: string; kind: string; description: string; quantity: number; unit_cost: number; unit_charge: number }>>([]);
   const [organizationDialog, setOrganizationDialog] = useState<EditableCrmOrganization | 'create' | null>(null);
@@ -360,7 +371,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
 
   const generateInvoiceFromAgreement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAgreementId) return;
+    if (!selectedAgreementId || invoiceReadiness?.source === 'missing') return;
     setQuoteSaving(true);
     const now = new Date();
     const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -379,6 +390,36 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     }
     setQuoteSaving(false);
   };
+
+  const loadInvoiceReadiness = useCallback(async (agreementId: string) => {
+    const agreement = [...state.platformSubscribers, ...state.contractedOrgs].find((item) => item.id === agreementId);
+    if (!agreement) { setInvoiceReadiness(null); return; }
+    setInvoiceReadinessLoading(true); setInvoiceReadiness(null);
+    const [quotesResponse, settingsResponse] = await Promise.all([
+      supabase.from('quotes').select('id,quote_lines(id)').eq('service_agreement_id', agreementId).eq('status', 'accepted'),
+      supabase.from('crm_commercial_settings').select('base_rate_per_hour,billing_cycle,payment_terms_days').eq('service_agreement_id', agreementId).maybeSingle(),
+    ]);
+    if (quotesResponse.error || settingsResponse.error) {
+      setState((current) => ({ ...current, error: quotesResponse.error?.message ?? settingsResponse.error?.message ?? 'Invoice readiness could not be loaded.' }));
+    } else {
+      const quoteLineCount = ((quotesResponse.data as Array<{ quote_lines: Array<{ id: string }> | null }> | null) ?? []).reduce((count, quote) => count + (quote.quote_lines?.length ?? 0), 0);
+      const settings = settingsResponse.data as { base_rate_per_hour: number | null; billing_cycle: string; payment_terms_days: number } | null;
+      setInvoiceReadiness({
+        accountName: agreement.counterparty_name,
+        agreementName: agreement.name,
+        source: quoteLineCount > 0 ? 'accepted_quote' : settings?.base_rate_per_hour != null ? 'commercial_rate' : 'missing',
+        detail: quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)}.` : 'No accepted quote lines or commercial base rate are configured.',
+        billingCycle: settings?.billing_cycle ?? null,
+        paymentTermsDays: settings?.payment_terms_days ?? null,
+      });
+    }
+    setInvoiceReadinessLoading(false);
+  }, [state.contractedOrgs, state.platformSubscribers]);
+
+  useEffect(() => {
+    if (!showGenerateInvoice || !selectedAgreementId) { setInvoiceReadiness(null); return; }
+    void loadInvoiceReadiness(selectedAgreementId);
+  }, [loadInvoiceReadiness, selectedAgreementId, showGenerateInvoice]);
 
   const openQuote = (client: AccountRow) => {
     const validUntil = new Date();
@@ -977,14 +1018,16 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <span>Service agreement</span>
               <select required value={selectedAgreementId} onChange={(e) => setSelectedAgreementId(e.target.value)}>
                 <option value="">Select an agreement...</option>
-                {[...state.platformSubscribers, ...state.contractedOrgs].map((ag) => (
+                {[...state.platformSubscribers, ...state.contractedOrgs].filter((agreement) => agreement.invitation_status === 'accepted').map((ag) => (
                   <option key={ag.id} value={ag.id}>{ag.counterparty_name} — {ag.name}</option>
                 ))}
               </select>
             </label>
+            {invoiceReadinessLoading && <div className="crm-invoice-readiness">Checking agreement billing readiness.</div>}
+            {invoiceReadiness && <div className={`crm-invoice-readiness is-${invoiceReadiness.source}`}><strong>{invoiceReadiness.accountName}</strong><span>{invoiceReadiness.agreementName}</span><p>{invoiceReadiness.detail}</p>{invoiceReadiness.billingCycle && <small>{invoiceReadiness.billingCycle} billing · {invoiceReadiness.paymentTermsDays} day payment terms</small>}{invoiceReadiness.source === 'missing' && <small>Configure accepted quote lines or commercial settings before creating a draft invoice.</small>}</div>}
             <footer>
               <button type="button" className="btn btn-secondary" onClick={() => setShowGenerateInvoice(false)}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
+              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing'}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
             </footer>
           </form>
         </div>

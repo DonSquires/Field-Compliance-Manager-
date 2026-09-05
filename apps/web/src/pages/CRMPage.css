@@ -3,6 +3,8 @@
 	border-bottom: 1px solid #244654;
 }
 
+.crm-invoice-readiness{display:grid;gap:4px;margin-top:12px;padding:11px 12px;border-left:3px solid #14c8d4;color:#b7ced7;background:#0c202b;font-size:10px}.crm-invoice-readiness strong{color:#e8f3f6;font-size:12px}.crm-invoice-readiness span,.crm-invoice-readiness small{color:#8faab6}.crm-invoice-readiness p{margin:2px 0;color:#c5dbe2}.crm-invoice-readiness.is-accepted_quote{border-left-color:#4cc38a;background:#0d2b26}.crm-invoice-readiness.is-commercial_rate{border-left-color:#14c8d4;background:#0b2630}.crm-invoice-readiness.is-missing{border-left-color:#f2bf3a;background:#30250d}.crm-invoice-readiness.is-missing p,.crm-invoice-readiness.is-missing small{color:#f4d88a}
+
 .crm-account-register {
 	display: grid;
 	margin-top: 12px;
