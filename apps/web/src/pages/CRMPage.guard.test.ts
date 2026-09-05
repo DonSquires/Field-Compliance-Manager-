@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/CRMPage.tsx'), 'utf8');
+const workspace = readFileSync(resolve(process.cwd(), 'src/components/CrmAccountWorkspace.tsx'), 'utf8');
 
 describe('governed CRM accounts', () => {
   it('loads account context in batches including real primary contacts', () => {
@@ -47,6 +48,16 @@ describe('governed CRM accounts', () => {
     expect(page).toMatch(/\.from\(["']invoices["']\)/);
     expect(page).toMatch(/\.rpc\(["']manage_crm_invoice["']/);
     expect(page).not.toMatch(/\.from\(["']invoices["']\)\.update/);
+  });
+
+  it('groups organization-owned place records as house, site, and zone facets', () => {
+    expect(workspace).toContain(".from('locations')");
+    expect(workspace).toContain(".eq('organization_id', account.id)");
+    expect(workspace).toContain(".from('client_sites')");
+    expect(workspace).toContain(".eq('client_organization_id', account.id)");
+    expect(workspace).toContain(".from('location_zones')");
+    expect(workspace).toContain('Location / house');
+    expect(workspace).toContain('Client-owned houses with their sibling site and zone facets.');
   });
 
   it('shows agreement billing readiness before generating an invoice and does not offer fallback billing', () => {
