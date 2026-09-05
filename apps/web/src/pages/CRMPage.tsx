@@ -174,7 +174,7 @@ interface CrmState {
 const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = () => undefined }) => {
   const location = useLocation();
   const requestedAccountId = readWorkflowContext(location.search).accountId;
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const [state, setState] = useState<CrmState>({
     ownOrg: null,
     clients: [],
@@ -248,7 +248,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
 
   // ATLAS READS: organizations, crm_account_list (view), service_agreements
   const loadCrm = useCallback(async () => {
-    const orgId = profile?.organizationId;
+    const orgId = operatingOrganizationId ?? profile?.organizationId;
     if (!orgId) return;
 
     try {
@@ -268,7 +268,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         .select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes')
         .eq('parent_organization_id', orgId);
       if (acctErr) throw acctErr;
-      const { data: portfolio, error: portfolioError } = await supabase.rpc('get_crm_provider_portfolio', { p_operating_provider_organization_id: null });
+      const { data: portfolio, error: portfolioError } = await supabase.rpc('get_crm_provider_portfolio', { p_operating_provider_organization_id: orgId });
       if (portfolioError) throw portfolioError;
       const portfolioRows = (portfolio as ProviderPortfolioRow[]) ?? [];
       const portfolioIds = [...new Set(portfolioRows.map((row) => row.organization_id))];
@@ -435,7 +435,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         loading: false,
       }));
     }
-  }, [profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   useEffect(() => {
     loadCrm();
@@ -573,7 +573,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     validUntil.setDate(validUntil.getDate() + 30);
     quoteRequestId.current = crypto.randomUUID();
     setQuoteClient(client);
-    setQuoteOperatingProviderId(client.operating_provider_organization_id ?? profile?.organizationId ?? '');
+    setQuoteOperatingProviderId(client.operating_provider_organization_id ?? operatingOrganizationId ?? profile?.organizationId ?? '');
     setProposalModules([]);
     setQuotedModuleKeys([]);
     setQuoteForm({
@@ -1246,7 +1246,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <span>Service agreement</span>
               <select required value={selectedAgreementId} onChange={(e) => setSelectedAgreementId(e.target.value)}>
                 <option value="">Select an agreement...</option>
-                {state.contractedOrgs.filter((agreement) => agreement.provider_organization_id === profile?.organizationId && agreement.invitation_status === 'accepted').map((ag) => (
+                {state.contractedOrgs.filter((agreement) => agreement.provider_organization_id === (operatingOrganizationId ?? profile?.organizationId) && agreement.invitation_status === 'accepted').map((ag) => (
                   <option key={ag.id} value={ag.id}>{ag.counterparty_name} — {ag.name}</option>
                 ))}
               </select>

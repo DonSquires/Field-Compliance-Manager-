@@ -88,7 +88,7 @@ describe('governed CRM accounts', () => {
     expect(page).toContain(".eq('client_organization_id', orgId)");
     expect(page).toContain(".eq('agreement_type', 'financial')");
     expect(page).toContain('Platform Subscription');
-    expect(page).toContain("agreement.provider_organization_id === profile?.organizationId && agreement.invitation_status === 'accepted'");
+    expect(page).toContain("agreement.provider_organization_id === (operatingOrganizationId ?? profile?.organizationId) && agreement.invitation_status === 'accepted'");
   });
 
   it('shows parent oversight through a branch-preserving consolidated commercial read model', () => {
@@ -103,7 +103,7 @@ describe('governed CRM accounts', () => {
     expect(page).toContain("supabase.rpc('get_crm_provider_portfolio'");
     expect(page).toContain('operating_provider_organization_id');
     expect(page).toContain('Operating provider: ${client.operating_provider_name}');
-    expect(page).toContain('client.operating_provider_organization_id ?? profile?.organizationId');
+    expect(page).toContain('client.operating_provider_organization_id ?? operatingOrganizationId ?? profile?.organizationId');
     expect(page).toContain('Client Portfolios');
   });
 
