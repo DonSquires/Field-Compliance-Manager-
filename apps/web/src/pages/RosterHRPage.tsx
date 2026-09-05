@@ -15,6 +15,7 @@ import './PageStyles.css';
 import './RosterHRPage.css';
 
 type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'pay-review' | 'assets' | 'oncall' | 'court';
+type RosterTabGroup = 'workforce' | 'people' | 'rostering' | 'pay-assets';
 
 interface StaffRow {
   id: string;
@@ -222,11 +223,21 @@ const TABS: { id: RosterTab; label: string }[] = [
   { id: 'pay-review', label: 'Pay Review' },
 ];
 
+const TAB_GROUPS: { id: RosterTabGroup; label: string; tabs: RosterTab[] }[] = [
+  { id: 'workforce', label: 'Workforce', tabs: ['staff', 'onboarding', 'credentials'] },
+  { id: 'people', label: 'People', tabs: ['recruitment', 'performance', 'cases', 'leave'] },
+  { id: 'rostering', label: 'Rostering', tabs: ['shift-templates', 'coverage', 'oncall', 'court'] },
+  { id: 'pay-assets', label: 'Pay & Assets', tabs: ['timesheets', 'pay-review', 'assets'] },
+];
+
+const tabGroupFor = (tab: RosterTab): RosterTabGroup => TAB_GROUPS.find((group) => group.tabs.includes(tab))?.id ?? 'workforce';
+
 const RosterHRPage: React.FC = () => {
   const location = useLocation();
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
   const { profile } = useAuth();
   const [tab, setTab] = useState<RosterTab>(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff');
+  const [tabGroup, setTabGroup] = useState<RosterTabGroup>(tabGroupFor(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff'));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -477,6 +488,7 @@ const RosterHRPage: React.FC = () => {
   useEffect(() => {
     if (!requestedCredentialId) return;
     setTab('credentials');
+    setTabGroup('workforce');
     document.getElementById(`credential-${requestedCredentialId}`)?.scrollIntoView({ block: 'center' });
   }, [credentials, requestedCredentialId]);
 
@@ -806,12 +818,19 @@ const RosterHRPage: React.FC = () => {
       )}
       {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
-      <div className="crm-branch-filter">
-        {TABS.map((t) => (
+      <div className="crm-branch-filter" aria-label="Roster and HR workspace">
+        {TAB_GROUPS.map((group) => (
+          <button type="button" key={group.id} className={`btn btn-sm ${tabGroup === group.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTabGroup(group.id); setTab(group.tabs[0]); }}>
+            {group.label}
+          </button>
+        ))}
+      </div>
+      <div className="roster-hr-tab-list" aria-label={`${TAB_GROUPS.find((group) => group.id === tabGroup)?.label} views`}>
+        {TABS.filter((item) => tabGroupFor(item.id) === tabGroup).map((t) => (
           <button
             key={t.id}
             className={`btn btn-sm ${tab === t.id ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setTab(t.id)}
+            onClick={() => { setTab(t.id); setTabGroup(tabGroupFor(t.id)); }}
           >
             {t.label}
           </button>

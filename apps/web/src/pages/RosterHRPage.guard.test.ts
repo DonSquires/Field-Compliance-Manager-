@@ -6,6 +6,15 @@ const page = readFileSync(resolve(process.cwd(), 'src/pages/RosterHRPage.tsx'), 
 const credentialSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql'), 'utf8');
 
 describe('governed HR administration', () => {
+  it('groups the full Roster HR workspace without removing payroll access', () => {
+    expect(page).toContain("type RosterTabGroup = 'workforce' | 'people' | 'rostering' | 'pay-assets'");
+    expect(page).toContain("{ id: 'workforce', label: 'Workforce'");
+    expect(page).toContain("{ id: 'people', label: 'People'");
+    expect(page).toContain("{ id: 'rostering', label: 'Rostering'");
+    expect(page).toContain("{ id: 'pay-assets', label: 'Pay & Assets'");
+    expect(page).toContain("{ id: 'pay-review', label: 'Pay Review' }");
+  });
+
   it('uses server-owned leave and timesheet decisions', () => {
     expect(page).toContain("supabase.rpc('review_leave_request'");
     expect(page).toContain("supabase.rpc('review_timesheet'");
