@@ -13,6 +13,11 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './AccessControlPage.css';
 
+const BRANCH_AUTHORITY_AREAS = [
+  ['timesheet_local_review', 'Timesheet local review'], ['leave_branch_approve', 'Leave branch approval'], ['roster_impact_approve', 'Roster impact approval'],
+  ['credentials_supervise', 'Credential supervision'], ['hr_case_local_investigate', 'Local people-matter investigation'], ['incident_manage_local', 'Local incident management'],
+] as const;
+
 interface AccessPreset {
   id: string;
   key: string;
@@ -56,6 +61,8 @@ const AccessControlPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [revokeGrant, setRevokeGrant] = useState<AreaGrant | null>(null);
   const [revokeReason, setRevokeReason] = useState('');
+  const [showGrantForm, setShowGrantForm] = useState(false);
+  const [grantForm, setGrantForm] = useState<{ userId: string; area: string; level: string; reason: string }>({ userId: '', area: BRANCH_AUTHORITY_AREAS[0][0], level: 'approve', reason: '' });
 
   // ATLAS READS: access_presets, preset_assignments, staff_area_grants, user_profiles
   const loadAll = useCallback(async () => {
@@ -114,6 +121,19 @@ const AccessControlPage: React.FC = () => {
       setRevokeGrant(null); setRevokeReason(''); await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to revoke grant');
+    }
+  };
+
+  const handleGrant = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
+    if (!operatingBranchId || !grantForm.userId || !grantForm.reason.trim()) return;
+    try {
+      const { error } = await supabase.rpc('grant_branch_area_access', { p_operating_organization_id: operatingBranchId, p_user_id: grantForm.userId, p_area: grantForm.area, p_level: grantForm.level, p_reason: grantForm.reason.trim() });
+      if (error) throw error;
+      setShowGrantForm(false); setGrantForm({ userId: '', area: BRANCH_AUTHORITY_AREAS[0][0], level: 'approve', reason: '' }); await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to grant branch authority');
     }
   };
 
@@ -177,7 +197,7 @@ const AccessControlPage: React.FC = () => {
       </section>
 
       <section className="reports-section">
-        <h2>Direct Area Grants ({grants.filter((g) => g.status === 'active').length})</h2>
+        <div className="access-section-heading"><h2>Direct Area Grants ({grants.filter((g) => g.status === 'active').length})</h2><button className="btn btn-sm btn-primary" onClick={() => { setGrantForm({ userId: '', area: BRANCH_AUTHORITY_AREAS[0][0], level: 'approve', reason: '' }); setShowGrantForm(true); }}>Grant branch authority</button></div>
         <div className="reports-table-wrapper">
           <table className="reports-table">
             <thead>
@@ -221,6 +241,7 @@ const AccessControlPage: React.FC = () => {
           </table>
         </div>
       </section>
+      {showGrantForm && <div className="access-dialog-backdrop"><form className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="grant-branch-authority-title" onSubmit={handleGrant}><h2 id="grant-branch-authority-title">Grant branch authority</h2><p>This applies only to the selected operating branch. Corporate payroll and formal disciplinary authority are managed separately.</p><label><span>Staff member</span><select required value={grantForm.userId} onChange={(event) => setGrantForm({ ...grantForm, userId: event.target.value })}><option value="">Select staff member</option>{Object.values(users).filter((user) => user.id !== profile?.id).map((user) => <option value={user.id} key={user.id}>{user.display_name ?? user.email ?? user.id}</option>)}</select></label><label><span>Authority area</span><select value={grantForm.area} onChange={(event) => setGrantForm({ ...grantForm, area: event.target.value })}>{BRANCH_AUTHORITY_AREAS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label><span>Access level</span><select value={grantForm.level} onChange={(event) => setGrantForm({ ...grantForm, level: event.target.value })}><option value="view">View</option><option value="verify">Verify</option><option value="approve">Approve</option><option value="adjust">Adjust</option><option value="manage">Manage</option></select></label><label><span>Reason for grant</span><textarea required rows={3} value={grantForm.reason} onChange={(event) => setGrantForm({ ...grantForm, reason: event.target.value })} /></label><div className="access-dialog-actions"><button type="button" onClick={() => setShowGrantForm(false)}>Cancel</button><button type="submit" disabled={!grantForm.userId || !grantForm.reason.trim()}>Grant authority</button></div></form></div>}
       {revokeGrant && <div className="access-dialog-backdrop"><form className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="revoke-grant-title" onSubmit={handleRevokeGrant}><h2 id="revoke-grant-title">End direct access grant</h2><p>{userLabel(revokeGrant.user_id)} · {revokeGrant.area} · {revokeGrant.level}</p><label><span>Reason for ending access</span><textarea required rows={3} value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} /></label><div className="access-dialog-actions"><button type="button" onClick={() => setRevokeGrant(null)}>Cancel</button><button type="submit" className="is-danger" disabled={!revokeReason.trim()}>End grant</button></div></form></div>}
     </div>
   );

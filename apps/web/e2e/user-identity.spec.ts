@@ -72,3 +72,19 @@ test('administrator ends a direct area grant with retained reason', async ({ pag
   await expect(page.getByText('ended', { exact: true })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('administrator grants a local branch authority with retained reason', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/access-control');
+  await page.getByRole('button', { name: 'Grant branch authority' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Grant branch authority' });
+  await expect(dialog.getByRole('button', { name: 'Grant authority' })).toBeDisabled();
+  await expect(dialog).toHaveScreenshot('branch-authority-grant.png');
+  await dialog.getByLabel('Staff member').selectOption({ label: 'Jordan Lee' });
+  await dialog.getByLabel('Authority area').selectOption('timesheet_local_review');
+  await dialog.getByLabel('Access level').selectOption('approve');
+  await dialog.getByLabel('Reason for grant').fill('Jordan provides local timesheet review cover.');
+  await dialog.getByRole('button', { name: 'Grant authority' }).click();
+  await expect(page.getByText('timesheet_local_review', { exact: true })).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
