@@ -1,0 +1,41 @@
+name: Mirror GitHub Main to Gitea
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-gitea-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Gitea mirror
+        env:
+          GITEA_MIRROR_USERNAME: ${{ secrets.GITEA_MIRROR_USERNAME }}
+          GITEA_MIRROR_TOKEN: ${{ secrets.GITEA_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GITEA_MIRROR_USERNAME"
+          test -n "$GITEA_MIRROR_TOKEN"
+          git remote add gitea "https://${GITEA_MIRROR_USERNAME}:${GITEA_MIRROR_TOKEN}@git.fcmanager.co.nz/Iron-Eagle-Security-Ltd/field-compliance-manager.git"
+      - name: Fast-forward Gitea main
+        run: |
+          set -euo pipefail
+          git fetch gitea main
+          GITEA_MAIN="$(git rev-parse gitea/main)"
+          if ! git merge-base --is-ancestor "$GITEA_MAIN" HEAD; then
+            echo "Gitea main diverges from GitHub main; refusing to overwrite mirror history." >&2
+            exit 1
+          fi
+          git push gitea HEAD:refs/heads/main
