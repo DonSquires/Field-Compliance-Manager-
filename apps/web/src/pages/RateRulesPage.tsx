@@ -29,7 +29,7 @@ interface CompletedDispatchJob {
 const RATE_TYPES = ['hourly', 'flat', 'daily', 'per_km', 'per_unit', 'percentage', 'per_hour_travel', 'per_hour_allowance', 'oncall_flat', 'callout', 'higher_duties_flat', 'per_visit', 'per_notice'];
 
 export default function RateRulesPage() {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const [rules, setRules] = useState<RateRule[]>([]);
   const [completedJobs, setCompletedJobs] = useState<CompletedDispatchJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,12 +41,13 @@ export default function RateRulesPage() {
   const [form, setForm] = useState({ kind: 'pay' as 'pay' | 'billing', name: '', rateType: 'hourly', amount: '', payCode: '', serviceType: '', jobType: '', dayCategory: '', priority: '0' });
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
+    if (!operatingBranchId) return;
     setLoading(true); setError(null);
     const [rulesResponse, jobsResponse, payLinesResponse] = await Promise.all([
-      supabase.from('rate_rules').select('id,rule_kind,name,rate_type,amount,pay_code,service_type,job_type,day_category,priority,active,updated_at').eq('organization_id', profile.organizationId).order('active', { ascending: false }).order('priority', { ascending: false }).order('name'),
-      supabase.from('dispatch_jobs').select('id,job_type,completed_at,client_site_id').eq('organization_id', profile.organizationId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(50),
-      supabase.from('dispatch_job_pay_lines').select('source_dispatch_id').eq('organization_id', profile.organizationId).limit(500),
+      supabase.from('rate_rules').select('id,rule_kind,name,rate_type,amount,pay_code,service_type,job_type,day_category,priority,active,updated_at').eq('organization_id', operatingBranchId).order('active', { ascending: false }).order('priority', { ascending: false }).order('name'),
+      supabase.from('dispatch_jobs').select('id,job_type,completed_at,client_site_id').eq('organization_id', operatingBranchId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(50),
+      supabase.from('dispatch_job_pay_lines').select('source_dispatch_id').eq('organization_id', operatingBranchId).limit(500),
     ]);
     const loadError = rulesResponse.error ?? jobsResponse.error ?? payLinesResponse.error;
     if (loadError) setError(loadError.message); else {
@@ -55,7 +56,7 @@ export default function RateRulesPage() {
       setCompletedJobs(((jobsResponse.data as CompletedDispatchJob[]) ?? []).filter((job) => !resolved.has(job.id)));
     }
     setLoading(false);
-  }, [profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (!showForm) setEditingRule(null); }, [showForm]);
@@ -64,7 +65,7 @@ export default function RateRulesPage() {
     event.preventDefault();
     if (editingRule) { await updateRule(event); return; }
     setSaving(true); setError(null); setNotice(null);
-    const { error: createError } = await supabase.rpc('manage_rate_rule', { p_client_request_id: crypto.randomUUID(), p_action: 'create', p_rate_rule_id: null, p_expected_updated_at: null, p_rule_kind: form.kind, p_name: form.name.trim(), p_rate_type: form.rateType, p_amount: Number(form.amount), p_pay_code: form.payCode.trim() || null, p_service_type: form.serviceType.trim() || null, p_job_type: form.jobType.trim() || null, p_client_org_id: null, p_site_id: null, p_zone_id: null, p_day_category: form.dayCategory || null, p_effective_from: null, p_effective_to: null, p_priority: Number(form.priority) });
+    const { error: createError } = await supabase.rpc('manage_operating_branch_rate_rule', { p_operating_organization_id: operatingOrganizationId ?? profile?.organizationId, p_client_request_id: crypto.randomUUID(), p_action: 'create', p_rate_rule_id: null, p_expected_updated_at: null, p_rule_kind: form.kind, p_name: form.name.trim(), p_rate_type: form.rateType, p_amount: Number(form.amount), p_pay_code: form.payCode.trim() || null, p_service_type: form.serviceType.trim() || null, p_job_type: form.jobType.trim() || null, p_client_org_id: null, p_site_id: null, p_zone_id: null, p_day_category: form.dayCategory || null, p_effective_from: null, p_effective_to: null, p_priority: Number(form.priority) });
     if (createError) setError(createError.message);
     else { setNotice('Rate rule created and available to the resolver.'); setForm({ kind: 'pay', name: '', rateType: 'hourly', amount: '', payCode: '', serviceType: '', jobType: '', dayCategory: '', priority: '0' }); setShowForm(false); await load(); }
     setSaving(false);
@@ -79,7 +80,7 @@ export default function RateRulesPage() {
   const updateRule = async (event: React.FormEvent) => {
     event.preventDefault(); if (!editingRule) return;
     setSaving(true); setError(null); setNotice(null);
-    const { error: updateError } = await supabase.rpc('manage_rate_rule', { p_client_request_id: crypto.randomUUID(), p_action: 'update', p_rate_rule_id: editingRule.id, p_expected_updated_at: editingRule.updated_at, p_rule_kind: form.kind, p_name: form.name.trim(), p_rate_type: form.rateType, p_amount: Number(form.amount), p_pay_code: form.payCode.trim() || null, p_service_type: form.serviceType.trim() || null, p_job_type: form.jobType.trim() || null, p_client_org_id: null, p_site_id: null, p_zone_id: null, p_day_category: form.dayCategory || null, p_effective_from: null, p_effective_to: null, p_priority: Number(form.priority) });
+    const { error: updateError } = await supabase.rpc('manage_operating_branch_rate_rule', { p_operating_organization_id: operatingOrganizationId ?? profile?.organizationId, p_client_request_id: crypto.randomUUID(), p_action: 'update', p_rate_rule_id: editingRule.id, p_expected_updated_at: editingRule.updated_at, p_rule_kind: form.kind, p_name: form.name.trim(), p_rate_type: form.rateType, p_amount: Number(form.amount), p_pay_code: form.payCode.trim() || null, p_service_type: form.serviceType.trim() || null, p_job_type: form.jobType.trim() || null, p_client_org_id: null, p_site_id: null, p_zone_id: null, p_day_category: form.dayCategory || null, p_effective_from: null, p_effective_to: null, p_priority: Number(form.priority) });
     if (updateError) setError(updateError.message);
     else { setNotice('Rate rule updated with a new audit revision.'); setEditingRule(null); setShowForm(false); await load(); }
     setSaving(false);
@@ -87,7 +88,7 @@ export default function RateRulesPage() {
 
   const toggle = async (rule: RateRule) => {
     setSaving(true); setError(null); setNotice(null);
-    const { error: actionError } = await supabase.rpc('manage_rate_rule', { p_client_request_id: crypto.randomUUID(), p_action: rule.active ? 'deactivate' : 'reactivate', p_rate_rule_id: rule.id, p_expected_updated_at: rule.updated_at, p_rule_kind: null, p_name: null, p_rate_type: null, p_amount: null, p_pay_code: null, p_service_type: null, p_job_type: null, p_client_org_id: null, p_site_id: null, p_zone_id: null, p_day_category: null, p_effective_from: null, p_effective_to: null, p_priority: 0 });
+    const { error: actionError } = await supabase.rpc('manage_operating_branch_rate_rule', { p_operating_organization_id: operatingOrganizationId ?? profile?.organizationId, p_client_request_id: crypto.randomUUID(), p_action: rule.active ? 'deactivate' : 'reactivate', p_rate_rule_id: rule.id, p_expected_updated_at: rule.updated_at, p_rule_kind: null, p_name: null, p_rate_type: null, p_amount: null, p_pay_code: null, p_service_type: null, p_job_type: null, p_client_org_id: null, p_site_id: null, p_zone_id: null, p_day_category: null, p_effective_from: null, p_effective_to: null, p_priority: 0 });
     if (actionError) setError(actionError.message); else { setNotice(`Rate rule ${rule.active ? 'deactivated' : 'reactivated'}.`); await load(); }
     setSaving(false);
   };
