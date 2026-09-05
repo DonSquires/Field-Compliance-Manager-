@@ -60,6 +60,16 @@ describe('governed CRM accounts', () => {
     expect(workspace).toContain('Client-owned houses with their sibling site and zone facets.');
   });
 
+  it('keeps real child organizations, module scope, and geofence defaults in the organization workspace', () => {
+    expect(workspace).toContain(".from('organizations').select('id,name,organization_type,status').eq('parent_organization_id', account.id)");
+    expect(workspace).toContain(".from('organization_modules')");
+    expect(workspace).toContain(".from('org_geofence_config')");
+    expect(workspace).toContain("view === 'structure'");
+    expect(workspace).toContain('Branches and divisions');
+    expect(workspace).toContain('A service agreement, not the organization tree, authorizes a provider');
+    expect(workspace).toContain('onOpenAccount?.({ id: child.id, name: child.name, status: child.status })');
+  });
+
   it('shows agreement billing readiness before generating an invoice and does not offer fallback billing', () => {
     expect(page).toContain("supabase.from('crm_commercial_settings')");
     expect(page).toContain(".eq('status', 'accepted')");
