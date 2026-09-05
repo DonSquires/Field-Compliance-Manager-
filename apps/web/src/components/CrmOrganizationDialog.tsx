@@ -328,6 +328,14 @@ export function CrmOrganizationDialog({
                     setForm({ ...form, companyNumber: event.target.value })
                   }
                 />
+                <a
+                  className="crm-org-external-link"
+                  href="https://app.companiesoffice.govt.nz/companies/app/ui/pages/companies/search?advancedPanel=true"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Search Companies Register
+                </a>
               </label>
             </div>
             <div className="crm-org-grid">
