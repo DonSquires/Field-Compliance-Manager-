@@ -58,7 +58,7 @@ const GEOFENCE_KEYS: { key: string; label: string; platformDefault: number }[] =
 const ENFORCEMENT_MODES = ['admin_first', 'officer_direct', 'hybrid'];
 
 const OrganizationSetupPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const [org, setOrg] = useState<OrgProfile | null>(null);
   const [modules, setModules] = useState<ModuleRow[]>([]);
   const [templates, setTemplates] = useState<NoticeTemplate[]>([]);
@@ -71,7 +71,7 @@ const OrganizationSetupPage: React.FC = () => {
 
   // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config
   const loadAll = useCallback(async () => {
-    const orgId = profile?.organizationId;
+    const orgId = operatingOrganizationId ?? profile?.organizationId;
     if (!orgId) return;
 
     try {
@@ -111,7 +111,7 @@ const OrganizationSetupPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   useEffect(() => {
     loadAll();
@@ -125,7 +125,8 @@ const OrganizationSetupPage: React.FC = () => {
       setSaving(true);
       setError(null);
 
-      const { data, error } = await supabase.rpc('update_organization_profile', {
+      const { data, error } = await supabase.rpc('update_operating_branch_profile', {
+        p_operating_organization_id: org.id,
         p_expected_updated_at: org.updated_at,
         p_contact_email: org.contact_email,
         p_contact_phone: org.contact_phone,
@@ -145,11 +146,7 @@ const OrganizationSetupPage: React.FC = () => {
 
   const handleToggleModule = async (mod: ModuleRow) => {
     try {
-      // ATLAS WRITES: organization_modules
-      const { error } = await supabase
-        .from('organization_modules')
-        .update({ enabled: !mod.enabled })
-        .eq('id', mod.id);
+      const { error } = await supabase.rpc('set_operating_branch_module', { p_operating_organization_id: org?.id, p_module_key: mod.module_key, p_enabled: !mod.enabled });
 
       if (error) throw error;
       setModules(modules.map((m) => (m.id === mod.id ? { ...m, enabled: !m.enabled } : m)));
@@ -169,23 +166,10 @@ const OrganizationSetupPage: React.FC = () => {
       setSavingKey(`${configKey}:${zoneType ?? ''}`);
       setError(null);
 
-      const existing = geofenceConfig.find((g) => g.config_key === configKey && (g.zone_type ?? null) === zoneType);
-
-      if (existing) {
-        // ATLAS WRITES: org_geofence_config
-        const { error } = await supabase.from('org_geofence_config').update({ config_value: value }).eq('id', existing.id);
-        if (error) throw error;
-        setGeofenceConfig(geofenceConfig.map((g) => (g.id === existing.id ? { ...g, config_value: value } : g)));
-      } else {
-        // ATLAS WRITES: org_geofence_config
-        const { data, error } = await supabase
-          .from('org_geofence_config')
-          .insert([{ organization_id: org.id, config_key: configKey, config_value: value, zone_type: zoneType }])
-          .select('id, config_key, config_value, zone_type')
-          .single();
-        if (error) throw error;
-        setGeofenceConfig([...geofenceConfig, data as GeofenceConfigRow]);
-      }
+      const { data, error } = await supabase.rpc('manage_operating_branch_geofence_config', { p_operating_organization_id: org.id, p_action: 'set', p_config_id: null, p_config_key: configKey, p_zone_type: zoneType, p_config_value: value });
+      if (error) throw error;
+      const saved = data as GeofenceConfigRow;
+      setGeofenceConfig((current) => current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save geofence config');
     } finally {
@@ -204,8 +188,8 @@ const OrganizationSetupPage: React.FC = () => {
   const handleDeleteOverride = async (id: string) => {
     try {
       setError(null);
-      // ATLAS WRITES: org_geofence_config
-      const { error } = await supabase.from('org_geofence_config').delete().eq('id', id);
+      if (!org) return;
+      const { error } = await supabase.rpc('manage_operating_branch_geofence_config', { p_operating_organization_id: org.id, p_action: 'remove', p_config_id: id, p_config_key: null, p_zone_type: null, p_config_value: null });
       if (error) throw error;
       setGeofenceConfig(geofenceConfig.filter((g) => g.id !== id));
     } catch (err) {
