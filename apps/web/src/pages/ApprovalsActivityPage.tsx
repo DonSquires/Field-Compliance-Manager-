@@ -53,6 +53,7 @@ const ApprovalsActivityPage: React.FC = () => {
   const [reasoning, setReasoning] = useState('');
   const [applyAfterApprove, setApplyAfterApprove] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [payloadLabels, setPayloadLabels] = useState<Record<string, string>>({});
 
   const loadActivity = useCallback(async () => {
     setLoading(true);
@@ -80,6 +81,24 @@ const ApprovalsActivityPage: React.FC = () => {
   useEffect(() => {
     void loadActivity();
   }, [loadActivity]);
+
+  useEffect(() => {
+    const payload = selectedPayload(rows.find((row) => row.id === selectedId) ?? null);
+    if (!payload) { setPayloadLabels({}); return; }
+    const loadLabels = async () => {
+      const labels: Record<string, string> = {};
+      if (typeof payload.site_id === 'string') {
+        const { data } = await supabase.from('client_sites').select('id,name,address').eq('id', payload.site_id).maybeSingle();
+        if (data) labels.site_id = `${data.name}${data.address ? ` · ${data.address}` : ''}`;
+      }
+      if (typeof payload.patrol_route_id === 'string') {
+        const { data } = await supabase.from('patrol_routes').select('id,name,route_code').eq('id', payload.patrol_route_id).maybeSingle();
+        if (data) labels.patrol_route_id = data.route_code ? `[${data.route_code}] ${data.name}` : data.name;
+      }
+      setPayloadLabels(labels);
+    };
+    void loadLabels();
+  }, [rows, selectedId]);
 
   const visibleRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -190,7 +209,8 @@ const ApprovalsActivityPage: React.FC = () => {
               </dl>
 
               <section className="approvals-reasoning"><span>Proposal reasoning</span><p>{selected.bob_reasoning ?? 'No reasoning was recorded with this proposal.'}</p></section>
-              <details className="approvals-payload"><summary>Proposed payload</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>
+              {selected.action_type === 'create_patrol_route_assignment' ? <HumanPatrolAssignmentSummary payload={selectedPayload(selected)} labels={payloadLabels} /> : <details className="approvals-payload"><summary>Proposal details</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>}
+              <details className="approvals-payload"><summary>Technical details</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>
 
               {selected.rejection_reason && <div className="approvals-outcome is-rejected"><XCircle size={17} /><div><strong>Rejection reason</strong><span>{selected.rejection_reason}</span></div></div>}
               {selected.error_message && <div className="approvals-outcome is-failed"><AlertTriangle size={17} /><div><strong>Application error</strong><span>{selected.error_message}</span></div></div>}
@@ -221,6 +241,16 @@ const ApprovalsActivityPage: React.FC = () => {
 
 function formatActionType(value: string): string {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function selectedPayload(row: ApprovalRow | null): Record<string, any> | null {
+  return (row?.amended_payload ?? row?.proposed_payload ?? null) as Record<string, any> | null;
+}
+
+function HumanPatrolAssignmentSummary({ payload, labels }: { payload: Record<string, any> | null; labels: Record<string, string> }) {
+  if (!payload) return null;
+  const days = Array.isArray(payload.active_days) ? payload.active_days.map((day: number) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day - 1] ?? day).join(', ') : 'Not specified';
+  return <section className="approvals-human-summary" aria-label="Human-readable patrol assignment"><div><span>Site</span><strong>{labels.site_id ?? 'Site name unavailable'}</strong></div><div><span>Patrol route / bucket</span><strong>{labels.patrol_route_id ?? 'Route name unavailable'}</strong></div><div><span>Service</span><strong>{String(payload.module_key ?? 'Not specified').replaceAll('_', ' ')}</strong></div><div><span>Visit window</span><strong>{payload.window_start && payload.window_end ? `${payload.window_start} to ${payload.window_end}` : 'Not specified'}</strong></div><div><span>Visits per shift</span><strong>{payload.visits_per_shift ?? 'Not specified'}</strong></div><div><span>Active days</span><strong>{days}</strong></div><div><span>Dwell time</span><strong>{payload.dwell_minutes != null ? `${payload.dwell_minutes} minutes` : 'Not specified'}</strong></div><div><span>Arrival / departure SLA</span><strong>{payload.sla_arrive_within_minutes != null ? `${payload.sla_arrive_within_minutes} / ${payload.sla_depart_within_minutes ?? 'not set'} minutes` : 'Not specified'}</strong></div><div><span>Stop order</span><strong>{payload.preferred_stop_order ?? 'Not specified'}</strong></div><div className="is-wide"><span>Instructions</span><strong>{payload.officer_instructions ?? 'None recorded'}</strong></div></section>;
 }
 
 function formatAge(value: string): string {

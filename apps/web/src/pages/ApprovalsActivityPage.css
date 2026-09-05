@@ -316,6 +316,34 @@
   line-height: 1.55;
 }
 
+.approvals-human-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid #293d4e;
+  border-radius: 6px;
+  background: #293d4e;
+}
+
+.approvals-human-summary > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 11px;
+  background: #07111c;
+}
+
+.approvals-human-summary > div.is-wide { grid-column: 1 / -1; }
+.approvals-human-summary span { color: #718899; font-size: 8px; text-transform: uppercase; }
+.approvals-human-summary strong { color: #dceaf0; font-size: 10px; line-height: 1.4; }
+
+@media (max-width: 720px) {
+  .approvals-human-summary { grid-template-columns: 1fr; }
+  .approvals-human-summary > div.is-wide { grid-column: auto; }
+}
+
 .approvals-payload {
   margin-top: 10px;
   border: 1px solid #293d4e;
