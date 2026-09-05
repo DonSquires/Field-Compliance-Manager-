@@ -43,7 +43,8 @@ interface RelationshipRecord {
 const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = () => undefined }) => {
   const location = useLocation();
   const requestedContext = readWorkflowContext(location.search);
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
+  const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +58,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
   }, [relationships, requestedContext.accountId, requestedContext.agreementId]);
 
   const loadRelationships = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!operatingBranchId) return;
 
     try {
       setLoading(true);
@@ -68,7 +69,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
         .select(
           'id, name, agreement_type, invitation_status, provider_organization_id, client_organization_id, client_portal_access_mode, enabled_modules, created_at, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
         )
-        .or(`provider_organization_id.eq.${profile.organizationId},client_organization_id.eq.${profile.organizationId}`)
+        .or(`provider_organization_id.eq.${operatingBranchId},client_organization_id.eq.${operatingBranchId}`)
         .order('created_at', { ascending: false });
 
       if (agreementsErr) throw agreementsErr;
@@ -98,7 +99,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
       const mapped = (agreements ?? []).map((agreement: any) => {
         const provider = agreement.provider?.name ?? 'Unknown provider';
         const client = agreement.client?.name ?? 'Unknown client';
-        const isProvider = agreement.provider_organization_id === profile.organizationId;
+        const isProvider = agreement.provider_organization_id === operatingBranchId;
         const counterpartName = isProvider ? client : provider;
         const counterpartId = isProvider ? agreement.client_organization_id : agreement.provider_organization_id;
         const counts = groupedCounts.get(agreement.id) ?? { siteCount: 0, zoneCount: 0 };
@@ -132,7 +133,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [operatingBranchId]);
 
   useEffect(() => {
     loadRelationships();
@@ -192,7 +193,7 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>
           {relationships.map((relationship) => {
-            const isProvider = relationship.provider_organization_id === profile?.organizationId;
+            const isProvider = relationship.provider_organization_id === operatingBranchId;
             const counterpartName = isProvider ? relationship.client_name : relationship.provider_name;
             const counterpartRole = isProvider ? 'Client org' : 'Provider org';
 

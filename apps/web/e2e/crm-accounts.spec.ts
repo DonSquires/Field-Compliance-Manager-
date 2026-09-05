@@ -76,6 +76,7 @@ test('relationships workspace opens the operational account record', async ({ pa
   await expect(relationship.getByText('Civic Events Limited', { exact: true }).first()).toBeVisible();
   await relationship.getByRole('button', { name: 'Manage relationship' }).click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: /Contacts/ }).click();
   await expect(workspace.getByText('Mere Wilson')).toBeVisible();
   await workspace.getByRole('button', { name: /Activity/ }).click();
   await workspace.getByRole('button', { name: 'Log activity' }).click();
