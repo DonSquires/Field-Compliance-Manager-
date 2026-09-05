@@ -174,6 +174,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     error: null,
   });
   const [quoteClient, setQuoteClient] = useState<AccountRow | null>(null);
+  const [quoteOperatingProviderId, setQuoteOperatingProviderId] = useState('');
   const [quoteForm, setQuoteForm] = useState({
     title: '',
     targetMargin: '20',
@@ -538,6 +539,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     validUntil.setDate(validUntil.getDate() + 30);
     quoteRequestId.current = crypto.randomUUID();
     setQuoteClient(client);
+    setQuoteOperatingProviderId(profile?.organizationId ?? '');
     setProposalModules([]);
     setQuotedModuleKeys([]);
     setQuoteForm({
@@ -554,8 +556,9 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     if (!quoteClient) return;
     setQuoteSaving(true);
     setState((current) => ({ ...current, error: null }));
-    const { data, error } = await supabase.rpc('create_crm_draft_quote', {
+    const { data, error } = await supabase.rpc('create_crm_draft_quote_for_provider', {
       p_client_request_id: quoteRequestId.current,
+      p_operating_provider_organization_id: quoteOperatingProviderId,
       p_client_org_id: quoteClient.id,
       p_title: quoteForm.title.trim(),
       p_target_margin_pct: Number(quoteForm.targetMargin),
@@ -1062,6 +1065,13 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               commercial charges remain explicit pricing lines after the draft
               is created.
             </p>
+            <label>
+              <span>Operating provider</span>
+              <select value={quoteOperatingProviderId} onChange={(event) => setQuoteOperatingProviderId(event.target.value)} required>
+                {state.ownOrg && <option value={state.ownOrg.id}>{state.ownOrg.name} (parent oversight / default provider)</option>}
+                {state.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name} (operating branch)</option>)}
+              </select>
+            </label>
             <label>
               <span>Quote title</span>
               <input

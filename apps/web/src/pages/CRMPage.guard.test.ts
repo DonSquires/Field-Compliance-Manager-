@@ -18,7 +18,7 @@ describe('governed CRM accounts', () => {
   });
 
   it('creates draft quotes only through the governed RPC', () => {
-    expect(page).toMatch(/supabase\.rpc\(["']create_crm_draft_quote["']/);
+    expect(page).toMatch(/supabase\.rpc\(["']create_crm_draft_quote_for_provider["']/);
     expect(page).toContain('quoteRequestId.current');
     expect(page).not.toMatch(/\.from\(["']quotes["']\)\.insert/);
   });
@@ -69,6 +69,10 @@ describe('governed CRM accounts', () => {
     expect(workspace).toContain('Add child organization');
     expect(workspace).toContain("supabase.rpc('manage_crm_organization_child'");
     expect(workspace).toContain('Client department');
+    expect(workspace).toContain('What belongs in this hierarchy');
+    expect(workspace).toContain('a First Security delivery region with its own staff, clients, pricing, rosters, and agreements');
+    expect(workspace).toContain('it owns a budget, service area, or agreement');
+    expect(workspace).toContain("{!showChildOrganizationForm && <button");
     expect(workspace).toMatch(/onOpenAccount\?\.\(\{[\s\S]*id: child\.id,[\s\S]*name: child\.name,[\s\S]*status: child\.status/);
   });
 

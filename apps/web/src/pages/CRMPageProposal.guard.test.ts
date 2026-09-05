@@ -14,6 +14,13 @@ describe('CRM proposal package', () => {
     expect(page).toContain('proposalModules.length === 0');
   });
 
+  it('records the accountable provider branch instead of inferring the root provider', () => {
+    expect(page).toContain("create_crm_draft_quote_for_provider");
+    expect(page).toContain('p_operating_provider_organization_id: quoteOperatingProviderId');
+    expect(page).toContain('Operating provider');
+    expect(page).toContain('operating branch');
+  });
+
   it('keeps provider-rule pricing explicit and blocks an unselected standard rate', () => {
     expect(page).toContain("value=\"standard_rate_rule\"");
     expect(page).toContain('Choose provider rate');
