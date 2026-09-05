@@ -17,16 +17,24 @@ interface SubscriptionRow {
   organization_id: string;
   module_key: string;
   base_price: number | null;
+  per_seat_price: number | null;
+  per_site_price: number | null;
   discount_pct: number;
   billing_period: string | null;
+  currency: string | null;
   status: string;
   started_at: string;
+  updated_at: string;
 }
 
 interface OrgLite {
   id: string;
   name: string;
 }
+
+const moduleLabel = (moduleKey: string) => ({
+  access_control: 'Access Control', biosecurity: 'Biosecurity', bob_assistant: 'Bob Assistant', client_reporting: 'Client Reporting', ems: 'Emergency Management System', freedom_camping: 'Freedom Camping', invoicing: 'Invoicing & Finance', noise_control: 'Noise Control', parking_enforcement: 'Parking Enforcement', patrol: 'Patrol', ptt_radio: 'PTT Radio', smoke_complaints: 'Smoke Complaints', static_guarding: 'Static Guarding',
+}[moduleKey] ?? moduleKey.split('_').map((word) => word[0].toUpperCase() + word.slice(1)).join(' '));
 
 const ProviderBillingPage: React.FC = () => {
   const { profile } = useAuth();
@@ -44,7 +52,7 @@ const ProviderBillingPage: React.FC = () => {
 
       const query = supabase
         .from('org_module_subscriptions')
-        .select('id, organization_id, module_key, base_price, discount_pct, billing_period, status, started_at')
+        .select('id, organization_id, module_key, base_price, per_seat_price, per_site_price, discount_pct, billing_period, currency, status, started_at, updated_at')
         .order('started_at', { ascending: false });
 
       const { data, error: err } = isGrandMaster
@@ -80,10 +88,9 @@ const ProviderBillingPage: React.FC = () => {
   const handleToggleStatus = async (sub: SubscriptionRow) => {
     const nextStatus = sub.status === 'active' ? 'suspended' : 'active';
     try {
-      // ATLAS WRITES: org_module_subscriptions (grand_master only)
-      const { error } = await supabase.from('org_module_subscriptions').update({ status: nextStatus }).eq('id', sub.id);
-      if (error) throw error;
-      setSubscriptions(subscriptions.map((s) => (s.id === sub.id ? { ...s, status: nextStatus } : s)));
+      const { data, error } = await supabase.rpc('manage_provider_module_subscription_status', { p_subscription_id: sub.id, p_expected_updated_at: sub.updated_at, p_status: nextStatus });
+      if (error || !data) throw error ?? new Error('Subscription status receipt was not confirmed.');
+      setSubscriptions(subscriptions.map((s) => (s.id === sub.id ? data as SubscriptionRow : s)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update subscription');
     }
@@ -103,8 +110,8 @@ const ProviderBillingPage: React.FC = () => {
   return (
     <div className="page-container">
       <header className="page-header">
-        <h1>Provider Billing</h1>
-        <p className="subtitle">{subscriptions.length} module subscriptions</p>
+        <h1>Iron Eagle Platform Billing</h1>
+        <p className="subtitle">Layer 1 charges to provider organizations and operating branches. This is not client service pricing.</p>
       </header>
 
       {error && (
@@ -122,7 +129,7 @@ const ProviderBillingPage: React.FC = () => {
             <tr>
               {isGrandMaster && <th>Provider</th>}
               <th>Module</th>
-              <th>Base Price</th>
+              <th>Platform cost</th>
               <th>Discount</th>
               <th>Period</th>
               <th>Status</th>
@@ -140,10 +147,10 @@ const ProviderBillingPage: React.FC = () => {
               subscriptions.map((sub) => (
                 <tr key={sub.id}>
                   {isGrandMaster && <td>{orgs[sub.organization_id] || sub.organization_id}</td>}
-                  <td>{sub.module_key}</td>
-                  <td>{sub.base_price != null ? `$${sub.base_price}` : 'Catalog default'}</td>
+                  <td>{moduleLabel(sub.module_key)}</td>
+                  <td>{sub.base_price != null ? `$${sub.base_price}` : 'Catalog list price'}<small>{` + ${sub.per_seat_price ?? 0}/seat + ${sub.per_site_price ?? 0}/site`}</small></td>
                   <td>{sub.discount_pct}%</td>
-                  <td>{sub.billing_period || 'Catalog default'}</td>
+                  <td>{sub.billing_period || 'Catalog period'}</td>
                   <td>
                     <span className={`status-badge status-${sub.status}`}>{sub.status}</span>
                   </td>
