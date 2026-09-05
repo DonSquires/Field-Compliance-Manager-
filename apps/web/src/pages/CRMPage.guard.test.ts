@@ -78,6 +78,13 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('Configure accepted quote lines or commercial settings before creating a draft invoice.');
   });
 
+  it('shows a provider tenant its own platform subscription and invoices only its operational agreements', () => {
+    expect(page).toContain(".eq('client_organization_id', orgId)");
+    expect(page).toContain(".eq('agreement_type', 'financial')");
+    expect(page).toContain('Platform Subscription');
+    expect(page).toContain("agreement.provider_organization_id === profile?.organizationId && agreement.invitation_status === 'accepted'");
+  });
+
   it('opens the exact account workspace once from explicit URL context', () => {
     expect(page).toContain('openedContextAccountId');
     expect(page).toContain('account.id === requestedAccountId');

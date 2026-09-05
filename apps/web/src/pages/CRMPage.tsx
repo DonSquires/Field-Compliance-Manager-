@@ -10,7 +10,7 @@
  *  - Your Organisation (own org + child counts)
  *  - Our Clients        (organizations.organization_type = 'client', parent = own org)
  *  - Branches           (organizations.organization_type = 'branch', parent = own org)
- *  - Platform Subscribers (service_agreements.agreement_type = 'financial', provider = own org)
+ *  - Platform Subscription (service_agreements.agreement_type = 'financial', client = own org)
  *  - Organizations We Contract With (service_agreements.agreement_type = 'operational',
  *    counterpart not part of the branch hierarchy)
  */
@@ -265,11 +265,11 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       const clients = rows.filter((r) => r.organization_type === 'client');
       const branches = rows.filter((r) => r.organization_type === 'branch');
 
-      // Platform subscribers: Layer-1 financial agreements where we are the provider
+      // Platform subscriptions: Layer-1 Iron Eagle -> current organization agreements.
       const { data: subscriberAgreements, error: subErr } = await supabase
         .from('service_agreements')
-        .select('*, client:client_organization_id(id, name, organization_type)')
-        .eq('provider_organization_id', orgId)
+        .select('*, provider:provider_organization_id(id, name, organization_type)')
+        .eq('client_organization_id', orgId)
         .eq('agreement_type', 'financial');
       if (subErr) throw subErr;
 
@@ -293,8 +293,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         subscriberAgreements ?? []
       ).map((a: any) => ({
         ...a,
-        counterparty_name: a.client?.name ?? 'Unknown organisation',
-        counterparty_type: a.client?.organization_type ?? 'unknown',
+        counterparty_name: a.provider?.name ?? 'Unknown platform provider',
+        counterparty_type: a.provider?.organization_type ?? 'unknown',
       }));
 
       const contractedOrgs: AgreementRow[] = (operationalAgreements ?? [])
@@ -855,19 +855,18 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       </section>
 
       <section className="reports-section">
-        <h2>Platform Subscribers ({state.platformSubscribers.length})</h2>
+        <h2>Platform Subscription ({state.platformSubscribers.length})</h2>
         <p className="subtitle">
-          Organizations subscribed via Iron Eagle (Layer-1 financial
-          agreements).
+          Your Iron Eagle platform agreement (Layer-1 financial subscription).
         </p>
-        <div className="crm-account-register is-compact" role="table" aria-label="Platform subscribers">
+        <div className="crm-account-register is-compact" role="table" aria-label="Platform subscription">
           {state.platformSubscribers.length === 0 ? (
             <div className="empty-state">
-              <p>No platform subscribers yet.</p>
+              <p>No platform subscription is recorded for this organization.</p>
             </div>
           ) : (
             <>
-              <div className="crm-account-register-row is-header" role="row"><span>Organization</span><span>Agreement</span><span>Type</span></div>
+              <div className="crm-account-register-row is-header" role="row"><span>Platform provider</span><span>Agreement</span><span>Type</span></div>
               {state.platformSubscribers.map((agreement) => (
                 <div key={agreement.id} role="row" className="crm-account-register-row is-static">
                   <strong>{agreement.counterparty_name}</strong><span>{agreement.name}</span><span>{agreement.counterparty_type}</span>
@@ -1018,7 +1017,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <span>Service agreement</span>
               <select required value={selectedAgreementId} onChange={(e) => setSelectedAgreementId(e.target.value)}>
                 <option value="">Select an agreement...</option>
-                {[...state.platformSubscribers, ...state.contractedOrgs].filter((agreement) => agreement.invitation_status === 'accepted').map((ag) => (
+                {state.contractedOrgs.filter((agreement) => agreement.provider_organization_id === profile?.organizationId && agreement.invitation_status === 'accepted').map((ag) => (
                   <option key={ag.id} value={ag.id}>{ag.counterparty_name} — {ag.name}</option>
                 ))}
               </select>
