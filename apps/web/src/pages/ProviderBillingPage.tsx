@@ -11,6 +11,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './ProviderBillingPage.css';
 
 interface SubscriptionRow {
   id: string;
@@ -25,6 +26,9 @@ interface SubscriptionRow {
   status: string;
   started_at: string;
   updated_at: string;
+  effective_from: string | null;
+  effective_to: string | null;
+  notes: string | null;
 }
 
 interface OrgLite {
@@ -42,6 +46,8 @@ const ProviderBillingPage: React.FC = () => {
   const [orgs, setOrgs] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingSubscription, setEditingSubscription] = useState<SubscriptionRow | null>(null);
+  const [termsForm, setTermsForm] = useState({ basePrice: '', perSeatPrice: '', perSitePrice: '', discountPct: '0', billingPeriod: '', currency: '', effectiveFrom: '', effectiveTo: '', notes: '' });
   const isGrandMaster = profile?.role === 'grand_master';
 
   // ATLAS READS: org_module_subscriptions, organizations
@@ -52,7 +58,7 @@ const ProviderBillingPage: React.FC = () => {
 
       const query = supabase
         .from('org_module_subscriptions')
-        .select('id, organization_id, module_key, base_price, per_seat_price, per_site_price, discount_pct, billing_period, currency, status, started_at, updated_at')
+        .select('id, organization_id, module_key, base_price, per_seat_price, per_site_price, discount_pct, billing_period, currency, status, started_at, updated_at, effective_from, effective_to, notes')
         .order('started_at', { ascending: false });
 
       const { data, error: err } = isGrandMaster
@@ -94,6 +100,19 @@ const ProviderBillingPage: React.FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update subscription');
     }
+  };
+
+  const openTerms = (sub: SubscriptionRow) => {
+    setEditingSubscription(sub);
+    setTermsForm({ basePrice: sub.base_price == null ? '' : String(sub.base_price), perSeatPrice: sub.per_seat_price == null ? '' : String(sub.per_seat_price), perSitePrice: sub.per_site_price == null ? '' : String(sub.per_site_price), discountPct: String(sub.discount_pct), billingPeriod: sub.billing_period ?? '', currency: sub.currency ?? '', effectiveFrom: sub.effective_from ?? '', effectiveTo: sub.effective_to ?? '', notes: sub.notes ?? '' });
+    setError(null);
+  };
+
+  const saveTerms = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!editingSubscription) return;
+    const { data, error: saveError } = await supabase.rpc('manage_provider_module_subscription_terms', { p_subscription_id: editingSubscription.id, p_expected_updated_at: editingSubscription.updated_at, p_base_price: termsForm.basePrice ? Number(termsForm.basePrice) : null, p_per_seat_price: termsForm.perSeatPrice ? Number(termsForm.perSeatPrice) : null, p_per_site_price: termsForm.perSitePrice ? Number(termsForm.perSitePrice) : null, p_discount_pct: Number(termsForm.discountPct), p_billing_period: termsForm.billingPeriod || null, p_currency: termsForm.currency || null, p_effective_from: termsForm.effectiveFrom || null, p_effective_to: termsForm.effectiveTo || null, p_notes: termsForm.notes.trim() || null });
+    if (saveError || !data) setError(saveError?.message ?? 'Subscription terms receipt was not confirmed.');
+    else { setSubscriptions(subscriptions.map((sub) => sub.id === editingSubscription.id ? data as SubscriptionRow : sub)); setEditingSubscription(null); }
   };
 
   if (loading) {
@@ -156,6 +175,7 @@ const ProviderBillingPage: React.FC = () => {
                   </td>
                   {isGrandMaster && (
                     <td>
+                      <button className="btn btn-sm btn-secondary" onClick={() => openTerms(sub)}>Terms</button>
                       <button className="btn btn-sm btn-secondary" onClick={() => handleToggleStatus(sub)}>
                         {sub.status === 'active' ? 'Suspend' : 'Reactivate'}
                       </button>
@@ -167,6 +187,7 @@ const ProviderBillingPage: React.FC = () => {
           </tbody>
         </table>
       </div>
+      {editingSubscription && <div className="provider-terms-backdrop"><form className="provider-terms-dialog" onSubmit={saveTerms} role="dialog" aria-modal="true" aria-labelledby="platform-terms-title"><header><div><span>Layer 1 platform contract</span><h2 id="platform-terms-title">{moduleLabel(editingSubscription.module_key)} for {orgs[editingSubscription.organization_id] ?? 'provider'}</h2></div><button type="button" onClick={() => setEditingSubscription(null)} aria-label="Close subscription terms">×</button></header><p>Blank price, period, and currency values inherit the Iron Eagle module catalog. These terms charge the provider or operating branch, never its client.</p><div><label><span>Base price override</span><input type="number" min="0" step="0.01" value={termsForm.basePrice} onChange={(event) => setTermsForm({ ...termsForm, basePrice: event.target.value })} /></label><label><span>Per-seat override</span><input type="number" min="0" step="0.01" value={termsForm.perSeatPrice} onChange={(event) => setTermsForm({ ...termsForm, perSeatPrice: event.target.value })} /></label></div><div><label><span>Per-site override</span><input type="number" min="0" step="0.01" value={termsForm.perSitePrice} onChange={(event) => setTermsForm({ ...termsForm, perSitePrice: event.target.value })} /></label><label><span>Discount %</span><input required type="number" min="0" max="100" step="0.01" value={termsForm.discountPct} onChange={(event) => setTermsForm({ ...termsForm, discountPct: event.target.value })} /></label></div><div><label><span>Billing period</span><select value={termsForm.billingPeriod} onChange={(event) => setTermsForm({ ...termsForm, billingPeriod: event.target.value })}><option value="">Catalog period</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label><label><span>Currency</span><select value={termsForm.currency} onChange={(event) => setTermsForm({ ...termsForm, currency: event.target.value })}><option value="">Catalog currency</option><option value="NZD">NZD</option><option value="AUD">AUD</option><option value="USD">USD</option></select></label></div><div><label><span>Effective from</span><input type="date" value={termsForm.effectiveFrom} onChange={(event) => setTermsForm({ ...termsForm, effectiveFrom: event.target.value })} /></label><label><span>Effective to</span><input type="date" value={termsForm.effectiveTo} onChange={(event) => setTermsForm({ ...termsForm, effectiveTo: event.target.value })} /></label></div><label><span>Contract note</span><textarea rows={3} value={termsForm.notes} onChange={(event) => setTermsForm({ ...termsForm, notes: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setEditingSubscription(null)}>Cancel</button><button type="submit" className="btn btn-primary">Save platform terms</button></footer></form></div>}
     </div>
   );
 };
