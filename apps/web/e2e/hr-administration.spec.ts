@@ -16,20 +16,22 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await readinessDialog.getByRole('button', { name: 'Confirm readiness' }).click();
   await expect(page.getByText('Ana Ngata readiness updated and audited.')).toBeVisible();
 
+  await page.getByRole('button', { name: 'People', exact: true }).click();
   await page.getByRole('button', { name: 'Leave', exact: true }).click();
-  await page.getByRole('button', { name: 'Decline' }).click();
-  const leaveDialog = page.getByRole('dialog', { name: 'Decline leave request?' });
-  await expect(leaveDialog.getByRole('button', { name: 'Confirm decision' })).toBeDisabled();
-  await leaveDialog.getByLabel('Review notes').fill('Coverage is already committed for these dates.');
+  await page.getByRole('button', { name: 'Branch check' }).click();
+  const leaveDialog = page.getByRole('dialog', { name: 'Branch check leave request?' });
+  await leaveDialog.getByLabel('Review notes').fill('Local roster coverage has been checked.');
   await expect(leaveDialog).toHaveScreenshot('hr-leave-review.png');
   await leaveDialog.getByRole('button', { name: 'Confirm decision' }).click();
-  await expect(page.getByText('Leave decision confirmed and roster conflicts checked.')).toBeVisible();
+  await expect(page.getByText('Leave branch check recorded for corporate confirmation.')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
   await page.getByRole('button', { name: 'Timesheets' }).click();
-  await page.getByRole('button', { name: 'Approve' }).click();
-  await page.getByRole('dialog', { name: 'Approve timesheet?' }).getByRole('button', { name: 'Confirm decision' }).click();
-  await expect(page.getByText('Timesheet decision confirmed for payroll processing.')).toBeVisible();
+  await page.getByRole('button', { name: 'Branch check' }).click();
+  await page.getByRole('dialog', { name: 'Branch check timesheet?' }).getByRole('button', { name: 'Confirm decision' }).click();
+  await expect(page.getByText('Timesheet branch check recorded for corporate payroll approval.')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Rostering', exact: true }).click();
   await page.getByRole('button', { name: 'Open Shifts' }).click();
   await page.getByRole('button', { name: '+ New Coverage Request' }).click();
   await page.getByLabel('Date').fill('2026-09-20'); await page.getByLabel('Required Staff').fill('3');

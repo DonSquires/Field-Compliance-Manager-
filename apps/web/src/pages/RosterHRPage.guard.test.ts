@@ -17,6 +17,7 @@ describe('governed HR administration', () => {
 
   it('uses server-owned leave and timesheet decisions', () => {
     expect(page).toContain("supabase.rpc('review_leave_request'");
+    expect(page).toContain("supabase.rpc('review_branch_timesheet'");
     expect(page).toContain("supabase.rpc('review_timesheet'");
     expect(page).not.toContain(".from('leave_requests').update");
     expect(page).not.toContain(".from('timesheets').update");
@@ -34,6 +35,7 @@ describe('governed HR administration', () => {
     expect(page).toContain('Reject for correction');
     expect(page).toContain('Evidence remains read-only until then.');
     expect(page).toContain('Resolve exceptions before approving related timesheets');
+    expect(page).toContain('Timesheet branch check recorded for corporate payroll approval.');
     expect(page).not.toMatch(/from\('dispatch_job_pay_lines'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
   });
 

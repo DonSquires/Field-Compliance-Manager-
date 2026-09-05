@@ -30,7 +30,7 @@ type StatusFilter = 'all' | 'active' | 'deactivated';
 type LifecycleAction = 'deactivate' | 'reactivate';
 
 const UserManagementPage: React.FC = () => {
-  const { profile, operatingOrganizations } = useAuth();
+  const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,16 +52,13 @@ const UserManagementPage: React.FC = () => {
   const directInviteRoles = useMemo(() => assignableRoles.filter((role) => !['officer', 'admin_officer'].includes(role)), [assignableRoles]);
 
   const loadIdentity = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
+    if (!operatingBranchId || !profile?.organizationId) return;
     setLoading(true);
     setError(null);
     try {
       const [usersResponse, auditResponse, presetResponse, assignmentResponse, readinessResponse] = await Promise.all([
-        supabase
-          .from('user_profiles')
-          .select('id, display_name, role, email, phone, module_access, deactivated_at, updated_at')
-          .eq('organization_id', profile.organizationId)
-          .order('display_name', { ascending: true }),
+        supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId }),
         supabase
           .from('user_management_audit')
           .select('id, target_user_id, action_type, performed_by, metadata, created_at')
@@ -86,7 +83,7 @@ const UserManagementPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   useEffect(() => {
     void loadIdentity();
@@ -178,7 +175,7 @@ const UserManagementPage: React.FC = () => {
   return (
     <div className="identity-page">
       <header className="identity-heading">
-        <div><span>Administration</span><h1>Identity and access</h1><p>Manage organisation accounts, roles, and lifecycle activity.</p></div>
+        <div><span>Administration</span><h1>Identity and access</h1><p>Manage staff identity and access for the selected operating branch.</p></div>
         <button type="button" className="identity-invite-button" onClick={() => setShowInvite((open) => !open)}><MailPlus size={17} /> Invite user</button>
       </header>
 
@@ -207,7 +204,7 @@ const UserManagementPage: React.FC = () => {
 
       <div className="identity-layout">
         <section className="identity-directory">
-          <div className="identity-panel-heading"><div><span>Directory</span><h2>Organisation users</h2></div><button type="button" onClick={() => void loadIdentity()} disabled={loading} title="Refresh identity records"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></div>
+          <div className="identity-panel-heading"><div><span>Directory</span><h2>Branch staff access</h2></div><button type="button" onClick={() => void loadIdentity()} disabled={loading} title="Refresh identity records"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></div>
           <div className="identity-toolbar">
             <label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, email, or role" /></label>
             <label><Filter size={15} /><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="all">All statuses</option><option value="active">Active</option><option value="deactivated">Deactivated</option></select></label>

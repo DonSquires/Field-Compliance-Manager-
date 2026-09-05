@@ -36,6 +36,7 @@ interface AreaGrant {
   level: string;
   status: string;
   source_preset: string | null;
+  updated_at: string;
 }
 
 interface UserLite {
@@ -46,7 +47,7 @@ interface UserLite {
 }
 
 const AccessControlPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const [presets, setPresets] = useState<AccessPreset[]>([]);
   const [assignments, setAssignments] = useState<PresetAssignment[]>([]);
   const [grants, setGrants] = useState<AreaGrant[]>([]);
@@ -59,7 +60,8 @@ const AccessControlPage: React.FC = () => {
   // ATLAS READS: access_presets, preset_assignments, staff_area_grants, user_profiles
   const loadAll = useCallback(async () => {
     const orgId = profile?.organizationId;
-    if (!orgId) return;
+    const operatingBranchId = operatingOrganizationId ?? orgId;
+    if (!orgId || !operatingBranchId) return;
 
     try {
       setLoading(true);
@@ -72,10 +74,8 @@ const AccessControlPage: React.FC = () => {
           .or(`organization_id.eq.${orgId},is_system.eq.true`),
         supabase.from('preset_assignments').select('id, user_id, preset_id, status').eq('scope_org_id', orgId),
         supabase
-          .from('staff_area_grants')
-          .select('id, user_id, area, level, status, source_preset')
-          .eq('scope_org_id', orgId),
-        supabase.from('user_profiles').select('id, display_name, email, updated_at').eq('organization_id', orgId),
+          .rpc('get_branch_area_grants', { p_operating_organization_id: operatingBranchId }),
+        supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId }),
       ]);
 
       if (presetsRes.error) throw presetsRes.error;
@@ -97,7 +97,7 @@ const AccessControlPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   useEffect(() => {
     loadAll();
@@ -109,7 +109,7 @@ const AccessControlPage: React.FC = () => {
     try {
       const target = users[revokeGrant.user_id];
       if (!target) throw new Error('Grant user could not be resolved.');
-      const { error } = await supabase.rpc('manage_user_identity_access', { p_user_id: revokeGrant.user_id, p_expected_updated_at: target.updated_at, p_action: 'end_grant', p_display_name: target.display_name, p_phone: null, p_role: null, p_preset_id: null, p_assignment_id: null, p_grant_id: revokeGrant.id, p_reason: revokeReason.trim() });
+      const { error } = await supabase.rpc('end_branch_area_grant', { p_grant_id: revokeGrant.id, p_expected_updated_at: revokeGrant.updated_at, p_reason: revokeReason.trim() });
       if (error) throw error;
       setRevokeGrant(null); setRevokeReason(''); await loadAll();
     } catch (err) {

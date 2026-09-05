@@ -65,6 +65,8 @@ interface LeaveRequestRow {
   ends_on: string;
   status: string;
   reason: string | null;
+  branch_review_notes?: string | null;
+  branch_reviewed_by?: string | null;
 }
 
 interface CoverageRequestRow {
@@ -93,6 +95,8 @@ interface TimesheetRow {
   adjustment_hours: number;
   work_summary: { source_count?: number } | null;
   status: string;
+  branch_review_notes?: string | null;
+  branch_reviewed_by?: string | null;
 }
 
 interface DispatchPayLineRow {
@@ -236,6 +240,8 @@ const RosterHRPage: React.FC = () => {
   const location = useLocation();
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
   const { profile, operatingOrganizationId } = useAuth();
+  const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  const corporatePayrollReviewer = Boolean(profile?.employerOrganizationId && profile.employerOrganizationId === profile.organizationId && ['grand_master', 'master', 'admin'].includes(profile.role));
   const [tab, setTab] = useState<RosterTab>(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff');
   const [tabGroup, setTabGroup] = useState<RosterTabGroup>(tabGroupFor(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff'));
   const [loading, setLoading] = useState(true);
@@ -280,7 +286,7 @@ const RosterHRPage: React.FC = () => {
     const [coverageWorkUnits,setCoverageWorkUnits]=useState<CoverageWorkUnit[]>([]);
     const [coverageFinalization,setCoverageFinalization]=useState<{request:CoverageRequestRow;workUnitId:string;notes:string}|null>(null);
   const [showCoverageForm, setShowCoverageForm] = useState(false);
-  const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' } | null>(null);
+  const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' | 'branch_checked' } | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [readinessReview, setReadinessReview] = useState<{ staffId: string; name: string; current: boolean; next: boolean } | null>(null);
   const [credentialRenewal, setCredentialRenewal] = useState<{ source: CredentialRow; credentialNumber: string; issuingAuthority: string; issuedDate: string; expiryDate: string; evidenceNotes: string } | null>(null);
@@ -353,16 +359,8 @@ const RosterHRPage: React.FC = () => {
             .select('id, name, shift_type, start_time, end_time, recurrence_type, required_staff_count, is_active')
             .eq('organization_id', orgId)
             .order('name', { ascending: true }),
-          supabase
-            .from('leave_requests')
-            .select('id, staff_id, leave_type, starts_on, ends_on, status, reason')
-            .eq('organization_id', orgId)
-            .order('starts_on', { ascending: false }),
-          supabase
-            .from('timesheets')
-            .select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, work_derived_hours, adjustment_hours, work_summary, status')
-            .eq('organization_id', orgId)
-            .order('period_start', { ascending: false }),
+          supabase.rpc('get_branch_leave_queue', { p_operating_organization_id: operatingBranchId }),
+          supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId }),
           supabase
             .from('dispatch_job_pay_lines')
             .select('id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code, rate_type, description, quantity, unit_rate, line_total, distance_km, distance_reason, created_at')
@@ -479,7 +477,7 @@ const RosterHRPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [operatingBranchId, profile?.organizationId]);
 
   useEffect(() => {
     loadAll();
@@ -496,9 +494,13 @@ const RosterHRPage: React.FC = () => {
     event.preventDefault();if (!review) return;setSaving(true);setError(null);setNotice(null);
     const currentStatus = review.kind === 'leave' ? leaveRequests.find((item) => item.id === review.id)?.status : timesheets.find((item) => item.id === review.id)?.status;
     const { error: reviewError } = review.kind === 'leave'
-      ? await supabase.rpc('review_leave_request', { p_request_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null })
-      : await supabase.rpc('review_timesheet', { p_timesheet_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null });
-    if (reviewError) setError(reviewError.message);else { setNotice(review.kind === 'leave' ? 'Leave decision confirmed and roster conflicts checked.' : 'Timesheet decision confirmed for payroll processing.');setReview(null);setReviewNotes('');await loadAll(); }setSaving(false);
+      ? review.decision === 'branch_checked' || (review.decision === 'declined' && currentStatus === 'pending')
+        ? await supabase.rpc('review_branch_leave_request', { p_operating_organization_id: operatingBranchId, p_request_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null })
+        : await supabase.rpc('review_leave_request', { p_request_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null })
+      : review.decision === 'branch_checked' || (review.decision === 'rejected' && currentStatus === 'submitted')
+        ? await supabase.rpc('review_branch_timesheet', { p_operating_organization_id: operatingBranchId, p_timesheet_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null })
+        : await supabase.rpc('review_timesheet', { p_timesheet_id: review.id, p_expected_status: currentStatus, p_decision: review.decision, p_review_notes: reviewNotes.trim() || null });
+    if (reviewError) setError(reviewError.message);else { setNotice(review.kind === 'leave' ? review.decision === 'branch_checked' ? 'Leave branch check recorded for corporate confirmation.' : review.decision === 'declined' ? 'Leave request declined with branch review notes.' : 'Leave approved after corporate review and roster conflict checks.' : review.decision === 'branch_checked' ? 'Timesheet branch check recorded for corporate payroll approval.' : review.decision === 'rejected' ? 'Timesheet returned for correction.' : 'Timesheet approved for payroll processing.');setReview(null);setReviewNotes('');await loadAll(); }setSaving(false);
   };
 
   const handleReadinessReview = async (event: React.FormEvent) => {
@@ -1176,14 +1178,15 @@ const RosterHRPage: React.FC = () => {
                   </div>
                   {l.status === 'pending' && (
                     <div className="assessment-actions">
-                      <button className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes('');setReview({ kind: 'leave', id: l.id, decision: 'approved' }); }}>
-                        Approve
+                      <button className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes('');setReview({ kind: 'leave', id: l.id, decision: 'branch_checked' }); }}>
+                        Branch check
                       </button>
                       <button className="btn btn-sm btn-danger" onClick={() => { setReviewNotes('');setReview({ kind: 'leave', id: l.id, decision: 'declined' }); }}>
                         Decline
                       </button>
                     </div>
                   )}
+                  {l.status === 'branch_checked' && corporatePayrollReviewer && <div className="assessment-actions">{l.branch_reviewed_by !== profile?.id && <button className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes('');setReview({ kind: 'leave', id: l.id, decision: 'approved' }); }}>Final approve</button>}{l.branch_reviewed_by !== profile?.id && ' '}<button className="btn btn-sm btn-danger" onClick={() => { setReviewNotes('');setReview({ kind: 'leave', id: l.id, decision: 'declined' }); }}>Decline</button></div>}
                 </div>
               ))
             )}
@@ -1193,10 +1196,11 @@ const RosterHRPage: React.FC = () => {
 
       {tab === 'timesheets' && (
         <section className="reports-section">
-          <h2>Timesheets ({timesheets.length})</h2>
-          <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => { const now = new Date(); setPayrollExport({ from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10), to: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10) }); }}>
+          <h2>Branch Timesheets ({timesheets.length})</h2>
+          <p className="subtitle">Branch review confirms local time and operational evidence. Corporate payroll gives final approval and exports paid time.</p>
+          {corporatePayrollReviewer && <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => { const now = new Date(); setPayrollExport({ from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10), to: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10) }); }}>
             Export approved to payroll
-          </button>
+          </button>}
           <div className="reports-table-wrapper">
             <table className="reports-table">
               <thead>
@@ -1238,18 +1242,19 @@ const RosterHRPage: React.FC = () => {
                           <>
                             <button
                               className="btn btn-sm btn-secondary"
-                              onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'approved' }); }}
+                              onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'branch_checked' }); }}
                             >
-                              Approve
+                              Branch check
                             </button>{' '}
                             <button
                               className="btn btn-sm btn-danger"
                               onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'rejected' }); }}
                             >
-                              Reject
+                              Return for correction
                             </button>
                           </>
                         )}
+                        {t.status === 'branch_checked' && corporatePayrollReviewer && <>{t.branch_reviewed_by !== profile?.id && <button className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'approved' }); }}>Final approve</button>}{t.branch_reviewed_by !== profile?.id && ' '}<button className="btn btn-sm btn-danger" onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'rejected' }); }}>Return for correction</button></>}
                       </td>
                     </tr>
                   ))
@@ -1434,7 +1439,7 @@ const RosterHRPage: React.FC = () => {
 
       {offerAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="offer-title" onSubmit={sendOffer}><header><div><span>Recruitment offer</span><h2 id="offer-title">Record offer</h2></div><button type="button" onClick={() => setOfferAction(null)} aria-label="Close offer form">×</button></header><p>{offerAction.candidate.first_name} {offerAction.candidate.last_name}. Recording an offer does not provision an application account; provision only after the candidate has accepted.</p><label><span>Application role</span><select value={offerAction.role} onChange={(event) => setOfferAction({ ...offerAction, role: event.target.value })}><option value="officer">Officer</option><option value="admin_officer">Senior officer</option></select></label><div className="form-row"><label><span>Employment type</span><select value={offerAction.employmentType} onChange={(event) => setOfferAction({ ...offerAction, employmentType: event.target.value })}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option><option value="volunteer">Volunteer</option></select></label><label><span>Proposed start</span><input type="date" required value={offerAction.startDate} onChange={(event) => setOfferAction({ ...offerAction, startDate: event.target.value })} /></label></div><label><span>Offer note</span><textarea required rows={4} value={offerAction.note} onChange={(event) => setOfferAction({ ...offerAction, note: event.target.value })} /></label><label className="roster-publish"><input type="checkbox" checked={offerAction.accepted} onChange={(event) => setOfferAction({ ...offerAction, accepted: event.target.checked })} /><span><b>Candidate has accepted this offer</b><small>Provision an application identity and start staff onboarding only after verified acceptance.</small></span></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOfferAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !offerAction.startDate || !offerAction.note.trim()}>{saving ? 'Saving' : offerAction.accepted ? 'Confirm acceptance and provision' : 'Record offer'}</button></footer></form></div>}
 
-      {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'approved' ? 'Approve' : review.decision === 'declined' ? 'Decline' : 'Reject'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : 'Approved hours become eligible for the payroll export workflow.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision !== 'approved'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (review.decision !== 'approved' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
+      {review && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-review-title" onSubmit={handleReview}><header><div><span>Governed HR decision</span><h2 id="hr-review-title">{review.decision === 'branch_checked' ? 'Branch check' : review.decision === 'approved' ? 'Final approve' : review.decision === 'declined' ? 'Decline' : 'Return for correction'} {review.kind === 'leave' ? 'leave request' : 'timesheet'}?</h2></div><button type="button" onClick={() => setReview(null)} aria-label="Close review">×</button></header><p>{review.kind === 'leave' ? 'Leave approval will fail when active roster slots overlap the requested dates.' : review.decision === 'branch_checked' ? 'This confirms local time and evidence. A different corporate payroll reviewer must give final approval.' : review.decision === 'approved' ? 'Final approval makes these hours eligible for payroll export.' : 'The staff member must correct and resubmit this timesheet.'}</p><label><span>Review notes</span><textarea rows={4} required={review.decision === 'rejected' || review.decision === 'declined'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || ((review.decision === 'rejected' || review.decision === 'declined') && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
       {credentialRenewal && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-renewal-title" onSubmit={handleCredentialRenewal}><header><div><span>Credential evidence</span><h2 id="credential-renewal-title">Record renewal</h2></div><button type="button" onClick={() => setCredentialRenewal(null)} aria-label="Close credential renewal">×</button></header><p>The existing {credentialRenewal.source.credential_type.replaceAll('_',' ')} record remains in history. This replacement is verified against your evidence notes.</p><label><span>Credential number</span><input required value={credentialRenewal.credentialNumber} onChange={(event)=>setCredentialRenewal({...credentialRenewal,credentialNumber:event.target.value})}/></label><label><span>Issuing authority</span><input required value={credentialRenewal.issuingAuthority} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuingAuthority:event.target.value})}/></label><div className="form-row"><label><span>Issued date</span><input type="date" required value={credentialRenewal.issuedDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuedDate:event.target.value})}/></label><label><span>New expiry date</span><input type="date" required min={credentialRenewal.source.expiry_date??undefined} value={credentialRenewal.expiryDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,expiryDate:event.target.value})}/></label></div><label><span>Verification evidence notes</span><textarea rows={4} required minLength={10} value={credentialRenewal.evidenceNotes} onChange={(event)=>setCredentialRenewal({...credentialRenewal,evidenceNotes:event.target.value})}/></label><footer><button type="button" className="btn btn-secondary" onClick={()=>setCredentialRenewal(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving||!credentialRenewal.credentialNumber.trim()||!credentialRenewal.issuingAuthority.trim()||!credentialRenewal.issuedDate||!credentialRenewal.expiryDate||credentialRenewal.evidenceNotes.trim().length<10}>{saving?'Saving':'Confirm renewal'}</button></footer></form></div>}
       {coverageFinalization&&<div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-finalization-title" onSubmit={finalizeCoverage}><header><div><span>Coverage ownership</span><h2 id="coverage-finalization-title">Finalize assignment</h2></div><button type="button" onClick={()=>setCoverageFinalization(null)} aria-label="Close coverage finalization">×</button></header><p>Confirm the claimant against an active work unit. Field work creates the linked operational shift through the governed roster workflow.</p><label><span>Select work unit</span><select required value={coverageFinalization.workUnitId} onChange={(event)=>setCoverageFinalization({...coverageFinalization,workUnitId:event.target.value})}><option value="">Select work unit</option>{coverageWorkUnits.map((unit)=><option value={unit.id} key={unit.id}>{unit.name} · {unit.work_unit_type}</option>)}</select></label><label><span>Finalization notes</span><textarea rows={3} value={coverageFinalization.notes} onChange={(event)=>setCoverageFinalization({...coverageFinalization,notes:event.target.value})}/></label><footer><button type="button" className="btn btn-secondary" onClick={()=>setCoverageFinalization(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving||!coverageFinalization.workUnitId}>{saving?'Finalizing':'Confirm assignment'}</button></footer></form></div>}
