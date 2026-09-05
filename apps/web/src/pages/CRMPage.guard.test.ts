@@ -70,6 +70,9 @@ describe('governed CRM accounts', () => {
   it('keeps proposals below the organization level and exposes organization editing', () => {
     expect(workspace).toContain('onEditOrganization');
     expect(workspace).toContain('Edit organization details');
+    expect(page).toContain("onEditOrganization={(organization) => setOrganizationDialog(organization)}");
+    expect(page).toContain("save_discovered_org_as_client");
+    expect(workspace).toContain('Save as client organization');
     expect(workspace).toContain('onCreateProposal(account, { siteId: site.id');
     expect(workspace).toContain('onCreateProposal(account, { zoneId: zone.id');
     expect(workspace).not.toContain('Start a module-based commercial proposal for this organization.');

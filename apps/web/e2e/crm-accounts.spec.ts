@@ -42,9 +42,10 @@ test('CRM account context and governed quote creation are operational', async ({
 
 test('account team manages contacts, follow-up activity, and receivables', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
-  const client = page.getByText('Civic Events Limited', { exact: true }).locator('..').locator('..');
-  await client.getByRole('button', { name: 'Manage account' }).click();
+  const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
+  await client.click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: /Contacts/ }).click();
   await expect(workspace.getByText('Mere Wilson')).toBeVisible();
   await workspace.getByRole('button', { name: 'Add contact' }).click();
   await workspace.getByLabel('First name').fill('Aria'); await workspace.getByLabel('Last name').fill('Rangi');
@@ -115,10 +116,11 @@ test('administrator creates and edits organizations through the human account sp
   await create.getByRole('button', { name: 'Create inactive prospect' }).click();
   const created = page.getByRole('dialog', { name: 'Prospect created' });
   await expect(created.getByText('Harbour Arts Trust is now a prospect')).toBeVisible();
-  await expect(created.getByText(/Add the primary contact next/)).toBeVisible();
-  await created.getByRole('button', { name: 'Add primary contact' }).click();
+  await expect(created.getByText(/Continue to Places/)).toBeVisible();
+  await created.getByRole('button', { name: 'Continue to places' }).click();
 
   const workspace = page.getByRole('dialog', { name: 'Harbour Arts Trust' });
+  await workspace.getByRole('button', { name: /Contacts/ }).click();
   await workspace.getByRole('button', { name: 'Add contact' }).click();
   await workspace.getByLabel('First name').fill('Hana'); await workspace.getByLabel('Last name').fill('Te Aho');
   await workspace.getByLabel('Role or title').fill('Venue Manager'); await workspace.getByLabel('Email').fill('hana@harbourarts.test');
