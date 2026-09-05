@@ -19,7 +19,7 @@ describe('Finance Bureau', () => {
     expect(page).toContain('Provider-owned commercial schedules');
     expect(page).toContain('Rate books remain in Rate Rules');
     expect(shell).toContain("'finance-bureau'");
-    expect(shell).toContain('Finance Bureau');
+    expect(shell).toContain('Pricing, Discounts & Tenders');
     expect(shell).toContain('<FinanceBureauPage />');
   });
 });
