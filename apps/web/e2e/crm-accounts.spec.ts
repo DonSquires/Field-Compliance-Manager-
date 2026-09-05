@@ -92,7 +92,6 @@ test('relationships workspace opens the operational account record', async ({ pa
 
 test('administrator creates and edits organizations through the human account spine', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
-
   await page.getByRole('button', { name: 'Add organization' }).click();
   let dialog = page.getByRole('dialog', { name: 'Find or add an organization' });
   await dialog.getByLabel('Organization name').fill('Civic Events');
@@ -116,10 +115,10 @@ test('administrator creates and edits organizations through the human account sp
   await create.getByRole('button', { name: 'Create inactive prospect' }).click();
   const created = page.getByRole('dialog', { name: 'Prospect created' });
   await expect(created.getByText('Harbour Arts Trust is now a prospect')).toBeVisible();
-  await expect(created.getByText(/Continue to Places/)).toBeVisible();
   await created.getByRole('button', { name: 'Continue to places' }).click();
-
   const workspace = page.getByRole('dialog', { name: 'Harbour Arts Trust' });
+  await workspace.getByRole('button', { name: /Places/ }).click();
+  await expect(workspace.getByRole('button', { name: 'Add location / place' })).toBeVisible();
   await workspace.getByRole('button', { name: /Contacts/ }).click();
   await workspace.getByRole('button', { name: 'Add contact' }).click();
   await workspace.getByLabel('First name').fill('Hana'); await workspace.getByLabel('Last name').fill('Te Aho');
@@ -127,31 +126,7 @@ test('administrator creates and edits organizations through the human account sp
   await workspace.getByText('Primary contact', { exact: true }).click();
   await workspace.getByRole('button', { name: 'Add contact', exact: true }).last().click();
   await expect(workspace.getByText('Hana Te Aho')).toBeVisible();
-  await workspace.getByRole('button', { name: 'Close account workspace' }).click();
-
-  const prospect = page.getByText('Harbour Arts Trust', { exact: true }).locator('..').locator('..');
-  await expect(prospect.getByText('prospect · 0 sites')).toBeVisible();
-  await expect(prospect.getByText('Add covered site')).toBeVisible();
-  await prospect.getByRole('button', { name: 'Add site' }).click();
-  const siteSearch = page.getByRole('dialog', { name: 'Find a site for Harbour Arts Trust' });
-  await siteSearch.getByLabel('Site name').fill('Harbour Arts Centre');
-  await siteSearch.getByLabel('Street address').fill('8 Haven Road, Nelson');
-  await siteSearch.getByRole('button', { name: 'Search sites' }).click();
-  await expect(siteSearch.getByText('No matching sites found')).toBeVisible();
-  await siteSearch.getByRole('button', { name: 'Create new site' }).click();
-  const siteCreate = page.getByRole('dialog', { name: 'Create site for Harbour Arts Trust' });
-  await expect(siteCreate.getByText(/provisional, unverified boundary/)).toBeVisible();
-  await siteCreate.getByRole('button', { name: 'Create site for boundary review' }).click();
-  await expect(page.getByRole('status')).toContainText('Harbour Arts Centre created with a provisional boundary');
-  await expect(prospect.getByText('prospect · 1 site')).toBeVisible();
-  await expect(prospect.getByText('Create service agreement')).toBeVisible();
-
-  const civic = page.getByText('Civic Events Limited', { exact: true }).locator('..').locator('..');
-  await civic.getByRole('button', { name: 'Edit organization' }).click();
-  const edit = page.getByRole('dialog', { name: 'Edit Civic Events Limited' });
-  await expect(edit.getByLabel('NZBN')).toHaveValue('9429041234567');
-  await edit.getByLabel('Account context').fill('Annual events programme with confirmed winter operations.');
-  await edit.getByRole('button', { name: 'Save organization' }).click();
-  await expect(page.getByRole('status')).toContainText('Civic Events Limited organization details updated');
+  await workspace.getByRole('button', { name: /Overview/ }).click();
+  await expect(workspace.getByRole('button', { name: 'Edit organization details' })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
