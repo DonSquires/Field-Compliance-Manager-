@@ -26,6 +26,7 @@ interface OrgProfile {
   billing_address: string | null;
   enforcement_workflow_mode: string;
   jurisdiction_verification: string;
+  jurisdiction_geom: GeoJSON.GeoJsonObject | null;
   status: string;
   updated_at: string;
 }
@@ -59,6 +60,7 @@ const GEOFENCE_KEYS: { key: string; label: string; platformDefault: number }[] =
 ];
 
 const ENFORCEMENT_MODES = ['admin_first', 'officer_direct', 'hybrid'];
+const TERRITORIAL_AUTHORITIES = ['Auckland', 'Ashburton District', 'Buller District', 'Carterton District', 'Central Hawke\'s Bay District', 'Central Otago District', 'Chatham Islands Territory', 'Christchurch City', 'Clutha District', 'Dunedin City', 'Far North District', 'Gisborne District', 'Gore District', 'Greater Wellington', 'Grey District', 'Hamilton City', 'Hastings District', 'Hauraki District', 'Hawke\'s Bay Region', 'Horowhenua District', 'Hurunui District', 'Invercargill City', 'Kaikoura District', 'Kaipara District', 'Kapiti Coast District', 'Kawerau District', 'Mackenzie District', 'Manawatu District', 'Marlborough District', 'Masterton District', 'Matamata-Piako District', 'Napier City', 'Nelson City', 'New Plymouth District', 'Northland Region', 'Opotiki District', 'Otorohanga District', 'Palmerston North City', 'Porirua City', 'Queenstown-Lakes District', 'Rangitikei District', 'Rotorua District', 'Selwyn District', 'South Taranaki District', 'South Waikato District', 'South Wairarapa District', 'Southland District', 'Stratford District', 'Tararua District', 'Tasman District', 'Taupo District', 'Tauranga City', 'Thames-Coromandel District', 'Timaru District', 'Upper Hutt City', 'Waikato District', 'Waikato Region', 'Waimakariri District', 'Waimate District', 'Waipa District', 'Wairoa District', 'Waitaki District', 'Waitomo District', 'Wellington City', 'Western Bay of Plenty District', 'Westland District', 'Whakatane District', 'Whanganui District', 'Whangarei District'];
 
 const OrganizationSetupPage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
@@ -71,7 +73,7 @@ const OrganizationSetupPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [jurisdictionName, setJurisdictionName] = useState('Nelson City');
+  const [jurisdictionNames, setJurisdictionNames] = useState(['Nelson City']);
   const [jurisdictionPreview, setJurisdictionPreview] = useState<GeoJSON.GeoJsonObject | null>(null);
   const [jurisdictionPreviewLoading, setJurisdictionPreviewLoading] = useState(false);
   const [jurisdictionPreviewMessage, setJurisdictionPreviewMessage] = useState<string | null>(null);
@@ -89,7 +91,7 @@ const OrganizationSetupPage: React.FC = () => {
         supabase
           .from('organizations')
           .select(
-            'id, name, contact_email, contact_phone, billing_email, billing_address, enforcement_workflow_mode, jurisdiction_verification, status, updated_at'
+            'id, name, contact_email, contact_phone, billing_email, billing_address, enforcement_workflow_mode, jurisdiction_verification, jurisdiction_geom, status, updated_at'
           )
           .eq('id', orgId)
           .single(),
@@ -206,16 +208,17 @@ const OrganizationSetupPage: React.FC = () => {
 
   const previewJurisdiction = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!jurisdictionName.trim()) return;
+    if (jurisdictionNames.length === 0) return;
     setJurisdictionPreviewLoading(true);
     setJurisdictionPreviewMessage(null);
     setJurisdictionPreview(null);
-    const { data, error: previewError } = await supabase.functions.invoke('bob-jurisdiction-preview', { body: { district_names: [jurisdictionName.trim()] } });
-    if (previewError || !data?.results?.[0]?.matched) {
-      setJurisdictionPreviewMessage(previewError?.message ?? `No verified Territorial Authority boundary matched "${jurisdictionName.trim()}".`);
+    const { data, error: previewError } = await supabase.functions.invoke('bob-jurisdiction-preview', { body: { district_names: jurisdictionNames } });
+    if (previewError || !data?.results?.length || data.results.some((result: { matched: boolean }) => !result.matched)) {
+      const unmatched = (data?.unmatched ?? jurisdictionNames).join(', ');
+      setJurisdictionPreviewMessage(previewError?.message ?? `No verified Territorial Authority boundary matched: ${unmatched}.`);
     } else {
-      setJurisdictionPreview(data.results[0].geometry as GeoJSON.GeoJsonObject);
-      setJurisdictionPreviewMessage(`Read-only boundary preview loaded for ${jurisdictionName.trim()}. Nothing has been saved.`);
+      setJurisdictionPreview({ type: 'FeatureCollection', features: data.results.map((result: { geometry: GeoJSON.GeoJsonObject; name: string }) => ({ type: 'Feature', properties: { name: result.name }, geometry: result.geometry })) } as GeoJSON.GeoJsonObject);
+      setJurisdictionPreviewMessage(`Read-only boundary preview loaded for ${jurisdictionNames.join(', ')}. Nothing has been saved.`);
     }
     setJurisdictionPreviewLoading(false);
   };
@@ -326,10 +329,10 @@ const OrganizationSetupPage: React.FC = () => {
         <h2>Branch Jurisdiction Map</h2>
         <p className="contact-meta">Resolve the branch Territorial Authority boundary before Bob proposes it for approval. This preview is read-only; it does not write or verify the jurisdiction.</p>
         <form className="settings-form organization-jurisdiction-form" onSubmit={previewJurisdiction}>
-          <div className="form-row"><div className="form-group"><label htmlFor="jurisdiction-name">Territorial Authority</label><input id="jurisdiction-name" value={jurisdictionName} onChange={(event) => setJurisdictionName(event.target.value)} placeholder="e.g. Nelson City" /></div><button type="submit" className="btn btn-secondary" disabled={jurisdictionPreviewLoading}>{jurisdictionPreviewLoading ? 'Resolving…' : 'Preview boundary'}</button></div>
+          <div className="form-row"><div className="form-group"><label htmlFor="jurisdiction-name">Territorial Authorities</label><select id="jurisdiction-name" multiple size={5} value={jurisdictionNames} onChange={(event) => setJurisdictionNames(Array.from(event.target.selectedOptions, (option) => option.value))}>{TERRITORIAL_AUTHORITIES.map((authority) => <option key={authority} value={authority}>{authority}</option>)}</select><small className="contact-meta">Hold Ctrl/Cmd to select more than one authority.</small></div><button type="submit" className="btn btn-secondary" disabled={jurisdictionPreviewLoading || jurisdictionNames.length === 0}>{jurisdictionPreviewLoading ? 'Resolving…' : 'Preview boundaries'}</button></div>
         </form>
         {jurisdictionPreviewMessage && <div className={`organization-jurisdiction-message ${jurisdictionPreview ? 'is-success' : 'is-error'}`} role="status">{jurisdictionPreviewMessage}</div>}
-        <JurisdictionPreviewMap geometry={jurisdictionPreview} label={jurisdictionName} />
+        <JurisdictionPreviewMap geometry={jurisdictionPreview ?? org.jurisdiction_geom} label={jurisdictionNames.join(', ')} />
         <p className="contact-meta">Next step: Bob submits the resolved boundary to the Approvals page. A human must approve it and then visually verify it before branch routing uses it.</p>
       </section>
 
