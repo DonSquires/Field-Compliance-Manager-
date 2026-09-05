@@ -21,7 +21,9 @@ serve(async (request) => {
     return new Response('Invalid tile request', { status: 400, headers: CORS });
   }
 
-  const tileUrl = `https://basemaps.linz.govt.nz/v1/tiles/${layer}/WebMercatorQuad/${z}/${x}/${y}.png?api=${encodeURIComponent(LINZ_API_KEY)}`;
+  const tileUrl = layer === 'topographic'
+    ? `https://tiles-cdn.koordinates.com/services;key=${encodeURIComponent(LINZ_API_KEY)}/tiles/v4/layer=50767/EPSG:3857/${z}/${x}/${y}.png`
+    : `https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/${z}/${x}/${y}.png?api=${encodeURIComponent(LINZ_API_KEY)}`;
   const tile = await fetch(tileUrl, { headers: { Accept: 'image/png' } });
   if (!tile.ok) return new Response('LINZ tile unavailable', { status: tile.status, headers: CORS });
   return new Response(tile.body, {
