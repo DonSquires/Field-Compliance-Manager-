@@ -206,7 +206,7 @@ export function CrmOrganizationDialog({
               prevent duplicate accounts and preserve relationship history.
             </p>
             <label>
-              <span>Organization, address, client ID, or contact</span>
+              <span>Organization, company number, address, client ID, or contact</span>
               <div>
                 <Search size={16} />
                 <input
@@ -225,6 +225,14 @@ export function CrmOrganizationDialog({
                 placeholder="13 digits"
               />
             </label>
+            <a
+              className="crm-org-external-link"
+              href="https://app.companiesoffice.govt.nz/companies/app/ui/pages/companies/search?advancedPanel=true"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Search Companies Register
+            </a>
             <button
               type="submit"
               disabled={

@@ -97,8 +97,10 @@ describe('governed CRM accounts', () => {
     expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
     expect(page).toContain('Add organization');
     expect(page).toContain('client.next_action');
-    expect(organizationDialog).toContain('Organization, address, client ID, or contact');
+    expect(organizationDialog).toContain('Organization, company number, address, client ID, or contact');
     expect(organizationDialog).toContain('close spellings are included');
+    expect(organizationDialog).toContain('Search Companies Register');
+    expect(organizationDialog).toContain('companies/app/ui/pages/companies/search?advancedPanel=true');
     expect(page).not.toMatch(/\.from\(["']organizations["']\)\.insert/);
   });
 });
