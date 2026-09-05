@@ -189,6 +189,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     error: null,
   });
   const [quoteClient, setQuoteClient] = useState<AccountRow | null>(null);
+  const [proposalAnchor, setProposalAnchor] = useState<{ siteId?: string; zoneId?: string; name: string } | null>(null);
   const [quoteOperatingProviderId, setQuoteOperatingProviderId] = useState('');
   const [quoteForm, setQuoteForm] = useState({
     title: '',
@@ -624,16 +625,17 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     void loadInvoiceReadiness(selectedAgreementId);
   }, [loadInvoiceReadiness, selectedAgreementId, showGenerateInvoice]);
 
-  const openQuote = (client: AccountRow) => {
+  const openQuote = (client: AccountRow, place?: { siteId?: string; zoneId?: string; name: string }) => {
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + 30);
     quoteRequestId.current = crypto.randomUUID();
     setQuoteClient(client);
+    setProposalAnchor(place ?? null);
     setQuoteOperatingProviderId(client.operating_provider_organization_id ?? operatingOrganizationId ?? profile?.organizationId ?? '');
     setProposalModules([]);
     setQuotedModuleKeys([]);
     setQuoteForm({
-      title: `${client.name} service proposal`,
+      title: `${client.name} - ${place?.name ?? 'service'} proposal`,
       targetMargin: '20',
       validUntil: validUntil.toISOString().slice(0, 10),
       notes: '',
@@ -699,6 +701,20 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           return;
         }
       }
+      if (proposalAnchor) {
+        for (const module of proposalModules) {
+          const { error: scopeError } = await supabase.rpc('manage_crm_quote_proposal_service_scope', {
+            p_client_request_id: crypto.randomUUID(), p_quote_id: quote.id, p_action: 'set',
+            p_module_key: module.moduleKey, p_site_id: proposalAnchor.siteId ?? null,
+            p_zone_id: proposalAnchor.zoneId ?? null, p_proposed_place_id: null,
+          });
+          if (scopeError) {
+            setState((current) => ({ ...current, error: scopeError.message }));
+            setQuoteSaving(false);
+            return;
+          }
+        }
+      }
       setQuotedModuleKeys(proposalModules.map((module) => module.moduleKey));
       setPricingQuote({ ...quote, client: quoteClient });
       setLineForm({
@@ -708,7 +724,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         unitCost: '',
         unitCharge: '',
         moduleKey: proposalModules[0]?.moduleKey ?? '',
-        siteId: quoteClient.sites[0]?.id ?? '',
+        siteId: proposalAnchor?.siteId ?? quoteClient.sites[0]?.id ?? '',
       });
       setPricingReceipt(null);
       setQuoteClient(null);
@@ -1288,7 +1304,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         </div>
       )}
       {pricingDialog}
-      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} initialView={workspaceInitialView} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} onNavigate={onNavigate} onOpenAccount={(account) => { setWorkspaceInitialView('overview'); setWorkspaceAccount(account); }} onCreateProposal={(account) => { const sourceAccount = [...state.clients, ...state.branches].find((candidate) => candidate.id === account.id); setWorkspaceInitialView('overview'); openQuote(sourceAccount ?? { id: account.id, name: account.name, organization_type: 'client', active: true, status: account.status ?? 'active', updated_at: '', nzbn: null, company_registration_number: null, contact_email: null, contact_phone: null, billing_email: null, billing_address: null, account_notes: null, site_count: account.siteCount ?? 0, primary_contact_name: account.primaryContactName ?? null, latest_quote_status: account.latestQuoteStatus ?? null, sites: [], blockers: account.readinessBlockers ?? [], next_action: account.nextAction ?? 'Prepare service proposal' }); }} />}
+      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} initialView={workspaceInitialView} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} onNavigate={onNavigate} onOpenAccount={(account) => { setWorkspaceInitialView('overview'); setWorkspaceAccount(account); }} onEditOrganization={() => { const sourceAccount = [...state.clients, ...state.branches].find((candidate) => candidate.id === workspaceAccount.id); if (sourceAccount) setOrganizationDialog({ id: sourceAccount.id, name: sourceAccount.name, organization_type: sourceAccount.organization_type, status: sourceAccount.status, updated_at: sourceAccount.updated_at, nzbn: sourceAccount.nzbn, company_registration_number: sourceAccount.company_registration_number, contact_email: sourceAccount.contact_email, contact_phone: sourceAccount.contact_phone, billing_email: sourceAccount.billing_email, billing_address: sourceAccount.billing_address, account_notes: sourceAccount.account_notes }); }} onCreateProposal={(account, place) => { const sourceAccount = [...state.clients, ...state.branches].find((candidate) => candidate.id === account.id); setWorkspaceInitialView('sites'); openQuote(sourceAccount ?? { id: account.id, name: account.name, organization_type: 'client', active: true, status: account.status ?? 'active', updated_at: '', nzbn: null, company_registration_number: null, contact_email: null, contact_phone: null, billing_email: null, billing_address: null, account_notes: null, site_count: account.siteCount ?? 0, primary_contact_name: account.primaryContactName ?? null, latest_quote_status: null, sites: [], blockers: account.readinessBlockers ?? [], next_action: 'Add place-scoped proposal' }, place); }} />}
       {organizationDialog && <CrmOrganizationDialog organization={organizationDialog === 'create' ? null : organizationDialog} onClose={() => { setOrganizationDialog(null); void loadCrm(); }} onUpdated={(name) => { setOrganizationDialog(null); setNotice(`${name} organization details updated. Review its readiness steps next.`); void loadCrm(); }} onOpenAccount={(account) => { setOrganizationDialog(null); setWorkspaceInitialView('sites'); setWorkspaceAccount(account); }} onUseOrganization={(organization) => { setOrganizationDialog(null); setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: organization.id, name: organization.name, status: organization.status }); }} />}
       {siteAccount && <CrmSiteDialog account={siteAccount} onClose={() => setSiteAccount(null)} onCreated={(site) => { setSiteAccount(null); setNotice(`${site.name} created with a provisional boundary. Operations boundary review is required before activation.`); void loadCrm(); }} />}
       {invoiceAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-invoice-action-title" onSubmit={manageInvoice}><header><div><span>Invoice lifecycle</span><h2 id="crm-invoice-action-title">{invoiceAction.action === 'send' ? 'Send invoice' : invoiceAction.action === 'mark_paid' ? 'Confirm payment' : 'Void invoice'}</h2></div><button type="button" onClick={() => setInvoiceAction(null)} aria-label="Close invoice action">×</button></header><p>{invoiceAction.invoice.invoice_number} · {invoiceAction.invoice.client?.name ?? 'Unknown account'} · {invoiceAction.invoice.currency} {Number(invoiceAction.invoice.total_amount).toFixed(2)}</p>{invoiceAction.action === 'void' && <label><span>Void reason</span><textarea required rows={4} value={invoiceReason} onChange={(event) => setInvoiceReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setInvoiceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (invoiceAction.action === 'void' && !invoiceReason.trim())}>{quoteSaving ? 'Saving' : 'Confirm action'}</button></footer></form></div>}

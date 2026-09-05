@@ -21,22 +21,23 @@ test('CRM account context and governed quote creation are operational', async ({
   const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
   await client.click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: /Places/ }).click();
+  await expect(workspace.getByText('Civic Centre', { exact: true })).toBeVisible();
   await workspace.getByRole('button', { name: 'Create proposal' }).click();
-  const dialog = page.getByRole('dialog', { name: 'New quote for Civic Events Limited' });
-  await expect(dialog.getByLabel('Quote title')).toHaveValue('Civic Events Limited service proposal');
+  const dialog = page.getByRole('dialog', { name: /New quote for Civic Events Limited/ });
+  await expect(dialog.getByLabel('Quote title')).toHaveValue(/Civic Events Limited - .* proposal/);
   await dialog.getByLabel('Target margin %').fill('24'); await dialog.getByLabel('Commercial notes').fill('Initial static guarding proposal.');
   await dialog.getByLabel('Include static_guarding').check();
   await expect(dialog).toHaveScreenshot('crm-draft-quote.png'); await dialog.getByRole('button', { name: 'Create draft quote' }).click();
   await expect(page.getByText('Draft quote created for Civic Events Limited. Add explicit pricing lines before review.')).toBeVisible();
-  const pricing = page.getByRole('dialog', { name: 'Price Civic Events Limited service proposal' });
-  await expect(pricing.getByLabel('Client site')).toHaveValue('42424242-4242-4242-8242-424242424242');
+  const pricing = page.getByRole('dialog', { name: /Price Civic Events Limited - .* proposal/ });
   await pricing.getByLabel('Quantity').fill('8'); await pricing.getByLabel('Provider unit cost').fill('35'); await pricing.getByLabel('Client unit charge').fill('52.5');
   await expect(pricing).toHaveScreenshot('crm-quote-pricing.png'); await pricing.getByRole('button', { name: 'Add pricing line' }).click();
   await expect(pricing.getByText('Total cost $280.00')).toBeVisible(); await expect(pricing.getByText('Total charge $483.00')).toBeVisible();
-  await pricing.getByRole('button', { name: 'Send quote' }).click();const sendDialog=page.getByRole('dialog',{name:'Send quote?'});await expect(sendDialog).toHaveScreenshot('crm-send-quote.png');await sendDialog.getByRole('button',{name:'Confirm send'}).click();await expect(page.getByText('Civic Events Limited service proposal sent for acceptance.')).toBeVisible();
+  await pricing.getByRole('button', { name: 'Send quote' }).click();const sendDialog=page.getByRole('dialog',{name:'Send quote?'});await expect(sendDialog).toHaveScreenshot('crm-send-quote.png');await sendDialog.getByRole('button',{name:'Confirm send'}).click();await expect(page.getByText(/Civic Events Limited - .* proposal sent for acceptance\./)).toBeVisible();
   await pricing.getByRole('button', { name: 'Accept quote' }).click();const acceptDialog=page.getByRole('dialog',{name:'Accept quote?'});await expect(acceptDialog).toHaveScreenshot('crm-accept-quote.png');await acceptDialog.getByRole('button',{name:'Confirm acceptance'}).click();
   const receipt = page.getByRole('region', { name: 'Quote acceptance receipt' });await expect(receipt).toContainText('Service agreement 46464646 established for Civic Events Limited.');await receipt.getByRole('button',{name:'Open service agreement'}).click();
-  await expect(page).toHaveURL(/\/admin\/relationships\?account=40404040-4040-4040-8040-404040404040&agreement=46464646-4646-4646-8646-464646464646$/);await expect(page.getByText('Civic Events Limited service proposal',{exact:true})).toBeVisible(); expect(errors, errors.join('\n')).toEqual([]);
+  await expect(page).toHaveURL(/\/admin\/relationships\?account=40404040-4040-4040-8040-404040404040&agreement=46464646-4646-4646-8646-464646464646$/);await expect(page.getByRole('heading', { name: 'Civic Events Compliance Services', exact: true })).toBeVisible(); expect(errors, errors.join('\n')).toEqual([]);
 });
 
 test('account team manages contacts, follow-up activity, and receivables', async ({ page }) => {

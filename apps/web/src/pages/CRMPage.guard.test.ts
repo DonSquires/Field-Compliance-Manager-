@@ -58,7 +58,21 @@ describe('governed CRM accounts', () => {
     expect(workspace).toMatch(/\.eq\(["']client_organization_id["'], account\.id\)/);
     expect(workspace).toMatch(/\.from\(["']location_zones["']\)/);
     expect(workspace).toContain('Location / house');
-    expect(workspace).toContain('Client-owned houses with their sibling site and zone facets.');
+    expect(workspace).toContain("Create and manage this organization\\'s location houses, sites, zones, boundaries, and closures.");
+  });
+
+  it('creates location houses inside the selected organization workspace', () => {
+    expect(workspace).toContain("supabase.rpc('manage_crm_location'");
+    expect(workspace).toContain('Add location / place');
+    expect(workspace).not.toContain("onNavigate?.('locations'");
+  });
+
+  it('keeps proposals below the organization level and exposes organization editing', () => {
+    expect(workspace).toContain('onEditOrganization');
+    expect(workspace).toContain('Edit organization details');
+    expect(workspace).toContain('onCreateProposal(account, { siteId: site.id');
+    expect(workspace).toContain('onCreateProposal(account, { zoneId: zone.id');
+    expect(workspace).not.toContain('Start a module-based commercial proposal for this organization.');
   });
 
   it('keeps real child organizations, module scope, and geofence defaults in the organization workspace', () => {
