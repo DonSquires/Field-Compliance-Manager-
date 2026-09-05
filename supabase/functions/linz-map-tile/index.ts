@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
-const LINZ_API_KEY = Deno.env.get('LINZ_API_KEY') ?? '';
+const LINZ_API_KEY = (Deno.env.get('LINZ_API_KEY') ?? '').trim().replace(/^['"]|['"]$/g, '');
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
