@@ -6,12 +6,14 @@ test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('20
 test('CRM account context and governed quote creation are operational', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
   await expect(page.getByRole('heading', { name: 'CRM & Finance', exact: true })).toBeVisible();
-  const client = page.getByText('Civic Events Limited', { exact: true }).locator('..').locator('..');
-  await expect(client.getByText('Mere Wilson')).toBeVisible(); await expect(client.getByText('Active · 2 sites')).toBeVisible();
-  await client.getByRole('button', { name: 'New quote' }).click();
+  const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
+  await client.click();
+  const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: 'Create proposal' }).click();
   const dialog = page.getByRole('dialog', { name: 'New quote for Civic Events Limited' });
   await expect(dialog.getByLabel('Quote title')).toHaveValue('Civic Events Limited service proposal');
   await dialog.getByLabel('Target margin %').fill('24'); await dialog.getByLabel('Commercial notes').fill('Initial static guarding proposal.');
+  await dialog.getByLabel('Include static_guarding').check();
   await expect(dialog).toHaveScreenshot('crm-draft-quote.png'); await dialog.getByRole('button', { name: 'Create draft quote' }).click();
   await expect(page.getByText('Draft quote created for Civic Events Limited. Add explicit pricing lines before review.')).toBeVisible();
   const pricing = page.getByRole('dialog', { name: 'Price Civic Events Limited service proposal' });
