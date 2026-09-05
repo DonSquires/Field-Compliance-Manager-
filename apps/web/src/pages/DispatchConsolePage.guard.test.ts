@@ -55,4 +55,10 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).not.toContain('requesterOrgs');
     expect(source).not.toContain('loadPhaseC');
   });
+
+  it('uses the selected operating branch for dispatch operations and billing rules', () => {
+    expect(source).toContain('operatingOrganizationId ?? profile?.organizationId');
+    expect(source).toContain('p_organization_id: operatingBranchId');
+    expect(source).toContain(".eq('organization_id', operatingBranchId)");
+  });
 });

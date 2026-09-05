@@ -240,7 +240,8 @@ const JobCard: React.FC<{ job: DispatchJob }> = ({ job }) => {
 
 // Main Component
 const DispatchConsolePage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
+  const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const {
     selectedAgreement,
     selectedAgreementSites,
@@ -295,7 +296,7 @@ const DispatchConsolePage: React.FC = () => {
   // Load Phase A: Active shifts, jobs, resources. Sites come from the selected
   // service agreement so contract/location access has one canonical owner.
   const loadPhaseA = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!operatingBranchId) return;
 
     try {
       setLoading(true);
@@ -304,17 +305,17 @@ const DispatchConsolePage: React.FC = () => {
         supabase
           .from('shifts')
           .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
-          .eq('organization_id', profile.organizationId)
+          .eq('organization_id', operatingBranchId)
           .in('status', ['published', 'accepted', 'in_progress']),
         supabase
           .from('dispatch_jobs')
           .select('*, site:client_site_id(name)')
-          .eq('organization_id', profile.organizationId)
+          .eq('organization_id', operatingBranchId)
           .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]),
         supabase
           .from('dispatch_resources')
           .select('id, name, callsign, status, assigned_officer_id')
-          .eq('organization_id', profile.organizationId),
+          .eq('organization_id', operatingBranchId),
       ]);
 
       const phaseErrors = [shiftsRes.error, jobsRes.error, resourcesRes.error].filter(Boolean);
@@ -374,7 +375,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [operatingBranchId]);
 
   useEffect(() => {
     const activeAgreementSites = selectedAgreementSites.filter((site) => site.active);
@@ -423,12 +424,12 @@ const DispatchConsolePage: React.FC = () => {
   // Canonical schema dimensions: client org, site/zone, job type, priority,
   // and effective dates. The resolver prefers the most specific active rule.
   const loadPhaseD = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!operatingBranchId) return;
     try {
       const { data, error } = await supabase
         .from('rate_rules')
         .select('id, amount, rate_type, client_org_id, site_id, zone_id, job_type, priority, effective_from, effective_to')
-        .eq('organization_id', profile.organizationId)
+        .eq('organization_id', operatingBranchId)
         .eq('rule_kind', 'billing')
         .eq('active', true)
         .order('priority', { ascending: false })
@@ -453,7 +454,7 @@ const DispatchConsolePage: React.FC = () => {
       console.error('Failed to load Phase D (rates):', err);
       setBillingRules([]);
     }
-  }, [profile?.organizationId]);
+  }, [operatingBranchId]);
 
   // Resolve billing rate
   const resolveBillingRate = useCallback(() => {
@@ -485,7 +486,7 @@ const DispatchConsolePage: React.FC = () => {
 
   // Create job
   const handleCreateJob = useCallback(async () => {
-    if (!formSiteId || !profile?.organizationId) {
+    if (!formSiteId || !operatingBranchId) {
       setError('Site is required');
       return;
     }
@@ -502,7 +503,7 @@ const DispatchConsolePage: React.FC = () => {
 
       const { data, error } = await supabase
         .rpc('create_dispatch_job', {
-          p_organization_id: profile.organizationId,
+          p_organization_id: operatingBranchId,
           p_service_agreement_id: selectedAgreement.id,
           p_client_site_id: formSiteId,
           p_client_request_id: formRequestId,
@@ -537,7 +538,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [profile?.organizationId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA]);
 
   const assignResource = useCallback((resourceId: string) => {
     setFormResourceId(resourceId);
