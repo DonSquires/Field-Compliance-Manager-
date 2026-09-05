@@ -13,6 +13,14 @@ describe('governed HR administration', () => {
     expect(page).not.toContain(".from('timesheets').update");
   });
 
+  it('surfaces generated dispatch pay evidence without directly mutating financial lines', () => {
+    expect(page).toContain(".from('dispatch_job_pay_lines')");
+    expect(page).toContain("{ id: 'pay-review', label: 'Pay Review' }");
+    expect(page).toContain("line.pay_code === 'UNRESOLVED'");
+    expect(page).toContain('Resolve exceptions before approving related timesheets');
+    expect(page).not.toMatch(/from\('dispatch_job_pay_lines'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
+  });
+
   it('uses governed coverage creation and reasoned review', () => {
     expect(page).toContain("supabase.rpc('create_shift_coverage_request'");
     expect(page).not.toContain(".from('shift_coverage_requests').insert");

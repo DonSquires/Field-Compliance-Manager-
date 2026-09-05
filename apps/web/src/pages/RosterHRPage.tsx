@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
-type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'assets' | 'oncall' | 'court';
+type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'pay-review' | 'assets' | 'oncall' | 'court';
 
 interface StaffRow {
   id: string;
@@ -89,6 +89,22 @@ interface TimesheetRow {
   adjustment_hours: number;
   work_summary: { source_count?: number } | null;
   status: string;
+}
+
+interface DispatchPayLineRow {
+  id: string;
+  source_dispatch_id: string;
+  officer_user_id: string | null;
+  rate_rule_id: string | null;
+  pay_code: string | null;
+  rate_type: string;
+  description: string;
+  quantity: number;
+  unit_rate: number;
+  line_total: number;
+  distance_km: number | null;
+  distance_reason: string | null;
+  created_at: string;
 }
 
 interface StaffOnboardingRow {
@@ -191,6 +207,7 @@ const TABS: { id: RosterTab; label: string }[] = [
   { id: 'assets', label: 'Assets' },
   { id: 'leave', label: 'Leave' },
   { id: 'timesheets', label: 'Timesheets' },
+  { id: 'pay-review', label: 'Pay Review' },
 ];
 
 const RosterHRPage: React.FC = () => {
@@ -228,6 +245,7 @@ const RosterHRPage: React.FC = () => {
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplateRow[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
+  const [dispatchPayLines, setDispatchPayLines] = useState<DispatchPayLineRow[]>([]);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
     const [coverageWorkUnits,setCoverageWorkUnits]=useState<CoverageWorkUnit[]>([]);
@@ -278,7 +296,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
+      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -309,6 +327,12 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId)
             .order('period_start', { ascending: false }),
           supabase
+            .from('dispatch_job_pay_lines')
+            .select('id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code, rate_type, description, quantity, unit_rate, line_total, distance_km, distance_reason, created_at')
+            .eq('organization_id', orgId)
+            .order('created_at', { ascending: false })
+            .limit(100),
+          supabase
             .from('shift_coverage_requests')
             .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes, claimed_by, roster_slot_id, site:site_id(name)')
             .eq('organization_id', orgId)
@@ -335,6 +359,7 @@ const RosterHRPage: React.FC = () => {
       if (templatesRes.error) throw templatesRes.error;
       if (leaveRes.error) throw leaveRes.error;
       if (timesheetsRes.error) throw timesheetsRes.error;
+      if (payLinesRes.error) throw payLinesRes.error;
       if (coverageRes.error) throw coverageRes.error;
       if (readinessRes.error) throw readinessRes.error;
   if(workUnitsRes.error)throw workUnitsRes.error;
@@ -383,6 +408,7 @@ const RosterHRPage: React.FC = () => {
       setShiftTemplates((templatesRes.data as ShiftTemplateRow[]) || []);
       setLeaveRequests((leaveRes.data as LeaveRequestRow[]) || []);
       setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
+      setDispatchPayLines((payLinesRes.data as DispatchPayLineRow[]) || []);
       setCoverageRequests(
         ((coverageRes.data as any[]) || []).map((row) => ({
           id: row.id,
@@ -1139,6 +1165,39 @@ const RosterHRPage: React.FC = () => {
                     </tr>
                   ))
                 )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {tab === 'pay-review' && (
+        <section className="reports-section">
+          <h2>Pay Review ({dispatchPayLines.length})</h2>
+          <p className="subtitle">Generated pay evidence from completed dispatch work. Resolve exceptions before approving related timesheets for payroll export.</p>
+          <div className="metrics-grid" style={{ marginBottom: '1rem' }}>
+            <div className="metric-card"><span>Total pay evidence</span><strong>NZ${dispatchPayLines.reduce((total, line) => total + Number(line.line_total || 0), 0).toFixed(2)}</strong></div>
+            <div className="metric-card"><span>Unresolved</span><strong>{dispatchPayLines.filter((line) => line.pay_code === 'UNRESOLVED').length}</strong></div>
+            <div className="metric-card"><span>Rule-backed lines</span><strong>{dispatchPayLines.filter((line) => line.rate_rule_id).length}</strong></div>
+          </div>
+          <div className="reports-table-wrapper">
+            <table className="reports-table">
+              <thead><tr><th>Staff</th><th>Dispatch source</th><th>Pay item</th><th>Quantity</th><th>Rate</th><th>Total</th><th>Evidence state</th></tr></thead>
+              <tbody>
+                {dispatchPayLines.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center">No completed-dispatch pay evidence yet.</td></tr>
+                ) : dispatchPayLines.map((line) => {
+                  const unresolved = line.pay_code === 'UNRESOLVED';
+                  return <tr key={line.id}>
+                    <td>{line.officer_user_id ? staffNames[line.officer_user_id] ?? line.officer_user_id : 'Officer not resolved'}</td>
+                    <td><code>{line.source_dispatch_id.slice(0, 8)}</code></td>
+                    <td><strong>{line.pay_code ?? 'Base pay'}</strong><br /><small>{line.description}</small></td>
+                    <td>{Number(line.quantity).toFixed(2)} {line.rate_type === 'per_km' ? 'km' : 'hours'}</td>
+                    <td>NZ${Number(line.unit_rate).toFixed(2)}</td>
+                    <td>NZ${Number(line.line_total).toFixed(2)}</td>
+                    <td><span className={`status-badge ${unresolved ? 'status-rejected' : 'status-approved'}`}>{unresolved ? (line.description.replace('Unresolved: ', 'Needs review')) : 'Rule resolved'}</span>{line.distance_reason && <small> · {line.distance_reason.replaceAll('_', ' ')}</small>}</td>
+                  </tr>;
+                })}
               </tbody>
             </table>
           </div>
