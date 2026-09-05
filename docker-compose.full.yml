@@ -19,6 +19,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
+      FCM_API_TOKEN: ${API_TOKEN:?set API_TOKEN}
       OSRM_URL: "http://osrm:5000"
       SOLVER_URL: "http://fcm-solver:5001"
       # In-house embeddings (Bob RAG). Reachable by compose service name on fcm-net.

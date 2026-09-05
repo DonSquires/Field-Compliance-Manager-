@@ -11,6 +11,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
+      FCM_API_TOKEN: ${API_TOKEN:?set API_TOKEN}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s
