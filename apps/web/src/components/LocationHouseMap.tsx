@@ -70,10 +70,13 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
     mapRef.current?.remove();
     const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView([-41.2, 172.5], 5);
     mapRef.current = map;
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const linzTile = (layer: 'topographic' | 'aerial') => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
+    const topographic = L.tileLayer(linzTile('topographic'), {
       maxZoom: 20,
-      attribution: '&copy; OpenStreetMap contributors',
+      attribution: '&copy; LINZ | CC BY 4.0',
     }).addTo(map);
+    const aerial = L.tileLayer(linzTile('aerial'), { maxZoom: 20, attribution: '&copy; LINZ | CC BY 4.0' });
+    L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, undefined, { collapsed: false }).addTo(map);
 
     const bounds = L.latLngBounds([]);
     const addBoundary = (geometry: GeoJSON.GeoJsonObject, style: L.PathOptions, label: string) => {

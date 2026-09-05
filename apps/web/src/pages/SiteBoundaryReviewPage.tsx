@@ -86,7 +86,10 @@ const SiteBoundaryReviewPage = () => {
     mapRef.current?.remove();
     const map = L.map(mapContainerRef.current, { zoomControl: true, attributionControl: true });
     mapRef.current = map;
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+    const linzTile = (layer: 'topographic' | 'aerial') => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
+    const topographic = L.tileLayer(linzTile('topographic'), { maxZoom: 20, attribution: '&copy; LINZ | CC BY 4.0' }).addTo(map);
+    const aerial = L.tileLayer(linzTile('aerial'), { maxZoom: 20, attribution: '&copy; LINZ | CC BY 4.0' });
+    L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, undefined, { collapsed: false }).addTo(map);
     const boundary = L.geoJSON(selected.boundary_geojson, { style: { color: '#2fc4a7', weight: 3, fillColor: '#2fc4a7', fillOpacity: 0.16 } }).bindTooltip(selected.site_name).addTo(map);
     const bounds = boundary.getBounds();
     if (bounds.isValid()) map.fitBounds(bounds.pad(0.2), { maxZoom: 19 });

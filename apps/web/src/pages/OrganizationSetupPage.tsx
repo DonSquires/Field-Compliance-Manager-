@@ -496,7 +496,10 @@ function JurisdictionPreviewMap({ geometry, label }: { geometry: GeoJSON.GeoJson
   useEffect(() => {
     if (!containerRef.current || !geometry) return;
     const map = L.map(containerRef.current, { zoomControl: true }).setView([-41.27, 173.28], 9);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 18 }).addTo(map);
+    const linzTile = (layer: 'topographic' | 'aerial') => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
+    const topographic = L.tileLayer(linzTile('topographic'), { attribution: '&copy; LINZ | CC BY 4.0', maxZoom: 18 }).addTo(map);
+    const aerial = L.tileLayer(linzTile('aerial'), { attribution: '&copy; LINZ | CC BY 4.0', maxZoom: 18 });
+    L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, undefined, { collapsed: false }).addTo(map);
     const layer = L.geoJSON(geometry, { style: { color: '#14c8d4', weight: 2, fillColor: '#14c8d4', fillOpacity: 0.16 } }).bindTooltip(label).addTo(map);
     const bounds = layer.getBounds();
     if (bounds.isValid()) map.fitBounds(bounds.pad(0.08));
