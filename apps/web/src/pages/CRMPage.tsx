@@ -96,6 +96,17 @@ interface InvoiceReadiness {
   billingCycle: string | null;
   paymentTermsDays: number | null;
 }
+interface ConsolidatedCommercialRow {
+  source_organization_id: string;
+  source_organization_name: string;
+  invoice_count: number;
+  open_receivables: number;
+  overdue_receivables: number;
+  invoice_total: number;
+  quote_count: number;
+  accepted_agreement_count: number;
+  report_pack_count: number;
+}
 
 interface ModuleCatalogRow { module_key: string; billing_period: string; }
 interface ProviderBillingRateRule {
@@ -142,6 +153,7 @@ interface CrmState {
   platformSubscribers: AgreementRow[];
   contractedOrgs: AgreementRow[];
   invoices: InvoiceRow[];
+  consolidatedCommercial: ConsolidatedCommercialRow[];
   loading: boolean;
   error: string | null;
 }
@@ -157,6 +169,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     platformSubscribers: [],
     contractedOrgs: [],
     invoices: [],
+    consolidatedCommercial: [],
     loading: true,
     error: null,
   });
@@ -338,6 +351,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       if (opErr) throw opErr;
       const { data: invoices, error: invoiceErr } = await supabase.from('invoices').select('id,invoice_number,invoice_date,due_date,status,total_amount,currency,client:client_organization_id(name)').eq('organization_id', orgId).order('due_date', { ascending: true }).limit(100);
       if (invoiceErr) throw invoiceErr;
+      const { data: consolidatedCommercial, error: consolidatedError } = await supabase.rpc('get_consolidated_commercial_overview', { p_root_organization_id: orgId });
+      if (consolidatedError) throw consolidatedError;
 
       const branchOrgIds = new Set(branches.map((b) => b.id));
 
@@ -374,6 +389,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         platformSubscribers,
         contractedOrgs,
         invoices: (invoices as unknown as InvoiceRow[]) ?? [],
+        consolidatedCommercial: (consolidatedCommercial as ConsolidatedCommercialRow[]) ?? [],
         loading: false,
         error: null,
       });
@@ -918,6 +934,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         <div className="crm-section-heading"><div><h2>Accounts receivable</h2><p className="subtitle">Invoice status, collection actions, and retained finance decisions.</p></div><div className="crm-finance-kpis"><span>Open <strong>{openReceivables.length}</strong></span><span>Receivable <strong>NZ${receivableTotal.toFixed(2)}</strong></span><span>Overdue <strong>{state.invoices.filter((invoice) => invoice.status === 'overdue').length}</strong></span><button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowGenerateInvoice(true)}>Generate from agreement</button></div></div>
         {state.invoices.length === 0 ? <div className="empty-state"><p>No invoice headers exist yet. Invoice generation remains blocked until line-level billing evidence is implemented.</p></div> : <div className="crm-invoice-table" role="table" aria-label="Accounts receivable"><div className="crm-invoice-row is-header" role="row"><span>Invoice</span><span>Account</span><span>Due</span><span>Total</span><span>Status</span><span>Action</span></div>{state.invoices.map((invoice) => <div className="crm-invoice-row" role="row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.client?.name ?? 'Unknown account'}</span><time dateTime={invoice.due_date}>{new Date(`${invoice.due_date}T00:00:00`).toLocaleDateString('en-NZ')}</time><span>{invoice.currency} {Number(invoice.total_amount).toFixed(2)}</span><span className={`crm-invoice-status status-${invoice.status}`}>{invoice.status}</span><div>{invoice.status === 'draft' && <button type="button" onClick={() => setInvoiceAction({ invoice, action: 'send' })}>Send</button>}{(invoice.status === 'sent' || invoice.status === 'overdue') && <button type="button" onClick={() => setInvoiceAction({ invoice, action: 'mark_paid' })}>Mark paid</button>}{!['paid','void'].includes(invoice.status) && <button type="button" onClick={() => { setInvoiceReason(''); setInvoiceAction({ invoice, action: 'void' }); }}>Void</button>}</div></div>)}</div>}
       </section>
+
+      {state.consolidatedCommercial.length > 1 && <section className="reports-section crm-finance-section"><div className="crm-section-heading"><div><h2>Group commercial oversight</h2><p className="subtitle">Branch-owned commercial activity, consolidated for parent oversight. Open the branch workspace to manage its clients, pricing, agreements, and delivery.</p></div></div><div className="crm-account-register crm-commercial-oversight" role="table" aria-label="Group commercial oversight"><div className="crm-account-register-row is-header" role="row"><span>Operating organization</span><span>Invoices</span><span>Open receivables</span><span>Agreements</span><span>Quotes</span><span>Report packs</span></div>{state.consolidatedCommercial.map((row) => <button key={row.source_organization_id} type="button" role="row" className="crm-account-register-row" onClick={() => setWorkspaceAccount({ id: row.source_organization_id, name: row.source_organization_name })}><strong>{row.source_organization_name}</strong><span>{row.invoice_count}</span><span>NZ${Number(row.open_receivables).toFixed(2)}{Number(row.overdue_receivables) > 0 ? ` · NZ$${Number(row.overdue_receivables).toFixed(2)} overdue` : ''}</span><span>{row.accepted_agreement_count}</span><span>{row.quote_count}</span><span>{row.report_pack_count}</span></button>)}</div></section>}
 
       <section className="reports-section">
         <h2>Our Clients ({state.clients.length})</h2>

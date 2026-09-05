@@ -38,6 +38,14 @@ interface ReportMetrics {
   totalObservations: number;
   nonCompliantObservations: number;
 }
+interface ConsolidatedReportingRow {
+  source_organization_id: string;
+  source_organization_name: string;
+  breach_count: number;
+  observation_count: number;
+  non_compliant_observation_count: number;
+  report_pack_count: number;
+}
 
 interface MonthlyReportPack {
   id: string;
@@ -61,6 +69,7 @@ const ReportsHubPage: React.FC = () => {
   const [breachAlerts, setBreachAlerts] = useState<BreachAlert[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
   const [reportPacks, setReportPacks] = useState<MonthlyReportPack[]>([]);
+  const [consolidatedReporting, setConsolidatedReporting] = useState<ConsolidatedReportingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +87,7 @@ const ReportsHubPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [breachResponse, observationResponse, packResponse] = await Promise.all([
+      const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
         supabase
           .from('breach_alerts')
           .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
@@ -100,15 +109,17 @@ const ReportsHubPage: React.FC = () => {
           .gte('period_start', dateRange.start)
           .lte('period_end', dateRange.end)
           .order('period_end', { ascending: false }),
+        supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
       ]);
 
-      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error;
+      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error;
       if (failure) throw failure;
       const breaches = (breachResponse.data as BreachAlert[]) || [];
       const obs = (observationResponse.data as Observation[]) || [];
       setBreachAlerts(breaches);
       setObservations(obs);
       setReportPacks((packResponse.data as MonthlyReportPack[]) || []);
+      setConsolidatedReporting((consolidatedResponse.data as ConsolidatedReportingRow[]) || []);
       setMetrics({ totalBreaches: breaches.length, totalObservations: obs.length, nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reports');
@@ -194,6 +205,8 @@ const ReportsHubPage: React.FC = () => {
           <div className="kpi-unit">observations</div>
         </div>
       </div>
+
+      {consolidatedReporting.length > 1 && <section className="reports-section"><h2>Group Reporting Overview</h2><p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Detailed queues below remain in the current organization context.</p><div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table></div></section>}
 
       <section className="reports-section">
         <h2>Monthly Report Packs ({reportPacks.length})</h2>

@@ -17,6 +17,13 @@ describe('governed monthly report pack generation', () => {
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.(insert|update|upsert)\(/);
   });
 
+  it('shows parent oversight as a branch-preserving reporting read model', () => {
+    expect(page).toContain("rpc('get_consolidated_reporting_overview'");
+    expect(page).toContain('Group Reporting Overview');
+    expect(page).toContain('row.source_organization_name');
+    expect(page).toContain('Branch-owned operational activity, consolidated for parent oversight.');
+  });
+
   it('limits generation to the active provider administrator and records an audit receipt', () => {
     expect(migration).toContain('provider_organization_id=v_provider');
     expect(migration).toContain('public.is_admin_for_org(v_provider)');

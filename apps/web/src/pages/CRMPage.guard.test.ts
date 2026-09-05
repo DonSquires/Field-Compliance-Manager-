@@ -87,6 +87,14 @@ describe('governed CRM accounts', () => {
     expect(page).toContain("agreement.provider_organization_id === profile?.organizationId && agreement.invitation_status === 'accepted'");
   });
 
+  it('shows parent oversight through a branch-preserving consolidated commercial read model', () => {
+    expect(page).toContain("supabase.rpc('get_consolidated_commercial_overview'");
+    expect(page).toContain('consolidatedCommercial: (consolidatedCommercial as ConsolidatedCommercialRow[]) ?? []');
+    expect(page).toContain('Group commercial oversight');
+    expect(page).toContain('row.source_organization_name');
+    expect(page).toContain('Branch-owned commercial activity, consolidated for parent oversight.');
+  });
+
   it('opens the exact account workspace once from explicit URL context', () => {
     expect(page).toContain('openedContextAccountId');
     expect(page).toContain('account.id === requestedAccountId');
