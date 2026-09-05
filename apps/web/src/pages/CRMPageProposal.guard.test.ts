@@ -21,6 +21,13 @@ describe('CRM proposal package', () => {
     expect(page).toContain('operating branch');
   });
 
+  it('uses the selected branch rate book before an explicit parent template', () => {
+    expect(page).toContain(".in('organization_id', providerOrgIds)");
+    expect(page).toContain('rule.organization_id === quoteOperatingProviderId || rule.organization_id === state.ownOrg?.id');
+    expect(page).toContain("'Operating rate'");
+    expect(page).toContain("'Parent template'");
+  });
+
   it('keeps provider-rule pricing explicit and blocks an unselected standard rate', () => {
     expect(page).toContain("value=\"standard_rate_rule\"");
     expect(page).toContain('Choose provider rate');

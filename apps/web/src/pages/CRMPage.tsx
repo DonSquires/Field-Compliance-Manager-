@@ -111,6 +111,7 @@ interface ConsolidatedCommercialRow {
 interface ModuleCatalogRow { module_key: string; billing_period: string; }
 interface ProviderBillingRateRule {
   id: string;
+  organization_id: string;
   name: string;
   rate_type: string;
   amount: number;
@@ -257,6 +258,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       if (acctErr) throw acctErr;
 
       const accountIds = (accounts ?? []).map((account) => account.id);
+      const providerOrgIds = [orgId, ...(accounts ?? []).filter((account) => account.organization_type === 'branch').map((branch) => branch.id)];
       const [sitesRes, contactsRes, quotesRes, readinessRes, moduleCatalogRes, billingRulesRes] = accountIds.length
         ? await Promise.all([
             supabase
@@ -276,7 +278,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               .order('created_at', { ascending: false }),
             supabase.rpc('get_crm_organization_readiness', { p_organization_ids: accountIds }),
             supabase.from('module_catalog').select('module_key,billing_period').eq('active', true).order('module_key'),
-            supabase.from('rate_rules').select('id,name,rate_type,amount,module_key').eq('organization_id', orgId).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
+            supabase.from('rate_rules').select('id,organization_id,name,rate_type,amount,module_key').in('organization_id', providerOrgIds).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
           ])
         : [
             { data: [], error: null },
@@ -284,7 +286,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             { data: [], error: null },
             { data: [], error: null },
             await supabase.from('module_catalog').select('module_key,billing_period').eq('active', true).order('module_key'),
-            await supabase.from('rate_rules').select('id,name,rate_type,amount,module_key').eq('organization_id', orgId).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
+            await supabase.from('rate_rules').select('id,organization_id,name,rate_type,amount,module_key').in('organization_id', providerOrgIds).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
           ];
       if (sitesRes.error) throw sitesRes.error;
       if (contactsRes.error) throw contactsRes.error;
@@ -1158,7 +1160,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                           {proposalModule ? <div className="crm-proposal-service-window"><label><span>Response SLA</span><input type="number" min="1" max="10080" placeholder="Not set" value={proposalModule.slaMinutes} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, slaMinutes: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} SLA minutes`} /></label><div><input type="time" value={proposalModule.startTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, startTime: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} service start time`} /><span>to</span><input type="time" value={proposalModule.endTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, endTime: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} service end time`} /></div><div className="crm-proposal-days">{['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => <label key={day}><input type="checkbox" checked={proposalModule.activeDays.includes(day)} onChange={() => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, activeDays: item.activeDays.includes(day) ? item.activeDays.filter((activeDay) => activeDay !== day) : [...item.activeDays, day] } : item))} />{day.slice(0, 1).toUpperCase()}</label>)}</div></div> : <span className="crm-proposal-empty">Select module first</span>}
                         </span>
                         <span>
-                          {proposalModule ? <><select value={proposalModule.pricingBasis} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, pricingBasis: event.target.value as ProposalModuleDraft['pricingBasis'], rateRuleId: event.target.value === 'standard_rate_rule' ? item.rateRuleId : '' } : item))} aria-label={`${formatModuleLabel(module.module_key)} pricing basis`}><option value="quote_lines">Price with quote lines</option><option value="standard_rate_rule">Use provider rate</option><option value="site_override_pending">Confirm rate by place</option></select>{proposalModule.pricingBasis === 'standard_rate_rule' && <select required value={proposalModule.rateRuleId} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, rateRuleId: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} provider rate rule`}><option value="">Choose provider rate</option>{providerBillingRules.filter((rule) => rule.module_key === null || rule.module_key === module.module_key).map((rule) => <option key={rule.id} value={rule.id}>{rule.name} ({rule.rate_type}, ${Number(rule.amount).toFixed(2)})</option>)}</select>}</> : <span className="crm-proposal-empty">Select module first</span>}
+                          {proposalModule ? <><select value={proposalModule.pricingBasis} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, pricingBasis: event.target.value as ProposalModuleDraft['pricingBasis'], rateRuleId: event.target.value === 'standard_rate_rule' ? item.rateRuleId : '' } : item))} aria-label={`${formatModuleLabel(module.module_key)} pricing basis`}><option value="quote_lines">Price with quote lines</option><option value="standard_rate_rule">Use provider rate</option><option value="site_override_pending">Confirm rate by place</option></select>{proposalModule.pricingBasis === 'standard_rate_rule' && <select required value={proposalModule.rateRuleId} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, rateRuleId: event.target.value } : item))} aria-label={`${formatModuleLabel(module.module_key)} provider rate rule`}><option value="">Choose provider rate</option>{providerBillingRules.filter((rule) => (rule.organization_id === quoteOperatingProviderId || rule.organization_id === state.ownOrg?.id) && (rule.module_key === null || rule.module_key === module.module_key)).sort((left, right) => Number(right.organization_id === quoteOperatingProviderId) - Number(left.organization_id === quoteOperatingProviderId)).map((rule) => <option key={rule.id} value={rule.id}>{rule.organization_id === quoteOperatingProviderId ? 'Operating rate' : 'Parent template'}: {rule.name} ({rule.rate_type}, ${Number(rule.amount).toFixed(2)})</option>)}</select>}</> : <span className="crm-proposal-empty">Select module first</span>}
                         </span>
                       </div>
                     );
