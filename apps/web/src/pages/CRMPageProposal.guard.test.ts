@@ -30,7 +30,7 @@ describe('CRM proposal package', () => {
 
   it('keeps provider-rule pricing explicit and blocks an unselected standard rate', () => {
     expect(page).toContain("value=\"standard_rate_rule\"");
-    expect(page).toContain('Choose provider rate');
+    expect(page).toContain('Choose rate for this work');
     expect(page).toContain("module.pricingBasis === 'standard_rate_rule' && !module.rateRuleId");
     expect(page).toContain('p_rate_rule_id: module.rateRuleId || null');
   });
@@ -40,6 +40,11 @@ describe('CRM proposal package', () => {
     expect(page).toContain("access_control: 'Access Control'");
     expect(page).toContain("bob_assistant: 'Bob Assistant'");
     expect(page).toContain('crm-proposal-module-register');
-    expect(page).toContain('Price with quote lines');
+    expect(page).toContain('Set charges from requirements');
+    expect(page).toContain('Service commitment');
+    expect(page).toContain('Work and charging');
+    expect(page).toContain('Scheduled patrol visits');
+    expect(page).toContain('Response target (minutes)');
+    expect(page).toContain("set_crm_quote_proposal_work_model");
   });
 });
