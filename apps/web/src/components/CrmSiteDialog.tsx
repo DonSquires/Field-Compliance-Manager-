@@ -32,17 +32,24 @@ export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolvedAddress, setResolvedAddress] = useState<AddressCandidate | null>(null);
+  const [resolvedGeometry, setResolvedGeometry] = useState<GeoJSON.GeoJsonObject | null>(null);
+  const [resolvedGeometrySource, setResolvedGeometrySource] = useState<'linz_parcel' | 'linz_building' | null>(null);
   const [resolvingAddress, setResolvingAddress] = useState(false);
   const requestId = useRef(crypto.randomUUID());
 
   const resolveAddress = async () => {
     if (address.trim().length < 4) return;
-    setResolvingAddress(true); setError(null); setResolvedAddress(null);
+    setResolvingAddress(true); setError(null); setResolvedAddress(null); setResolvedGeometry(null); setResolvedGeometrySource(null);
     try {
       const candidate = (await resolveAddressCandidates(address, 1))[0];
       if (!candidate) { setError('No canonical address match was found. Check the address and try again.'); return; }
       setResolvedAddress(candidate);
       setAddress(candidate.label);
+      const { data: boundaryData } = await supabase.functions.invoke<{ geometry?: GeoJSON.GeoJsonObject; kind?: 'parcel' | 'building' }>('linz-lookup', { body: { action: 'boundary_for_point_escalating', lat: candidate.lat, lng: candidate.lng } });
+      if (boundaryData?.geometry) {
+        setResolvedGeometry(boundaryData.geometry);
+        setResolvedGeometrySource(boundaryData.kind === 'building' ? 'linz_building' : 'linz_parcel');
+      }
     } catch { setError('Address resolution is unavailable. Check the address and try again.'); }
     finally { setResolvingAddress(false); }
   };
@@ -74,7 +81,13 @@ export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: 
     });
     const receipt = Array.isArray(data) ? data[0] : data;
     if (createError || !receipt) setError(createError?.message ?? 'Site creation receipt was not confirmed. Your entries remain available.');
-    else { requestId.current = crypto.randomUUID(); onCreated(receipt as SiteReceipt); }
+    else {
+      if (resolvedGeometry) {
+        const { error: boundaryError } = await supabase.rpc('manage_crm_place_boundary', { p_entity_type: 'client_site', p_entity_id: receipt.id, p_expected_version: 1, p_geojson: resolvedGeometry, p_source: resolvedGeometrySource ?? 'linz_parcel', p_verify: false });
+        if (boundaryError) setError(`Site created, but the LINZ lot outline could not be saved: ${boundaryError.message}`);
+      }
+      requestId.current = crypto.randomUUID(); onCreated(receipt as SiteReceipt);
+    }
     setSaving(false);
   };
 
@@ -91,7 +104,7 @@ export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: 
       <p>The site will start with a provisional, unverified boundary. Operations must review its geofence before activation.</p>
       <label><span>Site name</span><input required maxLength={200} value={name} onChange={(event) => setName(event.target.value)} /></label>
       <label><span>Street address</span><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input required maxLength={500} value={address} onChange={(event) => { setAddress(event.target.value); setResolvedAddress(null); }} /><button type="button" onClick={() => void resolveAddress()} disabled={resolvingAddress || address.trim().length < 4} style={{ minHeight: 34, padding: '0 10px', border: '1px solid #3e796e', borderRadius: 4, color: '#e6fff9', background: '#1b493f', fontSize: 9, fontWeight: 850, whiteSpace: 'nowrap' }}>{resolvingAddress ? 'Resolving' : 'Resolve address'}</button></div></label>
-      {resolvedAddress && <div className="crm-org-message is-success" role="status"><CheckCircle2 size={16} /><span>Canonical address ready: {resolvedAddress.label} · {resolvedAddress.source.replaceAll('_', ' ')}</span></div>}
+      {resolvedAddress && <div className="crm-org-message is-success" role="status"><CheckCircle2 size={16} /><span>Canonical address ready: {resolvedAddress.label} · {resolvedAddress.source.replaceAll('_', ' ')}{resolvedGeometry ? ` · ${resolvedGeometrySource === 'linz_building' ? 'LINZ building outline' : 'LINZ land-lot outline'} ready` : ' · point resolved; lot outline unavailable'}</span></div>}
       <label><span>Site type</span><select value={siteType} onChange={(event) => setSiteType(event.target.value)}><option value="commercial_premises">Commercial premises</option><option value="government_facility">Government facility</option><option value="education_facility">Education facility</option><option value="hospital">Hospital</option><option value="industrial_site">Industrial site</option><option value="residential_complex">Residential complex</option><option value="parking_area">Parking area</option><option value="public_space">Public space</option><option value="other">Other</option></select></label>
       <footer><button type="button" onClick={() => setStage('search')}>Back to matches</button><button type="submit" disabled={saving || resolvingAddress || !name.trim() || !resolvedAddress}>{saving ? 'Creating' : 'Create site for boundary review'}</button></footer>
     </form>}
