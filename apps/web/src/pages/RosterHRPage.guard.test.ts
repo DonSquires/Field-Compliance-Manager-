@@ -46,6 +46,14 @@ describe('governed HR administration', () => {
     expect(page).not.toContain(".from('staff_profiles').update");
   });
 
+  it('assigns staff payroll roles from active reference codes through the governed RPC', () => {
+    expect(page).toContain(".from('reference_codes')");
+    expect(page).toContain(".eq('code_type', 'role_code')");
+    expect(page).toContain("supabase.rpc('set_staff_pay_role_code'");
+    expect(page).toContain('Save payroll role');
+    expect(page).not.toContain(".from('staff_profiles').update");
+  });
+
   it('records credential renewals through a governed, race-checked RPC', () => {
     expect(page).toContain("supabase.rpc('renew_staff_credential'");
     expect(page).toContain('p_expected_expiry_date: credentialRenewal.source.expiry_date');

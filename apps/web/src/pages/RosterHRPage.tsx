@@ -27,7 +27,10 @@ interface StaffRow {
   start_date: string | null;
   end_date: string | null;
   work_ready: boolean | null;
+  role_code: string | null;
 }
+
+interface RoleCodeRow { code: string; name: string; }
 
 interface ReadinessAssessment { staff_id: string; user_id: string | null; work_ready: boolean; identity_status: string; employment_status: string; credential_status: string; training_status: string; blockers: string[]; }
 
@@ -247,6 +250,8 @@ const RosterHRPage: React.FC = () => {
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
   const [dispatchPayLines, setDispatchPayLines] = useState<DispatchPayLineRow[]>([]);
   const [payReviewFilter, setPayReviewFilter] = useState<'exceptions' | 'resolved' | 'all'>('exceptions');
+  const [roleCodes, setRoleCodes] = useState<RoleCodeRow[]>([]);
+  const [payRoleDrafts, setPayRoleDrafts] = useState<Record<string, string>>({});
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
     const [coverageWorkUnits,setCoverageWorkUnits]=useState<CoverageWorkUnit[]>([]);
@@ -297,7 +302,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
+      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -305,8 +310,16 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId),
           supabase
             .from('staff_profiles')
-            .select('id, user_id, employment_type, start_date, end_date, work_ready')
+            .select('id, user_id, employment_type, start_date, end_date, work_ready, role_code')
             .eq('organization_id', orgId),
+          supabase
+            .from('reference_codes')
+            .select('code, name')
+            .eq('organization_id', orgId)
+            .eq('code_type', 'role_code')
+            .eq('is_active', true)
+            .order('sort_order')
+            .order('code'),
           supabase
             .from('staff_credentials')
             .select('id, staff_id, credential_type, credential_number, issuing_authority, issued_date, expiry_date, verified')
@@ -356,6 +369,7 @@ const RosterHRPage: React.FC = () => {
 
       if (profilesRes.error) throw profilesRes.error;
       if (staffProfilesRes.error) throw staffProfilesRes.error;
+      if (roleCodesRes.error) throw roleCodesRes.error;
       if (credentialsRes.error) throw credentialsRes.error;
       if (templatesRes.error) throw templatesRes.error;
       if (leaveRes.error) throw leaveRes.error;
@@ -381,6 +395,7 @@ const RosterHRPage: React.FC = () => {
       setPerformanceCycles((cyclesRes.data as PerformanceCycle[]) ?? []);
       setPerformanceReviews((reviewsRes.data as PerformanceReview[]) ?? []);
       setHrCases((casesRes.data as HrCase[]) ?? []);
+      setRoleCodes((roleCodesRes.data as RoleCodeRow[]) ?? []);
 
       const staffProfileById = new Map((staffProfilesRes.data || []).map((s: any) => [s.user_id ?? s.id, s]));
       const merged: StaffRow[] = (profilesRes.data || []).map((p: any) => ({
@@ -394,6 +409,7 @@ const RosterHRPage: React.FC = () => {
         start_date: staffProfileById.get(p.id)?.start_date ?? null,
         end_date: staffProfileById.get(p.id)?.end_date ?? null,
         work_ready: staffProfileById.get(p.id)?.work_ready ?? null,
+        role_code: staffProfileById.get(p.id)?.role_code ?? null,
       }));
 
       const names: Record<string, string> = {};
@@ -456,6 +472,19 @@ const RosterHRPage: React.FC = () => {
     event.preventDefault();if (!readinessReview || !readinessNotes.trim()) return;setSaving(true);setError(null);setNotice(null);
     const { error: readinessError } = await supabase.rpc('set_staff_work_readiness', { p_staff_id: readinessReview.staffId, p_expected_work_ready: readinessReview.current, p_work_ready: readinessReview.next, p_review_notes: readinessNotes.trim() });
     if (readinessError) setError(readinessError.message);else { setNotice(`${readinessReview.name} readiness updated and audited.`);setReadinessReview(null);setReadinessNotes('');await loadAll(); }setSaving(false);
+  };
+
+  const saveStaffPayRole = async (person: StaffRow) => {
+    if (!person.staff_id) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: payRoleError } = await supabase.rpc('set_staff_pay_role_code', {
+      p_staff_id: person.staff_id,
+      p_expected_role_code: person.role_code,
+      p_role_code: (payRoleDrafts[person.id] ?? person.role_code ?? '').trim() || null,
+    });
+    if (payRoleError) setError(payRoleError.message);
+    else { setNotice(`Payroll role updated for ${person.display_name || person.email || 'staff member'}.`); await loadAll(); }
+    setSaving(false);
   };
 
   const handleCredentialRenewal = async (event: React.FormEvent) => {
@@ -773,6 +802,7 @@ const RosterHRPage: React.FC = () => {
                       {s.start_date ? ` · started ${new Date(s.start_date).toLocaleDateString()}` : ''}
                       {s.work_ready === false ? ' · NOT work ready' : ''}
                     </p>
+                    {s.staff_id && <div className="form-row" style={{ marginTop: '0.75rem' }}><label><span>Payroll role</span><select value={payRoleDrafts[s.id] ?? s.role_code ?? ''} onChange={(event) => setPayRoleDrafts((drafts) => ({ ...drafts, [s.id]: event.target.value }))}><option value="">No role code assigned</option>{roleCodes.map((code) => <option value={code.code} key={code.code}>{code.code} · {code.name}</option>)}</select></label><button type="button" className="btn btn-sm btn-secondary" disabled={saving || ((payRoleDrafts[s.id] ?? s.role_code ?? '') === (s.role_code ?? ''))} onClick={() => void saveStaffPayRole(s)}>Save payroll role</button></div>}
                     {s.staff_id && (() => { const assessment = readinessAssessments.find((item) => item.staff_id === s.staff_id); return assessment ? <div className="hr-readiness"><div><span>Identity</span><strong>{assessment.identity_status.replaceAll('_', ' ')}</strong></div><div><span>Employment</span><strong>{assessment.employment_status.replaceAll('_', ' ')}</strong></div><div><span>Credentials</span><strong>{assessment.credential_status.replaceAll('_', ' ')}</strong></div><div><span>Training advisory</span><strong>{assessment.training_status}</strong></div>{assessment.blockers.length > 0 && <p>{assessment.blockers.join(' · ')}</p>}<button type="button" className={`btn btn-sm ${assessment.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setReadinessNotes('');setReadinessReview({ staffId: assessment.staff_id, name: s.display_name || s.email || 'Staff member', current: assessment.work_ready, next: !assessment.work_ready }); }}>{assessment.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button></div> : null; })()}
                   </div>
                 </div>
