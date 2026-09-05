@@ -110,6 +110,15 @@ interface DispatchPayLineRow {
   created_at: string;
 }
 
+interface DispatchPayLineReviewRow {
+  id: string;
+  pay_line_id: string;
+  decision: 'approved' | 'rejected';
+  review_notes: string | null;
+  reviewed_at: string;
+  supersedes_review_id: string | null;
+}
+
 interface StaffOnboardingRow {
   ledger_id: string;
   staff_id: string;
@@ -249,6 +258,9 @@ const RosterHRPage: React.FC = () => {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
   const [dispatchPayLines, setDispatchPayLines] = useState<DispatchPayLineRow[]>([]);
+  const [dispatchPayLineReviews, setDispatchPayLineReviews] = useState<DispatchPayLineReviewRow[]>([]);
+  const [payReviewGovernanceAvailable, setPayReviewGovernanceAvailable] = useState(false);
+  const [payLineReview, setPayLineReview] = useState<{ line: DispatchPayLineRow; expectedReviewId: string | null; decision: 'approved' | 'rejected'; notes: string } | null>(null);
   const [payReviewFilter, setPayReviewFilter] = useState<'exceptions' | 'resolved' | 'all'>('exceptions');
   const [roleCodes, setRoleCodes] = useState<RoleCodeRow[]>([]);
   const [payRoleDrafts, setPayRoleDrafts] = useState<Record<string, string>>({});
@@ -302,7 +314,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
+      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, payLineReviewsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -347,6 +359,12 @@ const RosterHRPage: React.FC = () => {
             .order('created_at', { ascending: false })
             .limit(100),
           supabase
+            .from('dispatch_job_pay_line_reviews')
+            .select('id, pay_line_id, decision, review_notes, reviewed_at, supersedes_review_id')
+            .eq('organization_id', orgId)
+            .order('reviewed_at', { ascending: false })
+            .limit(200),
+          supabase
             .from('shift_coverage_requests')
             .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes, claimed_by, roster_slot_id, site:site_id(name)')
             .eq('organization_id', orgId)
@@ -375,6 +393,7 @@ const RosterHRPage: React.FC = () => {
       if (leaveRes.error) throw leaveRes.error;
       if (timesheetsRes.error) throw timesheetsRes.error;
       if (payLinesRes.error) throw payLinesRes.error;
+      if (payLineReviewsRes.error && payLineReviewsRes.error.code !== 'PGRST205') throw payLineReviewsRes.error;
       if (coverageRes.error) throw coverageRes.error;
       if (readinessRes.error) throw readinessRes.error;
   if(workUnitsRes.error)throw workUnitsRes.error;
@@ -426,6 +445,8 @@ const RosterHRPage: React.FC = () => {
       setLeaveRequests((leaveRes.data as LeaveRequestRow[]) || []);
       setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
       setDispatchPayLines((payLinesRes.data as DispatchPayLineRow[]) || []);
+      setDispatchPayLineReviews((payLineReviewsRes.data as DispatchPayLineReviewRow[]) || []);
+      setPayReviewGovernanceAvailable(!payLineReviewsRes.error);
       setCoverageRequests(
         ((coverageRes.data as any[]) || []).map((row) => ({
           id: row.id,
@@ -484,6 +505,23 @@ const RosterHRPage: React.FC = () => {
     });
     if (payRoleError) setError(payRoleError.message);
     else { setNotice(`Payroll role updated for ${person.display_name || person.email || 'staff member'}.`); await loadAll(); }
+    setSaving(false);
+  };
+
+  const submitPayLineReview = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!payLineReview) return;
+    if (payLineReview.decision === 'rejected' && !payLineReview.notes.trim()) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: reviewError } = await supabase.rpc('review_dispatch_job_pay_line', {
+      p_client_request_id: crypto.randomUUID(),
+      p_pay_line_id: payLineReview.line.id,
+      p_expected_review_id: payLineReview.expectedReviewId,
+      p_decision: payLineReview.decision,
+      p_review_notes: payLineReview.notes.trim() || null,
+    });
+    if (reviewError) setError(reviewError.message);
+    else { setNotice(`Pay evidence ${payLineReview.decision}.`); setPayLineReview(null); await loadAll(); }
     setSaving(false);
   };
 
@@ -1206,6 +1244,7 @@ const RosterHRPage: React.FC = () => {
         <section className="reports-section">
           <h2>Pay Review ({dispatchPayLines.length})</h2>
           <p className="subtitle">Generated pay evidence from completed dispatch work. Resolve exceptions before approving related timesheets for payroll export.</p>
+          {!payReviewGovernanceAvailable && <div className="alert alert-error" role="status">Pay-line decisions will be available after the pending finance-governance migration is deployed. Evidence remains read-only until then.</div>}
           <div className="metrics-grid" style={{ marginBottom: '1rem' }}>
             <div className="metric-card"><span>Total pay evidence</span><strong>NZ${dispatchPayLines.reduce((total, line) => total + Number(line.line_total || 0), 0).toFixed(2)}</strong></div>
             <div className="metric-card"><span>Unresolved</span><strong>{dispatchPayLines.filter((line) => line.pay_code === 'UNRESOLVED').length}</strong></div>
@@ -1224,12 +1263,13 @@ const RosterHRPage: React.FC = () => {
           </div>
           <div className="reports-table-wrapper">
             <table className="reports-table">
-              <thead><tr><th>Staff</th><th>Dispatch source</th><th>Pay item</th><th>Quantity</th><th>Rate</th><th>Total</th><th>Evidence state</th></tr></thead>
+              <thead><tr><th>Staff</th><th>Dispatch source</th><th>Pay item</th><th>Quantity</th><th>Rate</th><th>Total</th><th>Evidence state</th><th>Review</th></tr></thead>
               <tbody>
                 {dispatchPayLines.filter((line) => payReviewFilter === 'all' || (payReviewFilter === 'exceptions' ? line.pay_code === 'UNRESOLVED' : line.pay_code !== 'UNRESOLVED')).length === 0 ? (
-                  <tr><td colSpan={7} className="text-center">No {payReviewFilter === 'exceptions' ? 'unresolved' : payReviewFilter === 'resolved' ? 'rule-resolved' : 'completed-dispatch'} pay evidence.</td></tr>
+                  <tr><td colSpan={8} className="text-center">No {payReviewFilter === 'exceptions' ? 'unresolved' : payReviewFilter === 'resolved' ? 'rule-resolved' : 'completed-dispatch'} pay evidence.</td></tr>
                 ) : dispatchPayLines.filter((line) => payReviewFilter === 'all' || (payReviewFilter === 'exceptions' ? line.pay_code === 'UNRESOLVED' : line.pay_code !== 'UNRESOLVED')).map((line) => {
                   const unresolved = line.pay_code === 'UNRESOLVED';
+                  const latestReview = dispatchPayLineReviews.find((review) => review.pay_line_id === line.id);
                   return <tr key={line.id}>
                     <td>{line.officer_user_id ? staffNames[line.officer_user_id] ?? line.officer_user_id : 'Officer not resolved'}</td>
                     <td><code>{line.source_dispatch_id.slice(0, 8)}</code></td>
@@ -1238,6 +1278,7 @@ const RosterHRPage: React.FC = () => {
                     <td>NZ${Number(line.unit_rate).toFixed(2)}</td>
                     <td>NZ${Number(line.line_total).toFixed(2)}</td>
                     <td><span className={`status-badge ${unresolved ? 'status-rejected' : 'status-approved'}`}>{unresolved ? (line.description.replace('Unresolved: ', 'Needs review')) : 'Rule resolved'}</span>{line.distance_reason && <small> · {line.distance_reason.replaceAll('_', ' ')}</small>}</td>
+                    <td>{latestReview ? <><span className={`status-badge status-${latestReview.decision}`}>{latestReview.decision}</span>{latestReview.review_notes && <small> · {latestReview.review_notes}</small>}</> : <span className="status-badge status-pending">Pending</span>}{payReviewGovernanceAvailable && <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: '0.5rem' }} disabled={saving} onClick={() => setPayLineReview({ line, expectedReviewId: latestReview?.id ?? null, decision: unresolved ? 'rejected' : 'approved', notes: '' })}>{unresolved ? 'Reject for correction' : 'Review'}</button>}</td>
                   </tr>;
                 })}
               </tbody>
@@ -1245,6 +1286,7 @@ const RosterHRPage: React.FC = () => {
           </div>
         </section>
       )}
+      {payLineReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="pay-line-review-title" onSubmit={submitPayLineReview}><header><div><span>Payroll evidence</span><h2 id="pay-line-review-title">{payLineReview.decision === 'approved' ? 'Approve pay evidence' : 'Reject for correction'}</h2></div><button type="button" onClick={() => setPayLineReview(null)} aria-label="Close pay-line review">×</button></header><p>{payLineReview.line.pay_code ?? 'Base pay'} · NZ${Number(payLineReview.line.line_total).toFixed(2)} · dispatch {payLineReview.line.source_dispatch_id.slice(0, 8)}</p>{payLineReview.line.pay_code === 'UNRESOLVED' && <p>This evidence cannot be approved for payroll until the source work evidence or effective pay rule is corrected and recalculated.</p>}<label><span>Decision</span><select value={payLineReview.decision} disabled={payLineReview.line.pay_code === 'UNRESOLVED'} onChange={(event) => setPayLineReview({ ...payLineReview, decision: event.target.value as 'approved' | 'rejected' })}><option value="approved">Approve</option><option value="rejected">Reject for correction</option></select></label><label><span>Review notes</span><textarea rows={4} required={payLineReview.decision === 'rejected'} value={payLineReview.notes} onChange={(event) => setPayLineReview({ ...payLineReview, notes: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setPayLineReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (payLineReview.decision === 'rejected' && !payLineReview.notes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {tab === 'assets' && (
         <section className="reports-section">
           <h2>Fleet &amp; Equipment ({assets.length})</h2>
