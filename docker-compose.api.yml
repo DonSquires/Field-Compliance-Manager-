@@ -13,7 +13,7 @@ services:
       PORT: "3000"
       FCM_API_TOKEN: ${API_TOKEN:?set API_TOKEN}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -38,7 +38,7 @@ services:
       PORT: "3000"
       VEHICLE_ATTRS_PROVIDER: "basic"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
