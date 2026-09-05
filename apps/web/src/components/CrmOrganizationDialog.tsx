@@ -201,18 +201,18 @@ export function CrmOrganizationDialog({
         ) : stage === "search" ? (
           <form className="crm-org-search" onSubmit={searchCandidates}>
             <p>
-              Search before creating. Find organizations by name, address,
-              client ID, or contact person; close spellings are included to
-              prevent duplicate accounts and preserve relationship history.
+              Search FCM records by organization name or NZBN before creating.
+              For an organization not yet in FCM, use the Companies Register
+              lookup, then create a prospect with its verified identifiers.
             </p>
             <label>
-              <span>Organization, company number, address, client ID, or contact</span>
+              <span>Organization name</span>
               <div>
                 <Search size={16} />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="e.g. security, 100 Test Avenue, NCC200, Ari AAM"
+                  placeholder="e.g. security or nelson city council"
                 />
               </div>
             </label>
@@ -252,7 +252,7 @@ export function CrmOrganizationDialog({
                   <span>
                     {candidates.length
                       ? "Review these records before creating another."
-                      : "You can continue with a new prospect."}
+                      : "No matching FCM record. Search the Companies Register before creating a new prospect."}
                   </span>
                 </header>
                 {candidates.map((candidate) => (
