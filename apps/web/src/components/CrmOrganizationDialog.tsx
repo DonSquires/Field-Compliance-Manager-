@@ -188,16 +188,16 @@ export function CrmOrganizationDialog({
             <CheckCircle2 size={28} />
             <h3>{saved.name} is now a prospect</h3>
             <p>
-              The account is intentionally inactive. Add the primary contact
-              next; sites, agreement, modules, billing, and operations will
-              remain visible as readiness steps.
+              The account is intentionally inactive. Continue to Places to add
+              the first site or zone before agreements, modules, billing, and
+              operations.
             </p>
             <div>
               <button type="button" onClick={onClose}>
                 Back to CRM
               </button>
               <button type="button" onClick={() => onOpenAccount(saved)}>
-                Add primary contact
+                Continue to places
               </button>
             </div>
           </div>
@@ -287,7 +287,7 @@ export function CrmOrganizationDialog({
                         type="button"
                         onClick={() => onUseOrganization(candidate)}
                       >
-                        Use for proposal
+                        Open organization
                       </button>
                     )}
                   </article>
