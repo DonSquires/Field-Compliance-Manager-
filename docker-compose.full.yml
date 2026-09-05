@@ -9,7 +9,8 @@
 
 services:
   fcm-api:
-    image: registry.gitlab.com/don-squires1/field-compliance-manager/api:latest
+    build: ./services/fcm-api
+    image: fcm/fcm-api:local
     container_name: fcm-api
     restart: unless-stopped
     ports:
@@ -46,7 +47,8 @@ services:
       options: {max-size: "10m", max-file: "3"}
 
   fcm-inference:
-    image: registry.gitlab.com/don-squires1/field-compliance-manager/inference:latest
+    build: ./services/fcm-inference
+    image: fcm/fcm-inference:local
     container_name: fcm-inference
     restart: unless-stopped
     ports:
@@ -69,7 +71,8 @@ services:
 
   # fcm-voice — self-hosted STT (faster-whisper) + TTS (Piper) for "Hey Bob".
   fcm-voice:
-    image: registry.gitlab.com/don-squires1/field-compliance-manager/voice:latest
+    build: ./services/fcm-voice
+    image: fcm/fcm-voice:local
     container_name: fcm-voice
     restart: unless-stopped
     ports:
@@ -99,7 +102,8 @@ services:
   # bob-plan-step-advance edge function (service-role auth). Mirrors fcm-api's
   # block exactly (health check, restart policy, env_file, logging).
   fcm-planner:
-    image: registry.gitlab.com/don-squires1/field-compliance-manager/planner:latest
+    build: ./services/fcm-planner
+    image: fcm/fcm-planner:local
     container_name: fcm-planner
     restart: unless-stopped
     ports:
@@ -154,7 +158,8 @@ services:
       options: {max-size: "5m", max-file: "2"}
 
   fcm-solver:
-    image: registry.gitlab.com/don-squires1/field-compliance-manager/solver:latest
+    build: ./services/fcm-solver
+    image: fcm/fcm-solver:local
     container_name: fcm-solver
     restart: unless-stopped
     expose: ["5001"]
