@@ -90,7 +90,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate }: { account:
       supabase.from('crm_contacts').select('id,first_name,last_name,role_title,email,phone,mobile,is_primary,is_emergency,notes,updated_at,deactivated_at').eq('organization_id', account.id).is('deactivated_at', null).order('is_primary', { ascending: false }).order('last_name'),
       supabase.from('crm_account_activities').select('id,activity_type,subject,details,outcome,occurred_at,follow_up_at,created_at,completed_at,completed_by,completion_notes').eq('account_organization_id', account.id).order('occurred_at', { ascending: false }).limit(50),
       supabase.from('service_agreements').select('id,name,agreement_type,invitation_status,provider_organization_id,client_organization_id').or(`client_organization_id.eq.${account.id},provider_organization_id.eq.${account.id}`),
-      supabase.from('client_sites').select('id,name,address,site_type,active,location_id').eq('organization_id', account.id).order('name'),
+      supabase.from('client_sites').select('id,name,address,site_type,active,location_id').eq('client_organization_id', account.id).order('name'),
       supabase.from('monthly_report_packs').select('id,template_code,period_start,period_end,status').eq('organization_id', account.id).order('period_start', { ascending: false }).limit(24),
       supabase.from('quotes').select('id,title,status,total_charge,created_at').eq('client_org_id', account.id).order('created_at', { ascending: false }).limit(24),
       supabase.from('invoices').select('id,invoice_number,status,total_amount,due_date').eq('client_organization_id', account.id).order('due_date', { ascending: false }).limit(24),

@@ -8,6 +8,7 @@ describe('governed CRM accounts', () => {
   it('loads account context in batches including real primary contacts', () => {
     expect(page).toMatch(/\.from\(["']crm_contacts["']\)/);
     expect(page).toMatch(/\.from\(["']client_sites["']\)/);
+    expect(page).toContain(".in('client_organization_id', accountIds)");
     expect(page).toMatch(/\.from\(["']quotes["']\)/);
     expect(page).not.toContain('for (const acct of (accounts ?? []))');
     expect(page).not.toContain('primary_contact_name: null');

@@ -203,8 +203,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         ? await Promise.all([
             supabase
               .from('client_sites')
-              .select('id,name,organization_id')
-              .in('organization_id', accountIds),
+              .select('id,name,client_organization_id')
+              .in('client_organization_id', accountIds),
             supabase
               .from('crm_contacts')
               .select('organization_id,first_name,last_name,is_primary')
@@ -232,8 +232,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       const siteCounts = new Map<string, number>();
       for (const site of sitesRes.data ?? [])
         siteCounts.set(
-          site.organization_id,
-          (siteCounts.get(site.organization_id) ?? 0) + 1,
+          site.client_organization_id,
+          (siteCounts.get(site.client_organization_id) ?? 0) + 1,
         );
       const primaryContacts = new Map(
         (contactsRes.data ?? []).map((contact) => [
