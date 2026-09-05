@@ -97,6 +97,26 @@ interface InvoiceReadiness {
   paymentTermsDays: number | null;
 }
 
+interface ModuleCatalogRow { module_key: string; billing_period: string; }
+interface ProviderBillingRateRule {
+  id: string;
+  name: string;
+  rate_type: string;
+  amount: number;
+  module_key: string | null;
+}
+interface ProposalModuleDraft {
+  moduleKey: string;
+  slaMinutes: string;
+  pricingBasis: 'quote_lines' | 'standard_rate_rule' | 'site_override_pending';
+  rateRuleId: string;
+  activeDays: string[];
+  startTime: string;
+  endTime: string;
+}
+interface ProposalScopePlace { id: string; name: string; kind: 'Site' | 'Zone'; }
+interface ProposalServiceScope { id: string; module_key: string; site_id: string | null; zone_id: string | null; }
+
 interface CrmState {
   ownOrg: Organization | null;
   clients: AccountRow[];
@@ -130,6 +150,13 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     validUntil: '',
     notes: '',
   });
+  const [proposalModules, setProposalModules] = useState<ProposalModuleDraft[]>([]);
+  const [moduleCatalog, setModuleCatalog] = useState<ModuleCatalogRow[]>([]);
+  const [providerBillingRules, setProviderBillingRules] = useState<ProviderBillingRateRule[]>([]);
+  const [quotedModuleKeys, setQuotedModuleKeys] = useState<string[]>([]);
+  const [proposalScopePlaces, setProposalScopePlaces] = useState<ProposalScopePlace[]>([]);
+  const [proposalServiceScopes, setProposalServiceScopes] = useState<ProposalServiceScope[]>([]);
+  const [proposalScopeForm, setProposalScopeForm] = useState({ moduleKey: '', placeId: '' });
   const [quoteSaving, setQuoteSaving] = useState(false);
   const [pricingQuote, setPricingQuote] = useState<PricingQuote | null>(null);
   const [lineForm, setLineForm] = useState({
@@ -199,7 +226,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       if (acctErr) throw acctErr;
 
       const accountIds = (accounts ?? []).map((account) => account.id);
-      const [sitesRes, contactsRes, quotesRes, readinessRes] = accountIds.length
+      const [sitesRes, contactsRes, quotesRes, readinessRes, moduleCatalogRes, billingRulesRes] = accountIds.length
         ? await Promise.all([
             supabase
               .from('client_sites')
@@ -217,18 +244,26 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               .in('client_org_id', accountIds)
               .order('created_at', { ascending: false }),
             supabase.rpc('get_crm_organization_readiness', { p_organization_ids: accountIds }),
+            supabase.from('module_catalog').select('module_key,billing_period').eq('active', true).order('module_key'),
+            supabase.from('rate_rules').select('id,name,rate_type,amount,module_key').eq('organization_id', orgId).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
           ])
         : [
             { data: [], error: null },
             { data: [], error: null },
             { data: [], error: null },
             { data: [], error: null },
+            await supabase.from('module_catalog').select('module_key,billing_period').eq('active', true).order('module_key'),
+            await supabase.from('rate_rules').select('id,name,rate_type,amount,module_key').eq('organization_id', orgId).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
           ];
       if (sitesRes.error) throw sitesRes.error;
       if (contactsRes.error) throw contactsRes.error;
       if (quotesRes.error) throw quotesRes.error;
       if (readinessRes.error) throw readinessRes.error;
+      if (moduleCatalogRes.error) throw moduleCatalogRes.error;
+      if (billingRulesRes.error) throw billingRulesRes.error;
       const readiness = new Map(((readinessRes.data as Array<{ organization_id: string; blockers: string[]; next_action: string }>) ?? []).map((row) => [row.organization_id, row]));
+      setModuleCatalog((moduleCatalogRes.data as ModuleCatalogRow[]) ?? []);
+      setProviderBillingRules((billingRulesRes.data as ProviderBillingRateRule[]) ?? []);
       const siteCounts = new Map<string, number>();
       for (const site of sitesRes.data ?? [])
         siteCounts.set(
@@ -343,10 +378,54 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setQuoteLines((data as any) ?? []);
   }, []);
 
+  const loadProposalServiceScopes = useCallback(async (quote: PricingQuote) => {
+    const [moduleResponse, scopeResponse, siteResponse, zoneResponse] = await Promise.all([
+      supabase.from('quote_proposal_modules').select('module_key').eq('quote_id', quote.id),
+      supabase.from('quote_proposal_service_scopes').select('id,module_key,site_id,zone_id').eq('quote_id', quote.id),
+      supabase.from('client_sites').select('id,name').eq('client_organization_id', quote.client.id).eq('active', true).order('name'),
+      supabase.from('location_zones').select('id,name').eq('organization_id', quote.client.id).eq('is_active', true).order('name'),
+    ]);
+    const loadError = moduleResponse.error ?? scopeResponse.error ?? siteResponse.error ?? zoneResponse.error;
+    if (loadError) { setState((current) => ({ ...current, error: loadError.message })); return; }
+    const moduleKeys = ((moduleResponse.data as Array<{ module_key: string }>) ?? []).map((module) => module.module_key);
+    const places: ProposalScopePlace[] = [
+      ...((siteResponse.data as Array<{ id: string; name: string }>) ?? []).map((site) => ({ ...site, kind: 'Site' as const })),
+      ...((zoneResponse.data as Array<{ id: string; name: string }>) ?? []).map((zone) => ({ ...zone, kind: 'Zone' as const })),
+    ];
+    setQuotedModuleKeys(moduleKeys);
+    setProposalServiceScopes((scopeResponse.data as ProposalServiceScope[]) ?? []);
+    setProposalScopePlaces(places);
+    setProposalScopeForm((current) => ({
+      moduleKey: moduleKeys.includes(current.moduleKey) ? current.moduleKey : (moduleKeys[0] ?? ''),
+      placeId: places.some((place) => place.id === current.placeId) ? current.placeId : (places[0]?.id ?? ''),
+    }));
+  }, []);
+
   useEffect(() => {
-    if (pricingQuote) void loadQuoteLines(pricingQuote.id);
-    else setQuoteLines([]);
-  }, [pricingQuote, loadQuoteLines]);
+    if (pricingQuote) {
+      void loadQuoteLines(pricingQuote.id);
+      void loadProposalServiceScopes(pricingQuote);
+    } else {
+      setQuoteLines([]);
+      setProposalServiceScopes([]);
+      setProposalScopePlaces([]);
+    }
+  }, [pricingQuote, loadProposalServiceScopes, loadQuoteLines]);
+
+  const addProposalServiceScope = async () => {
+    if (!pricingQuote || !proposalScopeForm.moduleKey || !proposalScopeForm.placeId) return;
+    const place = proposalScopePlaces.find((candidate) => candidate.id === proposalScopeForm.placeId);
+    if (!place) return;
+    setQuoteSaving(true); setState((current) => ({ ...current, error: null }));
+    const { error } = await supabase.rpc('manage_crm_quote_proposal_service_scope', {
+      p_client_request_id: crypto.randomUUID(), p_quote_id: pricingQuote.id, p_action: 'set',
+      p_module_key: proposalScopeForm.moduleKey, p_site_id: place.kind === 'Site' ? place.id : null,
+      p_zone_id: place.kind === 'Zone' ? place.id : null,
+    });
+    if (error) setState((current) => ({ ...current, error: error.message }));
+    else { setNotice(`${proposalScopeForm.moduleKey} is now proposed for ${place.name}.`); await loadProposalServiceScopes(pricingQuote); }
+    setQuoteSaving(false);
+  };
 
   const removeQuoteLine = async (lineId: string) => {
     if (!pricingQuote) return;
@@ -426,6 +505,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     validUntil.setDate(validUntil.getDate() + 30);
     quoteRequestId.current = crypto.randomUUID();
     setQuoteClient(client);
+    setProposalModules([]);
+    setQuotedModuleKeys([]);
     setQuoteForm({
       title: `${client.name} service proposal`,
       targetMargin: '20',
@@ -458,6 +539,31 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       setNotice(
         `Draft quote created for ${quoteClient.name}. Add explicit pricing lines before review.`,
       );
+      for (const module of proposalModules) {
+        const { error: moduleError } = await supabase.rpc(
+          'manage_crm_quote_proposal_module',
+          {
+            p_client_request_id: crypto.randomUUID(),
+            p_quote_id: quote.id,
+            p_action: 'set',
+            p_module_key: module.moduleKey,
+            p_sla_minutes: module.slaMinutes ? Number(module.slaMinutes) : null,
+            p_service_window: {
+              active_days: module.activeDays,
+              start_time: module.startTime || null,
+              end_time: module.endTime || null,
+            },
+            p_pricing_basis: module.pricingBasis,
+            p_rate_rule_id: module.rateRuleId || null,
+          },
+        );
+        if (moduleError) {
+          setState((current) => ({ ...current, error: moduleError.message }));
+          setQuoteSaving(false);
+          return;
+        }
+      }
+      setQuotedModuleKeys(proposalModules.map((module) => module.moduleKey));
       setPricingQuote({ ...quote, client: quoteClient });
       setLineForm({
         kind: 'labour',
@@ -465,7 +571,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         quantity: '1',
         unitCost: '',
         unitCharge: '',
-        moduleKey: '',
+        moduleKey: proposalModules[0]?.moduleKey ?? '',
         siteId: quoteClient.sites[0]?.id ?? '',
       });
       setPricingReceipt(null);
@@ -588,6 +694,12 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             </span>
           </div>
         )}
+        {pricingQuote.status === 'draft' && <section className="crm-quote-package" aria-labelledby="proposal-scope-title">
+          <div><span>Service activation</span><h3 id="proposal-scope-title">Module coverage</h3></div>
+          <p>Coverage becomes an active agreement location and service only after the quote is accepted. Roster work units and shifts are configured separately.</p>
+          {proposalServiceScopes.length > 0 && <div className="crm-account-register" role="table" aria-label="Proposed module coverage"><div className="crm-account-register-row is-header" role="row"><span>Module</span><span>Place</span><span>Facet</span></div>{proposalServiceScopes.map((scope) => { const place = proposalScopePlaces.find((candidate) => candidate.id === (scope.site_id ?? scope.zone_id)); return <div key={scope.id} className="crm-account-register-row" role="row"><strong>{scope.module_key}</strong><span>{place?.name ?? 'Authorized place'}</span><span>{scope.site_id ? 'Site' : 'Zone'}</span></div>; })}</div>}
+          {quotedModuleKeys.length === 0 ? <p>No quoted modules are available for coverage.</p> : proposalScopePlaces.length === 0 ? <p>No visible active Sites or Zones are available. Complete client place onboarding before assigning operational coverage.</p> : <div className="crm-form-grid"><label><span>Quoted module</span><select value={proposalScopeForm.moduleKey} onChange={(event) => setProposalScopeForm({ ...proposalScopeForm, moduleKey: event.target.value })}>{quotedModuleKeys.map((moduleKey) => <option key={moduleKey} value={moduleKey}>{moduleKey}</option>)}</select></label><label><span>Client facet</span><select value={proposalScopeForm.placeId} onChange={(event) => setProposalScopeForm({ ...proposalScopeForm, placeId: event.target.value })}>{proposalScopePlaces.map((place) => <option key={place.id} value={place.id}>{place.kind}: {place.name}</option>)}</select></label><button type="button" className="btn btn-secondary" disabled={quoteSaving} onClick={() => void addProposalServiceScope()}>Add coverage</button></div>}
+        </section>}
         {quoteLines.length > 0 && (
           <div className="crm-quote-lines-list" style={{ marginBottom: '1rem', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '6px', padding: '0.5rem' }}>
             <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Existing quote lines ({quoteLines.length}):</strong>
@@ -926,8 +1038,9 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               </button>
             </header>
             <p>
-              Create the governed quote shell first. Labour, travel, module, and
-              platform-fee lines remain explicit follow-up pricing work.
+              Define the service package first. Labour, travel, and other
+              commercial charges remain explicit pricing lines after the draft
+              is created.
             </p>
             <label>
               <span>Quote title</span>
@@ -981,6 +1094,48 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                 }
               />
             </label>
+            <section className="crm-quote-package" aria-labelledby="proposal-package-title">
+              <div>
+                <span>Contract package</span>
+                <h3 id="proposal-package-title">Quoted modules</h3>
+              </div>
+              {moduleCatalog.length === 0 ? (
+                <p>No active modules are available to quote.</p>
+              ) : (
+                <div className="crm-account-register" role="table" aria-label="Quoted modules">
+                  <div className="crm-account-register-row is-header" role="row">
+                    <span>Include</span>
+                    <span>Module</span>
+                    <span>Service level</span>
+                    <span>Pricing basis</span>
+                  </div>
+                  {moduleCatalog.map((module) => {
+                    const proposalModule = proposalModules.find((item) => item.moduleKey === module.module_key);
+                    return (
+                      <div key={module.module_key} className="crm-account-register-row" role="row">
+                        <span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(proposalModule)}
+                            onChange={() => setProposalModules((current) => proposalModule
+                              ? current.filter((item) => item.moduleKey !== module.module_key)
+                              : [...current, { moduleKey: module.module_key, slaMinutes: '', pricingBasis: 'quote_lines', rateRuleId: '', activeDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], startTime: '', endTime: '' }])}
+                            aria-label={`Include ${module.module_key}`}
+                          />
+                        </span>
+                        <strong>{module.module_key} ({module.billing_period})</strong>
+                        <span>
+                          {proposalModule ? <div className="crm-proposal-service-window"><input type="number" min="1" max="10080" placeholder="Optional SLA minutes" value={proposalModule.slaMinutes} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, slaMinutes: event.target.value } : item))} aria-label={`${module.module_key} SLA minutes`} /><div><input type="time" value={proposalModule.startTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, startTime: event.target.value } : item))} aria-label={`${module.module_key} service start time`} /><input type="time" value={proposalModule.endTime} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, endTime: event.target.value } : item))} aria-label={`${module.module_key} service end time`} /></div><div>{['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => <label key={day}><input type="checkbox" checked={proposalModule.activeDays.includes(day)} onChange={() => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, activeDays: item.activeDays.includes(day) ? item.activeDays.filter((activeDay) => activeDay !== day) : [...item.activeDays, day] } : item))} />{day.slice(0, 1).toUpperCase()}</label>)}</div></div> : 'Not included'}
+                        </span>
+                        <span>
+                          {proposalModule ? <><select value={proposalModule.pricingBasis} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, pricingBasis: event.target.value as ProposalModuleDraft['pricingBasis'], rateRuleId: event.target.value === 'standard_rate_rule' ? item.rateRuleId : '' } : item))} aria-label={`${module.module_key} pricing basis`}><option value="quote_lines">Quoted line items</option><option value="standard_rate_rule">Provider rate rule</option><option value="site_override_pending">Site rate to confirm</option></select>{proposalModule.pricingBasis === 'standard_rate_rule' && <select required value={proposalModule.rateRuleId} onChange={(event) => setProposalModules((current) => current.map((item) => item.moduleKey === module.module_key ? { ...item, rateRuleId: event.target.value } : item))} aria-label={`${module.module_key} provider rate rule`}><option value="">Select provider rate</option>{providerBillingRules.filter((rule) => rule.module_key === null || rule.module_key === module.module_key).map((rule) => <option key={rule.id} value={rule.id}>{rule.name} ({rule.rate_type}, ${Number(rule.amount).toFixed(2)})</option>)}</select>}</> : 'Not included'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
             <footer>
               <button
                 type="button"
@@ -992,7 +1147,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={quoteSaving || !quoteForm.title.trim()}
+                disabled={quoteSaving || !quoteForm.title.trim() || proposalModules.length === 0 || proposalModules.some((module) => module.pricingBasis === 'standard_rate_rule' && !module.rateRuleId)}
               >
                 {quoteSaving ? 'Creating' : 'Create draft quote'}
               </button>

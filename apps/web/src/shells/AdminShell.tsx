@@ -66,6 +66,7 @@ const RelationshipWorkspacePage = React.lazy(() => import('../pages/Relationship
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
 const RateRulesPage = React.lazy(() => import('../pages/RateRulesPage'));
+const FinanceBureauPage = React.lazy(() => import('../pages/FinanceBureauPage'));
 const RosterTargetsPage = React.lazy(() => import('../pages/RosterTargetsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
 const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryReviewPage'));
@@ -96,7 +97,7 @@ const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOv
 const DebriefFollowupPage = React.lazy(() => import('../pages/DebriefFollowupPage'));
 
 type AdminPage =
-  | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -159,6 +160,7 @@ const NAVIGATION_MAP = {
     { id: 'onboarding', label: 'Account Onboarding', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Activation Handoffs', icon: ClipboardCheck },
     { id: 'rate-rules', label: 'Rate Rules', icon: DollarSign },
+    { id: 'finance-bureau', label: 'Finance Bureau', icon: DollarSign },
     { id: 'roster', label: 'Roster & HR', icon: Users },
     { id: 'people-hr', label: 'People & HR', icon: Users },
     { id: 'roster-targets', label: 'Work Units', icon: Route },
@@ -455,6 +457,8 @@ const AdminShell: React.FC = () => {
         return <RosterOperationsPage />;
       case 'rate-rules':
         return <RateRulesPage />;
+      case 'finance-bureau':
+        return <FinanceBureauPage />;
       case 'people-hr':
         return <RosterHRPage />;
       case 'roster-targets':
