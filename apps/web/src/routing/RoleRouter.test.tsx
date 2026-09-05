@@ -45,11 +45,14 @@ describe('RoleRouter', () => {
   it('renders the admin shell for admin roles', () => {
     render(
       <AuthContext.Provider value={{
-        profile: { id: 'u1', role: 'admin', organizationId: 'org-1', displayName: 'Admin User' },
+        profile: { id: 'u1', role: 'admin', organizationId: 'org-1', employerOrganizationId: 'org-1', displayName: 'Admin User' },
         hasSession: true,
         recoveryMode: false,
         loading: false,
         error: null,
+        operatingOrganizationId: null,
+        operatingOrganizations: [],
+        setOperatingOrganization: () => undefined,
         signInWithPassword: async () => ({ error: null }),
         requestPasswordReset: async () => ({ error: null }),
         updatePassword: async () => ({ error: null }),
@@ -68,11 +71,14 @@ describe('RoleRouter', () => {
   it('renders the officer shell for officer roles', () => {
     render(
       <AuthContext.Provider value={{
-        profile: { id: 'u2', role: 'officer', organizationId: 'org-1', displayName: 'Officer User' },
+        profile: { id: 'u2', role: 'officer', organizationId: 'org-1', employerOrganizationId: 'org-1', displayName: 'Officer User' },
         hasSession: true,
         recoveryMode: false,
         loading: false,
         error: null,
+        operatingOrganizationId: null,
+        operatingOrganizations: [],
+        setOperatingOrganization: () => undefined,
         signInWithPassword: async () => ({ error: null }),
         requestPasswordReset: async () => ({ error: null }),
         updatePassword: async () => ({ error: null }),

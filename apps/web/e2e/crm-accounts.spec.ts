@@ -3,6 +3,18 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('operating branch selector is visible and switches the session context', async ({ page }) => {
+  const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
+  const selector = page.getByLabel('Operating branch');
+  await expect(selector).toHaveValue('41414141-4141-4141-8141-414141414141');
+  await expect(selector.locator('option').nth(0)).toContainText('Northern Branch');
+  await expect(selector.locator('option').nth(1)).toContainText('Southern Branch');
+  await expect(page.locator('.admin-shell-header, .admin-mobile-header')).toHaveScreenshot('operating-branch-selector.png');
+  await selector.selectOption('45454545-4545-4545-8545-454545454545');
+  await expect(selector).toHaveValue('45454545-4545-4545-8545-454545454545');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('CRM account context and governed quote creation are operational', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
   await expect(page.getByRole('heading', { name: 'CRM & Finance', exact: true })).toBeVisible();

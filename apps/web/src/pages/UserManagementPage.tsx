@@ -30,7 +30,7 @@ type StatusFilter = 'all' | 'active' | 'deactivated';
 type LifecycleAction = 'deactivate' | 'reactivate';
 
 const UserManagementPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizations } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +49,7 @@ const UserManagementPage: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
 
   const assignableRoles = useMemo(() => getAssignableRoles(profile?.role ?? 'unknown'), [profile?.role]);
+  const directInviteRoles = useMemo(() => assignableRoles.filter((role) => !['officer', 'admin_officer'].includes(role)), [assignableRoles]);
 
   const loadIdentity = useCallback(async () => {
     if (!profile?.organizationId) return;
@@ -102,7 +103,7 @@ const UserManagementPage: React.FC = () => {
 
   const inviteUser = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!profile?.organizationId || !assignableRoles.includes(inviteForm.role)) return;
+    if (!profile?.organizationId || !directInviteRoles.includes(inviteForm.role)) return;
     setBusyId('invite');
     setError(null);
     setNotice(null);
@@ -119,7 +120,7 @@ const UserManagementPage: React.FC = () => {
       });
       if (invokeError) throw invokeError;
       setNotice(`Invitation sent to ${inviteForm.email.trim()}.`);
-      setInviteForm({ email: '', displayName: '', role: assignableRoles.includes('officer') ? 'officer' : assignableRoles[0], employmentType: 'permanent', presetKey: '' });
+      setInviteForm({ email: '', displayName: '', role: directInviteRoles[0] ?? 'client_viewer', employmentType: 'permanent', presetKey: '' });
       setShowInvite(false);
       await loadIdentity();
     } catch (inviteError) {
@@ -197,11 +198,10 @@ const UserManagementPage: React.FC = () => {
           <div className="identity-form-grid">
             <label><span>Display name</span><input required value={inviteForm.displayName} onChange={(event) => setInviteForm((form) => ({ ...form, displayName: event.target.value }))} /></label>
             <label><span>Email address</span><input type="email" required value={inviteForm.email} onChange={(event) => setInviteForm((form) => ({ ...form, email: event.target.value }))} /></label>
-            <label><span>Role</span><select value={inviteForm.role} onChange={(event) => setInviteForm((form) => ({ ...form, role: event.target.value as AppRole }))}>{assignableRoles.map((role) => <option value={role} key={role}>{IDENTITY_ROLE_LABEL[role]}</option>)}</select></label>
-            {['officer', 'admin_officer'].includes(inviteForm.role) && <label><span>Employment type</span><select value={inviteForm.employmentType} onChange={(event) => setInviteForm((form) => ({ ...form, employmentType: event.target.value }))}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option></select></label>}
+            <label><span>Role</span><select value={inviteForm.role} onChange={(event) => setInviteForm((form) => ({ ...form, role: event.target.value as AppRole }))}>{directInviteRoles.map((role) => <option value={role} key={role}>{IDENTITY_ROLE_LABEL[role]}</option>)}</select></label>
             {['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) && <label><span>Access preset</span><select value={inviteForm.presetKey} onChange={(event) => setInviteForm((form) => ({ ...form, presetKey: event.target.value }))}><option value="">Assign after invitation</option>{presets.map((preset) => <option value={preset.key} key={preset.id}>{preset.name}</option>)}</select></label>}
           </div>
-          <div className="identity-form-footer"><span>Only roles at or below your authority level are available.</span><button type="submit" disabled={busyId === 'invite'}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : <MailPlus size={16} />}{busyId === 'invite' ? 'Sending' : 'Send invitation'}</button></div>
+          <div className="identity-form-footer"><span>Field staff are provisioned through Recruitment after offer acceptance.</span><button type="submit" disabled={busyId === 'invite'}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : <MailPlus size={16} />}{busyId === 'invite' ? 'Sending' : 'Send invitation'}</button></div>
         </form>
       )}
 
@@ -254,7 +254,7 @@ const UserManagementPage: React.FC = () => {
           </form>
         </div>
       )}
-      {selectedUser && <UserIdentityWorkspace user={selectedUser as ManagedUserIdentity} callerRole={profile?.role ?? 'unknown'} presets={presets} assignment={assignments.find((assignment) => assignment.user_id === selectedUser.id) ?? null} readiness={readiness.find((row) => row.user_id === selectedUser.id) ?? null} onClose={() => setSelectedUser(null)} onChanged={async () => { await loadIdentity(); }} />}
+      {selectedUser && <UserIdentityWorkspace user={selectedUser as ManagedUserIdentity} callerRole={profile?.role ?? 'unknown'} presets={presets} assignment={assignments.find((assignment) => assignment.user_id === selectedUser.id) ?? null} readiness={readiness.find((row) => row.user_id === selectedUser.id) ?? null} branches={operatingOrganizations} onClose={() => setSelectedUser(null)} onChanged={async () => { await loadIdentity(); }} />}
     </div>
   );
 };

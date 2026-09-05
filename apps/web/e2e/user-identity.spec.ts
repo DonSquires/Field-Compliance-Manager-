@@ -17,6 +17,14 @@ test('administrator manages identity and access preset', async ({ page }) => {
   await expect(workspace.getByText('Verify credential')).toBeVisible();
   await expect(workspace.getByText('missing_valid')).toBeVisible();
 
+  await workspace.getByRole('button', { name: 'Grant branch access' }).click();
+  await workspace.getByLabel('Delivery branch').selectOption('45454545-4545-4545-8545-454545454545');
+  await workspace.getByLabel('Role at branch').selectOption('supervisor');
+  await workspace.getByLabel('Patrol').check();
+  await workspace.getByLabel('Reason for change').last().fill('Jordan now supervises the southern response team.');
+  await workspace.getByRole('button', { name: 'Grant access' }).click();
+  await expect(workspace.getByText('Southern Branch', { exact: true })).toBeVisible();
+
   await workspace.getByLabel('Role').selectOption('admin_officer');
   await workspace.getByLabel('Phone').fill('021 555 0199');
   await workspace.getByLabel('Reason for change').fill('Jordan is taking the duty administration rotation.');
@@ -34,7 +42,7 @@ test('administrator manages identity and access preset', async ({ page }) => {
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
-test('administrator sends an employment-aware officer invitation', async ({ page }) => {
+test('administrator sends a non-field identity invitation', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/users');
   await page.getByRole('button', { name: 'Invite user' }).click();
@@ -42,9 +50,8 @@ test('administrator sends an employment-aware officer invitation', async ({ page
   await expect(invite.getByRole('heading', { name: 'Invite a user' })).toBeVisible();
   await invite.getByLabel('Display name').fill('Tama Ropata');
   await invite.getByLabel('Email address').fill('tama@fcm.test');
-  await invite.getByLabel('Role').selectOption('officer');
-  await expect(invite.getByLabel('Employment type')).toBeVisible();
-  await invite.getByLabel('Employment type').selectOption('casual');
+  await invite.getByLabel('Role').selectOption('client_viewer');
+  await expect(invite.getByText('Field staff are provisioned through Recruitment after offer acceptance.')).toBeVisible();
   await invite.getByRole('button', { name: 'Send invitation' }).click();
   await expect(page.getByRole('status')).toContainText('Invitation sent to tama@fcm.test');
   await expect(page.getByText('Tama Ropata', { exact: true })).toBeVisible();

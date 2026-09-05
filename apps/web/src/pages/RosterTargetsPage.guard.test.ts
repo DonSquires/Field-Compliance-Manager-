@@ -12,9 +12,10 @@ describe('roster target catalog', () => {
     for (const table of ['roster_work_units', 'patrol_routes', 'service_agreement_locations', 'service_agreement_modules', 'organization_workplaces', 'teams', 'cost_centres']) expect(page).toContain(`from('${table}')`);
   });
   it('uses governed RPCs and explains attribution by type', () => {
-    expect(page).toContain("supabase.rpc('create_roster_work_unit'");
-    expect(page).toContain("'create_organization_workplace'");
-    expect(page).toContain("'create_cost_centre'");
+    expect(page).toContain("supabase.rpc('create_operating_roster_work_unit'");
+    expect(page).toContain("'create_operating_organization_workplace'");
+    expect(page).toContain("'create_operating_cost_centre'");
+    expect(page).toContain('p_operating_organization_id: operatingOrganizationId');
     expect(page).toContain('Client and contract attribution remains at each generated stop-module attendance.');
     expect(page).toContain('Internal work is provider-owned and never linked to a client agreement.');
   });

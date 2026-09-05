@@ -219,8 +219,9 @@ const LazyPageFallback: React.FC = () => (
 const AdminShell: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, signOut } = useAuth();
-  const { status: modulesStatus } = useEnabledModules(profile?.organizationId ?? null);
+  const { profile, signOut, operatingOrganizationId, operatingOrganizations, setOperatingOrganization } = useAuth();
+  const activeOrganizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  const { status: modulesStatus } = useEnabledModules(activeOrganizationId);
   const { agreements, sites, zones, selectedAgreement, selectedSite, selectedZone, loading: relationshipLoading } = useServiceRelationships();
 
   const [activePage, setActivePage] = useState<AdminPage>('hub');
@@ -285,7 +286,7 @@ const AdminShell: React.FC = () => {
         const { data, error } = await supabase
           .from('organizations')
           .select('name')
-          .eq('id', profile.organizationId)
+          .eq('id', activeOrganizationId)
           .single();
 
         if (!error && data) {
@@ -297,7 +298,7 @@ const AdminShell: React.FC = () => {
     };
 
     loadOrgName();
-  }, [profile?.organizationId]);
+  }, [activeOrganizationId]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -520,6 +521,7 @@ const AdminShell: React.FC = () => {
               )}
             </div>
             <div className="admin-shell-tools">
+              {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'corporate_oversight' ? ' (corporate)' : ''}</option>)}</select></label>}
               <NotificationCenter onNavigate={navigateFromNotification} />
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
@@ -565,6 +567,7 @@ const AdminShell: React.FC = () => {
           <strong>{orgName || 'Field Compliance Manager'}</strong>
         </div>
         <div className="admin-shell-tools">
+          {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}</option>)}</select></label>}
           <NotificationCenter onNavigate={navigateFromNotification} />
           <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>

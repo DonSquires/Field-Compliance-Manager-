@@ -66,7 +66,7 @@ serve(async (req)=>{
     }, 401);
     // Get caller profile to check role
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id').eq('id', caller.id).single();
+    const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id, employer_organization_id').eq('id', caller.id).single();
     if (!callerProfile || !CAN_INVITE.includes(callerProfile.role)) {
       return json({
         error: 'Forbidden: insufficient role'
@@ -104,9 +104,33 @@ serve(async (req)=>{
     if (!targetOrgId) return json({
       error: 'organization_id is required'
     }, 400);
+    const employerOrgId = employer_organization_id ?? callerProfile.employer_organization_id ?? callerProfile.organization_id;
+    if (!employerOrgId) return json({
+      error: 'An employing organization is required'
+    }, 400);
+    const callerEmployerOrgId = callerProfile.employer_organization_id ?? callerProfile.organization_id;
+    if (callerProfile.role !== 'grand_master' && employerOrgId !== callerEmployerOrgId) return json({
+      error: 'Forbidden: staff can only be employed by your corporate organization'
+    }, 403);
+    const { data: employerOrg } = await adminClient.from('organizations').select('id, organization_type, active').eq('id', employerOrgId).maybeSingle();
+    if (!employerOrg?.active || !['owner', 'service_provider'].includes(employerOrg.organization_type)) return json({
+      error: 'Employer must be an active provider organization'
+    }, 400);
+    if (staff && ['officer', 'admin_officer'].includes(role) && !branch_authorisations?.length) return json({
+      error: 'Field staff require at least one branch authorization'
+    }, 400);
+    if (branch_authorisations?.length) {
+      const { data: descendantIds, error: descendantsError } = await adminClient.rpc('get_descendant_organizations', { org_id: employerOrgId });
+      if (descendantsError) return json({ error: 'Employer branch scope could not be verified' }, 500);
+      const requestedBranchIds = [...new Set(branch_authorisations.map((branch)=>branch?.branch_org_id).filter(Boolean))];
+      const { data: branches, error: branchesError } = await adminClient.from('organizations').select('id').in('id', requestedBranchIds).eq('organization_type', 'branch').eq('active', true);
+      if (branchesError || branches?.length !== requestedBranchIds.length || requestedBranchIds.some((branchId)=>!descendantIds?.includes(branchId))) return json({
+        error: 'Every branch authorization must be an active delivery branch of the employer'
+      }, 400);
+    }
     // Fetch the employer org so the invite email can be branded to the inviting
     // company (name + logo) rather than the platform owner.
-    const brandingOrgId = employer_organization_id ?? targetOrgId;
+    const brandingOrgId = employerOrgId;
     const { data: brandingOrg } = await adminClient.from('organizations').select('name, logo_url').eq('id', brandingOrgId).single();
     const ROLE_LABELS = {
       grand_master: 'Grand Master',
@@ -233,9 +257,7 @@ serve(async (req)=>{
       ...address?.trim() ? {
         address: address.trim()
       } : {},
-      ...employer_organization_id ? {
-        employer_organization_id
-      } : {}
+      employer_organization_id: employerOrgId
     }, {
       onConflict: 'id'
     });
@@ -285,7 +307,7 @@ serve(async (req)=>{
     let staffId = null;
     if (staff || branch_authorisations && branch_authorisations.length > 0) {
       // Employment record lives under the corporate employer (fallback to org).
-      const employerOrg = employer_organization_id ?? targetOrgId;
+      const employerOrg = employerOrgId;
       // staff_profiles.id is a SHARED PRIMARY KEY: staff_profiles_id_fkey makes
       // id REFERENCE user_profiles(id), so id MUST equal the user's id (= userId).
       // user_id (0072) is redundant with id but kept populated for back-compat.

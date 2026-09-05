@@ -235,7 +235,7 @@ const tabGroupFor = (tab: RosterTab): RosterTabGroup => TAB_GROUPS.find((group) 
 const RosterHRPage: React.FC = () => {
   const location = useLocation();
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const [tab, setTab] = useState<RosterTab>(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff');
   const [tabGroup, setTabGroup] = useState<RosterTabGroup>(tabGroupFor(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff'));
   const [loading, setLoading] = useState(true);
@@ -726,7 +726,8 @@ const RosterHRPage: React.FC = () => {
     else if (offerAction.accepted && profile?.organizationId) {
       try {
         const candidate = offerAction.candidate;
-        const { data: provisioned, error: provisionError } = await supabase.functions.invoke('create-user', { body: { email: candidate.email, display_name: `${candidate.first_name} ${candidate.last_name}`.trim(), role: offerAction.role, organization_id: profile.organizationId, staff: { employment_type: offerAction.employmentType, start_date: offerAction.startDate } } });
+        const branchOrganizationId = operatingOrganizationId ?? profile.organizationId;
+        const { data: provisioned, error: provisionError } = await supabase.functions.invoke('create-user', { body: { email: candidate.email, display_name: `${candidate.first_name} ${candidate.last_name}`.trim(), role: offerAction.role, organization_id: profile.organizationId, employer_organization_id: profile.employerOrganizationId ?? profile.organizationId, staff: { employment_type: offerAction.employmentType, start_date: offerAction.startDate }, branch_authorisations: [{ branch_org_id: branchOrganizationId, role_at_branch: 'officer', module_access: [], can_be_rostered: true }] } });
         if (provisionError || !provisioned?.user_id || !provisioned?.staff_id) throw provisionError ?? new Error('Identity provisioning receipt was not confirmed.');
         const { error: convertError } = await supabase.rpc('convert_recruitment_candidate_to_staff', { p_candidate_id: candidate.id, p_user_id: provisioned.user_id, p_staff_id: provisioned.staff_id, p_note: offerAction.note.trim() });
         if (convertError) throw convertError;

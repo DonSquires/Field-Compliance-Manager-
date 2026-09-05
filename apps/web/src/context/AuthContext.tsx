@@ -20,7 +20,18 @@ export interface AppProfile {
   email?: string;
   role: AppRole;
   organizationId: string | null;
+  employerOrganizationId: string | null;
   moduleAccess?: string[];
+}
+
+export interface OperatingOrganization {
+  organizationId: string;
+  organizationName: string;
+  authorityBasis: 'branch_authorisation' | 'corporate_oversight';
+  roleAtBranch: string | null;
+  moduleAccess: string[];
+  canBeRostered: boolean;
+  isDefault: boolean;
 }
 
 interface AuthContextValue {
@@ -29,6 +40,9 @@ interface AuthContextValue {
   recoveryMode: boolean;
   loading: boolean;
   error: string | null;
+  operatingOrganizationId: string | null;
+  operatingOrganizations: OperatingOrganization[];
+  setOperatingOrganization: (organizationId: string) => void;
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
   requestPasswordReset: (email: string) => Promise<{ error: string | null }>;
   updatePassword: (password: string) => Promise<{ error: string | null }>;
@@ -41,6 +55,9 @@ export const AuthContext = createContext<AuthContextValue>({
   recoveryMode: false,
   loading: true,
   error: null,
+  operatingOrganizationId: null,
+  operatingOrganizations: [],
+  setOperatingOrganization: () => undefined,
   signInWithPassword: async () => ({ error: 'Auth not initialised' }),
   requestPasswordReset: async () => ({ error: 'Auth not initialised' }),
   updatePassword: async () => ({ error: 'Auth not initialised' }),
@@ -51,7 +68,7 @@ export const AuthContext = createContext<AuthContextValue>({
 async function loadProfile(userId: string): Promise<AppProfile | null> {
   const { data, error } = await supabase
     .from('user_profiles')
-    .select('id, display_name, email, role, organization_id, module_access')
+    .select('id, display_name, email, role, organization_id, employer_organization_id, module_access')
     .eq('id', userId)
     .maybeSingle();
 
@@ -63,8 +80,23 @@ async function loadProfile(userId: string): Promise<AppProfile | null> {
     email: data.email ?? undefined,
     role: (data.role as AppRole) ?? 'unknown',
     organizationId: data.organization_id ?? null,
+    employerOrganizationId: data.employer_organization_id ?? null,
     moduleAccess: data.module_access ?? [],
   };
+}
+
+async function loadOperatingOrganizations(): Promise<OperatingOrganization[]> {
+  const { data, error } = await supabase.rpc('get_operating_organization_contexts');
+  if (error || !Array.isArray(data)) return [];
+  return data.map((context) => ({
+    organizationId: context.organization_id,
+    organizationName: context.organization_name,
+    authorityBasis: context.authority_basis,
+    roleAtBranch: context.role_at_branch,
+    moduleAccess: context.module_access ?? [],
+    canBeRostered: context.can_be_rostered,
+    isDefault: context.is_default,
+  }));
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -73,17 +105,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [operatingOrganizationId, setOperatingOrganizationId] = useState<string | null>(null);
+  const [operatingOrganizations, setOperatingOrganizations] = useState<OperatingOrganization[]>([]);
 
   useEffect(() => {
     let cancelled = false;
+
+    const hydrateProfile = async (userId: string) => {
+      const nextProfile = await loadProfile(userId);
+      const contexts = nextProfile ? await loadOperatingOrganizations() : [];
+      const storageKey = `fcm:operating-organization:${userId}`;
+      const storedOrganizationId = sessionStorage.getItem(storageKey);
+      const selected = contexts.find((context) => context.organizationId === storedOrganizationId)
+        ?? contexts.find((context) => context.isDefault)
+        ?? contexts[0];
+      if (!cancelled) {
+        setProfile(nextProfile);
+        setOperatingOrganizations(contexts);
+        setOperatingOrganizationId(selected?.organizationId ?? null);
+        if (selected) sessionStorage.setItem(storageKey, selected.organizationId);
+        else sessionStorage.removeItem(storageKey);
+      }
+    };
 
     const bootstrap = async () => {
       const { data } = await supabase.auth.getSession();
       const userId = data.session?.user?.id;
       if (userId) {
         if (!cancelled) setHasSession(true);
-        const p = await loadProfile(userId);
-        if (!cancelled) setProfile(p);
+        await hydrateProfile(userId);
       }
       if (!cancelled) setLoading(false);
     };
@@ -95,11 +145,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!session?.user) {
         setHasSession(false);
         setProfile(null);
+        setOperatingOrganizations([]);
+        setOperatingOrganizationId(null);
         return;
       }
       setHasSession(true);
-      const p = await loadProfile(session.user.id);
-      setProfile(p);
+      await hydrateProfile(session.user.id);
     });
 
     return () => {
@@ -145,10 +196,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setHasSession(false);
     setRecoveryMode(false);
     setProfile(null);
+    setOperatingOrganizations([]);
+    setOperatingOrganizationId(null);
+  };
+
+  const setOperatingOrganization = (organizationId: string) => {
+    if (!profile || !operatingOrganizations.some((context) => context.organizationId === organizationId)) return;
+    sessionStorage.setItem(`fcm:operating-organization:${profile.id}`, organizationId);
+    setOperatingOrganizationId(organizationId);
   };
 
   return (
-    <AuthContext.Provider value={{ profile, hasSession, recoveryMode, loading, error, signInWithPassword, requestPasswordReset, updatePassword, signOut }}>
+    <AuthContext.Provider value={{ profile, hasSession, recoveryMode, loading, error, operatingOrganizationId, operatingOrganizations, setOperatingOrganization, signInWithPassword, requestPasswordReset, updatePassword, signOut }}>
       {children}
     </AuthContext.Provider>
   );

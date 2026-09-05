@@ -36,7 +36,7 @@ interface Module {
   module_key: string;
 }
 const RosterTargetsPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const workflowContext = readWorkflowContext(location.search);
@@ -69,10 +69,10 @@ const RosterTargetsPage: React.FC = () => {
     code: '',
   });
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    const org = operatingOrganizationId ?? profile?.organizationId;
+    if (!org) return;
     setLoading(true);
     setError(null);
-    const org = profile.organizationId;
     const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code')]);
     const [a, b, c, d, e, f, g, h, i] = responses;
     setUnits((a.data as Unit[]) ?? []);
@@ -87,7 +87,7 @@ const RosterTargetsPage: React.FC = () => {
     const failures = responses.filter((r) => r.error).map((r) => r.error?.message);
     if (failures.length) setError(failures.join(' · '));
     setLoading(false);
-  }, [profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -119,7 +119,10 @@ const RosterTargetsPage: React.FC = () => {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { data, error: rpcError } = await supabase.rpc('create_roster_work_unit', {
+    const activeOperatingOrganizationId = operatingOrganizationId ?? profile?.organizationId;
+    if (!activeOperatingOrganizationId) return;
+    const { data, error: rpcError } = await supabase.rpc('create_operating_roster_work_unit', {
+      p_operating_organization_id: activeOperatingOrganizationId,
       p_name: form.name,
       p_work_unit_type: type,
       p_service_type: form.serviceType,
@@ -144,7 +147,9 @@ const RosterTargetsPage: React.FC = () => {
     setBusy(true);
     setError(null);
     const isWorkplace = dialog === 'workplace';
-    const { error: rpcError } = await supabase.rpc(isWorkplace ? 'create_organization_workplace' : 'create_cost_centre', isWorkplace ? { p_name: form.name, p_address: form.address || null } : { p_code: form.code, p_name: form.name });
+    const activeOperatingOrganizationId = operatingOrganizationId ?? profile?.organizationId;
+    if (!activeOperatingOrganizationId) return;
+    const { error: rpcError } = await supabase.rpc(isWorkplace ? 'create_operating_organization_workplace' : 'create_operating_cost_centre', isWorkplace ? { p_operating_organization_id: activeOperatingOrganizationId, p_name: form.name, p_address: form.address || null } : { p_operating_organization_id: activeOperatingOrganizationId, p_code: form.code, p_name: form.name });
     if (rpcError) setError(rpcError.message);
     else {
       setNotice(`${isWorkplace ? 'Workplace' : 'Cost centre'} created.`);

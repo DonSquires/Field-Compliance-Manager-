@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { AlertTriangle, BadgeCheck, BriefcaseBusiness, CheckCircle2, KeyRound, ShieldCheck, UserRoundCog, X } from 'lucide-react';
-import type { AppRole } from '../context/AuthContext';
+import type { AppRole, OperatingOrganization } from '../context/AuthContext';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { supabase } from '../lib/supabase';
+import { StaffBranchAccessPanel } from './StaffBranchAccessPanel';
 import './UserIdentityWorkspace.css';
 
 export interface ManagedUserIdentity {
@@ -19,7 +20,7 @@ export interface UserAccessPreset { id: string; key: string; name: string; role:
 export interface UserPresetAssignment { id: string; user_id: string; preset_id: string; status: string; }
 export interface UserSpineReadiness { user_id: string; identity_status: string; employment_status: string; access_status: string; credential_status: string; work_status: string; blockers: string[]; next_action: string; }
 
-export function UserIdentityWorkspace({ user, callerRole, presets, assignment, readiness, onClose, onChanged }: { user: ManagedUserIdentity; callerRole: AppRole; presets: UserAccessPreset[]; assignment: UserPresetAssignment | null; readiness: UserSpineReadiness | null; onClose: () => void; onChanged: () => Promise<void> }) {
+export function UserIdentityWorkspace({ user, callerRole, presets, assignment, readiness, branches, onClose, onChanged }: { user: ManagedUserIdentity; callerRole: AppRole; presets: UserAccessPreset[]; assignment: UserPresetAssignment | null; readiness: UserSpineReadiness | null; branches: OperatingOrganization[]; onClose: () => void; onChanged: () => Promise<void> }) {
   const [form, setForm] = useState({ displayName: user.display_name ?? '', phone: user.phone ?? '', role: user.role });
   const [presetId, setPresetId] = useState(assignment?.preset_id ?? '');
   const [identityReason, setIdentityReason] = useState('');
@@ -57,6 +58,7 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
       <form onSubmit={saveAccess}><div className="user-spine-section-title"><KeyRound size={18} /><div><strong>Access preset</strong><span>One named administration access bundle at this organization.</span></div></div>{adminTier ? <><label><span>Preset</span><select value={presetId} onChange={(event) => setPresetId(event.target.value)}><option value="">No active preset</option>{presets.map((preset) => <option value={preset.id} key={preset.id}>{preset.name}</option>)}</select></label><label><span>Reason for access change</span><textarea required rows={3} value={accessReason} onChange={(event) => setAccessReason(event.target.value)} placeholder="Role responsibilities or approval reference" /></label><button type="submit" disabled={saving !== null || !accessReason.trim() || (!presetId && !assignment)}>{saving === 'access' ? 'Saving' : presetId ? 'Assign preset' : 'End preset'}</button></> : <div className="user-spine-not-applicable"><ShieldCheck size={22} /><strong>Role-scoped access</strong><span>Field and client roles use their role, branch authorization, and module scope rather than an administration preset.</span></div>}
       </form>
     </div>
+    <StaffBranchAccessPanel userId={user.id} branches={branches} onChanged={onChanged} />
     <footer><span><BriefcaseBusiness size={14} />Employment, credentials, and work readiness remain governed in People &amp; HR.</span><span><BadgeCheck size={14} />Every change requires a reason and is retained in the identity audit trail.</span></footer>
   </section></div>;
 }

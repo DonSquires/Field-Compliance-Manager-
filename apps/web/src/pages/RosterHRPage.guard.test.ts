@@ -67,6 +67,12 @@ describe('governed HR administration', () => {
     expect(page).not.toContain(".from('staff_profiles').update");
   });
 
+  it('provisions accepted candidates with employer-owned employment and a branch authorization', () => {
+    expect(page).toContain('employer_organization_id: profile.employerOrganizationId ?? profile.organizationId');
+    expect(page).toContain('branch_authorisations: [{ branch_org_id: branchOrganizationId');
+    expect(page).toContain('operatingOrganizationId ?? profile.organizationId');
+  });
+
   it('records credential renewals through a governed, race-checked RPC', () => {
     expect(page).toContain("supabase.rpc('renew_staff_credential'");
     expect(page).toContain('p_expected_expiry_date: credentialRenewal.source.expiry_date');
