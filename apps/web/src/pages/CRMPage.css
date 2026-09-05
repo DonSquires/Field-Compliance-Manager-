@@ -40,6 +40,7 @@
 .crm-account-register-row:not(.is-header):focus-visible { position: relative; outline: 2px solid #14c8d4; outline-offset: -2px; }
 .crm-account-register-row strong, .crm-account-register-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crm-account-register-row strong { color: #e6f0f4; font-size: 12px; }
+.crm-account-register-row strong small{display:block;margin-top:3px;color:#8faab6;font-size:9px;font-weight:500}
 .crm-account-register-row .is-ready { color: #83ddae; }
 .crm-account-register-row .is-attention { color: #f7d77a; }
 

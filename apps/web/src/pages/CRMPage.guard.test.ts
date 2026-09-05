@@ -99,6 +99,14 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('Branch-owned commercial activity, consolidated for parent oversight.');
   });
 
+  it('loads client portfolios through their accountable operating provider branch', () => {
+    expect(page).toContain("supabase.rpc('get_crm_provider_portfolio'");
+    expect(page).toContain('operating_provider_organization_id');
+    expect(page).toContain('Operating provider: ${client.operating_provider_name}');
+    expect(page).toContain('client.operating_provider_organization_id ?? profile?.organizationId');
+    expect(page).toContain('Client Portfolios');
+  });
+
   it('opens the exact account workspace once from explicit URL context', () => {
     expect(page).toContain('openedContextAccountId');
     expect(page).toContain('account.id === requestedAccountId');

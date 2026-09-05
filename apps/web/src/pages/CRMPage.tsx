@@ -63,6 +63,17 @@ interface AccountRow {
   sites: Array<{ id: string; name: string }>;
   blockers: string[];
   next_action: string;
+  operating_provider_organization_id?: string;
+  operating_provider_name?: string;
+}
+
+interface ProviderPortfolioRow {
+  organization_id: string;
+  organization_name: string;
+  organization_type: string;
+  organization_status: string;
+  operating_provider_organization_id: string;
+  operating_provider_name: string;
 }
 
 interface PricingQuote {
@@ -252,14 +263,23 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
 
       // SCHEMA FIX: crm_account_list view does not exist.
       // Query organizations directly; site_count loaded separately.
-      const { data: accounts, error: acctErr } = await supabase
+      const { data: directChildren, error: acctErr } = await supabase
         .from('organizations')
         .select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes')
         .eq('parent_organization_id', orgId);
       if (acctErr) throw acctErr;
+      const { data: portfolio, error: portfolioError } = await supabase.rpc('get_crm_provider_portfolio', { p_operating_provider_organization_id: null });
+      if (portfolioError) throw portfolioError;
+      const portfolioRows = (portfolio as ProviderPortfolioRow[]) ?? [];
+      const portfolioIds = [...new Set(portfolioRows.map((row) => row.organization_id))];
+      const { data: accounts, error: portfolioAccountsError } = portfolioIds.length
+        ? await supabase.from('organizations').select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes').in('id', portfolioIds)
+        : { data: [], error: null };
+      if (portfolioAccountsError) throw portfolioAccountsError;
 
-      const accountIds = (accounts ?? []).map((account) => account.id);
-      const providerOrgIds = [orgId, ...(accounts ?? []).filter((account) => account.organization_type === 'branch').map((branch) => branch.id)];
+      const branches = (directChildren ?? []).filter((account) => account.organization_type === 'branch');
+      const accountIds = [...new Set([...(accounts ?? []).map((account) => account.id), ...branches.map((branch) => branch.id)])];
+      const providerOrgIds = [orgId, ...branches.map((branch) => branch.id)];
       const [sitesRes, contactsRes, quotesRes, readinessRes, moduleCatalogRes, billingRulesRes] = accountIds.length
         ? await Promise.all([
             supabase
@@ -314,6 +334,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       for (const quote of quotesRes.data ?? [])
         if (quote.client_org_id && !latestQuotes.has(quote.client_org_id))
           latestQuotes.set(quote.client_org_id, quote.status);
+      const operatingProviderByAccount = new Map(portfolioRows.map((row) => [row.organization_id, row]));
       const accountsWithCounts: AccountRow[] = (accounts ?? []).map((acct) => ({
         ...acct,
         id: acct.id,
@@ -328,11 +349,21 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           .map((site) => ({ id: site.id, name: site.name })),
         blockers: readiness.get(acct.id)?.blockers ?? [],
         next_action: readiness.get(acct.id)?.next_action ?? 'Review account readiness',
+        operating_provider_organization_id: operatingProviderByAccount.get(acct.id)?.operating_provider_organization_id,
+        operating_provider_name: operatingProviderByAccount.get(acct.id)?.operating_provider_name,
+      }));
+      const branchAccounts: AccountRow[] = branches.map((branch) => ({
+        ...branch,
+        site_count: siteCounts.get(branch.id) ?? 0,
+        primary_contact_name: primaryContacts.get(branch.id) ?? null,
+        latest_quote_status: latestQuotes.get(branch.id) ?? null,
+        sites: (sitesRes.data ?? []).filter((site) => site.client_organization_id === branch.id).map((site) => ({ id: site.id, name: site.name })),
+        blockers: readiness.get(branch.id)?.blockers ?? [],
+        next_action: readiness.get(branch.id)?.next_action ?? 'Review branch readiness',
       }));
 
       const rows = accountsWithCounts;
-      const clients = rows.filter((r) => r.organization_type === 'client');
-      const branches = rows.filter((r) => r.organization_type === 'branch');
+      const clients = rows;
 
       // Platform subscriptions: Layer-1 Iron Eagle -> current organization agreements.
       const { data: subscriberAgreements, error: subErr } = await supabase
@@ -389,7 +420,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       setState({
         ownOrg: ownOrg as Organization,
         clients,
-        branches,
+        branches: branchAccounts,
         platformSubscribers,
         contractedOrgs,
         invoices: (invoices as unknown as InvoiceRow[]) ?? [],
@@ -542,7 +573,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     validUntil.setDate(validUntil.getDate() + 30);
     quoteRequestId.current = crypto.randomUUID();
     setQuoteClient(client);
-    setQuoteOperatingProviderId(profile?.organizationId ?? '');
+    setQuoteOperatingProviderId(client.operating_provider_organization_id ?? profile?.organizationId ?? '');
     setProposalModules([]);
     setQuotedModuleKeys([]);
     setQuoteForm({
@@ -954,7 +985,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       {state.consolidatedCommercial.length > 1 && <section className="reports-section crm-finance-section"><div className="crm-section-heading"><div><h2>Group commercial oversight</h2><p className="subtitle">Branch-owned commercial activity, consolidated for parent oversight. Open the branch workspace to manage its clients, pricing, agreements, and delivery.</p></div></div><div className="crm-account-register crm-commercial-oversight" role="table" aria-label="Group commercial oversight"><div className="crm-account-register-row is-header" role="row"><span>Operating organization</span><span>Invoices</span><span>Open receivables</span><span>Agreements</span><span>Quotes</span><span>Report packs</span></div>{state.consolidatedCommercial.map((row) => <button key={row.source_organization_id} type="button" role="row" className="crm-account-register-row" onClick={() => setWorkspaceAccount({ id: row.source_organization_id, name: row.source_organization_name })}><strong>{row.source_organization_name}</strong><span>{row.invoice_count}</span><span>NZ${Number(row.open_receivables).toFixed(2)}{Number(row.overdue_receivables) > 0 ? ` · NZ$${Number(row.overdue_receivables).toFixed(2)} overdue` : ''}</span><span>{row.accepted_agreement_count}</span><span>{row.quote_count}</span><span>{row.report_pack_count}</span></button>)}</div></section>}
 
       <section className="reports-section">
-        <h2>Our Clients ({state.clients.length})</h2>
+        <h2>Client Portfolios ({state.clients.length})</h2>
         <div className="crm-account-register" role="table" aria-label="Client accounts">
           {state.clients.length === 0 ? (
             <div className="empty-state">
@@ -962,10 +993,10 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             </div>
           ) : (
             <>
-              <div className="crm-account-register-row is-header" role="row"><span>Client</span><span>Primary contact</span><span>Sites</span><span>Readiness</span><span>Quote</span><span>Next action</span></div>
+              <div className="crm-account-register-row is-header" role="row"><span>Client and operating provider</span><span>Primary contact</span><span>Sites</span><span>Readiness</span><span>Quote</span><span>Next action</span></div>
               {state.clients.map((client) => (
                 <button id={`crm-account-${client.id}`} type="button" role="row" key={client.id} className={`crm-account-register-row ${client.id === requestedAccountId ? 'is-context-focus' : ''}`} onClick={() => setWorkspaceAccount({ id: client.id, name: client.name, status: client.status, primaryContactName: client.primary_contact_name, siteCount: client.site_count, readinessBlockers: client.blockers, nextAction: client.next_action, latestQuoteStatus: client.latest_quote_status })}>
-                  <strong>{client.name}</strong><span>{client.primary_contact_name ?? 'Not assigned'}</span><span>{client.site_count}</span><span className={client.blockers.length ? 'is-attention' : 'is-ready'}>{client.blockers.length ? `${client.blockers.length} open` : 'Ready'}</span><span>{client.latest_quote_status ?? 'None'}</span><span>{client.next_action}</span>
+                  <strong>{client.name}<small>{client.operating_provider_name ? `Operating provider: ${client.operating_provider_name}` : 'Operating provider not recorded'}</small></strong><span>{client.primary_contact_name ?? 'Not assigned'}</span><span>{client.site_count}</span><span className={client.blockers.length ? 'is-attention' : 'is-ready'}>{client.blockers.length ? `${client.blockers.length} open` : 'Ready'}</span><span>{client.latest_quote_status ?? 'None'}</span><span>{client.next_action}</span>
                 </button>
               ))}
             </>
