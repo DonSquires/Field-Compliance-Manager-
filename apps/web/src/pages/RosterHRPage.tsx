@@ -246,6 +246,7 @@ const RosterHRPage: React.FC = () => {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
   const [dispatchPayLines, setDispatchPayLines] = useState<DispatchPayLineRow[]>([]);
+  const [payReviewFilter, setPayReviewFilter] = useState<'exceptions' | 'resolved' | 'all'>('exceptions');
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
     const [coverageWorkUnits,setCoverageWorkUnits]=useState<CoverageWorkUnit[]>([]);
@@ -1180,13 +1181,24 @@ const RosterHRPage: React.FC = () => {
             <div className="metric-card"><span>Unresolved</span><strong>{dispatchPayLines.filter((line) => line.pay_code === 'UNRESOLVED').length}</strong></div>
             <div className="metric-card"><span>Rule-backed lines</span><strong>{dispatchPayLines.filter((line) => line.rate_rule_id).length}</strong></div>
           </div>
+          <div className="crm-branch-filter" aria-label="Pay review filter">
+            <button type="button" className={`btn btn-sm ${payReviewFilter === 'exceptions' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setPayReviewFilter('exceptions')}>Needs review ({dispatchPayLines.filter((line) => line.pay_code === 'UNRESOLVED').length})</button>
+            <button type="button" className={`btn btn-sm ${payReviewFilter === 'resolved' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setPayReviewFilter('resolved')}>Rule resolved ({dispatchPayLines.filter((line) => line.pay_code !== 'UNRESOLVED').length})</button>
+            <button type="button" className={`btn btn-sm ${payReviewFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setPayReviewFilter('all')}>All evidence</button>
+          </div>
+          <div className="reports-table-wrapper" style={{ marginBottom: '1rem' }}>
+            <table className="reports-table">
+              <thead><tr><th>Staff</th><th>Lines</th><th>Resolved pay</th><th>Exceptions</th></tr></thead>
+              <tbody>{Object.entries(dispatchPayLines.reduce<Record<string, { count: number; total: number; unresolved: number }>>((summary, line) => { const key = line.officer_user_id ?? 'unassigned'; const current = summary[key] ?? { count: 0, total: 0, unresolved: 0 }; current.count += 1; current.total += Number(line.line_total || 0); current.unresolved += line.pay_code === 'UNRESOLVED' ? 1 : 0; summary[key] = current; return summary; }, {})).map(([staffId, summary]) => <tr key={staffId}><td>{staffId === 'unassigned' ? 'Officer not resolved' : staffNames[staffId] ?? staffId}</td><td>{summary.count}</td><td>NZ${summary.total.toFixed(2)}</td><td>{summary.unresolved}</td></tr>)}</tbody>
+            </table>
+          </div>
           <div className="reports-table-wrapper">
             <table className="reports-table">
               <thead><tr><th>Staff</th><th>Dispatch source</th><th>Pay item</th><th>Quantity</th><th>Rate</th><th>Total</th><th>Evidence state</th></tr></thead>
               <tbody>
-                {dispatchPayLines.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center">No completed-dispatch pay evidence yet.</td></tr>
-                ) : dispatchPayLines.map((line) => {
+                {dispatchPayLines.filter((line) => payReviewFilter === 'all' || (payReviewFilter === 'exceptions' ? line.pay_code === 'UNRESOLVED' : line.pay_code !== 'UNRESOLVED')).length === 0 ? (
+                  <tr><td colSpan={7} className="text-center">No {payReviewFilter === 'exceptions' ? 'unresolved' : payReviewFilter === 'resolved' ? 'rule-resolved' : 'completed-dispatch'} pay evidence.</td></tr>
+                ) : dispatchPayLines.filter((line) => payReviewFilter === 'all' || (payReviewFilter === 'exceptions' ? line.pay_code === 'UNRESOLVED' : line.pay_code !== 'UNRESOLVED')).map((line) => {
                   const unresolved = line.pay_code === 'UNRESOLVED';
                   return <tr key={line.id}>
                     <td>{line.officer_user_id ? staffNames[line.officer_user_id] ?? line.officer_user_id : 'Officer not resolved'}</td>

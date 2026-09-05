@@ -17,6 +17,9 @@ describe('governed HR administration', () => {
     expect(page).toContain(".from('dispatch_job_pay_lines')");
     expect(page).toContain("{ id: 'pay-review', label: 'Pay Review' }");
     expect(page).toContain("line.pay_code === 'UNRESOLVED'");
+    expect(page).toContain("useState<'exceptions' | 'resolved' | 'all'>('exceptions')");
+    expect(page).toContain('Needs review (');
+    expect(page).toContain('Resolved pay');
     expect(page).toContain('Resolve exceptions before approving related timesheets');
     expect(page).not.toMatch(/from\('dispatch_job_pay_lines'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
   });
