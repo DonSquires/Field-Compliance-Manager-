@@ -28,7 +28,7 @@ const isoDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset
 const localInput = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
 const RosterOperationsPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const workflowContext = readWorkflowContext(location.search);
@@ -64,13 +64,11 @@ const RosterOperationsPage: React.FC = () => {
   const holidays = useMemo(() => nzRosterHolidays(weekStart, weekEnd, calendarRegion), [calendarRegion, weekEnd, weekStart]);
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    const org = operatingOrganizationId ?? profile?.organizationId;
+    if (!org) return;
     setLoading(true); setError(null);
-    const org = profile.organizationId;
     const responses = await Promise.all([
-      supabase.from('user_profiles').select('id,display_name,email,role').eq('organization_id', org).in('role', ['officer', 'admin_officer']).is('deactivated_at', null),
-      supabase.from('staff_profiles').select('id,user_id,employment_type,work_ready').eq('organization_id', org),
-      supabase.from('staff_credentials').select('staff_id,expiry_date,verified').eq('organization_id', org),
+      supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org }),
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_work_units').select('id,name,work_unit_type,service_type').eq('organization_id', org).eq('active', true).order('name'),
       supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
@@ -81,33 +79,29 @@ const RosterOperationsPage: React.FC = () => {
       supabase.rpc('get_roster_commercial_readiness', { p_organization_id: org, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
       supabase.rpc('get_roster_labour_cost', { p_organization_id: org, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
     ]);
-    const [usersRes, staffRes, credentialRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes, labourRes] = responses;
+    const [rosterStaffRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes, labourRes] = responses;
     const failures = responses.filter((response) => response.error).map((response) => response.error?.message);
     if (failures.length) setError(failures.join(' · '));
-    const staffRows = (staffRes.data ?? []) as Array<{ id: string; user_id: string | null; employment_type: string | null; work_ready: boolean }>;
-    const byUser = new Map(staffRows.map((row) => [row.user_id ?? row.id, row]));
-    const credentials = (credentialRes.data ?? []) as Array<{ staff_id: string; expiry_date: string | null; verified: boolean }>;
     const now = Date.now();
-    setStaff(((usersRes.data ?? []) as Array<{ id: string; display_name: string | null; email: string | null }>).map((user) => {
-      const employment = byUser.get(user.id); const staffId = employment?.id ?? user.id; const ownCredentials = credentials.filter((credential) => credential.staff_id === staffId);
-      let credentialRisk: Staff['credentialRisk'] = ownCredentials.some((credential) => !credential.verified) ? 'unverified' : 'clear';
-      if (ownCredentials.some((credential) => credential.expiry_date && new Date(credential.expiry_date).getTime() < now)) credentialRisk = 'expired';
-      else if (ownCredentials.some((credential) => credential.expiry_date && new Date(credential.expiry_date).getTime() - now < 30 * 86_400_000)) credentialRisk = 'expiring';
-      return { id: user.id, staffId, name: user.display_name || user.email || 'Unnamed staff', workReady: Boolean(employment?.work_ready), employmentType: employment?.employment_type ?? null, credentialRisk };
+    setStaff(((rosterStaffRes.data ?? []) as Array<{ user_id: string; staff_id: string; display_name: string | null; email: string | null; employment_type: string | null; work_ready: boolean; credential_expiry: string | null; credential_verified: boolean | null }>).map((user) => {
+      let credentialRisk: Staff['credentialRisk'] = user.credential_verified === false ? 'unverified' : 'clear';
+      if (user.credential_expiry && new Date(user.credential_expiry).getTime() < now) credentialRisk = 'expired';
+      else if (user.credential_expiry && new Date(user.credential_expiry).getTime() - now < 30 * 86_400_000) credentialRisk = 'expiring';
+      return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk };
     }));
     setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setLoading(false);
-  }, [profile?.organizationId, weekEnd, weekStart]);
+  }, [operatingOrganizationId, profile?.organizationId, weekEnd, weekStart]);
   useEffect(() => { void load(); }, [load]);
   const syncOfficerResponses = useCallback(async () => {
-    if (!profile?.organizationId) return;
-    const org = profile.organizationId;
+    const org = operatingOrganizationId ?? profile?.organizationId;
+    if (!org) return;
     const [shiftResponse, slotResponse] = await Promise.all([
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
     ]);
     if (!shiftResponse.error) setShifts((shiftResponse.data as Shift[]) ?? []);
     if (!slotResponse.error) setSlots((slotResponse.data as RosterSlot[]) ?? []);
-  }, [profile?.organizationId, weekEnd, weekStart]);
+  }, [operatingOrganizationId, profile?.organizationId, weekEnd, weekStart]);
   useEffect(() => {
     const interval = window.setInterval(() => void syncOfficerResponses(), 15_000);
     return () => window.clearInterval(interval);

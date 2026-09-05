@@ -10,8 +10,10 @@ describe('enterprise roster operations', () => {
     expect(page).toContain('!slot.linked_shift_id');
     expect(shell).toContain('return <RosterOperationsPage />');
   });
-  it('combines staff readiness, credentials, leave, availability, and coverage demand', () => {
-    for (const table of ['staff_profiles', 'staff_credentials', 'leave_requests', 'staff_availability', 'shift_coverage_requests', 'roster_work_units']) expect(page).toContain(`from('${table}')`);
+  it('combines authorized branch staff, leave, availability, and coverage demand', () => {
+    expect(page).toContain("supabase.rpc('get_operating_branch_roster_staff'");
+    expect(page).toContain('operatingOrganizationId ?? profile?.organizationId');
+    for (const table of ['leave_requests', 'staff_availability', 'shift_coverage_requests', 'roster_work_units']) expect(page).toContain(`from('${table}')`);
     expect(page).toContain('hasAvailabilityConflict');
     expect(page).toContain('Availability restrictions');
   });

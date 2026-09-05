@@ -204,7 +204,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'staff_availability') {
-      await route.fulfill(fulfillJson([{ staff_id: SECOND_OFFICER_ID, day_of_week: null, specific_date: '2026-08-26', available_from: null, available_to: null, all_day: true, availability_type: 'unavailable' }]));
+      await route.fulfill(fulfillJson([{ staff_id: SECOND_OFFICER_ID, day_of_week: 7, specific_date: null, available_from: null, available_to: null, all_day: true, availability_type: 'unavailable' }]));
       return;
     }
     if (table === 'organization_calendar_settings') { await route.fulfill(fulfillJson([{ region_code: holidayRegion }])); return; }
@@ -214,6 +214,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       return;
     }
     if (table === 'get_branch_leave_queue') { await route.fulfill(fulfillJson([{ id: '36363636-3636-4636-8636-363636363636', staff_id: OFFICER_ID, leave_type: 'annual', starts_on: '2026-09-14', ends_on: '2026-09-16', status: hrLeaveStatus, reason: 'Family commitment', branch_review_notes: null, branch_reviewed_by: hrLeaveStatus === 'branch_checked' ? ADMIN_ID : null }])); return; }
+    if (table === 'get_operating_branch_roster_staff') { await route.fulfill(fulfillJson([{ user_id: OFFICER_ID, staff_id: OFFICER_ID, display_name: 'Ana Ngata', email: 'ana@fcm.test', employment_type: 'permanent', work_ready: anaWorkReady, credential_expiry: '2027-06-01', credential_verified: true }, { user_id: SECOND_OFFICER_ID, staff_id: SECOND_OFFICER_ID, display_name: 'Jordan Lee', email: 'jordan@fcm.test', employment_type: 'casual', work_ready: true, credential_expiry: '2026-09-10', credential_verified: true }])); return; }
     if (table === 'leave_requests') {
       const rosterQuery = url.searchParams.get('status') === 'eq.approved';
       await route.fulfill(fulfillJson(rosterQuery ? [{ staff_id: SECOND_OFFICER_ID, starts_on: '2026-08-28', ends_on: '2026-08-29', status: 'approved' }] : [{ id: '36363636-3636-4636-8636-363636363636', staff_id: OFFICER_ID, leave_type: 'annual', starts_on: '2026-09-14', ends_on: '2026-09-16', status: hrLeaveStatus, reason: 'Family commitment' }]));
