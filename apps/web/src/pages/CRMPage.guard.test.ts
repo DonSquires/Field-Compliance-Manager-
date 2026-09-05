@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/CRMPage.tsx'), 'utf8');
 const workspace = readFileSync(resolve(process.cwd(), 'src/components/CrmAccountWorkspace.tsx'), 'utf8');
+const organizationDialog = readFileSync(resolve(process.cwd(), 'src/components/CrmOrganizationDialog.tsx'), 'utf8');
 
 describe('governed CRM accounts', () => {
   it('loads account context in batches including real primary contacts', () => {
@@ -96,6 +97,8 @@ describe('governed CRM accounts', () => {
     expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
     expect(page).toContain('Add organization');
     expect(page).toContain('client.next_action');
+    expect(organizationDialog).toContain('Organization, address, client ID, or contact');
+    expect(organizationDialog).toContain('close spellings are included');
     expect(page).not.toMatch(/\.from\(["']organizations["']\)\.insert/);
   });
 });
