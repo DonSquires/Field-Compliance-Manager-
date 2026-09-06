@@ -3,6 +3,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createClient } = require('@supabase/supabase-js');
 const { signJobToken } = require('./local_jwt_signer');
+const { consolidateMotionSummary } = require('./motion_consolidator');
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -214,8 +215,14 @@ async function processOne() {
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
     const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
     await classifyFrames(summary);
+    await consolidateMotionSummary(summary);
     await ingest(job, summary);
-    log('job_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
+    log('job_completed', {
+      job_id: job.id,
+      total_frames_parsed: summary.total_frames_parsed,
+      face_events: summary.consolidated_events?.summary_counts?.face_events || 0,
+      vehicle_events: summary.consolidated_events?.summary_counts?.vehicle_events || 0
+    });
   } catch (error) {
     log('watcher_error', { error: error.message });
     if (currentJobId) await failJob(currentJobId, error.message);
