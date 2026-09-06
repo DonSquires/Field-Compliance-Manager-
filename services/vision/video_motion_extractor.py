@@ -46,6 +46,12 @@ class MotionSummary:
     motion_segments: list[MotionSegment]
     total_frames_parsed: int
     extraction_truncated: bool = False
+    source_filename: str = ""
+    codec_fourcc: str = "unknown"
+    decoder_backend: str = "unknown"
+    frame_width: int = 0
+    frame_height: int = 0
+    frames_per_second: float = 0.0
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"), sort_keys=True)
@@ -67,7 +73,17 @@ def _validate_input(video_path: Path, max_input_bytes: int) -> None:
 
 def _timestamp_seconds(capture: cv2.VideoCapture, frame_index: int, fps: float) -> float:
     timestamp = capture.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-    return timestamp if np.isfinite(timestamp) and timestamp >= 0 else frame_index / fps
+    if frame_index == 0 and np.isfinite(timestamp) and timestamp >= 0:
+        return timestamp
+    # Some backends report 0 or a repeated timestamp for compressed streams.
+    return frame_index / fps
+
+
+def _codec_name(capture: cv2.VideoCapture) -> str:
+    code = int(capture.get(cv2.CAP_PROP_FOURCC))
+    if code <= 0:
+        return "unknown"
+    return "".join(chr((code >> (8 * index)) & 0xFF) for index in range(4)).strip() or "unknown"
 
 
 def _merge_windows(windows: list[tuple[int, int]], frame_count: int) -> list[tuple[int, int]]:
@@ -149,6 +165,10 @@ def extract_motion_summary(
         raise VideoExtractionError(f"Unable to read video headers: {video_path}")
     fps = capture.get(cv2.CAP_PROP_FPS)
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    frame_width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    codec_fourcc = _codec_name(capture)
+    decoder_backend = capture.getBackendName()
     if not np.isfinite(fps) or fps <= 0:
         capture.release()
         raise VideoExtractionError(f"Video has an invalid frame rate: {video_path}")
@@ -232,7 +252,18 @@ def extract_motion_summary(
         finally:
             capture.release()
 
-    return MotionSummary(round(last_timestamp + 1 / fps, 3), segments, frame_index, truncated)
+    return MotionSummary(
+        total_duration=round(last_timestamp + 1 / fps, 3),
+        motion_segments=segments,
+        total_frames_parsed=frame_index,
+        extraction_truncated=truncated,
+        source_filename=video_path.name,
+        codec_fourcc=codec_fourcc,
+        decoder_backend=decoder_backend,
+        frame_width=frame_width,
+        frame_height=frame_height,
+        frames_per_second=round(float(fps), 6),
+    )
 
 
 def _parse_arguments() -> argparse.Namespace:
