@@ -465,7 +465,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                   cacheControl: '3600',
                 },
                 onError: reject,
-                onProgress: (bytesUploaded, bytesTotal) => {
+                onProgress: (bytesUploaded: number, bytesTotal: number) => {
                   if (bytesUploaded < bytesTotal) setActivityPhase('uploading');
                 },
                 onSuccess: () => resolve(),

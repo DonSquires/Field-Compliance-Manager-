@@ -335,6 +335,12 @@ const AdminShell: React.FC = () => {
   }, [navigate]);
 
   const navigateFromHub = useCallback((destination: string) => {
+    if (destination.startsWith('dispatch?')) {
+      setFieldOpsSubArea('dispatch');
+      setActivePage('field-ops');
+      navigate(`/admin/field-ops?area=dispatch&${destination.slice('dispatch?'.length)}`);
+      return;
+    }
     if (FIELD_OPS_AREAS.has(destination as FieldOpsSubArea)) {
       navigateToFieldOps(destination as FieldOpsSubArea);
       return;
