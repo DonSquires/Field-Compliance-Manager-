@@ -186,7 +186,6 @@ services:
       VISION_VIDEO_ROOT: /opt/fcm/storage
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
       VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}
-      VISION_INGESTION_TOKEN: ${VISION_INGESTION_TOKEN:-}
     volumes:
       - /opt/fcm/storage:/opt/fcm/storage:ro
     networks: [fcm-net]

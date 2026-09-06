@@ -2,11 +2,12 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createClient } = require('@supabase/supabase-js');
+const { signJobToken } = require('./local_jwt_signer');
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const INGESTION_URL = (process.env.VISION_INGESTION_URL || '').replace(/\/+$/, '');
-const INGESTION_TOKEN = process.env.VISION_INGESTION_TOKEN || '';
+const WORKLOAD_SIGNING_SECRET = process.env.WORKLOAD_SIGNING_SECRET || '';
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
 const EXTRACTOR_PATH = path.resolve(
   process.env.VISION_EXTRACTOR_PATH || path.join(__dirname, 'video_motion_extractor.py')
@@ -87,10 +88,17 @@ function runExtractor(videoPath) {
 }
 
 async function ingest(job, summary) {
-  if (!INGESTION_URL || !INGESTION_TOKEN) throw new Error('VISION_INGESTION_URL and VISION_INGESTION_TOKEN are required');
+  if (!INGESTION_URL || !WORKLOAD_SIGNING_SECRET) throw new Error('VISION_INGESTION_URL and WORKLOAD_SIGNING_SECRET are required');
+  const token = signJobToken({
+    inference_job_id: job.id,
+    evidence_item_id: job.evidence_item_id,
+    organization_id: job.organization_id,
+    jti: require('node:crypto').randomUUID(),
+    exp: Math.floor(Date.now() / 1000) + 15 * 60
+  }, WORKLOAD_SIGNING_SECRET);
   const response = await fetch(INGESTION_URL, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${INGESTION_TOKEN}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       inference_job_id: job.id,
       evidence_item_id: job.evidence_item_id,
@@ -110,7 +118,7 @@ async function failJob(jobId, message) {
 
 async function processOne() {
   if (processing) return;
-  if (!INGESTION_URL || !INGESTION_TOKEN) return;
+  if (!INGESTION_URL || !WORKLOAD_SIGNING_SECRET) return;
   let currentJobId = null;
   processing = true;
   try {

@@ -12,7 +12,7 @@ COPY requirements.txt ./
 RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 COPY package.json ./
 RUN npm install --omit=dev --ignore-scripts
-COPY video_motion_extractor.py vision_job_watcher.js ./
+COPY video_motion_extractor.py vision_job_watcher.js local_jwt_signer.js ./
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser
