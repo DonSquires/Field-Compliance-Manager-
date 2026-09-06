@@ -27,11 +27,12 @@ import {
 } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
+import { resolveAddressCandidates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 import './DispatchConsolePage.css';
 
 // Type definitions
-type JobType = 'alarm_response' | 'event' | 'incident' | 'patrol_support' | 'welfare_check';
+type JobType = 'alarm_response' | 'event' | 'incident' | 'noise_control' | 'patrol_support' | 'welfare_check';
 type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
 type AlarmIntakeChannel = 'phone' | 'email';
 type JobStatus = 'pending' | 'pending_approval' | 'dispatched' | 'acknowledged' | 'en_route' | 'on_scene' | 'completed' | 'cancelled';
@@ -103,6 +104,7 @@ const JOB_TYPES: { id: JobType; label: string; icon: string }[] = [
   { id: 'alarm_response', label: 'Alarm Response', icon: '🚨' },
   { id: 'event', label: 'Event', icon: '🎪' },
   { id: 'incident', label: 'Incident', icon: '⚠️' },
+  { id: 'noise_control', label: 'Noise Control', icon: '🔊' },
   { id: 'patrol_support', label: 'Patrol Support', icon: '🚗' },
   { id: 'welfare_check', label: 'Welfare Check', icon: '🚧' },
 ];
@@ -266,6 +268,9 @@ const DispatchConsolePage: React.FC = () => {
   const [formJobType, setFormJobType] = useState<JobType>('alarm_response');
   const [formPriority, setFormPriority] = useState<JobPriority>('high');
   const [formSiteId, setFormSiteId] = useState<string>('');
+  const [isNewIncidentLocation, setIsNewIncidentLocation] = useState(false);
+  const [formLocationAddress, setFormLocationAddress] = useState('');
+  const [resolvedLocation, setResolvedLocation] = useState<{ label: string; lat: number; lng: number } | null>(null);
   const [formShiftId, setFormShiftId] = useState<string>('');
   const [formResourceId, setFormResourceId] = useState<string>('');
   const [formSlaMinutes, setFormSlaMinutes] = useState(15);
@@ -486,8 +491,12 @@ const DispatchConsolePage: React.FC = () => {
 
   // Create job
   const handleCreateJob = useCallback(async () => {
-    if (!formSiteId || !operatingBranchId) {
-      setError('Site is required');
+    if ((!formSiteId && !isNewIncidentLocation) || !operatingBranchId) {
+      setError('Select a site or add an incident location');
+      return;
+    }
+    if (isNewIncidentLocation && !resolvedLocation) {
+      setError('Resolve the incident address before dispatching');
       return;
     }
 
@@ -501,8 +510,14 @@ const DispatchConsolePage: React.FC = () => {
         ? `[Manual alarm intake: ${formAlarmIntakeChannel}; received ${new Date(formAlarmReceivedAt).toISOString()}]${formNotes.trim() ? `\n${formNotes.trim()}` : ''}`
         : formNotes || null;
 
-      const { data, error } = await supabase
-        .rpc('create_dispatch_job', {
+      const response = isNewIncidentLocation
+        ? await supabase.rpc('create_dispatch_intake_job', {
+            p_organization_id: operatingBranchId, p_service_agreement_id: selectedAgreement.id, p_client_request_id: formRequestId,
+            p_job_type: formJobType, p_priority: schemaDispatchJobPriority(formPriority), p_sla_minutes: formSlaMinutes,
+            p_location_name: resolvedLocation!.label, p_location_address: resolvedLocation!.label, p_location_lat: resolvedLocation!.lat, p_location_lng: resolvedLocation!.lng,
+            p_dispatch_resource_id: formResourceId || null, p_briefing_notes: briefingNotes, p_shift_id: formShiftId || null,
+          })
+        : await supabase.rpc('create_dispatch_job', {
           p_organization_id: operatingBranchId,
           p_service_agreement_id: selectedAgreement.id,
           p_client_site_id: formSiteId,
@@ -514,6 +529,7 @@ const DispatchConsolePage: React.FC = () => {
           p_briefing_notes: briefingNotes,
           p_shift_id: formShiftId || null,
         });
+      const { data, error } = response;
 
       if (error) throw error;
       if (!data?.length) throw new Error('The dispatch job was not confirmed after creation.');
@@ -522,6 +538,9 @@ const DispatchConsolePage: React.FC = () => {
       setFormJobType('alarm_response');
       setFormPriority('high');
       setFormSiteId('');
+      setIsNewIncidentLocation(false);
+      setFormLocationAddress('');
+      setResolvedLocation(null);
       setFormShiftId('');
       setFormResourceId('');
       setFormSlaMinutes(15);
@@ -538,7 +557,20 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA]);
+
+  const resolveIncidentLocation = useCallback(async () => {
+    try {
+      const candidate = (await resolveAddressCandidates(formLocationAddress, 1))[0];
+      if (!candidate) throw new Error('No matching address was found.');
+      setResolvedLocation(candidate);
+      setFormLocationAddress(candidate.label);
+      setError(null);
+    } catch (err) {
+      setResolvedLocation(null);
+      setError(err instanceof Error ? err.message : 'Unable to resolve the incident address.');
+    }
+  }, [formLocationAddress]);
 
   const assignResource = useCallback((resourceId: string) => {
     setFormResourceId(resourceId);
@@ -881,6 +913,7 @@ const DispatchConsolePage: React.FC = () => {
               </label>
               <select
                 value={formSiteId}
+                disabled={isNewIncidentLocation}
                 onChange={(e) => handleSelectSite(e.target.value)}
                 style={{
                   width: '100%',
@@ -905,6 +938,17 @@ const DispatchConsolePage: React.FC = () => {
                   No active sites are linked to the selected agreement.
                 </div>
               )}
+              <label style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+                <input type="checkbox" checked={isNewIncidentLocation} onChange={(event) => { setIsNewIncidentLocation(event.target.checked); setFormSiteId(''); setResolvedLocation(null); }} />
+                Create location from this dispatch
+              </label>
+              {isNewIncidentLocation && (
+                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                  <input value={formLocationAddress} onChange={(event) => { setFormLocationAddress(event.target.value); setResolvedLocation(null); }} placeholder="Incident address" style={{ flex: 1, minWidth: 0, padding: '6px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px' }} />
+                  <button type="button" onClick={resolveIncidentLocation} disabled={!formLocationAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
+                </div>
+              )}
+              {isNewIncidentLocation && resolvedLocation && <div style={{ marginTop: '4px', color: '#72D6A2', fontSize: '10px' }}>Resolved: {resolvedLocation.label}</div>}
             </div>
 
             {/* SLA Minutes */}
@@ -998,7 +1042,7 @@ const DispatchConsolePage: React.FC = () => {
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
                 onClick={handleCreateJob}
-                disabled={saving || !formSiteId || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
+                disabled={saving || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
                 style={{
                   flex: 1,
                   padding: '8px',

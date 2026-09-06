@@ -316,7 +316,7 @@ export async function installOfficerScheduleFixtures(page: Page): Promise<void> 
   let internalSlotStatus = 'published';
   let linkedSlotStatus = 'published';
   let linkedShiftStatus = 'published';
-  const dispatchJobs = [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', job_type: 'Alarm response', priority: 'high', status: 'on_scene', briefing_notes: 'Verify the north loading entrance and record the outcome.', sla_respond_by: '2026-08-30T10:00:00.000Z', created_at: '2026-08-30T09:00:00.000Z' }];
+  const dispatchJobs = [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', job_type: 'Alarm response', priority: 'high', status: 'on_scene', briefing_notes: 'Verify the north loading entrance and record the outcome.', sla_respond_by: '2026-08-30T10:00:00.000Z', expected_dwell_minutes: 8, timing_source: 'dispatcher_override', created_at: '2026-08-30T09:00:00.000Z', site: { name: 'Civic Operations Centre', address: '10 Waimea Road, Nelson', hs_notes: 'Boundary-first arrival check required.', access_instructions: 'Use the north loading entrance.' } }];
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'officer-e2e-token', refresh_token: 'officer-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: officerUser }) });
   });

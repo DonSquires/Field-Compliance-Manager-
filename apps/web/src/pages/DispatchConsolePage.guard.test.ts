@@ -36,6 +36,12 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).not.toMatch(/from\('dispatch_jobs'\)[\s\S]{0,200}\.insert\(/);
   });
 
+  it('can atomically create a provisional incident location through dispatch intake', () => {
+    expect(source).toContain("'create_dispatch_intake_job'");
+    expect(source).toContain('Create location from this dispatch');
+    expect(source).toContain('resolveIncidentLocation');
+  });
+
   it('pairs an available resource with its assigned officer active shift', () => {
     expect(source).toContain('p_dispatch_resource_id: formResourceId || null');
     expect(source).toContain('shift.officerUserId === resource?.assignedOfficerId');

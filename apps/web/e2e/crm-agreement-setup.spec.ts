@@ -18,7 +18,7 @@ test('provider configures covered sites and service modules through the accepted
   await expect(dialog.getByText('North Pavilion')).toBeVisible();
   await dialog.getByText('North Pavilion').locator('..').locator('..').getByRole('button', { name: 'Add coverage' }).click();
   await expect(dialog.getByRole('status')).toContainText('Covered site linked');
-  await expect(dialog.getByRole('button', { name: /Covered sites 2/ })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /Covered places 2/ })).toBeVisible();
 
   await dialog.getByRole('button', { name: /Service modules/ }).click();
   const parking = dialog.getByRole('article', { name: 'Module parking enforcement' });
@@ -29,7 +29,7 @@ test('provider configures covered sites and service modules through the accepted
   await expect(dialog.getByRole('status')).toContainText('Service module settings saved');
   await expect(dialog.getByRole('button', { name: /Service modules 2/ })).toBeVisible();
 
-  await dialog.getByRole('button', { name: /Covered sites/ }).click();
+  await dialog.getByRole('button', { name: /Covered places/ }).click();
   await expect(dialog).toHaveScreenshot('crm-agreement-setup.png');
   expect(errors, errors.join('\n')).toEqual([]);
 });

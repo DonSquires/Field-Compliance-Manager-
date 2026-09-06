@@ -104,6 +104,29 @@ interface WorkState {
 
 type ActivityPhase = 'idle' | 'preparing' | 'uploading' | 'waiting' | 'refreshing' | 'recording';
 
+const CONTEXT_LABELS: Record<string, string> = {
+  page: 'Workspace', crmTab: 'CRM view', rosterTab: 'Roster view', fieldOpsSubArea: 'Operations view',
+  agreement: 'Agreement', site: 'Place', zone: 'Zone', job: 'Dispatch job', route: 'Patrol route',
+};
+
+function contextValueLabel(key: string, value: string): [string, string] {
+  const readable = value.replaceAll('_', ' ').replace(/\w/g, (letter) => letter.toUpperCase());
+  return [CONTEXT_LABELS[key] ?? key.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase()), readable];
+}
+const CONTEXT_VALUES: Record<string, Record<string, string>> = {
+  page: { hub: 'Overview', crm: 'Accounts and proposals', relationships: 'Agreements and relationships', roster: 'Schedules and rosters', 'field-ops': 'Field operations', reports: 'Reports' },
+  crmTab: { crm: 'Account register', invoicing: 'Invoicing', payments: 'Payments', 'rate-rules': 'Rate rules' },
+  rosterTab: { roster: 'Roster board', people: 'People and capability', coverage: 'Work units and coverage' },
+  fieldOpsSubArea: { landing: 'Operations overview', dispatch: 'Dispatch console', patrol: 'Patrol operations', 'live-map': 'Live operations map', 'officer-activity': 'Officer activity', 'welfare-alerts': 'Welfare response', 'breach-review': 'Breach review', 'field-reports': 'Field reports' },
+};
+
+function formatContextEntry(key: string, value: string): [string, string] {
+  const normalizedKey = key.charAt(0).toLowerCase() + key.slice(1);
+  const label = CONTEXT_LABELS[normalizedKey] ?? key.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase());
+  const readable = CONTEXT_VALUES[normalizedKey]?.[value] ?? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return [label, readable];
+}
+
 export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations' }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -118,11 +141,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [globalResults, setGlobalResults] = useState<GlobalSearchResult[]>([]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  // Side panes are drawers on narrow screens, so they start closed there.
-  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === 'undefined' ? true : window.innerWidth >= 1100);
-  const [contextPanelOpen, setContextPanelOpen] = useState(() => typeof window === 'undefined' ? true : window.innerWidth >= 1100);
-  const [sidebarWidth, setSidebarWidth] = useState(296);
-  const [contextPanelWidth, setContextPanelWidth] = useState(344);
+  // Compact mode is a conversation surface. Side panes open on demand as
+  // drawers; users can expose both when they deliberately expand the workspace.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [contextPanelWidth, setContextPanelWidth] = useState(320);
   const [contextTab, setContextTab] = useState<ContextTab>('context');
   const [activityPhase, setActivityPhase] = useState<ActivityPhase>('idle');
   const [loading, setLoading] = useState(false);
@@ -136,9 +160,17 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
-  const contextEntries = useMemo(() => Object.entries(context ?? {})
-    .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
-    .slice(0, 4), [context]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const contextEntries = useMemo(() => Object.entries(context ?? {}).flatMap(([key, value]) => {
+    if (typeof value === 'string' || typeof value === 'number') return [formatContextEntry(key, String(value))];
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      const label = ['name', 'title', 'display_name', 'label'].map((field) => record[field]).find((candidate) => typeof candidate === 'string' && candidate.trim());
+      return label ? [formatContextEntry(key, String(label))] : [];
+    }
+    return [];
+  }).slice(0, 4), [context]);
   const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles, attachments });
 
   const loadAttachments = useCallback(async (convId: string) => {
@@ -324,6 +356,25 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   useEffect(() => {
     if (open) loadConversation();
   }, [open, loadConversation]);
+
+  useEffect(() => {
+    setSidebarOpen(workspaceExpanded);
+    setContextPanelOpen(workspaceExpanded);
+  }, [workspaceExpanded]);
+
+  useEffect(() => {
+    if (!open) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        window.setTimeout(() => returnFocusRef.current?.focus(), 0);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, open]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -552,6 +603,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   return (
     <div
+      ref={panelRef}
       className={`bob-panel ${workspaceExpanded ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
       aria-label="Bob agent workspace"
       onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
@@ -671,9 +723,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
               <Plus size={15} />
               <span>New chat</span>
             </button>
-            <button type="button" className={`bob-session-action bob-voice-action ${voiceState === 'recording' ? 'is-recording' : ''}`} onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Hold to talk'}>
+            <button type="button" className={`bob-session-action bob-voice-action ${voiceState === 'recording' ? 'is-recording' : ''}`} onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Start voice capture'}>
               <Mic size={15} />
-              <span>{voiceState === 'recording' ? 'Stop recording' : 'Hold to talk'}</span>
+              <span>{voiceState === 'recording' ? 'Stop recording' : 'Start recording'}</span>
             </button>
           </div>
 

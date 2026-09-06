@@ -8,6 +8,7 @@ const port = Number(process.env.PORT || 3000);
 const apiToken = process.env.FCM_API_TOKEN || '';
 const voiceUrl = (process.env.VOICE_URL || '').replace(/\/+$/, '');
 const voiceApiKey = process.env.VOICE_API_KEY || '';
+const osrmUrl = (process.env.OSRM_URL || '').replace(/\/+$/, '');
 const workloadSigningSecret = process.env.WORKLOAD_SIGNING_SECRET || '';
 const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -146,6 +147,66 @@ async function ingestMotion(request, response) {
   return json(response, 200, { ok: true, status: 'success', inference_result_id: data });
 }
 
+async function routeGuidance(request, response) {
+  if (!osrmUrl) return json(response, 503, { error: 'capability_unavailable', capability: 'route_guidance' });
+  const body = await readJson(request);
+  const values = ['origin_lat', 'origin_lng', 'destination_lat', 'destination_lng'].map((key) => Number(body[key]));
+  if (!Number.isFinite(values[0]) || !Number.isFinite(values[1]) || !Number.isFinite(values[2]) || !Number.isFinite(values[3]) || Math.abs(values[0]) > 90 || Math.abs(values[2]) > 90 || Math.abs(values[1]) > 180 || Math.abs(values[3]) > 180) return json(response, 400, { error: 'valid_origin_and_destination_coordinates_required' });
+  const [originLat, originLng, destinationLat, destinationLng] = values;
+  const url = `${osrmUrl}/route/v1/driving/${originLng},${originLat};${destinationLng},${destinationLat}?overview=full&geometries=geojson&steps=true`;
+  const upstream = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  const payload = await upstream.json().catch(() => null);
+  const route = payload?.routes?.[0];
+  if (!upstream.ok || !route) return json(response, 502, { error: 'route_guidance_unavailable' });
+  const steps = (route.legs?.[0]?.steps ?? []).slice(0, 30).map((step) => ({
+    instruction: [step.maneuver?.type, step.maneuver?.modifier, step.name].filter(Boolean).join(' '),
+    distance_meters: Math.round(Number(step.distance) || 0),
+    duration_seconds: Math.round(Number(step.duration) || 0),
+  }));
+  return json(response, 200, { distance_meters: Math.round(route.distance), duration_seconds: Math.round(route.duration), geometry: route.geometry?.coordinates ?? [], steps });
+}
+
+async function routePlan(request, response) {
+  if (!osrmUrl) return json(response, 503, { error: 'capability_unavailable', capability: 'route_plan' });
+  const body = await readJson(request);
+  const originLat = Number(body.origin_lat), originLng = Number(body.origin_lng);
+  const stops = Array.isArray(body.stops) ? body.stops.slice(0, 24) : [];
+  if (!Number.isFinite(originLat) || !Number.isFinite(originLng) || !stops.length || stops.some((stop) => !stop?.id || !Number.isFinite(Number(stop.lat)) || !Number.isFinite(Number(stop.lng)))) return json(response, 400, { error: 'valid_origin_and_stops_required' });
+  const points = [{ lat: originLat, lng: originLng }, ...stops.map((stop) => ({ lat: Number(stop.lat), lng: Number(stop.lng) }))];
+  const coordinates = points.map((point) => `${point.lng},${point.lat}`).join(';');
+  const upstream = await fetch(`${osrmUrl}/table/v1/driving/${coordinates}?annotations=duration,distance`, { signal: AbortSignal.timeout(12_000) });
+  const matrix = await upstream.json().catch(() => null);
+  if (!upstream.ok || !Array.isArray(matrix?.durations)) return json(response, 502, { error: 'route_plan_unavailable' });
+  const priorityWeight = { urgent: 0, high: 60, normal: 180, low: 360 };
+  const pending = stops.map((stop, index) => ({ ...stop, matrixIndex: index + 1 }));
+  const ordered = [];
+  let currentIndex = 0;
+  let elapsedSeconds = 0;
+  while (pending.length) {
+    const now = Date.now();
+    pending.sort((left, right) => {
+      const leftTravel = Number(matrix.durations[currentIndex]?.[left.matrixIndex] ?? Infinity);
+      const rightTravel = Number(matrix.durations[currentIndex]?.[right.matrixIndex] ?? Infinity);
+      const leftDeadline = left.sla_respond_by ? new Date(left.sla_respond_by).getTime() : Infinity;
+      const rightDeadline = right.sla_respond_by ? new Date(right.sla_respond_by).getTime() : Infinity;
+      const leftLate = Math.max(0, now + (elapsedSeconds + leftTravel) * 1000 - leftDeadline) / 1000;
+      const rightLate = Math.max(0, now + (elapsedSeconds + rightTravel) * 1000 - rightDeadline) / 1000;
+      const leftScore = leftLate * 1_000_000 + leftTravel + (priorityWeight[left.priority] ?? 720);
+      const rightScore = rightLate * 1_000_000 + rightTravel + (priorityWeight[right.priority] ?? 720);
+      return leftScore - rightScore;
+    });
+    const next = pending.shift();
+    const travelSeconds = Number(matrix.durations[currentIndex]?.[next.matrixIndex] ?? 0);
+    const distanceMeters = Number(matrix.distances?.[currentIndex]?.[next.matrixIndex] ?? 0);
+    elapsedSeconds += travelSeconds;
+    const deadline = next.sla_respond_by ? new Date(next.sla_respond_by).getTime() : null;
+    ordered.push({ id: next.id, kind: next.kind ?? 'dispatch', eta_seconds: Math.round(elapsedSeconds), distance_meters: Math.round(distanceMeters), sla_risk: deadline && Date.now() + elapsedSeconds * 1000 > deadline ? 'at_risk' : 'on_track' });
+    elapsedSeconds += Number(next.dwell_seconds ?? 300);
+    currentIndex = next.matrixIndex;
+  }
+  return json(response, 200, { stops: ordered });
+}
+
 http.createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') return json(response, 200, { status: 'ok', service: 'fcm-api' });
   if (request.method === 'POST' && request.url === '/api/v1/compliance/motion-ingestion') {
@@ -169,6 +230,8 @@ http.createServer(async (request, response) => {
   try {
     if (request.method === 'POST' && request.url === '/api/bob/voice/transcribe') return await proxyVoiceTranscription(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/voice/speak') return await proxyVoiceSpeech(request, response);
+    if (request.method === 'POST' && request.url === '/api/navigation/route') return await routeGuidance(request, response);
+    if (request.method === 'POST' && request.url === '/api/navigation/plan') return await routePlan(request, response);
     return json(response, 503, { error: 'capability_unavailable', capability: 'unrecovered_fcm_api_route' });
   } catch (error) {
     return json(response, 400, { error: error instanceof Error ? error.message : 'request_failed' });

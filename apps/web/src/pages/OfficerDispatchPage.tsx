@@ -11,6 +11,7 @@ import { CheckCircle2, FileText, Home, Map, ShieldCheck } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
+import { OfficerRouteGuidance } from '../components/OfficerRouteGuidance';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -21,7 +22,10 @@ interface DispatchJob {
   status: string;
   briefing_notes: string | null;
   sla_respond_by: string | null;
+  expected_dwell_minutes: number;
+  timing_source: string;
   created_at: string;
+  site: { name: string; address: string | null; hs_notes: string | null; access_instructions: string | null } | null;
 }
 
 interface CompletionReceipt {
@@ -44,6 +48,7 @@ const STATUS_LABEL: Record<string, string> = {
   en_route: 'Mark On Scene',
   on_scene: 'Mark Completed',
 };
+const PRIORITY_WEIGHT: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
 const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' | 'report' | 'debrief') => void }> = ({ onNavigate }) => {
   const location = useLocation();
@@ -55,6 +60,13 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
   const [completionReceipt, setCompletionReceipt] = useState<CompletionReceipt | null>(null);
+  const [plannedJobId, setPlannedJobId] = useState<string | null>(null);
+  const recommendedJob = [...jobs].sort((left, right) => {
+    const leftDeadline = left.sla_respond_by ? new Date(left.sla_respond_by).getTime() : Number.MAX_SAFE_INTEGER;
+    const rightDeadline = right.sla_respond_by ? new Date(right.sla_respond_by).getTime() : Number.MAX_SAFE_INTEGER;
+    return leftDeadline - rightDeadline || (PRIORITY_WEIGHT[left.priority] ?? 9) - (PRIORITY_WEIGHT[right.priority] ?? 9);
+  })[0] ?? null;
+  const routedJob = jobs.find((job) => job.id === plannedJobId) ?? recommendedJob;
 
   // ATLAS READS: dispatch_jobs (via shifts assigned to this officer)
   const loadJobs = useCallback(async () => {
@@ -80,14 +92,14 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
 
       const { data, error: err } = await supabase
         .from('dispatch_jobs')
-        .select('id, job_type, priority, status, briefing_notes, sla_respond_by, created_at')
+        .select('id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, site:client_site_id(name, address, hs_notes, access_instructions)')
         .in('shift_id', shiftIds)
         .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[])
         .order('priority', { ascending: false })
         .order('created_at', { ascending: true });
 
       if (err) throw err;
-      setJobs((data as DispatchJob[]) || []);
+      setJobs((data as unknown as DispatchJob[]) || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dispatch jobs');
     } finally {
@@ -195,6 +207,8 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
         </section>
       )}
 
+      {routedJob && <OfficerRouteGuidance job={routedJob} onRecommendation={setPlannedJobId} />}
+
       <div className="contacts-list">
         {jobs.length === 0 ? (
           <div className="empty-state">
@@ -210,10 +224,12 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
                 </span>
               </div>
               <div className="contact-details">
+                {job.site && <><p><strong>{job.site.name}</strong>{job.site.address && ` · ${job.site.address}`}</p>{job.site.access_instructions && <p>Access: {job.site.access_instructions}</p>}{job.site.hs_notes && <p><strong>Safety: </strong>{job.site.hs_notes}</p>}</>}
                 {job.briefing_notes && <p>{job.briefing_notes}</p>}
                 <p className="contact-meta">
                   {job.status}
                   {job.sla_respond_by ? ` · respond by ${new Date(job.sla_respond_by).toLocaleTimeString()}` : ''}
+                  {` · ${job.expected_dwell_minutes} min dwell`}
                 </p>
               </div>
               {job.status === 'on_scene' && (

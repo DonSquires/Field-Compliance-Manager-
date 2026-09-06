@@ -38,6 +38,12 @@ describe('officer dispatch lifecycle boundary', () => {
     expect(source).toContain("job.id === requestedJobId ? 'is-context-focus' : ''");
   });
 
+  it('shows location, access, and safety context before attendance', () => {
+    expect(source).toContain('site:client_site_id(name, address, hs_notes, access_instructions)');
+    expect(source).toContain('Access: {job.site.access_instructions}');
+    expect(source).toContain('Safety: ');
+  });
+
   it('returns the locked job context without widening RPC access', () => {
     expect(migration).toContain('returns table (id uuid, status text, shift_id uuid, completed_at timestamptz)');
     expect(migration).toContain('select updated.id, updated.status, updated.shift_id, updated.completed_at');

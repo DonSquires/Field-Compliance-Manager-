@@ -44,3 +44,30 @@ test('personal dispatch notification opens the exact assigned job', async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('route guidance renders the recommended SLA-aware route in the officer portal', async ({ page, context }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: -41.2805, longitude: 173.2840 });
+  await page.route('**/functions/v1/linz-map-tile**', async (route) => await route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL1XQAAAABJRU5ErkJggg==', 'base64') }));
+  await page.route('**/functions/v1/officer-route-guidance', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    if (body.mode === 'plan') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ stops: [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', kind: 'dispatch', eta_seconds: 296, distance_meters: 3110, sla_risk: 'on_track' }] }) });
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ distance_meters: 3110, duration_seconds: 296, destination_lat: -41.3012, destination_lng: 173.2316, geometry: [[173.2840, -41.2805], [173.2670, -41.2890], [173.2316, -41.3012]], steps: [{ instruction: 'depart Waimea Road', distance_meters: 300 }, { instruction: 'turn left onto Abraham Heights', distance_meters: 1200 }] }) });
+  });
+  await page.route('**/functions/v1/linz-lookup', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ geometry: { type: 'Polygon', coordinates: [[[173.230, -41.302], [173.233, -41.302], [173.233, -41.300], [173.230, -41.302]]] } }) }));
+  await signInAsOfficer(page, '/officer/dispatch');
+  const guidance = page.getByRole('region', { name: 'Recommended route guidance' });
+  await guidance.getByRole('button', { name: 'Route from here' }).click();
+  await expect(guidance).toContainText('Route updated');
+  await expect(guidance).toContainText('5 min');
+  await expect(guidance).toContainText('3.1 km');
+  await expect(guidance).toContainText('turn left onto Abraham Heights');
+  await expect(guidance.locator('.leaflet-control-layers')).toContainText('LINZ aerial');
+  await expect(guidance).toHaveScreenshot('officer-route-guidance.png');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
