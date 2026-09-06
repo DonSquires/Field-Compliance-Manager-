@@ -176,6 +176,24 @@ services:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}
 
+  fcm-vision-watcher:
+    build: ./services/vision
+    image: fcm/fcm-vision-watcher:local
+    container_name: fcm-vision-watcher
+    restart: unless-stopped
+    env_file: /opt/fcm/.env
+    environment:
+      VISION_VIDEO_ROOT: /opt/fcm/storage
+      VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
+      VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}
+      VISION_INGESTION_TOKEN: ${VISION_INGESTION_TOKEN:-}
+    volumes:
+      - /opt/fcm/storage:/opt/fcm/storage:ro
+    networks: [fcm-net]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
   # In-house embedding server. CPU-only; nomic-embed-text is small + fast enough
   # for the knowledge-card volume. Not exposed publicly — only fcm-api on fcm-net
   # talks to it at http://ollama:11434.
