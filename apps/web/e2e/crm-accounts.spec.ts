@@ -90,6 +90,30 @@ test('relationships workspace opens the operational account record', async ({ pa
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('location house lookup exposes only shared physical setup and blocks duplicate creation', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await page.route('**/rest/v1/rpc/find_crm_location_candidates', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+    location_id: '91919191-9191-4919-8919-919191919191', name: 'Nelson Civic Centre', address: '1 Civic Square, Nelson', suburb: 'Nelson', postcode: '7010',
+    site_count: 2, zone_count: 1, boundary_state: 'verified geometry available', match_reason: 'Exact address match', belongs_to_account: false,
+  }]) }));
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: /Places/ }).click();
+  await workspace.getByRole('button', { name: 'Find or add location' }).click();
+  await workspace.getByLabel('Location name').fill('Nelson Civic Centre');
+  await workspace.getByLabel('Street address').fill('1 Civic Square, Nelson');
+  await workspace.getByRole('button', { name: 'Search places' }).click();
+  const lookup = workspace.getByText('Possible physical place matches').locator('..');
+  await expect(lookup).toContainText('Nelson Civic Centre');
+  await expect(lookup).toContainText('2 site facets · 1 zone facet · verified geometry available');
+  await expect(lookup).toContainText('Existing place is managed by another account');
+  await expect(lookup.getByRole('button', { name: 'Create new location' })).toHaveCount(0);
+  await expect(lookup).not.toContainText('finance');
+  await expect(lookup).not.toContainText('Safety');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('administrator creates and edits organizations through the human account spine', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
   await page.getByRole('button', { name: 'Add organization' }).click();
