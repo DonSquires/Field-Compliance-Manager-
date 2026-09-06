@@ -420,7 +420,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       file,
       status: 'queued' as const,
     }));
-    if (rejected.length) setError('One or more files are empty or larger than the 48 MB upload limit.');
+    if (rejected.length) setError('One or more files are empty or larger than the 500 MB upload limit.');
     setPendingFiles(current => [...current, ...accepted].slice(0, 8));
   };
 
