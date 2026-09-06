@@ -21,10 +21,13 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { AlertTriangle, Archive, ArchiveRestore, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, PanelRightClose, Pencil, Pin, PinOff, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { Upload } from 'tus-js-client';
 import { BobMarkdown } from './BobMarkdown';
 import './BobPanel.css';
 
 const MAX_BOB_UPLOAD_BYTES = 500 * 1024 * 1024;
+const RESUMABLE_UPLOAD_THRESHOLD = 8 * 1024 * 1024;
+const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024;
 const ACCEPTED_BOB_UPLOADS = 'image/*,video/*,audio/*,.csv,.txt,.pdf,.doc,.docx,.xls,.xlsx,.json,.md';
 const ACCEPTED_BOB_UPLOAD_LABEL = 'PDF, DOCX, CSV/XLSX, TXT, JSON, images, audio, and video up to 500 MB each';
 
@@ -437,10 +440,49 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       const safeName = pending.file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180) || 'upload.bin';
       const attachmentId = crypto.randomUUID();
       const storagePath = `org/${profile.organizationId}/bob/${convId}/${attachmentId}-${safeName}`;
-      const { error: uploadError } = await supabase.storage.from('bob-uploads').upload(storagePath, pending.file, {
-        contentType: pending.file.type || 'application/octet-stream',
-        upsert: false,
-      });
+      let uploadError: Error | null = null;
+      if (pending.file.size > RESUMABLE_UPLOAD_THRESHOLD) {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !sessionData.session?.access_token) {
+          uploadError = sessionError ?? new Error('Your session expired. Sign in again before uploading large files.');
+        } else {
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const upload = new Upload(pending.file, {
+                endpoint: `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/upload/resumable`,
+                retryDelays: [0, 1000, 3000, 5000],
+                chunkSize: RESUMABLE_CHUNK_BYTES,
+                uploadDataDuringCreation: true,
+                headers: {
+                  apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+                  Authorization: `Bearer ${sessionData.session.access_token}`,
+                  'x-upsert': 'false',
+                },
+                metadata: {
+                  bucketName: 'bob-uploads',
+                  objectName: storagePath,
+                  contentType: pending.file.type || 'application/octet-stream',
+                  cacheControl: '3600',
+                },
+                onError: reject,
+                onProgress: (bytesUploaded, bytesTotal) => {
+                  if (bytesUploaded < bytesTotal) setActivityPhase('uploading');
+                },
+                onSuccess: () => resolve(),
+              });
+              upload.start();
+            });
+          } catch (error) {
+            uploadError = error instanceof Error ? error : new Error('Resumable upload failed.');
+          }
+        }
+      } else {
+        const result = await supabase.storage.from('bob-uploads').upload(storagePath, pending.file, {
+          contentType: pending.file.type || 'application/octet-stream',
+          upsert: false,
+        });
+        uploadError = result.error;
+      }
       if (uploadError) {
         setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: uploadError.message } : item));
         throw uploadError;
