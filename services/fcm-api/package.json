@@ -1,0 +1,7 @@
+{
+  "name": "fcm-api-workload-gateway",
+  "private": true,
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4"
+  }
+}
