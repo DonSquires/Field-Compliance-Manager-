@@ -11,6 +11,9 @@ const voiceApiKey = process.env.VOICE_API_KEY || '';
 const workloadSigningSecret = process.env.WORKLOAD_SIGNING_SECRET || '';
 const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const openaiApiKey = process.env.OPENAI_API_KEY || '';
+const openaiBaseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+const openaiPlanModel = process.env.OPENAI_PLAN_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const maxBodyBytes = 2 * 1024 * 1024;
 const supabase = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
@@ -67,6 +70,47 @@ async function proxyVoiceSpeech(request, response) {
   return json(response, upstream.status, payload);
 }
 
+async function planWithOpenAI(request, response) {
+  if (!openaiApiKey) return json(response, 503, { error: 'model_provider_not_configured' });
+  const body = await readJson(request);
+  const message = typeof body.message === 'string' ? body.message.trim() : '';
+  if (!message) return json(response, 400, { error: 'message is required' });
+  const systemPrompt = 'You are Bob, the Field Compliance Manager planning engine. Return only valid JSON with keys: action, tool, args, reply, questions, reasoning, confidence, route_selected. Use action="answer" and tool=null unless a supplied tool is clearly appropriate. Never claim a write, approval, deployment, or identity match has happened.';
+  const upstream = await fetch(`${openaiBaseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: openaiPlanModel,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: JSON.stringify({ message, tools: body.tools || [], context: body.platform_context || '', history: body.history || [] }) }
+      ],
+      response_format: { type: 'json_object' }
+    }),
+    signal: AbortSignal.timeout(120_000)
+  });
+  const providerBody = await upstream.json().catch(() => null);
+  if (!upstream.ok || !providerBody) return json(response, 502, { error: 'model_provider_request_failed' });
+  const content = providerBody.choices?.[0]?.message?.content;
+  if (typeof content !== 'string') return json(response, 502, { error: 'model_provider_returned_no_plan' });
+  try {
+    const plan = JSON.parse(content);
+    return json(response, 200, {
+      ok: true,
+      action: typeof plan.action === 'string' ? plan.action : 'answer',
+      tool: typeof plan.tool === 'string' ? plan.tool : null,
+      args: plan.args && typeof plan.args === 'object' ? plan.args : {},
+      reply: typeof plan.reply === 'string' ? plan.reply : '',
+      questions: Array.isArray(plan.questions) ? plan.questions : [],
+      reasoning: typeof plan.reasoning === 'string' ? plan.reasoning : '',
+      confidence: typeof plan.confidence === 'number' ? plan.confidence : 0,
+      route_selected: typeof plan.route_selected === 'string' ? plan.route_selected : 'answer'
+    });
+  } catch {
+    return json(response, 502, { error: 'model_provider_returned_invalid_plan' });
+  }
+}
+
 function bearerToken(request) {
   const value = request.headers.authorization || '';
   return value.toLowerCase().startsWith('bearer ') ? value.slice(7).trim() : '';
@@ -111,6 +155,13 @@ http.createServer(async (request, response) => {
       const message = error instanceof Error ? error.message : 'motion ingestion failed';
       const status = /token|credential|signature|expired|claim|invalid/.test(message) ? 401 : 502;
       return json(response, status, { ok: false, error: message });
+    }
+  }
+  if (request.method === 'POST' && request.url === '/api/bob/plan') {
+    try {
+      return await planWithOpenAI(request, response);
+    } catch (error) {
+      return json(response, 502, { error: error instanceof Error ? error.message : 'planning_failed' });
     }
   }
   if (!apiToken) return json(response, 503, { error: 'api_authentication_not_configured' });
