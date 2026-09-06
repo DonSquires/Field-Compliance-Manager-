@@ -41,7 +41,7 @@ interface Metrics {
   observations: MetricState;
 }
 
-type QueueKind = 'welfare' | 'dispatch' | 'breach' | 'report';
+type QueueKind = 'welfare' | 'dispatch' | 'breach' | 'report' | 'video';
 
 interface QueueItem {
   id: string;
@@ -98,7 +98,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
     try {
-      const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, welfareRows, dispatchRows, breachRows, reportRows] = await Promise.all([
+      const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, welfareRows, dispatchRows, breachRows, reportRows, videoRows] = await Promise.all([
         supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
         supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
         welfareEnabled
@@ -112,6 +112,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6),
         supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
         supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
+        supabase.from('inference_jobs').select('id, evidence_item_id, domain, status, created_at').eq('organization_id', organizationId).eq('domain', 'video_motion').in('status', ['queued', 'processing', 'manual_review_required']).order('created_at', { ascending: false }).limit(6),
       ]);
 
       setMetrics({
@@ -185,6 +186,22 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             status: report.status,
             priority: report.severity === 'critical' ? 95 : report.severity === 'high' ? 75 : 35,
             occurredAt: report.reported_at,
+            navigate: 'field-reports',
+          });
+        }
+      }
+
+      if (videoRows.error) warnings.push(['CCTV inference jobs', videoRows.error]);
+      else {
+        for (const job of videoRows.data ?? []) {
+          items.push({
+            id: job.id,
+            kind: 'video',
+            title: 'CCTV evidence review',
+            detail: `Video evidence ${String(job.evidence_item_id).slice(0, 8)} · ${job.status === 'processing' ? 'analysis in progress' : 'review required'}`,
+            status: job.status,
+            priority: job.status === 'manual_review_required' ? 78 : 45,
+            occurredAt: job.created_at,
             navigate: 'field-reports',
           });
         }
@@ -317,7 +334,7 @@ function Metric({ icon: Icon, label, metric, tone, onClick }: { icon: LucideIcon
 }
 
 function QueueRow({ item, onOpen }: { item: QueueItem; onOpen: () => void }) {
-  const Icon = item.kind === 'welfare' ? HeartPulse : item.kind === 'dispatch' ? Radio : item.kind === 'breach' ? ShieldAlert : FileWarning;
+  const Icon = item.kind === 'welfare' ? HeartPulse : item.kind === 'dispatch' ? Radio : item.kind === 'breach' ? ShieldAlert : item.kind === 'video' ? Binoculars : FileWarning;
   return (
     <button type="button" className={`admin-queue-row kind-${item.kind}`} onClick={onOpen}>
       <span className="admin-queue-icon"><Icon size={18} aria-hidden="true" /></span>
