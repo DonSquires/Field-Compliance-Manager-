@@ -12,6 +12,7 @@ const INFERENCE_SERVICE_URL = (process.env.INFERENCE_SERVICE_URL || 'http://fcm-
 const INFERENCE_API_KEY = process.env.INFERENCE_API_KEY || '';
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
 const DERIVED_ROOT = path.resolve(process.env.VISION_DERIVED_ROOT || '/opt/fcm/derived');
+const VIDEO_CACHE_ROOT = path.resolve(process.env.VISION_VIDEO_CACHE_ROOT || path.join(DERIVED_ROOT, 'source-cache'));
 const EXTRACTOR_PATH = path.resolve(
   process.env.VISION_EXTRACTOR_PATH || path.join(__dirname, 'video_motion_extractor.py')
 );
@@ -40,6 +41,46 @@ function safeVideoPath(storagePath) {
     throw new Error('evidence storage_path escapes VISION_VIDEO_ROOT');
   }
   return candidate;
+}
+
+function safeCacheVideoPath(storagePath) {
+  if (typeof storagePath !== 'string' || !storagePath.trim()) throw new Error('evidence storage_path is missing');
+  const candidate = path.resolve(VIDEO_CACHE_ROOT, storagePath.replace(/^\/+/, ''));
+  if (candidate !== VIDEO_CACHE_ROOT && !candidate.startsWith(`${VIDEO_CACHE_ROOT}${path.sep}`)) {
+    throw new Error('evidence storage_path escapes VISION_VIDEO_CACHE_ROOT');
+  }
+  return candidate;
+}
+
+async function ensureVideoPath(evidence) {
+  const sourcePath = safeVideoPath(evidence.storage_path);
+  try {
+    await fs.access(sourcePath);
+    return sourcePath;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+
+  const cachedPath = safeCacheVideoPath(evidence.storage_path);
+  try {
+    await fs.access(cachedPath);
+    return cachedPath;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+
+  const bucket = evidence.metadata?.storage_bucket || 'bob-uploads';
+  const { data, error } = await supabase.storage.from(bucket).download(evidence.storage_path);
+  if (error) throw new Error(`video download failed from ${bucket}: ${error.message}`);
+
+  await fs.mkdir(path.dirname(cachedPath), { recursive: true });
+  const bytes = Buffer.from(await data.arrayBuffer());
+  await fs.writeFile(cachedPath, bytes, { flag: 'wx' }).catch(async (error) => {
+    if (error?.code !== 'EEXIST') throw error;
+    await fs.access(cachedPath);
+  });
+  log('video_cached', { evidence_item_id: evidence.id, bucket, storage_path: evidence.storage_path, bytes: bytes.length });
+  return cachedPath;
 }
 
 async function claimJob(job) {
@@ -163,14 +204,13 @@ async function processOne() {
     currentJobId = job.id;
     const { data: evidence, error: evidenceError } = await supabase
       .from('evidence_items')
-      .select('id, organization_id, evidence_kind, storage_path')
+      .select('id, organization_id, evidence_kind, storage_path, metadata')
       .eq('id', job.evidence_item_id)
       .eq('organization_id', job.organization_id)
       .maybeSingle();
     if (evidenceError || !evidence) throw new Error(`evidence lookup failed: ${evidenceError?.message || 'not found'}`);
     if (evidence.evidence_kind !== 'video') throw new Error('evidence item is not video');
-    const videoPath = safeVideoPath(evidence.storage_path);
-    await fs.access(videoPath);
+    const videoPath = await ensureVideoPath(evidence);
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
     const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
     await classifyFrames(summary);
@@ -194,4 +234,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, runExtractor, claimJob, processOne };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne };

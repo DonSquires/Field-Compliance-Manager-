@@ -497,13 +497,20 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         file_size_bytes: pending.file.size,
         storage_bucket: 'bob-uploads',
         storage_path: storagePath,
-        purpose: pending.file.type.startsWith('image/') ? 'photo_intake' : 'document_intake',
+        purpose: pending.file.type.startsWith('video/') ? 'video_intake' : pending.file.type.startsWith('image/') ? 'photo_intake' : 'document_intake',
         processing_state: 'pending',
       }]);
       if (metadataError) {
         await supabase.storage.from('bob-uploads').remove([storagePath]);
         setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: metadataError.message } : item));
         throw metadataError;
+      }
+      if (pending.file.type.startsWith('video/')) {
+        const { error: registerError } = await supabase.functions.invoke('register-bob-video-attachment', { body: { attachment_id: attachmentId } });
+        if (registerError) {
+          setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: registerError.message } : item));
+          throw registerError;
+        }
       }
       const attachment = { id: attachmentId, name: pending.file.name, type: pending.file.type || 'application/octet-stream', storage_bucket: 'bob-uploads', storage_path: storagePath };
       uploaded.push(attachment);
