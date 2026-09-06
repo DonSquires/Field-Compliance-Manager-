@@ -189,6 +189,8 @@ services:
       VISION_VIDEO_ROOT: /opt/fcm/storage
       VISION_DERIVED_ROOT: /opt/fcm/derived
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
+      INFERENCE_SERVICE_URL: http://fcm-inference:3000
+      VISION_MAX_CLASSIFICATION_FRAMES: 120
       VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}
     volumes:
       - /opt/fcm/storage:/opt/fcm/storage:ro

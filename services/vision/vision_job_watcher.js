@@ -8,6 +8,8 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const INGESTION_URL = (process.env.VISION_INGESTION_URL || '').replace(/\/+$/, '');
 const WORKLOAD_SIGNING_SECRET = process.env.WORKLOAD_SIGNING_SECRET || '';
+const INFERENCE_SERVICE_URL = (process.env.INFERENCE_SERVICE_URL || 'http://fcm-inference:3000').replace(/\/+$/, '');
+const INFERENCE_API_KEY = process.env.INFERENCE_API_KEY || '';
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
 const DERIVED_ROOT = path.resolve(process.env.VISION_DERIVED_ROOT || '/opt/fcm/derived');
 const EXTRACTOR_PATH = path.resolve(
@@ -16,6 +18,7 @@ const EXTRACTOR_PATH = path.resolve(
 const POLL_INTERVAL_MS = Number(process.env.VISION_POLL_INTERVAL_MS || 5000);
 const EXTRACTOR_TIMEOUT_MS = Number(process.env.VISION_EXTRACTOR_TIMEOUT_MS || 30 * 60 * 1000);
 const MAX_SUMMARY_BYTES = Number(process.env.VISION_MAX_SUMMARY_BYTES || 2 * 1024 * 1024);
+const MAX_CLASSIFICATION_FRAMES = Number(process.env.VISION_MAX_CLASSIFICATION_FRAMES || 120);
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
@@ -111,6 +114,29 @@ async function ingest(job, summary) {
   if (!response.ok) throw new Error(`motion ingestion returned HTTP ${response.status}`);
 }
 
+async function classifyFrames(summary) {
+  if (!INFERENCE_API_KEY) throw new Error('INFERENCE_API_KEY is required for frame classification');
+  const frames = summary.motion_segments.flatMap((segment) => segment.frames || []);
+  const selectedFrames = frames.slice(0, MAX_CLASSIFICATION_FRAMES);
+  for (const frame of selectedFrames) {
+    const image = await fs.readFile(frame.file_path);
+    const buildForm = () => {
+      const form = new FormData();
+      form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);
+      return form;
+    };
+    const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
+    const [alprResponse, faceResponse] = await Promise.all([
+      fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
+      fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) })
+    ]);
+    frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
+    frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
+  }
+  if (frames.length > selectedFrames.length) summary.classification_truncated = true;
+  return summary;
+}
+
 async function failJob(jobId, message) {
   const { error } = await supabase.from('inference_jobs').update({ status: 'failed' }).eq('id', jobId).eq('status', 'processing');
   if (error) log('job_failure_update_failed', { job_id: jobId, error: error.message });
@@ -147,6 +173,7 @@ async function processOne() {
     await fs.access(videoPath);
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
     const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
+    await classifyFrames(summary);
     await ingest(job, summary);
     log('job_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
   } catch (error) {
