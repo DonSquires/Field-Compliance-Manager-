@@ -59,6 +59,9 @@ services:
       NODE_ENV: production
       PORT: "3000"
       VEHICLE_ATTRS_PROVIDER: "basic"
+      MODELS_DIR: /app/models
+    volumes:
+      - /opt/fcm/models:/app/models:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health')"]
       interval: 30s

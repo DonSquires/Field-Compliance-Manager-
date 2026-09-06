@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import math
 import os
+from pathlib import Path
 from typing import Annotated, Any
 
 import cv2
@@ -13,6 +14,11 @@ from pydantic import BaseModel, Field
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 SIMILARITY_THRESHOLD = 0.92
+MODELS_DIR = Path(os.getenv("MODELS_DIR", "/app/models"))
+YUNET_MODEL_PATH = Path(os.getenv("YUNET_MODEL_PATH", MODELS_DIR / "face_detection_yunet_2023mar.onnx"))
+SFACE_MODEL_PATH = Path(os.getenv("SFACE_MODEL_PATH", MODELS_DIR / "face_recognition_sface_2021dec.onnx"))
+_face_detector: cv2.FaceDetectorYN | None = None
+_face_recognizer: cv2.FaceRecognizerSF | None = None
 
 app = FastAPI(title="FCM Inference", docs_url=None, redoc_url=None)
 
@@ -54,9 +60,26 @@ def _capability_unavailable(capability: str) -> JSONResponse:
     )
 
 
+def _face_models() -> tuple[Any, Any]:
+    global _face_detector, _face_recognizer
+    if _face_detector is not None and _face_recognizer is not None:
+        return _face_detector, _face_recognizer
+    if not YUNET_MODEL_PATH.is_file() or not SFACE_MODEL_PATH.is_file():
+        raise FileNotFoundError("YuNet/SFace ONNX models are not staged")
+    if not hasattr(cv2, "FaceDetectorYN_create") or not hasattr(cv2, "FaceRecognizerSF_create"):
+        raise RuntimeError("installed OpenCV does not provide YuNet/SFace APIs")
+    _face_detector = cv2.FaceDetectorYN_create(str(YUNET_MODEL_PATH), "", (320, 320), 0.85, 0.3, 5000)
+    _face_recognizer = cv2.FaceRecognizerSF_create(str(SFACE_MODEL_PATH), "")
+    return _face_detector, _face_recognizer
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "fcm-inference"}
+    return {
+        "status": "ok",
+        "service": "fcm-inference",
+        "face_models": "ready" if YUNET_MODEL_PATH.is_file() and SFACE_MODEL_PATH.is_file() else "not_staged",
+    }
 
 
 @app.post("/infer/compare")
@@ -120,6 +143,45 @@ async def alpr(
     _authorize(authorization, x_inference_api_key)
     await _read_image(photo)
     return _capability_unavailable("alpr_model")
+
+
+@app.post("/infer/face")
+async def face(
+    photo: Annotated[UploadFile, File()],
+    authorization: Annotated[str | None, Header()] = None,
+    x_inference_api_key: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    _authorize(authorization, x_inference_api_key)
+    image = await _read_image(photo)
+    try:
+        detector, recognizer = _face_models()
+        height, width = image.shape[:2]
+        detector.setInputSize((width, height))
+        _, detections = detector.detect(image)
+        results: list[dict[str, Any]] = []
+        for index, detection in enumerate(detections if detections is not None else []):
+            aligned = recognizer.alignCrop(image, detection)
+            embedding = recognizer.feature(aligned)
+            vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+            norm = float(np.linalg.norm(vector))
+            if not np.isfinite(vector).all() or math.isclose(norm, 0.0):
+                continue
+            vector = vector / norm
+            x, y, box_width, box_height = [round(float(value), 3) for value in detection[:4]]
+            results.append({
+                "subject_label": f"Unidentified subject #{index + 1}",
+                "face_index": index,
+                "bbox": {"x": x, "y": y, "width": box_width, "height": box_height},
+                "embedding": [round(float(value), 7) for value in vector],
+                "embedding_dimension": int(vector.size),
+                "candidate_person_record_id": None,
+                "review_state": "manual_review_required",
+            })
+        return JSONResponse({"success": True, "faces": results, "identity_resolution": "manual_review_required"})
+    except FileNotFoundError:
+        return _capability_unavailable("yunet_sface_models")
+    except (RuntimeError, cv2.error) as error:
+        raise HTTPException(status_code=503, detail=f"face inference unavailable: {error}") from error
 
 
 @app.post("/infer")
