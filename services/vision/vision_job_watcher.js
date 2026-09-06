@@ -110,6 +110,7 @@ async function failJob(jobId, message) {
 
 async function processOne() {
   if (processing) return;
+  if (!INGESTION_URL || !INGESTION_TOKEN) return;
   let currentJobId = null;
   processing = true;
   try {
