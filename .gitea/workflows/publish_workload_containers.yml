@@ -1,0 +1,63 @@
+name: Publish workload containers
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  publish:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Gitea Container Registry
+        env:
+          REGISTRY_URL: ${{ secrets.GITEA_REGISTRY_URL }}
+          REGISTRY_USER: ${{ gitea.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: |
+          set -eu
+          test -n "$REGISTRY_URL" || { echo "GITEA_REGISTRY_URL is required" >&2; exit 1; }
+          test -n "$REGISTRY_USER" || { echo "Gitea actor is required" >&2; exit 1; }
+          test -n "$REGISTRY_TOKEN" || { echo "GITEA_TOKEN is required" >&2; exit 1; }
+          registry_host="${REGISTRY_URL#https://}"
+          registry_host="${registry_host#http://}"
+          registry_host="${registry_host%%/*}"
+          printf '%s' "$REGISTRY_TOKEN" | docker login "$registry_host" --username "$REGISTRY_USER" --password-stdin
+
+      - name: Build and publish workload images
+        env:
+          REGISTRY_URL: ${{ secrets.GITEA_REGISTRY_URL }}
+          REGISTRY_OWNER: ${{ gitea.repository_owner }}
+          SOURCE_SHA: ${{ gitea.sha }}
+        run: |
+          set -eu
+          registry_host="${REGISTRY_URL#https://}"
+          registry_host="${registry_host#http://}"
+          registry_host="${registry_host%%/*}"
+          owner="$(printf '%s' "$REGISTRY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          short_sha="${SOURCE_SHA:0:7}"
+          test "${#short_sha}" -eq 7 || { echo "Invalid source SHA" >&2; exit 1; }
+
+          while IFS='|' read -r service context; do
+            image="${registry_host}/${owner}/${service}"
+            echo "Building ${image}:${short_sha} from ${context}"
+            docker build --pull -t "${image}:${short_sha}" -t "${image}:latest" "${context}"
+            docker push "${image}:${short_sha}"
+            docker push "${image}:latest"
+          done <<'IMAGES'
+          fcm-api|services/fcm-api
+          fcm-inference|services/fcm-inference
+          fcm-voice|services/fcm-voice
+          fcm-planner|services/fcm-planner
+          fcm-solver|services/fcm-solver
+          IMAGES
