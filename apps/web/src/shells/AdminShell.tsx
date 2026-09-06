@@ -95,6 +95,7 @@ const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightP
 const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
 const DebriefFollowupPage = React.lazy(() => import('../pages/DebriefFollowupPage'));
+const CCTVReviewPage = React.lazy(() => import('../pages/CCTVReviewPage'));
 
 type AdminPage =
   | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
@@ -104,7 +105,7 @@ type AdminPage =
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
-type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'field-reports' | 'cctv-review' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
@@ -423,6 +424,8 @@ const AdminShell: React.FC = () => {
             return <VehicleSearchPage />;
           case 'field-reports':
             return <FieldReportsPage />;
+          case 'cctv-review':
+            return <CCTVReviewPage />;
           case 'debrief-followup':
             return <DebriefFollowupPage />;
           case 'parking':

@@ -202,7 +202,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             status: job.status,
             priority: job.status === 'manual_review_required' ? 78 : 45,
             occurredAt: job.created_at,
-            navigate: 'field-reports',
+            navigate: 'cctv-review',
           });
         }
       }

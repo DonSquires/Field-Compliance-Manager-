@@ -1,0 +1,101 @@
+.cctv-review-page {
+  padding: 28px clamp(18px, 3vw, 42px) 44px;
+  color: #18212b;
+}
+
+.cctv-review-header,
+.cctv-section-title,
+.cctv-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.cctv-review-header { margin-bottom: 24px; }
+.cctv-review-header span,
+.cctv-section-title span,
+.cctv-detail-heading span,
+.cctv-filter-rail > span {
+  color: #65727c;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.cctv-review-header h1,
+.cctv-section-title h2,
+.cctv-detail-heading h2,
+.cctv-filter-rail h2 { margin: 5px 0 0; }
+.cctv-review-header p { color: #5d6b75; margin: 8px 0 0; max-width: 660px; }
+.page-action { align-items: center; display: inline-flex; gap: 8px; }
+.cctv-review-layout { display: grid; grid-template-columns: 190px minmax(360px, 1fr) minmax(300px, 390px); gap: 16px; align-items: start; }
+.cctv-filter-rail,
+.cctv-job-list,
+.cctv-detail { background: #fff; border: 1px solid #dbe2e5; border-radius: 6px; }
+.cctv-filter-rail { padding: 18px 12px; }
+.cctv-filter-rail h2 { font-size: 16px; margin-bottom: 14px; }
+.cctv-filter-rail button { align-items: center; background: transparent; border: 0; border-left: 3px solid transparent; color: #53616b; display: flex; justify-content: space-between; padding: 10px 8px; text-align: left; width: 100%; }
+.cctv-filter-rail button:hover,
+.cctv-filter-rail button.is-active { background: #eef7f5; border-left-color: #16847a; color: #11675f; }
+.cctv-filter-rail button strong { font-size: 12px; }
+.cctv-review-note { border-top: 1px solid #e7ecee; color: #65727c; display: flex; gap: 8px; line-height: 1.4; margin-top: 20px; padding: 16px 6px 0; }
+.cctv-job-list { min-width: 0; overflow: hidden; }
+.cctv-section-title { border-bottom: 1px solid #e4eaec; padding: 18px; }
+.cctv-section-title h2 { font-size: 18px; }
+.cctv-section-title > strong { background: #edf3f4; border-radius: 999px; color: #315761; min-width: 28px; padding: 5px 9px; text-align: center; }
+.cctv-job-row { align-items: center; background: #fff; border: 0; border-bottom: 1px solid #edf0f1; display: grid; gap: 12px; grid-template-columns: 36px minmax(130px, 1fr) minmax(90px, .8fr) auto; padding: 15px 18px; text-align: left; width: 100%; }
+.cctv-job-row:hover,
+.cctv-job-row.is-selected { background: #f3f9f8; }
+.cctv-job-icon { align-items: center; background: #e8f3f2; border-radius: 5px; color: #167b72; display: flex; height: 34px; justify-content: center; width: 34px; }
+.cctv-job-copy { display: grid; gap: 4px; min-width: 0; }
+.cctv-job-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cctv-job-copy small,
+.cctv-job-findings { color: #75828a; font-size: 12px; }
+.cctv-job-findings { line-height: 1.35; }
+.cctv-status { align-items: center; display: inline-flex; gap: 5px; white-space: nowrap; }
+.status-queued { color: #9a6a16; }
+.status-processing { color: #1e6574; }
+.status-manual_review_required { color: #a44836; }
+.status-complete { color: #26724c; }
+.status-failed { color: #a13d3d; }
+.cctv-detail { padding: 20px; position: sticky; top: 18px; }
+.cctv-detail-heading { align-items: center; border-bottom: 1px solid #e4eaec; padding-bottom: 16px; }
+.cctv-detail-heading h2 { font-size: 19px; }
+.cctv-detail dl { margin: 18px 0; }
+.cctv-detail dl div { border-bottom: 1px solid #edf0f1; display: grid; gap: 8px; grid-template-columns: 74px 1fr; padding: 9px 0; }
+.cctv-detail dt { color: #75828a; font-size: 12px; }
+.cctv-detail dd { margin: 0; overflow-wrap: anywhere; }
+.cctv-finding-grid { display: grid; gap: 8px; grid-template-columns: repeat(3, 1fr); }
+.cctv-finding-grid div { background: #f4f7f7; display: grid; gap: 4px; padding: 12px 8px; }
+.cctv-finding-grid svg { color: #187a70; }
+.cctv-finding-grid strong { font-size: 20px; }
+.cctv-finding-grid span { color: #65727c; font-size: 11px; line-height: 1.25; }
+.cctv-car-icon { color: #187a70 !important; font-size: 10px !important; font-weight: 800 !important; letter-spacing: .04em !important; }
+.cctv-review-callout { background: #fff7e7; color: #75541b; display: flex; gap: 9px; line-height: 1.4; margin-top: 18px; padding: 13px; }
+.cctv-review-callout div { display: grid; gap: 4px; }
+.cctv-review-callout span { font-size: 12px; }
+.cctv-actions { display: flex; gap: 8px; margin-top: 18px; }
+.cctv-actions button { align-items: center; display: inline-flex; gap: 7px; }
+.cctv-empty { align-items: center; color: #71808a; display: grid; gap: 8px; justify-items: center; min-height: 190px; padding: 24px; text-align: center; }
+.cctv-empty strong { color: #27343c; }
+.page-error { align-items: center; color: #a13d3d; display: flex; gap: 8px; padding: 15px 18px; }
+
+@media (max-width: 1050px) {
+  .cctv-review-layout { grid-template-columns: 160px minmax(300px, 1fr); }
+  .cctv-detail { grid-column: 1 / -1; position: static; }
+}
+
+@media (max-width: 700px) {
+  .cctv-review-page { padding: 20px 14px 32px; }
+  .cctv-review-header { display: grid; }
+  .cctv-review-layout { display: grid; grid-template-columns: 1fr; }
+  .cctv-filter-rail { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  .cctv-filter-rail > span,
+  .cctv-filter-rail h2,
+  .cctv-review-note { grid-column: 1 / -1; }
+  .cctv-job-row { grid-template-columns: 34px minmax(0, 1fr) auto; padding: 13px 12px; }
+  .cctv-job-findings { display: none; }
+  .cctv-status { font-size: 11px; }
+}
