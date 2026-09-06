@@ -4,10 +4,12 @@ import hmac
 import math
 import os
 from pathlib import Path
+import re
 from typing import Annotated, Any
 
 import cv2
 import numpy as np
+import pytesseract
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -58,6 +60,19 @@ def _capability_unavailable(capability: str) -> JSONResponse:
         status_code=503,
         content={"success": False, "error": "capability_unavailable", "capability": capability},
     )
+
+
+def _normalize_nz_plate(raw: str) -> tuple[str, str] | None:
+    value = re.sub(r"[^A-Z0-9]", "", raw.upper())
+    if not 2 <= len(value) <= 7:
+        return None
+    if re.fullmatch(r"[A-Z]{3}[0-9]{3}", value):
+        return value, "standard_modern"
+    if re.fullmatch(r"[A-Z]{2}[0-9]{4}", value):
+        return value, "standard_older"
+    if re.fullmatch(r"[A-Z0-9]{2,6}", value):
+        return value, "personalised"
+    return None
 
 
 def _face_models() -> tuple[Any, Any]:
@@ -141,8 +156,45 @@ async def alpr(
     x_inference_api_key: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     _authorize(authorization, x_inference_api_key)
-    await _read_image(photo)
-    return _capability_unavailable("alpr_model")
+    image = await _read_image(photo)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    enlarged = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    prepared = cv2.threshold(enlarged, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    try:
+        data = pytesseract.image_to_data(
+            prepared,
+            config="--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            output_type=pytesseract.Output.DICT,
+        )
+    except (pytesseract.TesseractError, OSError) as error:
+        raise HTTPException(status_code=503, detail=f"ALPR unavailable: {error}") from error
+
+    candidates: dict[str, dict[str, Any]] = {}
+    for raw, confidence in zip(data.get("text", []), data.get("conf", [])):
+        normalized = _normalize_nz_plate(raw.strip())
+        try:
+            score = max(0.0, min(1.0, float(confidence) / 100))
+        except (TypeError, ValueError):
+            score = 0.0
+        if normalized and score >= 0.35:
+            plate, pattern = normalized
+            adjusted = min(0.99, score + (0.15 if pattern.startswith("standard_") else 0.0))
+            if plate not in candidates or adjusted > candidates[plate]["score"]:
+                candidates[plate] = {"plate": plate, "score": round(adjusted, 2), "pattern": pattern}
+    ordered = sorted(candidates.values(), key=lambda item: item["score"], reverse=True)
+    best = ordered[0] if ordered else None
+    return JSONResponse({
+        "success": True,
+        "plate": best["plate"] if best else None,
+        "confidence": best["score"] if best else 0,
+        "results": [
+            {"plate": item["plate"], "score": item["score"], "box": None,
+             "valid_nz_format": True, "nz_pattern": item["pattern"]}
+            for item in ordered[:5]
+        ],
+        "alpr_provider": "local_tesseract",
+        "review_required": best is None or best["score"] < 0.75,
+    })
 
 
 @app.post("/infer/face")
