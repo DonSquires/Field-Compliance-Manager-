@@ -118,7 +118,7 @@ const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
-  'field-reports', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
+  'field-reports', 'cctv-review', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
   'debrief-followup',
 ]);
 
