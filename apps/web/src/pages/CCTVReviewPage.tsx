@@ -17,6 +17,8 @@ type CCTVJob = {
   result: { status: string; result: Record<string, unknown> } | null;
 };
 
+const CCTV_DOMAINS = ['video_motion', 'vehicle', 'face'] as const;
+
 const FILTERS: Array<{ value: ReviewFilter; label: string }> = [
   { value: 'all', label: 'All work' },
   { value: 'queued', label: 'Queued' },
@@ -62,7 +64,7 @@ const CCTVReviewPage: React.FC = () => {
         .from('inference_jobs')
         .select('id, evidence_item_id, domain, status, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)')
         .eq('organization_id', profile.organizationId)
-        .eq('domain', 'video_motion')
+        .in('domain', [...CCTV_DOMAINS])
         .order('created_at', { ascending: false })
         .limit(100);
       if (filter !== 'all') query = query.eq('status', filter);
@@ -108,11 +110,11 @@ const CCTVReviewPage: React.FC = () => {
           {error && <div className="page-error"><AlertTriangle size={17} /> {error}</div>}
           {loading ? <div className="cctv-empty"><RefreshCw className="is-spinning" /> Loading review work</div> : jobs.length === 0 ? <div className="cctv-empty"><FileVideo2 size={24} /><strong>No CCTV work here</strong><span>Uploaded camera evidence will appear after an inference job is created.</span></div> : jobs.map((job) => {
             const jobCounts = resultCounts(job.result?.result);
-            return <button key={job.id} type="button" className={`cctv-job-row ${selectedId === job.id ? 'is-selected' : ''}`} onClick={() => setSelectedId(job.id)}><span className="cctv-job-icon"><FileVideo2 size={19} /></span><span className="cctv-job-copy"><strong>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</strong><small>{timeLabel(job.created_at)} · {String(job.id).slice(0, 8)}</small></span><span className="cctv-job-findings">{jobCounts.frames ? `${jobCounts.frames} frames` : 'No frames'}{jobCounts.plates ? ` · ${jobCounts.plates} plates` : ''}{jobCounts.faces ? ` · ${jobCounts.faces} faces` : ''}</span><span className={`cctv-status status-${job.status}`}><CircleDot size={13} /> {statusLabel(job.status)}</span></button>;
+            return <button key={job.id} type="button" className={`cctv-job-row ${selectedId === job.id ? 'is-selected' : ''}`} onClick={() => setSelectedId(job.id)}><span className="cctv-job-icon"><FileVideo2 size={19} /></span><span className="cctv-job-copy"><strong>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</strong><small>{timeLabel(job.created_at)} · {job.domain} · {String(job.id).slice(0, 8)}</small></span><span className="cctv-job-findings">{jobCounts.frames ? `${jobCounts.frames} frames` : job.domain === 'vehicle' ? 'ALPR review' : job.domain === 'face' ? 'Face review' : 'No frames'}{jobCounts.plates ? ` · ${jobCounts.plates} plates` : ''}{jobCounts.faces ? ` · ${jobCounts.faces} faces` : ''}</span><span className={`cctv-status status-${job.status}`}><CircleDot size={13} /> {statusLabel(job.status)}</span></button>;
           })}
         </section>
         <aside className="cctv-detail" aria-label="Selected CCTV evidence">
-          {selected ? <><div className="cctv-detail-heading"><div><span>Evidence detail</span><h2>{selected.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</h2></div><Eye size={19} /></div><dl><div><dt>Job</dt><dd>{selected.id}</dd></div><div><dt>Captured</dt><dd>{timeLabel(selected.created_at)}</dd></div><div><dt>Source</dt><dd>{selected.evidence?.storage_path ?? 'Storage path unavailable'}</dd></div><div><dt>Pipeline</dt><dd>{statusLabel(selected.status)}</dd></div></dl><div className="cctv-finding-grid"><div><FileVideo2 size={17} /><strong>{counts.frames}</strong><span>Derived frames</span></div><div><CarIcon /><strong>{counts.plates}</strong><span>Plate candidates</span></div><div><UserRound size={17} /><strong>{counts.faces}</strong><span>Face observations</span></div></div><div className="cctv-review-callout"><Clock3 size={17} /><div><strong>Human review required</strong><span>Open the source evidence before linking a person, vehicle, or incident.</span></div></div><div className="cctv-actions"><button type="button" disabled title="Governed review action is the next backend slice"><CheckCircle2 size={16} /> Confirm finding</button><button type="button" disabled title="Governed review action is the next backend slice"><XCircle size={16} /> Dismiss</button></div></> : <div className="cctv-empty"><FileVideo2 size={24} /><strong>Select evidence</strong><span>Choose a queue item to inspect its provenance and findings.</span></div>}
+          {selected ? <><div className="cctv-detail-heading"><div><span>Evidence detail</span><h2>{selected.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</h2></div><Eye size={19} /></div><dl><div><dt>Job</dt><dd>{selected.id}</dd></div><div><dt>Captured</dt><dd>{timeLabel(selected.created_at)}</dd></div><div><dt>Source</dt><dd>{selected.evidence?.storage_path ? 'Private evidence object' : 'Storage path unavailable'}</dd></div><div><dt>Pipeline</dt><dd>{selected.domain} · {statusLabel(selected.status)}</dd></div></dl><div className="cctv-finding-grid"><div><FileVideo2 size={17} /><strong>{counts.frames}</strong><span>Derived frames</span></div><div><CarIcon /><strong>{counts.plates}</strong><span>Plate candidates</span></div><div><UserRound size={17} /><strong>{counts.faces}</strong><span>Face observations</span></div></div><div className="cctv-review-callout"><Clock3 size={17} /><div><strong>Human review required</strong><span>Open the private source evidence before linking a person, vehicle, or incident.</span></div></div><div className="cctv-actions"><button type="button" disabled title="Governed review action is the next backend slice"><CheckCircle2 size={16} /> Confirm finding</button><button type="button" disabled title="Governed review action is the next backend slice"><XCircle size={16} /> Dismiss</button></div></> : <div className="cctv-empty"><FileVideo2 size={24} /><strong>Select evidence</strong><span>Choose a queue item to inspect its provenance and findings.</span></div>}
         </aside>
       </div>
     </div>
