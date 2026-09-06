@@ -9,6 +9,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const INGESTION_URL = (process.env.VISION_INGESTION_URL || '').replace(/\/+$/, '');
 const WORKLOAD_SIGNING_SECRET = process.env.WORKLOAD_SIGNING_SECRET || '';
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
+const DERIVED_ROOT = path.resolve(process.env.VISION_DERIVED_ROOT || '/opt/fcm/derived');
 const EXTRACTOR_PATH = path.resolve(
   process.env.VISION_EXTRACTOR_PATH || path.join(__dirname, 'video_motion_extractor.py')
 );
@@ -51,9 +52,9 @@ async function claimJob(job) {
   return data;
 }
 
-function runExtractor(videoPath) {
+function runExtractor(videoPath, outputDir) {
   return new Promise((resolve, reject) => {
-    const child = spawn('python3', [EXTRACTOR_PATH, videoPath], {
+    const child = spawn('python3', [EXTRACTOR_PATH, videoPath, '--output-dir', outputDir], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONUNBUFFERED: '1' }
     });
@@ -145,7 +146,7 @@ async function processOne() {
     const videoPath = safeVideoPath(evidence.storage_path);
     await fs.access(videoPath);
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
-    const summary = await runExtractor(videoPath);
+    const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
     await ingest(job, summary);
     log('job_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
   } catch (error) {
