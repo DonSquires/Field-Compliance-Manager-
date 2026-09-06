@@ -24,9 +24,9 @@ import { supabase } from '../lib/supabase';
 import { BobMarkdown } from './BobMarkdown';
 import './BobPanel.css';
 
-const MAX_BOB_UPLOAD_BYTES = 48 * 1024 * 1024;
+const MAX_BOB_UPLOAD_BYTES = 500 * 1024 * 1024;
 const ACCEPTED_BOB_UPLOADS = 'image/*,video/*,audio/*,.csv,.txt,.pdf,.doc,.docx,.xls,.xlsx,.json,.md';
-const ACCEPTED_BOB_UPLOAD_LABEL = 'PDF, DOCX, CSV/XLSX, TXT, JSON, images, audio, and video up to 48 MB each';
+const ACCEPTED_BOB_UPLOAD_LABEL = 'PDF, DOCX, CSV/XLSX, TXT, JSON, images, audio, and video up to 500 MB each';
 
 interface BobMessage {
   id: string;
