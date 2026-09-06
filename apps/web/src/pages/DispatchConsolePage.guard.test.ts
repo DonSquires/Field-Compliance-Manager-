@@ -11,6 +11,12 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).not.toMatch(/from\('client_sites'\)[\s\S]{0,200}\.eq\('organization_id'/);
   });
 
+  it('loads the exact requested job for overview deep links even outside the selected branch queue', () => {
+    expect(source).toContain("get('job')");
+    expect(source).toContain(".eq('id', requestedJobId).maybeSingle()");
+    expect(source).toContain('selectedJobRes.data');
+  });
+
   it('checks every Phase A query response', () => {
     expect(source).toContain('shiftsRes.error, jobsRes.error, resourcesRes.error');
     expect(source).toContain(".select('id, name, callsign, status, assigned_officer_id')");
@@ -22,6 +28,13 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain('p_service_agreement_id: selectedAgreement.id');
     expect(source).toContain('p_sla_minutes: formSlaMinutes');
     expect(source).toContain('dispatch job was not confirmed');
+  });
+
+  it('preserves an overview job deep link and shows its full dispatch record', () => {
+    expect(source).toContain("get('job')");
+    expect(source).toContain("site:client_site_id(name, address, hs_notes, access_instructions)");
+    expect(source).toContain('Dispatch details for ${job.siteName}');
+    expect(source).toContain('setMobileTab(\'jobs\')');
   });
 
   it('records phone or email provenance for manual alarm responses', () => {

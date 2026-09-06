@@ -10,6 +10,7 @@ describe('Admin Hub operational data contract', () => {
       expect(source).toContain(`from('${table}')`);
     }
     expect(source).toContain('metricFrom(onDuty)');
+    expect(source).toContain('navigate: `dispatch?job=${encodeURIComponent(job.id)}`');
     expect(source).toContain("isModuleEnabled('welfare', { safetyRelevant: true })");
     expect(source).toContain('admin-hub-welfare-${organizationId}');
     expect(source).toContain('<SafetyGate');

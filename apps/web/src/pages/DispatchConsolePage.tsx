@@ -15,6 +15,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import {
@@ -64,10 +65,17 @@ interface DispatchJob {
   status: JobStatus;
   briefingNotes: string;
   slaMinutes: number;
+  slaRespondBy: string | null;
   slaBreached: boolean;
   siteName: string;
+  siteAddress: string | null;
+  safetyNotes: string | null;
+  accessInstructions: string | null;
   siteId: string;
   shiftId?: string;
+  resourceName: string | null;
+  expectedDwellMinutes: number | null;
+  timingSource: string | null;
   createdAt: string;
   dispatchedAt?: string;
 }
@@ -217,12 +225,14 @@ const StopCard: React.FC<{ stop: ShiftStop }> = ({ stop }) => (
 );
 
 // Component: Job Card
-const JobCard: React.FC<{ job: DispatchJob }> = ({ job }) => {
+const JobCard: React.FC<{ job: DispatchJob; selected: boolean; onSelect: () => void }> = ({ job, selected, onSelect }) => {
   const priorityColor = PRIORITIES.find((p) => p.id === job.priority)?.color || '#666';
 
   return (
-    <div
-      className={`dispatch-job-card ${job.slaBreached ? 'is-sla-breached' : ''}`}
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`dispatch-job-card ${job.slaBreached ? 'is-sla-breached' : ''} ${selected ? 'is-selected' : ''}`}
       style={{ '--dispatch-priority': priorityColor } as React.CSSProperties}
     >
       <div className="dispatch-job-card-header">
@@ -235,13 +245,24 @@ const JobCard: React.FC<{ job: DispatchJob }> = ({ job }) => {
       {job.slaBreached && (
         <div className="dispatch-job-breach">SLA breached</div>
       )}
-      <div className="dispatch-job-card-sla">Response SLA: {job.slaMinutes} min</div>
-    </div>
+      <div className="dispatch-job-card-sla">Response SLA: {job.slaMinutes} min{job.slaRespondBy ? ` · respond by ${new Date(job.slaRespondBy).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</div>
+      {selected && <div className="dispatch-job-details" aria-label={`Dispatch details for ${job.siteName}`}>
+        <p><strong>Location</strong>{job.siteAddress ?? 'Address not recorded'}</p>
+        <p><strong>Status</strong>{job.status.replaceAll('_', ' ')}</p>
+        <p><strong>Assignment</strong>{job.resourceName ?? 'Unassigned'}{job.shiftId ? ` · shift ${job.shiftId.slice(0, 8)}` : ''}</p>
+        <p><strong>Expected attendance</strong>{job.expectedDwellMinutes ?? 5} min · {job.timingSource?.replaceAll('_', ' ') ?? 'dispatch default'}</p>
+        {job.briefingNotes && <p><strong>Briefing</strong>{job.briefingNotes}</p>}
+        {job.accessInstructions && <p><strong>Access</strong>{job.accessInstructions}</p>}
+        {job.safetyNotes && <p className="is-safety"><strong>Safety</strong>{job.safetyNotes}</p>}
+      </div>}
+    </button>
   );
 };
 
 // Main Component
 const DispatchConsolePage: React.FC = () => {
+  const location = useLocation();
+  const requestedJobId = new URLSearchParams(location.search).get('job');
   const { profile, operatingOrganizationId } = useAuth();
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const {
@@ -260,6 +281,7 @@ const DispatchConsolePage: React.FC = () => {
 
   // State: Phase B (Shift stops)
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(requestedJobId);
   const [shiftStops, setShiftStops] = useState<ShiftStop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
 
@@ -306,7 +328,7 @@ const DispatchConsolePage: React.FC = () => {
     try {
       setLoading(true);
 
-      const [shiftsRes, jobsRes, resourcesRes] = await Promise.all([
+      const [shiftsRes, jobsRes, resourcesRes, selectedJobRes] = await Promise.all([
         supabase
           .from('shifts')
           .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
@@ -314,16 +336,19 @@ const DispatchConsolePage: React.FC = () => {
           .in('status', ['published', 'accepted', 'in_progress']),
         supabase
           .from('dispatch_jobs')
-          .select('*, site:client_site_id(name)')
+          .select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)')
           .eq('organization_id', operatingBranchId)
           .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]),
         supabase
           .from('dispatch_resources')
           .select('id, name, callsign, status, assigned_officer_id')
           .eq('organization_id', operatingBranchId),
+        requestedJobId
+          ? supabase.from('dispatch_jobs').select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)').eq('id', requestedJobId).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
       ]);
 
-      const phaseErrors = [shiftsRes.error, jobsRes.error, resourcesRes.error].filter(Boolean);
+      const phaseErrors = [shiftsRes.error, jobsRes.error, resourcesRes.error, selectedJobRes.error].filter(Boolean);
       if (phaseErrors.length) {
         throw new Error(phaseErrors.map((phaseError) => phaseError?.message).join(' · '));
       }
@@ -348,16 +373,27 @@ const DispatchConsolePage: React.FC = () => {
       }
 
       if (jobsRes.data) {
-        const formatted: DispatchJob[] = jobsRes.data.map((j: any) => ({
+        const rows = selectedJobRes.data && !jobsRes.data.some((job: { id: string }) => job.id === selectedJobRes.data.id)
+          ? [selectedJobRes.data, ...jobsRes.data]
+          : jobsRes.data;
+        const formatted: DispatchJob[] = rows.map((j: any) => ({
           id: j.id,
           jobType: j.job_type || 'alarm_response',
           priority: j.priority || 'high',
           status: j.status,
           briefingNotes: j.briefing_notes || '',
           slaMinutes: j.sla_minutes || 15,
+          slaRespondBy: j.sla_respond_by ?? null,
           slaBreached: j.sla_breached ?? false,
           siteName: j.site?.name || 'Unknown Site',
+          siteAddress: j.site?.address ?? null,
+          safetyNotes: j.site?.hs_notes ?? null,
+          accessInstructions: j.site?.access_instructions ?? null,
           siteId: j.client_site_id,
+          shiftId: j.shift_id ?? undefined,
+          resourceName: j.resource?.name ?? null,
+          expectedDwellMinutes: j.expected_dwell_minutes ?? null,
+          timingSource: j.timing_source ?? null,
           createdAt: j.created_at,
         }));
         setJobs(formatted);
@@ -380,7 +416,13 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [operatingBranchId]);
+  }, [operatingBranchId, requestedJobId]);
+
+  useEffect(() => {
+    if (!requestedJobId) return;
+    setSelectedJobId(requestedJobId);
+    setMobileTab('jobs');
+  }, [requestedJobId]);
 
   useEffect(() => {
     const activeAgreementSites = selectedAgreementSites.filter((site) => site.active);
@@ -694,7 +736,7 @@ const DispatchConsolePage: React.FC = () => {
               {jobs.length === 0 ? (
                 <div style={{ color: 'var(--color-text-secondary)' }}>No active jobs</div>
               ) : (
-                jobs.map((job) => <JobCard key={job.id} job={job} />)
+                jobs.map((job) => <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />)
               )}
             </div>
           )}
@@ -1080,8 +1122,8 @@ const DispatchConsolePage: React.FC = () => {
 
         {/* Jobs List */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {jobs.map((job) => (
-            <JobCard key={job.id} job={job} />
+            {jobs.map((job) => (
+              <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />
           ))}
         </div>
       </div>

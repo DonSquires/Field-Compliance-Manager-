@@ -154,7 +154,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             status: job.status,
             priority: job.priority === 'urgent' ? 90 : job.priority === 'high' ? 70 : 40,
             occurredAt: job.created_at,
-            navigate: 'dispatch',
+            navigate: `dispatch?job=${encodeURIComponent(job.id)}`,
           });
         }
       }
