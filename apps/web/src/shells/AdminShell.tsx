@@ -217,6 +217,28 @@ const LazyPageFallback: React.FC = () => (
   </div>
 );
 
+class LazyPageRecovery extends React.Component<{ pageKey: string; children: React.ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    const isChunkFailure = /failed to fetch dynamically imported module|importing a module script failed|chunkloaderror/i.test(error.message);
+    const reloadKey = `fcm:lazy-page-reload:${window.location.pathname}${window.location.search}`;
+    if (isChunkFailure && !window.sessionStorage.getItem(reloadKey)) {
+      window.sessionStorage.setItem(reloadKey, '1');
+      window.location.reload();
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <section className="admin-page-loading" role="alert"><strong>This page could not load.</strong><span>{this.state.error.message}</span><button type="button" onClick={() => this.setState({ error: null })}>Retry page</button></section>;
+  }
+}
+
 const AdminShell: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -548,9 +570,9 @@ const AdminShell: React.FC = () => {
             {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
             <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />
             <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
-            <React.Suspense fallback={<LazyPageFallback />}>
-              {renderPage()}
-            </React.Suspense>
+            <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
+              <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
+            </LazyPageRecovery>
           </main>
         </div>
 
@@ -614,9 +636,9 @@ const AdminShell: React.FC = () => {
         {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
         <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />
         <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
-        <React.Suspense fallback={<LazyPageFallback />}>
-          {renderPage()}
-        </React.Suspense>
+        <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
+          <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
+        </LazyPageRecovery>
       </main>
 
       <nav className="admin-mobile-tabs" aria-label="Admin navigation">

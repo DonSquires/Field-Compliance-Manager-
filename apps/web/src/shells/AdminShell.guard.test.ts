@@ -53,6 +53,13 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('<AdminHubPage onNavigate={navigateFromHub} />');
   });
 
+  it('recovers from stale lazy page chunks instead of leaving a blank workspace', () => {
+    expect(source).toContain('class LazyPageRecovery extends React.Component');
+    expect(source).toContain('fcm:lazy-page-reload:');
+    expect(source).toContain('window.location.reload()');
+    expect(source).toContain('Retry page');
+  });
+
   it('keeps people and HR accessible until the local roster workspace is consolidated', () => {
     expect(source).toContain("{ id: 'people-hr', label: 'People, Pay & HR'");
     expect(source).toContain('return <RosterHRPage />');
