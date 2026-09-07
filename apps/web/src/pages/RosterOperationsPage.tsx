@@ -22,6 +22,7 @@ interface CommercialReadiness { slot_id: string; pay_status: string; billing_sta
 interface LabourCost { slot_id: string; work_unit_name: string; scheduled_hours: number; pay_cost: number; billable: number; margin: number; rate_status: string; }
 interface AttendanceException { shift_id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; exception_type: 'late_start' | 'active_overrun'; minutes_overdue: number; }
 interface TemplatePreview { templates_applied: number; candidate_slots: number; existing_slots: number; new_slots: number; }
+interface BatchPublishPreview { draft_count: number; leave_conflict_count: number; unassigned_count: number; field_shift_count: number; }
 type ReadinessFilter = 'all' | 'ready' | 'risk';
 
 const startOfWeek = (date: Date) => { const value = new Date(date); value.setDate(value.getDate() - ((value.getDay() + 6) % 7)); value.setHours(0, 0, 0, 0); return value; };
@@ -48,6 +49,7 @@ const RosterOperationsPage: React.FC = () => {
   const [labourCost, setLabourCost] = useState<LabourCost[]>([]);
   const [attendanceExceptions, setAttendanceExceptions] = useState<AttendanceException[]>([]);
   const [templatePreview, setTemplatePreview] = useState<TemplatePreview | null>(null);
+  const [batchPublishPreview, setBatchPublishPreview] = useState<BatchPublishPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -305,6 +307,17 @@ const RosterOperationsPage: React.FC = () => {
     setSaving(false);
   };
 
+  const previewBatchPublish = async () => {
+    const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
+    if (!operatingBranchId) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: previewError } = await supabase.rpc('preview_batch_publish_roster_slots', { p_organization_id: operatingBranchId, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() });
+    const preview = Array.isArray(data) ? data[0] : data;
+    if (previewError || !preview) setError(previewError?.message ?? 'Publish preview was not confirmed.');
+    else setBatchPublishPreview(preview as BatchPublishPreview);
+    setSaving(false);
+  };
+
   const updateCalendarRegion = async (regionCode: string) => {
     const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
     if (!operatingBranchId) return;
@@ -318,6 +331,8 @@ const RosterOperationsPage: React.FC = () => {
   return <div className="roster-ops">
     <header className="roster-ops-header"><div><span>Workforce operations</span><h1>Roster</h1><p>Live field shifts, workforce constraints, and public holidays across selectable planning horizons.</p></div><div><button onClick={() => void load()} disabled={loading} title="Refresh roster"><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /></button><button onClick={() => void previewTemplates()} disabled={saving} title="Preview template-generated slots">Preview templates</button><button onClick={() => void generateFromTemplates()} disabled={saving} title="Generate draft slots from templates">From templates</button><button onClick={() => void batchPublishPeriod()} disabled={saving} title="Publish all draft slots in current period">Publish period</button><button onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button>{selectedSlot && !['completed', 'cancelled'].includes(selectedSlot.status) && <button onClick={() => openCopy(selectedSlot)}>Copy selected</button>}<button className="is-primary" onClick={() => openCreate()}><Plus size={16} />Create shift</button></div></header>
     {workflowContext.workUnitId&&<section className="roster-context-banner" role="status"><div><span>{workflowContext.handoffId?'Mobilisation handoff · roster evidence':'Account flow · roster action'}</span><strong>{requestedWorkUnit?.name??'Loading requested work unit'}</strong><p>{requestedWorkUnit?'Schedule the next officer assignment against the work unit selected during mobilisation.':'The requested work unit is not active in this provider roster.'}</p></div><div><button onClick={()=>navigate('/admin/roster')}>Clear focus</button>{workflowContext.handoffId&&<button onClick={()=>navigate(`/admin/handoffs${workflowContextQuery(workflowContext)}`)}>Return to handoff</button>}<button onClick={()=>navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Open work unit</button><button className="is-primary" onClick={()=>openCreate()} disabled={!requestedWorkUnit}><Plus size={15}/>Create shift for this work unit</button></div></section>}
+    <button type="button" onClick={() => void previewBatchPublish()} disabled={saving}>Preview period publish</button>
+    {batchPublishPreview && <section className="roster-context-banner" role="status"><div><span>Period publish preview</span><strong>{batchPublishPreview.draft_count} draft slots in this period</strong><p>{batchPublishPreview.leave_conflict_count} leave conflicts · {batchPublishPreview.unassigned_count} unassigned · {batchPublishPreview.field_shift_count} field shifts would materialize</p></div><button type="button" onClick={() => setBatchPublishPreview(null)}>Dismiss preview</button></section>}
     {error && <div className="roster-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button onClick={() => setError(null)}><X size={16} /></button></div>}{notice && <div className="roster-message is-success" role="status"><ShieldCheck size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
     {templatePreview && <section className="roster-context-banner" role="status"><div><span>Template preview · current period</span><strong>{templatePreview.new_slots} new draft slot{templatePreview.new_slots === 1 ? '' : 's'} ready</strong><p>{templatePreview.templates_applied} active template{templatePreview.templates_applied === 1 ? '' : 's'} · {templatePreview.candidate_slots} candidate slots · {templatePreview.existing_slots} already present</p></div><button type="button" onClick={() => setTemplatePreview(null)}>Dismiss preview</button></section>}
     <section className="roster-metrics"><div><Users size={18} /><span>Rosterable staff</span><strong>{staff.length}</strong></div><div className={riskCount ? 'is-warning' : ''}><AlertTriangle size={18} /><span>Readiness risks</span><strong>{riskCount}</strong></div><div><Clock3 size={18} /><span>Scheduled hours</span><strong>{Math.round(totalHours)}</strong></div><div className={coverage.length ? 'is-warning' : ''}><CalendarDays size={18} /><span>Open coverage</span><strong>{coverage.length}</strong></div>{labourCost.length > 0 && <><div><Clock3 size={18} /><span>Labour cost</span><strong>NZ${labourCostTotals.pay.toFixed(0)}</strong></div><div className={labourCostTotals.unpriced ? 'is-warning' : ''}><AlertTriangle size={18} /><span>{labourCostTotals.unpriced ? 'Unpriced slots' : 'Forecast margin'}</span><strong>{labourCostTotals.unpriced ? labourCostTotals.unpriced : `NZ$${labourCostTotals.margin.toFixed(0)}`}</strong></div></>}</section>

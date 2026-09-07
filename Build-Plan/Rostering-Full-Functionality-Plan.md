@@ -140,6 +140,13 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - Generation remains a separate explicit action; preview does not mutate roster data.
 - Migration `20260907002200` is applied and verified in live Supabase.
 
+### Progress: bulk publish preview complete
+
+- Added `preview_batch_publish_roster_slots` with no data mutation.
+- Admins can see draft count, leave conflicts, unassigned slots, and field-shift materialization count before batch publish.
+- The existing batch publish action remains explicit and separate from preview.
+- Migration `20260907002300` is applied and verified in live Supabase.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
