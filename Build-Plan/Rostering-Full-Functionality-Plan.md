@@ -182,6 +182,12 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - Existing HR coverage proves branch check and final approval separately.
 - A single cross-role browser context spanning manager -> officer -> manager remains a release-test gap.
 
+### Progress: notification-center browser proof complete
+
+- Officer browser coverage now displays a roster notification, filters unread items, marks it read, and follows the schedule-linked notification action on desktop and mobile.
+- Direct swap request payload proof and open-swap fallback are both covered.
+- A shared-session manager approval -> officer notification -> officer schedule refresh journey remains a release-environment gap because the current fixtures isolate auth sessions.
+
 ### Progress: new migration authorization guards complete
 
 - Added static regression guards for the 20260907 roster migrations.

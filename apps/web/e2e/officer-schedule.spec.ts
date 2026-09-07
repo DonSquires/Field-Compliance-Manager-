@@ -175,3 +175,19 @@ test('officer starts an accepted shift with GPS attendance evidence', async ({ p
   await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Start shift' }).click();
   await expect(page.getByRole('status')).toContainText('Shift started at');
 });
+
+test('officer sees and reads a roster change notification', async ({ page }) => {
+  await page.route('**/rest/v1/notifications**', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '16161616-1616-4616-8616-161616161616' }]) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '16161616-1616-4616-8616-161616161616', category: 'roster', severity: 'warning', title: 'Roster assignment updated', body: 'Your North District Patrol shift has changed.', link_page: 'schedule', link_payload: { shift_id: '66666666-6666-4666-8666-666666666666' }, read_at: null, created_at: '2026-08-30T09:20:00.000Z' }]) });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByTitle(/notifications/i).click();
+  const panel = page.getByRole('region', { name: 'Notifications' });
+  await expect(panel).toContainText('Roster assignment updated');
+  await panel.getByRole('tab', { name: 'unread' }).click();
+  await panel.getByRole('button', { name: /Roster assignment updated/ }).click();
+});
