@@ -20,6 +20,7 @@ interface AssignedShift {
 }
 interface BreakEntitlement { worked_hours: number; rest_breaks_required: number; meal_breaks_required: number; rest_breaks_taken: number; meal_breaks_taken: number; compliant: boolean; }
 interface ActiveBreak { id: string; shift_id: string; break_type: 'rest' | 'meal'; started_at: string; }
+interface SwapOfficer { id: string; label: string; }
 
 interface RosterSlot { id: string; work_unit_id: string; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; }
@@ -73,16 +74,24 @@ const OfficerSchedulePage: React.FC = () => {
   const [swapRequest, setSwapRequest] = useState<AssignedShift | null>(null);
   const [swapReason, setSwapReason] = useState('');
   const [startingShiftId, setStartingShiftId] = useState<string | null>(null);
+  const [swapOfficers, setSwapOfficers] = useState<SwapOfficer[]>([]);
+  const [swapOfficerId, setSwapOfficerId] = useState('');
 
   const loadSchedule = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) return;
     setLoading(true);
     setError(null);
-    const [shiftResponse, coverageResponse, staffResponse] = await Promise.all([
+    const [shiftResponse, coverageResponse, staffResponse, officerResponse] = await Promise.all([
       supabase.from('shifts').select('id, service_type, scheduled_start, scheduled_end, status, notes, shift_health, total_stops').eq('officer_user_id', profile.id).gte('scheduled_end', new Date().toISOString()).neq('status', 'cancelled').order('scheduled_start', { ascending: true }).limit(40),
       supabase.from('shift_coverage_requests').select('id, shift_date, start_time, end_time, required_staff_count, urgency, notes, site:site_id(name)').eq('organization_id', profile.organizationId).eq('status', 'open').gte('shift_date', localDateIso()).order('shift_date', { ascending: true }).order('start_time', { ascending: true }),
       supabase.from('staff_profiles').select('id').eq('organization_id', profile.organizationId).or(`user_id.eq.${profile.id},id.eq.${profile.id}`).limit(1).maybeSingle(),
+      supabase.from('staff_profiles').select('id,user_id,work_ready').eq('organization_id', profile.organizationId).eq('work_ready', true),
     ]);
+    const candidateRows = Array.isArray(officerResponse.data) ? officerResponse.data as Array<{ id: string; user_id: string | null; work_ready: boolean }> : [];
+    const candidateUsers = candidateRows.map((row) => row.user_id).filter((id): id is string => Boolean(id) && id !== profile.id);
+    const userResponse = candidateUsers.length ? await supabase.from('user_profiles').select('id,display_name,email').in('id', candidateUsers) : { data: [], error: null };
+    const userLabels = new Map(((userResponse.data as Array<{ id: string; display_name: string | null; email: string | null }> | null) ?? []).map((user) => [user.id, user.display_name || user.email || user.id]));
+    setSwapOfficers(candidateRows.filter((row) => row.user_id && row.user_id !== profile.id).map((row) => ({ id: row.id, label: userLabels.get(row.user_id as string) ?? row.id })));
     setAssigned((shiftResponse.data as AssignedShift[]) ?? []);
     const activeShift = ((shiftResponse.data as AssignedShift[]) ?? []).find((shift) => shift.status === 'in_progress');
     if (activeShift) {
@@ -181,9 +190,9 @@ const OfficerSchedulePage: React.FC = () => {
   const requestSwap = async () => {
     if (!swapRequest || !swapReason.trim()) return;
     setBreakSaving(true); setError(null); setNotice(null);
-    const { error: swapError } = await supabase.rpc('request_shift_swap', { p_client_request_id: crypto.randomUUID(), p_shift_id: swapRequest.id, p_swap_with_staff_id: null, p_swap_type: 'open', p_reason: swapReason.trim() });
+    const { error: swapError } = await supabase.rpc('request_shift_swap', { p_client_request_id: crypto.randomUUID(), p_shift_id: swapRequest.id, p_swap_with_staff_id: swapOfficerId || null, p_swap_type: swapOfficerId ? 'direct' : 'open', p_reason: swapReason.trim() });
     if (swapError) setError(describeLoadFailures([['shift swap', swapError]]) ?? 'Shift swap request could not be submitted.');
-    else { setNotice('Shift swap request submitted for roster review.'); setSwapRequest(null); setSwapReason(''); }
+    else { setNotice(`${swapOfficerId ? 'Direct' : 'Open'} shift swap request submitted for roster review.`); setSwapRequest(null); setSwapReason(''); setSwapOfficerId(''); }
     setBreakSaving(false);
   };
 
@@ -220,7 +229,7 @@ const OfficerSchedulePage: React.FC = () => {
 
       {selectedCoverage && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-claim-title"><header><div><span>Coverage commitment</span><h2 id="coverage-claim-title">Claim this shift?</h2></div><button type="button" onClick={() => setSelectedCoverage(null)} title="Close"><X size={18} /></button></header><dl><div><dt>Date</dt><dd>{formatDate(`${selectedCoverage.shift_date}T00:00:00`)}</dd></div><div><dt>Time</dt><dd>{selectedCoverage.start_time.slice(0, 5)} - {selectedCoverage.end_time.slice(0, 5)}</dd></div><div><dt>Location</dt><dd><MapPin size={14} />{selectedCoverage.site?.name ?? 'To be confirmed'}</dd></div><div><dt>Urgency</dt><dd>{selectedCoverage.urgency}</dd></div></dl>{selectedCoverage.notes && <p>{selectedCoverage.notes}</p>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSelectedCoverage(null)}>Cancel</button><button type="button" onClick={() => void confirmClaim()} disabled={claiming}>{claiming ? <><RefreshCw size={16} className="is-spinning" />Confirming</> : <><CheckCircle2 size={16} />Confirm claim</>}</button></div></div></div>}
       {responding && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="assignment-response-title"><header><div><span>Roster response</span><h2 id="assignment-response-title">{responding.response === 'accept' ? 'Accept assignment?' : 'Decline assignment?'}</h2></div><button type="button" onClick={() => setResponding(null)} title="Close"><X size={18} /></button></header><p>{responding.response === 'accept' ? 'Acceptance confirms your roster slot and any linked field shift in one transaction.' : 'Declining releases this assignment for roster review. Record why you cannot accept it.'}</p>{responding.response === 'decline' && <label><span>Decline reason</span><textarea required rows={4} value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setResponding(null)}>Back</button><button type="button" onClick={() => void respondToSlot()} disabled={claiming || (responding.response === 'decline' && !declineReason.trim())}>{claiming ? 'Saving' : responding.response === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></div></div></div>}
-      {swapRequest && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-title"><header><div><span>Roster change</span><h2 id="shift-swap-title">Request shift swap?</h2></div><button type="button" onClick={() => setSwapRequest(null)} title="Close"><X size={18} /></button></header><p>{formatDate(swapRequest.scheduled_start)} · {formatTime(swapRequest.scheduled_start)} - {formatTime(swapRequest.scheduled_end)}. This opens the shift for roster review; the shift remains assigned until approved.</p><label><span>Reason</span><textarea required rows={4} value={swapReason} onChange={(event) => setSwapReason(event.target.value)} placeholder="Why can you no longer work this shift?" /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSwapRequest(null)}>Cancel</button><button type="button" onClick={() => void requestSwap()} disabled={breakSaving || !swapReason.trim()}>Submit swap request</button></div></div></div>}
+      {swapRequest && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-title"><header><div><span>Roster change</span><h2 id="shift-swap-title">Request shift swap?</h2></div><button type="button" onClick={() => setSwapRequest(null)} title="Close"><X size={18} /></button></header><p>{formatDate(swapRequest.scheduled_start)} · {formatTime(swapRequest.scheduled_start)} - {formatTime(swapRequest.scheduled_end)}. This opens the shift for roster review; the shift remains assigned until approved.</p><label><span>Replacement officer (optional)</span><select value={swapOfficerId} onChange={(event) => setSwapOfficerId(event.target.value)}><option value="">Open coverage request</option>{swapOfficers.map((officer) => <option key={officer.id} value={officer.id}>{officer.label}</option>)}</select></label><label><span>Reason</span><textarea required rows={4} value={swapReason} onChange={(event) => setSwapReason(event.target.value)} placeholder="Why can you no longer work this shift?" /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSwapRequest(null)}>Cancel</button><button type="button" onClick={() => void requestSwap()} disabled={breakSaving || !swapReason.trim()}>Submit swap request</button></div></div></div>}
     </div>
   );
 };

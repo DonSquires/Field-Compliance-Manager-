@@ -132,7 +132,7 @@ test('officer submits an open shift-swap request with a reason', async ({ page }
   const dialog = page.getByRole('dialog', { name: 'Request shift swap?' });
   await dialog.getByLabel('Reason').fill('Approved family commitment prevents me working this assignment.');
   await dialog.getByRole('button', { name: 'Submit swap request' }).click();
-  await expect(page.getByRole('status')).toContainText('Shift swap request submitted for roster review.');
+  await expect(page.getByRole('status')).toContainText('Open shift swap request submitted for roster review.');
 });
 
 test('officer starts an accepted shift with GPS attendance evidence', async ({ page, context }) => {

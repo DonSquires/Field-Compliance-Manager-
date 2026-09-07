@@ -112,6 +112,14 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - Officers can start accepted/published/scheduled shifts from My Schedule; GPS coordinates are captured when available and the start is audited by `start_officer_shift`.
 - Fixed the roster inspector stacking order so header actions remain clickable while an assignment is open.
 
+### Progress: direct swaps and notifications complete
+
+- Officers can select an eligible work-ready replacement officer or leave a swap as open coverage.
+- The request RPC validates organization, readiness, overlap, shift state, and duplicate pending requests.
+- Replacement officers receive a roster notification for direct requests.
+- Original and replacement officers receive approval/decline notifications after manager review.
+- Migration `20260907001900` is applied and verified in live Supabase.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
