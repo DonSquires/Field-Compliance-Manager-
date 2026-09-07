@@ -1819,6 +1819,29 @@
 }
 
 @media (max-width: 680px) {
+  .assessment-form .form-row,
+  .new-contact-form .form-row,
+  .settings-form .form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .assessment-form label,
+  .new-contact-form label,
+  .settings-form label,
+  .assessment-form input,
+  .assessment-form select,
+  .assessment-form textarea,
+  .new-contact-form input,
+  .new-contact-form select,
+  .new-contact-form textarea,
+  .settings-form input,
+  .settings-form select,
+  .settings-form textarea {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
   .officer-home {
     padding: 18px 14px 92px;
   }
