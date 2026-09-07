@@ -344,7 +344,7 @@ struct DhfsDptReport {
     non_zero_u32_fields: Vec<DhfsDptField>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct ExportTool {
     name: String,
     executable_path: String,
