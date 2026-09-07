@@ -168,6 +168,13 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - Payload coverage verifies `swap_type = direct` and the selected replacement staff profile.
 - Open swap fallback remains covered separately.
 
+### Progress: approval-loop browser proof improved
+
+- HR browser coverage now proves the manager return-for-correction leg for branch-checked time.
+- Officer browser coverage proves rejected-period correction and resubmission.
+- Existing HR coverage proves branch check and final approval separately.
+- A single cross-role browser context spanning manager -> officer -> manager remains a release-test gap.
+
 ### Atlas follow-up
 
 - The current repository dry-run inventory is 823 capabilities and 2,484 edges.

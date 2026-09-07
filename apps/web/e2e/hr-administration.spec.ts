@@ -82,3 +82,29 @@ test('administrator corrects submitted timesheet hours before review', async ({ 
   await dialog.getByRole('button', { name: 'Save correction' }).click();
   await expect(page.getByRole('status')).toContainText('Timesheet hours corrected and returned to submitted review.');
 });
+
+test('administrator returns branch-checked time for correction and reapproves it', async ({ page }) => {
+  let status = 'branch_checked';
+  await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', staff_id: '22222222-2222-4222-8222-222222222222', period_start: '2026-08-17', period_end: '2026-08-23', scheduled_hours: 40, actual_hours: 40, overtime_hours: 0, work_derived_hours: 40, adjustment_hours: 0, work_summary: { source_count: 4 }, status, branch_review_notes: null, branch_reviewed_by: '2f2f2f2f-2222-4222-8222-222222222222' }]) });
+  });
+  await page.route('**/rest/v1/rpc/review_timesheet', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    if (payload.p_decision === 'rejected') status = 'rejected';
+    if (payload.p_decision === 'approved') {
+      expect(payload.p_expected_status).toBe('branch_checked');
+      status = 'approved';
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', status }]) });
+  });
+  await page.route('**/rest/v1/rpc/correct_timesheet_hours', async (route) => { status = 'submitted'; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-383838383838', status }]) }); });
+  await page.route('**/rest/v1/rpc/review_branch_timesheet', async (route) => { status = 'branch_checked'; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-383838383838', status }]) }); });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
+  await page.getByRole('button', { name: 'Timesheets' }).click();
+  await page.getByRole('button', { name: 'Return for correction' }).click();
+  const returnDialog = page.getByRole('dialog', { name: 'Return for correction timesheet?' });
+  await returnDialog.getByLabel('Review notes').fill('Please reconcile the signed attendance record.');
+  await returnDialog.getByRole('button', { name: 'Confirm decision' }).click();
+  await expect(page.getByRole('status')).toContainText('Timesheet returned for correction.');
+});
