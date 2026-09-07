@@ -82,6 +82,23 @@ struct PartitionProbe {
     format_hint: String,
 }
 
+#[derive(Serialize)]
+struct ClusterSample {
+    multiplier_bytes: u64,
+    absolute_offset_bytes: u64,
+    sha256: String,
+    signature: String,
+    format_hint: String,
+}
+
+#[derive(Serialize)]
+struct ClusterMappingReport {
+    disk_number: u32,
+    partition_number: u32,
+    cluster_number: i64,
+    samples: Vec<ClusterSample>,
+}
+
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|error| error.to_string())?;
     let mut hasher = Sha256::new();
@@ -97,6 +114,25 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 fn unix_timestamp(timestamp: i64) -> Option<String> {
     if timestamp <= 0 { return None; }
     DateTime::<Utc>::from_timestamp(timestamp, 0).map(|value| value.to_rfc3339())
+}
+
+fn media_signature_hint(bytes: &[u8]) -> String {
+    if bytes.windows(4).any(|window| window == [0, 0, 0, 1]) || bytes.windows(3).any(|window| window == [0, 0, 1]) {
+        return "H.264/H.265 NAL start code detected".to_string();
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"AVI ") {
+        return "AVI container header detected".to_string();
+    }
+    if bytes.get(4..8) == Some(b"ftyp") {
+        return "MP4/MOV container header detected".to_string();
+    }
+    if bytes.starts_with(&[0x47]) || bytes.get(188) == Some(&0x47) {
+        return "MPEG transport-stream packet marker detected".to_string();
+    }
+    if bytes.iter().all(|byte| *byte == 0) {
+        return "All-zero sample".to_string();
+    }
+    "No standard media signature detected".to_string()
 }
 
 #[cfg(target_os = "windows")]
@@ -189,10 +225,50 @@ fn probe_partition_header(disk_number: u32, partition_number: u32) -> Result<Par
     Ok(PartitionProbe { disk_number, partition_number, offset_bytes: coordinates.offset_bytes, bytes_read: PROBE_BYTES, sha256, signature, format_hint })
 }
 
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn probe_indexed_cluster(disk_number: u32, partition_number: u32, cluster_number: i64) -> Result<ClusterMappingReport, String> {
+    const SAMPLE_BYTES: usize = 4096;
+    const CANDIDATE_MULTIPLIERS: [u64; 4] = [512, 4096, 65536, 1048576];
+    if cluster_number < 0 {
+        return Err("Cluster number must not be negative.".to_string());
+    }
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path}. Open FCM Desktop as Administrator only if Windows denies read-only access: {error}"))?;
+    let mut samples = Vec::new();
+    for multiplier_bytes in CANDIDATE_MULTIPLIERS {
+        let relative_offset = (cluster_number as u64).checked_mul(multiplier_bytes)
+            .ok_or_else(|| "Cluster offset overflowed.".to_string())?;
+        if relative_offset.saturating_add(SAMPLE_BYTES as u64) > coordinates.size_bytes {
+            continue;
+        }
+        let absolute_offset_bytes = coordinates.offset_bytes.saturating_add(relative_offset);
+        device.seek(SeekFrom::Start(absolute_offset_bytes)).map_err(|error| format!("Could not seek to candidate offset: {error}"))?;
+        let mut bytes = vec![0_u8; SAMPLE_BYTES];
+        device.read_exact(&mut bytes).map_err(|error| format!("Could not read candidate offset: {error}"))?;
+        samples.push(ClusterSample {
+            multiplier_bytes,
+            absolute_offset_bytes,
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            signature: bytes[..32].iter().map(|byte| format!("{byte:02x}")).collect(),
+            format_hint: media_signature_hint(&bytes),
+        });
+    }
+    Ok(ClusterMappingReport { disk_number, partition_number, cluster_number, samples })
+}
+
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 fn probe_partition_header(_disk_number: u32, _partition_number: u32) -> Result<PartitionProbe, String> {
     Err("Partition header probing is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn probe_indexed_cluster(_disk_number: u32, _partition_number: u32, _cluster_number: i64) -> Result<ClusterMappingReport, String> {
+    Err("Indexed cluster probing is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -282,7 +358,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![detect_removable_disks, probe_partition_header, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![detect_removable_disks, probe_partition_header, probe_indexed_cluster, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
