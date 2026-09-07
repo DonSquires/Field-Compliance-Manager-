@@ -142,7 +142,7 @@ test('administrator creates and edits organizations through the human account sp
   await created.getByRole('button', { name: 'Continue to places' }).click();
   const workspace = page.getByRole('dialog', { name: 'Harbour Arts Trust' });
   await workspace.getByRole('button', { name: /Places/ }).click();
-  await expect(workspace.getByRole('button', { name: 'Add location / place' })).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'Find or add location' })).toBeVisible();
   await workspace.getByRole('button', { name: /Contacts/ }).click();
   await workspace.getByRole('button', { name: 'Add contact' }).click();
   await workspace.getByLabel('First name').fill('Hana'); await workspace.getByLabel('Last name').fill('Te Aho');

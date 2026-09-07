@@ -30,7 +30,7 @@ test('house map separates LINZ source geometry from runtime geofence decisions',
   await expect(resolution).toContainText('restricted · Controlled loading access only');
 
   await map.getByRole('button', { name: 'Preview LINZ boundary' }).click();
-  await expect(map.getByText('Read-only LINZ preview')).toBeVisible();
+  await expect(map.getByText('Read-only LINZ land-lot preview')).toBeVisible();
   await expect(map.getByText(/Exact parcel/)).toBeVisible();
   await expect(page).toHaveScreenshot('geofence-house-runtime.png');
 
