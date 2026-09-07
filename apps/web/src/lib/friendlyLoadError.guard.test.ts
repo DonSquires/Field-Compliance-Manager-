@@ -11,6 +11,7 @@ const pages = [
   'pages/OfficerSchedulePage.tsx',
   'pages/OfficerDebriefPage.tsx',
   'pages/OfficerFieldReportPage.tsx',
+  'pages/InvestigationPage.tsx',
   'pages/AdminHubPage.tsx',
 ];
 

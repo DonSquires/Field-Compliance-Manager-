@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ClipboardPlus, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -71,7 +72,7 @@ const InvestigationPage: React.FC = () => {
       ? await supabase.rpc('list_dispatch_target_officers', { p_service_agreement_id: agreementRows[0].id })
       : { data: [], error: null };
     const firstError = investigationResponse.error ?? linksResponse.error ?? eventsResponse.error ?? agreementsResponse.error ?? resolvedSitesResponse.error ?? officersResponse.error ?? jobsResponse.error;
-    if (firstError) setError(firstError.message);
+    if (firstError) setError(describeLoadFailures([['investigation workspace', firstError]]) ?? 'Investigation workspace could not be loaded.');
     else {
       setInvestigation(investigationResponse.data as Investigation);
       setLinks((linksResponse.data as InvestigationLink[]) ?? []);
@@ -105,14 +106,14 @@ const InvestigationPage: React.FC = () => {
       p_dispatch_resource_id: null,
       p_shift_id: null,
     });
-    if (createError || !data?.length) setError(createError?.message ?? 'Follow-up dispatch was not confirmed.');
+    if (createError || !data?.length) setError(describeLoadFailures([['follow-up dispatch', createError]]) ?? 'Follow-up dispatch was not confirmed.');
     else {
       let assignmentError: { message: string } | null = null;
       if (officerId) {
         const assignment = await supabase.rpc('assign_dispatch_job_to_officer', { p_job_id: data[0].id, p_officer_user_id: officerId });
         assignmentError = assignment.error;
       }
-      if (assignmentError) setError(`Job created but officer assignment failed: ${assignmentError.message}`);
+      if (assignmentError) setError(`Job created, but ${describeLoadFailures([['officer assignment', assignmentError]]) ?? 'officer assignment could not be saved.'}`);
       else setNotice(`Investigation follow-up job ${data[0].id.slice(0, 8)} queued${officerId ? ' for the selected officer' : ''}.`);
       setInstructions(''); await load();
     }
@@ -123,7 +124,7 @@ const InvestigationPage: React.FC = () => {
     if (!targetOfficerId) return;
     setSaving(true); setError(null); setNotice(null);
     const { error: assignmentError } = await supabase.rpc('assign_dispatch_job_to_officer', { p_job_id: jobId, p_officer_user_id: targetOfficerId });
-    if (assignmentError) setError(assignmentError.message);
+    if (assignmentError) setError(describeLoadFailures([['officer assignment', assignmentError]]) ?? 'Officer assignment could not be saved.');
     else { setNotice('Investigation dispatch assigned to the selected officer.'); await load(); }
     setSaving(false);
   }
