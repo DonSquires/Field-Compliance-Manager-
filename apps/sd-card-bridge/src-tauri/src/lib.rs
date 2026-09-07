@@ -2,7 +2,11 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{fs::File, io::Read, path::Path};
+use std::{
+    fs::{self, File},
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 #[derive(Serialize)]
 struct IndexRecord {
@@ -26,6 +30,21 @@ struct IndexReport {
     records: Vec<IndexRecord>,
 }
 
+#[derive(Serialize)]
+struct MountedFile {
+    relative_path: String,
+    size_bytes: u64,
+}
+
+#[derive(Serialize)]
+struct MountedFolderReport {
+    folder_path: String,
+    file_count: usize,
+    total_bytes: u64,
+    truncated: bool,
+    files: Vec<MountedFile>,
+}
+
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|error| error.to_string())?;
     let mut hasher = Sha256::new();
@@ -41,6 +60,41 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 fn unix_timestamp(timestamp: i64) -> Option<String> {
     if timestamp <= 0 { return None; }
     DateTime::<Utc>::from_timestamp(timestamp, 0).map(|value| value.to_rfc3339())
+}
+
+#[tauri::command]
+fn inspect_mounted_folder(folder_path: String) -> Result<MountedFolderReport, String> {
+    const MAX_FILES: usize = 5_000;
+    let root = PathBuf::from(&folder_path);
+    if !root.is_dir() {
+        return Err("Select a mounted SD-card folder or drive root.".to_string());
+    }
+    let mut files = Vec::new();
+    let mut file_count = 0_usize;
+    let mut total_bytes = 0_u64;
+    let mut stack = vec![root.clone()];
+    while let Some(directory) = stack.pop() {
+        for entry in fs::read_dir(&directory).map_err(|error| format!("Could not read {directory:?}: {error}"))? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let metadata = entry.metadata().map_err(|error| error.to_string())?;
+            if metadata.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !metadata.is_file() {
+                continue;
+            }
+            file_count = file_count.saturating_add(1);
+            total_bytes = total_bytes.saturating_add(metadata.len());
+            if files.len() < MAX_FILES {
+                let relative_path = path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                files.push(MountedFile { relative_path, size_bytes: metadata.len() });
+            }
+        }
+    }
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(MountedFolderReport { folder_path, file_count, total_bytes, truncated: file_count > MAX_FILES, files })
 }
 
 #[tauri::command]
@@ -89,7 +143,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
