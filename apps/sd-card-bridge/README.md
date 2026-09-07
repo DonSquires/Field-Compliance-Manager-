@@ -7,7 +7,9 @@ Local Windows utility for inspecting a copied `SDFileInfo.db` CCTV index before 
 - Opens only a user-selected `SDFileInfo.db` file.
 - Opens SQLite in read-only mode and calculates a source SHA-256.
 - Displays motion-recording metadata, event labels, timestamps, and vendor cluster references.
-- Does not access physical disks, read raw partitions, export footage, upload to FCM, or store credentials.
+- Signs users in against FCM using public browser configuration fetched at startup; passwords and service credentials are never sent to the configuration endpoint.
+- Uploads exported MP4/MOV/AVI/MKV footage to private FCM storage and queues the existing VPS `video_motion` pipeline.
+- Does not access physical disks, read raw partitions, or extract footage from vendor block storage.
 
 ## Security model
 

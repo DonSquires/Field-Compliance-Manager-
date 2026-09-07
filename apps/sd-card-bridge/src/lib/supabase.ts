@@ -1,16 +1,28 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let client: SupabaseClient | null = null;
+let clientPromise: Promise<SupabaseClient> | null = null;
 
-export function getSupabaseClient(): SupabaseClient {
-  if (client) return client;
-  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-  if (!url || !anonKey) {
-    throw new Error('The bridge requires VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY. Copy the public values from the FCM web environment.');
+type DesktopClientConfig = {
+  supabase_url: string;
+  supabase_anon_key: string;
+};
+
+export function getSupabaseClient(): Promise<SupabaseClient> {
+  if (client) return Promise.resolve(client);
+  if (!clientPromise) {
+    clientPromise = fetch('https://dotczcyyzgabmtmnglqj.supabase.co/functions/v1/desktop-client-config')
+      .then(async (response) => {
+        if (!response.ok) throw new Error('FCM desktop connection setup is unavailable. Check your internet connection and try again.');
+        return response.json() as Promise<DesktopClientConfig>;
+      })
+      .then((config) => {
+        if (!config.supabase_url || !config.supabase_anon_key) throw new Error('FCM desktop connection setup returned an invalid response.');
+        client = createClient(config.supabase_url, config.supabase_anon_key, {
+          auth: { autoRefreshToken: true, persistSession: false, detectSessionInUrl: false },
+        });
+        return client;
+      });
   }
-  client = createClient(url, anonKey, {
-    auth: { autoRefreshToken: true, persistSession: false, detectSessionInUrl: false },
-  });
-  return client;
+  return clientPromise;
 }
