@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capability for the SD index inspection utility.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "deep-link:default"]
+  "permissions": ["core:default", "dialog:default", "fs:default", "fs:allow-read-file", "deep-link:default"]
 }

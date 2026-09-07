@@ -42,6 +42,30 @@ type CCTVJob = {
   result: { status: string; result: Record<string, unknown> } | null;
 };
 
+type PersonRecordOption = {
+  id: string;
+  display_name: string | null;
+  review_state: string;
+  metadata: Record<string, unknown> | null;
+};
+
+type FaceObservationLink = {
+  id: string;
+  person_record_id: string | null;
+  metadata: {
+    candidates?: FaceCandidate[];
+    original_thumbnail?: string | null;
+  } | null;
+};
+
+type FaceCandidate = {
+  person_record_id: string;
+  display_name: string;
+  similarity: number;
+  reference_thumbnail: string | null;
+  review_state: string;
+};
+
 const CCTV_DOMAINS = ['video_motion', 'vehicle', 'face'] as const;
 
 const FILTERS: Array<{ value: ReviewFilter; label: string }> = [
@@ -74,6 +98,11 @@ export const CCTVReviewPage: React.FC = () => {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'events' | 'keyframes' | 'raw'>('events');
   const [enlargedImage, setEnlargedImage] = useState<{ src: string; title: string; subtitle?: string } | null>(null);
+  const [personRecords, setPersonRecords] = useState<PersonRecordOption[]>([]);
+  const [faceObservationLinks, setFaceObservationLinks] = useState<Record<string, FaceObservationLink>>({});
+  const [identityDrafts, setIdentityDrafts] = useState<Record<string, { personRecordId: string; displayName: string }>>({});
+  const [identitySaving, setIdentitySaving] = useState<string | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -170,6 +199,62 @@ export const CCTVReviewPage: React.FC = () => {
   const consolidated = useMemo(() => {
     return consolidateResultData(selected?.result?.result);
   }, [selected?.result?.result]);
+
+  useEffect(() => {
+    let active = true;
+    const loadFaceIdentityLinks = async () => {
+      if (!profile?.organizationId || !selected?.evidence_item_id) {
+        setPersonRecords([]);
+        setFaceObservationLinks({});
+        return;
+      }
+      const [{ data: observations, error: observationsError }, { data: records, error: recordsError }] = await Promise.all([
+        supabase.from('face_observations').select('id, person_record_id, metadata').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
+        supabase.from('person_records').select('id, display_name, review_state, metadata').eq('organization_id', profile.organizationId).order('created_at', { ascending: true }),
+      ]);
+      if (!active) return;
+      if (observationsError || recordsError) {
+        setIdentityError(observationsError?.message || recordsError?.message || 'Face identity records could not be loaded.');
+        return;
+      }
+      const nextRecords = (records ?? []) as PersonRecordOption[];
+      const recordById = new Map(nextRecords.map((record) => [record.id, record]));
+      const nextLinks: Record<string, FaceObservationLink> = {};
+      for (const observation of (observations ?? []) as FaceObservationLink[]) {
+        const record = observation.person_record_id ? recordById.get(observation.person_record_id) : null;
+        const eventId = typeof record?.metadata?.source_event_id === 'string' ? record.metadata.source_event_id : null;
+        if (eventId) nextLinks[eventId] = observation;
+      }
+      setPersonRecords(nextRecords);
+      setFaceObservationLinks(nextLinks);
+      setIdentityError(null);
+    };
+    void loadFaceIdentityLinks();
+    return () => {
+      active = false;
+    };
+  }, [profile?.organizationId, selected?.evidence_item_id]);
+
+  const saveFaceIdentity = async (face: ConsolidatedFaceEvent) => {
+    const link = faceObservationLinks[face.event_id];
+    const draft = identityDrafts[face.event_id];
+    if (!link?.id || !draft?.personRecordId) return;
+    setIdentitySaving(face.event_id);
+    setIdentityError(null);
+    const { error: saveError } = await supabase.rpc('assign_face_observation_person', {
+      p_observation_id: link.id,
+      p_person_record_id: draft.personRecordId,
+      p_display_name: draft.displayName.trim() || null,
+    });
+    if (saveError) {
+      setIdentityError(saveError.message);
+    } else {
+      setPersonRecords((current) => current.map((record) => record.id === draft.personRecordId
+        ? { ...record, display_name: draft.displayName.trim() || record.display_name }
+        : record));
+    }
+    setIdentitySaving(null);
+  };
 
   const jumpToTime = (seconds: number) => {
     if (videoRef.current) {
@@ -374,6 +459,7 @@ export const CCTVReviewPage: React.FC = () => {
               {/* Tab 1: Consolidated Observation Events */}
               {activeTab === 'events' && (
                 <div className="cctv-events-list">
+                  {identityError && <div className="page-error">{identityError}</div>}
                   {consolidated.face_events.length === 0 && consolidated.vehicle_events.length === 0 ? (
                     <div className="cctv-empty-small">
                       <Clock3 size={18} />
@@ -410,7 +496,7 @@ export const CCTVReviewPage: React.FC = () => {
                       <div className="cctv-card-body">
                         <div className="cctv-card-header">
                           <span className="cctv-badge cctv-badge-person">
-                            <UserRound size={12} /> {face.subject_label}
+                            <UserRound size={12} /> {personRecords.find((record) => record.id === faceObservationLinks[face.event_id]?.person_record_id)?.display_name || face.subject_label}
                           </span>
                           {face.is_return ? (
                             <span className="cctv-badge cctv-badge-return">Return visit</span>
@@ -435,6 +521,74 @@ export const CCTVReviewPage: React.FC = () => {
                             <Play size={12} /> Jump to {face.first_seen_seconds}s
                           </button>
                         </div>
+                        {faceObservationLinks[face.event_id]?.metadata?.candidates?.length ? (
+                          <div className="cctv-candidate-list">
+                            <strong>Potential matches for human review</strong>
+                            {(faceObservationLinks[face.event_id].metadata?.candidates ?? []).map((candidate) => (
+                              <div key={candidate.person_record_id} className="cctv-candidate-row">
+                                {candidate.reference_thumbnail ? (
+                                  <img src={candidate.reference_thumbnail} alt={`${candidate.display_name} reference`} />
+                                ) : (
+                                  <span className="cctv-candidate-no-thumb"><UserRound size={14} /></span>
+                                )}
+                                <span className="cctv-candidate-copy">
+                                  <b>{candidate.display_name}</b>
+                                  <small>{Math.round(candidate.similarity * 100)}% visual similarity · {candidate.review_state}</small>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {faceObservationLinks[face.event_id] ? (
+                          <div className="cctv-identity-editor">
+                            <label>
+                              Person record
+                              <select
+                                value={identityDrafts[face.event_id]?.personRecordId || faceObservationLinks[face.event_id].person_record_id || ''}
+                                onChange={(event) => {
+                                  const personRecordId = event.target.value;
+                                  const selectedRecord = personRecords.find((record) => record.id === personRecordId);
+                                  setIdentityDrafts((current) => ({
+                                    ...current,
+                                    [face.event_id]: {
+                                      personRecordId,
+                                      displayName: current[face.event_id]?.displayName || selectedRecord?.display_name || '',
+                                    },
+                                  }));
+                                }}
+                              >
+                                {personRecords.map((record) => (
+                                  <option key={record.id} value={record.id}>
+                                    {record.display_name || 'Unnamed person'}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              Display name
+                              <input
+                                value={identityDrafts[face.event_id]?.displayName ?? personRecords.find((record) => record.id === faceObservationLinks[face.event_id]?.person_record_id)?.display_name ?? ''}
+                                onChange={(event) => setIdentityDrafts((current) => ({
+                                  ...current,
+                                  [face.event_id]: {
+                                    personRecordId: current[face.event_id]?.personRecordId || faceObservationLinks[face.event_id].person_record_id || '',
+                                    displayName: event.target.value,
+                                  },
+                                }))}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="cctv-btn-jump"
+                              disabled={identitySaving === face.event_id}
+                              onClick={() => void saveFaceIdentity(face)}
+                            >
+                              {identitySaving === face.event_id ? 'Saving...' : 'Save identity'}
+                            </button>
+                          </div>
+                        ) : (
+                          <small className="cctv-identity-pending">Identity record pending for this observation.</small>
+                        )}
                       </div>
                     </div>
                   ))}

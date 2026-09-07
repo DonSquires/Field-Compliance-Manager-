@@ -6,6 +6,7 @@ create table "public"."face_observations" (
   "confidence"       real,
   "purpose"          text                     not null,
   "review_state"     text                     not null default 'manual_review_required'::text,
+  "metadata"         jsonb                    not null default '{}'::jsonb,
   "created_at"       timestamp with time zone not null default now(),
   constraint "face_observations_evidence_item_id_fkey" foreign key (evidence_item_id) references public.evidence_items(id),
   constraint "face_observations_pkey" primary key (id),

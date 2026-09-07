@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -28,6 +28,34 @@ struct IndexReport {
     valid_timestamped_record_count: usize,
     event_definitions: Vec<String>,
     records: Vec<IndexRecord>,
+}
+
+#[derive(Serialize)]
+struct DhfsVideoExport {
+    file_name: String,
+    partition: usize,
+    descriptor: u32,
+    channel: u32,
+    start_time: String,
+    end_time: String,
+    bytes_written: u64,
+}
+
+#[derive(Serialize)]
+struct DhfsConversionReport {
+    source_path: String,
+    source_sha256: String,
+    output_directory: String,
+    exported: Vec<DhfsVideoExport>,
+}
+
+#[derive(Serialize)]
+struct DhfsImageReport {
+    disk_number: u32,
+    partition_number: u32,
+    output_path: String,
+    bytes_copied: u64,
+    sha256: String,
 }
 
 #[derive(Serialize)]
@@ -240,6 +268,31 @@ fn partition_coordinates(disk_number: u32, partition_number: u32) -> Result<Part
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
+fn image_dhfs_partition(disk_number: u32, partition_number: u32, output_path: String) -> Result<DhfsImageReport, String> {
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    if coordinates.size_bytes < 4096 { return Err("Selected partition is too small to be a DHFS recording partition.".to_string()); }
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not open {device_path} read-only: {error}"))?;
+    let mut image = OpenOptions::new().write(true).create_new(true).open(&output_path)
+        .map_err(|error| format!("Could not create image without overwriting an existing file: {error}"))?;
+    device.seek(SeekFrom::Start(coordinates.offset_bytes)).map_err(|error| error.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut remaining = coordinates.size_bytes;
+    let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+    while remaining > 0 {
+        let requested = remaining.min(buffer.len() as u64) as usize;
+        device.read_exact(&mut buffer[..requested]).map_err(|error| format!("Read-only DHFS imaging failed: {error}"))?;
+        image.write_all(&buffer[..requested]).map_err(|error| format!("Writing DHFS image failed: {error}"))?;
+        hasher.update(&buffer[..requested]);
+        remaining -= requested as u64;
+    }
+    image.flush().map_err(|error| error.to_string())?;
+    Ok(DhfsImageReport { disk_number, partition_number, output_path, bytes_copied: coordinates.size_bytes, sha256: format!("{:x}", hasher.finalize()) })
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
 fn probe_partition_header(disk_number: u32, partition_number: u32) -> Result<PartitionProbe, String> {
     const PROBE_BYTES: usize = 4096;
     let coordinates = partition_coordinates(disk_number, partition_number)?;
@@ -348,6 +401,130 @@ struct DhfsDptReport {
 struct ExportTool {
     name: String,
     executable_path: String,
+}
+
+fn dhfs_read_u32(file: &mut File, offset: u64) -> Result<u32, String> {
+    file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
+    let mut bytes = [0_u8; 4];
+    file.read_exact(&mut bytes).map_err(|error| error.to_string())?;
+    Ok(u32::from_le_bytes(bytes))
+}
+
+fn dhfs_read_descriptor(file: &mut File, offset: u64) -> Result<[u8; 32], String> {
+    file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
+    let mut descriptor = [0_u8; 32];
+    file.read_exact(&mut descriptor).map_err(|error| error.to_string())?;
+    Ok(descriptor)
+}
+
+fn dhfs_timestamp(timestamp: u32) -> String {
+    let bits = |position: u32, size: u32| (timestamp >> (position + 1 - size)) & ((1_u32 << size) - 1);
+    format!("20{:02}-{:02}-{:02}_{:02}-{:02}-{:02}", bits(31, 6), bits(25, 4), bits(21, 5), bits(16, 5), bits(11, 6), bits(5, 6))
+}
+
+fn dhfs_descriptor_chain(file: &mut File, descriptor_offset: u64, descriptor_count: u32, start: u32) -> Result<Vec<u32>, String> {
+    let mut chain = Vec::new();
+    let mut current = start;
+    while current != 0 && current != u32::MAX && current < descriptor_count {
+        if chain.contains(&current) { return Err("DHFS descriptor chain is cyclic.".to_string()); }
+        chain.push(current);
+        let descriptor = dhfs_read_descriptor(file, descriptor_offset + current as u64 * 32)?;
+        current = u32::from_le_bytes(descriptor[12..16].try_into().expect("DHFS next descriptor field"));
+        if chain.len() > descriptor_count as usize { return Err("DHFS descriptor chain is invalid.".to_string()); }
+    }
+    if chain.is_empty() { return Err("DHFS recording has no fragments.".to_string()); }
+    Ok(chain)
+}
+
+#[tauri::command]
+fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<DhfsConversionReport, String> {
+    let image = PathBuf::from(&image_path);
+    let output = PathBuf::from(&output_directory);
+    if !image.is_file() { return Err("Select a DHFS disk or partition image.".to_string()); }
+    if !output.is_dir() { return Err("Select an existing output folder.".to_string()); }
+
+    let source_sha256 = sha256_file(&image)?;
+    let mut file = File::open(&image).map_err(|error| format!("Could not open DHFS image read-only: {error}"))?;
+    let mut magic = [0_u8; 7];
+    file.read_exact(&mut magic).map_err(|error| error.to_string())?;
+    if &magic != b"DHFS4.1" { return Err("The selected image is not a DHFS4.1 image.".to_string()); }
+
+    let mut table_offset = 0x3c00_u64 + 0x34;
+    let mut partitions = Vec::new();
+    for _ in 0..64 {
+        file.seek(SeekFrom::Start(table_offset)).map_err(|error| error.to_string())?;
+        let mut entry = [0_u8; 64];
+        file.read_exact(&mut entry).map_err(|error| error.to_string())?;
+        if &entry[..4] == [0xaa, 0x55, 0xaa, 0x55] { break; }
+        let superblock_offset = u32::from_le_bytes(entry[20..24].try_into().expect("DHFS superblock field")) as u64 * 512;
+        let partition_offset = u64::from_le_bytes(entry[48..56].try_into().expect("DHFS partition field")) * 512;
+        if partition_offset == 0 { break; }
+        partitions.push((partition_offset, superblock_offset));
+        table_offset += 64;
+    }
+    if partitions.is_empty() { return Err("No DHFS partitions were found in the image.".to_string()); }
+
+    let mut exported = Vec::new();
+    for (partition_index, (partition_offset, superblock_offset)) in partitions.iter().enumerate() {
+        let superblock = partition_offset + superblock_offset;
+        let block_size = dhfs_read_u32(&mut file, superblock + 0x2c)? as u64;
+        let fragment_size = dhfs_read_u32(&mut file, superblock + 0x30)? as u64 * block_size;
+        let descriptor_offset = partition_offset + dhfs_read_u32(&mut file, superblock + 0x44)? as u64 * block_size;
+        let video_offset = partition_offset + dhfs_read_u32(&mut file, superblock + 0x48)? as u64 * block_size;
+        let descriptor_count = dhfs_read_u32(&mut file, superblock + 0x4c)?;
+        if block_size == 0 || fragment_size == 0 || descriptor_count == 0 { continue; }
+
+        for descriptor_index in 0..descriptor_count {
+            let descriptor = dhfs_read_descriptor(&mut file, descriptor_offset + descriptor_index as u64 * 32)?;
+            if descriptor[0] != 1 { continue; }
+            let start_timestamp = u32::from_le_bytes(descriptor[4..8].try_into().expect("DHFS start timestamp"));
+            let end_timestamp = u32::from_le_bytes(descriptor[8..12].try_into().expect("DHFS end timestamp"));
+            if start_timestamp == end_timestamp { continue; }
+            let chain = dhfs_descriptor_chain(&mut file, descriptor_offset, descriptor_count, descriptor_index)?;
+            let last = dhfs_read_descriptor(&mut file, descriptor_offset + *chain.last().expect("non-empty chain") as u64 * 32)?;
+            let last_size = u32::from_le_bytes(last[16..20].try_into().expect("DHFS final fragment size")) as u64 * block_size;
+            if last_size == 0 || last_size > fragment_size { continue; }
+
+            let channel = descriptor[1].saturating_sub(b'0') as u32 + 1;
+            let start_time = dhfs_timestamp(start_timestamp);
+            let end_time = dhfs_timestamp(end_timestamp);
+            let file_name = format!("FCM-p{}-d{:06}-{}-{}-ch{:02}.h264", partition_index, descriptor_index, start_time, end_time, channel);
+            let output_path = output.join(&file_name);
+            let mut output_file = File::create(&output_path).map_err(|error| format!("Could not create {output_path:?}: {error}"))?;
+            let mut bytes_written = 0_u64;
+            for (position, fragment) in chain.iter().enumerate() {
+                let bytes_to_copy = if position + 1 == chain.len() { last_size } else { fragment_size };
+                file.seek(SeekFrom::Start(video_offset + *fragment as u64 * fragment_size)).map_err(|error| error.to_string())?;
+                let mut remaining = bytes_to_copy;
+                let mut buffer = [0_u8; 64 * 1024];
+                while remaining > 0 {
+                    let requested = remaining.min(buffer.len() as u64) as usize;
+                    file.read_exact(&mut buffer[..requested]).map_err(|error| error.to_string())?;
+                    output_file.write_all(&buffer[..requested]).map_err(|error| error.to_string())?;
+                    remaining -= requested as u64;
+                    bytes_written += requested as u64;
+                }
+            }
+            exported.push(DhfsVideoExport { file_name, partition: partition_index, descriptor: descriptor_index, channel, start_time, end_time, bytes_written });
+        }
+    }
+    Ok(DhfsConversionReport { source_path: image_path, source_sha256, output_directory, exported })
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn launch_dahua_export_tool(executable_path: String) -> Result<(), String> {
+    use std::process::Command;
+
+    let path = PathBuf::from(&executable_path);
+    let name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
+    if !path.is_file() || !name.ends_with(".exe") || !(name.contains("dahua") || name.contains("smartplayer") || name.contains("smartpss") || name.contains("diskmanager")) {
+        return Err("FCM will only launch a detected Dahua-compatible exporter.".to_string());
+    }
+    Command::new(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Could not launch Dahua exporter: {error}"))
 }
 
 #[cfg(target_os = "windows")]
@@ -573,6 +750,12 @@ fn detect_dahua_export_tools() -> Result<Vec<ExportTool>, String> {
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
+fn launch_dahua_export_tool(_executable_path: String) -> Result<(), String> {
+    Err("Dahua exporter launch is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
 fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
     Err("Automated SD-card analysis is available in the Windows FCM Desktop application.".to_string())
 }
@@ -581,6 +764,12 @@ fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
 #[tauri::command]
 fn detect_removable_disks() -> Result<Vec<RemovableDisk>, String> {
         Err("Removable disk discovery is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn image_dhfs_partition(_disk_number: u32, _partition_number: u32, _output_path: String) -> Result<DhfsImageReport, String> {
+    Err("DHFS physical imaging is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[tauri::command]
@@ -631,8 +820,9 @@ fn inspect_sd_index(database_path: String) -> Result<IndexReport, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, image_dhfs_partition, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }

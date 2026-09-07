@@ -1153,6 +1153,7 @@ export type Database = {
           file_size_bytes: number
           file_type: string
           id: string
+            metadata: Json
           organization_id: string
           processing_state: string
           purpose: string
@@ -1173,6 +1174,7 @@ export type Database = {
           file_size_bytes: number
           file_type: string
           id?: string
+          metadata?: Json
           organization_id: string
           processing_state?: string
           purpose: string
@@ -1193,6 +1195,7 @@ export type Database = {
           file_size_bytes?: number
           file_type?: string
           id?: string
+          metadata?: Json
           organization_id?: string
           processing_state?: string
           purpose?: string

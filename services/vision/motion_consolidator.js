@@ -139,7 +139,7 @@ async function consolidateFaces(frames, options = {}) {
   const allTracks = [];
   for (const subj of subjects) {
     if (subj.activeTrack) subj.completedTracks.push(subj.activeTrack);
-    allTracks.push(...subj.completedTracks);
+    allTracks.push(...subj.completedTracks.map((track) => ({ ...track, faceEmbedding: subj.avgEmbedding })));
   }
 
   // Sort by firstSeen
@@ -164,6 +164,7 @@ async function consolidateFaces(frames, options = {}) {
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
       best_bbox: tr.bestBbox,
       thumbnail,
+      face_embedding: Array.isArray(tr.faceEmbedding) ? tr.faceEmbedding : null,
       review_state: 'manual_review_required',
     });
   }

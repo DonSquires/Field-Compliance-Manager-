@@ -1,7 +1,8 @@
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { readFile } from '@tauri-apps/plugin-fs';
 import { AlertTriangle, Camera, Database, ExternalLink, FileText, HardDrive, LogOut, MonitorPlay, RefreshCw, Upload, Wifi } from 'lucide-react';
 import { getSupabaseClient } from './lib/supabase';
 import './styles.css';
@@ -122,6 +123,21 @@ type ExportTool = {
   executable_path: string;
 };
 
+type DhfsConversionReport = {
+  source_path: string;
+  source_sha256: string;
+  output_directory: string;
+  exported: Array<{
+    file_name: string;
+    partition: number;
+    descriptor: number;
+    channel: number;
+    start_time: string;
+    end_time: string;
+    bytes_written: number;
+  }>;
+};
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -151,6 +167,10 @@ function App() {
   const [dhfsDpt, setDhfsDpt] = useState<DhfsDptReport | null>(null);
   const [exportTools, setExportTools] = useState<ExportTool[] | null>(null);
   const [toolDetectionLoading, setToolDetectionLoading] = useState(false);
+  const [conversionReport, setConversionReport] = useState<DhfsConversionReport | null>(null);
+  const [conversionLoading, setConversionLoading] = useState(false);
+  const [imagingLoading, setImagingLoading] = useState(false);
+  const [convertedVideoLoading, setConvertedVideoLoading] = useState<string | null>(null);
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -344,6 +364,80 @@ function App() {
     }
   };
 
+  const convertDhfsImage = async () => {
+    setError(null);
+    const selectedImage = await open({
+      title: 'Select a read-only DHFS disk or partition image',
+      multiple: false,
+      filters: [{ name: 'Disk image', extensions: ['dd', 'img', 'bin'] }],
+    });
+    if (typeof selectedImage !== 'string') return;
+    const outputDirectory = await open({ title: 'Choose a folder for reconstructed H.264 recordings', directory: true, multiple: false });
+    if (typeof outputDirectory !== 'string') return;
+    setConversionLoading(true);
+    setStatus('Converting DHFS recordings locally. The source image is read-only...');
+    try {
+      const result = await invoke<DhfsConversionReport>('convert_dhfs_image', {
+        imagePath: selectedImage,
+        outputDirectory,
+      });
+      setConversionReport(result);
+      setStatus(`Converted ${result.exported.length} DHFS recording${result.exported.length === 1 ? '' : 's'} locally. Select the H.264 output in Video Upload.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setStatus('DHFS conversion did not complete.');
+    } finally {
+      setConversionLoading(false);
+    }
+  };
+
+  const imageInsertedDhfsPartition = async () => {
+    const disk = removableDisks.find((item) => item.partitions.some((partition) => !partition.drive_letter));
+    const partition = disk?.partitions.filter((item) => !item.drive_letter).sort((left, right) => right.size_bytes - left.size_bytes)[0];
+    if (!disk || !partition) {
+      setError('Analyse the inserted SD card first so FCM can identify its DHFS partition.');
+      return;
+    }
+    setError(null);
+    const outputPath = await save({ title: 'Save a read-only DHFS partition image', defaultPath: 'fcm-dhfs-evidence.img', filters: [{ name: 'Disk image', extensions: ['img'] }] });
+    if (!outputPath) return;
+    setImagingLoading(true);
+    setStatus('Creating a read-only image of the DHFS partition. Do not remove the SD card...');
+    try {
+      const result = await invoke<{ bytes_copied: number; sha256: string; output_path: string }>('image_dhfs_partition', {
+        diskNumber: disk.disk_number,
+        partitionNumber: partition.partition_number,
+        outputPath,
+      });
+      setStatus(`Created ${Math.round(result.bytes_copied / 1024 / 1024 / 1024)} GB read-only image. SHA-256: ${result.sha256}. Run the built-in converter on this image.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setImagingLoading(false);
+    }
+  };
+
+  const selectConvertedVideo = async (exported: DhfsConversionReport['exported'][number]) => {
+    if (!conversionReport) return;
+    if (exported.bytes_written > 524288000) {
+      setError('This converted clip exceeds the 500 MB upload limit. Select a shorter recording.');
+      return;
+    }
+    const filePath = `${conversionReport.output_directory.replace(/[\\/]$/, '')}/${exported.file_name}`;
+    setConvertedVideoLoading(exported.file_name);
+    setError(null);
+    try {
+      const bytes = await readFile(filePath);
+      setVideo(new File([bytes], exported.file_name, { type: 'video/h264' }));
+      setActiveView('video-upload');
+      setUploadStatus(`Loaded ${exported.file_name}. Review the clip, then upload it to Bob.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setConvertedVideoLoading(null);
+    }
+  };
+
   const uploadVideo = async () => {
     if (!video) return;
     setError(null);
@@ -386,13 +480,15 @@ function App() {
 
   return <main className="desktop-companion">
     <header className="companion-header">
-      <div className="companion-brand"><img src="/icons/128x128.png" alt="Iron Eagle Security" /><div><span>Iron Eagle Security</span><h1>FCM Desktop</h1></div></div>
+      <div className="companion-brand"><span className="companion-brand-mark" aria-hidden="true"><Camera size={24} /></span><div><span>Iron Eagle Security</span><h1>FCM Desktop</h1></div></div>
       {signedInAs ? <div className="companion-session"><span><Wifi size={14} /> Connected as {signedInAs}</span><button type="button" className="icon-button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={17} /></button></div> : <form className="sign-in-form" onSubmit={(event) => void signIn(event)}><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" required /><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" required /><button type="submit">Sign in</button></form>}
     </header>
     <div className="companion-layout">
       <nav className="companion-nav" aria-label="FCM Desktop navigation">
         <button type="button" className={activeView === 'home' ? 'is-active' : ''} onClick={() => setActiveView('home')}><MonitorPlay size={18} /> Desktop home</button>
         <button type="button" className={activeView === 'sd-import-clean' ? 'is-active' : ''} onClick={() => setActiveView('sd-import-clean')}><HardDrive size={18} /> SD card import</button>
+        <button type="button" onClick={() => void convertDhfsImage()} disabled={conversionLoading}><Database size={18} /> {conversionLoading ? 'Converting DHFS...' : 'Built-in DHFS converter'}</button>
+        <button type="button" onClick={() => void imageInsertedDhfsPartition()} disabled={imagingLoading}><HardDrive size={18} /> {imagingLoading ? 'Imaging DHFS card...' : 'Image inserted DHFS card'}</button>
         <button type="button" className={activeView === 'video-upload' ? 'is-active' : ''} onClick={() => setActiveView('video-upload')}><Upload size={18} /> Video upload</button>
         <a href={FCM_WEB_URL} target="_blank" rel="noreferrer"><ExternalLink size={18} /> FCM web portal</a>
       </nav>
@@ -407,7 +503,8 @@ function App() {
         {activeView === 'sd-import' && <section className="results"><h2>Dahua export handoff</h2><p>The card is DHFS 4.1. Use a DHFS-compatible viewer to export a selected recording as MP4/AVI, then upload it through FCM Desktop for VPS inference.</p><button type="button" onClick={() => void detectDahuaExportTools()} disabled={toolDetectionLoading}>{toolDetectionLoading ? 'Checking installed tools...' : 'Find installed Dahua export tools'}</button>{exportTools !== null && <>{exportTools.length ? <ul className="export-tool-list">{exportTools.map((tool) => <li key={tool.executable_path}><strong>{tool.name}</strong><span>{tool.executable_path}</span></li>)}</ul> : <p className="mounted-note">Install the official Dahua SmartPlayer/Toolbox or use a licensed DHFS forensic export tool. FCM does not replace their proprietary decoder.</p>}</>}</section>}
         {activeView === 'home' && <><div className="workspace-heading"><span>Local operations</span><h2>FCM desktop workspace</h2><p>Use local hardware and large-file tools here. Open the FCM web portal for live work queues, formal review, reporting, and approvals.</p></div><div className="capability-grid"><Capability icon={<HardDrive size={23} />} title="SD card import" detail="Inspect copied camera indexes and prepare evidence for review." action="Open importer" onClick={() => setActiveView('sd-import-clean')} /><Capability icon={<Camera size={23} />} title="Camera evidence" detail="Upload exported footage and queue VPS motion, ALPR, and face analysis." action="Upload video" onClick={() => setActiveView('video-upload')} /><Capability icon={<Database size={23} />} title="Operations portal" detail="Open FCM web for CCTV Review, Parking, Freedom Camping, and approvals." action="Open FCM web" onClick={() => window.open(FCM_WEB_URL, '_blank', 'noopener,noreferrer')} /></div><section className="read-only-notice"><strong>Current local access</strong><span>This release never writes to an SD card or reads raw physical disks. It works with copied evidence while the vendor storage format is validated.</span></section></>}
         {activeView === 'sd-import' && <><div className="workspace-heading"><span>Evidence intake</span><h2>SD card files and partitions</h2><p>Analyse the inserted card to find the camera index, hidden recording partition, and a bounded mapping sample automatically.</p></div><section className="tool"><button type="button" onClick={() => void analyseInsertedSdCard()} disabled={analysisLoading}><RefreshCw size={16} className={analysisLoading ? 'is-spinning' : ''} /> Analyse inserted SD card</button><button type="button" onClick={() => void scanDhfsMetadata()} disabled={dhfsLoading || analysisLoading}><Database size={16} /> {dhfsLoading ? 'Scanning DHFS...' : 'Scan DHFS metadata'}</button><button type="button" onClick={() => void detectRemovableDisks()} disabled={diskLoading || analysisLoading}><HardDrive size={16} /> Detect partitions</button><button type="button" onClick={() => void inspectMountedFolder()}><FileText size={16} /> Browse mounted files</button><button type="button" onClick={() => void inspectIndex()}><Database size={16} /> Choose SDFileInfo.db</button><p>{status}</p></section>{removableDisks.map((disk) => <section className="results" key={disk.disk_number}><h2>Disk {disk.disk_number}: {disk.friendly_name || 'Removable disk'}</h2><p>{formatBytes(disk.size_bytes)} · {disk.bus_type} · {disk.operational_status}</p><table><thead><tr><th>Partition</th><th>Size</th><th>Filesystem</th><th>Windows access</th><th>Read-only probe</th></tr></thead><tbody>{disk.partitions.map((partition) => <tr key={partition.partition_number}><td>{partition.partition_number}</td><td>{formatBytes(partition.size_bytes)}</td><td>{partition.filesystem || 'Unknown or proprietary'}</td><td>{partition.drive_letter ? `${partition.drive_letter}: mounted` : 'Not mounted'}</td><td>{!partition.drive_letter && <><button type="button" onClick={() => void probePartitionHeader(disk.disk_number, partition.partition_number)} disabled={probeLoading !== null}>{probeLoading === `${disk.disk_number}:${partition.partition_number}` ? 'Probing...' : 'Probe header'}</button><button type="button" onClick={() => void probeFirstIndexedCluster(disk.disk_number, partition.partition_number)} disabled={probeLoading !== null || !report}>{probeLoading === `${disk.disk_number}:${partition.partition_number}:cluster` ? 'Sampling...' : 'Test first index'}</button></>}</td></tr>)}</tbody></table>{disk.partitions.some((partition) => !partition.drive_letter) && <p className="mounted-note"><AlertTriangle size={15} /> Analysis and probes are read-only. Do not format or repair an unmounted partition.</p>}</section>)}{dhfsScan && <section className="results"><h2>DHFS metadata reconnaissance</h2><p>Disk {dhfsScan.disk_number}, partition {dhfsScan.partition_number} · scanned {formatBytes(dhfsScan.bytes_scanned)}{dhfsScan.truncated ? ' (bounded first 16 MB)' : ''}</p><p className="mounted-note">DHFS markers found: {dhfsScan.dhfs_marker_offsets.length}. Non-zero 4 KB metadata blocks reported: {dhfsScan.non_zero_block_offsets.length}.</p><p className="hash">DHFS marker offsets: {dhfsScan.dhfs_marker_offsets.length ? dhfsScan.dhfs_marker_offsets.join(', ') : 'none beyond the header'}<br />Non-zero block offsets: {dhfsScan.non_zero_block_offsets.length ? dhfsScan.non_zero_block_offsets.join(', ') : 'none'}</p></section>}{partitionProbe && <section className="results"><h2>Partition header report</h2><p><strong>Disk {partitionProbe.disk_number}, partition {partitionProbe.partition_number}</strong> · offset {partitionProbe.offset_bytes.toLocaleString()} bytes · {partitionProbe.bytes_read.toLocaleString()} bytes read</p><p className="mounted-note">{partitionProbe.format_hint}</p><p className="hash">SHA-256: {partitionProbe.sha256}<br />First 32 bytes: {partitionProbe.signature}</p></section>}{clusterReport && <section className="results"><h2>Indexed cluster mapping report</h2><p>Disk {clusterReport.disk_number}, partition {clusterReport.partition_number} · index cluster {clusterReport.cluster_number}</p><table><thead><tr><th>Candidate block size</th><th>Absolute offset</th><th>Result</th></tr></thead><tbody>{clusterReport.samples.map((sample) => <tr key={sample.multiplier_bytes}><td>{sample.multiplier_bytes.toLocaleString()} bytes</td><td>{sample.absolute_offset_bytes.toLocaleString()} bytes</td><td>{sample.format_hint}</td></tr>)}</tbody></table><p className="hash">Each sample is 4 KB. No video is exported at this stage.</p></section>}{mountedFiles && <section className="results"><div className="metrics"><Metric label="Mounted files" value={mountedFiles.file_count} /><Metric label="Total data" value={Math.round(mountedFiles.total_bytes / 1024 / 1024)} /><Metric label="File limit" value={mountedFiles.truncated ? 5000 : mountedFiles.file_count} /></div><p className="hash">Source: {mountedFiles.folder_path}</p><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody>{mountedFiles.files.map((file) => <tr key={file.relative_path}><td><FileText size={14} /> {file.relative_path}</td><td>{formatBytes(file.size_bytes)}</td></tr>)}</tbody></table></section>}</>}
-        {activeView === 'video-upload' && <><div className="workspace-heading"><span>Evidence intake</span><h2>Upload camera video</h2><p>Select an exported MP4, MOV, AVI, or MKV. FCM stores it privately and queues VPS inference for CCTV Review.</p></div><section className="tool upload-tool"><input type="file" accept="video/*,.avi,.mkv" disabled={!signedInAs} onChange={(event) => setVideo(event.target.files?.[0] ?? null)} /><button type="button" onClick={() => void uploadVideo()} disabled={!signedInAs || !video}><Upload size={16} /> Upload to CCTV Review</button>{video && <p>Selected: {video.name} ({Math.ceil(video.size / 1024 / 1024)} MB)</p>}{uploadStatus && <p>{uploadStatus}</p>}</section></>}
+        {activeView === 'video-upload' && <><div className="workspace-heading"><span>Evidence intake</span><h2>Upload camera video</h2><p>Select converted H.264 or exported MP4, MOV, AVI, or MKV. FCM stores it privately and queues VPS inference for CCTV Review.</p></div><section className="tool upload-tool"><input type="file" accept="video/*,.avi,.mkv,.h264" disabled={!signedInAs} onChange={(event) => setVideo(event.target.files?.[0] ?? null)} /><button type="button" onClick={() => void uploadVideo()} disabled={!signedInAs || !video}><Upload size={16} /> Upload to CCTV Review</button>{video && <p>Selected: {video.name} ({Math.ceil(video.size / 1024 / 1024)} MB)</p>}{uploadStatus && <p>{uploadStatus}</p>}</section></>}
+    {conversionReport && <section className="results"><h2>Converted DHFS recordings</h2><p className="hash">Source SHA-256: {conversionReport.source_sha256}</p><ul className="export-tool-list">{conversionReport.exported.map((exported) => <li key={exported.file_name}><strong>{exported.start_time} · Camera {exported.channel}</strong><span>{exported.file_name} · {formatBytes(exported.bytes_written)}</span><button type="button" onClick={() => void selectConvertedVideo(exported)} disabled={convertedVideoLoading !== null}>{convertedVideoLoading === exported.file_name ? 'Loading clip...' : 'Select clip for Bob'}</button></li>)}</ul></section>}
     {activeView === 'sd-import' && report && <section className="results">
       <div className="metrics"><Metric label="Indexed recordings" value={report.record_count} /><Metric label="Usable timestamps" value={report.valid_timestamped_record_count} /><Metric label="Event definitions" value={report.event_definitions.filter(Boolean).length} /></div>
       <p className="hash">Source hash: {report.database_sha256}</p>

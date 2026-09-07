@@ -7687,9 +7687,9 @@ CREATE TABLE IF NOT EXISTS "public"."bob_attachments" (
     "source_type" "text" DEFAULT 'upload'::"text" NOT NULL,
     "source_url" "text",
     CONSTRAINT "bob_attachments_confidence_check" CHECK ((("confidence" IS NULL) OR (("confidence" >= (0)::double precision) AND ("confidence" <= (1)::double precision)))),
-    CONSTRAINT "bob_attachments_file_size_bytes_check" CHECK ((("file_size_bytes" > 0) AND ("file_size_bytes" <= 52428800))),
+    CONSTRAINT "bob_attachments_file_size_bytes_check" CHECK ((("file_size_bytes" > 0) AND ("file_size_bytes" <= 524288000))),
     CONSTRAINT "bob_attachments_processing_state_check" CHECK (("processing_state" = ANY (ARRAY['pending'::"text", 'processing'::"text", 'extracted'::"text", 'failed'::"text", 'manual_review_required'::"text"]))),
-    CONSTRAINT "bob_attachments_purpose_check" CHECK (("purpose" = ANY (ARRAY['document_intake'::"text", 'photo_intake'::"text"]))),
+    CONSTRAINT "bob_attachments_purpose_check" CHECK (("purpose" = ANY (ARRAY['document_intake'::"text", 'photo_intake'::"text", 'video_intake'::"text"]))),
     CONSTRAINT "bob_attachments_source_type_check" CHECK (("source_type" = ANY (ARRAY['upload'::"text", 'url'::"text"]))),
     CONSTRAINT "bob_attachments_storage_bucket_check" CHECK (("storage_bucket" = 'bob-uploads'::"text"))
 );
@@ -7710,7 +7710,7 @@ COMMENT ON COLUMN "public"."bob_attachments"."source_url" IS 'The external URL t
 
 
 
-COMMENT ON CONSTRAINT "bob_attachments_file_size_bytes_check" ON "public"."bob_attachments" IS 'File size 1 byte .. 50 MB (52428800). Raised from 10 MB in 0142 to match the bob-uploads bucket (50 MB) + client cap (48 MB). 50 MB is the Supabase project per-file hard limit.';
+COMMENT ON CONSTRAINT "bob_attachments_file_size_bytes_check" ON "public"."bob_attachments" IS 'File size 1 byte .. 500 MB (524288000) for video intake.';
 
 
 
@@ -9736,6 +9736,7 @@ CREATE TABLE IF NOT EXISTS "public"."face_observations" (
     "confidence" real,
     "purpose" "text" NOT NULL,
     "review_state" "text" DEFAULT 'manual_review_required'::"text" NOT NULL,
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );
 
@@ -10071,7 +10072,7 @@ CREATE TABLE IF NOT EXISTS "public"."inference_jobs" (
     "requested_by_user_id" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "completed_at" timestamp with time zone,
-    CONSTRAINT "inference_jobs_domain_check" CHECK (("domain" = ANY (ARRAY['vehicle'::"text", 'face'::"text", 'identity_document'::"text", 'ocr'::"text", 'audio'::"text", 'bob_reasoning'::"text"]))),
+    CONSTRAINT "inference_jobs_domain_check" CHECK (("domain" = ANY (ARRAY['vehicle'::"text", 'face'::"text", 'identity_document'::"text", 'ocr'::"text", 'audio'::"text", 'bob_reasoning'::"text", 'video_motion'::"text"]))),
     CONSTRAINT "inference_jobs_status_check" CHECK (("status" = ANY (ARRAY['queued'::"text", 'processing'::"text", 'complete'::"text", 'inconclusive'::"text", 'manual_review_required'::"text", 'failed'::"text"])))
 );
 
@@ -10092,7 +10093,7 @@ CREATE TABLE IF NOT EXISTS "public"."inference_results" (
     "confidence" real,
     "result" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "inference_results_domain_check" CHECK (("domain" = ANY (ARRAY['vehicle'::"text", 'face'::"text", 'identity_document'::"text", 'ocr'::"text", 'audio'::"text", 'bob_reasoning'::"text"]))),
+    CONSTRAINT "inference_results_domain_check" CHECK (("domain" = ANY (ARRAY['vehicle'::"text", 'face'::"text", 'identity_document'::"text", 'ocr'::"text", 'audio'::"text", 'bob_reasoning'::"text", 'video_motion'::"text"]))),
     CONSTRAINT "inference_results_status_check" CHECK (("status" = ANY (ARRAY['complete'::"text", 'inconclusive'::"text", 'manual_review_required'::"text", 'failed'::"text"])))
 );
 
