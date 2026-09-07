@@ -344,6 +344,12 @@ struct DhfsDptReport {
     non_zero_u32_fields: Vec<DhfsDptField>,
 }
 
+#[derive(Serialize)]
+struct ExportTool {
+    name: String,
+    executable_path: String,
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn scan_dhfs_metadata(disk_number: u32, partition_number: u32) -> Result<DhfsMetadataScan, String> {
@@ -463,6 +469,36 @@ fn inspect_dhfs_dpt(disk_number: u32, partition_number: u32) -> Result<DhfsDptRe
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
+fn detect_dahua_export_tools() -> Result<Vec<ExportTool>, String> {
+        use std::process::Command;
+
+        let script = r#"
+            $patterns = @('*SmartPlayer*.exe', '*SmartPSS*.exe', '*Dahua*.exe', '*DiskManager*.exe')
+            $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA) | Where-Object { $_ }
+            $found = @()
+            foreach ($root in $roots) {
+                foreach ($pattern in $patterns) {
+                    $found += @(Get-ChildItem -Path $root -Filter $pattern -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 8)
+                }
+            }
+            @($found | Sort-Object FullName -Unique | ForEach-Object { [pscustomobject]@{ name = $_.BaseName; executable_path = $_.FullName } }) | ConvertTo-Json -Compress
+        "#;
+        let output = Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", script])
+                .output()
+                .map_err(|error| format!("Could not inspect installed Dahua export tools: {error}"))?;
+        if !output.status.success() {
+                return Err(format!("Dahua tool detection failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        }
+        let body = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
+        if body.trim().is_empty() || body.trim() == "null" {
+                return Ok(Vec::new());
+        }
+        serde_json::from_str(&body).map_err(|error| format!("Could not parse Dahua tool inventory: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
 fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
     let disks = detect_removable_disks()?;
     let Some(disk) = disks.iter().find(|disk| !disk.partitions.is_empty()) else {
@@ -531,6 +567,12 @@ fn inspect_dhfs_dpt(_disk_number: u32, _partition_number: u32) -> Result<DhfsDpt
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
+fn detect_dahua_export_tools() -> Result<Vec<ExportTool>, String> {
+    Err("Dahua tool detection is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
 fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
     Err("Automated SD-card analysis is available in the Windows FCM Desktop application.".to_string())
 }
@@ -590,7 +632,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
