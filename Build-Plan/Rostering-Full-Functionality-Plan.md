@@ -182,6 +182,12 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - Existing HR coverage proves branch check and final approval separately.
 - A single cross-role browser context spanning manager -> officer -> manager remains a release-test gap.
 
+### Progress: new migration authorization guards complete
+
+- Added static regression guards for the 20260907 roster migrations.
+- Guards cover authenticated/service-role grants, actor/administrator checks, expected-state protections, bounded preview/repeat windows, audit writes, and notifications.
+- Full unit coverage is now 170 files and 696 tests.
+
 ### Progress: travel evidence review visibility complete
 
 - Pay Review now shows distance kilometres and the provenance reason for every dispatch pay line, including explicit missing-distance states.
