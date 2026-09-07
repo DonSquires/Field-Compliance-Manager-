@@ -25,6 +25,7 @@ interface DispatchJob {
   expected_dwell_minutes: number;
   timing_source: string;
   created_at: string;
+  investigation_id: string | null;
   site: { name: string; address: string | null; hs_notes: string | null; access_instructions: string | null } | null;
 }
 
@@ -33,9 +34,11 @@ interface CompletionReceipt {
   shiftId: string | null;
   jobType: string;
   completedAt: string;
+  investigationId: string | null;
 }
 
 const NEXT_STATUS: Record<string, string> = {
+  pending: 'dispatched',
   acknowledged: 'en_route',
   dispatched: 'acknowledged',
   en_route: 'on_scene',
@@ -43,6 +46,7 @@ const NEXT_STATUS: Record<string, string> = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
+  pending: 'Accept Job',
   acknowledged: 'Start En Route',
   dispatched: 'Acknowledge Job',
   en_route: 'Mark On Scene',
@@ -85,15 +89,15 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
       if (shiftErr) throw shiftErr;
 
       const shiftIds = (shifts || []).map((s: { id: string }) => s.id);
-      if (shiftIds.length === 0) {
+      if (shiftIds.length === 0 && !profile.id) {
         setJobs([]);
         return;
       }
 
       const { data, error: err } = await supabase
         .from('dispatch_jobs')
-        .select('id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, site:client_site_id(name, address, hs_notes, access_instructions)')
-        .in('shift_id', shiftIds)
+        .select('id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, site:client_site_id(name, address, hs_notes, access_instructions)')
+        .or(`${shiftIds.length ? `shift_id.in.(${shiftIds.join(',')}),` : ''}assigned_officer_id.eq.${profile.id}`)
         .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[])
         .order('priority', { ascending: false })
         .order('created_at', { ascending: true });
@@ -142,7 +146,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
       if (!result || result.id !== job.id || result.status !== nextStatus) throw new Error('The dispatch status change was not confirmed.');
 
       if (nextStatus === 'completed') {
-        setCompletionReceipt({ id: result.id, shiftId: result.shift_id, jobType: job.job_type, completedAt: result.completed_at ?? new Date().toISOString() });
+        setCompletionReceipt({ id: result.id, shiftId: result.shift_id, jobType: job.job_type, completedAt: result.completed_at ?? new Date().toISOString(), investigationId: job.investigation_id });
         setJobs((current) => current.filter((item) => item.id !== job.id));
         setOutcomeNotes((current) => {
           const next = { ...current };
@@ -201,7 +205,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
           <div className="dispatch-completion-actions" aria-label="Dispatch next actions">
             <button type="button" className="btn btn-primary" onClick={() => onNavigate?.('home')}><Home size={16} />Shift home</button>
             <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('map')}><Map size={16} />Open map</button>
-            <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('report')}><FileText size={16} />Field report</button>
+            <button type="button" className="btn btn-secondary" onClick={() => completionReceipt.investigationId ? window.location.assign(`/officer/report?job=${completionReceipt.id}&investigation=${completionReceipt.investigationId}`) : onNavigate?.('report')}><FileText size={16} />{completionReceipt.investigationId ? 'Submit investigation report' : 'Field report'}</button>
             <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('debrief')}><ShieldCheck size={16} />Debrief</button>
           </div>
         </section>

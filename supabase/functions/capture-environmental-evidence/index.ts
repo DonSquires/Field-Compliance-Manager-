@@ -22,13 +22,21 @@ function base64ToBytes(value: string) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+async function sha256Hex(value: Uint8Array | Blob) {
+  const payload = value instanceof Blob ? await value.arrayBuffer() : value;
+  const digest = await crypto.subtle.digest('SHA-256', payload);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function watermark(bytes: Uint8Array, text: string): Promise<Blob> {
-  if (!INFERENCE_SERVICE_URL || !INFERENCE_API_KEY) return new Blob([bytes], { type: 'image/jpeg' });
+  if (!INFERENCE_SERVICE_URL || !INFERENCE_API_KEY) {
+    throw new Error('Inference watermark service is not configured; photo evidence cannot be accepted');
+  }
   const body = new FormData();
   body.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'evidence.jpg');
   body.append('watermark_text', text);
   const response = await fetch(`${INFERENCE_SERVICE_URL}/infer/watermark`, { method: 'POST', headers: { 'x-inference-api-key': INFERENCE_API_KEY }, body });
-  if (!response.ok) return new Blob([bytes], { type: 'image/jpeg' });
+  if (!response.ok) throw new Error(`Inference watermark service failed with HTTP ${response.status}`);
   return response.blob();
 }
 
@@ -70,10 +78,21 @@ serve(async (request) => {
     const originalPath = `${basePath}-original.jpg`;
     const watermarkedPath = `${basePath}-watermarked.jpg`;
     const watermarked = await watermark(bytes, watermarkText);
+    const rawSha256 = await sha256Hex(bytes);
+    const watermarkedSha256 = await sha256Hex(watermarked);
     const { error: originalError } = await supabase.storage.from(EVIDENCE_BUCKET).upload(originalPath, new Blob([bytes], { type: 'image/jpeg' }), { upsert: false, contentType: 'image/jpeg' });
     if (originalError) throw originalError;
     const { error: watermarkError } = await supabase.storage.from(EVIDENCE_BUCKET).upload(watermarkedPath, watermarked, { upsert: false, contentType: 'image/jpeg' });
     if (watermarkError) throw watermarkError;
+
+    const { data: evidenceId, error: evidenceError } = await supabase.rpc('register_edge_court_photo', {
+      p_organization_id: assessment.organization_id,
+      p_module_key: module,
+      p_storage_path: watermarkedPath,
+      p_captured_at: capturedAt,
+      p_metadata: { original_path: originalPath, raw_sha256: rawSha256, watermarked_sha256: watermarkedSha256, watermark_text: watermarkText, watermark_service: 'inference', assessment_id: assessmentId },
+    });
+    if (evidenceError || !evidenceId) throw evidenceError ?? new Error('Court evidence registration could not be confirmed');
 
     const { data: signed, error: signedError } = await supabase.storage.from(EVIDENCE_BUCKET).createSignedUrl(watermarkedPath, 300);
     if (signedError || !signed?.signedUrl) throw signedError ?? new Error('Evidence URL could not be created');
@@ -85,7 +104,7 @@ serve(async (request) => {
     const classification = await classifyResponse.json();
     if (!classifyResponse.ok || classification.error) return json({ error: classification.error ?? 'Photo classification failed' }, 502);
 
-    const evidence = { original_path: originalPath, watermarked_path: watermarkedPath, captured_at: capturedAt, watermark_text: watermarkText };
+    const evidence = { id: evidenceId, original_path: originalPath, watermarked_path: watermarkedPath, captured_at: capturedAt, raw_sha256: rawSha256, watermarked_sha256: watermarkedSha256, watermark_text: watermarkText, watermark_service: 'inference' };
     const update = module === 'biosecurity'
       ? { photo_urls: [evidence], photo_url: watermarkedPath, bob_classification: classification.classification ?? null, bob_confidence: classification.confidence ?? null, species_name: classification.details?.species_name ?? assessment.species_name }
       : { photo_urls: [evidence], bob_classification: classification.classification ?? null, bob_confidence: classification.confidence ?? null, smoke_source: classification.details?.smoke_source ?? null };

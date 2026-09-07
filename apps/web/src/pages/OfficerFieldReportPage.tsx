@@ -19,6 +19,8 @@ const initialForm = { reportType: 'incident' as ReportType, severity: 'medium' a
 const OfficerFieldReportPage: React.FC = () => {
   const location = useLocation();
   const requestedReportId = new URLSearchParams(location.search).get('report');
+  const investigationId = new URLSearchParams(location.search).get('investigation');
+  const dispatchJobId = new URLSearchParams(location.search).get('job');
   const { profile } = useAuth();
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
@@ -104,12 +106,12 @@ const OfficerFieldReportPage: React.FC = () => {
     });
     const result = (data as Array<{ id: string; received_at: string; shift_id: string | null }> | null)?.[0];
     if (submitError || !result) setError(submitError?.message ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
-    else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id);setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); setAddressResolution('idle'); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
+    else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id); if (investigationId) { const { error: linkError } = await supabase.rpc('link_investigation_entity', { p_investigation_id: investigationId, p_entity_type: 'field_report', p_entity_id: result.id, p_link_role: 'primary', p_link_reason: dispatchJobId ? `Follow-up report from investigation dispatch ${dispatchJobId}` : 'Officer report submitted from investigation context' }); if (linkError) { setError(`Report confirmed, but investigation link failed: ${linkError.message}`); } } setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); setAddressResolution('idle'); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
     setSubmitting(false);
   };
 
   return <div className="officer-report-page">
-    <header className="officer-report-header"><div><span>Field evidence</span><h1>Field report</h1><p>Submit operational, maintenance, or health and safety concerns.</p></div><button type="button" onClick={() => void loadData()} disabled={loading} title="Refresh reports"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
+    <header className="officer-report-header"><div><span>Field evidence</span><h1>Field report</h1><p>{investigationId ? 'Investigation follow-up report. This submission will be linked to the investigation.' : 'Submit operational, maintenance, or health and safety concerns.'}</p></div><button type="button" onClick={() => void loadData()} disabled={loading} title="Refresh reports"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
     {error && <div className="officer-report-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
     {receipt && <div className="officer-report-message is-success" role="status"><CheckCircle2 size={17} /><span>Report confirmed · receipt {receipt.id.slice(0, 8)} · {receipt.shiftId ? `linked to ${receipt.shiftLabel ?? `shift ${receipt.shiftId.slice(0, 8)}`}` : 'not linked to a shift'} · {new Date(receipt.receivedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span><button type="button" onClick={() => setReceipt(null)} title="Dismiss"><X size={16} /></button></div>}
     <div className="officer-report-layout">

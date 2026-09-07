@@ -26,6 +26,12 @@ const processOfficerScanSource = readFileSync(
   resolve(process.cwd(), '../../supabase/functions/process-officer-scan/index.ts'),
   'utf8',
 );
+const photoEvidenceFunctionSources = [
+  processOfficerScanSource,
+  readFileSync(resolve(process.cwd(), '../../supabase/functions/capture-environmental-evidence/index.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../supabase/functions/submit-biosecurity-assessment/index.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), '../../supabase/functions/submit-smoke-assessment/index.ts'), 'utf8'),
+];
 const bobUpsertGenericSource = readFileSync(
   resolve(process.cwd(), '../../supabase/functions/bob-upsert-generic/index.ts'),
   'utf8',
@@ -44,6 +50,18 @@ const resendInviteSource = readFileSync(
 );
 
 describe('Edge Function Schema Audit', () => {
+  it('fails closed when inference cannot watermark court-evidence photos', () => {
+    for (const source of photoEvidenceFunctionSources) {
+      expect(source).toContain('photo evidence cannot be accepted');
+      expect(source).toContain('Inference watermark service failed with HTTP');
+      expect(source).toContain('raw_sha256');
+      expect(source).toContain('watermarked_sha256');
+      expect(source).toContain("watermark_service: 'inference'");
+      expect(source).not.toContain('storing original as fallback');
+    }
+    expect(processOfficerScanSource).toContain("rpc('register_edge_court_photo'");
+  });
+
   it('prevents create-user callers from assigning roles above their own level', () => {
     expect(createUserSource).toContain("import { roleLevel } from '../_shared/auth.ts'");
     expect(createUserSource).toContain('roleLevel(role) > roleLevel(callerProfile.role)');

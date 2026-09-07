@@ -21,8 +21,16 @@ function base64ToBytes(value: string) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+async function sha256Hex(value: Uint8Array | Blob) {
+  const payload = value instanceof Blob ? await value.arrayBuffer() : value;
+  const digest = await crypto.subtle.digest('SHA-256', payload);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function watermark(bytes: Uint8Array, text: string): Promise<Blob> {
-  if (!INFERENCE_SERVICE_URL || !INFERENCE_API_KEY) return new Blob([bytes], { type: 'image/jpeg' });
+  if (!INFERENCE_SERVICE_URL || !INFERENCE_API_KEY) {
+    throw new Error('Inference watermark service is not configured; photo evidence cannot be accepted');
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), INFERENCE_TIMEOUT_MS);
   try {
@@ -35,10 +43,11 @@ async function watermark(bytes: Uint8Array, text: string): Promise<Blob> {
       body,
       signal: controller.signal,
     });
-    if (!response.ok) return new Blob([bytes], { type: 'image/jpeg' });
+    if (!response.ok) throw new Error(`Inference watermark service failed with HTTP ${response.status}`);
     return response.blob();
-  } catch {
-    return new Blob([bytes], { type: 'image/jpeg' });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Inference watermark service failed')) throw error;
+    throw new Error('Inference watermark service could not process photo evidence', { cause: error });
   } finally {
     clearTimeout(timeout);
   }
@@ -125,6 +134,8 @@ serve(async (request) => {
       const watermarkedPath = `${basePath}-watermarked.jpg`;
 
       const watermarkedBlob = await watermark(bytes, watermarkText);
+      const rawSha256 = await sha256Hex(bytes);
+      const watermarkedSha256 = await sha256Hex(watermarkedBlob);
 
       const { error: origErr } = await supabase.storage.from(EVIDENCE_BUCKET).upload(originalPath, new Blob([bytes], { type: 'image/jpeg' }), { upsert: true, contentType: 'image/jpeg' });
       if (origErr) throw origErr;
@@ -138,6 +149,10 @@ serve(async (request) => {
         captured_at: assessedAt,
         evidence_kind: 'photo',
         purpose: i === 0 ? 'primary_evidence' : 'supporting_evidence',
+        raw_sha256: rawSha256,
+        watermarked_sha256: watermarkedSha256,
+        watermark_text: watermarkText,
+        watermark_service: 'inference',
       });
     }
 

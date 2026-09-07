@@ -93,6 +93,7 @@ const OfficerActivityTimelinePage = React.lazy(() => import('../pages/OfficerAct
 const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
 const VehicleSearchPage = React.lazy(() => import('../pages/VehicleSearchPage'));
 const FieldReportsPage = React.lazy(() => import('../pages/FieldReportsPage'));
+const InvestigationPage = React.lazy(() => import('../pages/InvestigationPage'));
 const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPage'));
 const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightPage'));
 const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
@@ -101,7 +102,7 @@ const DebriefFollowupPage = React.lazy(() => import('../pages/DebriefFollowupPag
 const CCTVReviewPage = React.lazy(() => import('../pages/CCTVReviewPage'));
 
 type AdminPage =
-  | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -445,6 +446,8 @@ const AdminShell: React.FC = () => {
         return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'reports':
         return <ReportsHubPage />;
+      case 'investigations':
+        return <InvestigationPage />;
       case 'field-ops':
         switch (fieldOpsSubArea) {
           case 'landing':

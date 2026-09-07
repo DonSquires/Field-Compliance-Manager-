@@ -597,13 +597,14 @@ function base64ToBytes(imageBase64) {
   for(let i = 0; i < binaryStr.length; i++)bytes[i] = binaryStr.charCodeAt(i);
   return bytes;
 }
+async function sha256Hex(value) {
+  const payload = value instanceof Blob ? await value.arrayBuffer() : value;
+  const digest = await crypto.subtle.digest('SHA-256', payload);
+  return Array.from(new Uint8Array(digest), (byte)=>byte.toString(16).padStart(2, '0')).join('');
+}
 async function renderWatermarkedEvidence(bytes, watermarkText) {
   if (!INFERENCE_SERVICE_URL || !INFERENCE_API_KEY) {
-    return new Blob([
-      bytes
-    ], {
-      type: 'image/jpeg'
-    });
+    throw new Error('Inference watermark service is not configured; photo evidence cannot be accepted');
   }
   const formData = new FormData();
   formData.append('photo', new Blob([
@@ -620,12 +621,7 @@ async function renderWatermarkedEvidence(bytes, watermarkText) {
     body: formData
   });
   if (!res.ok) {
-    console.warn(`[scan] watermark service HTTP ${res.status}; storing original as fallback`);
-    return new Blob([
-      bytes
-    ], {
-      type: 'image/jpeg'
-    });
+    throw new Error(`Inference watermark service failed with HTTP ${res.status}`);
   }
   return await res.blob();
 }
@@ -651,6 +647,8 @@ async function storeScanEvidence(supabase, input) {
     `Observation ${input.observationId}`
   ].filter(Boolean).join(' | ');
   const watermarked = await renderWatermarkedEvidence(bytes, watermarkText);
+  const rawSha256 = await sha256Hex(bytes);
+  const watermarkedSha256 = await sha256Hex(watermarked);
   await supabase.storage.from(SCAN_BUCKET).upload(originalPath, new Blob([
     bytes
   ], {
@@ -663,10 +661,20 @@ async function storeScanEvidence(supabase, input) {
     upsert: false,
     contentType: 'image/jpeg'
   });
+  const { error: evidenceError } = await supabase.rpc('register_edge_court_photo', {
+    p_organization_id: input.orgId,
+    p_module_key: input.moduleKey,
+    p_storage_path: watermarkedPath,
+    p_captured_at: input.observedAt,
+    p_metadata: { original_path: originalPath, raw_sha256: rawSha256, watermarked_sha256: watermarkedSha256, watermark_text: watermarkText, watermark_service: 'inference', observation_id: input.observationId }
+  });
+  if (evidenceError) throw evidenceError;
   return {
     originalPath,
     watermarkedPath,
-    watermarkText
+    watermarkText,
+    rawSha256,
+    watermarkedSha256
   };
 }
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -1068,6 +1076,7 @@ serve(async (req)=>{
         imageBase64,
         plateNumber,
         officerId,
+        moduleKey: 'parking_enforcement',
         observedAt: parkingObservedAt,
         gpsLat,
         gpsLng,
@@ -1453,6 +1462,7 @@ serve(async (req)=>{
       imageBase64,
       plateNumber,
       officerId,
+      moduleKey,
       observedAt: evidenceObservedAt,
       gpsLat,
       gpsLng,

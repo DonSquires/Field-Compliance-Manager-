@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileText, RefreshCw, Search, ShieldCheck, UserRound, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, FolderPlus, RefreshCw, Search, ShieldCheck, UserRound, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './FieldReportsPage.css';
@@ -27,6 +28,7 @@ type StatusFilter = 'all' | 'submitted' | 'reviewed' | 'closed';
 
 const FieldReportsPage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
+  const navigate = useNavigate();
   const [reports, setReports] = useState<FieldReport[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -38,6 +40,8 @@ const FieldReportsPage: React.FC = () => {
   const [reviewing, setReviewing] = useState(false);
   const [reviewNotes, setReviewNotes] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [investigationForm, setInvestigationForm] = useState<{ reference: string; title: string; type: string; priority: string; summary: string } | null>(null);
+  const [investigationSaving, setInvestigationSaving] = useState(false);
 
   const loadReports = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
@@ -103,6 +107,46 @@ const FieldReportsPage: React.FC = () => {
     setBusyId(null);
   };
 
+  const createInvestigationFromReport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selected || !investigationForm) return;
+    const organizationId = operatingOrganizationId ?? profile?.organizationId;
+    if (!organizationId) return;
+    setInvestigationSaving(true);
+    setError(null);
+    const { data: investigation, error: createError } = await supabase.rpc('create_investigation', {
+      p_organization_id: organizationId,
+      p_client_request_id: crypto.randomUUID(),
+      p_reference: investigationForm.reference.trim(),
+      p_title: investigationForm.title.trim(),
+      p_investigation_type: investigationForm.type,
+      p_priority: investigationForm.priority,
+      p_summary: investigationForm.summary.trim() || null,
+      p_lead_user_id: null,
+    });
+    if (createError || !investigation) {
+      setError(createError?.message ?? 'Investigation was not confirmed.');
+      setInvestigationSaving(false);
+      return;
+    }
+    const investigationId = (investigation as { id: string }).id;
+    const { error: linkError } = await supabase.rpc('link_investigation_entity', {
+      p_investigation_id: investigationId,
+      p_entity_type: 'field_report',
+      p_entity_id: selected.id,
+      p_link_role: 'primary',
+      p_link_reason: 'Investigation opened from field report review',
+    });
+    if (linkError) {
+      setError(`Investigation created but report link failed: ${linkError.message}`);
+    } else {
+      setNotice(`Investigation ${investigationForm.reference.trim()} created and linked to this report.`);
+      navigate(`/admin/investigations?id=${investigationId}`);
+      setInvestigationForm(null);
+    }
+    setInvestigationSaving(false);
+  };
+
   return (
     <div className="field-reports-page">
       <header className="field-reports-header">
@@ -131,11 +175,15 @@ const FieldReportsPage: React.FC = () => {
             {selected.follow_up_notes && <section className="field-report-note"><strong>Follow-up context</strong><span>{selected.follow_up_notes}</span></section>}
             {selected.review_notes && <section className="field-report-review-record"><ShieldCheck size={17} /><div><strong>Supervisor review</strong><span>{selected.review_notes}</span><small>{selected.reviewed_by ? names[selected.reviewed_by] || selected.reviewed_by : 'Reviewer unavailable'}{selected.reviewed_at ? ` · ${new Date(selected.reviewed_at).toLocaleString('en-NZ')}` : ''}</small></div></section>}
             <div className="field-report-provenance"><UserRound size={15} /><span>Report ID {selected.id}</span></div>
-            {selected.status === 'submitted' && <div className="field-report-actions"><button type="button" onClick={() => { setReviewNotes(''); setReviewing(true); }}><ShieldCheck size={17} />Review report</button></div>}
+            <div className="field-report-actions">
+              <button type="button" onClick={() => setInvestigationForm({ reference: `INV-${new Date().getFullYear()}-${selected.id.slice(0, 8).toUpperCase()}`, title: selected.title, type: selected.report_type === 'incident' ? 'incident' : 'compliance', priority: selected.severity, summary: selected.follow_up_notes ?? selected.description })}><FolderPlus size={17} />Create investigation</button>
+              {selected.status === 'submitted' && <button type="button" onClick={() => { setReviewNotes(''); setReviewing(true); }}><ShieldCheck size={17} />Review report</button>}
+            </div>
           </>}
         </aside>
       </div>
       {reviewing && selected && <div className="field-report-dialog-backdrop"><form className="field-report-dialog" onSubmit={submitReview} role="dialog" aria-modal="true" aria-labelledby="field-report-review-title"><div className="field-reports-panel-heading"><div><span>Governed decision</span><h2 id="field-report-review-title">Review field report</h2></div><button type="button" onClick={() => setReviewing(false)} title="Close"><X size={18} /></button></div><div className="field-report-dialog-subject"><strong>{selected.title}</strong><span>{selected.severity} · {names[selected.officer_id] || 'Officer'}</span></div><p>Confirm that the report has been assessed. Record the conclusion, required escalation, or reason no further action is needed.</p><label><span>Supervisor review notes</span><textarea required rows={5} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Assessment, escalation, ownership, and next action" /></label><div className="field-report-dialog-actions"><button type="button" onClick={() => setReviewing(false)}>Cancel</button><button type="submit" disabled={busyId === selected.id || !reviewNotes.trim()}>{busyId === selected.id ? 'Recording review' : 'Confirm review'}</button></div></form></div>}
+      {investigationForm && selected && <div className="field-report-dialog-backdrop"><form className="field-report-dialog" onSubmit={createInvestigationFromReport} role="dialog" aria-modal="true" aria-labelledby="create-investigation-title"><div className="field-reports-panel-heading"><div><span>Court matter</span><h2 id="create-investigation-title">Create investigation</h2></div><button type="button" onClick={() => setInvestigationForm(null)} title="Close"><X size={18} /></button></div><p>This creates the authoritative investigation workspace and links this report as primary evidence.</p><label><span>Investigation reference</span><input required value={investigationForm.reference} onChange={(event) => setInvestigationForm({ ...investigationForm, reference: event.target.value })} /></label><label><span>Title</span><input required value={investigationForm.title} onChange={(event) => setInvestigationForm({ ...investigationForm, title: event.target.value })} /></label><div className="officer-report-grid"><label><span>Type</span><select value={investigationForm.type} onChange={(event) => setInvestigationForm({ ...investigationForm, type: event.target.value })}><option value="incident">Incident</option><option value="compliance">Compliance</option><option value="enforcement">Enforcement</option><option value="safety">Safety</option><option value="biosecurity">Biosecurity</option><option value="noise">Noise</option><option value="smoke">Smoke</option><option value="parking">Parking</option><option value="welfare">Welfare</option><option value="other">Other</option></select></label><label><span>Priority</span><select value={investigationForm.priority} onChange={(event) => setInvestigationForm({ ...investigationForm, priority: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div><label><span>Summary</span><textarea required rows={4} value={investigationForm.summary} onChange={(event) => setInvestigationForm({ ...investigationForm, summary: event.target.value })} /></label><div className="field-report-dialog-actions"><button type="button" onClick={() => setInvestigationForm(null)}>Cancel</button><button type="submit" disabled={investigationSaving}>{investigationSaving ? 'Creating investigation' : 'Create and link report'}</button></div></form></div>}
     </div>
   );
 };
