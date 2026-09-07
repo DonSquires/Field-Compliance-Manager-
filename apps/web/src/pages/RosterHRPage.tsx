@@ -92,6 +92,7 @@ interface TimesheetRow {
   period_end: string;
   scheduled_hours: number | null;
   actual_hours: number | null;
+  overtime_hours: number;
   work_derived_hours: number | null;
   adjustment_hours: number;
   work_summary: { source_count?: number } | null;
@@ -291,6 +292,7 @@ const RosterHRPage: React.FC = () => {
   const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' | 'branch_checked' } | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [swapReview, setSwapReview] = useState<{ item: ShiftSwapRow; decision: 'approved' | 'declined' } | null>(null);
+  const [timesheetCorrection, setTimesheetCorrection] = useState<{ item: TimesheetRow; actualHours: string; overtimeHours: string; reason: string } | null>(null);
   const [readinessReview, setReadinessReview] = useState<{ staffId: string; name: string; current: boolean; next: boolean } | null>(null);
   const [credentialRenewal, setCredentialRenewal] = useState<{ source: CredentialRow; credentialNumber: string; issuingAuthority: string; issuedDate: string; expiryDate: string; evidenceNotes: string } | null>(null);
   const [readinessNotes, setReadinessNotes] = useState('');
@@ -642,6 +644,22 @@ const RosterHRPage: React.FC = () => {
     setSaving(false);
   };
 
+  const correctTimesheet = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!timesheetCorrection) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: correctionError } = await supabase.rpc('correct_timesheet_hours', {
+      p_timesheet_id: timesheetCorrection.item.id,
+      p_expected_status: timesheetCorrection.item.status,
+      p_actual_hours: Number(timesheetCorrection.actualHours),
+      p_overtime_hours: Number(timesheetCorrection.overtimeHours),
+      p_reason: timesheetCorrection.reason.trim(),
+    });
+    if (correctionError) setError(correctionError.message);
+    else { setNotice('Timesheet hours corrected and returned to submitted review.'); setTimesheetCorrection(null); await loadAll(); }
+    setSaving(false);
+  };
+
   const handlePayrollExport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payrollExport || !profile?.organizationId) return;
@@ -836,6 +854,7 @@ const RosterHRPage: React.FC = () => {
 
   return (
     <div className="page-container roster-hr-page">
+      {timesheetCorrection && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-correction-title" onSubmit={correctTimesheet}><header><div><span>Payroll correction</span><h2 id="timesheet-correction-title">Edit timesheet hours</h2></div><button type="button" onClick={() => setTimesheetCorrection(null)} aria-label="Close timesheet correction">×</button></header><p>Correction returns the timesheet to submitted review and records before/after values in the audit trail.</p><label><span>Actual hours</span><input type="number" min="0" max="744" step="0.25" required value={timesheetCorrection.actualHours} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, actualHours: event.target.value })} /></label><label><span>Overtime hours</span><input type="number" min="0" max="744" step="0.25" required value={timesheetCorrection.overtimeHours} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, overtimeHours: event.target.value })} /></label><label><span>Correction reason</span><textarea required rows={4} value={timesheetCorrection.reason} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, reason: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setTimesheetCorrection(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !timesheetCorrection.reason.trim()}>Save correction</button></footer></form></div>}
       {swapReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-review-title" onSubmit={reviewSwap}><header><div><span>Roster governance</span><h2 id="shift-swap-review-title">{swapReview.decision === 'approved' ? 'Approve' : 'Decline'} shift swap?</h2></div><button type="button" onClick={() => setSwapReview(null)} aria-label="Close shift swap review">×</button></header><p>Approval transfers ownership of the unstarted shift and its linked roster slot. Declined requests remain in the audit history.</p><label><span>Review notes</span><textarea rows={4} required={swapReview.decision === 'declined'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setSwapReview(null)}>Cancel</button><button type="submit" className={swapReview.decision === 'declined' ? 'btn btn-danger' : 'btn btn-primary'} disabled={saving || (swapReview.decision === 'declined' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       <header className="page-header">
         <h1>Roster & HR</h1>
@@ -1273,7 +1292,7 @@ const RosterHRPage: React.FC = () => {
                         <span className={`status-badge status-${t.status}`}>{t.status}</span>
                       </td>
                       <td>
-                        {t.status === 'submitted' && (
+                        {['submitted', 'branch_checked'].includes(t.status) && <button className="btn btn-sm btn-secondary" onClick={() => setTimesheetCorrection({ item: t, actualHours: String(t.actual_hours ?? ''), overtimeHours: String(t.overtime_hours ?? 0), reason: '' })}>Edit hours</button>}{t.status === 'submitted' && (
                           <>
                             <button
                               className="btn btn-sm btn-secondary"

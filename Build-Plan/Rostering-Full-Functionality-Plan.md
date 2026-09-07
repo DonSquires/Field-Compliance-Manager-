@@ -98,6 +98,13 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - Linked dispatch jobs remain excluded when already represented by a completed shift, preventing double counting.
 - Migration `20260907001700` is applied and verified in live Supabase.
 
+### Progress: manager time correction complete
+
+- Added `correct_timesheet_hours` with expected-status protection, range validation, mandatory reason, and immutable before/after audit metadata.
+- HR can manually edit actual and overtime hours while a timesheet is submitted or branch-checked.
+- Corrections return the timesheet to `submitted`, clear branch review state, and require the normal review path again.
+- Migration `20260907001800` is applied and verified in live Supabase.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
