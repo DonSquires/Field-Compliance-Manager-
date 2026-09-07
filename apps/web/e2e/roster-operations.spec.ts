@@ -18,3 +18,15 @@ test('enterprise roster week board is operational and visually stable', async ({
  await page.getByRole('button',{name:'risk'}).click(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible(); await expect(board.getByText('Ana Ngata',{exact:true})).toBeHidden();
  await page.getByRole('button',{name:/Create shift/}).click(); const dialog=page.getByRole('dialog',{name:'Create shift'}); await expect(dialog).toBeVisible(); await dialog.getByLabel('Officer',{exact:true}).selectOption('22222222-2222-4222-8222-222222222222'); await dialog.getByLabel('Start',{exact:true}).fill('2026-08-30T10:00'); await dialog.getByLabel('End',{exact:true}).fill('2026-08-30T18:00'); await expect(dialog.getByText('Publish immediately')).toBeVisible(); await expect(dialog).toHaveScreenshot('roster-create-shift-dialog.png'); await dialog.getByRole('button',{name:'Create shift'}).click(); await expect(page.getByText('Shift published for Ana Ngata.')).toBeVisible(); expect(errors,errors.join('\n')).toEqual([]);
 });
+
+test('administrator copies an existing roster assignment into a future draft', async ({ page }) => {
+	await signInAsAdmin(page, '/admin/roster');
+	await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+	await page.getByRole('button', { name: 'Copy selected' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Create shift' });
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByLabel('Officer')).toHaveValue('22222222-2222-4222-8222-222222222222');
+	await expect(dialog.getByLabel('Work unit')).toHaveValue('23232323-2323-4323-8323-232323232323');
+	await expect(dialog.getByText('Publish immediately')).toBeVisible();
+	await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeVisible();
+});

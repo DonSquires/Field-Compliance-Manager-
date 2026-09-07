@@ -134,3 +134,17 @@ test('officer submits an open shift-swap request with a reason', async ({ page }
   await dialog.getByRole('button', { name: 'Submit swap request' }).click();
   await expect(page.getByRole('status')).toContainText('Shift swap request submitted for roster review.');
 });
+
+test('officer starts an accepted shift with GPS attendance evidence', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
+  await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload.p_gps_lat).toBe(-41.274);
+    expect(payload.p_gps_lng).toBe(173.283);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: '66666666-6666-4666-8666-666666666666', shift_status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z', created: true }]) });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Start shift' }).click();
+  await expect(page.getByRole('status')).toContainText('Shift started at');
+});

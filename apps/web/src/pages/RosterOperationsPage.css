@@ -22,6 +22,8 @@
 
 .roster-ops-header {
 	border-color: #244654;
+	position: relative;
+	z-index: 60;
 }
 
 .roster-ops-header button {

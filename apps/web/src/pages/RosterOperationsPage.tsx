@@ -56,6 +56,7 @@ const RosterOperationsPage: React.FC = () => {
   const [replacementStaffId, setReplacementStaffId] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [editingSlot, setEditingSlot] = useState<RosterSlot | null>(null);
+  const [copyingSlot, setCopyingSlot] = useState<RosterSlot | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ officerId: '', workUnitId: '', start: '', end: '', notes: '', publish: true });
 
@@ -143,6 +144,7 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const openCreate = (person?: Staff, day?: Date) => {
+    setCopyingSlot(null);
     if (selectedSlot?.status === 'draft') {
       openEdit(selectedSlot);
       return;
@@ -152,6 +154,7 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   const openEdit = (slot: RosterSlot) => {
+    setCopyingSlot(null);
     const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
       setEditingSlot(slot);
     setForm({
@@ -162,6 +165,19 @@ const RosterOperationsPage: React.FC = () => {
       notes: slot.notes ?? '',
       publish: false,
     });
+    setSelectedSlotId(null);
+    setShowCreate(true);
+  };
+
+  const openCopy = (slot: RosterSlot) => {
+    const staffMember = staff.find((candidate) => candidate.staffId === slot.staff_id);
+    const start = new Date(slot.scheduled_start);
+    const end = new Date(slot.scheduled_end);
+    start.setDate(start.getDate() + 7);
+    end.setDate(end.getDate() + 7);
+    setCopyingSlot(slot);
+    setEditingSlot(null);
+    setForm({ officerId: staffMember?.id ?? '', workUnitId: slot.work_unit_id, start: localInput(start), end: localInput(end), notes: slot.notes ?? '', publish: false });
     setSelectedSlotId(null);
     setShowCreate(true);
   };
@@ -200,7 +216,7 @@ const RosterOperationsPage: React.FC = () => {
       const materialized = await supabase.rpc('materialize_roster_slot', { p_slot_id: slot.id, p_expected_status: 'published' });
       if (materialized.error || !materialized.data) { setError(materialized.error?.message ?? 'Roster slot was saved, but field shift materialization was not confirmed.'); setSaving(false); await load(); return; }
     }
-    setNotice(`Shift ${form.publish ? 'published' : 'saved'} for ${person?.name ?? 'staff member'}.`); setShowCreate(false); await load(); setSaving(false);
+    setNotice(`${copyingSlot ? 'Shift copied as a draft' : `Shift ${form.publish ? 'published' : 'saved'}`} for ${person?.name ?? 'staff member'}.`); setCopyingSlot(null); setShowCreate(false); await load(); setSaving(false);
   };
 
   const manageSlot = async (event: React.FormEvent) => {
@@ -284,7 +300,7 @@ const RosterOperationsPage: React.FC = () => {
   };
 
   return <div className="roster-ops">
-    <header className="roster-ops-header"><div><span>Workforce operations</span><h1>Roster</h1><p>Live field shifts, workforce constraints, and public holidays across selectable planning horizons.</p></div><div><button onClick={() => void load()} disabled={loading} title="Refresh roster"><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /></button><button onClick={() => void generateFromTemplates()} disabled={saving} title="Generate draft slots from templates">From templates</button><button onClick={() => void batchPublishPeriod()} disabled={saving} title="Publish all draft slots in current period">Publish period</button><button onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button><button className="is-primary" onClick={() => openCreate()}><Plus size={16} />Create shift</button></div></header>
+    <header className="roster-ops-header"><div><span>Workforce operations</span><h1>Roster</h1><p>Live field shifts, workforce constraints, and public holidays across selectable planning horizons.</p></div><div><button onClick={() => void load()} disabled={loading} title="Refresh roster"><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /></button><button onClick={() => void generateFromTemplates()} disabled={saving} title="Generate draft slots from templates">From templates</button><button onClick={() => void batchPublishPeriod()} disabled={saving} title="Publish all draft slots in current period">Publish period</button><button onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button>{selectedSlot && !['completed', 'cancelled'].includes(selectedSlot.status) && <button onClick={() => openCopy(selectedSlot)}>Copy selected</button>}<button className="is-primary" onClick={() => openCreate()}><Plus size={16} />Create shift</button></div></header>
     {workflowContext.workUnitId&&<section className="roster-context-banner" role="status"><div><span>{workflowContext.handoffId?'Mobilisation handoff · roster evidence':'Account flow · roster action'}</span><strong>{requestedWorkUnit?.name??'Loading requested work unit'}</strong><p>{requestedWorkUnit?'Schedule the next officer assignment against the work unit selected during mobilisation.':'The requested work unit is not active in this provider roster.'}</p></div><div><button onClick={()=>navigate('/admin/roster')}>Clear focus</button>{workflowContext.handoffId&&<button onClick={()=>navigate(`/admin/handoffs${workflowContextQuery(workflowContext)}`)}>Return to handoff</button>}<button onClick={()=>navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Open work unit</button><button className="is-primary" onClick={()=>openCreate()} disabled={!requestedWorkUnit}><Plus size={15}/>Create shift for this work unit</button></div></section>}
     {error && <div className="roster-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button onClick={() => setError(null)}><X size={16} /></button></div>}{notice && <div className="roster-message is-success" role="status"><ShieldCheck size={17} /><span>{notice}</span><button onClick={() => setNotice(null)}><X size={16} /></button></div>}
     <section className="roster-metrics"><div><Users size={18} /><span>Rosterable staff</span><strong>{staff.length}</strong></div><div className={riskCount ? 'is-warning' : ''}><AlertTriangle size={18} /><span>Readiness risks</span><strong>{riskCount}</strong></div><div><Clock3 size={18} /><span>Scheduled hours</span><strong>{Math.round(totalHours)}</strong></div><div className={coverage.length ? 'is-warning' : ''}><CalendarDays size={18} /><span>Open coverage</span><strong>{coverage.length}</strong></div>{labourCost.length > 0 && <><div><Clock3 size={18} /><span>Labour cost</span><strong>NZ${labourCostTotals.pay.toFixed(0)}</strong></div><div className={labourCostTotals.unpriced ? 'is-warning' : ''}><AlertTriangle size={18} /><span>{labourCostTotals.unpriced ? 'Unpriced slots' : 'Forecast margin'}</span><strong>{labourCostTotals.unpriced ? labourCostTotals.unpriced : `NZ$${labourCostTotals.margin.toFixed(0)}`}</strong></div></>}</section>

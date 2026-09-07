@@ -105,6 +105,13 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - Corrections return the timesheet to `submitted`, clear branch review state, and require the normal review path again.
 - Migration `20260907001800` is applied and verified in live Supabase.
 
+### Progress: planning and attendance controls complete
+
+- Admins can copy a selected roster assignment one week forward as an unpublished draft, preserving officer, work unit, hours, and notes for review.
+- The copy action reuses governed `create_roster_slot` validation for overlap, leave, fatigue, and work-readiness rules.
+- Officers can start accepted/published/scheduled shifts from My Schedule; GPS coordinates are captured when available and the start is audited by `start_officer_shift`.
+- Fixed the roster inspector stacking order so header actions remain clickable while an assignment is open.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
