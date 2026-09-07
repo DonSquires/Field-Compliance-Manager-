@@ -45,7 +45,7 @@ struct MountedFolderReport {
     files: Vec<MountedFile>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct DiskPartition {
         partition_number: u32,
         drive_letter: Option<String>,
@@ -99,6 +99,15 @@ struct ClusterMappingReport {
     samples: Vec<ClusterSample>,
 }
 
+#[derive(Serialize)]
+struct SdCardAnalysis {
+    disks: Vec<RemovableDisk>,
+    index_report: Option<IndexReport>,
+    hidden_partition: Option<DiskPartition>,
+    cluster_report: Option<ClusterMappingReport>,
+    summary: String,
+}
+
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|error| error.to_string())?;
     let mut hasher = Sha256::new();
@@ -133,6 +142,38 @@ fn media_signature_hint(bytes: &[u8]) -> String {
         return "All-zero sample".to_string();
     }
     "No standard media signature detected".to_string()
+}
+
+fn inspect_sd_index_at_path(path: &Path) -> Result<IndexReport, String> {
+    let database_path = path.to_string_lossy().to_string();
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+        .map_err(|error| format!("Could not open the index read-only: {error}"))?;
+    let event_definitions = connection.prepare("SELECT COALESCE(ED_Name, '') FROM EvtDef ORDER BY ED_Index")
+        .map_err(|error| error.to_string())?
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare(
+        "SELECT f.FI_RecNo, f.FI_Channel, f.FI_StartTimeRealUTC, f.FI_EndTimeRealUTC,
+                f.FI_Length, f.FI_ClusterNo, f.FI_IndexInCluster,
+                COALESCE(group_concat(d.ED_Name, '|'), '')
+           FROM File f
+      LEFT JOIN Event e ON e.ET_FI_RecNo = f.FI_RecNo
+      LEFT JOIN EvtDef d ON d.ED_Index = e.ET_ED_Index
+       GROUP BY f.FI_RecNo
+       ORDER BY f.FI_StartTimeRealUTC"
+    ).map_err(|error| format!("The index schema is not recognised: {error}"))?;
+    let records = statement.query_map([], |row| {
+        let events: String = row.get(7)?;
+        Ok(IndexRecord {
+            record_number: row.get(0)?, channel: row.get(1)?,
+            start_time_utc: unix_timestamp(row.get(2)?), end_time_utc: unix_timestamp(row.get(3)?),
+            length_bytes: row.get(4)?, cluster_number: row.get(5)?, index_in_cluster: row.get(6)?,
+            event_names: events.split('|').filter(|name| !name.is_empty()).map(str::to_owned).collect(),
+        })
+    }).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    let valid_timestamped_record_count = records.iter().filter(|record| record.start_time_utc.is_some() && record.end_time_utc.is_some()).count();
+    Ok(IndexReport { database_path, database_sha256: sha256_file(path)?, record_count: records.len(), valid_timestamped_record_count, event_definitions, records })
 }
 
 #[cfg(target_os = "windows")]
@@ -259,6 +300,44 @@ fn probe_indexed_cluster(disk_number: u32, partition_number: u32, cluster_number
     Ok(ClusterMappingReport { disk_number, partition_number, cluster_number, samples })
 }
 
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
+    let disks = detect_removable_disks()?;
+    let Some(disk) = disks.iter().find(|disk| !disk.partitions.is_empty()) else {
+        return Ok(SdCardAnalysis { disks, index_report: None, hidden_partition: None, cluster_report: None, summary: "No removable SD card or USB disk was detected.".to_string() });
+    };
+    let hidden_partition = disk.partitions.iter().filter(|partition| partition.drive_letter.is_none()).max_by_key(|partition| partition.size_bytes).cloned();
+    let index_path = disk.partitions.iter().filter_map(|partition| partition.drive_letter.as_ref()).find_map(|letter| {
+        let root = PathBuf::from(format!("{letter}:\\"));
+        let mut stack = vec![root];
+        while let Some(directory) = stack.pop() {
+            let entries = fs::read_dir(&directory).ok()?;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.eq_ignore_ascii_case("SDFileInfo.db")) {
+                    return Some(path);
+                }
+                if entry.metadata().ok()?.is_dir() { stack.push(path); }
+            }
+        }
+        None
+    });
+    let index_report = index_path.as_deref().map(inspect_sd_index_at_path).transpose()?;
+    let cluster_report = match (&index_report, &hidden_partition) {
+        (Some(index), Some(partition)) => index.records.iter().find(|record| record.cluster_number > 0)
+            .map(|record| probe_indexed_cluster(disk.disk_number, partition.partition_number, record.cluster_number)).transpose()?,
+        _ => None,
+    };
+    let summary = match (&index_report, &hidden_partition, &cluster_report) {
+        (Some(index), Some(partition), Some(cluster)) => format!("Found {} indexed recordings and unmounted partition {}. Tested indexed cluster {} at {} candidate offsets.", index.valid_timestamped_record_count, partition.partition_number, cluster.cluster_number, cluster.samples.len()),
+        (None, Some(partition), _) => format!("Found unmounted partition {}, but SDFileInfo.db was not found on a mounted partition.", partition.partition_number),
+        (Some(index), None, _) => format!("Found {} indexed recordings, but no unmounted recording partition was found.", index.valid_timestamped_record_count),
+        _ => "No compatible SD-card index and hidden recording partition pair was found.".to_string(),
+    };
+    Ok(SdCardAnalysis { disks, index_report, hidden_partition, cluster_report, summary })
+}
+
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 fn probe_partition_header(_disk_number: u32, _partition_number: u32) -> Result<PartitionProbe, String> {
@@ -269,6 +348,12 @@ fn probe_partition_header(_disk_number: u32, _partition_number: u32) -> Result<P
 #[tauri::command]
 fn probe_indexed_cluster(_disk_number: u32, _partition_number: u32, _cluster_number: i64) -> Result<ClusterMappingReport, String> {
     Err("Indexed cluster probing is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
+    Err("Automated SD-card analysis is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -318,39 +403,7 @@ fn inspect_sd_index(database_path: String) -> Result<IndexReport, String> {
     if path.file_name().and_then(|name| name.to_str()) != Some("SDFileInfo.db") {
         return Err("Select the SDFileInfo.db index from a copied SD-card folder.".to_string());
     }
-    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-        .map_err(|error| format!("Could not open the index read-only: {error}"))?;
-
-    let event_definitions = connection.prepare("SELECT COALESCE(ED_Name, '') FROM EvtDef ORDER BY ED_Index")
-        .map_err(|error| error.to_string())?
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
-
-    let mut statement = connection.prepare(
-        "SELECT f.FI_RecNo, f.FI_Channel, f.FI_StartTimeRealUTC, f.FI_EndTimeRealUTC,
-                f.FI_Length, f.FI_ClusterNo, f.FI_IndexInCluster,
-                COALESCE(group_concat(d.ED_Name, '|'), '')
-           FROM File f
-      LEFT JOIN Event e ON e.ET_FI_RecNo = f.FI_RecNo
-      LEFT JOIN EvtDef d ON d.ED_Index = e.ET_ED_Index
-       GROUP BY f.FI_RecNo
-       ORDER BY f.FI_StartTimeRealUTC"
-    ).map_err(|error| format!("The index schema is not recognised: {error}"))?;
-
-    let records = statement.query_map([], |row| {
-        let events: String = row.get(7)?;
-        Ok(IndexRecord {
-            record_number: row.get(0)?, channel: row.get(1)?,
-            start_time_utc: unix_timestamp(row.get(2)?), end_time_utc: unix_timestamp(row.get(3)?),
-            length_bytes: row.get(4)?, cluster_number: row.get(5)?, index_in_cluster: row.get(6)?,
-            event_names: events.split('|').filter(|name| !name.is_empty()).map(str::to_owned).collect(),
-        })
-    }).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
-    let valid_timestamped_record_count = records.iter().filter(|record| record.start_time_utc.is_some() && record.end_time_utc.is_some()).count();
-    let database_sha256 = sha256_file(path)?;
-
-    Ok(IndexReport { database_path, database_sha256, record_count: records.len(), valid_timestamped_record_count, event_definitions, records })
+    inspect_sd_index_at_path(path)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -358,7 +411,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![detect_removable_disks, probe_partition_header, probe_indexed_cluster, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
