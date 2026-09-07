@@ -89,7 +89,7 @@ const OfficerFieldReportPage: React.FC = () => {
       setAddressResolutionMessage(candidate.label);
     } catch (error) {
       setAddressResolution('unavailable');
-      setAddressResolutionMessage(error instanceof Error ? error.message : 'Address could not be resolved.');
+      setAddressResolutionMessage(describeLoadFailures([['address', error instanceof Error ? error : { message: 'Address could not be resolved.' }]]) ?? 'Address could not be resolved.');
     }
   };
 
@@ -105,8 +105,8 @@ const OfficerFieldReportPage: React.FC = () => {
       p_follow_up_notes: form.followUp ? form.followUpNotes.trim() : null,
     });
     const result = (data as Array<{ id: string; received_at: string; shift_id: string | null }> | null)?.[0];
-    if (submitError || !result) setError(submitError?.message ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
-    else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id); if (investigationId) { const { error: linkError } = await supabase.rpc('link_investigation_entity', { p_investigation_id: investigationId, p_entity_type: 'field_report', p_entity_id: result.id, p_link_role: 'primary', p_link_reason: dispatchJobId ? `Follow-up report from investigation dispatch ${dispatchJobId}` : 'Officer report submitted from investigation context' }); if (linkError) { setError(`Report confirmed, but investigation link failed: ${linkError.message}`); } } setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); setAddressResolution('idle'); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
+    if (submitError || !result) setError(describeLoadFailures([['report submission', submitError]]) ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
+    else { const linkedShift = shifts.find((shift) => shift.id === result.shift_id); if (investigationId) { const { error: linkError } = await supabase.rpc('link_investigation_entity', { p_investigation_id: investigationId, p_entity_type: 'field_report', p_entity_id: result.id, p_link_role: 'primary', p_link_reason: dispatchJobId ? `Follow-up report from investigation dispatch ${dispatchJobId}` : 'Officer report submitted from investigation context' }); if (linkError) { setError(`Report confirmed, but ${describeLoadFailures([['investigation link', linkError]]) ?? 'the investigation link could not be saved.'}`); } } setReceipt({ id: result.id, receivedAt: result.received_at, shiftId: result.shift_id, shiftLabel: linkedShift ? `${linkedShift.service_type.replaceAll('_', ' ')} · ${new Date(linkedShift.scheduled_start).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}` : null }); setForm(initialForm); setGps({ status: 'idle', lat: null, lng: null, accuracy: null }); setAddressResolution('idle'); eventIdRef.current = crypto.randomUUID(); capturedAtRef.current = new Date().toISOString(); await loadData(); }
     setSubmitting(false);
   };
 
