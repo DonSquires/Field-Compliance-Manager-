@@ -256,8 +256,9 @@ const RosterOperationsPage: React.FC = () => {
     const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
     if (!operatingBranchId) return;
     setSaving(true); setError(null); setNotice(null);
+    const clientRequestId = crypto.randomUUID();
     const { data, error: rpcError } = await supabase.rpc('batch_publish_roster_slots', {
-      p_client_request_id: crypto.randomUUID(),
+      p_client_request_id: clientRequestId,
       p_organization_id: operatingBranchId,
       p_from: weekStart.toISOString(),
       p_to: weekEnd.toISOString(),
@@ -265,7 +266,9 @@ const RosterOperationsPage: React.FC = () => {
     const receipt = Array.isArray(data) ? data[0] : data;
     if (rpcError || !receipt) setError(rpcError?.message ?? 'Batch publishing was not confirmed.');
     else {
-      setNotice(`Period published: ${receipt.published_count} slots published, ${receipt.materialized_count} shifts materialized, ${receipt.unfilled_count} left unfilled, ${receipt.conflict_count} skipped for leave conflicts.`);
+      const { data: failures } = await supabase.rpc('get_roster_batch_publish_failures', { p_client_request_id: clientRequestId });
+      const failureCount = Array.isArray(failures) ? failures.length : 0;
+      setNotice(`Period published: ${receipt.published_count} slots published, ${receipt.materialized_count} shifts materialized, ${receipt.conflict_count} skipped for leave conflicts${failureCount ? `, ${failureCount} materialization failures retained for review` : ''}.`);
       await load();
     }
     setSaving(false);

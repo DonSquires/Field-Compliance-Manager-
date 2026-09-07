@@ -155,6 +155,13 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - Fixed quick-action stacking so repeat controls remain clickable on mobile with the assignment inspector open.
 - Migration `20260907002400` is applied and verified in live Supabase.
 
+### Progress: batch publish failures durable
+
+- Batch publish now records each materialization failure with slot, work unit, client request ID, and database reason in the audit log.
+- The admin receipt queries those failures and reports the retained failure count instead of silently swallowing the error.
+- The public batch publish RPC signature remains compatible with existing callers.
+- Migration `20260907002500` is applied and verified in live Supabase.
+
 ### Atlas follow-up
 
 - The current repository dry-run inventory is 823 capabilities and 2,484 edges.
