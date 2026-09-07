@@ -45,3 +45,22 @@ test('officer timesheet derives hours from completed work only', async ({ page }
   await expect(page.getByRole('status')).toContainText('8 hours from 1 work records');
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('officer resubmits a rejected period after correction', async ({ page }) => {
+  await page.route('**/rest/v1/timesheets**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', period_start: '2026-08-17', period_end: '2026-08-23', scheduled_hours: 40, actual_hours: 39, overtime_hours: 0, status: 'rejected', review_notes: 'Please reconcile the signed attendance record.', approved_at: null }]) });
+  });
+  await page.route('**/rest/v1/rpc/get_officer_timesheet_work', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ source_type: 'shift', source_id: '12121212-1212-4212-8212-121212121212', work_status: 'completed', started_at: '2026-08-18T08:00:00.000Z', ended_at: '2026-08-18T16:00:00.000Z', calculated_minutes: 480, label: 'Completed patrol', metadata: {} }]) });
+  });
+  await page.route('**/rest/v1/rpc/resubmit_rejected_timesheet_from_work', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload.p_timesheet_id).toBe('38383838-3838-4838-8838-383838383838');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', actual_hours: 8, source_count: 1 }]) });
+  });
+  await signInAsOfficer(page, '/officer/timesheet');
+  await page.getByLabel('Period start').fill('2026-08-17');
+  await page.getByLabel('Period end').fill('2026-08-23');
+  await page.getByRole('button', { name: 'Resubmit corrected timesheet' }).click();
+  await expect(page.getByRole('status')).toContainText('8 hours from 1 work records');
+});
