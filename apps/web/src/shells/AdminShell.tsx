@@ -262,6 +262,18 @@ const AdminShell: React.FC = () => {
   const [bobOpen, setBobOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
+  const [showDesktopDownload, setShowDesktopDownload] = useState(false);
+
+  useEffect(() => {
+    if (!profile?.id || isMobile) return;
+    const promptKey = `fcm:desktop-download-dismissed:${profile.id}`;
+    setShowDesktopDownload(!window.localStorage.getItem(promptKey));
+  }, [isMobile, profile?.id]);
+
+  const dismissDesktopDownload = () => {
+    if (profile?.id) window.localStorage.setItem(`fcm:desktop-download-dismissed:${profile.id}`, '1');
+    setShowDesktopDownload(false);
+  };
 
   const pageFromUrl = useCallback((pathname: string): AdminPage => {
     const segments = pathname.split('/').filter(Boolean);
@@ -585,6 +597,7 @@ const AdminShell: React.FC = () => {
           onClose={() => setBobOpen(false)}
           context={bobContext}
         />
+        {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop companion</span><h2 id="desktop-download-title">Use local hardware with FCM</h2><p>Install the desktop companion to import SD-card footage, prepare large video files locally, and queue VPS analysis.</p></div><div className="desktop-download-actions"><a href={DESKTOP_APP_RELEASES_URL} target="_blank" rel="noreferrer" onClick={dismissDesktopDownload}><Download size={16} aria-hidden="true" /> Download desktop app</a><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
 
       </div>
     );
