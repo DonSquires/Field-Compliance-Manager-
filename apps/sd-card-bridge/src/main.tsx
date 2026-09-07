@@ -399,10 +399,10 @@ function App() {
       return;
     }
     setError(null);
-    const outputPath = await save({ title: 'Save a read-only DHFS partition image', defaultPath: 'fcm-dhfs-evidence.img', filters: [{ name: 'Disk image', extensions: ['img'] }] });
+    const outputPath = await save({ title: 'Save DHFS image on the local computer (not the SD card)', defaultPath: 'C:\\Users\\Public\\Documents\\fcm-dhfs-evidence.img', filters: [{ name: 'Disk image', extensions: ['img'] }] });
     if (!outputPath) return;
     setImagingLoading(true);
-    setStatus('Creating a read-only image of the DHFS partition. Do not remove the SD card...');
+    setStatus('Creating a read-only image on the local computer. Keep the SD card connected; this may take a while...');
     try {
       const result = await invoke<{ bytes_copied: number; sha256: string; output_path: string }>('image_dhfs_partition', {
         diskNumber: disk.disk_number,

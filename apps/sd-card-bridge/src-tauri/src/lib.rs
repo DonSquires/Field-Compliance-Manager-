@@ -271,6 +271,19 @@ fn partition_coordinates(disk_number: u32, partition_number: u32) -> Result<Part
 fn image_dhfs_partition(disk_number: u32, partition_number: u32, output_path: String) -> Result<DhfsImageReport, String> {
     let coordinates = partition_coordinates(disk_number, partition_number)?;
     if coordinates.size_bytes < 4096 { return Err("Selected partition is too small to be a DHFS recording partition.".to_string()); }
+    let normalized_output = output_path.replace('/', "\\").to_ascii_uppercase();
+    let removable_disks = detect_removable_disks()?;
+    for removable_disk in removable_disks {
+        if removable_disk.disk_number != disk_number { continue; }
+        for partition in removable_disk.partitions {
+            if let Some(letter) = partition.drive_letter {
+                let drive_prefix = format!("{}:\\", letter.to_ascii_uppercase());
+                if normalized_output.starts_with(&drive_prefix) {
+                    return Err(format!("Choose a local computer drive, not the SD card ({letter}:). The DHFS image needs about {} GB of free space.", coordinates.size_bytes / 1024 / 1024 / 1024));
+                }
+            }
+        }
+    }
     let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
     let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
         .map_err(|error| format!("Could not open {device_path} read-only: {error}"))?;
