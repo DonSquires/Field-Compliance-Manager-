@@ -133,6 +133,13 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - No duplicate attendance ledger was introduced; actual start/end remains governed by the shift record and clock-in/completion RPCs.
 - Migration `20260907002100` is applied and verified in live Supabase.
 
+### Progress: template preview complete
+
+- Added `preview_roster_from_templates` with a bounded 93-day planning window.
+- Admins can inspect active templates, candidate slots, duplicate existing slots, and net new drafts before generation.
+- Generation remains a separate explicit action; preview does not mutate roster data.
+- Migration `20260907002200` is applied and verified in live Supabase.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
