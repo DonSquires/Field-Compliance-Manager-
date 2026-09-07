@@ -27,6 +27,7 @@ import {
   ClipboardCheck,
   CreditCard,
   DollarSign,
+  Download,
   FileBarChart,
   FlaskConical,
   Grid3X3,
@@ -57,6 +58,8 @@ import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from 
 import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
+
+const DESKTOP_APP_RELEASES_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/latest';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
@@ -554,6 +557,7 @@ const AdminShell: React.FC = () => {
             <div className="admin-shell-tools">
               {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'corporate_oversight' ? ' (corporate)' : ''}</option>)}</select></label>}
               <NotificationCenter onNavigate={navigateFromNotification} />
+              <a className="admin-shell-icon admin-desktop-download" href={DESKTOP_APP_RELEASES_URL} target="_blank" rel="noreferrer" title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></a>
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>
