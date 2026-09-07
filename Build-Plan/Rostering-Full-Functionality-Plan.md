@@ -147,6 +147,12 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - The existing batch publish action remains explicit and separate from preview.
 - Migration `20260907002300` is applied and verified in live Supabase.
 
+### Atlas follow-up
+
+- The current repository dry-run inventory is 823 capabilities and 2,484 edges.
+- Live Atlas apply is intentionally pending because the generator detected 108 retirements and refused to proceed without an explicit large-retirement override.
+- Do not force that override until the retirement list is reviewed against the live capability map; the roster work remains deployed and verified independently.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
