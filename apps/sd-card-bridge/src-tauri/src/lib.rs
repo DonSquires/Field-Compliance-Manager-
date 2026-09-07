@@ -384,9 +384,11 @@ fn inspect_dhfs_headers(disk_number: u32, partition_number: u32) -> Result<DhfsH
     let mut headers = Vec::new();
     for relative_offset in marker_offsets {
         let absolute_offset_bytes = coordinates.offset_bytes.saturating_add(relative_offset as u64);
-        device.seek(SeekFrom::Start(absolute_offset_bytes)).map_err(|error| format!("Could not seek to DHFS header: {error}"))?;
-        let mut bytes = vec![0_u8; HEADER_BYTES];
-        device.read_exact(&mut bytes).map_err(|error| format!("Could not read DHFS header: {error}"))?;
+        let end_offset = relative_offset.saturating_add(HEADER_BYTES);
+        if end_offset > scan.len() {
+            continue;
+        }
+        let bytes = &scan[relative_offset..end_offset];
         let preview = &bytes[..PREVIEW_BYTES];
         let ascii_preview = preview.iter().map(|byte| if byte.is_ascii_graphic() || *byte == b' ' { *byte as char } else { '.' }).collect();
         let hex_preview = preview.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(" ");
