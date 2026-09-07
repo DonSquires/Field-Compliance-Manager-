@@ -59,3 +59,26 @@ test('administrator finalizes an officer coverage claim into roster ownership', 
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   expect(errors,errors.join('\n')).toEqual([]);
 });
+
+test('administrator corrects submitted timesheet hours before review', async ({ page }) => {
+  await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', staff_id: '22222222-2222-4222-8222-222222222222', period_start: '2026-08-17', period_end: '2026-08-23', scheduled_hours: 40, actual_hours: 39, overtime_hours: 0, work_derived_hours: 39, adjustment_hours: 0, work_summary: { source_count: 4 }, status: 'submitted', branch_review_notes: null, branch_reviewed_by: null }]) });
+  });
+  await page.route('**/rest/v1/rpc/correct_timesheet_hours', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload.p_expected_status).toBe('submitted');
+    expect(payload.p_actual_hours).toBe(40);
+    expect(payload.p_overtime_hours).toBe(0);
+    expect(payload.p_reason).toBe('Corrected after comparing the signed attendance record.');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', status: 'submitted' }]) });
+  });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
+  await page.getByRole('button', { name: 'Timesheets' }).click();
+  await page.getByRole('button', { name: 'Edit hours' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit timesheet hours' });
+  await dialog.getByLabel('Actual hours').fill('40');
+  await dialog.getByLabel('Correction reason').fill('Corrected after comparing the signed attendance record.');
+  await dialog.getByRole('button', { name: 'Save correction' }).click();
+  await expect(page.getByRole('status')).toContainText('Timesheet hours corrected and returned to submitted review.');
+});
