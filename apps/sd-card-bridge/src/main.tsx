@@ -2,8 +2,11 @@ import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { Camera, Database, ExternalLink, HardDrive, LogOut, MonitorPlay, Upload, Wifi } from 'lucide-react';
 import { getSupabaseClient } from './lib/supabase';
 import './styles.css';
+
+const FCM_WEB_URL = 'https://field-compliance-manager-8hs8ed7et-iron-eagle-security.vercel.app';
 
 type IndexRecord = {
   record_number: number;
@@ -34,6 +37,7 @@ function App() {
   const [signedInAs, setSignedInAs] = useState<string | null>(null);
   const [video, setVideo] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<'home' | 'sd-import' | 'video-upload'>('home');
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -116,27 +120,24 @@ function App() {
     }
   };
 
-  return <main>
-    <header>
-      <div><span>FCM Local Utility</span><h1>SD Card Bridge</h1></div>
-      <p>Read copied card indexes and validate media mapping before any export.</p>
+  return <main className="desktop-companion">
+    <header className="companion-header">
+      <div className="companion-brand"><img src="/icons/128x128.png" alt="Iron Eagle Security" /><div><span>Iron Eagle Security</span><h1>FCM Desktop</h1></div></div>
+      {signedInAs ? <div className="companion-session"><span><Wifi size={14} /> Connected as {signedInAs}</span><button type="button" className="icon-button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={17} /></button></div> : <form className="sign-in-form" onSubmit={(event) => void signIn(event)}><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" required /><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" required /><button type="submit">Sign in</button></form>}
     </header>
-    <section className="notice"><strong>Read-only card access</strong><span>This version never writes to an SD card or accesses a physical disk. It keeps FCM sessions in memory and never stores service credentials.</span></section>
-    <section className="tool bridge-session">
-      {signedInAs ? <><strong>Signed in as {signedInAs}</strong><button type="button" className="secondary" onClick={() => void signOut()}>Sign out</button></> : <form onSubmit={(event) => void signIn(event)}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label><button type="submit">Sign in to FCM</button></form>}
-    </section>
-    <section className="tool">
-      <button type="button" onClick={() => void inspectIndex()}>Choose SDFileInfo.db</button>
-      <p>{status}</p>
-      {error && <p className="error">{error}</p>}
-    </section>
-    <section className="tool upload-tool">
-      <h2>Upload exported camera video</h2>
-      <p>Select an MP4/MOV/AVI video already exported from the SD card. FCM will store it privately and queue the existing VPS inference pipeline.</p>
-      <input type="file" accept="video/*,.avi,.mkv" disabled={!signedInAs} onChange={(event) => setVideo(event.target.files?.[0] ?? null)} />
-      <button type="button" onClick={() => void uploadVideo()} disabled={!signedInAs || !video}>Upload to CCTV Review</button>
-      {uploadStatus && <p>{uploadStatus}</p>}
-    </section>
+    <div className="companion-layout">
+      <nav className="companion-nav" aria-label="FCM Desktop navigation">
+        <button type="button" className={activeView === 'home' ? 'is-active' : ''} onClick={() => setActiveView('home')}><MonitorPlay size={18} /> Desktop home</button>
+        <button type="button" className={activeView === 'sd-import' ? 'is-active' : ''} onClick={() => setActiveView('sd-import')}><HardDrive size={18} /> SD card import</button>
+        <button type="button" className={activeView === 'video-upload' ? 'is-active' : ''} onClick={() => setActiveView('video-upload')}><Upload size={18} /> Video upload</button>
+        <a href={FCM_WEB_URL} target="_blank" rel="noreferrer"><ExternalLink size={18} /> FCM web portal</a>
+      </nav>
+      <section className="companion-workspace">
+        {error && <div className="companion-error" role="alert">{error}</div>}
+        {!signedInAs && <section className="connection-notice"><strong>Sign in to begin</strong><span>Use your authorised FCM account. Desktop processing is local; evidence, approvals, and results remain centrally governed.</span></section>}
+        {activeView === 'home' && <><div className="workspace-heading"><span>Local operations</span><h2>FCM desktop workspace</h2><p>Use local hardware and large-file tools here. Open the FCM web portal for live work queues, formal review, reporting, and approvals.</p></div><div className="capability-grid"><Capability icon={<HardDrive size={23} />} title="SD card import" detail="Inspect copied camera indexes and prepare evidence for review." action="Open importer" onClick={() => setActiveView('sd-import')} /><Capability icon={<Camera size={23} />} title="Camera evidence" detail="Upload exported footage and queue VPS motion, ALPR, and face analysis." action="Upload video" onClick={() => setActiveView('video-upload')} /><Capability icon={<Database size={23} />} title="Operations portal" detail="Open FCM web for CCTV Review, Parking, Freedom Camping, and approvals." action="Open FCM web" onClick={() => window.open(FCM_WEB_URL, '_blank', 'noopener,noreferrer')} /></div><section className="read-only-notice"><strong>Current local access</strong><span>This release never writes to an SD card or reads raw physical disks. It works with copied evidence while the vendor storage format is validated.</span></section></>}
+        {activeView === 'sd-import' && <><div className="workspace-heading"><span>Evidence intake</span><h2>SD card recording index</h2><p>Select `SDFileInfo.db` from a copied SD-card folder. Keep the matching `-wal` and `-shm` files beside it.</p></div><section className="tool"><button type="button" onClick={() => void inspectIndex()}><Database size={16} /> Choose SDFileInfo.db</button><p>{status}</p></section></>}
+        {activeView === 'video-upload' && <><div className="workspace-heading"><span>Evidence intake</span><h2>Upload camera video</h2><p>Select an exported MP4, MOV, AVI, or MKV. FCM stores it privately and queues VPS inference for CCTV Review.</p></div><section className="tool upload-tool"><input type="file" accept="video/*,.avi,.mkv" disabled={!signedInAs} onChange={(event) => setVideo(event.target.files?.[0] ?? null)} /><button type="button" onClick={() => void uploadVideo()} disabled={!signedInAs || !video}><Upload size={16} /> Upload to CCTV Review</button>{video && <p>Selected: {video.name} ({Math.ceil(video.size / 1024 / 1024)} MB)</p>}{uploadStatus && <p>{uploadStatus}</p>}</section></>}
     {report && <section className="results">
       <div className="metrics"><Metric label="Indexed recordings" value={report.record_count} /><Metric label="Usable timestamps" value={report.valid_timestamped_record_count} /><Metric label="Event definitions" value={report.event_definitions.filter(Boolean).length} /></div>
       <p className="hash">Source hash: {report.database_sha256}</p>
@@ -145,11 +146,17 @@ function App() {
         {report.records.slice(0, 100).map((record) => <tr key={record.record_number}><td>{record.record_number}</td><td>{record.channel}</td><td>{record.start_time_utc ?? 'Missing'}</td><td>{record.end_time_utc ?? 'Missing'}</td><td>{record.length_bytes.toLocaleString()}</td><td>{record.cluster_number}:{record.index_in_cluster}</td><td>{record.event_names.filter(Boolean).join(', ') || 'Unlabelled'}</td></tr>)}
       </tbody></table>
     </section>}
+      </section>
+    </div>
   </main>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return <div><strong>{value}</strong><span>{label}</span></div>;
+}
+
+function Capability({ icon, title, detail, action, onClick }: { icon: React.ReactNode; title: string; detail: string; action: string; onClick: () => void }) {
+  return <section className="capability"><span>{icon}</span><h3>{title}</h3><p>{detail}</p><button type="button" onClick={onClick}>{action}</button></section>;
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
