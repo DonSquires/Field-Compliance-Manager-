@@ -126,6 +126,13 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - Notifications include schedule links and deduplicated roster/shift change keys.
 - Migrations `20260907001900` and `20260907002000` are applied and verified in live Supabase.
 
+### Progress: attendance exception queue complete
+
+- Added `get_roster_attendance_exceptions` over the canonical `shifts` table.
+- Admin roster now surfaces late starts after a 15-minute grace period and active shifts that overrun their scheduled end.
+- No duplicate attendance ledger was introduced; actual start/end remains governed by the shift record and clock-in/completion RPCs.
+- Migration `20260907002100` is applied and verified in live Supabase.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
