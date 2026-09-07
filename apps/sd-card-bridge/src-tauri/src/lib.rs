@@ -254,7 +254,9 @@ fn probe_partition_header(disk_number: u32, partition_number: u32) -> Result<Par
     device.read_exact(&mut bytes).map_err(|error| format!("Could not read partition header: {error}"))?;
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
     let signature = bytes[..32].iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-    let format_hint = if bytes.get(1080..1082) == Some(&[0x53, 0xef]) {
+    let format_hint = if bytes.starts_with(b"DHFS4.1\0") {
+        "Dahua DHFS 4.1 filesystem header"
+    } else if bytes.get(1080..1082) == Some(&[0x53, 0xef]) {
         "ext4 filesystem signature"
     } else if bytes.starts_with(b"NTFS    ") {
         "NTFS filesystem signature"
@@ -310,6 +312,21 @@ struct DhfsMetadataScan {
     truncated: bool,
 }
 
+#[derive(Serialize)]
+struct DhfsHeaderBlock {
+    absolute_offset_bytes: u64,
+    sha256: String,
+    ascii_preview: String,
+    hex_preview: String,
+}
+
+#[derive(Serialize)]
+struct DhfsHeaderReport {
+    disk_number: u32,
+    partition_number: u32,
+    headers: Vec<DhfsHeaderBlock>,
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn scan_dhfs_metadata(disk_number: u32, partition_number: u32) -> Result<DhfsMetadataScan, String> {
@@ -344,6 +361,38 @@ fn scan_dhfs_metadata(disk_number: u32, partition_number: u32) -> Result<DhfsMet
         non_zero_block_offsets,
         truncated: bytes_scanned == SCAN_BYTES,
     })
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn inspect_dhfs_headers(disk_number: u32, partition_number: u32) -> Result<DhfsHeaderReport, String> {
+    const SCAN_BYTES: usize = 64 * 1024;
+    const HEADER_BYTES: usize = 4096;
+    const PREVIEW_BYTES: usize = 128;
+    const MAX_HEADERS: usize = 8;
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path}. Open FCM Desktop as Administrator only if Windows denies read-only access: {error}"))?;
+    device.seek(SeekFrom::Start(coordinates.offset_bytes)).map_err(|error| format!("Could not seek to DHFS metadata: {error}"))?;
+    let mut scan = vec![0_u8; SCAN_BYTES];
+    device.read_exact(&mut scan).map_err(|error| format!("Could not read DHFS header window: {error}"))?;
+    let marker_offsets = scan.windows(4).enumerate().filter_map(|(offset, window)| (window == b"DHFS").then_some(offset)).take(MAX_HEADERS).collect::<Vec<_>>();
+    if marker_offsets.is_empty() {
+        return Err("No DHFS markers found in the first 64 KB of the selected partition.".to_string());
+    }
+    let mut headers = Vec::new();
+    for relative_offset in marker_offsets {
+        let absolute_offset_bytes = coordinates.offset_bytes.saturating_add(relative_offset as u64);
+        device.seek(SeekFrom::Start(absolute_offset_bytes)).map_err(|error| format!("Could not seek to DHFS header: {error}"))?;
+        let mut bytes = vec![0_u8; HEADER_BYTES];
+        device.read_exact(&mut bytes).map_err(|error| format!("Could not read DHFS header: {error}"))?;
+        let preview = &bytes[..PREVIEW_BYTES];
+        let ascii_preview = preview.iter().map(|byte| if byte.is_ascii_graphic() || *byte == b' ' { *byte as char } else { '.' }).collect();
+        let hex_preview = preview.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(" ");
+        headers.push(DhfsHeaderBlock { absolute_offset_bytes, sha256: format!("{:x}", Sha256::digest(&bytes)), ascii_preview, hex_preview });
+    }
+    Ok(DhfsHeaderReport { disk_number, partition_number, headers })
 }
 
 #[cfg(target_os = "windows")]
@@ -400,6 +449,12 @@ fn probe_indexed_cluster(_disk_number: u32, _partition_number: u32, _cluster_num
 #[tauri::command]
 fn scan_dhfs_metadata(_disk_number: u32, _partition_number: u32) -> Result<DhfsMetadataScan, String> {
     Err("DHFS metadata scanning is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn inspect_dhfs_headers(_disk_number: u32, _partition_number: u32) -> Result<DhfsHeaderReport, String> {
+    Err("DHFS header inspection is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -463,7 +518,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
