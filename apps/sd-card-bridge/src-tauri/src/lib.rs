@@ -300,6 +300,52 @@ fn probe_indexed_cluster(disk_number: u32, partition_number: u32, cluster_number
     Ok(ClusterMappingReport { disk_number, partition_number, cluster_number, samples })
 }
 
+#[derive(Serialize)]
+struct DhfsMetadataScan {
+    disk_number: u32,
+    partition_number: u32,
+    bytes_scanned: usize,
+    dhfs_marker_offsets: Vec<u64>,
+    non_zero_block_offsets: Vec<u64>,
+    truncated: bool,
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn scan_dhfs_metadata(disk_number: u32, partition_number: u32) -> Result<DhfsMetadataScan, String> {
+    const SCAN_BYTES: usize = 16 * 1024 * 1024;
+    const BLOCK_BYTES: usize = 4096;
+    const MAX_REPORTED_OFFSETS: usize = 64;
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let bytes_scanned = usize::try_from(coordinates.size_bytes.min(SCAN_BYTES as u64)).map_err(|error| error.to_string())?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path}. Open FCM Desktop as Administrator only if Windows denies read-only access: {error}"))?;
+    device.seek(SeekFrom::Start(coordinates.offset_bytes)).map_err(|error| format!("Could not seek to partition start: {error}"))?;
+    let mut bytes = vec![0_u8; bytes_scanned];
+    device.read_exact(&mut bytes).map_err(|error| format!("Could not read DHFS metadata window: {error}"))?;
+    let mut dhfs_marker_offsets = Vec::new();
+    for (offset, window) in bytes.windows(4).enumerate() {
+        if window == b"DHFS" && dhfs_marker_offsets.len() < MAX_REPORTED_OFFSETS {
+            dhfs_marker_offsets.push(coordinates.offset_bytes.saturating_add(offset as u64));
+        }
+    }
+    let mut non_zero_block_offsets = Vec::new();
+    for (index, block) in bytes.chunks(BLOCK_BYTES).enumerate() {
+        if block.iter().any(|byte| *byte != 0) && non_zero_block_offsets.len() < MAX_REPORTED_OFFSETS {
+            non_zero_block_offsets.push(coordinates.offset_bytes.saturating_add((index * BLOCK_BYTES) as u64));
+        }
+    }
+    Ok(DhfsMetadataScan {
+        disk_number,
+        partition_number,
+        bytes_scanned,
+        dhfs_marker_offsets,
+        non_zero_block_offsets,
+        truncated: bytes_scanned == SCAN_BYTES,
+    })
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
@@ -348,6 +394,12 @@ fn probe_partition_header(_disk_number: u32, _partition_number: u32) -> Result<P
 #[tauri::command]
 fn probe_indexed_cluster(_disk_number: u32, _partition_number: u32, _cluster_number: i64) -> Result<ClusterMappingReport, String> {
     Err("Indexed cluster probing is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn scan_dhfs_metadata(_disk_number: u32, _partition_number: u32) -> Result<DhfsMetadataScan, String> {
+    Err("DHFS metadata scanning is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -411,7 +463,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
