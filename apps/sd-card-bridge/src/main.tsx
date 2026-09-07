@@ -43,7 +43,7 @@ function App() {
     event.preventDefault();
     setError(null);
     try {
-      const supabase = await getSupabaseClient();
+      const supabase = getSupabaseClient();
       const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
       if (signInError) throw signInError;
       setPassword('');
@@ -54,7 +54,7 @@ function App() {
   };
 
   const signOut = async () => {
-    const supabase = await getSupabaseClient();
+    const supabase = getSupabaseClient();
     await supabase.auth.signOut();
     setSignedInAs(null);
     setVideo(null);
@@ -84,7 +84,7 @@ function App() {
     if (!video) return;
     setError(null);
     setUploadStatus('Preparing private video upload...');
-    const supabase = await getSupabaseClient();
+    const supabase = getSupabaseClient();
     const { data: sessionData } = await supabase.auth.getSession();
     const user = sessionData.session?.user;
     if (!user) {
