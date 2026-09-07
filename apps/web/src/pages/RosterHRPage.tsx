@@ -1342,10 +1342,10 @@ const RosterHRPage: React.FC = () => {
           </div>
           <div className="reports-table-wrapper">
             <table className="reports-table">
-              <thead><tr><th>Staff</th><th>Dispatch source</th><th>Pay item</th><th>Quantity</th><th>Rate</th><th>Total</th><th>Evidence state</th><th>Review</th></tr></thead>
+              <thead><tr><th>Staff</th><th>Dispatch source</th><th>Pay item</th><th>Quantity</th><th>Rate</th><th>Total</th><th>Travel evidence</th><th>Evidence state</th><th>Review</th></tr></thead>
               <tbody>
                 {dispatchPayLines.filter((line) => payReviewFilter === 'all' || (payReviewFilter === 'exceptions' ? line.pay_code === 'UNRESOLVED' : line.pay_code !== 'UNRESOLVED')).length === 0 ? (
-                  <tr><td colSpan={8} className="text-center">No {payReviewFilter === 'exceptions' ? 'unresolved' : payReviewFilter === 'resolved' ? 'rule-resolved' : 'completed-dispatch'} pay evidence.</td></tr>
+                  <tr><td colSpan={9} className="text-center">No {payReviewFilter === 'exceptions' ? 'unresolved' : payReviewFilter === 'resolved' ? 'rule-resolved' : 'completed-dispatch'} pay evidence.</td></tr>
                 ) : dispatchPayLines.filter((line) => payReviewFilter === 'all' || (payReviewFilter === 'exceptions' ? line.pay_code === 'UNRESOLVED' : line.pay_code !== 'UNRESOLVED')).map((line) => {
                   const unresolved = line.pay_code === 'UNRESOLVED';
                   const latestReview = dispatchPayLineReviews.find((review) => review.pay_line_id === line.id);
@@ -1356,6 +1356,7 @@ const RosterHRPage: React.FC = () => {
                     <td>{Number(line.quantity).toFixed(2)} {line.rate_type === 'per_km' ? 'km' : 'hours'}</td>
                     <td>NZ${Number(line.unit_rate).toFixed(2)}</td>
                     <td>NZ${Number(line.line_total).toFixed(2)}</td>
+                    <td>{line.distance_km != null ? `${Number(line.distance_km).toFixed(2)} km` : 'No distance'}<br /><small>{line.distance_reason?.replaceAll('_', ' ') ?? 'Not recorded'}</small></td>
                     <td><span className={`status-badge ${unresolved ? 'status-rejected' : 'status-approved'}`}>{unresolved ? (line.description.replace('Unresolved: ', 'Needs review')) : 'Rule resolved'}</span>{line.distance_reason && <small> · {line.distance_reason.replaceAll('_', ' ')}</small>}</td>
                     <td>{latestReview ? <><span className={`status-badge status-${latestReview.decision}`}>{latestReview.decision}</span>{latestReview.review_notes && <small> · {latestReview.review_notes}</small>}</> : <span className="status-badge status-pending">Pending</span>}{payReviewGovernanceAvailable && <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: '0.5rem' }} disabled={saving} onClick={() => setPayLineReview({ line, expectedReviewId: latestReview?.id ?? null, decision: unresolved ? 'rejected' : 'approved', notes: '' })}>{unresolved ? 'Reject for correction' : 'Review'}</button>}</td>
                   </tr>;

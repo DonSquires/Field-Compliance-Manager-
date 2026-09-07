@@ -175,6 +175,12 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - Existing HR coverage proves branch check and final approval separately.
 - A single cross-role browser context spanning manager -> officer -> manager remains a release-test gap.
 
+### Progress: travel evidence review visibility complete
+
+- Pay Review now shows distance kilometres and the provenance reason for every dispatch pay line, including explicit missing-distance states.
+- Existing rate resolution remains the source of truth; the UI does not fabricate travel claims.
+- HR desktop/mobile flows and the full unit suite remain green.
+
 ### Atlas follow-up
 
 - The current repository dry-run inventory is 823 capabilities and 2,484 edges.
