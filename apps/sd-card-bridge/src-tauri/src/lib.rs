@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
@@ -45,6 +45,25 @@ struct MountedFolderReport {
     files: Vec<MountedFile>,
 }
 
+#[derive(Deserialize, Serialize)]
+struct DiskPartition {
+        partition_number: u32,
+        drive_letter: Option<String>,
+        size_bytes: u64,
+        filesystem: Option<String>,
+        label: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct RemovableDisk {
+        disk_number: u32,
+        friendly_name: String,
+        bus_type: String,
+        size_bytes: u64,
+        operational_status: String,
+        partitions: Vec<DiskPartition>,
+}
+
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|error| error.to_string())?;
     let mut hasher = Sha256::new();
@@ -60,6 +79,56 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 fn unix_timestamp(timestamp: i64) -> Option<String> {
     if timestamp <= 0 { return None; }
     DateTime::<Utc>::from_timestamp(timestamp, 0).map(|value| value.to_rfc3339())
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn detect_removable_disks() -> Result<Vec<RemovableDisk>, String> {
+        use std::process::Command;
+
+        let script = r#"
+            $disks = @(Get-Disk | Where-Object { $_.BusType -in @('USB', 'SD', 'MMC') } | ForEach-Object {
+                $disk = $_
+                $partitions = @(Get-Partition -DiskNumber $disk.Number | ForEach-Object {
+                    $partition = $_
+                    $volume = $partition | Get-Volume -ErrorAction SilentlyContinue
+                    [pscustomobject]@{
+                        partition_number = [uint32]$partition.PartitionNumber
+                        drive_letter = if ($volume -and $volume.DriveLetter) { [string]$volume.DriveLetter } else { $null }
+                        size_bytes = [uint64]$partition.Size
+                        filesystem = if ($volume -and $volume.FileSystem) { [string]$volume.FileSystem } else { $null }
+                        label = if ($volume -and $volume.FileSystemLabel) { [string]$volume.FileSystemLabel } else { $null }
+                    }
+                })
+                [pscustomobject]@{
+                    disk_number = [uint32]$disk.Number
+                    friendly_name = [string]$disk.FriendlyName
+                    bus_type = [string]$disk.BusType
+                    size_bytes = [uint64]$disk.Size
+                    operational_status = [string]$disk.OperationalStatus
+                    partitions = $partitions
+                }
+            })
+            $disks | ConvertTo-Json -Depth 5 -Compress
+        "#;
+        let output = Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", script])
+                .output()
+                .map_err(|error| format!("Could not query Windows disk inventory: {error}"))?;
+        if !output.status.success() {
+                return Err(format!("Windows disk inventory failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        }
+        let body = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
+        if body.trim().is_empty() {
+                return Ok(Vec::new());
+        }
+        serde_json::from_str(&body).map_err(|error| format!("Could not parse Windows disk inventory: {error}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn detect_removable_disks() -> Result<Vec<RemovableDisk>, String> {
+        Err("Removable disk discovery is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[tauri::command]
@@ -143,7 +212,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![detect_removable_disks, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
