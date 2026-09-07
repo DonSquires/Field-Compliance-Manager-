@@ -327,6 +327,23 @@ struct DhfsHeaderReport {
     headers: Vec<DhfsHeaderBlock>,
 }
 
+#[derive(Serialize)]
+struct DhfsDptField {
+    relative_offset_bytes: usize,
+    little_endian_u32: u32,
+    big_endian_u32: u32,
+}
+
+#[derive(Serialize)]
+struct DhfsDptReport {
+    disk_number: u32,
+    partition_number: u32,
+    dpt_header_offsets: Vec<u64>,
+    headers_identical: bool,
+    differing_byte_offsets: Vec<usize>,
+    non_zero_u32_fields: Vec<DhfsDptField>,
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn scan_dhfs_metadata(disk_number: u32, partition_number: u32) -> Result<DhfsMetadataScan, String> {
@@ -399,6 +416,53 @@ fn inspect_dhfs_headers(disk_number: u32, partition_number: u32) -> Result<DhfsH
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
+fn inspect_dhfs_dpt(disk_number: u32, partition_number: u32) -> Result<DhfsDptReport, String> {
+    const SCAN_BYTES: usize = 64 * 1024;
+    const HEADER_BYTES: usize = 4096;
+    const MAX_FIELDS: usize = 64;
+    const MAX_DIFFERENCES: usize = 64;
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path}. Open FCM Desktop as Administrator only if Windows denies read-only access: {error}"))?;
+    device.seek(SeekFrom::Start(coordinates.offset_bytes)).map_err(|error| format!("Could not seek to DHFS metadata: {error}"))?;
+    let mut scan = vec![0_u8; SCAN_BYTES];
+    device.read_exact(&mut scan).map_err(|error| format!("Could not read DHFS DPT window: {error}"))?;
+    let marker_offsets = scan.windows(12).enumerate().filter_map(|(offset, window)| (window.starts_with(b"DHFS_DPT:")).then_some(offset)).take(2).collect::<Vec<_>>();
+    if marker_offsets.len() < 2 {
+        return Err("Two DHFS_DPT metadata copies were not found in the first 64 KB of the selected partition.".to_string());
+    }
+    let first_end = marker_offsets[0].saturating_add(HEADER_BYTES);
+    let second_end = marker_offsets[1].saturating_add(HEADER_BYTES);
+    if first_end > scan.len() || second_end > scan.len() {
+        return Err("DHFS_DPT header extends outside the bounded metadata window.".to_string());
+    }
+    let first = &scan[marker_offsets[0]..first_end];
+    let second = &scan[marker_offsets[1]..second_end];
+    let differing_byte_offsets = first.iter().zip(second.iter()).enumerate().filter_map(|(offset, (left, right))| (left != right).then_some(offset)).take(MAX_DIFFERENCES).collect::<Vec<_>>();
+    let mut non_zero_u32_fields = Vec::new();
+    for (offset, bytes) in first.windows(4).step_by(4).enumerate() {
+        let little_endian_u32 = u32::from_le_bytes(bytes.try_into().expect("window size is fixed"));
+        if little_endian_u32 != 0 && non_zero_u32_fields.len() < MAX_FIELDS {
+            non_zero_u32_fields.push(DhfsDptField {
+                relative_offset_bytes: offset * 4,
+                little_endian_u32,
+                big_endian_u32: u32::from_be_bytes(bytes.try_into().expect("window size is fixed")),
+            });
+        }
+    }
+    Ok(DhfsDptReport {
+        disk_number,
+        partition_number,
+        dpt_header_offsets: marker_offsets.iter().map(|offset| coordinates.offset_bytes.saturating_add(*offset as u64)).collect(),
+        headers_identical: differing_byte_offsets.is_empty(),
+        differing_byte_offsets,
+        non_zero_u32_fields,
+    })
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
 fn analyse_inserted_sd_card() -> Result<SdCardAnalysis, String> {
     let disks = detect_removable_disks()?;
     let Some(disk) = disks.iter().find(|disk| !disk.partitions.is_empty()) else {
@@ -457,6 +521,12 @@ fn scan_dhfs_metadata(_disk_number: u32, _partition_number: u32) -> Result<DhfsM
 #[tauri::command]
 fn inspect_dhfs_headers(_disk_number: u32, _partition_number: u32) -> Result<DhfsHeaderReport, String> {
     Err("DHFS header inspection is available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn inspect_dhfs_dpt(_disk_number: u32, _partition_number: u32) -> Result<DhfsDptReport, String> {
+    Err("DHFS DPT inspection is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -520,7 +590,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
