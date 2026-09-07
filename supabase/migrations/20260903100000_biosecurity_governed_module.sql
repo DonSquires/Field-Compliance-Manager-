@@ -175,7 +175,7 @@ begin
     update public.biosecurity_assessments
       set photo_urls = v_photo_arr,
           photo_url = coalesce(v_item->>'watermarked_path', photo_url)
-      where id = v_assessment.id;
+      where biosecurity_assessments.id = v_assessment.id;
   end if;
 
   insert into public.audit_log (
@@ -242,7 +242,7 @@ begin
         reviewed_by = v_actor,
         reviewed_at = clock_timestamp(),
         review_notes = v_notes,
-        follow_up_required = case when v_next = 'requires_supervisor_review' then true when v_next = 'closed' then false else follow_up_required end
+        follow_up_required = case when v_next = 'requires_supervisor_review' then true when v_next = 'closed' then false else biosecurity_assessments.follow_up_required end
     where id = v_item.id
     returning * into v_item;
 

@@ -6,6 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '
 const INFERENCE_SERVICE_URL = (Deno.env.get('INFERENCE_SERVICE_URL') ?? '').replace(/\/+$/, '');
 const INFERENCE_API_KEY = Deno.env.get('INFERENCE_API_KEY') ?? '';
 const EVIDENCE_BUCKET = 'scans';
+const INFERENCE_TIMEOUT_MS = 8_000;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -22,6 +23,8 @@ function base64ToBytes(value: string) {
 
 async function watermark(bytes: Uint8Array, text: string): Promise<Blob> {
   if (!INFERENCE_SERVICE_URL || !INFERENCE_API_KEY) return new Blob([bytes], { type: 'image/jpeg' });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), INFERENCE_TIMEOUT_MS);
   try {
     const body = new FormData();
     body.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'biosecurity_evidence.jpg');
@@ -30,11 +33,24 @@ async function watermark(bytes: Uint8Array, text: string): Promise<Blob> {
       method: 'POST',
       headers: { 'x-inference-api-key': INFERENCE_API_KEY },
       body,
+      signal: controller.signal,
     });
     if (!response.ok) return new Blob([bytes], { type: 'image/jpeg' });
     return response.blob();
   } catch {
     return new Blob([bytes], { type: 'image/jpeg' });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), INFERENCE_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -44,7 +60,9 @@ serve(async (request) => {
 
   const authorization = request.headers.get('Authorization') ?? '';
   const token = authorization.replace('Bearer ', '').trim();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: authorization } },
+  });
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return json({ error: 'Unauthorized' }, 401);
 
@@ -129,7 +147,7 @@ serve(async (request) => {
       try {
         const { data: signed } = await supabase.storage.from(EVIDENCE_BUCKET).createSignedUrl(processedEvidence[0].watermarked_path, 300);
         if (signed?.signedUrl) {
-          const classifyRes = await fetch(`${SUPABASE_URL}/functions/v1/classify-photo`, {
+          const classifyRes = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/classify-photo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: authorization },
             body: JSON.stringify({ photo_url: signed.signedUrl, module: 'biosecurity', context: `Location: ${locationName}; Species: ${speciesName}` }),
@@ -184,6 +202,7 @@ serve(async (request) => {
       classification: classificationResult,
     });
   } catch (err) {
+    console.error('[submit-biosecurity-assessment] failed:', err);
     return json({ error: err instanceof Error ? err.message : 'Biosecurity assessment could not be submitted' }, 500);
   }
 });

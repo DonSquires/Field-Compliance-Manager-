@@ -19,6 +19,12 @@ interface BiosecurityAssessment {
   status: string;
   mpi_referral_number: string | null;
   assessed_at: string;
+  location_name: string | null;
+  protected_land_address: string | null;
+  photo_url: string | null;
+  evidence_state: string;
+  review_state: string;
+  review_notes: string | null;
 }
 
 const BiosecurityOversightPage: React.FC = () => {
@@ -26,6 +32,8 @@ const BiosecurityOversightPage: React.FC = () => {
   const [assessments, setAssessments] = useState<BiosecurityAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reviewNotes, setReviewNotes] = useState('');
 
   // ATLAS READS: biosecurity_assessments
   useEffect(() => {
@@ -38,7 +46,7 @@ const BiosecurityOversightPage: React.FC = () => {
 
         const { data, error: err } = await supabase
           .from('biosecurity_assessments')
-          .select('id, officer_name, species_name, density_estimate, action_taken, status, mpi_referral_number, assessed_at')
+          .select('id, officer_name, species_name, density_estimate, action_taken, status, mpi_referral_number, assessed_at, location_name, protected_land_address, photo_url, evidence_state, review_state, review_notes')
           .eq('organization_id', orgId)
           .order('assessed_at', { ascending: false })
           .limit(100);
@@ -54,6 +62,29 @@ const BiosecurityOversightPage: React.FC = () => {
 
     load();
   }, [profile?.organizationId]);
+
+  const reviewAssessment = async (assessment: BiosecurityAssessment, action: 'triage' | 'require_review' | 'close') => {
+    if (!reviewNotes.trim()) {
+      setError('Review notes are required before changing the assessment state.');
+      return;
+    }
+    setError(null);
+    const { error: reviewError } = await supabase.rpc('manage_biosecurity_assessment_review', {
+      p_assessment_id: assessment.id,
+      p_expected_review_state: assessment.review_state,
+      p_action: action,
+      p_notes: reviewNotes.trim(),
+    });
+    if (reviewError) {
+      setError(reviewError.message);
+      return;
+    }
+    setReviewingId(null);
+    setReviewNotes('');
+    setAssessments((current) => current.map((item) => item.id === assessment.id
+      ? { ...item, review_state: action === 'close' ? 'closed' : action === 'triage' ? 'triaged' : 'requires_supervisor_review', review_notes: reviewNotes.trim() }
+      : item));
+  };
 
   if (loading) {
     return (
@@ -100,6 +131,16 @@ const BiosecurityOversightPage: React.FC = () => {
                   {new Date(a.assessed_at).toLocaleString()}
                 </p>
                 {a.mpi_referral_number && <p className="contact-meta">MPI referral: {a.mpi_referral_number}</p>}
+                <p className="contact-meta">Observed: {a.location_name ?? 'Not recorded'} · Protected land: {a.protected_land_address ?? 'Not recorded'}</p>
+                <p className="contact-meta">Evidence: {a.evidence_state} · Review: {a.review_state}</p>
+                {a.review_state !== 'closed' && (reviewingId === a.id ? (
+                  <div>
+                    <textarea aria-label={`Review notes for ${a.species_name ?? 'assessment'}`} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} placeholder="Required review notes" rows={2} />
+                    <button type="button" onClick={() => void reviewAssessment(a, 'triage')}>Triage</button>
+                    <button type="button" onClick={() => void reviewAssessment(a, 'close')}>Close review</button>
+                    <button type="button" onClick={() => { setReviewingId(null); setReviewNotes(''); }}>Cancel</button>
+                  </div>
+                ) : <button type="button" onClick={() => { setReviewingId(a.id); setReviewNotes(a.review_notes ?? ''); }}>Review assessment</button>)}
               </div>
             </div>
           ))
