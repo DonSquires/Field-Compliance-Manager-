@@ -135,6 +135,33 @@ test('officer submits an open shift-swap request with a reason', async ({ page }
   await expect(page.getByRole('status')).toContainText('Open shift swap request submitted for roster review.');
 });
 
+test('officer requests a direct swap with an eligible replacement officer', async ({ page }) => {
+  await page.route('**/rest/v1/staff_profiles**', async (route) => {
+    const select = new URL(route.request().url()).searchParams.get('select') ?? '';
+    const body = select.includes('user_id') ? [{ id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', work_ready: true }, { id: '2f2f2f2f-2222-4222-8222-222222222222', user_id: '2f2f2f2f-2222-4222-8222-222222222222', work_ready: true }] : { id: '22222222-2222-4222-8222-222222222222' };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.route('**/rest/v1/user_profiles**', async (route) => {
+    const select = new URL(route.request().url()).searchParams.get('select') ?? '';
+    const requestedId = new URL(route.request().url()).searchParams.get('id') ?? '';
+    const body = requestedId.includes('22222222-2222-4222-8222-222222222222') ? [{ id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', email: 'ana@fcm.test', role: 'officer', organization_id: '33333333-3333-4333-8333-333333333333' }] : [{ id: '2f2f2f2f-2222-4222-8222-222222222222', display_name: 'Jordan Lee', email: 'jordan@fcm.test' }];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.route('**/rest/v1/rpc/request_shift_swap', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload.p_swap_type).toBe('direct');
+    expect(payload.p_swap_with_staff_id).toBe('2f2f2f2f-2222-4222-8222-222222222222');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '15151515-1515-4515-8515-151515151515', status: 'pending', swap_type: 'direct' }]) });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Request swap' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Request shift swap?' });
+  await dialog.getByLabel('Replacement officer (optional)').selectOption('2f2f2f2f-2222-4222-8222-222222222222');
+  await dialog.getByLabel('Reason').fill('Jordan agreed to cover this assignment.');
+  await dialog.getByRole('button', { name: 'Submit swap request' }).click();
+  await expect(page.getByRole('status')).toContainText('Direct shift swap request submitted for roster review.');
+});
+
 test('officer starts an accepted shift with GPS attendance evidence', async ({ page, context }) => {
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });

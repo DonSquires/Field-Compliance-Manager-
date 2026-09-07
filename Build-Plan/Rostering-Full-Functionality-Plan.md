@@ -162,6 +162,12 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - The public batch publish RPC signature remains compatible with existing callers.
 - Migration `20260907002500` is applied and verified in live Supabase.
 
+### Progress: direct swap browser proof complete
+
+- Added a human browser journey for selecting an eligible replacement officer and submitting a direct swap.
+- Payload coverage verifies `swap_type = direct` and the selected replacement staff profile.
+- Open swap fallback remains covered separately.
+
 ### Atlas follow-up
 
 - The current repository dry-run inventory is 823 capabilities and 2,484 edges.
