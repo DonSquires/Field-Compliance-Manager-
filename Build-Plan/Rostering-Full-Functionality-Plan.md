@@ -120,6 +120,12 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - Original and replacement officers receive approval/decline notifications after manager review.
 - Migration `20260907001900` is applied and verified in live Supabase.
 
+### Progress: roster change notifications complete
+
+- Assignment publication, reassignment, cancellation, timing changes, and materialized shift ownership/status changes now notify the affected officer through the existing notification center.
+- Notifications include schedule links and deduplicated roster/shift change keys.
+- Migrations `20260907001900` and `20260907002000` are applied and verified in live Supabase.
+
 ## Acceptance criteria
 
 - A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
