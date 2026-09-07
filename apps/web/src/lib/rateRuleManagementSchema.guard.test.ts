@@ -16,7 +16,7 @@ describe('governed rate rule management', () => {
     expect(sql).toContain("'rate_rule_managed'");
   });
   it('exposes create, update, and activate/deactivate only through the governed RPC', () => {
-    expect(page).toContain("supabase.rpc('manage_rate_rule'");
+    expect(page).toContain("supabase.rpc('manage_operating_branch_rate_rule'");
     expect(page).toContain("p_action: 'update'");
     expect(page).toContain('p_expected_updated_at: editingRule.updated_at');
     expect(page).toContain('Edit rule');

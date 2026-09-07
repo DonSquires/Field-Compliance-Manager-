@@ -39,7 +39,7 @@ const OfficerFieldReportPage: React.FC = () => {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const [reportResponse, shiftResponse] = await Promise.all([
       supabase.from('officer_field_reports').select('id, report_type, severity, status, title, description, location_name, reported_at, follow_up_required, review_notes, reviewed_at').eq('officer_id', profile.id).order('reported_at', { ascending: false }).limit(20),
-      supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('organization_id', profile.organizationId).eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
+      supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
     ]);
     setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts((shiftResponse.data as ShiftOption[]) ?? []);
     setForm((current) => ({ ...current, shiftId: current.shiftId || (shiftResponse.data as ShiftOption[] | null)?.[0]?.id || '' }));

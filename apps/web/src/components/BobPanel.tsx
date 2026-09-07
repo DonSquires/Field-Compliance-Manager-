@@ -18,11 +18,12 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Archive, ArchiveRestore, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, PanelRightClose, Pencil, Pin, PinOff, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Upload } from 'tus-js-client';
 import { BobMarkdown } from './BobMarkdown';
+import { BobStudio } from './BobStudio';
 import './BobPanel.css';
 
 const MAX_BOB_UPLOAD_BYTES = 500 * 1024 * 1024;
@@ -69,6 +70,8 @@ interface BobAttachmentRecord {
   file_name: string;
   file_type: string;
   file_size_bytes: number;
+  storage_bucket: string | null;
+  storage_path: string | null;
   processing_state: 'pending' | 'processing' | 'extracted' | 'failed' | 'manual_review_required' | string;
   extraction_summary: string | null;
   confidence: number | null;
@@ -159,6 +162,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [error, setError] = useState<string | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -179,7 +183,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const loadAttachments = useCallback(async (convId: string) => {
     const { data, error: attachmentErr } = await supabase
       .from('bob_attachments')
-      .select('id, file_name, file_type, file_size_bytes, processing_state, extraction_summary, confidence, created_at')
+      .select('id, file_name, file_type, file_size_bytes, storage_bucket, storage_path, processing_state, extraction_summary, confidence, created_at')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
@@ -359,11 +363,6 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   useEffect(() => {
     if (open) loadConversation();
   }, [open, loadConversation]);
-
-  useEffect(() => {
-    setSidebarOpen(workspaceExpanded);
-    setContextPanelOpen(workspaceExpanded);
-  }, [workspaceExpanded]);
 
   useEffect(() => {
     if (!open) return;
@@ -636,6 +635,16 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     }
   };
 
+  const focusComposer = () => {
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const openStudioWithPrompt = (prompt: string) => {
+    setWorkspaceExpanded(true);
+    setInput(prompt);
+    focusComposer();
+  };
+
   if (!open) return null;
 
   const quickActions = mode === 'builder'
@@ -663,14 +672,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       <header className="bob-panel-header">
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <div className="bob-panel-header-actions">
-          <button type="button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
-          <button type="button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
-          <button type="button" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
-          <button type="button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><PanelRightClose size={18} /></button>
+          <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
+          <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
+          <button type="button" className="bob-workspace-toggle" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Studio'}</span></button>
+          <button type="button" className="bob-close-button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><X size={16} /><span>Close</span></button>
         </div>
       </header>
 
-      <div className="bob-workspace">
+      <div className={`bob-workspace ${workspaceExpanded ? 'is-studio' : ''}`}>
         {sidebarOpen && (
           <SessionSidebar
             sessions={sessions}
@@ -733,7 +742,6 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                   <div className="bob-message-body">
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
-                    {m.role === 'assistant' && <OperationalCards message={m} />}
                     <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
                   </div>
                 </article>
@@ -741,9 +749,11 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             )}
           </div>
 
-          {!workspaceExpanded && !contextPanelOpen && attachments.length > 0 && (
-            <div className="bob-attachment-results" aria-label="Evidence processing results">
-              {attachments.map(attachment => <AttachmentResultCard key={attachment.id} attachment={attachment} />)}
+          {!workspaceExpanded && attachments.length > 0 && (
+            <div className="bob-attachment-strip" aria-label="Evidence processing summary">
+              <Paperclip size={13} />
+              <span>{attachments.length} source file{attachments.length === 1 ? '' : 's'} in this session</span>
+              <button type="button" onClick={() => setWorkspaceExpanded(true)}>Review in studio</button>
             </div>
           )}
 
@@ -763,6 +773,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             {quickActions.map(action => (
               <button key={action.label} type="button" onClick={() => setInput(action.prompt)} disabled={sending}>{action.label}</button>
             ))}
+            {mode === 'operations' && <>
+              <button type="button" onClick={() => openStudioWithPrompt('Draft a document using the current context and attached source files. Use clear headings, fill only evidence-backed fields, mark unknowns as [TO CONFIRM], and finish with a human-review checklist.')} disabled={sending}>Document studio</button>
+              <button type="button" onClick={() => openStudioWithPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.')} disabled={sending}>Diagram studio</button>
+            </>}
           </div>
 
           <p className="bob-composer-hint">{ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.</p>
@@ -781,6 +795,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           <form onSubmit={handleSend} className="bob-composer">
             <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_BOB_UPLOADS} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />
             <textarea
+              ref={composerRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={mode === 'builder' ? 'Describe what you want to build, change, or fix' : 'Ask Bob to plan, inspect, explain, or prepare a proposal'}
@@ -807,6 +822,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             </button>
           </form>
         </div>
+
+        {workspaceExpanded && <BobStudio messages={messages} attachments={attachments} onPrompt={(prompt) => { setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
 
         {workspaceExpanded && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
         {contextPanelOpen && (
@@ -1206,8 +1223,8 @@ function AgentMetadata({ message }: { message: BobMessage }) {
   const plannedTool = typeof metadata.planned_tool === 'string' ? metadata.planned_tool : null;
   const suggestedAction = typeof metadata.suggested_action === 'string' ? metadata.suggested_action : null;
   const confidence = typeof metadata.confidence === 'number' ? metadata.confidence : message.confidence;
-  if (!plannedTool && confidence == null) return null;
-  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}</div>;
+  if (!plannedTool && confidence == null && !suggestedAction) return null;
+  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}{suggestedAction && <span className="bob-agent-next"><ListChecks size={12} /> {suggestedAction}</span>}</div>;
 }
 
 export default BobPanel;

@@ -20,6 +20,7 @@ describe('enterprise identity console', () => {
 
   it('filters invite roles through the non-escalating presentation policy', () => {
     expect(source).toContain('getAssignableRoles');
-    expect(source).toContain('assignableRoles.map');
+    expect(source).toContain('directInviteRoles.map');
+    expect(source).toContain("assignableRoles.filter((role) => !['officer', 'admin_officer'].includes(role))");
   });
 });

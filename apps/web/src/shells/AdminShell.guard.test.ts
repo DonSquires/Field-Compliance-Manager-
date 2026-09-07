@@ -68,7 +68,7 @@ describe('AdminShell access and routing boundaries', () => {
 
   it('keeps specialist routes visible until their container pages exist locally', () => {
     expect(source).toContain("'Clients & Commercial': [");
-    expect(source).toContain("{ id: 'crm', label: 'Accounts & Proposals'");
+    expect(source).toContain("{ id: 'crm', label: 'Client Portfolios'");
     expect(source).toContain("{ id: 'finance-bureau', label: 'Pricing, Discounts & Tenders'");
     expect(source).toContain("'Workforce & Operations': [");
     expect(source).toContain("{ id: 'roster', label: 'Schedules & Rosters'");

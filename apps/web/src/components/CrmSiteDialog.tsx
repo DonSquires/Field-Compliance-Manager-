@@ -22,7 +22,7 @@ interface SiteReceipt {
   boundary_verification: string;
 }
 
-export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: string; name: string }; onClose: () => void; onCreated: (site: SiteReceipt) => void }) {
+export function CrmSiteDialog({ account, locationId, onClose, onCreated }: { account: { id: string; name: string }; locationId?: string; onClose: () => void; onCreated: (site: SiteReceipt) => void }) {
   const [stage, setStage] = useState<'search' | 'create'>('search');
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
@@ -78,16 +78,15 @@ export function CrmSiteDialog({ account, onClose, onCreated }: { account: { id: 
       p_site_type: siteType,
       p_center_lat: resolvedAddress?.lat ?? null,
       p_center_lng: resolvedAddress?.lng ?? null,
+      p_location_id: locationId ?? null,
     });
     const receipt = Array.isArray(data) ? data[0] : data;
     if (createError || !receipt) setError(createError?.message ?? 'Site creation receipt was not confirmed. Your entries remain available.');
-    else {
-      if (resolvedGeometry) {
-        const { error: boundaryError } = await supabase.rpc('manage_crm_place_boundary', { p_entity_type: 'client_site', p_entity_id: receipt.id, p_expected_version: 1, p_geojson: resolvedGeometry, p_source: resolvedGeometrySource ?? 'linz_parcel', p_verify: false });
-        if (boundaryError) setError(`Site created, but the LINZ lot outline could not be saved: ${boundaryError.message}`);
-      }
-      requestId.current = crypto.randomUUID(); onCreated(receipt as SiteReceipt);
-    }
+    else if (resolvedGeometry) {
+      const { error: boundaryError } = await supabase.rpc('manage_crm_place_boundary', { p_entity_type: 'client_site', p_entity_id: receipt.id, p_expected_version: 1, p_geojson: resolvedGeometry, p_source: resolvedGeometrySource ?? 'linz_parcel', p_verify: false });
+      if (boundaryError) setError(`Site created, but the LINZ lot outline could not be saved: ${boundaryError.message}`);
+      else { requestId.current = crypto.randomUUID(); onCreated(receipt as SiteReceipt); }
+    } else { requestId.current = crypto.randomUUID(); onCreated(receipt as SiteReceipt); }
     setSaving(false);
   };
 

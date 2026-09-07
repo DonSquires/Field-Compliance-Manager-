@@ -7,16 +7,21 @@
  */
 
 import React from 'react';
+import { BobMermaidDiagram } from './BobMermaidDiagram';
 
 type Block =
   | { kind: 'heading'; level: 2 | 3 | 4; text: string }
   | { kind: 'paragraph'; text: string }
-  | { kind: 'code'; text: string }
+  | { kind: 'code'; language: string; text: string }
+  | { kind: 'image'; alt: string; src: string }
+  | { kind: 'video'; label: string; src: string }
   | { kind: 'list'; ordered: boolean; items: Array<{ depth: number; text: string }> };
 
 const BULLET = /^(\s*)[-*+]\s+(.*)$/;
 const ORDERED = /^(\s*)\d+[.)]\s+(.*)$/;
 const HEADING = /^(#{1,6})\s+(.*)$/;
+const IMAGE = /^!\[([^\]]*)\]\(([^)\s]+)\)$/;
+const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i;
 
 function safeHref(raw: string) {
   try {
@@ -77,19 +82,38 @@ function parseBlocks(source: string): Block[] {
 
     if (line.trim().startsWith('```')) {
       flushParagraph();
+      const language = line.trim().slice(3).trim().toLowerCase();
       const body: string[] = [];
       i += 1;
       while (i < lines.length && !lines[i].trim().startsWith('```')) {
         body.push(lines[i]);
         i += 1;
       }
-      blocks.push({ kind: 'code', text: body.join('\n') });
+      blocks.push({ kind: 'code', language, text: body.join('\n') });
       continue;
     }
 
     if (!line.trim()) {
       flushParagraph();
       continue;
+    }
+
+    const image = IMAGE.exec(line.trim());
+    if (image) {
+      flushParagraph();
+      const src = safeHref(image[2]);
+      if (src) blocks.push({ kind: 'image', alt: image[1], src });
+      continue;
+    }
+
+    const linkedMedia = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(line.trim());
+    if (linkedMedia) {
+      const src = safeHref(linkedMedia[2]);
+      if (src && VIDEO_EXTENSIONS.test(src)) {
+        flushParagraph();
+        blocks.push({ kind: 'video', label: linkedMedia[1], src });
+        continue;
+      }
     }
 
     const heading = HEADING.exec(line);
@@ -136,7 +160,17 @@ export function BobMarkdown({ content }: { content: string }) {
         const key = `block-${blockIndex}`;
 
         if (block.kind === 'code') {
-          return <pre key={key}><code>{block.text}</code></pre>;
+          return block.language === 'mermaid'
+            ? <BobMermaidDiagram key={key} chart={block.text} />
+            : <pre key={key}><code>{block.text}</code></pre>;
+        }
+
+        if (block.kind === 'image') {
+          return <img key={key} src={block.src} alt={block.alt || 'Bob supplied image'} loading="lazy" />;
+        }
+
+        if (block.kind === 'video') {
+          return <video key={key} src={block.src} controls preload="metadata" aria-label={block.label || 'Bob supplied video'} />;
         }
 
         if (block.kind === 'heading') {

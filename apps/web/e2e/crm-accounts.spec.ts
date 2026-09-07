@@ -17,7 +17,7 @@ test('operating branch selector is visible and switches the session context', as
 
 test('CRM account context and governed quote creation are operational', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
-  await expect(page.getByRole('heading', { name: 'CRM & Finance', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Client Portfolios', exact: true })).toBeVisible();
   const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
   await client.click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
@@ -62,7 +62,7 @@ test('account team manages contacts, follow-up activity, and receivables', async
   await workspace.getByRole('button', { name: 'Record activity' }).click();
   await expect(workspace.getByText('Mobilisation review')).toBeVisible();
   await expect(workspace).toHaveScreenshot('crm-account-workspace.png');
-  await workspace.getByRole('button', { name: 'Close account workspace' }).click();
+  await workspace.getByRole('button', { name: 'Close client portfolio' }).click();
 
   const invoice = page.getByText('INV-2026-0042').locator('..');
   await expect(invoice.getByText('NZD 2484.50')).toBeVisible(); await invoice.getByRole('button', { name: 'Mark paid' }).click();

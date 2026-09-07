@@ -26,7 +26,7 @@ interface FieldReport {
 type StatusFilter = 'all' | 'submitted' | 'reviewed' | 'closed';
 
 const FieldReportsPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const [reports, setReports] = useState<FieldReport[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -40,7 +40,7 @@ const FieldReportsPage: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const loadReports = useCallback(async () => {
-    const organizationId = profile?.organizationId;
+    const organizationId = operatingOrganizationId ?? profile?.organizationId;
     if (!organizationId) return;
     setLoading(true);
     setError(null);
@@ -64,7 +64,7 @@ const FieldReportsPage: React.FC = () => {
       else setNames(Object.fromEntries((users ?? []).map((user: { id: string; display_name: string | null; email: string | null }) => [user.id, user.display_name || user.email || user.id])));
     }
     setLoading(false);
-  }, [profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 

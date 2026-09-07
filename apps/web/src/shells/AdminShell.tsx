@@ -161,8 +161,8 @@ const NAVIGATION_MAP = {
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
   ],
   'Clients & Commercial': [
-    { id: 'crm', label: 'Accounts & Proposals', icon: DollarSign },
-    { id: 'relationships', label: 'Agreements & Relationships', icon: Network },
+    { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
+    { id: 'relationships', label: 'Client Portfolios', icon: Network },
     { id: 'onboarding', label: 'New Account Setup', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Activation Checklists', icon: ClipboardCheck },
     { id: 'finance-bureau', label: 'Pricing, Discounts & Tenders', icon: DollarSign },

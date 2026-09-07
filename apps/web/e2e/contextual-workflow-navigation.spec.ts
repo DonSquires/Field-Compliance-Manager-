@@ -16,7 +16,7 @@ test('account workflow rail preserves context across operating workspaces', asyn
   await expect(page.locator(`#crm-account-${ACCOUNT}`)).toHaveClass(/is-context-focus/);
   const accountWorkspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await expect(accountWorkspace.getByText('Mere Wilson')).toBeVisible();
-  await accountWorkspace.getByRole('button', { name: 'Close account workspace' }).click();
+  await accountWorkspace.getByRole('button', { name: 'Close client portfolio' }).click();
   await expect(accountWorkspace).toBeHidden();
   await rail.getByRole('button', { name: /Agreement/ }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/relationships\\?account=${ACCOUNT}`));

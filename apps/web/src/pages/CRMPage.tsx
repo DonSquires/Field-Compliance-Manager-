@@ -303,7 +303,6 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             supabase
               .from('quotes')
               .select('client_org_id,status,created_at')
-              .eq('provider_org_id', orgId)
               .in('client_org_id', accountIds)
               .order('created_at', { ascending: false }),
             supabase.rpc('get_crm_organization_readiness', { p_organization_ids: accountIds }),
@@ -1009,7 +1008,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   return (
     <div className="page-container crm-page">
       <header className="page-header">
-        <div><h1>CRM &amp; Finance</h1><p className="subtitle">{totalAccounts} accounts · Client and service provider management</p></div>
+        <div><h1>Client Portfolios</h1><p className="subtitle">{totalAccounts} accounts · Client and service provider management</p></div>
         <button type="button" className="btn btn-primary" onClick={() => setOrganizationDialog('create')}>Add organization</button>
       </header>
 

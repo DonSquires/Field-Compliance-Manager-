@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BobPanel } from './BobPanel';
+import { extractMermaidDiagrams } from './BobStudio';
 
 const { mockFrom, mockInvoke, mockStorageFrom } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
@@ -109,6 +110,7 @@ describe('BobPanel', () => {
     mockStorageFrom.mockReturnValue({
       upload: vi.fn().mockResolvedValue({ error: null }),
       remove: vi.fn().mockResolvedValue({ error: null }),
+      createSignedUrl: vi.fn().mockResolvedValue({ data: { signedUrl: 'https://signed.example/bob-media.jpg' }, error: null }),
     });
   });
 
@@ -162,7 +164,6 @@ describe('BobPanel', () => {
     render(<BobPanel open onClose={() => undefined} />);
 
     expect(await screen.findByText('repo search')).toBeTruthy();
-    expect(screen.getByText('Completed')).toBeTruthy();
     expect(screen.getByText('80% confidence')).toBeTruthy();
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
   });
@@ -254,7 +255,12 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
 
-    expect(await screen.findByText('agreement.pdf')).toBeTruthy();
+    expect(await screen.findByText('3 source files in this session')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Show context panel'));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Files' }));
+
+    expect(screen.getByText('agreement.pdf')).toBeTruthy();
     expect(screen.getByText('Reading/OCR')).toBeTruthy();
     expect(screen.getByText('site-photo.jpg')).toBeTruthy();
     expect(screen.getByText('Extracted · 84% confidence')).toBeTruthy();
@@ -279,11 +285,14 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
 
-    expect(await screen.findAllByText('Draft prepared')).toHaveLength(2);
-    expect(screen.getByText('Governed proposal')).toBeTruthy();
-    expect(screen.getByText('Evidence')).toBeTruthy();
-    expect(screen.getByText('Next action')).toBeTruthy();
+    expect(await screen.findByText('Draft prepared')).toBeTruthy();
     expect(screen.getByText('Review the approval item before applying it.')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Show context panel'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }));
+
+    expect(screen.getByText('Governed actions')).toBeTruthy();
+    expect(screen.getByText('Nothing is applied until a human approves it in the approval surface.')).toBeTruthy();
   });
 
   it('shows explicit activity state and truthful evidence intake availability', async () => {
@@ -370,9 +379,13 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
 
-    expect(await screen.findAllByText('Failed/paused')).toHaveLength(2);
+    expect(await screen.findByText('Failed/paused')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Show context panel'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Audit' }));
+
     expect(screen.getByText('Waiting on you')).toBeTruthy();
-    expect(screen.getAllByText('Bob recorded a failed or flagged operation for review.')).toHaveLength(2);
+    expect(screen.getByText('Bob recorded a failed or flagged operation for review.')).toBeTruthy();
   });
 
   it('can expand from compact chat into the Bob workspace surface', async () => {
@@ -395,6 +408,8 @@ describe('BobPanel', () => {
     render(<BobPanel open onClose={() => undefined} />);
 
     fireEvent.click(await screen.findByLabelText('Open full workspace'));
+    fireEvent.click(screen.getByLabelText('Show sessions'));
+    fireEvent.click(screen.getByLabelText('Show context panel'));
 
     expect(await screen.findByLabelText('Bob sessions')).toBeTruthy();
     expect(screen.getByLabelText('Search chats')).toBeTruthy();
@@ -416,6 +431,7 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
     fireEvent.click(await screen.findByLabelText('Open full workspace'));
+    fireEvent.click(screen.getByLabelText('Show sessions'));
 
     fireEvent.change(await screen.findByLabelText('Search chats'), { target: { value: 'roster' } });
 
@@ -431,6 +447,7 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
     fireEvent.click(await screen.findByLabelText('Open full workspace'));
+    fireEvent.click(screen.getByLabelText('Show sessions'));
 
     const sessions = await screen.findByLabelText('Bob sessions');
     fireEvent.pointerDown(screen.getByLabelText('Resize sessions pane'), { clientX: 300 });
@@ -473,6 +490,80 @@ describe('BobPanel', () => {
     expect(screen.getByRole('button', { name: 'Plan implementation' })).toBeTruthy();
     expect(screen.getByPlaceholderText('Describe what you want to build, change, or fix')).toBeTruthy();
     expect(mockFrom).toHaveBeenCalledWith('bob_conversations');
+  });
+
+  it('shows an explicit close button and dismisses the workspace', async () => {
+    const onClose = vi.fn();
+    render(<BobPanel open onClose={onClose} />);
+
+    const close = await screen.findByRole('button', { name: 'Close Bob' });
+    expect(close.textContent).toContain('Close');
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a full-page studio for documents, diagrams, and media without forcing side panes open', async () => {
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByLabelText('Open full workspace'));
+
+    expect(await screen.findByLabelText('Bob studio')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Documents/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Diagrams/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Media/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /RFQ response/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Employment contract draft/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Report design/ })).toBeTruthy();
+    expect(screen.queryByLabelText('Bob sessions')).toBeNull();
+    expect(screen.queryByLabelText('Bob context panel')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /RFQ response/ }));
+    expect(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal')).toHaveProperty('value', expect.stringContaining('Draft an RFQ response'));
+  });
+
+  it('extracts Mermaid diagrams from Bob responses for studio rendering', () => {
+    const diagrams = extractMermaidDiagrams([{
+      id: 'message-1',
+      role: 'assistant',
+      created_at: '2026-09-02T06:00:00.000Z',
+      content: '### Flow\n\n```mermaid\nflowchart LR\n  Intake --> Review\n  Review --> Publish\n```',
+    }]);
+
+    expect(diagrams).toHaveLength(1);
+    expect(diagrams[0].chart).toContain('Intake --> Review');
+  });
+
+  it('renders image and direct video markdown as safe media elements', async () => {
+    messageHistory = [{
+      id: 'message-1', role: 'assistant', flagged: false, confidence: null,
+      created_at: '2026-09-02T06:00:00.000Z',
+      content: '![Site photo](https://example.com/site.jpg)\n\n[Patrol video](https://example.com/patrol.mp4)',
+      metadata: {},
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect((await screen.findByAltText('Site photo')).getAttribute('src')).toBe('https://example.com/site.jpg');
+    expect(screen.getByLabelText('Patrol video').getAttribute('src')).toBe('https://example.com/patrol.mp4');
+  });
+
+  it('opens private attached media through a signed preview in the studio', async () => {
+    attachmentHistory = [{
+      id: 'att-image', file_name: 'site-photo.jpg', file_type: 'image/jpeg', file_size_bytes: 900,
+      storage_bucket: 'bob-uploads', storage_path: 'org/org-1/bob/conversation-1/site-photo.jpg',
+      processing_state: 'extracted', extraction_summary: 'Detected site frontage.', confidence: 0.84,
+      created_at: '2026-09-02T06:01:00.000Z',
+    }];
+    const storageApi = { upload: vi.fn(), remove: vi.fn(), createSignedUrl: vi.fn().mockResolvedValue({ data: { signedUrl: 'https://signed.example/site-photo.jpg' }, error: null }) };
+    mockStorageFrom.mockReturnValue(storageApi);
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByLabelText('Open full workspace'));
+    fireEvent.click(screen.getByRole('tab', { name: /Media/ }));
+
+    const image = await screen.findByAltText('site-photo.jpg');
+    expect(image.getAttribute('src')).toBe('https://signed.example/site-photo.jpg');
+    expect(storageApi.createSignedUrl).toHaveBeenCalledWith('org/org-1/bob/conversation-1/site-photo.jpg', 3600);
   });
 
   it('keeps the native file input hidden and the composer anchored', () => {
