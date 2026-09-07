@@ -49,7 +49,11 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
   return { status: 200, contentType: 'application/json', headers, body: JSON.stringify(body) };
 }
 
+export const DESKTOP_PROMPT_KEY = `fcm:desktop-download-prompt-v2-dismissed:${ADMIN_ID}`;
+
 export async function installSupabaseFixtures(page: Page): Promise<void> {
+  // Admin surfaces run as a returning user; the desktop companion prompt is a modal that would otherwise block every click.
+  await page.addInitScript((key) => window.localStorage.setItem(key, '1'), DESKTOP_PROMPT_KEY);
   let authenticatedUser = user;
   let adminSlotStatus = 'published';
   let adminSlotStaffId = OFFICER_ID;
