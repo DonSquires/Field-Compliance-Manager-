@@ -162,6 +162,13 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - The public batch publish RPC signature remains compatible with existing callers.
 - Migration `20260907002500` is applied and verified in live Supabase.
 
+### Progress: attendance exception acknowledgment complete
+
+- Added governed `acknowledge_roster_attendance_exception` for late-start and active-overrun cases.
+- Admin notes are required and written to the audit log.
+- The assigned officer receives a roster notification linked to the schedule.
+- Migration `20260907002600` is applied and verified in live Supabase.
+
 ### Progress: direct swap browser proof complete
 
 - Added a human browser journey for selecting an eligible replacement officer and submitting a direct swap.
