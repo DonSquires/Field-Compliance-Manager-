@@ -200,6 +200,7 @@ The following items are still genuinely incomplete or only partially proven:
 - **Skills matching:** work readiness and credential checks exist, but no canonical skill-to-work-unit requirement contract exists, so skill matching must not be claimed complete.
 - **Credential picker filter:** the roster board displays credential risk and server-side write guards remain authoritative, but the compressed create dialog still lists all `workReady` staff instead of filtering the picker to `credentialRisk = clear`; refactor that dialog before adding the UI filter.
 - **Credential assignment guard:** create, copied-draft, and draft-edit submission now block non-clear credential states before the governed write; the picker refactor remains a UX follow-up.
+- **Credential assignment notice:** the create workflow now explicitly tells operators that risk-state staff remain visible for context but cannot be submitted; the compressed picker refactor remains the only UX follow-up.
 - **Authorization proof:** the full provider/branch/officer/corporate authorization matrix still needs explicit RPC tests for the new migrations.
 - **Atlas:** dry-run inventory is current, but live refresh remains blocked by the 108-row retirement safety gate and needs a reviewed retirement list.
 
