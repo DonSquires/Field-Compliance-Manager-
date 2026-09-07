@@ -79,8 +79,9 @@ fn inspect_sd_index(database_path: String) -> Result<IndexReport, String> {
         })
     }).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     let valid_timestamped_record_count = records.iter().filter(|record| record.start_time_utc.is_some() && record.end_time_utc.is_some()).count();
+    let database_sha256 = sha256_file(path)?;
 
-    Ok(IndexReport { database_path, database_sha256: sha256_file(path)?, record_count: records.len(), valid_timestamped_record_count, event_definitions, records })
+    Ok(IndexReport { database_path, database_sha256, record_count: records.len(), valid_timestamped_record_count, event_definitions, records })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
