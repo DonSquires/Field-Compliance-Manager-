@@ -198,6 +198,7 @@ The following items are still genuinely incomplete or only partially proven:
 - **Attendance exceptions:** late-start and active-overrun visibility exists; absence/no-show resolution, escalation ownership, and notification creation are not yet implemented.
 - **Travel evidence:** rate resolution and distance pay lines exist in schema; the officer/admin UI does not yet present travel/break/pay-line evidence together before approval.
 - **Skills matching:** work readiness and credential checks exist, but no canonical skill-to-work-unit requirement contract exists, so skill matching must not be claimed complete.
+- **Credential picker filter:** the roster board displays credential risk and server-side write guards remain authoritative, but the compressed create dialog still lists all `workReady` staff instead of filtering the picker to `credentialRisk = clear`; refactor that dialog before adding the UI filter.
 - **Authorization proof:** the full provider/branch/officer/corporate authorization matrix still needs explicit RPC tests for the new migrations.
 - **Atlas:** dry-run inventory is current, but live refresh remains blocked by the 108-row retirement safety gate and needs a reviewed retirement list.
 
