@@ -207,6 +207,7 @@ const RosterOperationsPage: React.FC = () => {
     setSaving(true); setError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId);
     if (!person) { setError('A work-ready staff member is required.'); setSaving(false); return; }
+    if (person.credentialRisk !== 'clear') { setError(`${person.name} cannot be assigned until their credential status is clear.`); setSaving(false); return; }
     const { error: updateError } = await supabase.rpc('update_roster_slot', {
       p_slot_id: editingSlot.id,
       p_expected_status: editingSlot.status,
@@ -227,6 +228,7 @@ const RosterOperationsPage: React.FC = () => {
     }
     event.preventDefault(); setSaving(true); setError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId); const unit = workUnits.find((candidate) => candidate.id === form.workUnitId);
+    if (person && person.credentialRisk !== 'clear') { setError(`${person.name} cannot be assigned until their credential status is clear.`); setSaving(false); return; }
     if (person && hasAvailabilityConflict(person.staffId, form.start, form.end)) { setError(`${person.name} is unavailable during the selected assignment time.`); setSaving(false); return; }
     const slotResponse = await supabase.rpc('create_roster_slot', { p_client_request_id: crypto.randomUUID(), p_work_unit_id: form.workUnitId, p_staff_id: person?.staffId, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString(), p_publish: form.publish, p_notes: form.notes.trim() || null });
     if (slotResponse.error || !slotResponse.data) { setError(slotResponse.error?.message ?? 'Roster slot creation was not confirmed.'); setSaving(false); return; }
