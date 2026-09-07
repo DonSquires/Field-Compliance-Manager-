@@ -205,6 +205,7 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - The current repository dry-run inventory is 823 capabilities and 2,484 edges.
 - Live Atlas apply is intentionally pending because the generator detected 108 retirements and refused to proceed without an explicit large-retirement override.
 - Do not force that override until the retirement list is reviewed against the live capability map; the roster work remains deployed and verified independently.
+- The live inventory check confirms the current source-owned capability population is `ci_generator`-owned with no manual-seed rows in the queried set; this still does not make the 108-row retirement safe to force without reviewing the exact stale names/edges.
 
 ## Plan audit: remaining gaps
 
