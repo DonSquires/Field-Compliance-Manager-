@@ -12,7 +12,7 @@ The roster domain is already anchored to these schema entities:
 - `shift_templates`: recurring roster generation.
 - `staff_availability` and `leave_requests`: conflict controls.
 - `rate_rules`, dispatch pay lines, and travel-distance resolution: commercial/pay evidence.
-- `shift_swaps`, break entitlement, and break start RPCs: present in schema but not exposed through the web/mobile roster workflows.
+- `shift_swaps`, break entitlement, and break start RPCs: now exposed through the web workflow; direct swap notifications are live.
 
 Existing governed writes include `create_roster_slot`, `update_roster_slot`, `materialize_roster_slot`, `manage_roster_slot`, `reassign_roster_slot`, `respond_to_roster_slot`, `offer_overtime_by_seniority`, `complete_officer_shift`, `review_branch_timesheet`, `review_timesheet`, and payroll export.
 
@@ -74,7 +74,7 @@ Start with Phase 1 break and swap exposure because the database contracts alread
 - The browser acceptance flow covers start and end receipts on desktop and mobile.
 - No migration was required; the existing `get_shift_break_entitlement`, `start_shift_break`, and `end_shift_break` RPCs are used.
 
-Next slice: expose shift-swap request/review safely, then add browser coverage for return-for-correction and timesheet reapproval.
+Next slice: add full browser coverage for return-for-correction and timesheet reapproval.
 
 ### Progress: shift-swap request/review in progress
 
@@ -152,6 +152,20 @@ Next slice: expose shift-swap request/review safely, then add browser coverage f
 - The current repository dry-run inventory is 823 capabilities and 2,484 edges.
 - Live Atlas apply is intentionally pending because the generator detected 108 retirements and refused to proceed without an explicit large-retirement override.
 - Do not force that override until the retirement list is reviewed against the live capability map; the roster work remains deployed and verified independently.
+
+## Plan audit: remaining gaps
+
+The following items are still genuinely incomplete or only partially proven:
+
+- **Repeat planning:** single-slot copy exists; date-range repeat/copy with per-day conflict preview is not built.
+- **Bulk publish:** preview exists, but materialization failures are still swallowed by the existing batch publish RPC and need a durable failure result per slot.
+- **Timesheet approval loop:** manager correction and officer resubmission exist, but there is no dedicated browser journey proving return -> correction -> branch check -> corporate approval -> corporate return -> re-correction -> reapproval.
+- **Direct swap proof:** direct replacement selection is implemented, but browser coverage currently proves the open-swap path, not direct approval plus replacement notification delivery.
+- **Attendance exceptions:** late-start and active-overrun visibility exists; absence/no-show resolution, escalation ownership, and notification creation are not yet implemented.
+- **Travel evidence:** rate resolution and distance pay lines exist in schema; the officer/admin UI does not yet present travel/break/pay-line evidence together before approval.
+- **Skills matching:** work readiness and credential checks exist, but no canonical skill-to-work-unit requirement contract exists, so skill matching must not be claimed complete.
+- **Authorization proof:** the full provider/branch/officer/corporate authorization matrix still needs explicit RPC tests for the new migrations.
+- **Atlas:** dry-run inventory is current, but live refresh remains blocked by the 108-row retirement safety gate and needs a reviewed retirement list.
 
 ## Acceptance criteria
 
