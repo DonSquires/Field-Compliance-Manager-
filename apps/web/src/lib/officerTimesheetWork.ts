@@ -29,3 +29,14 @@ export async function submitOfficerTimesheetFromWork(clientEventId: string, peri
   if (error || !receipt) throw error ?? new Error('Timesheet work receipt was not confirmed.');
   return receipt;
 }
+
+export async function resubmitRejectedTimesheetFromWork(timesheetId: string, adjustmentHours: number, notes: string) {
+  const { data, error } = await supabase.rpc('resubmit_rejected_timesheet_from_work', {
+    p_timesheet_id: timesheetId,
+    p_adjustment_hours: adjustmentHours,
+    p_notes: notes.trim() || null,
+  });
+  const receipt = (data as Array<{ id: string; actual_hours: number; source_count: number }> | null)?.[0];
+  if (error || !receipt) throw error ?? new Error('Timesheet correction receipt was not confirmed.');
+  return receipt;
+}

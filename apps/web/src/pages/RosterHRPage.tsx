@@ -83,6 +83,7 @@ interface CoverageRequestRow {
   roster_slot_id: string | null;
 }
 interface CoverageWorkUnit { id:string;name:string;work_unit_type:string; }
+interface ShiftSwapRow { id: string; original_shift_id: string; original_staff_id: string; swap_with_staff_id: string | null; swap_type: string; reason: string | null; status: string; requested_by: string; requested_at: string; }
 
 interface TimesheetRow {
   id: string;
@@ -283,11 +284,13 @@ const RosterHRPage: React.FC = () => {
   const [payRoleDrafts, setPayRoleDrafts] = useState<Record<string, string>>({});
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
+  const [shiftSwaps, setShiftSwaps] = useState<ShiftSwapRow[]>([]);
     const [coverageWorkUnits,setCoverageWorkUnits]=useState<CoverageWorkUnit[]>([]);
     const [coverageFinalization,setCoverageFinalization]=useState<{request:CoverageRequestRow;workUnitId:string;notes:string}|null>(null);
   const [showCoverageForm, setShowCoverageForm] = useState(false);
   const [review, setReview] = useState<{ kind: 'leave' | 'timesheet'; id: string; decision: 'approved' | 'declined' | 'rejected' | 'branch_checked' } | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
+  const [swapReview, setSwapReview] = useState<{ item: ShiftSwapRow; decision: 'approved' | 'declined' } | null>(null);
   const [readinessReview, setReadinessReview] = useState<{ staffId: string; name: string; current: boolean; next: boolean } | null>(null);
   const [credentialRenewal, setCredentialRenewal] = useState<{ source: CredentialRow; credentialNumber: string; issuingAuthority: string; issuedDate: string; expiryDate: string; evidenceNotes: string } | null>(null);
   const [readinessNotes, setReadinessNotes] = useState('');
@@ -393,6 +396,12 @@ const RosterHRPage: React.FC = () => {
           supabase.from('performance_reviews').select('id,staff_id,reviewer_user_id,status,rating,cycle_id').eq('organization_id', orgId).order('created_at', { ascending: false }),
           supabase.from('hr_cases').select('id,staff_id,case_type,severity,status,subject,opened_at').eq('organization_id', orgId).order('opened_at', { ascending: false }),
         ]);
+      const shiftSwapsRes = await supabase
+        .from('shift_swaps')
+        .select('id, original_shift_id, original_staff_id, swap_with_staff_id, swap_type, reason, status, requested_by, requested_at')
+        .eq('organization_id', orgId)
+        .order('requested_at', { ascending: false })
+        .limit(100);
 
       if (profilesRes.error) throw profilesRes.error;
       if (staffProfilesRes.error) throw staffProfilesRes.error;
@@ -404,6 +413,7 @@ const RosterHRPage: React.FC = () => {
       if (payLinesRes.error) throw payLinesRes.error;
       if (payLineReviewsRes.error && payLineReviewsRes.error.code !== 'PGRST205') throw payLineReviewsRes.error;
       if (coverageRes.error) throw coverageRes.error;
+      if (shiftSwapsRes.error) throw shiftSwapsRes.error;
       if (readinessRes.error) throw readinessRes.error;
   if(workUnitsRes.error)throw workUnitsRes.error;
         if (onboardingRes.error) throw onboardingRes.error;
@@ -472,6 +482,7 @@ const RosterHRPage: React.FC = () => {
         }))
       );
       setCoverageWorkUnits((workUnitsRes.data as CoverageWorkUnit[])||[]);
+      setShiftSwaps((shiftSwapsRes.data as ShiftSwapRow[]) || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load roster data');
     } finally {
@@ -608,6 +619,25 @@ const RosterHRPage: React.FC = () => {
       setNotice(`Check recorded for ${assetCheck.asset.name}.`);
       setAssetCheck(null);
       await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const reviewSwap = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!swapReview) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: reviewError } = await supabase.rpc('review_shift_swap', {
+      p_client_request_id: crypto.randomUUID(),
+      p_swap_id: swapReview.item.id,
+      p_expected_status: swapReview.item.status,
+      p_decision: swapReview.decision,
+      p_review_notes: reviewNotes.trim() || null,
+    });
+    if (reviewError) setError(reviewError.message);
+    else {
+      setNotice(swapReview.decision === 'approved' ? 'Shift swap approved and roster ownership updated.' : 'Shift swap declined with the review recorded.');
+      setSwapReview(null); setReviewNotes(''); await loadAll();
     }
     setSaving(false);
   };
@@ -806,6 +836,7 @@ const RosterHRPage: React.FC = () => {
 
   return (
     <div className="page-container roster-hr-page">
+      {swapReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-review-title" onSubmit={reviewSwap}><header><div><span>Roster governance</span><h2 id="shift-swap-review-title">{swapReview.decision === 'approved' ? 'Approve' : 'Decline'} shift swap?</h2></div><button type="button" onClick={() => setSwapReview(null)} aria-label="Close shift swap review">×</button></header><p>Approval transfers ownership of the unstarted shift and its linked roster slot. Declined requests remain in the audit history.</p><label><span>Review notes</span><textarea rows={4} required={swapReview.decision === 'declined'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setSwapReview(null)}>Cancel</button><button type="submit" className={swapReview.decision === 'declined' ? 'btn btn-danger' : 'btn btn-primary'} disabled={saving || (swapReview.decision === 'declined' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       <header className="page-header">
         <h1>Roster & HR</h1>
         <p className="subtitle">{staff.length} staff · Credentials, shifts, leave, timesheets</p>
@@ -868,6 +899,10 @@ const RosterHRPage: React.FC = () => {
                 </div>
               ))
             )}
+          </div>
+          <h2 style={{ marginTop: '1.5rem' }}>Shift swap requests ({shiftSwaps.filter((item) => item.status === 'pending').length})</h2>
+          <div className="contacts-list">
+            {shiftSwaps.filter((item) => item.status === 'pending').length === 0 ? <div className="empty-state"><p>No pending shift swaps.</p></div> : shiftSwaps.filter((item) => item.status === 'pending').map((swap) => <div className="contact-card" key={swap.id}><div className="contact-header"><h3>{swap.swap_type.replaceAll('_', ' ')} swap · {swap.original_shift_id.slice(0, 8)}</h3><span className="status-badge status-pending">pending</span></div><p>{swap.reason ?? 'No reason recorded.'}</p><small>Requested by {staffNames[swap.requested_by] ?? swap.requested_by} · {new Date(swap.requested_at).toLocaleString('en-NZ')}</small><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes(''); setSwapReview({ item: swap, decision: 'approved' }); }}>Approve swap</button><button type="button" className="btn btn-sm btn-danger" onClick={() => { setReviewNotes(''); setSwapReview({ item: swap, decision: 'declined' }); }}>Decline swap</button></div></div>)}
           </div>
         </section>
       )}

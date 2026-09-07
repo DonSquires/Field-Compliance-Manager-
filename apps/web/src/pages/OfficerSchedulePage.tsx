@@ -18,6 +18,8 @@ interface AssignedShift {
   shift_health: string | null;
   total_stops: number;
 }
+interface BreakEntitlement { worked_hours: number; rest_breaks_required: number; meal_breaks_required: number; rest_breaks_taken: number; meal_breaks_taken: number; compliant: boolean; }
+interface ActiveBreak { id: string; shift_id: string; break_type: 'rest' | 'meal'; started_at: string; }
 
 interface RosterSlot { id: string; work_unit_id: string; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; }
@@ -65,6 +67,11 @@ const OfficerSchedulePage: React.FC = () => {
   const [responseReceipt, setResponseReceipt] = useState<{ slotId: string; slotStatus: string; shiftId: string | null; shiftStatus: string | null } | null>(null);
   const [responding, setResponding] = useState<{ slot: RosterSlot; response: 'accept' | 'decline' } | null>(null);
   const [declineReason, setDeclineReason] = useState('');
+  const [breakEntitlement, setBreakEntitlement] = useState<Record<string, BreakEntitlement>>({});
+  const [activeBreak, setActiveBreak] = useState<ActiveBreak | null>(null);
+  const [breakSaving, setBreakSaving] = useState(false);
+  const [swapRequest, setSwapRequest] = useState<AssignedShift | null>(null);
+  const [swapReason, setSwapReason] = useState('');
 
   const loadSchedule = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) return;
@@ -76,6 +83,16 @@ const OfficerSchedulePage: React.FC = () => {
       supabase.from('staff_profiles').select('id').eq('organization_id', profile.organizationId).or(`user_id.eq.${profile.id},id.eq.${profile.id}`).limit(1).maybeSingle(),
     ]);
     setAssigned((shiftResponse.data as AssignedShift[]) ?? []);
+    const activeShift = ((shiftResponse.data as AssignedShift[]) ?? []).find((shift) => shift.status === 'in_progress');
+    if (activeShift) {
+      const [entitlementResponse, breakResponse] = await Promise.all([
+        supabase.rpc('get_shift_break_entitlement', { p_shift_id: activeShift.id }),
+        supabase.from('shift_breaks').select('id, shift_id, break_type, started_at').eq('shift_id', activeShift.id).is('ended_at', null).maybeSingle(),
+      ]);
+      const entitlement = (Array.isArray(entitlementResponse.data) ? entitlementResponse.data[0] : entitlementResponse.data) as BreakEntitlement | null;
+      if (entitlement) setBreakEntitlement({ [activeShift.id]: entitlement });
+      setActiveBreak((breakResponse.data as ActiveBreak | null) ?? null);
+    } else { setActiveBreak(null); setBreakEntitlement({}); }
     const staffId = (staffResponse.data as { id: string } | null)?.id;
     let slotError: { message: string } | null = null;
     if (staffId) {
@@ -143,6 +160,32 @@ const OfficerSchedulePage: React.FC = () => {
     setClaiming(false);
   };
 
+  const startBreak = async (shiftId: string, breakType: 'rest' | 'meal') => {
+    setBreakSaving(true); setError(null); setNotice(null);
+    const { data, error: breakError } = await supabase.rpc('start_shift_break', { p_client_request_id: crypto.randomUUID(), p_shift_id: shiftId, p_break_type: breakType });
+    if (breakError || !data) setError(describeLoadFailures([['break', breakError]]) ?? 'Break could not be started.');
+    else { setActiveBreak(data as ActiveBreak); setNotice(`${breakType === 'meal' ? 'Meal' : 'Rest'} break started and recorded.`); }
+    setBreakSaving(false);
+  };
+
+  const endBreak = async () => {
+    if (!activeBreak) return;
+    setBreakSaving(true); setError(null); setNotice(null);
+    const { error: breakError } = await supabase.rpc('end_shift_break', { p_break_id: activeBreak.id, p_notes: null });
+    if (breakError) setError(describeLoadFailures([['break', breakError]]) ?? 'Break could not be ended.');
+    else { setActiveBreak(null); setNotice('Break ended and duration recorded.'); await loadSchedule(); }
+    setBreakSaving(false);
+  };
+
+  const requestSwap = async () => {
+    if (!swapRequest || !swapReason.trim()) return;
+    setBreakSaving(true); setError(null); setNotice(null);
+    const { error: swapError } = await supabase.rpc('request_shift_swap', { p_client_request_id: crypto.randomUUID(), p_shift_id: swapRequest.id, p_swap_with_staff_id: null, p_swap_type: 'open', p_reason: swapReason.trim() });
+    if (swapError) setError(describeLoadFailures([['shift swap', swapError]]) ?? 'Shift swap request could not be submitted.');
+    else { setNotice('Shift swap request submitted for roster review.'); setSwapRequest(null); setSwapReason(''); }
+    setBreakSaving(false);
+  };
+
   return (
     <div className="officer-schedule">
       <header className="officer-schedule-header"><div><span>Roster</span><h1>My schedule</h1><p>Confirmed assignments and open coverage available to claim.</p></div><button type="button" onClick={() => void loadSchedule()} disabled={loading} title="Refresh schedule"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /><span>Refresh</span></button></header>
@@ -156,13 +199,14 @@ const OfficerSchedulePage: React.FC = () => {
 
       {loading ? <div className="officer-schedule-empty"><RefreshCw size={20} className="is-spinning" />Checking roster</div> : view === 'assigned' ? (
         assigned.length + workforceSlots.length === 0 ? <div className="officer-schedule-empty"><CalendarDays size={23} />No upcoming assigned shifts</div> : <div className="officer-schedule-list">
-          {assigned.map((shift) => { const slot = slots.find((item) => item.linked_shift_id === shift.id); return <article id={slot?`officer-roster-slot-${slot.id}`:undefined} className={`officer-assigned-shift ${slot?.id===requestedSlotId?'is-context-focus':''}`} key={shift.id}><div className="officer-schedule-date"><strong>{formatDate(shift.scheduled_start)}</strong><span>{formatTime(shift.scheduled_start)} - {formatTime(shift.scheduled_end)}</span></div><div><strong>{shift.service_type.replaceAll('_', ' ')}</strong><small>{shift.total_stops} planned stops{shift.notes ? ` · ${shift.notes}` : ''}</small></div><span className={`status-${shift.status}`}>{shift.status.replaceAll('_', ' ')}</span>{slot?.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
+          {assigned.map((shift) => { const slot = slots.find((item) => item.linked_shift_id === shift.id); const entitlement = breakEntitlement[shift.id]; return <article id={slot?`officer-roster-slot-${slot.id}`:undefined} className={`officer-assigned-shift ${slot?.id===requestedSlotId?'is-context-focus':''}`} key={shift.id}><div className="officer-schedule-date"><strong>{formatDate(shift.scheduled_start)}</strong><span>{formatTime(shift.scheduled_start)} - {formatTime(shift.scheduled_end)}</span></div><div><strong>{shift.service_type.replaceAll('_', ' ')}</strong><small>{shift.total_stops} planned stops{shift.notes ? ` · ${shift.notes}` : ''}</small></div><span className={`status-${shift.status}`}>{shift.status.replaceAll('_', ' ')}</span>{slot?.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}{['scheduled', 'published', 'accepted'].includes(shift.status) && <button type="button" className="officer-swap-button" onClick={() => setSwapRequest(shift)}>Request swap</button>}{shift.status === 'in_progress' && <div className="officer-break-controls"><small>{entitlement ? `${entitlement.rest_breaks_taken}/${entitlement.rest_breaks_required} rest · ${entitlement.meal_breaks_taken}/${entitlement.meal_breaks_required} meal` : 'Break entitlement loading'}</small>{activeBreak?.shift_id === shift.id ? <button type="button" onClick={() => void endBreak()} disabled={breakSaving}>End {activeBreak.break_type} break</button> : <><button type="button" onClick={() => void startBreak(shift.id, 'rest')} disabled={breakSaving}>Start rest break</button><button type="button" onClick={() => void startBreak(shift.id, 'meal')} disabled={breakSaving}>Start meal break</button></>}</div>}</article>; })}
           {workforceSlots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); return <article id={`officer-roster-slot-${slot.id}`} className={`officer-assigned-shift officer-internal-slot ${slot.id===requestedSlotId?'is-context-focus':''}`} key={slot.id}><div className="officer-schedule-date"><strong>{formatDate(slot.scheduled_start)}</strong><span>{formatTime(slot.scheduled_start)} - {formatTime(slot.scheduled_end)}</span></div><div><strong>{unit?.name ?? 'Internal assignment'}</strong><small>{unit?.service_type.replaceAll('_', ' ')}{slot.notes ? ` · ${slot.notes}` : ''}</small></div><span className={`status-${slot.status}`}>{slot.status}</span>{slot.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
         </div>
       ) : coverage.length === 0 ? <div className="officer-schedule-empty"><ShieldCheck size={23} />No open coverage right now</div> : <div className="officer-schedule-list">{coverage.map((request) => <article className={`officer-coverage urgency-${request.urgency}`} key={request.id}><div className="officer-schedule-date"><strong>{formatDate(`${request.shift_date}T00:00:00`)}</strong><span>{request.start_time.slice(0, 5)} - {request.end_time.slice(0, 5)}</span></div><div><strong>{request.site?.name ?? 'Location to be confirmed'}</strong><small><Users size={13} /> {request.required_staff_count} needed{request.notes ? ` · ${request.notes}` : ''}</small></div><span>{request.urgency}</span><button type="button" onClick={() => setSelectedCoverage(request)}>Review claim</button></article>)}</div>}
 
       {selectedCoverage && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-claim-title"><header><div><span>Coverage commitment</span><h2 id="coverage-claim-title">Claim this shift?</h2></div><button type="button" onClick={() => setSelectedCoverage(null)} title="Close"><X size={18} /></button></header><dl><div><dt>Date</dt><dd>{formatDate(`${selectedCoverage.shift_date}T00:00:00`)}</dd></div><div><dt>Time</dt><dd>{selectedCoverage.start_time.slice(0, 5)} - {selectedCoverage.end_time.slice(0, 5)}</dd></div><div><dt>Location</dt><dd><MapPin size={14} />{selectedCoverage.site?.name ?? 'To be confirmed'}</dd></div><div><dt>Urgency</dt><dd>{selectedCoverage.urgency}</dd></div></dl>{selectedCoverage.notes && <p>{selectedCoverage.notes}</p>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSelectedCoverage(null)}>Cancel</button><button type="button" onClick={() => void confirmClaim()} disabled={claiming}>{claiming ? <><RefreshCw size={16} className="is-spinning" />Confirming</> : <><CheckCircle2 size={16} />Confirm claim</>}</button></div></div></div>}
       {responding && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="assignment-response-title"><header><div><span>Roster response</span><h2 id="assignment-response-title">{responding.response === 'accept' ? 'Accept assignment?' : 'Decline assignment?'}</h2></div><button type="button" onClick={() => setResponding(null)} title="Close"><X size={18} /></button></header><p>{responding.response === 'accept' ? 'Acceptance confirms your roster slot and any linked field shift in one transaction.' : 'Declining releases this assignment for roster review. Record why you cannot accept it.'}</p>{responding.response === 'decline' && <label><span>Decline reason</span><textarea required rows={4} value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setResponding(null)}>Back</button><button type="button" onClick={() => void respondToSlot()} disabled={claiming || (responding.response === 'decline' && !declineReason.trim())}>{claiming ? 'Saving' : responding.response === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></div></div></div>}
+      {swapRequest && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-title"><header><div><span>Roster change</span><h2 id="shift-swap-title">Request shift swap?</h2></div><button type="button" onClick={() => setSwapRequest(null)} title="Close"><X size={18} /></button></header><p>{formatDate(swapRequest.scheduled_start)} · {formatTime(swapRequest.scheduled_start)} - {formatTime(swapRequest.scheduled_end)}. This opens the shift for roster review; the shift remains assigned until approved.</p><label><span>Reason</span><textarea required rows={4} value={swapReason} onChange={(event) => setSwapReason(event.target.value)} placeholder="Why can you no longer work this shift?" /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSwapRequest(null)}>Cancel</button><button type="button" onClick={() => void requestSwap()} disabled={breakSaving || !swapReason.trim()}>Submit swap request</button></div></div></div>}
     </div>
   );
 };

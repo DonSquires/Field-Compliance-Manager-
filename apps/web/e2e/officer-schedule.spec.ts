@@ -98,3 +98,39 @@ test('coverage finalization notification opens the exact roster assignment', asy
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('active shift records and closes a governed rest break', async ({ page }) => {
+  await page.route('**/rest/v1/shifts**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '12121212-1212-4212-8212-121212121212', service_type: 'patrol', scheduled_start: '2026-08-30T08:00:00.000Z', scheduled_end: '2026-08-30T16:00:00.000Z', status: 'in_progress', notes: 'Active patrol', shift_health: 'on_track', total_stops: 2 }]) });
+  });
+  await page.route('**/rest/v1/rpc/get_shift_break_entitlement', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ worked_hours: 4, rest_breaks_required: 1, meal_breaks_required: 1, rest_breaks_taken: 0, meal_breaks_taken: 0, compliant: false }]) });
+  });
+  await page.route('**/rest/v1/shift_breaks**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+  });
+  await page.route('**/rest/v1/rpc/start_shift_break', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: '13131313-1313-4313-8313-131313131313', shift_id: '12121212-1212-4212-8212-121212121212', break_type: 'rest', started_at: '2026-08-30T10:00:00.000Z' }) });
+  });
+  await page.route('**/rest/v1/rpc/end_shift_break', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: '13131313-1313-4313-8313-131313131313', shift_id: '12121212-1212-4212-8212-121212121212', break_type: 'rest', started_at: '2026-08-30T10:00:00.000Z', ended_at: '2026-08-30T10:10:00.000Z' }) });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await expect(page.getByRole('button', { name: 'Start rest break' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start rest break' }).click();
+  await expect(page.getByRole('status')).toContainText('Rest break started and recorded.');
+  await page.getByRole('button', { name: 'End rest break' }).click();
+  await expect(page.getByRole('status')).toContainText('Break ended and duration recorded.');
+});
+
+test('officer submits an open shift-swap request with a reason', async ({ page }) => {
+  await page.route('**/rest/v1/rpc/request_shift_swap', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '14141414-1414-4414-8414-141414141414', status: 'pending', swap_type: 'open' }]) });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Request swap' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Request shift swap?' });
+  await dialog.getByLabel('Reason').fill('Approved family commitment prevents me working this assignment.');
+  await dialog.getByRole('button', { name: 'Submit swap request' }).click();
+  await expect(page.getByRole('status')).toContainText('Shift swap request submitted for roster review.');
+});

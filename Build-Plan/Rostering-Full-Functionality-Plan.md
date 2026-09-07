@@ -1,0 +1,109 @@
+# Full Rostering Build Plan
+
+Date: 2026-09-07
+
+## Verified foundation
+
+The roster domain is already anchored to these schema entities:
+
+- `roster_slots`: planned typed assignments and lifecycle state.
+- `shifts`: materialized field execution, actual timestamps, completion state.
+- `timesheets`: derived/manual payroll time and approval state.
+- `shift_templates`: recurring roster generation.
+- `staff_availability` and `leave_requests`: conflict controls.
+- `rate_rules`, dispatch pay lines, and travel-distance resolution: commercial/pay evidence.
+- `shift_swaps`, break entitlement, and break start RPCs: present in schema but not exposed through the web/mobile roster workflows.
+
+Existing governed writes include `create_roster_slot`, `update_roster_slot`, `materialize_roster_slot`, `manage_roster_slot`, `reassign_roster_slot`, `respond_to_roster_slot`, `offer_overtime_by_seniority`, `complete_officer_shift`, `review_branch_timesheet`, `review_timesheet`, and payroll export.
+
+## Atlas findings
+
+Live Atlas marks `roster_slots`, `shifts`, `timesheets`, and `shift_templates` as present and wired. Static callers include `RosterOperationsPage`, `OfficerSchedulePage`, `OfficerTimesheetPage`, `RosterHRPage`, materialization, completion, commercial readiness, overtime, shift swaps, breaks, and travel pay resolution.
+
+Atlas does not infer `exercised`; browser acceptance must prove each flow. The direct `roster_slots` flow-reach query returned no rows, so Atlas refresh/seed must be run after new lifecycle callers are exercised. Do not treat the existing `references` inventory as proof of live runtime flow.
+
+## Product lifecycle
+
+`demand/template -> draft slot -> published slot -> officer response -> accepted slot -> active shift -> break/travel/time evidence -> completed shift -> derived timesheet -> branch review -> payroll approval -> payroll export`
+
+Every transition must include expected state, actor authority, reason where material, audit event, notification behavior, and downstream payroll/report impact.
+
+## Build phases
+
+### Phase 1: Expose existing governed capabilities
+
+1. Add admin roster actions for copy-to-draft, repeat date range, draft edit, publish, recall, reassign, cancel, and batch publish.
+2. Add officer actions for accept/decline, open-shift claim, swap request, swap cancellation, and swap decision receipt.
+3. Add break controls using `get_shift_break_entitlement` and `start_shift_break`, with active-shift validation and visible receipt.
+4. Add travel/time evidence to the officer shift workflow using existing geofence/GPS and rate resolution paths.
+5. Add browser tests for every transition and terminal-state restriction.
+
+### Phase 2: Timesheet correction and approval loop
+
+1. Show derived work, actual timestamps, adjustments, breaks, travel, and pay-line evidence together.
+2. Allow authorised managers to correct submitted time through a governed correction RPC with before/after values and reason.
+3. Support branch check, return for correction, resubmission, corporate approval, approval return, and reapproval.
+4. Block approval when unresolved dispatch pay-line exceptions exist.
+5. Lock paid/exported timesheets and expose an audited correction route rather than direct editing.
+
+### Phase 3: Planning intelligence and workforce safeguards
+
+1. Repeat templates across date ranges with preview and conflict counts.
+2. Add rest/fatigue, skills, credential, leave, availability, and overlapping-work warnings before publish.
+3. Add workload, overtime, labour-cost, client-billing, and margin previews.
+4. Add notifications for assignment, update, cancellation, swap, offer expiry, and approval decisions.
+5. Add no-show, late, absence, and coverage escalation workflows.
+
+### Phase 4: Human acceptance and release hardening
+
+1. Desktop and mobile browser journeys for every lifecycle path.
+2. RLS/RPC authorization tests for provider, branch, manager, officer, and corporate payroll roles.
+3. Re-run Atlas capability/edge refresh after exercised flows.
+4. Compare Atlas flow reach with schema writers and report dormant or references-only claims.
+5. Apply migrations, run full tests, capture screenshots, and publish rollback notes.
+
+## First implementation slice
+
+Start with Phase 1 break and swap exposure because the database contracts already exist and the current UI has no callers. Do not add duplicate tables. Add only missing UI adapters, friendly error handling, receipts, focused browser fixtures/tests, and Atlas refresh evidence.
+
+### Progress: active-shift breaks complete
+
+- `OfficerSchedulePage` now loads break entitlement for an `in_progress` shift.
+- Officers can start a governed rest or meal break and end the active break.
+- The schedule shows taken versus required rest/meal breaks.
+- The browser acceptance flow covers start and end receipts on desktop and mobile.
+- No migration was required; the existing `get_shift_break_entitlement`, `start_shift_break`, and `end_shift_break` RPCs are used.
+
+Next slice: expose shift-swap request/review safely, then add browser coverage for return-for-correction and timesheet reapproval.
+
+### Progress: shift-swap request/review in progress
+
+- Added the missing governed `request_shift_swap` RPC for officer-originated open/direct requests.
+- Officers can submit an open swap request with a required reason from My Schedule.
+- HR loads pending swaps and can approve or decline them through `review_shift_swap`.
+- Approval is restricted to unstarted shifts and transfers linked roster ownership through the existing review RPC.
+- Browser coverage now exercises the officer request path; the migration must be applied before live use.
+
+### Progress: correction loop started
+
+- Added `resubmit_rejected_timesheet_from_work` for owner-only correction and resubmission.
+- Rejected timesheets recalculate derived work, replace their work ledger, clear the rejection, and return to `submitted` with an audit event.
+- The officer form now shows `Resubmit corrected timesheet` for the matching rejected period.
+- The remaining approval-loop work is browser coverage for manager return, officer correction, branch check, and corporate reapproval, plus live migration application.
+
+### Progress: completed-shifts-only timesheets complete
+
+- `get_officer_timesheet_work` now includes only completed shifts with actual timestamps and standalone completed dispatch jobs.
+- Accepted, in-progress, and active partial work no longer generates payable timesheet hours.
+- Linked dispatch jobs remain excluded when already represented by a completed shift, preventing double counting.
+- Migration `20260907001700` is applied and verified in live Supabase.
+
+## Acceptance criteria
+
+- A manager can create, copy, edit, publish, recall, reassign, and cancel a planned slot.
+- An officer can receive, accept, decline, swap, start/end an allowed break, and see every receipt.
+- A completed shift cannot be edited through the planning UI.
+- A timesheet can be submitted, returned with a reason, corrected, re-submitted, branch checked, approved, returned, and re-approved.
+- Travel and hourly pay evidence resolves from governed rate rules and is visible before payroll approval.
+- All terminal and correction transitions are append-only in audit history.
+- No raw backend errors, silent writes, or untracked schema-only capabilities remain in the tested path.
