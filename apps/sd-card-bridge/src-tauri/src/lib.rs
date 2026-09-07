@@ -109,7 +109,7 @@ fn detect_removable_disks() -> Result<Vec<RemovableDisk>, String> {
                     partitions = $partitions
                 }
             })
-            $disks | ConvertTo-Json -Depth 5 -Compress
+            ConvertTo-Json -InputObject @($disks) -Depth 5 -Compress
         "#;
         let output = Command::new("powershell.exe")
                 .args(["-NoProfile", "-NonInteractive", "-Command", script])
