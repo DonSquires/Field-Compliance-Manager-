@@ -1,0 +1,72 @@
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const MAX_VIDEO_BYTES = 524288000;
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+}
+
+serve(async (request) => {
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
+  try {
+    const authorization = request.headers.get('Authorization') ?? '';
+    const caller = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: authorization } } });
+    const { data: { user }, error: authError } = await caller.auth.getUser();
+    if (authError || !user) return json({ error: 'Unauthorized' }, 401);
+    const body = await request.json().catch(() => ({}));
+    const attachmentId = String(body.attachment_id ?? '').trim();
+    const storagePath = String(body.storage_path ?? '').trim();
+    const fileName = String(body.file_name ?? '').trim();
+    const fileType = String(body.file_type ?? '').trim();
+    const fileSizeBytes = Number(body.file_size_bytes);
+    if (!attachmentId || !storagePath || !fileName || !fileType.startsWith('video/') || !Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > MAX_VIDEO_BYTES) {
+      return json({ error: 'Valid video attachment_id, storage_path, file_name, file_type, and file_size_bytes are required' }, 422);
+    }
+
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { data: profile } = await admin.from('user_profiles').select('organization_id').eq('id', user.id).single();
+    if (!profile?.organization_id) return json({ error: 'Active organization not found' }, 404);
+    const requiredPrefix = `desktop/${user.id}/${attachmentId}-`;
+    if (!storagePath.startsWith(requiredPrefix)) return json({ error: 'Storage path does not belong to this desktop import' }, 403);
+    const { data: storedObject, error: objectError } = await admin.schema('storage').from('objects')
+      .select('name, metadata').eq('bucket_id', 'bob-uploads').eq('name', storagePath).maybeSingle();
+    if (objectError || !storedObject) return json({ error: 'Uploaded video object not found' }, 404);
+
+    const { data: conversation, error: conversationError } = await admin.from('bob_conversations').insert({
+      organization_id: profile.organization_id,
+      user_id: user.id,
+      module_key: 'cctv_review',
+      title: `Desktop CCTV import: ${fileName.slice(0, 160)}`,
+    }).select('id').single();
+    if (conversationError || !conversation) throw new Error(conversationError?.message ?? 'Could not create import conversation');
+    const { error: attachmentError } = await admin.from('bob_attachments').insert({
+      id: attachmentId,
+      organization_id: profile.organization_id,
+      conversation_id: conversation.id,
+      uploaded_by: user.id,
+      file_name: fileName,
+      file_type: fileType,
+      file_size_bytes: fileSizeBytes,
+      storage_bucket: 'bob-uploads',
+      storage_path: storagePath,
+      purpose: 'video_intake',
+      processing_state: 'pending',
+      source_type: 'upload',
+    });
+    if (attachmentError) throw new Error(attachmentError.message);
+    const { data: jobId, error: jobError } = await admin.rpc('register_bob_video_attachment_for_review', { p_attachment_id: attachmentId });
+    if (jobError) throw new Error(jobError.message);
+    return json({ success: true, attachment_id: attachmentId, inference_job_id: jobId });
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : 'Desktop video registration failed' }, 500);
+  }
+});
