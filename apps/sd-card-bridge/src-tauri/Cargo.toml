@@ -21,4 +21,4 @@ sha2 = "0.10"
 tauri = { version = "2.11.1", features = [] }
 tauri-plugin-deep-link = "2.4.10"
 tauri-plugin-dialog = "2.7.3"
-tauri-plugin-fs = "2.4.4"
+tauri-plugin-fs = "2.5.2"
