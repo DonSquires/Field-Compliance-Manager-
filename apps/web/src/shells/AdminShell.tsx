@@ -59,7 +59,7 @@ import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
 
-const DESKTOP_APP_RELEASES_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/latest';
+const DESKTOP_APP_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/latest/download/FCM-SD-Card-Bridge-Setup.exe';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
@@ -569,7 +569,7 @@ const AdminShell: React.FC = () => {
             <div className="admin-shell-tools">
               {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'corporate_oversight' ? ' (corporate)' : ''}</option>)}</select></label>}
               <NotificationCenter onNavigate={navigateFromNotification} />
-              <a className="admin-shell-icon admin-desktop-download" href={DESKTOP_APP_RELEASES_URL} target="_blank" rel="noreferrer" title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></a>
+              <a className="admin-shell-icon admin-desktop-download" href={DESKTOP_APP_DOWNLOAD_URL} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></a>
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>
@@ -597,7 +597,7 @@ const AdminShell: React.FC = () => {
           onClose={() => setBobOpen(false)}
           context={bobContext}
         />
-        {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop companion</span><h2 id="desktop-download-title">Use local hardware with FCM</h2><p>Install the desktop companion to import SD-card footage, prepare large video files locally, and queue VPS analysis.</p></div><div className="desktop-download-actions"><a href={DESKTOP_APP_RELEASES_URL} target="_blank" rel="noreferrer" onClick={dismissDesktopDownload}><Download size={16} aria-hidden="true" /> Download desktop app</a><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
+        {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop companion</span><h2 id="desktop-download-title">Use local hardware with FCM</h2><p>Install the desktop companion to import SD-card footage, prepare large video files locally, and queue VPS analysis.</p></div><div className="desktop-download-actions"><a href={DESKTOP_APP_DOWNLOAD_URL} onClick={dismissDesktopDownload}><Download size={16} aria-hidden="true" /> Download desktop app</a><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
 
       </div>
     );

@@ -1,6 +1,6 @@
 [package]
 name = "fcm-sd-card-bridge"
-version = "0.1.0"
+version = "0.1.1"
 description = "Read-only local SD-card evidence bridge for Field Compliance Manager"
 authors = ["Field Compliance Manager"]
 edition = "2021"
@@ -17,6 +17,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
-tauri = { version = "2.8.1", features = [] }
-tauri-plugin-deep-link = "2.2.0"
-tauri-plugin-dialog = "2.2.1"
+tauri = { version = "2.11.1", features = [] }
+tauri-plugin-deep-link = "2.4.10"
+tauri-plugin-dialog = "2.7.3"
