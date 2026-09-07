@@ -26,6 +26,15 @@
 	z-index: 60;
 }
 
+.roster-quick-actions {
+	position: relative;
+	z-index: 60;
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-top: 10px;
+}
+
 .roster-ops-header button {
 	border-color: #315969;
 	color: #d8e6eb;

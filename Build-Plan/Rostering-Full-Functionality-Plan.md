@@ -147,6 +147,14 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - The existing batch publish action remains explicit and separate from preview.
 - Migration `20260907002300` is applied and verified in live Supabase.
 
+### Progress: date-range repeat planning complete
+
+- Added `repeat_roster_slot_range` for governed draft repetition across up to 93 days.
+- Leave-conflicted and overlapping days are skipped and returned as separate counts.
+- Admins can choose a date range from the selected assignment without auto-publishing.
+- Fixed quick-action stacking so repeat controls remain clickable on mobile with the assignment inspector open.
+- Migration `20260907002400` is applied and verified in live Supabase.
+
 ### Atlas follow-up
 
 - The current repository dry-run inventory is 823 capabilities and 2,484 edges.

@@ -30,3 +30,14 @@ test('administrator copies an existing roster assignment into a future draft', a
 	await expect(dialog.getByText('Publish immediately')).toBeVisible();
 	await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeVisible();
 });
+
+test('administrator repeats a selected assignment across a date range', async ({ page }) => {
+	await signInAsAdmin(page, '/admin/roster');
+	await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+	await page.getByRole('button', { name: 'Repeat selected' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Repeat assignment' });
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByLabel('From date')).toHaveValue('2026-09-04');
+	await expect(dialog.getByLabel('To date')).toHaveValue('2026-09-10');
+	await expect(dialog.getByText('Creates draft assignments and skips overlapping or leave-conflicted days.')).toBeVisible();
+});
