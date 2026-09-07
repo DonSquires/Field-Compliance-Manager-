@@ -3,8 +3,8 @@ use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{self, File},
-    io::Read,
+    fs::{self, File, OpenOptions},
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -50,6 +50,7 @@ struct DiskPartition {
         partition_number: u32,
         drive_letter: Option<String>,
         size_bytes: u64,
+        offset_bytes: u64,
         filesystem: Option<String>,
         label: Option<String>,
 }
@@ -62,6 +63,23 @@ struct RemovableDisk {
         size_bytes: u64,
         operational_status: String,
         partitions: Vec<DiskPartition>,
+}
+
+#[derive(Deserialize)]
+struct PartitionCoordinates {
+    offset_bytes: u64,
+    size_bytes: u64,
+}
+
+#[derive(Serialize)]
+struct PartitionProbe {
+    disk_number: u32,
+    partition_number: u32,
+    offset_bytes: u64,
+    bytes_read: usize,
+    sha256: String,
+    signature: String,
+    format_hint: String,
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
@@ -96,6 +114,7 @@ fn detect_removable_disks() -> Result<Vec<RemovableDisk>, String> {
                         partition_number = [uint32]$partition.PartitionNumber
                         drive_letter = if ($volume -and $volume.DriveLetter) { [string]$volume.DriveLetter } else { $null }
                         size_bytes = [uint64]$partition.Size
+                        offset_bytes = [uint64]$partition.Offset
                         filesystem = if ($volume -and $volume.FileSystem) { [string]$volume.FileSystem } else { $null }
                         label = if ($volume -and $volume.FileSystemLabel) { [string]$volume.FileSystemLabel } else { $null }
                     }
@@ -123,6 +142,57 @@ fn detect_removable_disks() -> Result<Vec<RemovableDisk>, String> {
                 return Ok(Vec::new());
         }
         serde_json::from_str(&body).map_err(|error| format!("Could not parse Windows disk inventory: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn partition_coordinates(disk_number: u32, partition_number: u32) -> Result<PartitionCoordinates, String> {
+    use std::process::Command;
+
+    let script = format!(
+        " $disk = Get-Disk -Number {disk_number} -ErrorAction Stop; if ($disk.BusType -notin @('USB', 'SD', 'MMC')) {{ throw 'Selected disk is not removable' }}; $partition = Get-Partition -DiskNumber {disk_number} -PartitionNumber {partition_number} -ErrorAction Stop; [pscustomobject]@{{ offset_bytes = [uint64]$partition.Offset; size_bytes = [uint64]$partition.Size }} | ConvertTo-Json -Compress "
+    );
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|error| format!("Could not query the selected partition: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("Partition query failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| format!("Could not parse selected partition: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn probe_partition_header(disk_number: u32, partition_number: u32) -> Result<PartitionProbe, String> {
+    const PROBE_BYTES: usize = 4096;
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    if coordinates.size_bytes < PROBE_BYTES as u64 {
+        return Err("Selected partition is too small to inspect safely.".to_string());
+    }
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path}. Open FCM Desktop as Administrator only if Windows denies read-only access: {error}"))?;
+    device.seek(SeekFrom::Start(coordinates.offset_bytes)).map_err(|error| format!("Could not seek to partition start: {error}"))?;
+    let mut bytes = vec![0_u8; PROBE_BYTES];
+    device.read_exact(&mut bytes).map_err(|error| format!("Could not read partition header: {error}"))?;
+    let sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let signature = bytes[..32].iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let format_hint = if bytes.get(1080..1082) == Some(&[0x53, 0xef]) {
+        "ext4 filesystem signature"
+    } else if bytes.starts_with(b"NTFS    ") {
+        "NTFS filesystem signature"
+    } else if bytes.starts_with(&[0xeb, 0x3c, 0x90]) || bytes.starts_with(&[0xeb, 0x58, 0x90]) {
+        "FAT-compatible boot sector"
+    } else {
+        "No recognised filesystem header: possible proprietary DVR container or encrypted data"
+    }.to_string();
+    Ok(PartitionProbe { disk_number, partition_number, offset_bytes: coordinates.offset_bytes, bytes_read: PROBE_BYTES, sha256, signature, format_hint })
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn probe_partition_header(_disk_number: u32, _partition_number: u32) -> Result<PartitionProbe, String> {
+    Err("Partition header probing is available in the Windows FCM Desktop application.".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -212,7 +282,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![detect_removable_disks, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![detect_removable_disks, probe_partition_header, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }

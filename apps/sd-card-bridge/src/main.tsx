@@ -46,9 +46,20 @@ type RemovableDisk = {
     partition_number: number;
     drive_letter: string | null;
     size_bytes: number;
+    offset_bytes: number;
     filesystem: string | null;
     label: string | null;
   }>;
+};
+
+type PartitionProbe = {
+  disk_number: number;
+  partition_number: number;
+  offset_bytes: number;
+  bytes_read: number;
+  sha256: string;
+  signature: string;
+  format_hint: string;
 };
 
 function formatBytes(bytes: number): string {
@@ -70,6 +81,8 @@ function App() {
   const [mountedFiles, setMountedFiles] = useState<MountedFolderReport | null>(null);
   const [removableDisks, setRemovableDisks] = useState<RemovableDisk[]>([]);
   const [diskLoading, setDiskLoading] = useState(false);
+  const [partitionProbe, setPartitionProbe] = useState<PartitionProbe | null>(null);
+  const [probeLoading, setProbeLoading] = useState<string | null>(null);
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -140,6 +153,20 @@ function App() {
     }
   };
 
+  const probePartitionHeader = async (diskNumber: number, partitionNumber: number) => {
+    setError(null);
+    setProbeLoading(`${diskNumber}:${partitionNumber}`);
+    try {
+      const result = await invoke<PartitionProbe>('probe_partition_header', { diskNumber, partitionNumber });
+      setPartitionProbe(result);
+      setStatus(`Read ${result.bytes_read.toLocaleString()} bytes from Disk ${diskNumber}, partition ${partitionNumber}. No data was written.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setProbeLoading(null);
+    }
+  };
+
   const uploadVideo = async () => {
     if (!video) return;
     setError(null);
@@ -196,7 +223,7 @@ function App() {
         {error && <div className="companion-error" role="alert">{error}</div>}
         {!signedInAs && <section className="connection-notice"><strong>Sign in to begin</strong><span>Use your authorised FCM account. Desktop processing is local; evidence, approvals, and results remain centrally governed.</span></section>}
         {activeView === 'home' && <><div className="workspace-heading"><span>Local operations</span><h2>FCM desktop workspace</h2><p>Use local hardware and large-file tools here. Open the FCM web portal for live work queues, formal review, reporting, and approvals.</p></div><div className="capability-grid"><Capability icon={<HardDrive size={23} />} title="SD card import" detail="Inspect copied camera indexes and prepare evidence for review." action="Open importer" onClick={() => setActiveView('sd-import')} /><Capability icon={<Camera size={23} />} title="Camera evidence" detail="Upload exported footage and queue VPS motion, ALPR, and face analysis." action="Upload video" onClick={() => setActiveView('video-upload')} /><Capability icon={<Database size={23} />} title="Operations portal" detail="Open FCM web for CCTV Review, Parking, Freedom Camping, and approvals." action="Open FCM web" onClick={() => window.open(FCM_WEB_URL, '_blank', 'noopener,noreferrer')} /></div><section className="read-only-notice"><strong>Current local access</strong><span>This release never writes to an SD card or reads raw physical disks. It works with copied evidence while the vendor storage format is validated.</span></section></>}
-        {activeView === 'sd-import' && <><div className="workspace-heading"><span>Evidence intake</span><h2>SD card files and partitions</h2><p>Detect the complete removable disk first. Browse Windows-readable files separately; unmounted recording partitions need a vendor adapter or read-only image analysis.</p></div><section className="tool"><button type="button" onClick={() => void detectRemovableDisks()} disabled={diskLoading}><RefreshCw size={16} className={diskLoading ? 'is-spinning' : ''} /> Detect SD card partitions</button><button type="button" onClick={() => void inspectMountedFolder()}><HardDrive size={16} /> Browse mounted card files</button><button type="button" onClick={() => void inspectIndex()}><Database size={16} /> Choose SDFileInfo.db</button><p>{status}</p></section>{removableDisks.map((disk) => <section className="results" key={disk.disk_number}><h2>Disk {disk.disk_number}: {disk.friendly_name || 'Removable disk'}</h2><p>{formatBytes(disk.size_bytes)} · {disk.bus_type} · {disk.operational_status}</p><table><thead><tr><th>Partition</th><th>Size</th><th>Filesystem</th><th>Windows access</th></tr></thead><tbody>{disk.partitions.map((partition) => <tr key={partition.partition_number}><td>{partition.partition_number}</td><td>{formatBytes(partition.size_bytes)}</td><td>{partition.filesystem || 'Unknown or proprietary'}</td><td>{partition.drive_letter ? `${partition.drive_letter}: mounted` : 'Not mounted'}</td></tr>)}</tbody></table>{disk.partitions.some((partition) => !partition.drive_letter) && <p className="mounted-note"><AlertTriangle size={15} /> Do not format or repair an unmounted partition. FCM must use a validated vendor reader or read-only disk image before it can extract footage.</p>}</section>)}{mountedFiles && <section className="results"><div className="metrics"><Metric label="Mounted files" value={mountedFiles.file_count} /><Metric label="Total data" value={Math.round(mountedFiles.total_bytes / 1024 / 1024)} /><Metric label="File limit" value={mountedFiles.truncated ? 5000 : mountedFiles.file_count} /></div><p className="hash">Source: {mountedFiles.folder_path}</p><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody>{mountedFiles.files.map((file) => <tr key={file.relative_path}><td><FileText size={14} /> {file.relative_path}</td><td>{formatBytes(file.size_bytes)}</td></tr>)}</tbody></table></section>}</>}
+        {activeView === 'sd-import' && <><div className="workspace-heading"><span>Evidence intake</span><h2>SD card files and partitions</h2><p>Detect the complete removable disk first. Browse Windows-readable files separately; probe an unmounted partition&apos;s first 4 KB before choosing a vendor reader or image analysis.</p></div><section className="tool"><button type="button" onClick={() => void detectRemovableDisks()} disabled={diskLoading}><RefreshCw size={16} className={diskLoading ? 'is-spinning' : ''} /> Detect SD card partitions</button><button type="button" onClick={() => void inspectMountedFolder()}><HardDrive size={16} /> Browse mounted card files</button><button type="button" onClick={() => void inspectIndex()}><Database size={16} /> Choose SDFileInfo.db</button><p>{status}</p></section>{removableDisks.map((disk) => <section className="results" key={disk.disk_number}><h2>Disk {disk.disk_number}: {disk.friendly_name || 'Removable disk'}</h2><p>{formatBytes(disk.size_bytes)} · {disk.bus_type} · {disk.operational_status}</p><table><thead><tr><th>Partition</th><th>Size</th><th>Filesystem</th><th>Windows access</th><th>Read-only probe</th></tr></thead><tbody>{disk.partitions.map((partition) => <tr key={partition.partition_number}><td>{partition.partition_number}</td><td>{formatBytes(partition.size_bytes)}</td><td>{partition.filesystem || 'Unknown or proprietary'}</td><td>{partition.drive_letter ? `${partition.drive_letter}: mounted` : 'Not mounted'}</td><td>{!partition.drive_letter && <button type="button" onClick={() => void probePartitionHeader(disk.disk_number, partition.partition_number)} disabled={probeLoading !== null}>{probeLoading === `${disk.disk_number}:${partition.partition_number}` ? 'Probing...' : 'Probe header'}</button>}</td></tr>)}</tbody></table>{disk.partitions.some((partition) => !partition.drive_letter) && <p className="mounted-note"><AlertTriangle size={15} /> The probe reads only the first 4 KB. Do not format or repair an unmounted partition.</p>}</section>)}{partitionProbe && <section className="results"><h2>Partition header report</h2><p><strong>Disk {partitionProbe.disk_number}, partition {partitionProbe.partition_number}</strong> · offset {partitionProbe.offset_bytes.toLocaleString()} bytes · {partitionProbe.bytes_read.toLocaleString()} bytes read</p><p className="mounted-note">{partitionProbe.format_hint}</p><p className="hash">SHA-256: {partitionProbe.sha256}<br />First 32 bytes: {partitionProbe.signature}</p></section>}{mountedFiles && <section className="results"><div className="metrics"><Metric label="Mounted files" value={mountedFiles.file_count} /><Metric label="Total data" value={Math.round(mountedFiles.total_bytes / 1024 / 1024)} /><Metric label="File limit" value={mountedFiles.truncated ? 5000 : mountedFiles.file_count} /></div><p className="hash">Source: {mountedFiles.folder_path}</p><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody>{mountedFiles.files.map((file) => <tr key={file.relative_path}><td><FileText size={14} /> {file.relative_path}</td><td>{formatBytes(file.size_bytes)}</td></tr>)}</tbody></table></section>}</>}
         {activeView === 'video-upload' && <><div className="workspace-heading"><span>Evidence intake</span><h2>Upload camera video</h2><p>Select an exported MP4, MOV, AVI, or MKV. FCM stores it privately and queues VPS inference for CCTV Review.</p></div><section className="tool upload-tool"><input type="file" accept="video/*,.avi,.mkv" disabled={!signedInAs} onChange={(event) => setVideo(event.target.files?.[0] ?? null)} /><button type="button" onClick={() => void uploadVideo()} disabled={!signedInAs || !video}><Upload size={16} /> Upload to CCTV Review</button>{video && <p>Selected: {video.name} ({Math.ceil(video.size / 1024 / 1024)} MB)</p>}{uploadStatus && <p>{uploadStatus}</p>}</section></>}
     {report && <section className="results">
       <div className="metrics"><Metric label="Indexed recordings" value={report.record_count} /><Metric label="Usable timestamps" value={report.valid_timestamped_record_count} /><Metric label="Event definitions" value={report.event_definitions.filter(Boolean).length} /></div>
