@@ -145,6 +145,16 @@ type CachedClipReport = {
   state: string;
 };
 
+type PhysicalDhfsRecording = {
+  partition_number: number;
+  descriptor: number;
+  channel: number;
+  start_time: string;
+  end_time: string;
+  fragment_count: number;
+  bytes: number;
+};
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -179,6 +189,8 @@ function App() {
   const [imagingLoading, setImagingLoading] = useState(false);
   const [convertedVideoLoading, setConvertedVideoLoading] = useState<string | null>(null);
   const [cachedClip, setCachedClip] = useState<CachedClipReport | null>(null);
+  const [physicalRecordings, setPhysicalRecordings] = useState<PhysicalDhfsRecording[]>([]);
+  const [physicalRecordingsLoading, setPhysicalRecordingsLoading] = useState(false);
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -426,6 +438,29 @@ function App() {
     }
   };
 
+  const listPhysicalDhfsRecordings = async () => {
+    const disk = removableDisks.find((item) => item.partitions.some((partition) => !partition.drive_letter));
+    const partition = disk?.partitions.filter((item) => !item.drive_letter).sort((left, right) => right.size_bytes - left.size_bytes)[0];
+    if (!disk || !partition) {
+      setError('Analyse the inserted SD card first so FCM can identify its DHFS partition.');
+      return;
+    }
+    setPhysicalRecordingsLoading(true);
+    setError(null);
+    try {
+      const recordings = await invoke<PhysicalDhfsRecording[]>('list_dhfs_partition_recordings', {
+        diskNumber: disk.disk_number,
+        partitionNumber: partition.partition_number,
+      });
+      setPhysicalRecordings(recordings);
+      setStatus(`Read ${recordings.length.toLocaleString()} normal DHFS recordings directly from the card. No full image was created.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPhysicalRecordingsLoading(false);
+    }
+  };
+
   const selectConvertedVideo = async (exported: DhfsConversionReport['exported'][number]) => {
     if (!conversionReport) return;
     if (exported.bytes_written > 524288000) {
@@ -508,6 +543,7 @@ function App() {
         <button type="button" className={activeView === 'sd-import-clean' ? 'is-active' : ''} onClick={() => setActiveView('sd-import-clean')}><HardDrive size={18} /> SD card import</button>
         <button type="button" onClick={() => void convertDhfsImage()} disabled={conversionLoading}><Database size={18} /> {conversionLoading ? 'Converting DHFS...' : 'Built-in DHFS converter'}</button>
         <button type="button" onClick={() => void imageInsertedDhfsPartition()} disabled={imagingLoading}><HardDrive size={18} /> {imagingLoading ? 'Imaging DHFS card...' : 'Image inserted DHFS card'}</button>
+        <button type="button" onClick={() => void listPhysicalDhfsRecordings()} disabled={physicalRecordingsLoading}><Database size={18} /> {physicalRecordingsLoading ? 'Reading card recordings...' : 'Read card recordings directly'}</button>
         <button type="button" className={activeView === 'video-upload' ? 'is-active' : ''} onClick={() => setActiveView('video-upload')}><Upload size={18} /> Video upload</button>
         <a href={FCM_WEB_URL} target="_blank" rel="noreferrer"><ExternalLink size={18} /> FCM web portal</a>
       </nav>

@@ -67,6 +67,17 @@ struct CachedClipReport {
 }
 
 #[derive(Serialize)]
+struct PhysicalDhfsRecording {
+    partition_number: u32,
+    descriptor: u32,
+    channel: u32,
+    start_time: String,
+    end_time: String,
+    fragment_count: u32,
+    bytes: u64,
+}
+
+#[derive(Serialize)]
 struct MountedFile {
     relative_path: String,
     size_bytes: u64,
@@ -493,6 +504,64 @@ fn dhfs_descriptor_chain(file: &mut File, descriptor_offset: u64, descriptor_cou
     Ok(chain)
 }
 
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Result<Vec<PhysicalDhfsRecording>, String> {
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path} read-only: {error}"))?;
+    let base = coordinates.offset_bytes;
+    let mut magic = [0_u8; 7];
+    device.seek(SeekFrom::Start(base)).map_err(|error| error.to_string())?;
+    device.read_exact(&mut magic).map_err(|error| error.to_string())?;
+    if &magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
+
+    let mut table_offset = base + 0x3c00 + 0x34;
+    let mut partitions = Vec::new();
+    for _ in 0..64 {
+        device.seek(SeekFrom::Start(table_offset)).map_err(|error| error.to_string())?;
+        let mut entry = [0_u8; 64];
+        device.read_exact(&mut entry).map_err(|error| error.to_string())?;
+        if &entry[..4] == [0xaa, 0x55, 0xaa, 0x55] { break; }
+        let superblock_offset = u32::from_le_bytes(entry[20..24].try_into().expect("DHFS superblock field")) as u64 * 512;
+        let partition_offset = u64::from_le_bytes(entry[48..56].try_into().expect("DHFS partition field")) * 512;
+        if partition_offset == 0 { break; }
+        partitions.push((partition_offset, superblock_offset));
+        table_offset += 64;
+    }
+    let mut recordings = Vec::new();
+    for (partition_index, (partition_offset, superblock_offset)) in partitions.iter().enumerate() {
+        let superblock = base + partition_offset + superblock_offset;
+        let block_size = dhfs_read_u32(&mut device, superblock + 0x2c)? as u64;
+        let fragment_size = dhfs_read_u32(&mut device, superblock + 0x30)? as u64 * block_size;
+        let descriptor_offset = base + partition_offset + dhfs_read_u32(&mut device, superblock + 0x44)? as u64 * block_size;
+        let descriptor_count = dhfs_read_u32(&mut device, superblock + 0x4c)?;
+        if block_size == 0 || fragment_size == 0 || descriptor_count == 0 { continue; }
+        for descriptor_index in 0..descriptor_count {
+            let descriptor = dhfs_read_descriptor(&mut device, descriptor_offset + descriptor_index as u64 * 32)?;
+            if descriptor[0] != 1 { continue; }
+            let start = u32::from_le_bytes(descriptor[4..8].try_into().expect("DHFS start timestamp"));
+            let end = u32::from_le_bytes(descriptor[8..12].try_into().expect("DHFS end timestamp"));
+            if start == end { continue; }
+            let chain = dhfs_descriptor_chain(&mut device, descriptor_offset, descriptor_count, descriptor_index)?;
+            let last = dhfs_read_descriptor(&mut device, descriptor_offset + *chain.last().expect("non-empty chain") as u64 * 32)?;
+            let last_size = u32::from_le_bytes(last[16..20].try_into().expect("DHFS final fragment size")) as u64 * block_size;
+            if last_size == 0 || last_size > fragment_size { continue; }
+            recordings.push(PhysicalDhfsRecording {
+                partition_number: partition_number + partition_index as u32,
+                descriptor: descriptor_index,
+                channel: descriptor[1].saturating_sub(b'0') as u32 + 1,
+                start_time: dhfs_timestamp(start),
+                end_time: dhfs_timestamp(end),
+                fragment_count: chain.len() as u32,
+                bytes: (chain.len().saturating_sub(1) as u64 * fragment_size) + last_size,
+            });
+        }
+    }
+    Ok(recordings)
+}
+
 #[tauri::command]
 fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<DhfsConversionReport, String> {
     let image = PathBuf::from(&image_path);
@@ -829,6 +898,12 @@ fn image_dhfs_partition(_disk_number: u32, _partition_number: u32, _output_path:
     Err("DHFS physical imaging is available in the Windows FCM Desktop application.".to_string())
 }
 
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn list_dhfs_partition_recordings(_disk_number: u32, _partition_number: u32) -> Result<Vec<PhysicalDhfsRecording>, String> {
+    Err("Direct DHFS partition reading is available in the Windows FCM Desktop application.".to_string())
+}
+
 #[tauri::command]
 fn inspect_mounted_folder(folder_path: String) -> Result<MountedFolderReport, String> {
     const MAX_FILES: usize = 5_000;
@@ -879,7 +954,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, image_dhfs_partition, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, image_dhfs_partition, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
