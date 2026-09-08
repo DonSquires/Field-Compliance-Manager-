@@ -398,19 +398,17 @@ function collectSourceEdges(rootDir, knownEntities) {
         }
       }
     }
+    const functionUrlTargets = new Map();
+    for (const match of content.matchAll(/\b(?:const|let)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:\([^)]*\)\s*=>\s*)?`[^`]*\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
+      if (knownEntities.edgeFunctions.has(match[2])) functionUrlTargets.set(match[1], match[2]);
+    }
+    for (const [variable, target] of functionUrlTargets) {
+      add(source, 'edge_function', target, 'calls', file, `function endpoint URL variable (${variable})`);
+    }
     for (const match of content.matchAll(/fetch\(\s*(?:`[^`]*\/functions\/v1\/|['"][^'"]*\/functions\/v1\/)([a-zA-Z0-9_-]+)/g)) {
       if (knownEntities.edgeFunctions.has(match[1])) {
         add(source, 'edge_function', match[1], 'calls', file, `fetch('/functions/v1/${match[1]}')`);
       }
-    }
-    for (const match of content.matchAll(/\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
-      if (knownEntities.edgeFunctions.has(match[1])) {
-        add(source, 'edge_function', match[1], 'calls', file, `function endpoint URL (${match[1]})`);
-      }
-    }
-    const functionUrlTargets = new Map();
-    for (const match of content.matchAll(/\b(?:const|let)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*`[^`]*\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
-      if (knownEntities.edgeFunctions.has(match[2])) functionUrlTargets.set(match[1], match[2]);
     }
     for (const match of content.matchAll(/\bfetch\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,/g)) {
       const target = functionUrlTargets.get(match[1]);

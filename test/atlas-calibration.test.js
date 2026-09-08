@@ -272,6 +272,21 @@ test('Atlas refresh derives edge-function URLs supplied to a client library', ()
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
 
+test('Atlas refresh ignores function endpoint names mentioned only in comments', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-comment-url-'));
+  const sourcePath = path.join(rootDir, 'apps/web/src/components/Comment.tsx');
+  const targetPath = path.join(rootDir, 'supabase/functions/linz-map-tile/index.ts');
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, '// See /functions/v1/linz-map-tile for map tiles.');
+  fs.writeFileSync(targetPath, 'export default {}');
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.equal(manifest.edges.some((edge) => edge.target_name === 'linz-map-tile'), false);
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
+
 test('Atlas refresh derives direct SQL RPC calls', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-sql-rpc-call-'));
   const schemaPath = path.join(rootDir, 'supabase/schema.sql');
