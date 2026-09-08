@@ -18590,7 +18590,7 @@ export type Database = {
         }[]
       }
       bob_atlas_gap_report: {
-        Args: { p_limit?: number; p_offset?: number }
+        Args: { p_include_columns?: boolean; p_include_unknown_exercise?: boolean; p_limit?: number; p_offset?: number }
         Returns: {
           caller_summary: string | null
           entity_name: string

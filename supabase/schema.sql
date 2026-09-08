@@ -559,7 +559,7 @@ COMMENT ON FUNCTION "public"."bob_atlas_flow_reach"("p_from_type" "text", "p_fro
 
 
 
-CREATE OR REPLACE FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer DEFAULT 200, "p_offset" integer DEFAULT 0) RETURNS TABLE("entity_type" "text", "entity_name" "text", "gap_kind" "text", "present" boolean, "wired" boolean, "exercised" boolean, "caller_summary" "text", "notes" "text", "retirement_status" "text")
+CREATE OR REPLACE FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer DEFAULT 200, "p_offset" integer DEFAULT 0, "p_include_columns" boolean DEFAULT false, "p_include_unknown_exercise" boolean DEFAULT false) RETURNS TABLE("entity_type" "text", "entity_name" "text", "gap_kind" "text", "present" boolean, "wired" boolean, "exercised" boolean, "caller_summary" "text", "notes" "text", "retirement_status" "text")
     LANGUAGE "sql" STABLE SECURITY DEFINER
     SET "search_path" TO 'public'
     AS $$
@@ -568,8 +568,8 @@ CREATE OR REPLACE FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer DEF
     c.entity_name,
     case
       when c.present = true and c.wired = false then 'unwired'
-      when c.present = true and (c.exercised is null or c.exercised = false) then 'unexercised'
-      else 'dormant'
+      when c.present = true and c.exercised = false then 'unexercised'
+      else 'exercise_unknown'
     end as gap_kind,
     c.present,
     c.wired,
@@ -580,10 +580,11 @@ CREATE OR REPLACE FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer DEF
   from public.bob_capability_map c
   where c.retirement_status <> 'retired'
     and c.present = true
+    and (coalesce(p_include_columns, false) or c.entity_type <> 'column')
     and (
       c.wired = false
-      or c.exercised is null
       or c.exercised = false
+      or (coalesce(p_include_unknown_exercise, false) and c.exercised is null)
     )
   order by c.entity_type, c.entity_name
   limit greatest(1, least(coalesce(p_limit, 200), 500))
@@ -591,10 +592,10 @@ CREATE OR REPLACE FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer DEF
 $$;
 
 
-ALTER FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer) OWNER TO "postgres";
+ALTER FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer, "p_include_columns" boolean, "p_include_unknown_exercise" boolean) OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer) IS 'Atlas gap-report: list capabilities that are present but not wired or not exercised, scoped to live non-retired entities. This is the formal gap layer for Bob/Atlas and is distinct from the raw bob_capability_map inventory.';
+COMMENT ON FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer, "p_include_columns" boolean, "p_include_unknown_exercise" boolean) IS 'Atlas operational gaps: present but unwired or explicitly unexercised non-retired capabilities. Columns and unknown exercise state are opt-in diagnostics because static refresh cannot infer runtime execution.';
 
 
 

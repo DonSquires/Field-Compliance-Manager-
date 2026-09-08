@@ -13,6 +13,6 @@ test('Bob can paginate every Atlas inventory surface without losing result windo
   assert.match(atlas, /next_offset:/g);
   assert.match(conductor, /offset: Math\.max\(typeof toolArgs\.offset/);
   assert.doesNotMatch(conductor, /results\.slice\(0, 50\)/);
-  assert.match(conductor, /More results begin at offset/);
+  assert.match(conductor, /More results are available from offset/);
   assert.match(caddie, /next_offset is returned/);
 });

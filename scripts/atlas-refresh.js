@@ -327,6 +327,10 @@ function collectSourceEdges(rootDir, knownEntities) {
   for (const file of sourceFiles) {
     const content = fs.readFileSync(path.join(rootDir, file), 'utf8');
     const source = sourceIdentity(file);
+    const dynamicCallTargets = new Map();
+    for (const assignment of content.matchAll(/\bconst\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*[^;\n]*?['"]([a-zA-Z0-9_-]+)['"][^;\n]*?['"]([a-zA-Z0-9_-]+)['"]/g)) {
+      dynamicCallTargets.set(assignment[1], [assignment[2], assignment[3]].filter((name) => knownEntities.edgeFunctions.has(name)));
+    }
 
     for (const match of content.matchAll(/\.from\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]\s*\)/g)) {
       const segment = content.slice(match.index, Math.min(content.length, match.index + 1600)).split(';', 1)[0];
@@ -338,6 +342,19 @@ function collectSourceEdges(rootDir, knownEntities) {
     }
     for (const match of content.matchAll(/\.functions\.invoke(?:\s*<[^>]*>)?\(\s*['"]([a-zA-Z0-9_-]+)['"]/g)) {
       add(source, 'edge_function', match[1], 'calls', file, `.functions.invoke('${match[1]}')`);
+    }
+    for (const match of content.matchAll(/\bcallFn\(\s*['"]([a-zA-Z0-9_-]+)['"]/g)) {
+      if (knownEntities.edgeFunctions.has(match[1])) {
+        add(source, 'edge_function', match[1], 'calls', file, `callFn('${match[1]}')`);
+      }
+    }
+    for (const match of content.matchAll(/\bcallFn\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,/g)) {
+      for (const target of dynamicCallTargets.get(match[1]) || []) {
+        add(source, 'edge_function', target, 'calls', file, `callFn(${match[1]})`);
+      }
+    }
+    if (source.source_name === 'onspace-ai-chat' && /\bcallInference\(\s*\{/.test(content) && knownEntities.edgeFunctions.has('bob-inference')) {
+      add(source, 'edge_function', 'bob-inference', 'calls', file, 'callInference() wrapper');
     }
     for (const match of content.matchAll(/fetch\(\s*(?:`[^`]*\/functions\/v1\/|['"][^'"]*\/functions\/v1\/)([a-zA-Z0-9_-]+)/g)) {
       if (knownEntities.edgeFunctions.has(match[1])) {

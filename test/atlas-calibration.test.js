@@ -113,3 +113,41 @@ test('atlas graph inventories app, platform, deployment, and governance without 
   assert.equal(artifact.ok, true);
   assert.ok(artifact.domains.includes('governance'));
 });
+
+test('Atlas refresh derives internal conductor callFn dispatches as live edges', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-call-fn-'));
+  const functionPath = path.join(rootDir, 'supabase/functions/onspace-ai-chat/index.ts');
+  const targetPath = path.join(rootDir, 'supabase/functions/bob-query-atlas/index.ts');
+  fs.mkdirSync(path.dirname(functionPath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(functionPath, "callFn('bob-query-atlas', authHeader, { action: 'gap_report' });");
+  fs.writeFileSync(targetPath, 'export default {}');
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'onspace-ai-chat'
+    && edge.target_type === 'edge_function'
+    && edge.target_name === 'bob-query-atlas'
+    && edge.edge_kind === 'calls'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
+
+test('Atlas refresh derives conductor wrapper and variable-dispatched function calls', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-dynamic-call-'));
+  const functionPath = path.join(rootDir, 'supabase/functions/onspace-ai-chat/index.ts');
+  for (const name of ['bob-inference', 'bob-perceive-image', 'bob-perceive-video']) {
+    const targetPath = path.join(rootDir, `supabase/functions/${name}/index.ts`);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'export default {}');
+  }
+  fs.mkdirSync(path.dirname(functionPath), { recursive: true });
+  fs.writeFileSync(functionPath, "const fn = isImage ? 'bob-perceive-image' : 'bob-perceive-video'; callFn(fn, authHeader, {}); callInference({ action: 'embed' });");
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+  const targets = manifest.edges.filter((edge) => edge.source_name === 'onspace-ai-chat').map((edge) => edge.target_name);
+
+  assert.ok(targets.includes('bob-perceive-image'));
+  assert.ok(targets.includes('bob-perceive-video'));
+  assert.ok(targets.includes('bob-inference'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
