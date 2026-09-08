@@ -3,5 +3,14 @@
   "identifier": "default",
   "description": "Default capability for the SD index inspection utility.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "fs:default", "fs:allow-read-file", "deep-link:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "fs:default",
+    "deep-link:default",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$PUBLIC/Documents/fcm-cache/**" }]
+    }
+  ]
 }
