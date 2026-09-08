@@ -25,3 +25,8 @@ supabase/migrations_backup/
 docker-compose.yml.txt
 migration_list.txt
 short_out*.txt
+
+# Large local media/model artifacts
+Build-Plan/EventBitMask.zip
+Build-Plan/Sample Data/
+models/

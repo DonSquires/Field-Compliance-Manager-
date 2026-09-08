@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS public.cctv_review_decisions (
 );
 
 ALTER TABLE public.cctv_review_decisions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cctv_review_decisions_select ON public.cctv_review_decisions;
+DROP POLICY IF EXISTS cctv_review_decisions_insert ON public.cctv_review_decisions;
 CREATE POLICY cctv_review_decisions_select ON public.cctv_review_decisions FOR SELECT USING (public.org_access_allowed(organization_id));
 CREATE POLICY cctv_review_decisions_insert ON public.cctv_review_decisions FOR INSERT WITH CHECK (public.org_access_allowed(organization_id) AND decided_by = auth.uid());
 
