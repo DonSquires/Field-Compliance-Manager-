@@ -428,13 +428,21 @@ const AdminShell: React.FC = () => {
     reportsTab,
     orgName,
     role: profile?.role,
+    accountId: workflowContext.accountId,
+    agreementId: workflowContext.agreementId,
+    ledgerId: workflowContext.ledgerId,
+    locationId: workflowContext.locationId,
+    siteId: workflowContext.siteId,
+    zoneId: workflowContext.zoneId,
+    workUnitId: workflowContext.workUnitId,
+    handoffId: workflowContext.handoffId,
     agreement: selectedAgreement,
     site: selectedSite,
     zone: selectedZone,
     agreements: agreements.slice(0, 10),
     sites: sites.slice(0, 10),
     zones: zones.slice(0, 10),
-  }), [activePage, crmTab, rosterTab, fieldOpsSubArea, reportsTab, orgName, profile?.role, selectedAgreement, selectedSite, selectedZone, agreements, sites, zones]);
+  }), [activePage, crmTab, rosterTab, fieldOpsSubArea, reportsTab, orgName, profile?.role, workflowContext, selectedAgreement, selectedSite, selectedZone, agreements, sites, zones]);
 
   const renderPage = useCallback(() => {
     switch (activePage) {

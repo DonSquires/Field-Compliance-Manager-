@@ -84,4 +84,11 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("label: 'People & Access'");
     expect(source).not.toContain("label: 'Client Portfolios', icon: Network");
   });
+
+  it('passes portfolio workflow identifiers into Bob context', () => {
+    expect(source).toContain('accountId: workflowContext.accountId');
+    expect(source).toContain('agreementId: workflowContext.agreementId');
+    expect(source).toContain('locationId: workflowContext.locationId');
+    expect(source).toContain('workUnitId: workflowContext.workUnitId');
+  });
 });
