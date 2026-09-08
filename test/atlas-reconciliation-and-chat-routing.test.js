@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '..');
 const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20260908002000_reconcile_seed_data_for_atlas.sql'), 'utf8');
 const compare = fs.readFileSync(path.join(root, 'supabase/functions/bob-client-site-compare/index.ts'), 'utf8');
 const chat = fs.readFileSync(path.join(root, 'supabase/functions/onspace-ai-chat/index.ts'), 'utf8');
+const caddie = fs.readFileSync(path.join(root, 'supabase/functions/onspace-ai-chat/caddie.ts'), 'utf8');
 
 test('seed data reconciliation is service-role-only and never invents canonical records', () => {
   assert.match(migration, /refresh_fs_nelson_clients_clean/);
@@ -20,7 +21,6 @@ test('seed data reconciliation is service-role-only and never invents canonical 
 });
 
 test('explicit admiral Atlas requests reach the read-only Atlas tool when planning falls back to an answer', () => {
-  const caddie = fs.readFileSync(path.join(root, 'supabase/functions/onspace-ai-chat/caddie.ts'), 'utf8');
   assert.match(chat, /const explicitAtlasRequest = caps\.tier === 'admiral'/);
   assert.match(chat, /chosenTool = 'query_atlas'/);
   assert.match(chat, /action: requestedAtlasAction/);
@@ -28,4 +28,12 @@ test('explicit admiral Atlas requests reach the read-only Atlas tool when planni
   assert.match(caddie, /export function resolveCatalogueTool/);
   assert.match(chat, /resolveCatalogueTool\(catalogue, d\.tool\)/);
   assert.doesNotMatch(chat, /const toolByCanon = new Map/);
+});
+
+test('site risk is available only through Caddie and its scoped edge function', () => {
+  assert.match(caddie, /site_risk: \{/);
+  assert.match(caddie, /site_risk: 'bob-site-risk'/);
+  assert.match(chat, /async function execSiteRisk/);
+  assert.match(chat, /callFn\('bob-site-risk', authHeader/);
+  assert.match(chat, /case 'site_risk':/);
 });

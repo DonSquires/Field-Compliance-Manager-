@@ -4429,6 +4429,39 @@ async function execScvLookup(authHeader, args) {
     }
   };
 }
+async function execSiteRisk(authHeader, args) {
+  const siteId = String(args.site_id ?? '').trim();
+  if (!siteId) return {
+    reply: 'Tell me which site to assess before I check its operational risk.',
+    meta: {
+      tool: 'site_risk',
+      outcome: 'need_site_id'
+    }
+  };
+  const radius = Number(args.radius_m);
+  const r = await callFn('bob-site-risk', authHeader, {
+    site_id: siteId,
+    radius_m: Number.isFinite(radius) ? radius : undefined
+  });
+  if (!r.ok || !r.data?.success) return {
+    reply: 'I could not complete the site risk assessment right now.',
+    meta: {
+      tool: 'site_risk',
+      outcome: 'failed'
+    }
+  };
+  const assessment = r.data;
+  const counts = assessment.counts ?? {};
+  return {
+    reply: `${assessment.site_name ?? 'This site'} is currently rated ${assessment.rating ?? 'unknown'} risk. ${counts.active ?? 0} active concern(s), ${counts.monitor ?? 0} monitor signal(s), and ${counts.history ?? 0} historical signal(s) were considered. ${(assessment.mitigations ?? []).join(' ')}`,
+    meta: {
+      tool: 'site_risk',
+      outcome: 'ok',
+      rating: assessment.rating ?? null,
+      active_concern_count: counts.active ?? 0
+    }
+  };
+}
 // Bob PROPOSES a freedom-camping ENFORCEMENT zone (geofence + night limits) into
 // the bell. Calls bob-propose-freedom-camping-zone. Bob must have RESOLVED the
 // geofence himself first (verify address -> LINZ parcel -> Google fallback, per
@@ -7541,6 +7574,8 @@ serve(async (req)=>{
           return execQueryRecords(authHeader, caps, toolArgs);
         case 'scv_lookup':
           return execScvLookup(authHeader, toolArgs);
+        case 'site_risk':
+          return execSiteRisk(authHeader, toolArgs);
         case 'propose_client_onboarding':
           return execProposeClientOnboarding(authHeader, caps, orgId, toolArgs);
         case 'propose_freedom_camping_zone':

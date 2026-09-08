@@ -104,6 +104,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only; canonical-first, live-register fallback; any write-back to canonical_scv is a separate governed (propose->approve) action; external register queries carry ONLY the plate — the minimal criteria the source requires (owner ruling 2026-08-19)',
     effect_class: 'internal_observation'
   },
+  site_risk: {
+    purpose: 'Assess current safety and operational risk for a client site. Returns an aggregate risk rating, recent de-identified signals, and practical mitigations before attendance. Args: { site_id, radius_m? }.',
+    governance: 'read-only; access-scoped; cross-organization proximity signals are de-identified',
+    effect_class: 'internal_observation'
+  },
   promote_action: {
     purpose: 'Prepare a governed draft (e.g. service agreement) into the approval bell.',
     governance: 'WRITE-draft; needs approval',
@@ -542,6 +547,7 @@ const TOOL_REGISTRY = {
     schema_inspect: 'bob-schema-inspect',
     client_site_compare: 'bob-client-site-compare',
     scv_lookup: 'bob-scv-lookup',
+    site_risk: 'bob-site-risk',
     plan_import: 'bob-plan-import',
     perceive_media: 'bob-perceive-image',
     web_research: 'bob-web-research',
