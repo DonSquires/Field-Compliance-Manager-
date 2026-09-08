@@ -304,7 +304,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
       <header><div><span>Client portfolio</span><h2 id="crm-workspace-title">{account.name}</h2><p>Commercial, operational, and relationship context for this organisation.</p></div><button type="button" onClick={onClose} aria-label="Close client portfolio"><X size={19} /></button></header>
       {error && <div className="crm-workspace-message is-error" role="alert">{error}</div>}
       {notice && <div className="crm-workspace-message is-success" role="status">{notice}</div>}
-      <nav aria-label="Client portfolio views">
+      <nav className="crm-portfolio-nav" aria-label="Client portfolio views">
         <button type="button" className={view === 'overview' ? 'is-active' : ''} onClick={() => setView('overview')}><Users size={16} />Overview</button>
         <button type="button" className={view === 'structure' ? 'is-active' : ''} onClick={() => setView('structure')}><Building2 size={16} />Structure <strong>{childOrganizations.length}</strong></button>
         <button type="button" className={view === 'agreements' ? 'is-active' : ''} onClick={() => setView('agreements')}><Handshake size={16} />Agreements <strong>{agreements.length}</strong></button>
