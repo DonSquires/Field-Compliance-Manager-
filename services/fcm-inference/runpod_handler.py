@@ -17,12 +17,16 @@ from app import (
     _infer_vehicle_attributes,
 )
 
+MAX_IMAGE_PIXELS = 20_000_000
+
 
 def _image_from_input(value: str) -> np.ndarray:
     raw = value.split(",", 1)[1] if "," in value else value
     image = cv2.imdecode(np.frombuffer(base64.b64decode(raw, validate=True), dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("image_base64 is not a decodable image")
+    if image.shape[0] * image.shape[1] > MAX_IMAGE_PIXELS:
+        raise ValueError("image dimensions exceed the 20 megapixel limit")
     return image
 
 

@@ -37,6 +37,9 @@ type CCTVJob = {
   evidence_item_id: string | null;
   domain: string;
   status: string;
+  stage?: string | null;
+  error_message?: string | null;
+  attempt_count?: number | null;
   created_at: string;
   evidence: {
     storage_path: string | null;
@@ -113,6 +116,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [identityDrafts, setIdentityDrafts] = useState<Record<string, { personRecordId: string; displayName: string }>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
+  const [decisionSaving, setDecisionSaving] = useState(false);
+  const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -125,7 +130,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       let query = supabase
         .from('inference_jobs')
         .select(
-          'id, evidence_item_id, domain, status, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)'
+          'id, evidence_item_id, domain, status, stage, error_message, attempt_count, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)'
         )
         .eq('organization_id', profile.organizationId)
         .in('domain', [...CCTV_DOMAINS])
@@ -320,6 +325,25 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     setIdentitySaving(null);
   };
 
+  const recordReviewDecision = async (decision: 'confirmed' | 'dismissed') => {
+    if (!selected || !profile?.organizationId) return;
+    const reason = window.prompt(decision === 'confirmed' ? 'Record the verification reason.' : 'Record why this observation is dismissed.');
+    if (!reason?.trim()) return;
+    setDecisionSaving(true);
+    setDecisionMessage(null);
+    const { error: decisionError } = await supabase.rpc('record_cctv_review_decision', {
+      p_job_id: selected.id,
+      p_evidence_id: selected.evidence_item_id,
+      p_organization_id: profile.organizationId,
+      p_event_id: null,
+      p_event_type: 'video',
+      p_decision: decision,
+      p_reason: reason.trim(),
+    });
+    setDecisionSaving(false);
+    setDecisionMessage(decisionError ? decisionError.message : `Review decision recorded: ${decision}.`);
+  };
+
   const jumpToTime = (seconds: number) => {
     if (videoRef.current) {
       videoRef.current.currentTime = Math.max(0, seconds);
@@ -414,7 +438,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                     <span className="cctv-job-icon"><FileVideo2 size={19} /></span>
                     <span className="cctv-job-copy">
                       <strong>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</strong>
-                      <small>{timeLabel(job.created_at)} · {job.domain} · {String(job.id).slice(0, 8)}</small>
+                      <small>{timeLabel(job.created_at)} · {job.domain} · {String(job.id).slice(0, 8)}{job.stage ? ` · ${statusLabel(job.stage)}` : ''}</small>
                     </span>
                     <span className="cctv-job-findings">
                       {frameCount > 0 ? `${frameCount} frames` : 'Pending frames'}
@@ -431,6 +455,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                       <button type="button" title="Delete failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'delete')}><Trash2 size={13} /><span>Delete</span></button>
                     </div>
                   )}
+                  {job.error_message && <span className="cctv-job-error" title={job.error_message}>{job.error_message}</span>}
                 </div>
               );
             })
@@ -878,9 +903,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 <button
                   type="button"
                   className="cctv-btn-confirm"
-                  onClick={() => {
-                    alert('Consolidated observations verified. Link to incident or person record.');
-                  }}
+                  disabled={decisionSaving || !profile?.organizationId || !selected}
+                  onClick={() => void recordReviewDecision('confirmed')}
                   title="Confirm verified observations"
                 >
                   <CheckCircle2 size={16} /> Confirm observation
@@ -888,14 +912,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 <button
                   type="button"
                   className="cctv-btn-dismiss"
-                  onClick={() => {
-                    alert('Observation dismissed as background noise.');
-                  }}
+                  disabled={decisionSaving || !profile?.organizationId || !selected}
+                  onClick={() => void recordReviewDecision('dismissed')}
                   title="Dismiss noise / false positive"
                 >
                   <XCircle size={16} /> Dismiss
                 </button>
               </div>
+              {decisionMessage && <p className="cctv-decision-message" role="status">{decisionMessage}</p>}
             </>
           ) : (
             <div className="cctv-empty">

@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { createClient } = require('@supabase/supabase-js');
 const { signJobToken } = require('./local_jwt_signer');
@@ -95,16 +96,25 @@ async function ensureVideoPath(evidence) {
 }
 
 async function claimJob(job) {
-  const { data, error } = await supabase
-    .from('inference_jobs')
-    .update({ status: 'processing' })
-    .eq('id', job.id)
-    .eq('domain', 'video_motion')
-    .eq('status', 'queued')
-    .select('id, organization_id, evidence_item_id, domain, status')
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('claim_cctv_inference_job', {
+    p_job_id: job.id,
+    p_lease_token: crypto.randomUUID(),
+    p_lease_seconds: Math.ceil(EXTRACTOR_TIMEOUT_MS / 1000) + 900,
+  });
   if (error) throw new Error(`job claim failed: ${error.message}`);
-  return data;
+  return Array.isArray(data) ? data[0] ?? null : data;
+}
+
+async function heartbeatJob(job, stage) {
+  if (!job?.lease_token) return;
+  const { data, error } = await supabase.rpc('heartbeat_cctv_inference_job', {
+    p_job_id: job.id,
+    p_lease_token: job.lease_token,
+    p_stage: stage,
+    p_lease_seconds: Math.ceil(EXTRACTOR_TIMEOUT_MS / 1000) + 900,
+  });
+  if (error) throw new Error(`job heartbeat failed: ${error.message}`);
+  if (data !== true) throw new Error('CCTV job lease was lost');
 }
 
 function runExtractor(videoPath, outputDir) {
@@ -216,14 +226,38 @@ async function classifyFrames(summary) {
       const [alprResponse, faceResponse, peopleResponse, inferenceResponse] = await Promise.all(localRequests);
       frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
       frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
-      frame.people = peopleResponse ? (peopleResponse.ok ? await peopleResponse.json() : { success: false, error: `people_http_${peopleResponse.status}` }) : { success: false, error: 'people_runpod_primary' };
-      frame.inference = inferenceResponse ? (inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` }) : { success: false, error: 'vehicle_runpod_primary' };
       const runpodResult = runpodResults.get(frame.sha256_hash);
       if (runpodResult) frame.runpod = runpodResult;
+
+      // RunPod is primary for vehicle and people work. The VPS is called only
+      // when the batch missed that capability or the GPU request failed.
+      if (runpodResult?.people && Array.isArray(runpodResult.people)) {
+        frame.people = { success: true, people: runpodResult.people, provider: 'runpod' };
+      } else if (peopleResponse) {
+        frame.people = peopleResponse.ok ? await peopleResponse.json() : { success: false, error: `people_http_${peopleResponse.status}` };
+      } else {
+        frame.people = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm);
+      }
+      if (runpodResult?.vehicle) {
+        frame.inference = { success: true, data: runpodResult.vehicle, provider: 'runpod' };
+      } else if (inferenceResponse) {
+        frame.inference = inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` };
+      } else {
+        frame.inference = await classifyLocally(INFERENCE_SERVICE_URL, '/infer', headers, buildForm);
+      }
     }
   }
   if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
   return summary;
+}
+
+async function classifyLocally(baseUrl, route, headers, buildForm) {
+  try {
+    const response = await fetch(`${baseUrl}${route}`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) });
+    return response.ok ? await response.json() : { success: false, error: `${route}_http_${response.status}` };
+  } catch (error) {
+    return { success: false, error: `${route}_unavailable`, detail: error.message };
+  }
 }
 
 async function classifyWithRunpodBatch(batch) {
@@ -259,7 +293,7 @@ async function classifyWithRunpodBatch(batch) {
 }
 
 async function failJob(jobId, message) {
-  const { error } = await supabase.from('inference_jobs').update({ status: 'failed' }).eq('id', jobId).eq('status', 'processing');
+  const { error } = await supabase.from('inference_jobs').update({ status: 'failed', stage: 'failed', error_message: String(message).slice(0, 4000), lease_token: null, lease_expires_at: null, heartbeat_at: null }).eq('id', jobId).eq('status', 'processing');
   if (error) log('job_failure_update_failed', { job_id: jobId, error: error.message });
   log('job_failed', { job_id: jobId, error: message });
 }
@@ -326,6 +360,8 @@ async function processOne() {
   let currentJobId = null;
   processing = true;
   try {
+    const { error: recoveryError } = await supabase.rpc('recover_stale_cctv_inference_jobs');
+    if (recoveryError) throw new Error(`stale job recovery failed: ${recoveryError.message}`);
     const { data: jobs, error } = await supabase
       .from('inference_jobs')
       .select('id, organization_id, evidence_item_id, domain, status')
@@ -338,6 +374,7 @@ async function processOne() {
     const job = await claimJob(jobs[0]);
     if (!job) return;
     currentJobId = job.id;
+    await heartbeatJob(job, 'loading_evidence');
     const { data: evidence, error: evidenceError } = await supabase
       .from('evidence_items')
       .select('id, organization_id, evidence_kind, storage_path, metadata')
@@ -349,12 +386,16 @@ async function processOne() {
     const videoPath = await ensureVideoPath(evidence);
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
     log('motion_extraction_started', { job_id: job.id });
+    await heartbeatJob(job, 'extracting_motion');
     const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
     log('motion_extraction_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
+    await heartbeatJob(job, 'classifying_frames');
     await classifyFrames(summary);
+    await heartbeatJob(job, 'consolidating_observations');
     await consolidateMotionSummary(summary, {
       metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null,
     });
+    await heartbeatJob(job, 'persisting_result');
     await ingest(job, summary);
     try {
       await ensurePlaybackCopy(job, evidence, videoPath);

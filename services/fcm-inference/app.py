@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from openvino import Core
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_IMAGE_PIXELS = 20_000_000
 SIMILARITY_THRESHOLD = 0.92
 DIFFERENT_VEHICLE_THRESHOLD = 0.75
 APP_PATH = Path(__file__).resolve()
@@ -67,6 +68,8 @@ async def _read_image(photo: UploadFile) -> np.ndarray:
     image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise HTTPException(status_code=422, detail="photo is not a decodable image")
+    if image.shape[0] * image.shape[1] > MAX_IMAGE_PIXELS:
+        raise HTTPException(status_code=413, detail="photo dimensions exceed the 20 megapixel limit")
     return image
 
 

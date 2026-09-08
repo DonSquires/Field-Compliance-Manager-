@@ -222,6 +222,8 @@ http.createServer(async (request, response) => {
     }
   }
   if (request.method === 'POST' && request.url === '/api/bob/plan') {
+    if (!apiToken) return json(response, 503, { error: 'api_authentication_not_configured' });
+    if (!authorized(request)) return json(response, 401, { error: 'unauthorized' });
     try {
       return await planWithOpenAI(request, response);
     } catch (error) {

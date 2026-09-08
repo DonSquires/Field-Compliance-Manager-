@@ -52,6 +52,7 @@
 .cctv-job-icon { align-items: center; background: #e8f3f2; border-radius: 5px; color: #167b72; display: flex; height: 34px; justify-content: center; width: 34px; }
 .cctv-job-copy { display: grid; gap: 4px; min-width: 0; }
 .cctv-job-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cctv-job-error { color: #a13d3d; display: block; font-size: 11px; grid-column: 1 / -1; overflow: hidden; padding: 0 0 10px 48px; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-job-copy small,
 .cctv-job-findings { color: #75828a; font-size: 12px; }
 .cctv-job-findings { line-height: 1.35; }
