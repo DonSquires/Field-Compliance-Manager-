@@ -24,4 +24,11 @@ describe('client portfolio hub', () => {
     expect(source).toContain("onNavigate?.('roster'");
     expect(source).toContain('deliverySchedules.map');
   });
+
+  it('provides one portfolio readiness checklist for the next human action', () => {
+    expect(source).toContain('>Readiness</button>');
+    expect(source).toContain('crm-readiness-list');
+    expect(source).toContain('Organization identity');
+    expect(source).toContain('No recorded activation blockers');
+  });
 });
