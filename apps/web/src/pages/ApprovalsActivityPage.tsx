@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, ListChecks, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
 import { formatGovernedPayload } from '../lib/governedPayload';
 import { supabase } from '../lib/supabase';
 import './ApprovalsActivityPage.css';
@@ -32,6 +32,22 @@ interface ApprovalRow {
   can_decide: boolean;
 }
 
+interface JobPlanRow {
+  id: string;
+  goal: string;
+  status: 'draft' | 'proposed' | 'executing' | 'needs_review' | 'completed' | 'failed' | 'cancelled';
+  reasoning: string | null;
+  created_at: string;
+  organization_id: string;
+}
+
+interface JobPlanStep {
+  id: string;
+  sequence: number;
+  action_type: string;
+  status: string;
+}
+
 const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
   { id: 'pending', label: 'Pending' },
   { id: 'approved', label: 'Approved' },
@@ -43,6 +59,8 @@ const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
 
 const ApprovalsActivityPage: React.FC = () => {
   const [rows, setRows] = useState<ApprovalRow[]>([]);
+  const [plans, setPlans] = useState<JobPlanRow[]>([]);
+  const [planSteps, setPlanSteps] = useState<Record<string, JobPlanStep[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -54,20 +72,34 @@ const ApprovalsActivityPage: React.FC = () => {
   const [applyAfterApprove, setApplyAfterApprove] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [payloadLabels, setPayloadLabels] = useState<Record<string, string>>({});
+  const [planDecision, setPlanDecision] = useState<'approve' | 'reject' | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   const loadActivity = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: queryError } = await supabase.rpc('get_approvals_activity', {
+      const [activityResponse, plansResponse, stepsResponse] = await Promise.all([
+        supabase.rpc('get_approvals_activity', {
         p_limit: 100,
         p_offset: 0,
         p_statuses: filter === 'all' ? null : [filter],
         p_action_types: null,
-      });
-      if (queryError) throw queryError;
-      const activity = (data as ApprovalRow[]) ?? [];
+        }),
+        supabase.from('bob_job_plans').select('id,goal,status,reasoning,created_at,organization_id').in('status', filter === 'all' ? ['proposed', 'executing', 'needs_review'] : filter === 'pending' ? ['proposed'] : []).order('created_at', { ascending: false }).limit(30),
+        supabase.from('bob_job_plan_steps').select('id,plan_id,sequence,action_type,status').order('sequence'),
+      ]);
+      if (activityResponse.error) throw activityResponse.error;
+      if (plansResponse.error) throw plansResponse.error;
+      if (stepsResponse.error) throw stepsResponse.error;
+      const activity = (activityResponse.data as ApprovalRow[]) ?? [];
       setRows(activity);
+      const planRows = (plansResponse.data as JobPlanRow[]) ?? [];
+      setPlans(planRows);
+      setPlanSteps(((stepsResponse.data as Array<JobPlanStep & { plan_id: string }>) ?? []).reduce<Record<string, JobPlanStep[]>>((grouped, step) => {
+        (grouped[step.plan_id] ??= []).push(step);
+        return grouped;
+      }, {}));
       setSelectedId((current) => current && activity.some((row) => row.id === current) ? current : activity[0]?.id ?? null);
     } catch (loadError) {
       setRows([]);
@@ -119,6 +151,35 @@ const ApprovalsActivityPage: React.FC = () => {
     setError(null);
   };
 
+  const openPlanDecision = (plan: JobPlanRow, nextDecision: 'approve' | 'reject') => {
+    setSelectedPlanId(plan.id);
+    setPlanDecision(nextDecision);
+    setReasoning('');
+    setError(null);
+  };
+
+  const submitPlanDecision = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedPlanId || !planDecision || !reasoning.trim()) return;
+    setBusyId(selectedPlanId);
+    setError(null);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('bob-job-plan-approve', {
+        body: { plan_id: selectedPlanId, action: planDecision, reasoning: reasoning.trim() },
+      });
+      if (invokeError) throw invokeError;
+      setNotice((data as { note?: string } | null)?.note ?? `Plan ${planDecision === 'approve' ? 'approved' : 'rejected'} successfully.`);
+      setPlanDecision(null);
+      setSelectedPlanId(null);
+      setReasoning('');
+      await loadActivity();
+    } catch (decisionError) {
+      setError(decisionError instanceof Error ? decisionError.message : `The plan ${planDecision} decision could not be recorded.`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const submitDecision = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected || !decision || !reasoning.trim() || !selected.can_decide) return;
@@ -164,6 +225,8 @@ const ApprovalsActivityPage: React.FC = () => {
         <div><AlertTriangle size={18} /><span>Failed in view</span><strong>{failedCount}</strong></div>
         <div><History size={18} /><span>Loaded activity</span><strong>{rows.length}</strong></div>
       </section>
+
+      {plans.length > 0 && <section className="approvals-queue" aria-label="Governed job plans"><div className="approvals-panel-heading"><div><span>Whole-plan approval</span><h2>Job plans awaiting review</h2></div><ListChecks size={18} /></div><div className="approvals-list">{plans.map((plan) => { const steps = planSteps[plan.id] ?? []; return <article className={`status-${plan.status}`} key={plan.id}><div><strong>{plan.goal}</strong><small>{steps.length} ordered step{steps.length === 1 ? '' : 's'} · {formatAge(plan.created_at)}</small></div><p>{plan.reasoning ?? 'No plan reasoning was recorded.'}</p><small>{steps.map((step) => `${step.sequence + 1}. ${formatActionType(step.action_type)} (${step.status})`).join(' · ')}</small>{plan.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openPlanDecision(plan, 'reject')}><XCircle size={17} /> Reject plan</button><button type="button" className="is-approve" onClick={() => openPlanDecision(plan, 'approve')}><CheckCircle2 size={17} /> Review plan</button></div>}</article>; })}</div></section>}
 
       {error && <div className="approvals-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
       {notice && <div className={`approvals-message ${notice.includes('failed') ? 'is-warning' : 'is-success'}`} role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
@@ -234,6 +297,9 @@ const ApprovalsActivityPage: React.FC = () => {
             <div className="approvals-dialog-actions"><button type="button" onClick={() => setDecision(null)}>Cancel</button><button type="submit" className={decision === 'approve' ? 'is-approve' : 'is-reject'} disabled={busyId === selected.id || !reasoning.trim()}>{busyId === selected.id ? 'Recording decision' : decision === 'approve' ? applyAfterApprove ? 'Approve and apply' : 'Approve' : 'Reject'}</button></div>
           </form>
         </div>
+      )}
+      {planDecision && selectedPlanId && (
+        <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={submitPlanDecision} role="dialog" aria-modal="true" aria-labelledby="plan-decision-title"><div className="approvals-panel-heading"><div><span>Whole-plan decision</span><h2 id="plan-decision-title">{planDecision === 'approve' ? 'Approve job plan' : 'Reject job plan'}</h2></div><button type="button" onClick={() => { setPlanDecision(null); setSelectedPlanId(null); }}><X size={18} /><span className="sr-only">Close</span></button></div><label><span>Decision reasoning</span><textarea required rows={4} value={reasoning} onChange={(event) => setReasoning(event.target.value)} placeholder="Record why this whole plan should proceed or stop." /></label><div className="approvals-dialog-actions"><button type="button" onClick={() => { setPlanDecision(null); setSelectedPlanId(null); }}>Cancel</button><button type="submit" className={planDecision === 'approve' ? 'is-approve' : 'is-reject'} disabled={busyId === selectedPlanId || !reasoning.trim()}>{busyId === selectedPlanId ? 'Recording decision' : planDecision === 'approve' ? 'Approve plan' : 'Reject plan'}</button></div></form></div>
       )}
     </div>
   );
