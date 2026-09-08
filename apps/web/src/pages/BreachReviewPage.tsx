@@ -61,6 +61,7 @@ const BreachReviewPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [generatingNoticeId, setGeneratingNoticeId] = useState<string | null>(null);
 
   // ATLAS READS: breach_alerts, location_zones, observations
   const loadAlerts = useCallback(async () => {
@@ -149,6 +150,30 @@ const BreachReviewPage: React.FC = () => {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const generateNoticeDraft = async (alert: BreachAlert) => {
+    if (!profile?.displayName || !alert.action_type) return;
+    setGeneratingNoticeId(alert.id);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string }>('generate-notice', {
+      body: {
+        notice_type: alert.action_type,
+        breach_alert_id: alert.id,
+        officer_name: profile.displayName,
+        authorized_by: profile.displayName,
+        location_name: alert.zone_name,
+        additional_notes: alert.notes,
+      },
+    });
+    if (invokeError || !data?.html) {
+      setError(invokeError?.message ?? 'The notice draft was not generated. Refresh and try again.');
+    } else {
+      const draftUrl = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
+      window.open(draftUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(draftUrl), 60_000);
+    }
+    setGeneratingNoticeId(null);
   };
 
   const filteredAlerts = useMemo(() => {
@@ -403,6 +428,9 @@ const BreachReviewPage: React.FC = () => {
                       >
                         🏠 Mark Exempt - Homeless
                       </button>
+                      {(['written_warning', 'notice_to_vacate', 'infringement'] as string[]).includes(alert.action_type ?? '') && <button className="btn btn-sm btn-primary" onClick={() => void generateNoticeDraft(alert)} disabled={generatingNoticeId === alert.id}>
+                        {generatingNoticeId === alert.id ? 'Generating draft...' : 'Generate notice draft'}
+                      </button>}
                     </div>
                   </div>
                 )}
