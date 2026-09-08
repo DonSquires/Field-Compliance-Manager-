@@ -4,6 +4,9 @@ const path = require('node:path');
 const OWNER_MARKER = '[repo-atlas-refresh:v1]';
 const BATCH_SIZE = 250;
 const MAX_RETIREMENTS = 100;
+const ROOT_SOURCE_FILES = [
+  'supabase-workflow-client.js'
+];
 const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterOperationsPage.tsx',
   'apps/web/src/pages/OfficerSchedulePage.tsx',
@@ -304,7 +307,9 @@ function collectSourceEdges(rootDir, knownEntities) {
   const sourceFiles = [
     ...walkFiles(rootDir, 'apps/web/src'),
     ...walkFiles(rootDir, 'apps/mobile/src'),
-    ...walkFiles(rootDir, 'supabase/functions')
+    ...walkFiles(rootDir, 'supabase/functions'),
+    ...walkFiles(rootDir, 'services'),
+    ...ROOT_SOURCE_FILES.filter(file => fs.existsSync(path.join(rootDir, file)))
   ].filter(isSourceFile);
   const edges = new Map();
   const add = (source, targetType, targetName, edgeKind, file, context) => {
@@ -356,11 +361,26 @@ function collectSourceEdges(rootDir, knownEntities) {
     if (source.source_name === 'onspace-ai-chat' && /\bcallInference\(\s*\{/.test(content) && knownEntities.edgeFunctions.has('bob-inference')) {
       add(source, 'edge_function', 'bob-inference', 'calls', file, 'callInference() wrapper');
     }
+    if (/\/functions\/v1\/\$\{functionName\}/.test(content)) {
+      const endpointMap = content.match(/\bfunctionNames\s*=\s*\{([\s\S]*?)\s*\};/);
+      for (const endpoint of endpointMap?.[1].matchAll(/:\s*['"]([a-zA-Z0-9_-]+)['"]/g) || []) {
+        if (knownEntities.edgeFunctions.has(endpoint[1])) {
+          add(source, 'edge_function', endpoint[1], 'calls', file, 'workflow endpoint map');
+        }
+      }
+    }
     for (const match of content.matchAll(/fetch\(\s*(?:`[^`]*\/functions\/v1\/|['"][^'"]*\/functions\/v1\/)([a-zA-Z0-9_-]+)/g)) {
       if (knownEntities.edgeFunctions.has(match[1])) {
         add(source, 'edge_function', match[1], 'calls', file, `fetch('/functions/v1/${match[1]}')`);
       }
     }
+      if (/\bfetch\(\s*(?:url|endpoint)\s*,/.test(content)) {
+        for (const match of content.matchAll(/\b(?:url|endpoint)\s*=\s*`[^`]*\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
+          if (knownEntities.edgeFunctions.has(match[1])) {
+            add(source, 'edge_function', match[1], 'calls', file, `fetch(${match[0].split('=')[0].trim()})`);
+          }
+        }
+      }
 
     for (const match of content.matchAll(/ATLAS\s+(READS|WRITES|CALLS|INVOKES):\s*([^\n]+)/gi)) {
       const operation = match[1].toUpperCase();

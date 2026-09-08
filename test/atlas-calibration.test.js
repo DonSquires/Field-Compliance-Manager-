@@ -151,3 +151,36 @@ test('Atlas refresh derives conductor wrapper and variable-dispatched function c
   assert.ok(targets.includes('bob-inference'));
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
+
+test('Atlas refresh derives root workflow-client endpoint map dispatches', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-workflow-client-'));
+  const clientPath = path.join(rootDir, 'supabase-workflow-client.js');
+  const targetPath = path.join(rootDir, 'supabase/functions/wf-create-job/index.ts');
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, 'export default {}');
+  fs.writeFileSync(clientPath, "const functionNames = { createJob: 'wf-create-job' }; fetch(`\${url}/functions/v1/\${functionName}`);");
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'supabase-workflow-client'
+    && edge.target_name === 'wf-create-job'
+    && edge.edge_kind === 'calls'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
+
+test('Atlas refresh derives explicit function URL variables passed to fetch', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-url-variable-'));
+  const sourcePath = path.join(rootDir, 'supabase/functions/bob-job-plan-approve/index.ts');
+  const targetPath = path.join(rootDir, 'supabase/functions/bob-notify-conductor/index.ts');
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, "const url = `\${SUPABASE_URL}/functions/v1/bob-notify-conductor`; fetch(url, {});");
+  fs.writeFileSync(targetPath, 'export default {}');
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'bob-job-plan-approve'
+    && edge.target_name === 'bob-notify-conductor'
+    && edge.edge_kind === 'calls'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
