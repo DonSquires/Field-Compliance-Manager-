@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Clock3, Download, FileArchive, FileText, FolderOpen, Image, RefreshCw, Search, ShieldCheck, Video, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ImportSchemaPreview, parseCsvPreview, parseXlsxPreview } from '../lib/importPreview';
+import { ImportSchemaPreview, parseCsvPreview, parseXlsxPreview, sha256Hex } from '../lib/importPreview';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './FileSystemPage.css';
@@ -292,7 +292,9 @@ const FileSystemPage: React.FC = () => {
       return;
     }
     try {
-      setUploadedImportPreview(lowerName.endsWith('.xlsx') ? await parseXlsxPreview(await file.arrayBuffer(), file.name) : parseCsvPreview(await file.text(), file.name));
+      const bytes = await file.arrayBuffer();
+      const preview = lowerName.endsWith('.xlsx') ? await parseXlsxPreview(bytes, file.name) : parseCsvPreview(new TextDecoder().decode(bytes), file.name);
+      setUploadedImportPreview({ ...preview, source_sha256: await sha256Hex(bytes) });
     } catch {
       setPreviewError('The CSV could not be parsed safely for preview.');
     }
@@ -311,7 +313,7 @@ const FileSystemPage: React.FC = () => {
     const { data, error: batchError } = await supabase.rpc('create_file_import_batch', {
       p_batch_name: `preview-${activeImportPreview.source_file}`,
       p_source_file: activeImportPreview.source_file,
-      p_source_sha256: null,
+      p_source_sha256: activeImportPreview.source_sha256 ?? null,
       p_parser: activeImportPreview.parser,
       p_manifest_json: { staged: true, source_file: activeImportPreview.source_file, date_range: activeImportPreview.date_range },
       p_schema_json: { mappings: activeImportPreview.mappings, warnings: activeImportPreview.warnings },
@@ -388,6 +390,7 @@ const FileSystemPage: React.FC = () => {
       </div>
       <div className="file-system-import-detail">
         <strong className="file-system-import-source">{activeImportPreview.source_file}</strong>
+        <small className="file-system-import-hash">SHA-256: {activeImportPreview.source_sha256 ?? 'Generated when a local source is selected'}</small>
         {previewError && <p className="file-system-import-warning" role="alert">{previewError}</p>}
         <button type="button" className="file-system-import-create" onClick={() => void createReviewBatch()} disabled={creatingBatch}>{creatingBatch ? 'Creating review batch' : 'Create review batch'}</button>
         <div className="file-system-import-facts"><div><small>Parser</small><strong>{activeImportPreview.parser}</strong></div><div><small>Rows</small><strong>{activeImportPreview.row_count.toLocaleString()}</strong></div><div><small>duplicate rows</small><strong>{activeImportPreview.duplicate_count}</strong></div><div><small>Date range</small><strong>{activeImportPreview.date_range}</strong></div></div>

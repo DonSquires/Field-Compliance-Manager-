@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCsvPreview, parseXlsxPreview } from './importPreview';
+import { parseCsvPreview, parseXlsxPreview, sha256Hex } from './importPreview';
 
 describe('CSV import preview', () => {
   it('detects mappings, date range, and duplicate rows without writing data', () => {
@@ -16,5 +16,10 @@ describe('CSV import preview', () => {
 
   it('rejects an invalid XLSX payload safely before any promotion', async () => {
     await expect(parseXlsxPreview(new ArrayBuffer(0), 'Vehicle events.xlsx')).rejects.toBeTruthy();
+  });
+
+  it('creates a stable SHA-256 digest for source bytes', async () => {
+    const bytes = new TextEncoder().encode('source-row').buffer as ArrayBuffer;
+    await expect(sha256Hex(bytes)).resolves.toBe('e7b8190cd3763566ca3061365d327050fe7d6d7dcf3a51ebb5585150e40f5547');
   });
 });

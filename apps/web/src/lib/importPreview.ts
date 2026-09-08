@@ -2,12 +2,18 @@ import readXlsxFile from 'read-excel-file/browser';
 
 export interface ImportSchemaPreview {
   source_file: string;
+  source_sha256?: string;
   parser: string;
   row_count: number;
   duplicate_count: number;
   date_range: string;
   mappings: Array<{ source: string; target: string; confidence: string }>;
   warnings: string[];
+}
+
+export async function sha256Hex(data: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function parseCsvRows(text: string): string[][] {

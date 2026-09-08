@@ -62,6 +62,9 @@ describe('organisation file system', () => {
     expect(page).toContain('Approve batch');
     expect(page).toContain('Reject batch');
     expect(page).toContain('A review reason is required');
+    expect(page).toContain('sha256Hex');
+    expect(page).toContain('p_source_sha256');
+    expect(page).toContain('SHA-256');
   });
 
   it('is registered as a first-class admin page', () => {
