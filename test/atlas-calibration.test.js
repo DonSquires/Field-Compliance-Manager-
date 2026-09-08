@@ -160,13 +160,16 @@ test('Atlas refresh derives conditional Supabase RPC targets', () => {
   fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
   fs.mkdirSync(path.dirname(schemaPath), { recursive: true });
   fs.writeFileSync(schemaPath, 'CREATE FUNCTION public.create_operating_organization_workplace() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql; CREATE FUNCTION public.create_operating_cost_centre() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;');
-  fs.writeFileSync(sourcePath, "supabase.rpc(isWorkplace ? 'create_operating_organization_workplace' : 'create_operating_cost_centre', payload);");
+  fs.writeFileSync(sourcePath, "supabase.rpc(isWorkplace ? 'create_operating_organization_workplace' : 'create_operating_cost_centre', payload); supabase.rpc(action.endsWith('_zone') ? 'manage_crm_agreement_zone_coverage' : 'manage_crm_agreement_setup', payload);");
+  fs.appendFileSync(schemaPath, ' CREATE FUNCTION public.manage_crm_agreement_zone_coverage() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql; CREATE FUNCTION public.manage_crm_agreement_setup() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;');
 
   const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
   const targets = manifest.edges.filter((edge) => edge.source_name === 'pages/RosterTargetsPage').map((edge) => edge.target_name);
 
   assert.ok(targets.includes('create_operating_organization_workplace'));
   assert.ok(targets.includes('create_operating_cost_centre'));
+  assert.ok(targets.includes('manage_crm_agreement_zone_coverage'));
+  assert.ok(targets.includes('manage_crm_agreement_setup'));
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
 
