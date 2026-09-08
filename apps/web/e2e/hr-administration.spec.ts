@@ -108,3 +108,21 @@ test('administrator returns branch-checked time for correction and reapproves it
   await returnDialog.getByRole('button', { name: 'Confirm decision' }).click();
   await expect(page.getByRole('status')).toContainText('Timesheet returned for correction.');
 });
+
+test('administrator approves a pending direct shift swap', async ({ page }) => {
+  await page.route('**/rest/v1/shift_swaps**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '15151515-1515-4515-8515-151515151515', original_shift_id: '66666666-6666-4666-8666-666666666666', original_staff_id: '22222222-2222-4222-8222-222222222222', swap_with_staff_id: '2f2f2f2f-2222-4222-8222-222222222222', swap_type: 'direct', reason: 'Jordan agreed to cover this assignment.', status: 'pending', requested_by: '22222222-2222-4222-8222-222222222222', requested_at: '2026-08-30T09:20:00.000Z' }]) });
+  });
+  await page.route('**/rest/v1/rpc/review_shift_swap', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload.p_swap_id).toBe('15151515-1515-4515-8515-151515151515');
+    expect(payload.p_decision).toBe('approved');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: payload.p_swap_id, status: 'approved' }]) });
+  });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await expect(page.getByRole('heading', { name: /Shift swap requests/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Approve swap' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Approve shift swap?' });
+  await dialog.getByRole('button', { name: 'Confirm decision' }).click();
+  await expect(page.getByRole('status')).toContainText('Shift swap approved and roster ownership updated.');
+});

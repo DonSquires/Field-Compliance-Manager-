@@ -195,6 +195,11 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - Direct swap request payload proof and open-swap fallback are both covered.
 - A shared-session manager approval -> officer notification -> officer schedule refresh journey remains a release-environment gap because the current fixtures isolate auth sessions.
 
+### Progress: manager swap approval browser proof complete
+
+- HR browser coverage now loads a pending direct swap, opens the approval dialog, submits the governed review action, and verifies the ownership-updated receipt on desktop and mobile.
+- Notification delivery remains verified by the live migration and notification-center browser proof; shared authenticated-session delivery remains a release-environment check.
+
 ### Progress: new migration authorization guards complete
 
 - Added static regression guards for the 20260907 roster migrations.
