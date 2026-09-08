@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   History,
+  Plus,
   RefreshCw,
   Rocket,
   UserRound,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { readWorkflowContext, type NavigateWithContext, type WorkflowContext } from "../lib/workflowNavigation";
+import { CrmOrganizationDialog } from "../components/CrmOrganizationDialog";
 import "./AccountOnboardingPage.css";
 import "./AccountOnboardingUnavailable.css";
 import "./AccountOnboardingOwnership.css";
@@ -72,7 +74,8 @@ export default function AccountOnboardingPage({
     [assignees, setAssignees] = useState<Assignee[]>([]),
     [assignedTo, setAssignedTo] = useState(""),
     [stageNote, setStageNote] = useState(""),
-    [history, setHistory] = useState<OnboardingEvent[]>([]);
+    [history, setHistory] = useState<OnboardingEvent[]>([]),
+    [showCreateAccount, setShowCreateAccount] = useState(false);
   const selected = rows.find((row) => row.ledger_id === selectedId) ?? null;
   const loadQueue = useCallback(async (preferred?: string) => {
     setLoading(true);
@@ -214,11 +217,33 @@ export default function AccountOnboardingPage({
             activation from durable evidence.
           </p>
         </div>
-        <button onClick={() => void loadQueue()} disabled={loading}>
-          <RefreshCw size={16} className={loading ? "is-spinning" : ""} />
-          Refresh
-        </button>
+        <div className="onboarding-header-actions">
+          <button className="is-new-account" onClick={() => setShowCreateAccount(true)}>
+            <Plus size={16} />
+            New account
+          </button>
+          <button onClick={() => void loadQueue()} disabled={loading}>
+            <RefreshCw size={16} className={loading ? "is-spinning" : ""} />
+            Refresh
+          </button>
+        </div>
       </header>
+      {showCreateAccount && (
+        <CrmOrganizationDialog
+          organization={null}
+          onClose={() => setShowCreateAccount(false)}
+          onUpdated={() => setShowCreateAccount(false)}
+          onOpenAccount={(account) => {
+            setShowCreateAccount(false);
+            void loadQueue();
+            onNavigate("crm", { accountId: account.id });
+          }}
+          onUseOrganization={() => {
+            setShowCreateAccount(false);
+            onNavigate("crm", {});
+          }}
+        />
+      )}
       {error && (
         <div className="onboarding-message is-error" role="alert">
           <AlertTriangle size={16} />
@@ -283,6 +308,10 @@ export default function AccountOnboardingPage({
           ) : (
             <div className="onboarding-empty">
               No incomplete onboarding accounts.
+              <button type="button" className="is-new-account" onClick={() => setShowCreateAccount(true)}>
+                <Plus size={14} />
+                Set up a new subscriber
+              </button>
             </div>
           )}
         </aside>

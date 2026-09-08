@@ -39,4 +39,13 @@ describe('Account Onboarding failure state', () => {
     expect(source).toContain('agreementId: selected.agreement_id');
     expect(source).toContain('ledgerId: selected.ledger_id');
   });
+
+  it('gives grand masters and admins a working entry point to create a new subscriber account', () => {
+    expect(source).toContain('CrmOrganizationDialog');
+    expect(source).toContain('setShowCreateAccount(true)');
+    expect(source).toContain('New account');
+    expect(source).toContain('organization={null}');
+    expect(source).toContain('onNavigate("crm", { accountId: account.id })');
+    expect(source).not.toMatch(/supabase\.(from|rpc)\(['"]organizations['"]/);
+  });
 });
