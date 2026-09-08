@@ -17,8 +17,11 @@ const repeat = read('20260907002400_repeat_roster_slot_range.sql');
 const batchFailures = read('20260907002500_batch_publish_failure_audit.sql');
 const attendanceAck = read('20260907002600_acknowledge_roster_attendance_exception.sql');
 const skills = read('20260907002800_roster_skill_requirements.sql');
+const skillCatalog = read('20260907002900_canonical_roster_skill_catalog.sql');
+const skillIds = read('20260907003000_canonical_work_unit_skill_ids.sql');
+const inductions = read('20260907003100_site_induction_requirements.sql');
 
-const migrations = [swap, notify, attendance, templatePreview, batchPreview, repeat, batchFailures, attendanceAck, skills];
+const migrations = [swap, notify, attendance, templatePreview, batchPreview, repeat, batchFailures, attendanceAck, skills, skillCatalog, skillIds, inductions];
 
 describe('new roster lifecycle migrations remain governed', () => {
   it('restricts every new executable function to authenticated and service roles', () => {
@@ -63,5 +66,29 @@ describe('new roster lifecycle migrations remain governed', () => {
     expect(skills).toContain('tg_enforce_roster_slot_skill_requirements');
     expect(skills).toContain('certification_expiry >= current_date');
     expect(skills).toContain('Assigned staff member lacks required current skill');
+  });
+
+  it('provides canonical organization-scoped skill catalog and staff assignment', () => {
+    expect(skillCatalog).toContain('create table if not exists public.roster_skill_catalog');
+    expect(skillCatalog).toContain('skill_key text not null');
+    expect(skillCatalog).toContain('skill_id uuid references public.roster_skill_catalog');
+    expect(skillCatalog).toContain('manage_roster_skill_catalog');
+    expect(skillCatalog).toContain('assign_roster_skill_to_staff');
+    expect(skillCatalog).toContain('is_admin_for_org');
+  });
+
+  it('supports stable canonical skill IDs on work-unit requirements', () => {
+    expect(skillIds).toContain('required_skill_ids');
+    expect(skillIds).toContain('manage_roster_work_unit_skill_ids');
+    expect(skillIds).toContain('skill.skill_id = v_required_id');
+    expect(skillIds).toContain('required_skill_names');
+  });
+
+  it('keeps site induction separate from global skills', () => {
+    expect(inductions).toContain('create table if not exists public.site_induction_requirements');
+    expect(inductions).toContain('create table if not exists public.staff_site_inductions');
+    expect(inductions).toContain('service_agreement_location_id');
+    expect(inductions).toContain('get_site_induction_state');
+    expect(inductions).toContain('expires_at');
   });
 });
