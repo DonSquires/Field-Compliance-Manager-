@@ -567,6 +567,17 @@ fn dhfs_timestamp(timestamp: u32) -> String {
     format!("20{:02}-{:02}-{:02}_{:02}-{:02}-{:02}", bits(31, 6), bits(25, 4), bits(21, 5), bits(16, 5), bits(11, 6), bits(5, 6))
 }
 
+// File-based counterpart to locate_dhfs_dpt_marker, for convert_dhfs_image's already-scoped image file.
+fn locate_dhfs_dpt_marker_file(file: &mut File) -> Result<u64, String> {
+    const SCAN_BYTES: usize = 96 * 1024;
+    file.seek(SeekFrom::Start(0)).map_err(|error| error.to_string())?;
+    let mut scan = vec![0_u8; SCAN_BYTES];
+    file.read_exact(&mut scan).map_err(|error| format!("Could not read DHFS metadata window: {error}"))?;
+    let marker_offset = scan.windows(9).position(|window| window == b"DHFS_DPT:")
+        .ok_or("No DHFS_DPT metadata marker was found near the start of this image.")?;
+    Ok(marker_offset as u64)
+}
+
 fn dhfs_descriptor_chain(file: &mut File, descriptor_offset: u64, descriptor_count: u32, start: u32) -> Result<Vec<u32>, String> {
     let mut chain = Vec::new();
     let mut current = start;
@@ -636,6 +647,12 @@ fn locate_dhfs_dpt_marker(device: &mut File, base: u64) -> Result<u64, String> {
     Ok(base + marker_offset as u64)
 }
 
+// Verified against a real DHFS4.1 card: its partition-table entries were all zero (no explicit
+// multi-partition entries), yet a real, sane superblock (block_size=512, fragment/descriptor
+// counts matching the card's actual capacity) sits exactly here relative to the DPT marker.
+// Single-partition DVR/NVR SD cards fall back to this fixed location.
+const SINGLE_PARTITION_SUPERBLOCK_OFFSET: u64 = 0x6c0;
+
 // Reports the raw values the partition-table parser derives, so a real card's layout can be
 // verified against the current field-offset assumptions before they are trusted for extraction.
 #[cfg(target_os = "windows")]
@@ -678,6 +695,27 @@ fn diagnose_dhfs_partition_table(disk_number: u32, partition_number: u32) -> Res
             descriptor_count,
         });
         table_offset += 64;
+    }
+    if entries.is_empty() {
+        let superblock_offset = SINGLE_PARTITION_SUPERBLOCK_OFFSET;
+        let superblock_absolute_offset = dpt_marker_absolute_offset + superblock_offset;
+        let block_size = read_device_u32(&mut device, superblock_absolute_offset + 0x2c)? as u64;
+        let fragment_size_blocks = read_device_u32(&mut device, superblock_absolute_offset + 0x30)?;
+        let descriptor_offset_blocks = read_device_u32(&mut device, superblock_absolute_offset + 0x44)?;
+        let video_offset_blocks = read_device_u32(&mut device, superblock_absolute_offset + 0x48)?;
+        let descriptor_count = read_device_u32(&mut device, superblock_absolute_offset + 0x4c)?;
+        entries.push(DhfsPartitionTableEntry {
+            index: 0,
+            partition_offset: 0,
+            superblock_offset,
+            superblock_absolute_offset,
+            block_size,
+            fragment_size_blocks,
+            descriptor_offset_blocks,
+            video_offset_blocks,
+            descriptor_count,
+        });
+        stopped_reason = format!("{stopped_reason} Fell back to the single-partition superblock at marker + 0x{superblock_offset:x}.");
     }
     Ok(DhfsPartitionTableReport { disk_number, partition_number, dpt_marker_absolute_offset, table_start_absolute_offset, entries, stopped_reason })
 }
@@ -723,7 +761,8 @@ fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Re
     let magic = read_device_aligned(&mut device, base, 7)?;
     if magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
 
-    let mut table_offset = locate_dhfs_dpt_marker(&mut device, base)? + 0x34;
+    let dpt_marker = locate_dhfs_dpt_marker(&mut device, base)?;
+    let mut table_offset = dpt_marker + 0x34;
     let mut partitions = Vec::new();
     for _ in 0..64 {
         let entry = read_device_aligned(&mut device, table_offset, 64)?;
@@ -734,7 +773,7 @@ fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Re
         partitions.push((partition_offset, superblock_offset));
         table_offset += 64;
     }
-    if partitions.is_empty() { return Err("No DHFS partitions were found on this card.".to_string()); }
+    if partitions.is_empty() { partitions.push((0, dpt_marker - base + SINGLE_PARTITION_SUPERBLOCK_OFFSET)); }
     let mut recordings = Vec::new();
     for (partition_index, (partition_offset, superblock_offset)) in partitions.iter().enumerate() {
         let superblock = base + partition_offset + superblock_offset;
@@ -779,7 +818,8 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
     let magic = read_device_aligned(&mut device, base, 7)?;
     if magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
 
-    let mut table_offset = locate_dhfs_dpt_marker(&mut device, base)? + 0x34;
+    let dpt_marker = locate_dhfs_dpt_marker(&mut device, base)?;
+    let mut table_offset = dpt_marker + 0x34;
     let mut partitions = Vec::new();
     for _ in 0..64 {
         let entry = read_device_aligned(&mut device, table_offset, 64)?;
@@ -790,6 +830,7 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
         partitions.push((partition_offset, superblock_offset));
         table_offset += 64;
     }
+    if partitions.is_empty() { partitions.push((0, dpt_marker - base + SINGLE_PARTITION_SUPERBLOCK_OFFSET)); }
     let (partition_offset, superblock_offset) = partitions.get(dhfs_partition_index as usize)
         .ok_or("The selected DHFS partition is no longer present on this card.")?;
     let superblock = base + partition_offset + superblock_offset;
@@ -867,7 +908,8 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
     file.read_exact(&mut magic).map_err(|error| error.to_string())?;
     if &magic != b"DHFS4.1" { return Err("The selected image is not a DHFS4.1 image.".to_string()); }
 
-    let mut table_offset = 0x3c00_u64 + 0x34;
+    let dpt_marker = locate_dhfs_dpt_marker_file(&mut file)?;
+    let mut table_offset = dpt_marker + 0x34;
     let mut partitions = Vec::new();
     for _ in 0..64 {
         file.seek(SeekFrom::Start(table_offset)).map_err(|error| error.to_string())?;
@@ -880,7 +922,7 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
         partitions.push((partition_offset, superblock_offset));
         table_offset += 64;
     }
-    if partitions.is_empty() { return Err("No DHFS partitions were found in the image.".to_string()); }
+    if partitions.is_empty() { partitions.push((0, dpt_marker + SINGLE_PARTITION_SUPERBLOCK_OFFSET)); }
 
     let mut exported = Vec::new();
     for (partition_index, (partition_offset, superblock_offset)) in partitions.iter().enumerate() {
@@ -1295,10 +1337,13 @@ mod tests {
         let fragment_size = FRAGMENT_SIZE_BLOCKS as u64 * BLOCK_SIZE as u64;
         let descriptor_offset = (PARTITION_OFFSET + DESCRIPTOR_OFFSET_BLOCKS as u64 * BLOCK_SIZE as u64) as usize;
         let video_offset = (PARTITION_OFFSET + VIDEO_OFFSET_BLOCKS as u64 * BLOCK_SIZE as u64) as usize;
-        let mut buffer = vec![0_u8; video_offset + 2 * fragment_size as usize + 4096];
+        const MARKER_SCAN_BYTES: usize = 96 * 1024;
+        let mut buffer = vec![0_u8; (video_offset + 2 * fragment_size as usize + 4096).max(MARKER_SCAN_BYTES)];
         buffer[0..7].copy_from_slice(b"DHFS4.1");
 
-        let table_offset = 0x3c00_usize + 0x34;
+        let marker_offset = 0x3c00_usize;
+        buffer[marker_offset..marker_offset + 12].copy_from_slice(b"DHFS_DPT:3.0");
+        let table_offset = marker_offset + 0x34;
         write_le_u32(&mut buffer, table_offset + 20, (SUPERBLOCK_OFFSET / 512) as u32);
         write_le_u64(&mut buffer, table_offset + 48, PARTITION_OFFSET / 512);
         buffer[table_offset + 64..table_offset + 68].copy_from_slice(&[0xaa, 0x55, 0xaa, 0x55]);
@@ -1349,6 +1394,55 @@ mod tests {
         assert_eq!(&output_bytes[..4], &[0, 0, 0, 1]);
         assert!(output_bytes[4..1024].iter().all(|byte| *byte == 0xAA), "first fragment content must be preserved exactly");
         assert!(output_bytes[1024..].iter().all(|byte| *byte == 0xBB), "trimmed final fragment content must be preserved exactly, not padded with the full fragment size");
+
+        std::fs::remove_dir_all(&image_dir).ok();
+    }
+
+    // Real cards can leave the partition-table entries all-zero (no explicit multi-partition
+    // entries); the single-partition fallback must still locate the real superblock and recording.
+    #[test]
+    fn falls_back_to_single_partition_superblock_when_table_entries_are_empty() {
+        const BLOCK_SIZE: u32 = 512;
+        const FRAGMENT_SIZE_BLOCKS: u32 = 2;
+        let fragment_size = FRAGMENT_SIZE_BLOCKS as u64 * BLOCK_SIZE as u64;
+        let marker_offset = 0x3c00_usize;
+        let superblock = marker_offset + SINGLE_PARTITION_SUPERBLOCK_OFFSET as usize;
+        let descriptor_offset = 20 * 1024_usize; // block-aligned, well past the superblock
+        let video_offset = 40 * 1024_usize;
+        const MARKER_SCAN_BYTES: usize = 96 * 1024;
+        let mut buffer = vec![0_u8; (video_offset + 2 * fragment_size as usize + 4096).max(MARKER_SCAN_BYTES)];
+        buffer[0..7].copy_from_slice(b"DHFS4.1");
+        buffer[marker_offset..marker_offset + 12].copy_from_slice(b"DHFS_DPT:3.0");
+        // The partition-table entry region (marker + 0x34 onward) is deliberately left all-zero.
+
+        write_le_u32(&mut buffer, superblock + 0x2c, BLOCK_SIZE);
+        write_le_u32(&mut buffer, superblock + 0x30, FRAGMENT_SIZE_BLOCKS);
+        write_le_u32(&mut buffer, superblock + 0x44, (descriptor_offset as u64 / BLOCK_SIZE as u64) as u32);
+        write_le_u32(&mut buffer, superblock + 0x48, (video_offset as u64 / BLOCK_SIZE as u64) as u32);
+        write_le_u32(&mut buffer, superblock + 0x4c, 1);
+
+        buffer[descriptor_offset] = 1;
+        buffer[descriptor_offset + 1] = b'0';
+        write_le_u32(&mut buffer, descriptor_offset + 4, 0x1000_0001);
+        write_le_u32(&mut buffer, descriptor_offset + 8, 0x1000_0002);
+        // next-descriptor field left at its default zero: this is a single-fragment recording.
+        write_le_u32(&mut buffer, descriptor_offset + 16, FRAGMENT_SIZE_BLOCKS);
+
+        buffer[video_offset..video_offset + 4].copy_from_slice(&[0, 0, 0, 1]);
+        buffer[video_offset + 4..video_offset + fragment_size as usize].fill(0xCC);
+
+        let image_dir = std::env::temp_dir().join(format!("fcm-dhfs-fallback-test-{}", std::process::id()));
+        std::fs::create_dir_all(&image_dir).expect("create temp dir");
+        let image_path = image_dir.join("synthetic-fallback.img");
+        std::fs::write(&image_path, buffer).expect("write synthetic image");
+
+        let report = convert_dhfs_image(
+            image_path.to_string_lossy().to_string(),
+            image_dir.to_string_lossy().to_string(),
+        ).expect("conversion should succeed via the single-partition superblock fallback");
+
+        assert_eq!(report.exported.len(), 1);
+        assert_eq!(report.exported[0].bytes_written, fragment_size);
 
         std::fs::remove_dir_all(&image_dir).ok();
     }
