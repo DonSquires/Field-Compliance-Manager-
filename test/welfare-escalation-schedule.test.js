@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '..');
 const schedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005000_schedule_welfare_escalation_tick.sql'), 'utf8');
 const activation = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005100_activate_welfare_escalation_tick.sql'), 'utf8');
 const credentialSchedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005200_schedule_credential_expiry_notifications.sql'), 'utf8');
+const taSchedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005300_schedule_canonical_ta_refresh.sql'), 'utf8');
 
 test('welfare escalation is scheduled through Vault-backed backend-only cron', () => {
   assert.match(schedule, /ops\.enqueue_welfare_escalation_tick/);
@@ -27,4 +28,13 @@ test('credential expiry notifications run through a daily Vault-backed backend s
   assert.match(credentialSchedule, /credential-expiry-notifications-daily/);
   assert.match(credentialSchedule, /'17 6 \* \* \*'/);
   assert.match(credentialSchedule, /true\n  \);/);
+});
+
+test('canonical territorial-authority names refresh weekly through a backend schedule', () => {
+  assert.match(taSchedule, /ops\.enqueue_canonical_ta_refresh/);
+  assert.match(taSchedule, /vault\.decrypted_secrets/);
+  assert.match(taSchedule, /functions\/v1\/bob-refresh-canonical-ta-names/);
+  assert.match(taSchedule, /canonical-ta-refresh-weekly/);
+  assert.match(taSchedule, /'23 3 \* \* 0'/);
+  assert.match(taSchedule, /true\n  \);/);
 });
