@@ -662,7 +662,16 @@ function App() {
           file_size_bytes: video.size,
         },
       });
-      if (registerError) throw registerError;
+      if (registerError) {
+        // supabase-js's default FunctionsHttpError message is a generic "non-2xx status code";
+        // the real reason is in the response body our own edge function returned.
+        const context = (registerError as { context?: unknown }).context;
+        if (context instanceof Response) {
+          const body = await context.clone().json().catch(() => null);
+          throw new Error(body?.error || registerError.message);
+        }
+        throw registerError;
+      }
       setUploadStatus(data?.inference_job_id ? `Uploaded. VPS inference job ${String(data.inference_job_id).slice(0, 8)} is queued for CCTV Review.` : 'Uploaded to private Bob storage for review.');
       if (cachedClip) {
         await invoke('clear_cached_clip', { cachePath: cachedClip.cache_path });

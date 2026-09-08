@@ -1,6 +1,6 @@
 [package]
 name = "fcm-sd-card-bridge"
-version = "0.1.38"
+version = "0.1.39"
 description = "Read-only local SD-card evidence bridge for Field Compliance Manager"
 authors = ["Field Compliance Manager"]
 edition = "2021"
