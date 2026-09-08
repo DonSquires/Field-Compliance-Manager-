@@ -31,4 +31,11 @@ describe('client portfolio hub', () => {
     expect(source).toContain('Organization identity');
     expect(source).toContain('No recorded activation blockers');
   });
+
+  it('shows the corporate hub status at the top of the portfolio', () => {
+    expect(source).toContain('Client access');
+    expect(source).toContain('Commercial agreement');
+    expect(source).toContain('Schedules');
+    expect(source).toContain('headlineInvitation');
+  });
 });
