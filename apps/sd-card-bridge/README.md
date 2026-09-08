@@ -9,7 +9,8 @@ Local Windows utility for inspecting a copied `SDFileInfo.db` CCTV index before 
 - Displays motion-recording metadata, event labels, timestamps, and vendor cluster references.
 - Signs users in against FCM using public browser configuration fetched at startup; passwords and service credentials are never sent to the configuration endpoint.
 - Uploads exported MP4/MOV/AVI/MKV footage to private FCM storage and queues the existing VPS `video_motion` pipeline.
-- Does not access physical disks, read raw partitions, or extract footage from vendor block storage.
+- Stages one selected recording at a time through an atomic `.part` -> ready cache before upload; failed reads or uploads remain retryable and successful Bob registration clears the cache.
+- The built-in DHFS parser currently operates on a read-only image. Direct selected-record extraction from the physical DHFS partition is the next native acquisition step.
 
 ## Security model
 

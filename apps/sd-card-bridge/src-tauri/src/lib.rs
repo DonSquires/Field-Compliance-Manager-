@@ -59,6 +59,14 @@ struct DhfsImageReport {
 }
 
 #[derive(Serialize)]
+struct CachedClipReport {
+    cache_path: String,
+    bytes: u64,
+    sha256: String,
+    state: String,
+}
+
+#[derive(Serialize)]
 struct MountedFile {
     relative_path: String,
     size_bytes: u64,
@@ -146,6 +154,42 @@ fn sha256_file(path: &Path) -> Result<String, String> {
         hasher.update(&buffer[..read]);
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+#[tauri::command]
+fn cache_video_clip(source_path: String, cache_directory: String, cache_name: String) -> Result<CachedClipReport, String> {
+    let source = PathBuf::from(&source_path);
+    let cache_dir = PathBuf::from(&cache_directory);
+    if !source.is_file() { return Err("The selected recording is no longer available.".to_string()); }
+    if cache_name.is_empty() || cache_name.contains(['/', '\\']) || !cache_name.ends_with(".h264") {
+        return Err("Invalid cache clip name.".to_string());
+    }
+    fs::create_dir_all(&cache_dir).map_err(|error| format!("Could not create clip cache: {error}"))?;
+    let ready_path = cache_dir.join(&cache_name);
+    let part_path = cache_dir.join(format!("{cache_name}.part"));
+    let mut input = File::open(&source).map_err(|error| format!("Could not open selected recording: {error}"))?;
+    let mut output = File::create(&part_path).map_err(|error| format!("Could not create clip cache: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut bytes = 0_u64;
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = input.read(&mut buffer).map_err(|error| format!("Recording read failed; partial cache retained: {error}"))?;
+        if read == 0 { break; }
+        output.write_all(&buffer[..read]).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
+        hasher.update(&buffer[..read]);
+        bytes += read as u64;
+    }
+    output.flush().map_err(|error| error.to_string())?;
+    output.sync_all().map_err(|error| error.to_string())?;
+    fs::rename(&part_path, &ready_path).map_err(|error| format!("Could not commit clip cache atomically: {error}"))?;
+    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string() })
+}
+
+#[tauri::command]
+fn clear_cached_clip(cache_path: String) -> Result<(), String> {
+    let path = PathBuf::from(&cache_path);
+    if path.exists() { fs::remove_file(path).map_err(|error| format!("Could not clear clip cache: {error}"))?; }
+    Ok(())
 }
 
 fn unix_timestamp(timestamp: i64) -> Option<String> {
@@ -835,7 +879,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, image_dhfs_partition, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, image_dhfs_partition, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }

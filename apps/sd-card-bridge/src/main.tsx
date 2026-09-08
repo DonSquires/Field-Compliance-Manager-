@@ -138,6 +138,13 @@ type DhfsConversionReport = {
   }>;
 };
 
+type CachedClipReport = {
+  cache_path: string;
+  bytes: number;
+  sha256: string;
+  state: string;
+};
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -171,6 +178,7 @@ function App() {
   const [conversionLoading, setConversionLoading] = useState(false);
   const [imagingLoading, setImagingLoading] = useState(false);
   const [convertedVideoLoading, setConvertedVideoLoading] = useState<string | null>(null);
+  const [cachedClip, setCachedClip] = useState<CachedClipReport | null>(null);
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -192,6 +200,7 @@ function App() {
     setSignedInAs(null);
     setVideo(null);
     setUploadStatus(null);
+    setCachedClip(null);
   };
 
   const inspectIndex = async () => {
@@ -423,14 +432,20 @@ function App() {
       setError('This converted clip exceeds the 500 MB upload limit. Select a shorter recording.');
       return;
     }
-    const filePath = `${conversionReport.output_directory.replace(/[\\/]$/, '')}/${exported.file_name}`;
     setConvertedVideoLoading(exported.file_name);
     setError(null);
     try {
-      const bytes = await readFile(filePath);
+      if (cachedClip) await invoke('clear_cached_clip', { cachePath: cachedClip.cache_path });
+      const cacheResult = await invoke<CachedClipReport>('cache_video_clip', {
+        sourcePath: `${conversionReport.output_directory.replace(/[\\/]$/, '')}/${exported.file_name}`,
+        cacheDirectory: `${conversionReport.output_directory.replace(/[\\/]$/, '')}/fcm-cache`,
+        cacheName: exported.file_name,
+      });
+      const bytes = await readFile(cacheResult.cache_path);
+      setCachedClip(cacheResult);
       setVideo(new File([bytes], exported.file_name, { type: 'video/h264' }));
       setActiveView('video-upload');
-      setUploadStatus(`Loaded ${exported.file_name}. Review the clip, then upload it to Bob.`);
+      setUploadStatus(`Clip cached and verified (${cacheResult.sha256.slice(0, 12)}...). Review it, then upload it to Bob.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -470,6 +485,10 @@ function App() {
       });
       if (registerError) throw registerError;
       setUploadStatus(`Uploaded. VPS inference job ${String(data?.inference_job_id ?? '').slice(0, 8)} is queued for CCTV Review.`);
+      if (cachedClip) {
+        await invoke('clear_cached_clip', { cachePath: cachedClip.cache_path });
+        setCachedClip(null);
+      }
       setVideo(null);
     } catch (cause) {
       await supabase.storage.from('bob-uploads').remove([storagePath]);
