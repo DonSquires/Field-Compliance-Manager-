@@ -25,6 +25,7 @@ interface OnboardingRow {
   has_primary_contact: boolean;
   agreement_id: string | null;
   agreement_name: string | null;
+  invitation_status?: 'not_invited' | 'invited' | 'accepted' | 'declined' | 'expired' | null;
   readiness: { ready: boolean; dimensions: ReadinessDimension[] } | null;
   assigned_to: string | null;
   assigned_name: string | null;
@@ -169,7 +170,7 @@ export function CrmOnboardingPanel({
       <label className="is-wide"><span>Stage note</span><textarea rows={2} value={stageNote} onChange={(event) => setStageNote(event.target.value)} /></label>
     </div>
     <footer>
-      <span>{row.agreement_name ? `Agreement: ${row.agreement_name}` : 'No operational agreement linked yet'}</span>
+      <span>{row.agreement_name ? `Agreement: ${row.agreement_name} · ${row.invitation_status?.replace('_', ' ') ?? 'not invited'}` : 'No operational agreement linked yet'}</span>
       <div>
         <button type="button" className="btn btn-sm btn-secondary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(false)}>Save ownership</button>
         {nextStage && <button type="button" className="btn btn-sm btn-primary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(true)}>Advance to {nextStage}<ChevronRight size={14} /></button>}
