@@ -260,8 +260,9 @@ function collectDdlEntities(rootDir) {
 }
 
 function collectSqlFunctionEdges(rootDir) {
+  const schemaFile = 'supabase/schema.sql';
   const files = [
-    'supabase/schema.sql',
+    schemaFile,
     ...walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort()
   ];
   const latestFunctions = new Map();
@@ -298,6 +299,25 @@ function collectSqlFunctionEdges(rootDir) {
     }
     for (const match of definition.body.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
       add(rpcName, 'table', match[1], 'writes', definition.file, `SQL writes public.${match[1]}`);
+    }
+  }
+  const schema = fs.existsSync(path.join(rootDir, schemaFile)) ? fs.readFileSync(path.join(rootDir, schemaFile), 'utf8') : '';
+  for (const trigger of schema.matchAll(/CREATE TRIGGER\s+[a-zA-Z0-9_]+[\s\S]*?\s+ON\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?EXECUTE FUNCTION\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
+    if (latestFunctions.has(trigger[2])) {
+      const edge = {
+        source_type: 'table',
+        source_name: trigger[1],
+        target_type: 'rpc',
+        target_name: trigger[2],
+        edge_kind: 'triggers',
+        evidence_class: 'live-schema',
+        retirement_status: 'live',
+        source_file: schemaFile,
+        migration_name: null,
+        caller_context: `${OWNER_MARKER} PostgreSQL trigger execution`,
+        refresh_source: 'ci_generator'
+      };
+      edges.set(edgeKey(edge), edge);
     }
   }
   return [...edges.values()];

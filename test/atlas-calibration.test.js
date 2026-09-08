@@ -184,3 +184,21 @@ test('Atlas refresh derives explicit function URL variables passed to fetch', ()
     && edge.edge_kind === 'calls'));
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
+
+test('Atlas refresh derives canonical schema trigger invocations', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-trigger-'));
+  const schemaPath = path.join(rootDir, 'supabase/schema.sql');
+  fs.mkdirSync(path.dirname(schemaPath), { recursive: true });
+  fs.writeFileSync(schemaPath, `
+    create table public.samples (id uuid);
+    create function public.touch_sample() returns trigger language plpgsql as $$ begin return new; end; $$;
+    create trigger samples_touch before update on public.samples for each row execute function public.touch_sample();
+  `);
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'samples'
+    && edge.target_name === 'touch_sample'
+    && edge.edge_kind === 'triggers'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
