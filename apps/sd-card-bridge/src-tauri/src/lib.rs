@@ -519,6 +519,29 @@ struct DhfsDptReport {
     non_zero_u32_fields: Vec<DhfsDptField>,
 }
 
+#[derive(Serialize)]
+struct DhfsPartitionTableEntry {
+    index: u32,
+    partition_offset: u64,
+    superblock_offset: u64,
+    superblock_absolute_offset: u64,
+    block_size: u64,
+    fragment_size_blocks: u32,
+    descriptor_offset_blocks: u32,
+    video_offset_blocks: u32,
+    descriptor_count: u32,
+}
+
+#[derive(Serialize)]
+struct DhfsPartitionTableReport {
+    disk_number: u32,
+    partition_number: u32,
+    dpt_marker_absolute_offset: u64,
+    table_start_absolute_offset: u64,
+    entries: Vec<DhfsPartitionTableEntry>,
+    stopped_reason: String,
+}
+
 #[derive(Deserialize, Serialize)]
 struct ExportTool {
     name: String,
@@ -611,6 +634,58 @@ fn locate_dhfs_dpt_marker(device: &mut File, base: u64) -> Result<u64, String> {
     let marker_offset = scan.windows(9).position(|window| window == b"DHFS_DPT:")
         .ok_or("No DHFS_DPT metadata marker was found near the start of this partition.")?;
     Ok(base + marker_offset as u64)
+}
+
+// Reports the raw values the partition-table parser derives, so a real card's layout can be
+// verified against the current field-offset assumptions before they are trusted for extraction.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn diagnose_dhfs_partition_table(disk_number: u32, partition_number: u32) -> Result<DhfsPartitionTableReport, String> {
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path} read-only: {error}"))?;
+    let base = coordinates.offset_bytes;
+    let magic = read_device_aligned(&mut device, base, 7)?;
+    if magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
+
+    let dpt_marker_absolute_offset = locate_dhfs_dpt_marker(&mut device, base)?;
+    let mut table_offset = dpt_marker_absolute_offset + 0x34;
+    let table_start_absolute_offset = table_offset;
+    let mut entries = Vec::new();
+    let mut stopped_reason = "Reached the 64-entry scan limit.".to_string();
+    for _ in 0..64 {
+        let entry = read_device_aligned(&mut device, table_offset, 64)?;
+        if &entry[..4] == [0xaa, 0x55, 0xaa, 0x55] { stopped_reason = "Hit the 0xaa55aa55 terminator.".to_string(); break; }
+        let superblock_offset = u32::from_le_bytes(entry[20..24].try_into().expect("DHFS superblock field")) as u64 * 512;
+        let partition_offset = u64::from_le_bytes(entry[48..56].try_into().expect("DHFS partition field")) * 512;
+        if partition_offset == 0 { stopped_reason = "Partition offset field was zero.".to_string(); break; }
+        let superblock_absolute_offset = base + partition_offset + superblock_offset;
+        let block_size = read_device_u32(&mut device, superblock_absolute_offset + 0x2c)? as u64;
+        let fragment_size_blocks = read_device_u32(&mut device, superblock_absolute_offset + 0x30)?;
+        let descriptor_offset_blocks = read_device_u32(&mut device, superblock_absolute_offset + 0x44)?;
+        let video_offset_blocks = read_device_u32(&mut device, superblock_absolute_offset + 0x48)?;
+        let descriptor_count = read_device_u32(&mut device, superblock_absolute_offset + 0x4c)?;
+        entries.push(DhfsPartitionTableEntry {
+            index: entries.len() as u32,
+            partition_offset,
+            superblock_offset,
+            superblock_absolute_offset,
+            block_size,
+            fragment_size_blocks,
+            descriptor_offset_blocks,
+            video_offset_blocks,
+            descriptor_count,
+        });
+        table_offset += 64;
+    }
+    Ok(DhfsPartitionTableReport { disk_number, partition_number, dpt_marker_absolute_offset, table_start_absolute_offset, entries, stopped_reason })
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn diagnose_dhfs_partition_table(_disk_number: u32, _partition_number: u32) -> Result<DhfsPartitionTableReport, String> {
+    Err("DHFS partition table diagnostics are available in the Windows FCM Desktop application.".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -1161,7 +1236,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, extract_dhfs_recording_to_cache, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, extract_dhfs_recording_to_cache, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, diagnose_dhfs_partition_table, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
