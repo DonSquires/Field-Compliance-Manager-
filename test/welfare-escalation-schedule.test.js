@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const schedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005000_schedule_welfare_escalation_tick.sql'), 'utf8');
 const activation = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005100_activate_welfare_escalation_tick.sql'), 'utf8');
+const credentialSchedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005200_schedule_credential_expiry_notifications.sql'), 'utf8');
 
 test('welfare escalation is scheduled through Vault-backed backend-only cron', () => {
   assert.match(schedule, /ops\.enqueue_welfare_escalation_tick/);
@@ -16,4 +17,14 @@ test('welfare escalation is scheduled through Vault-backed backend-only cron', (
   assert.match(schedule, /'\* \* \* \* \*'/);
   assert.match(activation, /cron\.alter_job\(v_job_id, active => true\)/);
   assert.doesNotMatch(schedule, /apps\/web/);
+});
+
+test('credential expiry notifications run through a daily Vault-backed backend schedule', () => {
+  assert.match(credentialSchedule, /ops\.enqueue_credential_expiry_notifications/);
+  assert.match(credentialSchedule, /vault\.decrypted_secrets/);
+  assert.match(credentialSchedule, /functions\/v1\/notify-credential-expiry/);
+  assert.match(credentialSchedule, /x-cron-secret/);
+  assert.match(credentialSchedule, /credential-expiry-notifications-daily/);
+  assert.match(credentialSchedule, /'17 6 \* \* \*'/);
+  assert.match(credentialSchedule, /true\n  \);/);
 });
