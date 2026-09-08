@@ -37,6 +37,7 @@ const NoiseControlOversightPage: React.FC = () => {
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [generatingPackageId, setGeneratingPackageId] = useState<string | null>(null);
 
   // ATLAS READS: noise_assessments
   const load = useCallback(async () => {
@@ -74,6 +75,14 @@ const NoiseControlOversightPage: React.FC = () => {
     });
     const receipt=(data as Array<{assessment_id:string;review_status:string;follow_up_required:boolean}>|null)?.[0];
     if(reviewError||!receipt)setError(reviewError?.message??'Noise review receipt was not confirmed.');else{setNotice(`Noise assessment ${receipt.review_status} · receipt ${receipt.assessment_id.slice(0,8)}.`);setSelected(null);setReviewAction(null);setReviewNotes('');await load();}setSaving(false);
+  };
+
+  const generateEvidencePackage = async (assessment: NoiseAssessment) => {
+    setGeneratingPackageId(assessment.id); setError(null); setNotice(null);
+    const { data, error: packageError } = await supabase.functions.invoke<{ evidence_package_url?: string }>('generate-noise-evidence-package', { body: { assessment_id: assessment.id } });
+    if (packageError || !data?.evidence_package_url) setError(packageError?.message ?? 'The noise evidence package was not generated.');
+    else setNotice(`Court-ready evidence package generated for ${assessment.id.slice(0, 8)}.`);
+    setGeneratingPackageId(null);
   };
 
   if (loading) {
@@ -135,7 +144,7 @@ const NoiseControlOversightPage: React.FC = () => {
                   <td>{a.action_taken || '-'}</td>
                   <td>{new Date(a.assessed_at).toLocaleString()}</td>
                   <td><span className={`status-badge status-${a.review_status}`}>{a.review_status.replaceAll('_',' ')}</span>{a.follow_up_required&&<small> · follow-up required</small>}</td>
-                  <td><div className="noise-review-actions">{a.review_status==='open'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('acknowledge');setReviewNotes('');}}>Acknowledge</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('require_follow_up');setReviewNotes('');}}>Require follow-up</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-primary" onClick={()=>{setSelected(a);setReviewAction('close');setReviewNotes('');}}>Close review</button>}</div></td>
+                  <td><div className="noise-review-actions">{a.review_status==='open'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('acknowledge');setReviewNotes('');}}>Acknowledge</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('require_follow_up');setReviewNotes('');}}>Require follow-up</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-primary" onClick={()=>{setSelected(a);setReviewAction('close');setReviewNotes('');}}>Close review</button>}{a.review_status==='closed'&&<button className="btn btn-sm btn-primary" disabled={generatingPackageId===a.id} onClick={()=>void generateEvidencePackage(a)}>{generatingPackageId===a.id?'Generating...':'Generate evidence package'}</button>}</div></td>
                 </tr>
               ))
             )}

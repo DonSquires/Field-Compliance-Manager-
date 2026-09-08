@@ -15,6 +15,13 @@ describe('governed noise review return', () => {
     expect(admin).not.toMatch(/from\('noise_assessments'\)[\s\S]{0,300}\.update\(/);
   });
 
+  it('generates court-ready evidence packages through the edge function', () => {
+    expect(admin).toContain("supabase.functions.invoke<{ evidence_package_url?: string }>('generate-noise-evidence-package'");
+    expect(admin).toContain('assessment_id: assessment.id');
+    expect(admin).toContain('Generate evidence package');
+    expect(admin).not.toMatch(/from\('noise_assessments'\)[\s\S]{0,300}\.update\(/);
+  });
+
   it('shows and focuses exact officer review outcomes', () => {
     expect(officer).toContain("get('assessment')");
     expect(officer).toContain('Supervisor review');
