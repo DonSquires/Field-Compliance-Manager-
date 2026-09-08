@@ -4462,6 +4462,52 @@ async function execSiteRisk(authHeader, args) {
     }
   };
 }
+async function execProposeSiteRisk(authHeader, caps, args) {
+  if (!caps.canPromote) return {
+    reply: 'Updating a site risk rating needs an admin, master, or grand master. I can assess the site risk, but cannot prepare a proposal for this account.',
+    meta: {
+      tool: 'propose_site_risk',
+      outcome: 'forbidden'
+    }
+  };
+  const siteId = String(args.site_id ?? '').trim();
+  if (!siteId) return {
+    reply: 'Tell me which site should receive the risk-rating proposal.',
+    meta: {
+      tool: 'propose_site_risk',
+      outcome: 'need_site_id'
+    }
+  };
+  const requestedRating = String(args.risk_level ?? '').toLowerCase().trim();
+  if (requestedRating && !['low', 'medium', 'high', 'critical'].includes(requestedRating)) return {
+    reply: 'The proposed risk rating must be low, medium, high, or critical.',
+    meta: {
+      tool: 'propose_site_risk',
+      outcome: 'invalid_risk_level'
+    }
+  };
+  const r = await callFn('bob-propose-site-risk', authHeader, {
+    site_id: siteId,
+    risk_level: requestedRating || undefined,
+    _idempotency_key: args._idempotency_key,
+    conversation_id: args._conversation_id
+  });
+  if (!r.ok || !r.data?.success) return {
+    reply: 'I could not prepare the site risk proposal right now.',
+    meta: {
+      tool: 'propose_site_risk',
+      outcome: 'failed'
+    }
+  };
+  return {
+    reply: r.data.no_change ? String(r.data.note) : `I prepared a proposal to set this site to ${r.data.proposed_risk_level} risk. Review and approve it in the notifications bell to apply the change.`,
+    meta: {
+      tool: 'propose_site_risk',
+      outcome: r.data.no_change ? 'no_change' : 'ok',
+      action_id: r.data.action_id ?? null
+    }
+  };
+}
 // Bob PROPOSES a freedom-camping ENFORCEMENT zone (geofence + night limits) into
 // the bell. Calls bob-propose-freedom-camping-zone. Bob must have RESOLVED the
 // geofence himself first (verify address -> LINZ parcel -> Google fallback, per
@@ -7576,6 +7622,8 @@ serve(async (req)=>{
           return execScvLookup(authHeader, toolArgs);
         case 'site_risk':
           return execSiteRisk(authHeader, toolArgs);
+        case 'propose_site_risk':
+          return execProposeSiteRisk(authHeader, caps, toolArgs);
         case 'propose_client_onboarding':
           return execProposeClientOnboarding(authHeader, caps, orgId, toolArgs);
         case 'propose_freedom_camping_zone':

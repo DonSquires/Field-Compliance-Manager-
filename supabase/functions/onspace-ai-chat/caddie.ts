@@ -109,6 +109,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only; access-scoped; cross-organization proximity signals are de-identified',
     effect_class: 'internal_observation'
   },
+  propose_site_risk: {
+    purpose: 'PROPOSE an updated site risk rating from a site assessment. Creates a pending approval only; it never changes the rating directly. Args: { site_id, risk_level? }.',
+    governance: 'WRITE-draft; needs approval',
+    effect_class: 'draft_governed_write'
+  },
   promote_action: {
     purpose: 'Prepare a governed draft (e.g. service agreement) into the approval bell.',
     governance: 'WRITE-draft; needs approval',
@@ -548,6 +553,7 @@ const TOOL_REGISTRY = {
     client_site_compare: 'bob-client-site-compare',
     scv_lookup: 'bob-scv-lookup',
     site_risk: 'bob-site-risk',
+    propose_site_risk: 'bob-propose-site-risk',
     plan_import: 'bob-plan-import',
     perceive_media: 'bob-perceive-image',
     web_research: 'bob-web-research',

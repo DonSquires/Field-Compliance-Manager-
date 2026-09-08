@@ -37,3 +37,12 @@ test('site risk is available only through Caddie and its scoped edge function', 
   assert.match(chat, /callFn\('bob-site-risk', authHeader/);
   assert.match(chat, /case 'site_risk':/);
 });
+
+test('site risk changes are routed through Caddie to the governed proposal producer', () => {
+  assert.match(caddie, /propose_site_risk: \{/);
+  assert.match(caddie, /propose_site_risk: 'bob-propose-site-risk'/);
+  assert.match(chat, /async function execProposeSiteRisk/);
+  assert.match(chat, /callFn\('bob-propose-site-risk', authHeader/);
+  assert.match(chat, /case 'propose_site_risk':/);
+  assert.match(chat, /_idempotency_key: args\._idempotency_key/);
+});
