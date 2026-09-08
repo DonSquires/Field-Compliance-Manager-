@@ -48,11 +48,16 @@ jobs:
           if ($null -eq $signtool) { throw 'signtool.exe was not found on this runner.' }
           & $signtool.FullName sign /sha1 $imported.Thumbprint /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d "FCM Desktop" release/FCM-SD-Card-Bridge-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'signtool failed to sign the installer.' }
+          & $signtool.FullName verify /pa /all /tw release/FCM-SD-Card-Bridge-Setup.exe
+          if ($LASTEXITCODE -ne 0) { throw 'signtool verification failed for the installer.' }
           Remove-Item $pfxPath -Force
+      - name: Reject unsigned tagged release
+        if: ${{ startsWith(github.ref, 'refs/tags/sd-card-bridge-v') && env.HAS_SIGNING_CERT != 'true' }}
+        run: throw 'A tagged FCM Desktop release requires WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD. Use workflow_dispatch for unsigned development artifacts.'
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FCM-SD-Card-Bridge-Windows
+          name: ${{ env.HAS_SIGNING_CERT == 'true' && 'FCM-SD-Card-Bridge-Windows-Signed' || 'FCM-SD-Card-Bridge-Windows-Unsigned-Development' }}
           path: apps/sd-card-bridge/release/FCM-SD-Card-Bridge-Setup.exe
           if-no-files-found: error
       - name: Publish tagged installer release
@@ -61,3 +66,4 @@ jobs:
         with:
           files: apps/sd-card-bridge/release/FCM-SD-Card-Bridge-Setup.exe
           generate_release_notes: true
+          prerelease: ${{ env.HAS_SIGNING_CERT != 'true' }}

@@ -20,6 +20,20 @@ Local Windows utility for read-only SD/DHFS inspection, evidence preparation, an
 - A future exporter must preserve image hash, partition offset, record number, cluster/index coordinates, extraction hash, and tool version in evidence metadata.
 - Face detections remain manual-review candidates. No automatic identity or incident linkage is permitted.
 
+## Windows privileges and antivirus trust
+
+The installer uses a per-user NSIS install mode and does not request `requireAdministrator`.
+The normal workflow therefore works without elevation: inspect a copied card folder, choose
+an exported recording, cache it locally, and upload it to FCM. Direct reads from
+`\\.\PhysicalDriveN` are an advanced Windows path and may still require Administrator access
+because Windows protects raw disk handles; this is an operating-system permission boundary,
+not an application requirement for ordinary intake.
+
+FCM Desktop does not use stealth, process injection, obfuscation, or antivirus bypasses. Release
+installers should be Authenticode-signed with the organisation's certificate, timestamped, and
+distributed from the repository release page. Unsigned builds are development artifacts and may
+be flagged by SmartScreen or endpoint security products even when the code is benign.
+
 ## Windows build prerequisite
 
 Install Rust (`rustup`), Visual Studio Build Tools with the Desktop development with C++ workload, Node.js 22+, and WebView2. Then run:

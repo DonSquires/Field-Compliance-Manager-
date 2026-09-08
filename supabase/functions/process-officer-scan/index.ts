@@ -41,7 +41,7 @@
  * Env secrets required:
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_ROLE_KEY
- *   INFERENCE_SERVICE_URL   — Railway inference service base URL
+ *   INFERENCE_SERVICE_URL   — FCM inference service base URL
  *   INFERENCE_API_KEY       — shared secret with inference service
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient as _createClient } from 'https://esm.sh/@supabase/supabase-js@2';

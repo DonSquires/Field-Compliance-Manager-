@@ -25,8 +25,8 @@
  *   API_TOKEN             — apps/api auth token
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
-const API_URL = Deno.env.get('API_URL') ?? Deno.env.get('RAILWAY_API_URL') ?? '';
-const API_TOKEN = Deno.env.get('API_TOKEN') ?? Deno.env.get('RAILWAY_API_TOKEN') ?? '';
+const API_URL = Deno.env.get('FCM_API_URL') ?? Deno.env.get('API_URL') ?? Deno.env.get('RAILWAY_API_URL') ?? '';
+const API_TOKEN = Deno.env.get('FCM_API_TOKEN') ?? Deno.env.get('API_TOKEN') ?? Deno.env.get('RAILWAY_API_TOKEN') ?? '';
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     status: 200

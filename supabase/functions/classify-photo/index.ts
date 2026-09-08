@@ -45,8 +45,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-const API_URL = Deno.env.get('API_URL') ?? Deno.env.get('RAILWAY_API_URL') ?? '';
-const API_TOKEN = Deno.env.get('API_TOKEN') ?? Deno.env.get('RAILWAY_API_TOKEN') ?? '';
+const API_URL = Deno.env.get('FCM_API_URL') ?? Deno.env.get('API_URL') ?? Deno.env.get('RAILWAY_API_URL') ?? '';
+const API_TOKEN = Deno.env.get('FCM_API_TOKEN') ?? Deno.env.get('API_TOKEN') ?? Deno.env.get('RAILWAY_API_TOKEN') ?? '';
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
