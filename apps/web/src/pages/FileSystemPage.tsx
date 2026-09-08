@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Clock3, Download, FileArchive, FileText, FolderOpen, Image, RefreshCw, Search, ShieldCheck, Video, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { ImportSchemaPreview, parseCsvPreview, parseXlsxPreview } from '../lib/importPreview';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './FileSystemPage.css';
@@ -57,6 +58,31 @@ interface IntakeAttachment {
   created_at: string;
 }
 
+interface ManifestPreview {
+  batch_name: string;
+  file_count: number;
+  total_bytes: number;
+  structured_data: number;
+  quarantine: number;
+  document: number;
+  media: number;
+  unresolved: number;
+}
+
+interface FileImportBatch {
+  id: string;
+  batch_name: string;
+  source_file: string;
+  parser: string;
+  status: 'preview' | 'needs_review' | 'approved' | 'rejected' | 'applied' | 'failed';
+  row_count: number;
+  duplicate_count: number;
+  unresolved_count: number;
+  manifest_json: Record<string, unknown>;
+  schema_json: { mappings?: Array<{ source: string; target: string; confidence: string }>; warnings?: string[] };
+  created_at: string;
+}
+
 type FileFilter = 'all' | 'quarantined' | 'tenant_reference' | 'tenant' | 'global_reference';
 
 const FILE_SPACES = [
@@ -69,6 +95,54 @@ const FILE_SPACES = [
   { key: 'evidence', label: 'Evidence' },
   { key: 'bob', label: 'Bob intake' },
 ] as const;
+
+const SAMPLE_MANIFEST_PREVIEW: ManifestPreview = {
+  batch_name: 'sample-data-2026-09-08',
+  file_count: 5648,
+  total_bytes: 8930000000,
+  structured_data: 1842,
+  quarantine: 632,
+  document: 1490,
+  media: 713,
+  unresolved: 171,
+};
+
+const SAMPLE_IMPORT_PREVIEWS: ImportSchemaPreview[] = [
+  {
+    source_file: 'Vehicle Log (1).csv',
+    parser: 'CSV / vehicle observations',
+    row_count: 4396,
+    duplicate_count: 12,
+    date_range: '02 Jan 2026 - 31 Jan 2026',
+    mappings: [
+      { source: 'REGO', target: 'vehicle.registration', confidence: '99%' },
+      { source: 'RecordedDate', target: 'observation.observed_at', confidence: '98%' },
+      { source: 'Title', target: 'observation.site_name', confidence: '94%' },
+    ],
+    warnings: ['17 vehicle registrations need organisation matching', 'No canonical vehicle records will be written during preview'],
+  },
+  {
+    source_file: 'Site Report By Vehicle.csv',
+    parser: 'CSV / patrol movement events',
+    row_count: 107,
+    duplicate_count: 3,
+    date_range: '22 Dec 2025 - 27 Dec 2025',
+    mappings: [
+      { source: 'Registration', target: 'vehicle.registration', confidence: '99%' },
+      { source: 'EnteredTime / ExitTime', target: 'movement.event_time', confidence: '96%' },
+      { source: 'Site', target: 'site.name', confidence: '91%' },
+    ],
+    warnings: ['6 site names need canonical location matching', 'Driver values remain unresolved until staff matching is approved'],
+  },
+];
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** index;
+  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+}
 
 function fileIcon(mimeType: string) {
   if (mimeType.startsWith('image/')) return Image;
@@ -117,24 +191,35 @@ const FileSystemPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [uploadedImportPreview, setUploadedImportPreview] = useState<ImportSchemaPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [creatingBatch, setCreatingBatch] = useState(false);
+  const [importPreviewIndex, setImportPreviewIndex] = useState(0);
+  const [importBatches, setImportBatches] = useState<FileImportBatch[]>([]);
+  const [batchStatus, setBatchStatus] = useState<'all' | FileImportBatch['status']>('all');
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
 
   const loadDocuments = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
     if (!organizationId) return;
     setLoading(true);
     setError(null);
-    const [{ data, error: loadError }, { data: intakeData, error: intakeError }] = await Promise.all([supabase
+    const [{ data, error: loadError }, { data: intakeData, error: intakeError }, { data: batchData, error: batchError }] = await Promise.all([supabase
       .from('documents')
       .select('id,attachment_id,storage_bucket,storage_object_ref,original_filename,mime_type,sha256,uploaded_by,source_channel,organization_id,current_scope,created_at,updated_at')
       .or(`organization_id.eq.${organizationId},organization_id.is.null`)
       .order('updated_at', { ascending: false })
-      .limit(250), supabase.from('bob_attachments').select('id,file_name,file_type,file_size_bytes,processing_state,created_at').eq('processing_state', 'pending').order('created_at', { ascending: false }).limit(50)]);
+      .limit(250), supabase.from('bob_attachments').select('id,file_name,file_type,file_size_bytes,processing_state,created_at').eq('processing_state', 'pending').order('created_at', { ascending: false }).limit(50), supabase.from('file_import_batches').select('id,batch_name,source_file,parser,status,row_count,duplicate_count,unresolved_count,manifest_json,schema_json,created_at').order('created_at', { ascending: false }).limit(50)]);
     if (loadError || intakeError) setError(loadError?.message ?? intakeError?.message ?? 'Files could not be loaded.');
     else {
       const rows = (data as DocumentRow[]) ?? [];
       setDocuments(rows);
       setSelectedId((current) => current && rows.some((row) => row.id === current) ? current : rows[0]?.id ?? null);
       setIntakeAttachments((intakeData as IntakeAttachment[]) ?? []);
+      const batches = (batchData as FileImportBatch[]) ?? [];
+      setImportBatches(batches);
+      setSelectedBatchId((current) => current && batches.some((batch) => batch.id === current) ? current : batches[0]?.id ?? null);
+      if (batchError) setNotice('Review batch history is unavailable until the file import migration is deployed.');
     }
     setLoading(false);
   }, [operatingOrganizationId, profile?.organizationId]);
@@ -157,6 +242,9 @@ const FileSystemPage: React.FC = () => {
       return matchesSearch && matchesScope && matchesSpace;
     });
   }, [documents, scope, search, space]);
+
+  const visibleBatches = useMemo(() => batchStatus === 'all' ? importBatches : importBatches.filter((batch) => batch.status === batchStatus), [batchStatus, importBatches]);
+  const selectedBatch = importBatches.find((batch) => batch.id === selectedBatchId) ?? null;
 
   const selected = documents.find((document) => document.id === selectedId) ?? null;
 
@@ -192,10 +280,104 @@ const FileSystemPage: React.FC = () => {
     setOpening(false);
   };
 
+  const previewImportFile = async (file: File) => {
+    setPreviewError(null);
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.xlsx')) {
+      setPreviewError('Preview supports CSV and XLSX files. Other formats remain staged for their dedicated parser.');
+      return;
+    }
+    try {
+      setUploadedImportPreview(lowerName.endsWith('.xlsx') ? await parseXlsxPreview(await file.arrayBuffer(), file.name) : parseCsvPreview(await file.text(), file.name));
+    } catch {
+      setPreviewError('The CSV could not be parsed safely for preview.');
+    }
+  };
+
+  const activeImportPreview = uploadedImportPreview ?? SAMPLE_IMPORT_PREVIEWS[importPreviewIndex];
+
+  const createReviewBatch = async () => {
+    const organizationId = operatingOrganizationId ?? profile?.organizationId;
+    if (!organizationId) {
+      setPreviewError('An operating organisation is required before a review batch can be created.');
+      return;
+    }
+    setCreatingBatch(true);
+    setPreviewError(null);
+    const { data, error: batchError } = await supabase.rpc('create_file_import_batch', {
+      p_batch_name: `preview-${activeImportPreview.source_file}`,
+      p_source_file: activeImportPreview.source_file,
+      p_source_sha256: null,
+      p_parser: activeImportPreview.parser,
+      p_manifest_json: { staged: true, source_file: activeImportPreview.source_file, date_range: activeImportPreview.date_range },
+      p_schema_json: { mappings: activeImportPreview.mappings, warnings: activeImportPreview.warnings },
+      p_row_count: activeImportPreview.row_count,
+      p_duplicate_count: activeImportPreview.duplicate_count,
+      p_unresolved_count: activeImportPreview.warnings.length,
+      p_organization_id: organizationId,
+    });
+    if (batchError) setPreviewError(batchError.message);
+    else setNotice(`Review batch ${data?.id ? `${data.id.slice(0, 8)} ` : ''}created. No canonical records were changed.`);
+    setCreatingBatch(false);
+  };
+
   return <div className="file-system-page">
     <header className="file-system-header"><div><span>Organisation workspace / Files</span><h1>File system</h1><p>Find source documents, inspect provenance, and review extracted versions before anything becomes an authoritative record.</p></div><div className="file-system-header-actions"><button type="button" onClick={() => navigate('/admin/approvals')}><ShieldCheck size={17} />Review promotions</button><button type="button" onClick={() => void loadDocuments()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></div></header>
     {error && <div className="file-system-message is-error" role="alert"><span>{error}</span><button type="button" title="Dismiss" onClick={() => setError(null)}><X size={16} /></button></div>}
     {notice && <div className="file-system-message is-success" role="status"><ShieldCheck size={16} /><span>{notice}</span><button type="button" title="Dismiss" onClick={() => setNotice(null)}><X size={16} /></button></div>}
+    <section className="file-system-intake" aria-label="Manifest-based import preview">
+      <div>
+        <span>Import preview</span>
+        <h2>Batch manifest: {SAMPLE_MANIFEST_PREVIEW.batch_name}</h2>
+        <p>Staged sample data is previewed before any promotion. The manifest separates structured_data, quarantine, media, and unresolved references so review remains explicit.</p>
+      </div>
+      <div className="file-system-manifest-grid">
+        <article>
+          <strong>{SAMPLE_MANIFEST_PREVIEW.file_count.toLocaleString()}</strong>
+          <small>Files in batch</small>
+        </article>
+        <article>
+          <strong>{formatBytes(SAMPLE_MANIFEST_PREVIEW.total_bytes)}</strong>
+          <small>Total bytes</small>
+        </article>
+        <article>
+          <strong>{SAMPLE_MANIFEST_PREVIEW.structured_data.toLocaleString()}</strong>
+          <small>structured_data</small>
+        </article>
+        <article>
+          <strong>{SAMPLE_MANIFEST_PREVIEW.quarantine.toLocaleString()}</strong>
+          <small>quarantine</small>
+        </article>
+        <article>
+          <strong>{SAMPLE_MANIFEST_PREVIEW.document.toLocaleString()}</strong>
+          <small>document</small>
+        </article>
+        <article>
+          <strong>{SAMPLE_MANIFEST_PREVIEW.media.toLocaleString()}</strong>
+          <small>media</small>
+        </article>
+        <article>
+          <strong>{SAMPLE_MANIFEST_PREVIEW.unresolved.toLocaleString()}</strong>
+          <small>unresolved</small>
+        </article>
+      </div>
+      <div className="file-system-import-switcher" role="tablist" aria-label="Import batch previews">
+        {SAMPLE_IMPORT_PREVIEWS.map((preview, index) => <button type="button" role="tab" aria-selected={!uploadedImportPreview && importPreviewIndex === index} className={!uploadedImportPreview && importPreviewIndex === index ? 'is-active' : ''} key={preview.source_file} onClick={() => { setUploadedImportPreview(null); setImportPreviewIndex(index); }}>{preview.source_file}</button>)}
+        <label className="file-system-import-upload">Preview CSV/XLSX<input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewImportFile(file); event.currentTarget.value = ''; }} /></label>
+      </div>
+      <div className="file-system-import-detail">
+        <strong className="file-system-import-source">{activeImportPreview.source_file}</strong>
+        {previewError && <p className="file-system-import-warning" role="alert">{previewError}</p>}
+        <button type="button" className="file-system-import-create" onClick={() => void createReviewBatch()} disabled={creatingBatch}>{creatingBatch ? 'Creating review batch' : 'Create review batch'}</button>
+        <div className="file-system-import-facts"><div><small>Parser</small><strong>{activeImportPreview.parser}</strong></div><div><small>Rows</small><strong>{activeImportPreview.row_count.toLocaleString()}</strong></div><div><small>duplicate rows</small><strong>{activeImportPreview.duplicate_count}</strong></div><div><small>Date range</small><strong>{activeImportPreview.date_range}</strong></div></div>
+        <div className="file-system-import-columns"><div><span>Column mapping</span>{activeImportPreview.mappings.map((mapping) => <div className="file-system-import-mapping" key={`${mapping.source}-${mapping.target}`}><strong>{mapping.source}</strong><span>to {mapping.target}</span><small>{mapping.confidence}</small></div>)}</div><div><span>Review warnings</span>{activeImportPreview.warnings.map((warning) => <p key={warning}>{warning}</p>)}<p className="file-system-import-warning">{activeImportPreview.warnings.length} unresolved references</p></div></div>
+      </div>
+    </section>
+    <section className="file-system-batches" aria-label="Import batch history">
+      <div className="file-system-batches-heading"><div><span>Review history</span><h2>Import batches</h2></div><select aria-label="Import batch status" value={batchStatus} onChange={(event) => setBatchStatus(event.target.value as typeof batchStatus)}><option value="all">All statuses</option><option value="preview">Preview</option><option value="needs_review">Needs review</option><option value="approved">Approved</option><option value="applied">Applied</option><option value="rejected">Rejected</option><option value="failed">Failed</option></select></div>
+      {visibleBatches.length === 0 ? <p className="file-system-muted">No persisted review batches match this status.</p> : <div className="file-system-batch-grid">{visibleBatches.map((batch) => <button type="button" key={batch.id} className={selectedBatchId === batch.id ? 'is-selected' : ''} onClick={() => setSelectedBatchId(batch.id)}><strong>{batch.source_file}</strong><span>{batch.status.replaceAll('_', ' ')} · {batch.row_count.toLocaleString()} rows</span><small>{batch.duplicate_count} duplicates · {batch.unresolved_count} unresolved · {new Date(batch.created_at).toLocaleDateString('en-NZ')}</small></button>)}</div>}
+      {selectedBatch && <article className="file-system-batch-detail"><div><strong>{selectedBatch.batch_name}</strong><span>{selectedBatch.parser} · {selectedBatch.status.replaceAll('_', ' ')}</span></div><div><span>Mappings</span>{(selectedBatch.schema_json.mappings ?? []).map((mapping) => <small key={`${mapping.source}-${mapping.target}`}>{mapping.source} to {mapping.target} ({mapping.confidence})</small>)}</div><div><span>Warnings</span>{(selectedBatch.schema_json.warnings ?? []).map((warning) => <small key={warning}>{warning}</small>)}</div></article>}
+    </section>
     {intakeAttachments.length > 0 && <section className="file-system-intake" aria-label="Bob intake waiting registration"><div><span>Bob intake</span><h2>Files waiting registration</h2><p>These uploads are not yet canonical Files records. Registration extracts, hashes, classifies, and preserves upload provenance.</p></div><div>{intakeAttachments.map((attachment) => { const disposition = intakeDisposition(attachment); return <article key={attachment.id}><strong>{attachment.file_name}</strong><small>{attachment.file_type} · {Math.round(attachment.file_size_bytes / 1024)} KB · {new Date(attachment.created_at).toLocaleDateString('en-NZ')}</small>{disposition.allowed ? <button type="button" onClick={() => void registerAttachment(attachment)}>Register in Files</button> : <span className="file-system-quarantine">Quarantined: {disposition.reason}</span>}</article>; })}</div></section>}
     <section className="file-system-spaces" aria-label="File spaces">{FILE_SPACES.map((item) => <button type="button" key={item.key} className={space === item.key ? 'is-active' : ''} onClick={() => setSpace(item.key)}><FolderOpen size={16} /><span>{item.label}</span></button>)}</section>
     <div className="file-system-toolbar"><label><Search size={16} /><input type="search" placeholder="Search filenames, type, source, or hash" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label="File status" value={scope} onChange={(event) => setScope(event.target.value as FileFilter)}><option value="all">All statuses</option><option value="quarantined">Quarantined</option><option value="tenant_reference">Reference</option><option value="tenant">Tenant files</option><option value="global_reference">Global reference</option></select></div>

@@ -85,4 +85,16 @@ describe('governed approvals workbench', () => {
     expect(source).toContain('p_total_amount: Number(financeForm.totalAmount)');
     expect(source).toContain('Create draft invoice');
   });
+
+  it('uses target-specific execution fields instead of one generic form', () => {
+    expect(source).toContain('Advanced credential details');
+    expect(source).toContain('p_credential_type: targetForm.credentialType');
+    expect(source).toContain('p_document_type: targetForm.documentType');
+    expect(source).toContain('p_work_unit_type: targetForm.workUnitType');
+    expect(source).toContain('p_investigation_id: targetForm.investigationId');
+    expect(source).toContain('Apply approved credential');
+    expect(source).toContain('Apply approved HR document');
+    expect(source).toContain('Apply approved site brief');
+    expect(source).toContain('Apply approved investigation link');
+  });
 });

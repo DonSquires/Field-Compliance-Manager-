@@ -44,6 +44,22 @@ describe('organisation file system', () => {
     expect(page).toContain('Quarantined:');
   });
 
+  it('shows a manifest-based import preview for staged sample data before promotion', () => {
+    expect(page).toContain('Import preview');
+    expect(page).toContain('Batch manifest');
+    expect(page).toContain('structured_data');
+    expect(page).toContain('quarantine');
+    expect(page).toContain('Column mapping');
+    expect(page).toContain('duplicate rows');
+    expect(page).toContain('unresolved references');
+    expect(page).toContain("rpc('create_file_import_batch'");
+    expect(page).toContain('Create review batch');
+    expect(page).toContain('No canonical records were changed');
+    expect(page).toContain("from('file_import_batches')");
+    expect(page).toContain('Import batch status');
+    expect(page).toContain('Review history');
+  });
+
   it('is registered as a first-class admin page', () => {
     expect(shell).toContain("const FileSystemPage = React.lazy(() => import('../pages/FileSystemPage'));");
     expect(shell).toContain("{ id: 'files', label: 'File System', icon: FolderOpen }");

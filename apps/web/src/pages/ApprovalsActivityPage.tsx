@@ -406,9 +406,66 @@ const ApprovalsActivityPage: React.FC = () => {
     }
   };
 
+  const renderTargetExecutionFields = () => {
+    if (!targetExecution) return null;
+
+    switch (targetExecution.target) {
+      case 'credential':
+        return (
+          <>
+            <p className="approvals-context">Advanced credential details</p>
+            <label><span>Staff member</span><select required value={targetForm.staffId} onChange={(event) => setTargetForm({ ...targetForm, staffId: event.target.value })}><option value="">Select staff member</option>{staffOptions.map((staff) => <option key={staff.id} value={staff.id}>{staff.display_name || staff.email || staff.id}</option>)}</select></label>
+            <label><span>Credential type</span><select required value={targetForm.credentialType} onChange={(event) => setTargetForm({ ...targetForm, credentialType: event.target.value })}><option value="certificate_of_authority">Certificate of authority</option><option value="warrant">Warrant</option><option value="driver_licence">Driver licence</option><option value="security_clearance">Security clearance</option></select></label>
+            <label><span>Credential number</span><input value={targetForm.credentialNumber} onChange={(event) => setTargetForm({ ...targetForm, credentialNumber: event.target.value })} /></label>
+            <label><span>Issuing authority</span><input value={targetForm.issuingAuthority} onChange={(event) => setTargetForm({ ...targetForm, issuingAuthority: event.target.value })} /></label>
+            <div className="approvals-review-checks"><label><span>Issued date</span><input type="date" value={targetForm.issuedDate} onChange={(event) => setTargetForm({ ...targetForm, issuedDate: event.target.value })} /></label><label><span>Expiry date</span><input type="date" value={targetForm.expiryDate} onChange={(event) => setTargetForm({ ...targetForm, expiryDate: event.target.value })} /></label></div>
+            <label><span>Evidence notes</span><textarea rows={3} value={targetForm.notes} onChange={(event) => setTargetForm({ ...targetForm, notes: event.target.value })} placeholder="Capture the authority basis, scope, and safe handling notes." /></label>
+          </>
+        );
+      case 'hr_case':
+        return (
+          <>
+            <p className="approvals-context">Advanced HR document details</p>
+            <label><span>Staff member</span><select required value={targetForm.staffId} onChange={(event) => setTargetForm({ ...targetForm, staffId: event.target.value })}><option value="">Select staff member</option>{staffOptions.map((staff) => <option key={staff.id} value={staff.id}>{staff.display_name || staff.email || staff.id}</option>)}</select></label>
+            <label><span>Document type</span><select value={targetForm.documentType} onChange={(event) => setTargetForm({ ...targetForm, documentType: event.target.value })}><option value="contract">Contract</option><option value="certificate">Certificate</option><option value="policy_acknowledgement">Policy acknowledgement</option><option value="other">Other</option></select></label>
+            <label><span>File name</span><input required value={targetForm.fileName || targetForm.name} onChange={(event) => setTargetForm({ ...targetForm, fileName: event.target.value, name: event.target.value })} /></label>
+            <label><span>Storage path</span><input required value={targetForm.storagePath} onChange={(event) => setTargetForm({ ...targetForm, storagePath: event.target.value })} /></label>
+            <label><span>Expiry date</span><input type="date" value={targetForm.expiryDate} onChange={(event) => setTargetForm({ ...targetForm, expiryDate: event.target.value })} /></label>
+            <label><span>Notes</span><textarea rows={3} value={targetForm.notes} onChange={(event) => setTargetForm({ ...targetForm, notes: event.target.value })} placeholder="Record the reason and handling requirements for this HR document." /></label>
+          </>
+        );
+      case 'site_brief':
+        return (
+          <>
+            <p className="approvals-context">Advanced site brief details</p>
+            <label><span>Site brief name</span><input required value={targetForm.name} onChange={(event) => setTargetForm({ ...targetForm, name: event.target.value })} /></label>
+            <div className="approvals-review-checks"><label><span>Work unit type</span><select value={targetForm.workUnitType} onChange={(event) => setTargetForm({ ...targetForm, workUnitType: event.target.value })}><option value="patrol">Patrol</option><option value="parking">Parking</option><option value="noise">Noise</option><option value="compliance">Compliance</option></select></label><label><span>Service type</span><select value={targetForm.serviceType} onChange={(event) => setTargetForm({ ...targetForm, serviceType: event.target.value })}><option value="patrol">Patrol</option><option value="enforcement">Enforcement</option><option value="investigation">Investigation</option><option value="support">Support</option></select></label></div>
+            <label><span>Purpose</span><textarea rows={3} value={targetForm.notes} onChange={(event) => setTargetForm({ ...targetForm, notes: event.target.value })} placeholder="Describe the operational brief to be attached to the site." /></label>
+          </>
+        );
+      case 'investigation_link':
+        return (
+          <>
+            <p className="approvals-context">Advanced investigation link details</p>
+            <label><span>Investigation</span><select required value={targetForm.investigationId} onChange={(event) => setTargetForm({ ...targetForm, investigationId: event.target.value })}><option value="">Select investigation</option>{investigationOptions.map((investigation) => <option key={investigation.id} value={investigation.id}>{investigation.investigation_reference} · {investigation.title}</option>)}</select></label>
+            <div className="approvals-review-checks"><label><span>Entity type</span><select value={targetForm.entityType} onChange={(event) => setTargetForm({ ...targetForm, entityType: event.target.value })}><option value="field_report">Field report</option><option value="observation">Observation</option><option value="incident">Incident</option><option value="evidence_package">Evidence package</option></select></label><label><span>Link role</span><select value={targetForm.linkRole} onChange={(event) => setTargetForm({ ...targetForm, linkRole: event.target.value })}><option value="supporting">Supporting</option><option value="primary">Primary</option><option value="reviewing">Reviewing</option></select></label></div>
+            <label><span>Entity ID</span><input required value={targetForm.entityId} onChange={(event) => setTargetForm({ ...targetForm, entityId: event.target.value })} /></label>
+            <label><span>Reason</span><textarea rows={3} value={targetForm.linkReason} onChange={(event) => setTargetForm({ ...targetForm, linkReason: event.target.value })} placeholder="Explain why this record is linked to the investigation." /></label>
+          </>
+        );
+      default:
+        return (
+          <>
+            <label><span>Target name or type</span><input required value={targetForm.name || targetForm.credentialType} onChange={(event) => setTargetForm({ ...targetForm, name: event.target.value, credentialType: event.target.value, entityId: event.target.value })} /></label>
+            <label><span>Notes</span><textarea required rows={4} value={targetForm.notes || targetForm.linkReason || targetForm.storagePath} onChange={(event) => setTargetForm({ ...targetForm, notes: event.target.value, linkReason: event.target.value, storagePath: event.target.value })} /></label>
+          </>
+        );
+    }
+  };
+
   return (
     <div className="approvals-page">
-      {targetExecution && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={applyTargetProposal} role="dialog" aria-modal="true" aria-labelledby="target-proposal-apply-title"><div className="approvals-panel-heading"><div><span>Approved proposal</span><h2 id="target-proposal-apply-title">Apply approved {formatActionType(targetExecution.target)}</h2></div><button type="button" onClick={() => setTargetExecution(null)}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">Enter the authoritative target details explicitly. No inference is applied silently.</p><label><span>Primary target ID</span><input required value={targetForm.staffId || targetForm.investigationId} onChange={(event) => setTargetForm({ ...targetForm, staffId: event.target.value, investigationId: event.target.value })} /></label><label><span>Target name or type</span><input required value={targetForm.name || targetForm.credentialType} onChange={(event) => setTargetForm({ ...targetForm, name: event.target.value, credentialType: event.target.value, entityId: event.target.value })} /></label><label><span>Notes, reason, or secure path</span><textarea required rows={4} value={targetForm.notes || targetForm.linkReason || targetForm.storagePath} onChange={(event) => setTargetForm({ ...targetForm, notes: event.target.value, linkReason: event.target.value, storagePath: event.target.value })} /></label><div className="approvals-dialog-actions"><button type="button" onClick={() => setTargetExecution(null)}>Cancel</button><button type="submit" className="is-approve" disabled={busyId === targetExecution.proposal.id}>Apply approved proposal</button></div></form></div>}
+      {targetExecution && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={applyTargetProposal} role="dialog" aria-modal="true" aria-labelledby="target-proposal-apply-title"><div className="approvals-panel-heading"><div><span>Approved proposal</span><h2 id="target-proposal-apply-title">{targetExecution.target === 'credential' ? 'Apply approved credential' : targetExecution.target === 'hr_case' ? 'Apply approved HR document' : targetExecution.target === 'site_brief' ? 'Apply approved site brief' : targetExecution.target === 'investigation_link' ? 'Apply approved investigation link' : `Apply approved ${formatActionType(targetExecution.target)}`}</h2></div><button type="button" onClick={() => setTargetExecution(null)}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">Enter the authoritative target details explicitly. No inference is applied silently.</p>{renderTargetExecutionFields()}<div className="approvals-dialog-actions"><button type="button" onClick={() => setTargetExecution(null)}>Cancel</button><button type="submit" className="is-approve" disabled={busyId === targetExecution.proposal.id}>{targetExecution.target === 'credential' ? 'Apply approved credential' : targetExecution.target === 'hr_case' ? 'Apply approved HR document' : targetExecution.target === 'site_brief' ? 'Apply approved site brief' : targetExecution.target === 'investigation_link' ? 'Apply approved investigation link' : `Apply approved ${formatActionType(targetExecution.target)}`}</button></div></form></div>}
       <header className="approvals-heading">
         <div><span>Governed operations</span><h1>Approvals and activity</h1><p>Review consequential actions before they enter the application.</p></div>
         <button type="button" onClick={() => void loadActivity()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh</button>
