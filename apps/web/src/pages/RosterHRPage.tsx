@@ -346,6 +346,7 @@ const RosterHRPage: React.FC = () => {
   const [showTemplateForm, setShowTemplateForm] = useState(false);
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [onCallPeriods, setOnCallPeriods] = useState<OnCallRow[]>([]);
+  const [onCallForm, setOnCallForm] = useState({ officerId: '', type: 'standard', startsAt: '', endsAt: '', flatRate: '', notes: '' });
   const [callouts, setCallouts] = useState<CalloutRow[]>([]);
   const [calloutPaySummaries, setCalloutPaySummaries] = useState<Record<string, CalloutPaySummary>>({});
   const [courtAppearances, setCourtAppearances] = useState<CourtRow[]>([]);
@@ -836,6 +837,25 @@ const RosterHRPage: React.FC = () => {
     });
     if (calloutError) setError(calloutError.message);
     else { setNotice('Callout raised and the assigned officer was notified.'); await loadAll(); }
+    setSaving(false);
+  };
+
+  const createOnCallPeriod = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!onCallForm.officerId || !onCallForm.startsAt || !onCallForm.endsAt) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: createError } = await supabase.rpc('create_on_call_period', {
+      p_client_request_id: crypto.randomUUID(),
+      p_officer_user_id: onCallForm.officerId,
+      p_period_type: onCallForm.type,
+      p_starts_at: new Date(onCallForm.startsAt).toISOString(),
+      p_ends_at: new Date(onCallForm.endsAt).toISOString(),
+      p_flat_rate: onCallForm.flatRate ? Number(onCallForm.flatRate) : null,
+      p_linked_shift_id: null,
+      p_notes: onCallForm.notes.trim() || null,
+    });
+    if (createError) setError(createError.message);
+    else { setNotice('On-call period created and sent to the officer for acceptance.'); setOnCallForm({ officerId: '', type: 'standard', startsAt: '', endsAt: '', flatRate: '', notes: '' }); await loadAll(); }
     setSaving(false);
   };
 
@@ -1780,6 +1800,12 @@ const RosterHRPage: React.FC = () => {
       {tab === 'oncall' && (
         <section className="reports-section">
           <h2>On-Call Periods ({onCallPeriods.length})</h2>
+          <form className="assessment-form" onSubmit={createOnCallPeriod}>
+            <div className="form-row"><label><span>Officer</span><select required value={onCallForm.officerId} onChange={(event) => setOnCallForm({ ...onCallForm, officerId: event.target.value })}><option value="">Select active officer</option>{staff.filter((person) => person.id !== profile?.id).map((person) => <option value={person.id} key={person.id}>{person.display_name ?? person.email ?? person.id}</option>)}</select></label><label><span>Type</span><select value={onCallForm.type} onChange={(event) => setOnCallForm({ ...onCallForm, type: event.target.value })}><option value="standard">Standard</option><option value="before_shift">Before shift</option><option value="after_shift">After shift</option><option value="overnight">Overnight</option></select></label></div>
+            <div className="form-row"><label><span>Starts</span><input type="datetime-local" required value={onCallForm.startsAt} onChange={(event) => setOnCallForm({ ...onCallForm, startsAt: event.target.value })} /></label><label><span>Ends</span><input type="datetime-local" required value={onCallForm.endsAt} onChange={(event) => setOnCallForm({ ...onCallForm, endsAt: event.target.value })} /></label></div>
+            <div className="form-row"><label><span>Flat rate</span><input type="number" min="0" step="0.01" value={onCallForm.flatRate} onChange={(event) => setOnCallForm({ ...onCallForm, flatRate: event.target.value })} /></label><label><span>Notes</span><input value={onCallForm.notes} onChange={(event) => setOnCallForm({ ...onCallForm, notes: event.target.value })} /></label></div>
+            <button type="submit" className="btn btn-primary" disabled={saving}>Create on-call period</button>
+          </form>
           <div className="contacts-list">
             {onCallPeriods.length === 0 ? (
               <div className="empty-state"><p>No on-call periods scheduled.</p></div>

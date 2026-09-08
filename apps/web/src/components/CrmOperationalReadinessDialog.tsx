@@ -28,13 +28,16 @@ export function CrmOperationalReadinessDialog({ agreement, onClose, onNavigate }
     setLoading(true); setError(null);
     const { data, error: loadError } = await supabase.rpc('get_crm_enterprise_readiness', { p_agreement_id: agreement.id });
     if (loadError || !data) setError(loadError?.message ?? 'Enterprise readiness evidence could not be loaded.');
-    else setReadiness(data as OperationalReadiness);
+    else {
+      const payload = data as Partial<OperationalReadiness>;
+      setReadiness({ ...payload, dimensions: Array.isArray(payload.dimensions) ? payload.dimensions : [] } as OperationalReadiness);
+    }
     setLoading(false);
   };
 
   useEffect(() => { void loadReadiness(); }, [agreement.id]);
 
-  const blockedCount = readiness?.dimensions.filter((dimension) => dimension.status === 'blocked').length ?? 0;
+  const blockedCount = readiness?.dimensions?.filter((dimension) => dimension.status === 'blocked').length ?? 0;
 
   return <div className="readiness-backdrop"><section className="readiness-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-title">
     <header><div><span>Activation evidence</span><h2 id="readiness-title">{agreement.name}</h2><p>{agreement.clientName}</p></div><button type="button" onClick={onClose} aria-label="Close readiness review"><X size={18} /></button></header>

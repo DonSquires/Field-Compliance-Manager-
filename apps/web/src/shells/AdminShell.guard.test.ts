@@ -77,4 +77,11 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
     expect(source).toContain("{ id: 'onboarding', label: 'New Account Setup'");
   });
+
+  it('consolidates duplicate admin menu entries and landing shortcuts', () => {
+    expect(source).toContain("{ id: 'crm', label: 'Client Portfolios', icon: DollarSign }");
+    expect(source).not.toContain("{ id: 'relationships', label: 'Client Portfolios', icon: Network }");
+    expect(source).toContain("label: 'People & Access'");
+    expect(source).not.toContain("label: 'Client Portfolios', icon: Network");
+  });
 });

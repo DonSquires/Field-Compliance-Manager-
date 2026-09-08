@@ -37,4 +37,8 @@ describe('Officer Freedom Camping interaction boundary', () => {
     expect(source).toContain('result.zone_closure?.closure_type');
     expect(source).toContain('The compliance verdict remains rule-derived.');
   });
+
+  it('keeps the requested-breach scroll effect at component scope instead of nesting it inside the async loader', () => {
+    expect(source).not.toMatch(/const loadHistory = useCallback\(async \(\) => \{[\s\S]*?useEffect\(\(\) => \{ if \(requestedBreachId\)/);
+  });
 });

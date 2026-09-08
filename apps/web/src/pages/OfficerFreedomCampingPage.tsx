@@ -138,13 +138,18 @@ const OfficerFreedomCampingPage: React.FC = () => {
         if (breachError) throw breachError;
         setBreaches((breachRows as BreachOutcome[]) ?? []);
       } else setBreaches([]);
-      useEffect(() => { if (requestedBreachId) document.getElementById(`officer-breach-${requestedBreachId}`)?.scrollIntoView({ block: 'center' }); }, [breaches, requestedBreachId]);
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : 'Recent scans could not be loaded.');
     } finally {
       setLoadingHistory(false);
     }
   }, [profile?.id, profile?.organizationId]);
+
+  useEffect(() => {
+    if (requestedBreachId) {
+      document.getElementById(`officer-breach-${requestedBreachId}`)?.scrollIntoView({ block: 'center' });
+    }
+  }, [breaches, requestedBreachId]);
 
   const refreshQueueCount = useCallback(async () => {
     try {

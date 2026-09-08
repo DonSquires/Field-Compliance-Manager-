@@ -163,7 +163,6 @@ const NAVIGATION_MAP = {
   ],
   'Clients & Commercial': [
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
-    { id: 'relationships', label: 'Client Portfolios', icon: Network },
     { id: 'onboarding', label: 'New Account Setup', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Activation Checklists', icon: ClipboardCheck },
     { id: 'finance-bureau', label: 'Pricing, Discounts & Tenders', icon: DollarSign },

@@ -101,7 +101,7 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('pages/SiteBoundaryReviewPage', 'manage_crm_site_boundary', 'calls'), true);
   assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'get_crm_agreement_setup', 'calls'), true);
   assert.equal(hasEdge('components/CrmAgreementSetupDialog', 'manage_crm_agreement_setup', 'calls'), true);
-  assert.equal(hasEdge('components/CrmOperationalReadinessDialog', 'get_crm_operational_readiness', 'calls'), true);
+  assert.equal(hasEdge('components/CrmOperationalReadinessDialog', 'get_crm_enterprise_readiness', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_workspace', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_assignees', 'calls'), true);
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'get_crm_onboarding_history', 'calls'), true);
@@ -144,9 +144,9 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('manage_crm_organization', 'organizations', 'writes'), true);
   assert.equal(hasEdge('manage_crm_organization', 'audit_log', 'writes'), true);
   assert.equal(hasEdge('get_crm_organization_readiness', 'crm_contacts', 'reads'), true);
-  assert.equal(hasEdge('pages/OrganizationSetupPage', 'update_organization_profile', 'calls'), true);
-  assert.equal(hasEdge('update_organization_profile', 'organizations', 'writes'), true);
-  assert.equal(hasEdge('update_organization_profile', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('pages/OrganizationSetupPage', 'update_operating_branch_profile', 'calls'), true);
+  assert.equal(hasEdge('update_operating_branch_profile', 'organizations', 'writes'), true);
+  assert.equal(hasEdge('update_operating_branch_profile', 'audit_log', 'writes'), true);
   assert.equal(hasEdge('find_crm_site_candidates', 'client_sites', 'reads'), true);
   assert.equal(hasEdge('create_crm_site', 'client_sites', 'writes'), true);
   assert.equal(hasEdge('create_crm_site', 'audit_log', 'writes'), true);
@@ -221,7 +221,7 @@ test('managed user spine routes identity and access through governed RPCs', () =
 
   assert.equal(hasEdge('pages/UserManagementPage', 'get_user_spine_readiness', 'calls'), true);
   assert.equal(hasEdge('components/UserIdentityWorkspace', 'manage_user_identity_access', 'calls'), true);
-  assert.equal(hasEdge('pages/AccessControlPage', 'manage_user_identity_access', 'calls'), true);
+  assert.equal(hasEdge('pages/AccessControlPage', 'grant_branch_area_access', 'calls'), true);
   assert.equal(hasEdge('manage_user_identity_access', 'user_profiles', 'writes'), true);
   assert.equal(hasEdge('manage_user_identity_access', 'preset_assignments', 'writes'), true);
   assert.equal(hasEdge('manage_user_identity_access', 'staff_area_grants', 'writes'), true);
@@ -423,7 +423,7 @@ test('managed Atlas refresh derives governed component and RPC flow edges', () =
   assert.equal(hasEdge('pages/RosterOperationsPage', 'reassign_roster_slot', 'calls'), true);
   assert.equal(hasEdge('reassign_roster_slot', 'roster_slots', 'writes'), true);
   assert.equal(hasEdge('manage_roster_slot', 'materialize_roster_slot', 'calls'), true);
-  assert.equal(hasEdge('pages/CRMPage', 'create_crm_draft_quote', 'calls'), true);
+  assert.equal(hasEdge('pages/CRMPage', 'create_crm_draft_quote_for_provider', 'calls'), true);
   assert.equal(hasEdge('manage_welfare_alert', 'welfare_alerts', 'writes'), true);
   assert.equal(hasEdge('submit_officer_field_report', 'officer_field_reports', 'writes'), true);
   assert.equal(hasEdge('submit_officer_field_report', 'audit_log', 'writes'), true);

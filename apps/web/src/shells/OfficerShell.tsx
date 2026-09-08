@@ -118,6 +118,8 @@ const MODULE_METADATA: Record<string, { label: string; icon: LucideIcon }> = {
   credentials: { label: 'Credentials', icon: BadgeCheck },
 };
 
+const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'credentials', 'map']);
+
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
   ok: { bg: '#1A1A1A', dot: 'OK', color: '#4CAF50' },
   due: { bg: '#1A1200', dot: 'DUE', color: '#FF9800' },
@@ -170,6 +172,13 @@ const OfficerShell: React.FC = () => {
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
 
+  const canAccessOfficerModule = useCallback((module: ActiveModule): boolean => {
+    if (!module) return true;
+    if (module === 'modules') return true;
+    if (CORE_OFFICER_MODULES.has(module)) return true;
+    return grantedModules.includes(module);
+  }, [grantedModules]);
+
   // Derive active module from URL
   const moduleFromUrl = useCallback((pathname: string): ActiveModule => {
     const segments = pathname.split('/').filter(Boolean);
@@ -182,6 +191,11 @@ const OfficerShell: React.FC = () => {
   // Determine current state machine state
   useEffect(() => {
     const module = moduleFromUrl(location.pathname);
+    if (module && !canAccessOfficerModule(module)) {
+      navigate('/officer', { replace: true });
+      setActiveModule(null);
+      return;
+    }
     setActiveModule(module);
 
     if (!activeShift && !module) {
@@ -195,7 +209,7 @@ const OfficerShell: React.FC = () => {
     } else {
       setOfficerState('home');
     }
-  }, [location.pathname, activeShift, grantedModules, moduleFromUrl]);
+  }, [location.pathname, activeShift, grantedModules, canAccessOfficerModule, moduleFromUrl, navigate]);
 
   // Direct module access requires both the officer's grant and the organisation entitlement.
   useEffect(() => {
@@ -264,14 +278,19 @@ const OfficerShell: React.FC = () => {
 
   // Navigate to module
   const navigateToModule = useCallback((module: ActiveModule) => {
-    if (module === null) {
+    if (module === null || module === 'modules') {
       navigate('/officer');
       setActiveModule(null);
-    } else {
-      navigate(`/officer/${module}`);
-      setActiveModule(module);
+      return;
     }
-  }, [navigate]);
+    if (!canAccessOfficerModule(module)) {
+      navigate('/officer', { replace: true });
+      setActiveModule(null);
+      return;
+    }
+    navigate(`/officer/${module}`);
+    setActiveModule(module);
+  }, [canAccessOfficerModule, navigate]);
 
   const navigateFromNotification = useCallback((notification: NotificationRecord) => {
     const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);

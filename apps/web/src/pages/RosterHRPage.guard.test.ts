@@ -54,6 +54,13 @@ describe('governed HR administration', () => {
     expect(page).not.toMatch(/from\('callout_shifts'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
   });
 
+  it('creates on-call periods through the admin-owned idempotent RPC', () => {
+    expect(page).toContain("supabase.rpc('create_on_call_period'");
+    expect(page).toContain('p_client_request_id: crypto.randomUUID()');
+    expect(page).toContain('Create on-call period');
+    expect(page).not.toMatch(/from\('on_call_periods'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
+  });
+
   it('uses governed coverage creation and reasoned review', () => {
     expect(page).toContain("supabase.rpc('create_shift_coverage_request'");
     expect(page).not.toContain(".from('shift_coverage_requests').insert");
