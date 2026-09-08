@@ -72,6 +72,7 @@ const ReportsHubPage: React.FC = () => {
   const [consolidatedReporting, setConsolidatedReporting] = useState<ConsolidatedReportingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [sendingPackId, setSendingPackId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState({
@@ -138,6 +139,16 @@ const ReportsHubPage: React.FC = () => {
     if (generationError || typeof data !== 'number') setError(generationError?.message ?? 'Report pack generation was not confirmed.');
     else { setNotice(`${data} report packs generated for the selected period.`); await loadReports(); }
     setGenerating(false);
+  };
+
+  const sendReportPack = async (pack: MonthlyReportPack) => {
+    setSendingPackId(pack.id);
+    setError(null);
+    setNotice(null);
+    const { error: sendError } = await supabase.functions.invoke('send-report-pack', { body: { pack_id: pack.id } });
+    if (sendError) setError(sendError.message);
+    else { setNotice(`Report pack for ${pack.period_start} to ${pack.period_end} sent to the client contact.`); await loadReports(); }
+    setSendingPackId(null);
   };
 
   if (loading) {
@@ -212,9 +223,9 @@ const ReportsHubPage: React.FC = () => {
         <h2>Monthly Report Packs ({reportPacks.length})</h2>
         <div className="reports-table-wrapper">
           <table className="reports-table">
-            <thead><tr><th>Agreement</th><th>Period</th><th>Template</th><th>Status</th><th>Generated</th></tr></thead>
+            <thead><tr><th>Agreement</th><th>Period</th><th>Template</th><th>Status</th><th>Generated</th><th>Delivery</th></tr></thead>
             <tbody>
-              {reportPacks.length === 0 ? <tr><td colSpan={5} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => <tr key={pack.id}><td>{pack.agreement?.[0]?.name ?? 'Service agreement'}</td><td>{pack.period_start} to {pack.period_end}</td><td>{pack.template_code}</td><td><span className={`status-badge status-${pack.status}`}>{pack.status}</span></td><td>{pack.generated_at ? new Date(pack.generated_at).toLocaleString() : '-'}</td></tr>)}
+              {reportPacks.length === 0 ? <tr><td colSpan={6} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => <tr key={pack.id}><td>{pack.agreement?.[0]?.name ?? 'Service agreement'}</td><td>{pack.period_start} to {pack.period_end}</td><td>{pack.template_code}</td><td><span className={`status-badge status-${pack.status}`}>{pack.status}</span></td><td>{pack.generated_at ? new Date(pack.generated_at).toLocaleString() : '-'}</td><td>{pack.status === 'sent' ? (pack.sent_at ? `Sent ${new Date(pack.sent_at).toLocaleString()}` : 'Sent') : <button type="button" className="btn btn-sm btn-primary" onClick={() => void sendReportPack(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Sending...' : 'Send to client'}</button>}</td></tr>)}
             </tbody>
           </table>
         </div>

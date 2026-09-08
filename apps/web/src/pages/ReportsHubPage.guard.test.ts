@@ -13,6 +13,13 @@ describe('governed monthly report pack generation', () => {
     expect(page).toContain('Generate report packs');
   });
 
+  it('sends generated packs through the authenticated delivery function', () => {
+    expect(page).toContain("supabase.functions.invoke('send-report-pack'");
+    expect(page).toContain('pack_id: pack.id');
+    expect(page).toContain('Send to client');
+    expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.update\(/);
+  });
+
   it('does not mutate report packs directly from the browser', () => {
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.(insert|update|upsert)\(/);
   });
