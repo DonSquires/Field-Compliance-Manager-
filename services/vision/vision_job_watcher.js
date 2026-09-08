@@ -156,10 +156,30 @@ async function ingest(job, summary) {
   if (!response.ok) throw new Error(`motion ingestion returned HTTP ${response.status}`);
 }
 
+// Spreads the classification budget fairly across every motion segment (vehicle/person event),
+// and samples each segment's frames evenly across its full range instead of only the earliest
+// ones. The earliest frames of a padded motion window are frequently just the pre-roll moment a
+// vehicle's edge first crosses the motion threshold, before it is fully in frame.
+function selectFramesForClassification(segments, maxFrames) {
+  const segmentFrameLists = segments.map((segment) => segment.frames || []).filter((frames) => frames.length > 0);
+  if (segmentFrameLists.length === 0 || maxFrames <= 0) return [];
+  const perSegmentBudget = Math.max(1, Math.floor(maxFrames / segmentFrameLists.length));
+  const selected = [];
+  for (const frames of segmentFrameLists) {
+    const budget = Math.min(perSegmentBudget, frames.length, maxFrames - selected.length);
+    if (budget <= 0) break;
+    for (let index = 0; index < budget; index += 1) {
+      const position = budget === 1 ? Math.floor((frames.length - 1) / 2) : Math.round((index * (frames.length - 1)) / (budget - 1));
+      selected.push(frames[position]);
+    }
+  }
+  return selected;
+}
+
 async function classifyFrames(summary) {
   if (!INFERENCE_API_KEY) throw new Error('INFERENCE_API_KEY is required for frame classification');
-  const frames = summary.motion_segments.flatMap((segment) => segment.frames || []);
-  const selectedFrames = frames.slice(0, MAX_CLASSIFICATION_FRAMES);
+  const totalFrames = summary.motion_segments.reduce((total, segment) => total + (segment.frames?.length || 0), 0);
+  const selectedFrames = selectFramesForClassification(summary.motion_segments, MAX_CLASSIFICATION_FRAMES);
   for (const frame of selectedFrames) {
     const image = await fs.readFile(frame.file_path);
     const buildForm = () => {
@@ -175,7 +195,7 @@ async function classifyFrames(summary) {
     frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
     frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
   }
-  if (frames.length > selectedFrames.length) summary.classification_truncated = true;
+  if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
   return summary;
 }
 
@@ -299,4 +319,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification };
