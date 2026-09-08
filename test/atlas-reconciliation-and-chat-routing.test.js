@@ -46,3 +46,11 @@ test('site risk changes are routed through Caddie to the governed proposal produ
   assert.match(chat, /case 'propose_site_risk':/);
   assert.match(chat, /_idempotency_key: args\._idempotency_key/);
 });
+
+test('patrol route service areas are Caddie-routed governed proposals', () => {
+  assert.match(caddie, /propose_patrol_route_service_area: \{/);
+  assert.match(caddie, /'bob-propose-patrol-route-service-area'/);
+  assert.match(chat, /async function execProposePatrolRouteServiceArea/);
+  assert.match(chat, /callFn\('bob-propose-patrol-route-service-area', authHeader/);
+  assert.match(chat, /case 'propose_patrol_route_service_area':/);
+});

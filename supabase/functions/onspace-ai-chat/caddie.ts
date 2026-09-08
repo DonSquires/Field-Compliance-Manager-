@@ -114,6 +114,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; needs approval',
     effect_class: 'draft_governed_write'
   },
+  propose_patrol_route_service_area: {
+    purpose: 'PROPOSE a patrol route service-area geofence from validated New Zealand Territorial Authority district names. Creates a pending approval only. Args: { patrol_route_id, district_names, despatch_zone_code?, name?, module_key? }.',
+    governance: 'WRITE-draft; needs approval; exact route ID required',
+    effect_class: 'draft_governed_write'
+  },
   promote_action: {
     purpose: 'Prepare a governed draft (e.g. service agreement) into the approval bell.',
     governance: 'WRITE-draft; needs approval',
@@ -554,6 +559,7 @@ const TOOL_REGISTRY = {
     scv_lookup: 'bob-scv-lookup',
     site_risk: 'bob-site-risk',
     propose_site_risk: 'bob-propose-site-risk',
+    propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
     plan_import: 'bob-plan-import',
     perceive_media: 'bob-perceive-image',
     web_research: 'bob-web-research',

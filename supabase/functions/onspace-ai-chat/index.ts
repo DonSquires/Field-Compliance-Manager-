@@ -844,10 +844,10 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
     'describe_image',
     'retrieve_knowledge'
   ];
-  if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'resolve_geofence');
+  if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -1413,6 +1413,9 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'propose_freedom_camping_zone' && caps.canPromote || // propose_patrol_route_assignment is a governed WRITE-draft — same gate.
     t.tool === 'propose_patrol_route_assignment' && caps.canPromote || // propose_zone_patrol_stop is a governed WRITE-draft — same gate.
     t.tool === 'propose_zone_patrol_stop' && caps.canPromote || // job_plan_create is a governed WRITE-draft (a PLAN of governed actions) —
+    t.tool === 'propose_patrol_route_service_area' && caps.canPromote || // propose_site_risk is a governed WRITE-draft — same gate.
+    t.tool === 'propose_site_risk' && caps.canPromote || // site_risk is a read-only assessment.
+    t.tool === 'site_risk' && caps.canCompareData ||
     // same gate as every single-action propose_* tool; a plan approval is the
     // same kind of human decision, just at plan granularity (#86 Phase 3).
     t.tool === 'job_plan_create' && caps.canPromote || // propose_freedom_camping_org_strategy is a governed WRITE-draft — same gate.
@@ -4506,6 +4509,36 @@ async function execProposeSiteRisk(authHeader, caps, args) {
       outcome: r.data.no_change ? 'no_change' : 'ok',
       action_id: r.data.action_id ?? null
     }
+  };
+}
+async function execProposePatrolRouteServiceArea(authHeader, caps, args) {
+  if (!caps.canPromote) return {
+    reply: 'Creating a patrol route service area needs an admin, master, or grand master.',
+    meta: { tool: 'propose_patrol_route_service_area', outcome: 'forbidden' }
+  };
+  const routeId = String(args.patrol_route_id ?? '').trim();
+  const districtNames = Array.isArray(args.district_names) ? args.district_names.map((name)=>String(name).trim()).filter(Boolean) : [];
+  if (!routeId || districtNames.length === 0) return {
+    reply: 'Provide the exact patrol route ID and at least one valid New Zealand Territorial Authority district name before I prepare this proposal.',
+    meta: { tool: 'propose_patrol_route_service_area', outcome: 'need_route_or_districts' }
+  };
+  const r = await callFn('bob-propose-patrol-route-service-area', authHeader, {
+    patrol_route_id: routeId,
+    district_names: districtNames,
+    despatch_zone_code: typeof args.despatch_zone_code === 'string' ? args.despatch_zone_code : undefined,
+    name: typeof args.name === 'string' ? args.name : undefined,
+    module_key: typeof args.module_key === 'string' ? args.module_key : undefined,
+    reasoning: typeof args.reasoning === 'string' ? args.reasoning : undefined,
+    _idempotency_key: args._idempotency_key,
+    conversation_id: args._conversation_id
+  });
+  if (!r.ok || !r.data?.success) return {
+    reply: 'I could not prepare the patrol route service-area proposal right now.',
+    meta: { tool: 'propose_patrol_route_service_area', outcome: 'failed' }
+  };
+  return {
+    reply: String(r.data.note ?? 'The patrol route service-area proposal is ready for approval.'),
+    meta: { tool: 'propose_patrol_route_service_area', outcome: 'ok', action_id: r.data.action_id ?? null }
   };
 }
 // Bob PROPOSES a freedom-camping ENFORCEMENT zone (geofence + night limits) into
@@ -7624,6 +7657,8 @@ serve(async (req)=>{
           return execSiteRisk(authHeader, toolArgs);
         case 'propose_site_risk':
           return execProposeSiteRisk(authHeader, caps, toolArgs);
+        case 'propose_patrol_route_service_area':
+          return execProposePatrolRouteServiceArea(authHeader, caps, toolArgs);
         case 'propose_client_onboarding':
           return execProposeClientOnboarding(authHeader, caps, orgId, toolArgs);
         case 'propose_freedom_camping_zone':
