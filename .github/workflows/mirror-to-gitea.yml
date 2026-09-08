@@ -32,10 +32,27 @@ jobs:
       - name: Fast-forward Gitea main
         run: |
           set -euo pipefail
-          git fetch gitea main
+          retry_git() {
+            local attempt=1
+            local max_attempts=4
+            local delay_seconds=5
+
+            until "$@"; do
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "Gitea mirror command failed after ${attempt} attempts." >&2
+                return 1
+              fi
+              echo "Gitea mirror command failed; retrying in ${delay_seconds}s (attempt $((attempt + 1))/${max_attempts})." >&2
+              sleep "$delay_seconds"
+              attempt=$((attempt + 1))
+              delay_seconds=$((delay_seconds * 2))
+            done
+          }
+
+          retry_git git fetch gitea main
           GITEA_MAIN="$(git rev-parse gitea/main)"
           if ! git merge-base --is-ancestor "$GITEA_MAIN" HEAD; then
             echo "Gitea main diverges from GitHub main; refusing to overwrite mirror history." >&2
             exit 1
           fi
-          git push gitea HEAD:refs/heads/main
+          retry_git git push gitea HEAD:refs/heads/main
