@@ -18,4 +18,10 @@ describe('governed organization profile setup', () => {
     expect(source).not.toMatch(/from\(['"]organization_modules['"]\)[\s\S]{0,200}\.(update|insert|delete)/);
     expect(source).not.toMatch(/from\(['"]org_geofence_config['"]\)[\s\S]{0,200}\.(update|insert|delete)/);
   });
+
+  it('resolves geofence defaults through the canonical fallback RPC', () => {
+    expect(source).toContain("supabase.rpc('get_org_geofence_config'");
+    expect(source).toContain('p_org_id: orgId');
+    expect(source).toContain('resolvedGeofenceDefaults');
+  });
 });

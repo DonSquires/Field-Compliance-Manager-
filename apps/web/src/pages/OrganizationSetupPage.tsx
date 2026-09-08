@@ -68,6 +68,7 @@ const OrganizationSetupPage: React.FC = () => {
   const [modules, setModules] = useState<ModuleRow[]>([]);
   const [templates, setTemplates] = useState<NoticeTemplate[]>([]);
   const [geofenceConfig, setGeofenceConfig] = useState<GeofenceConfigRow[]>([]);
+  const [resolvedGeofenceDefaults, setResolvedGeofenceDefaults] = useState<Record<string, number>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [overrideForm, setOverrideForm] = useState({ config_key: GEOFENCE_KEYS[0].key, zone_type: '', config_value: '' });
   const [loading, setLoading] = useState(true);
@@ -115,6 +116,17 @@ const OrganizationSetupPage: React.FC = () => {
       setModules((modulesRes.data as ModuleRow[]) || []);
       setTemplates((templatesRes.data as NoticeTemplate[]) || []);
       setGeofenceConfig((geofenceRes.data as GeofenceConfigRow[]) || []);
+      const resolvedEntries = await Promise.all(GEOFENCE_KEYS.map(async (key) => {
+        const { data, error: resolutionError } = await supabase.rpc('get_org_geofence_config', {
+          p_org_id: orgId,
+          p_config_key: key.key,
+          p_zone_type: null,
+          p_default: key.platformDefault,
+        });
+        if (resolutionError) throw resolutionError;
+        return [key.key, Number(data)] as const;
+      }));
+      setResolvedGeofenceDefaults(Object.fromEntries(resolvedEntries));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load organisation setup');
     } finally {
@@ -393,6 +405,7 @@ const OrganizationSetupPage: React.FC = () => {
         <div className="contacts-list" style={{ marginTop: '8px' }}>
           {GEOFENCE_KEYS.map((k) => {
             const existing = geofenceConfig.find((g) => g.config_key === k.key && g.zone_type === null);
+            const resolvedValue = resolvedGeofenceDefaults[k.key] ?? existing?.config_value ?? k.platformDefault;
             return (
               <div key={k.key} className="contact-card">
                 <div className="contact-header">
@@ -402,7 +415,7 @@ const OrganizationSetupPage: React.FC = () => {
                   <input
                     type="number"
                     min={0}
-                    defaultValue={existing?.config_value ?? k.platformDefault}
+                    defaultValue={resolvedValue}
                     style={{ width: '100px' }}
                     onBlur={(e) => {
                       const value = Number(e.target.value);
@@ -412,7 +425,7 @@ const OrganizationSetupPage: React.FC = () => {
                     }}
                   />
                   <span className="contact-meta">
-                    {existing ? 'org-wide override' : `platform default (${k.platformDefault})`}
+                    {existing ? 'org-wide override' : `resolved fallback (${resolvedValue})`}
                     {savingKey === `${k.key}:` ? ' · saving…' : ''}
                   </span>
                 </div>
