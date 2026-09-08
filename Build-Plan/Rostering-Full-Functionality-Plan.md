@@ -175,6 +175,13 @@ Next slice: add full browser coverage for return-for-correction and timesheet re
 - Payload coverage verifies `swap_type = direct` and the selected replacement staff profile.
 - Open swap fallback remains covered separately.
 
+### Progress: pending swap cancellation complete
+
+- Officers can withdraw their own pending swap requests with a required reason.
+- Cancellation is state-checked, owner-authorized, and audit-recorded.
+- The original shift remains assigned and visible after cancellation.
+- Migration `20260907002700` is applied and verified in live Supabase.
+
 ### Progress: approval-loop browser proof improved
 
 - HR browser coverage now proves the manager return-for-correction leg for branch-checked time.
