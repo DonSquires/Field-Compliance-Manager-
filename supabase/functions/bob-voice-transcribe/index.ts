@@ -16,8 +16,11 @@
  *   API_URL    - apps/api base URL (no trailing slash)
  *   API_TOKEN  - apps/api auth token
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const API_URL = Deno.env.get('API_URL') ?? '';
 const API_TOKEN = Deno.env.get('API_TOKEN') ?? '';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -36,6 +39,12 @@ serve(async (req)=>{
       }
     });
   try {
+      const authorization = req.headers.get('Authorization') ?? '';
+      const caller = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authorization } }
+      });
+      const { data: { user }, error: authError } = await caller.auth.getUser();
+      if (authError || !user) return json({ error: 'Unauthorized' }, 401);
     if (!API_URL || !API_TOKEN) return json({
       error: 'Voice transcribe not configured'
     }, 503);

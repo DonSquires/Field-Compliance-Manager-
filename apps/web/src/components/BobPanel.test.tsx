@@ -348,6 +348,11 @@ describe('BobPanel', () => {
       expect(screen.getByText(/voice-note-.*\.webm/)).toBeTruthy();
       expect(screen.getByText('queued')).toBeTruthy();
     });
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('bob-voice-transcribe', expect.objectContaining({
+        body: expect.objectContaining({ language: 'en' }),
+      }));
+    });
     expect(stopTrack).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));

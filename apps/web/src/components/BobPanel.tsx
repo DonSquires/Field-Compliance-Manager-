@@ -158,6 +158,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>('off');
+  const [voiceTranscript, setVoiceTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -545,6 +546,26 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         }
         const file = new File([blob], `voice-note-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`, { type: blob.type || 'audio/webm' });
         addFiles([file]);
+        if (blob.size <= 6 * 1024 * 1024) {
+          void (async () => {
+            try {
+              const audioBase64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error('Voice note could not be read for transcription.'));
+                reader.onload = () => resolve(String(reader.result).split(',', 2)[1] ?? '');
+                reader.readAsDataURL(blob);
+              });
+              const { data, error: transcriptionError } = await supabase.functions.invoke('bob-voice-transcribe', {
+                body: { audio_base64: audioBase64, language: 'en' }
+              });
+              if (transcriptionError) throw transcriptionError;
+              const transcript = String(data?.transcript ?? '').trim();
+              if (transcript) setVoiceTranscript(transcript);
+            } catch {
+              // Audio remains attached as evidence even when optional STT is unavailable.
+            }
+          })();
+        }
         setActivityPhase('idle');
       };
       recorder.start();
@@ -565,7 +586,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    const message = input.trim();
+    const message = input.trim() || voiceTranscript.trim();
     if ((!message && pendingFiles.length === 0) || !conversationId) return;
 
     const optimisticId = `optimistic-${Date.now()}`;
@@ -575,6 +596,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       { id: optimisticId, role: 'user', content: attachmentNames.length ? `${message || 'Please review the attached file(s).'}\n\nAttached: ${attachmentNames.join(', ')}` : message, confidence: null, flagged: false, created_at: new Date().toISOString(), metadata: {} },
     ]);
     setInput('');
+    setVoiceTranscript('');
     setSending(true);
     setActivityPhase('preparing');
     setError(null);
