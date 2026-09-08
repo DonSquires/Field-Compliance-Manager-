@@ -370,6 +370,21 @@ describe('BobPanel', () => {
     });
   });
 
+  it('plays an assistant reply through the authenticated voice service', async () => {
+    messageHistory = [{ id: 'assistant-voice', role: 'assistant', content: 'Voice reply', confidence: null, flagged: false, created_at: '2026-09-02T06:00:00.000Z', metadata: {} }];
+    vi.stubGlobal('Audio', class { play = vi.fn().mockResolvedValue(undefined); });
+    mockInvoke.mockImplementation(async (name: string) => name === 'bob-voice-speak'
+      ? { data: { audio_base64: 'dGVzdA==', mime: 'audio/wav' }, error: null }
+      : { data: { reply: 'ok' }, error: null });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Listen to this reply' }));
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('bob-voice-speak', {
+      body: { text: 'Voice reply' },
+    }));
+  });
+
   it('names waiting-on-human and failed states plainly', async () => {
     messageHistory = [
       {

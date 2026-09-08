@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Archive, ArchiveRestore, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Upload } from 'tus-js-client';
@@ -159,6 +159,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [dragging, setDragging] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>('off');
   const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -584,6 +585,26 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
   };
 
+  const speakMessage = async (message: BobMessage) => {
+    if (!message.content.trim() || speakingMessageId) return;
+    setSpeakingMessageId(message.id);
+    try {
+      const { data, error: speechError } = await supabase.functions.invoke('bob-voice-speak', {
+        body: { text: message.content }
+      });
+      if (speechError) throw speechError;
+      const audioBase64 = String(data?.audio_base64 ?? '');
+      if (!audioBase64) throw new Error('No speech audio was returned.');
+      const mime = String(data?.mime ?? 'audio/wav');
+      const audio = new Audio(`data:${mime};base64,${audioBase64}`);
+      await audio.play();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Voice playback could not start.');
+    } finally {
+      setSpeakingMessageId(null);
+    }
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const message = input.trim() || voiceTranscript.trim();
@@ -763,7 +784,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                   <div className="bob-message-body">
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
-                    <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
+                    <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
                   </div>
                 </article>
               ))
