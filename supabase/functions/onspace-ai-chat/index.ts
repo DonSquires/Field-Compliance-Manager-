@@ -429,7 +429,7 @@ const KNOWLEDGE_TOTAL_BUDGET = 120_000;
 // in constitutional-lane.test.ts). index.ts keeps only the stateful/I/O parts:
 // the isolate cache + the DB fetch.
 import { CONSTITUTIONAL_FALLBACK, CONSTITUTIONAL_NEG_CACHE_MS, classifyConstitutional, buildConstitutionalOrgFilter, selectCacheableCards, renderConstitutionalSection } from './constitutional-lane.ts';
-import { generateToolCatalogue, isToolEffectPermitted, classifyToolEffect } from './caddie.ts';
+import { generateToolCatalogue, isToolEffectPermitted, classifyToolEffect, resolveCatalogueTool } from './caddie.ts';
 import { resolveQueryRouting, renderQueryResults, formatQueryError } from './query-records-conductor.ts';
 import { evaluateWelfareSafetySeam, isSafetySignalAction, buildAlertRaisePayload, captureWelfareTruthForWriteRefusal, buildAlertDedupeKey, buildDedupeQueryParams, validateAuthorityPredicate, validateWelfareContextCompleteness, buildAlertRaiseSuccess, buildAlertRaiseDeduplicated, buildAlertRaiseInsertFailed, buildAlertRaiseAuthorityFailed, buildAlertRaiseIncompleteContext } from './conductor-welfare-seam.ts';
 // Isolate-level cache — PLATFORM-CONSTITUTIONAL (org NULL) cards ONLY. Warms once
@@ -3796,13 +3796,20 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       internal: true
     }
   };
-  const summary = results.map((row)=>{
-    if (action === 'capability_map') return `  ${row.entity_type}:${row.entity_name} present=${row.present} wired=${row.wired} exercised=${row.exercised ?? '?'}`;
-    if (action === 'terrain_edges') return `  ${row.source_type}:${row.source_name} -[${row.edge_kind}]-> ${row.target_type}:${row.target_name}`;
-    return `  ${row.entity_type}:${row.entity_name} wired=${row.wired} exercised=${row.exercised ?? '?'} notes=${row.notes ?? '-'}`;
-  }).join('\n');
+  const countsBy = (key)=>Object.entries(results.reduce((counts, row)=>{
+      const value = String(row[key] ?? 'unknown');
+      counts[value] = (counts[value] ?? 0) + 1;
+      return counts;
+    }, {})).map(([value, count])=>`${count} ${value}`).join(', ');
+  const summary = action === 'gap_report'
+    ? `I found ${results.length} Atlas gaps in this page: ${countsBy('gap_kind')}. They are grouped as ${countsBy('entity_type')}.`
+    : action === 'expectation_report'
+      ? `I evaluated ${results.length} Atlas expectations: ${countsBy('expectation_status')}.`
+      : action === 'terrain_edges'
+        ? `I found ${results.length} live terrain edges in this page: ${countsBy('edge_kind')}.`
+        : `I found ${results.length} capability entries in this page: ${countsBy('entity_type')}.`;
   return {
-    reply: `[INTERNAL: Atlas ${action} returned ${results.length} result(s) at offset ${r.data?.offset ?? 0} of ${r.data?.total ?? 'unknown'}.${r.data?.next_offset !== null && r.data?.next_offset !== undefined ? ` More results begin at offset ${r.data.next_offset}; call query_atlas again with that offset to continue surveying the terrain.` : ' This is the final page.'} Reason over this to understand the terrain. Do NOT dump raw to the user.]\n\n${summary}`,
+    reply: `${summary}${r.data?.next_offset !== null && r.data?.next_offset !== undefined ? ` More results are available from offset ${r.data.next_offset}.` : ''}`,
     meta: {
       tool: 'query_atlas',
       outcome: 'ok',
@@ -6477,16 +6484,10 @@ serve(async (req)=>{
     // canonical form so a formatting quirk never falls through to the default
     // branch (which used to echo the raw JSON decision to the user).
     const canon = (s)=>String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    // Resolve the chosen tool against the allowed catalogue by canonical name, so
-    // "reposearch"/"repo_search"/"repo search" all map to the real tool id.
-    const toolByCanon = new Map(catalogue.map((t)=>[
-        canon(t.tool),
-        t.tool
-      ]));
     /** Parse a raw plan decision into normalised action/tool/args. */ const parsePlanDecision = (d)=>{
       const ra = canon(d.action);
       const na = ra === 'usetool' ? 'use_tool' : ra === 'ask' ? 'ask' : ra === 'introspect' ? 'introspect' : 'answer';
-      const ct = na === 'use_tool' ? toolByCanon.get(canon(d.tool)) ?? null : null;
+      const ct = na === 'use_tool' ? resolveCatalogueTool(catalogue, d.tool) : null;
       const a = d.args && typeof d.args === 'object' ? d.args : {};
       // Always inject conversation_id into args so propose functions can save it
       // on bob_agentic_actions for the push-notification path.
@@ -7972,6 +7973,25 @@ serve(async (req)=>{
     }
     let decision = plan.data ?? {};
     let { normAction, chosenTool, args } = parsePlanDecision(decision);
+    const explicitAtlasRequest = caps.tier === 'admiral'
+      && /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
+      && /\b(?:query|check|inspect|use|explain|triage|show|look)\b/i.test(message);
+    if (normAction === 'answer' && explicitAtlasRequest) {
+      const requestedAtlasAction = /\bexpectation(?:s| report)?\b/i.test(message)
+        ? 'expectation_report'
+        : /\bgap(?:s| report)?\b/i.test(message)
+          ? 'gap_report'
+          : /\bterrain|edge(?:s)?\b/i.test(message)
+            ? 'terrain_edges'
+            : 'capability_map';
+      normAction = 'use_tool';
+      chosenTool = 'query_atlas';
+      args = {
+        ...args,
+        action: requestedAtlasAction,
+        limit: 25
+      };
+    }
     // PILLAR H: plan_received event (fires for ALL requests, FIRST plan only per owner decision)
     await emitEvent("plan_received", {
       action: String(decision.action ?? ""),

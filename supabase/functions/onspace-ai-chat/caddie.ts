@@ -217,7 +217,7 @@ const TOOL_REGISTRY = {
   },
   // ── !1403 "Bob full-access v2" family (#329) ──────────────────────────────
   query_atlas: {
-    purpose: 'Query your own terrain graph to know what is wired, reachable, and exercised in the build. Know the whole before the part. Actions: (1) capability_map - list entities with present/wired/exercised flags; args { action, filter?, limit?, offset? }. (2) terrain_edges - list live edges touching a node; args { action, filter?, limit?, offset? }. (3) gap_report - list dormant/never-run entities; args { action, limit?, offset? }. When next_offset is returned, call again with that offset until the page is final. (4) blast_radius - IMPACT / RIPPLE: from a node, what does touching it reach across the build (glass to core). Use this to answer "if we change X, what is affected". Args { action: "blast_radius", from_type, from_name, direction? (downstream|upstream|both; default downstream), max_depth? (1-20, default 8) }. Returns TWO SEPARATE sections: flow_reach (proven data-flow: writes/reads/calls/invokes) and fk_reach (structural RELATION only, undirected). NEVER report an fk_reach link as a data-flow path - they are different truths.',
+    purpose: 'Query your own terrain graph to know what is wired, reachable, and exercised in the build. Know the whole before the part. Actions: (1) capability_map - list entities with present/wired/exercised flags; args { action, filter?, limit?, offset? }. (2) terrain_edges - list live edges touching a node; args { action, filter?, limit?, offset? }. (3) gap_report - list dormant/never-run entities; args { action, limit?, offset? }. (4) expectation_report - evaluate authored required/prohibited paths against live flow terrain; args { action, limit?, offset? }. When next_offset is returned, call again with that offset until the page is final. (5) blast_radius - IMPACT / RIPPLE: from a node, what does touching it reach across the build (glass to core). Use this to answer "if we change X, what is affected". Args { action: "blast_radius", from_type, from_name, direction? (downstream|upstream|both; default downstream), max_depth? (1-20, default 8) }. Returns TWO SEPARATE sections: flow_reach (proven data-flow: writes/reads/calls/invokes) and fk_reach (structural RELATION only, undirected). NEVER report an fk_reach link as a data-flow path - they are different truths.',
     governance: 'read-only; bob_capability_map + bob_app_map_edges',
     effect_class: 'admin_diagnostic_substrate_action'
   },
@@ -691,6 +691,15 @@ function fallbackCatalogue() {
       governance: desc.governance,
       effect_class: desc.effect_class
     }));
+}
+
+// Resolve planner output only through the catalogue generated for this turn.
+// Formatting variations are tolerated, but tools absent from Caddie never reach
+// the conductor's execution switch.
+export function resolveCatalogueTool(catalogue, requestedTool) {
+  const canonical = String(requestedTool ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!canonical) return null;
+  return catalogue.find((entry)=>String(entry.tool).toLowerCase().replace(/[^a-z0-9]/g, '') === canonical)?.tool ?? null;
 }
 /**
  * Classify a tool's effect class for enforcement purposes.

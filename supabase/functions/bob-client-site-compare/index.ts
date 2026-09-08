@@ -22,7 +22,7 @@ const CAN_COMPARE = new Set([
   'admin'
 ]);
 const ALLOWED_STAGING_TABLES = new Set([
-  '_seed_fs_nelson_clients_raw'
+  'fs_nelson_clients_clean'
 ]);
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -101,6 +101,7 @@ serve(async (req)=>{
           ]
         }, 422);
       }
+      // ATLAS READS: fs_nelson_clients_clean
       const { data: staged, error: stagedErr } = await admin.from(staging).select('client_id, client_name, client_address, client_suburb, client_postcode').limit(Math.min(Math.max(body.limit ?? 5000, 1), 10000));
       if (stagedErr) throw new Error(stagedErr.message);
       candidates = (staged ?? []).map((r)=>({
