@@ -153,6 +153,23 @@ test('Atlas refresh derives conductor wrapper and variable-dispatched function c
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
 
+test('Atlas refresh derives conditional Supabase RPC targets', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-conditional-rpc-'));
+  const sourcePath = path.join(rootDir, 'apps/web/src/pages/RosterTargetsPage.tsx');
+  const schemaPath = path.join(rootDir, 'supabase/schema.sql');
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(schemaPath), { recursive: true });
+  fs.writeFileSync(schemaPath, 'CREATE FUNCTION public.create_operating_organization_workplace() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql; CREATE FUNCTION public.create_operating_cost_centre() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;');
+  fs.writeFileSync(sourcePath, "supabase.rpc(isWorkplace ? 'create_operating_organization_workplace' : 'create_operating_cost_centre', payload);");
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+  const targets = manifest.edges.filter((edge) => edge.source_name === 'pages/RosterTargetsPage').map((edge) => edge.target_name);
+
+  assert.ok(targets.includes('create_operating_organization_workplace'));
+  assert.ok(targets.includes('create_operating_cost_centre'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
+
 test('Atlas refresh derives root workflow-client endpoint map dispatches', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-workflow-client-'));
   const clientPath = path.join(rootDir, 'supabase-workflow-client.js');
