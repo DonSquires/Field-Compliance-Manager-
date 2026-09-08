@@ -46,6 +46,14 @@ describe('governed HR administration', () => {
     expect(page).not.toContain('Math.max(worked, Number(c.minimum_pay_hours))');
   });
 
+  it('opens callouts and advances milestones through expected-state RPCs', () => {
+    expect(page).toContain("supabase.rpc('open_callout'");
+    expect(page).toContain('p_client_request_id: crypto.randomUUID()');
+    expect(page).toContain("supabase.rpc('record_callout_milestone'");
+    expect(page).toContain('p_expected_status: callout.status');
+    expect(page).not.toMatch(/from\('callout_shifts'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
+  });
+
   it('uses governed coverage creation and reasoned review', () => {
     expect(page).toContain("supabase.rpc('create_shift_coverage_request'");
     expect(page).not.toContain(".from('shift_coverage_requests').insert");

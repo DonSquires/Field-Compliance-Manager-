@@ -824,6 +824,33 @@ const RosterHRPage: React.FC = () => {
     setSaving(false);
   };
 
+  const openCallout = async (period: OnCallRow) => {
+    setSaving(true); setError(null); setNotice(null);
+    const { error: calloutError } = await supabase.rpc('open_callout', {
+      p_client_request_id: crypto.randomUUID(),
+      p_on_call_period_id: period.id,
+      p_dispatch_job_id: null,
+      p_minimum_pay_hours: 3,
+      p_after_minimum_rate: null,
+      p_notes: 'Callout raised from roster HR workspace',
+    });
+    if (calloutError) setError(calloutError.message);
+    else { setNotice('Callout raised and the assigned officer was notified.'); await loadAll(); }
+    setSaving(false);
+  };
+
+  const recordCalloutMilestone = async (callout: CalloutRow, milestone: string) => {
+    setSaving(true); setError(null); setNotice(null);
+    const { error: milestoneError } = await supabase.rpc('record_callout_milestone', {
+      p_callout_id: callout.id,
+      p_milestone: milestone,
+      p_expected_status: callout.status,
+    });
+    if (milestoneError) setError(milestoneError.message);
+    else { setNotice(`Callout milestone '${milestone.replaceAll('_', ' ')}' recorded.`); await loadAll(); }
+    setSaving(false);
+  };
+
   const recordOnboardingEvidence = async (event: React.FormEvent) => {
     event.preventDefault(); if (!evidenceAction) return;
     setSaving(true); setError(null); setNotice(null);
@@ -1767,6 +1794,7 @@ const RosterHRPage: React.FC = () => {
                     <p>{p.period_type.replaceAll('_', ' ')} · {new Date(p.starts_at).toLocaleString('en-NZ')} – {new Date(p.ends_at).toLocaleString('en-NZ')}</p>
                     <p className="contact-meta">{p.flat_rate != null ? `Flat rate NZ$${Number(p.flat_rate).toFixed(2)}` : 'No flat rate set'}</p>
                   </div>
+                  {p.status === 'accepted' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void openCallout(p)}>Raise callout</button>}
                 </div>
               ))
             )}
@@ -1793,6 +1821,7 @@ const RosterHRPage: React.FC = () => {
                         {summary?.response_minutes != null ? ` · Response ${Number(summary.response_minutes).toFixed(1)}m` : ''}
                       </p>
                     </div>
+                    {c.status !== 'completed' && <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void recordCalloutMilestone(c, ({ raised: 'departed', responding: 'arrived', on_site: 'work_started', working: 'work_ended', returning: 'returned' } as Record<string, string>)[c.status])}>Record next milestone</button>}
                   </div>
                 );
               })
