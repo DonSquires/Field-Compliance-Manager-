@@ -114,6 +114,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only; access-scoped to the supplied organization',
     effect_class: 'internal_observation'
   },
+  document_search: {
+    purpose: 'Search approved reference documents by text, scope, type, jurisdiction, or tags. Returns only policy-filtered document summaries. Args: { query?, scope?, document_type?, jurisdiction?, tags?, limit? }.',
+    governance: 'read-only; tenant-scoped; restricted material is limited by the document service',
+    effect_class: 'internal_observation'
+  },
   propose_site_risk: {
     purpose: 'PROPOSE an updated site risk rating from a site assessment. Creates a pending approval only; it never changes the rating directly. Args: { site_id, risk_level? }.',
     governance: 'WRITE-draft; needs approval',
@@ -574,6 +579,7 @@ const TOOL_REGISTRY = {
     scv_lookup: 'bob-scv-lookup',
     site_risk: 'bob-site-risk',
     resolve_point_context: 'resolve-point-context',
+    document_search: 'bob-document-search',
     propose_site_risk: 'bob-propose-site-risk',
     propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
     propose_corporate_profile: 'bob-propose-corporate-profile',

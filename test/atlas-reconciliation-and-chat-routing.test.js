@@ -46,6 +46,14 @@ test('GPS point context is resolved through Caddie and the scoped field service'
   assert.match(chat, /case 'resolve_point_context':/);
 });
 
+test('document search is routed through Caddie to the policy-filtered service', () => {
+  assert.match(caddie, /document_search: \{/);
+  assert.match(caddie, /document_search: 'bob-document-search'/);
+  assert.match(chat, /async function execDocumentSearch/);
+  assert.match(chat, /callFn\('bob-document-search', authHeader/);
+  assert.match(chat, /case 'document_search':/);
+});
+
 test('site risk changes are routed through Caddie to the governed proposal producer', () => {
   assert.match(caddie, /propose_site_risk: \{/);
   assert.match(caddie, /propose_site_risk: 'bob-propose-site-risk'/);

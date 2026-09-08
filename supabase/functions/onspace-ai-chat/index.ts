@@ -844,7 +844,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
     'describe_image',
     'retrieve_knowledge'
   ];
-  if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'resolve_geofence');
+  if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
   if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
@@ -1417,6 +1417,7 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'propose_site_risk' && caps.canPromote || // site_risk is a read-only assessment.
     t.tool === 'site_risk' && caps.canCompareData ||
     t.tool === 'resolve_point_context' && caps.canCompareData ||
+    t.tool === 'document_search' && caps.canCompareData ||
     t.tool === 'propose_corporate_profile' && caps.canPromote ||
     t.tool === 'propose_client_root_org' && caps.tier === 'admiral' ||
     // same gate as every single-action propose_* tool; a plan approval is the
@@ -4497,6 +4498,19 @@ async function execResolvePointContext(authHeader, caps, orgId, args) {
       site_match_kind: context.site_match_kind ?? null
     }
   };
+}
+async function execDocumentSearch(authHeader, args) {
+  const r = await callFn('bob-document-search', authHeader, {
+    query: typeof args.query === 'string' ? args.query : undefined,
+    scope: typeof args.scope === 'string' ? args.scope : undefined,
+    document_type: typeof args.document_type === 'string' ? args.document_type : undefined,
+    jurisdiction: typeof args.jurisdiction === 'string' ? args.jurisdiction : undefined,
+    tags: Array.isArray(args.tags) ? args.tags : undefined,
+    limit: typeof args.limit === 'number' ? args.limit : 25
+  });
+  if (!r.ok || !r.data?.success) return { reply: 'I could not search the approved document library right now.', meta: { tool: 'document_search', outcome: 'failed' } };
+  const results = Array.isArray(r.data.results) ? r.data.results : [];
+  return { reply: results.length ? `I found ${results.length} approved document match${results.length === 1 ? '' : 'es'}.` : 'I found no approved documents matching that search.', meta: { tool: 'document_search', outcome: 'ok', count: results.length } };
 }
 async function execProposeSiteRisk(authHeader, caps, args) {
   if (!caps.canPromote) return {
@@ -7753,6 +7767,8 @@ serve(async (req)=>{
           return execSiteRisk(authHeader, toolArgs);
         case 'resolve_point_context':
           return execResolvePointContext(authHeader, caps, orgId, toolArgs);
+        case 'document_search':
+          return execDocumentSearch(authHeader, toolArgs);
         case 'propose_site_risk':
           return execProposeSiteRisk(authHeader, caps, toolArgs);
         case 'propose_patrol_route_service_area':
