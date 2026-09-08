@@ -194,7 +194,7 @@ services:
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
       INFERENCE_SERVICE_URL: http://fcm-inference:3000
       RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
-      RUNPOD_API: ${RUNPOD_API:-}
+      RUNPOD_API: ${RUNPOD_API:-${RUNPOD_API_KEY:-}}
       VISION_MAX_CLASSIFICATION_FRAMES: 120
       VISION_RUNPOD_BATCH_SIZE: ${VISION_RUNPOD_BATCH_SIZE:-6}
       # Set per camera after calibration; without this, CCTV reports px/s only.
