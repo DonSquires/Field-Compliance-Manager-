@@ -398,6 +398,11 @@ function collectSourceEdges(rootDir, knownEntities) {
         add(source, 'edge_function', match[1], 'calls', file, `fetch('/functions/v1/${match[1]}')`);
       }
     }
+    for (const match of content.matchAll(/\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
+      if (knownEntities.edgeFunctions.has(match[1])) {
+        add(source, 'edge_function', match[1], 'calls', file, `function endpoint URL (${match[1]})`);
+      }
+    }
     const functionUrlTargets = new Map();
     for (const match of content.matchAll(/\b(?:const|let)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*`[^`]*\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
       if (knownEntities.edgeFunctions.has(match[2])) functionUrlTargets.set(match[1], match[2]);
