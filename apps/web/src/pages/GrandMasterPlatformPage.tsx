@@ -44,6 +44,8 @@ const GrandMasterPlatformPage: React.FC = () => {
   const [notifications, setNotifications] = useState<PlatformNotification[]>([]);
   const [health, setHealth] = useState<HealthCheckResult[] | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [scvImporting, setScvImporting] = useState(false);
+  const [scvImportResult, setScvImportResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +105,21 @@ const GrandMasterPlatformPage: React.FC = () => {
     } finally {
       setHealthLoading(false);
     }
+  };
+
+  const importScvRegister = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      setScvImporting(true); setError(null); setScvImportResult(null);
+      const csvText = await file.text();
+      const { data, error: importError } = await supabase.functions.invoke<{ batch_id?: string; total_rows?: number; valid_rows?: number; invalid_rows?: number; status?: string }>('import-scv-csv', { body: { file_name: file.name, csv_text: csvText } });
+      if (importError || !data?.batch_id) throw importError ?? new Error('SCV import was not confirmed.');
+      setScvImportResult(`${file.name}: ${data.valid_rows ?? 0} valid of ${data.total_rows ?? 0} rows imported${data.invalid_rows ? `; ${data.invalid_rows} invalid rows require review` : ''}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'SCV register import failed');
+    } finally { setScvImporting(false); }
   };
 
   if (!isGrandMaster) {
@@ -165,6 +182,16 @@ const GrandMasterPlatformPage: React.FC = () => {
           <div className="kpi-label">Total Observations</div>
         </div>
       </div>
+
+      <section className="reports-section">
+        <h2>Infrastructure data</h2>
+        <p className="subtitle">Grand Master infrastructure ownership only. SCV register imports update the canonical platform vehicle source.</p>
+        {scvImportResult && <div className="alert alert-success" role="status">{scvImportResult}</div>}
+        <label className="btn btn-primary btn-sm" style={{ display: 'inline-flex', cursor: scvImporting ? 'wait' : 'pointer' }}>
+          {scvImporting ? 'Importing SCV register...' : 'Import SCV CSV'}
+          <input type="file" accept=".csv,text/csv" onChange={importScvRegister} disabled={scvImporting} hidden />
+        </label>
+      </section>
 
       <section className="reports-section">
         <h2>Organisations by Type</h2>
