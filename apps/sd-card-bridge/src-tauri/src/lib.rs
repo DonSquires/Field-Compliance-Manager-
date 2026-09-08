@@ -64,6 +64,12 @@ struct CachedClipReport {
     bytes: u64,
     sha256: String,
     state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channel: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_time: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -77,6 +83,7 @@ struct DestinationSpaceReport {
 #[derive(Serialize)]
 struct PhysicalDhfsRecording {
     partition_number: u32,
+    dhfs_partition_index: u32,
     descriptor: u32,
     channel: u32,
     start_time: String,
@@ -201,7 +208,7 @@ fn cache_video_clip(source_path: String, cache_directory: String, cache_name: St
     output.flush().map_err(|error| error.to_string())?;
     output.sync_all().map_err(|error| error.to_string())?;
     fs::rename(&part_path, &ready_path).map_err(|error| format!("Could not commit clip cache atomically: {error}"))?;
-    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string() })
+    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string(), channel: None, start_time: None, end_time: None })
 }
 
 #[tauri::command]
@@ -576,7 +583,8 @@ fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Re
             let last_size = u32::from_le_bytes(last[16..20].try_into().expect("DHFS final fragment size")) as u64 * block_size;
             if last_size == 0 || last_size > fragment_size { continue; }
             recordings.push(PhysicalDhfsRecording {
-                partition_number: partition_number + partition_index as u32,
+                partition_number,
+                dhfs_partition_index: partition_index as u32,
                 descriptor: descriptor_index,
                 channel: descriptor[1].saturating_sub(b'0') as u32 + 1,
                 start_time: dhfs_timestamp(start),
@@ -587,6 +595,93 @@ fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Re
         }
     }
     Ok(recordings)
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs_partition_index: u32, descriptor_index: u32, cache_directory: String) -> Result<CachedClipReport, String> {
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path} read-only: {error}"))?;
+    let base = coordinates.offset_bytes;
+    let mut magic = [0_u8; 7];
+    device.seek(SeekFrom::Start(base)).map_err(|error| error.to_string())?;
+    device.read_exact(&mut magic).map_err(|error| error.to_string())?;
+    if &magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
+
+    let mut table_offset = base + 0x3c00 + 0x34;
+    let mut partitions = Vec::new();
+    for _ in 0..64 {
+        device.seek(SeekFrom::Start(table_offset)).map_err(|error| error.to_string())?;
+        let mut entry = [0_u8; 64];
+        device.read_exact(&mut entry).map_err(|error| error.to_string())?;
+        if &entry[..4] == [0xaa, 0x55, 0xaa, 0x55] { break; }
+        let superblock_offset = u32::from_le_bytes(entry[20..24].try_into().expect("DHFS superblock field")) as u64 * 512;
+        let partition_offset = u64::from_le_bytes(entry[48..56].try_into().expect("DHFS partition field")) * 512;
+        if partition_offset == 0 { break; }
+        partitions.push((partition_offset, superblock_offset));
+        table_offset += 64;
+    }
+    let (partition_offset, superblock_offset) = partitions.get(dhfs_partition_index as usize)
+        .ok_or("The selected DHFS partition is no longer present on this card.")?;
+    let superblock = base + partition_offset + superblock_offset;
+    let block_size = dhfs_read_u32(&mut device, superblock + 0x2c)? as u64;
+    let fragment_size = dhfs_read_u32(&mut device, superblock + 0x30)? as u64 * block_size;
+    let descriptor_offset = base + partition_offset + dhfs_read_u32(&mut device, superblock + 0x44)? as u64 * block_size;
+    let video_offset = base + partition_offset + dhfs_read_u32(&mut device, superblock + 0x48)? as u64 * block_size;
+    let descriptor_count = dhfs_read_u32(&mut device, superblock + 0x4c)?;
+    if block_size == 0 || fragment_size == 0 || descriptor_index >= descriptor_count {
+        return Err("The selected recording is no longer valid on this card.".to_string());
+    }
+
+    let descriptor = dhfs_read_descriptor(&mut device, descriptor_offset + descriptor_index as u64 * 32)?;
+    if descriptor[0] != 1 { return Err("The selected descriptor is not a normal recording.".to_string()); }
+    let start = u32::from_le_bytes(descriptor[4..8].try_into().expect("DHFS start timestamp"));
+    let end = u32::from_le_bytes(descriptor[8..12].try_into().expect("DHFS end timestamp"));
+    let channel = descriptor[1].saturating_sub(b'0') as u32 + 1;
+    let chain = dhfs_descriptor_chain(&mut device, descriptor_offset, descriptor_count, descriptor_index)?;
+    let last = dhfs_read_descriptor(&mut device, descriptor_offset + *chain.last().expect("non-empty chain") as u64 * 32)?;
+    let last_size = u32::from_le_bytes(last[16..20].try_into().expect("DHFS final fragment size")) as u64 * block_size;
+    if last_size == 0 || last_size > fragment_size { return Err("The selected recording's final fragment size is invalid.".to_string()); }
+
+    let start_time = dhfs_timestamp(start);
+    let end_time = dhfs_timestamp(end);
+    let cache_name = format!("FCM-card-p{dhfs_partition_index}-d{descriptor_index:06}-{start_time}-{end_time}-ch{channel:02}.h264");
+    let cache_dir = PathBuf::from(&cache_directory);
+    fs::create_dir_all(&cache_dir).map_err(|error| format!("Could not create clip cache: {error}"))?;
+    let ready_path = cache_dir.join(&cache_name);
+    let part_path = cache_dir.join(format!("{cache_name}.part"));
+    let mut output_file = File::create(&part_path).map_err(|error| format!("Could not create clip cache: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut bytes_written = 0_u64;
+    for (position, fragment) in chain.iter().enumerate() {
+        let bytes_to_copy = if position + 1 == chain.len() { last_size } else { fragment_size };
+        device.seek(SeekFrom::Start(video_offset + *fragment as u64 * fragment_size))
+            .map_err(|error| format!("Card seek failed; partial cache retained: {error}"))?;
+        let mut remaining = bytes_to_copy;
+        let mut buffer = [0_u8; 1024 * 1024];
+        while remaining > 0 {
+            let requested = remaining.min(buffer.len() as u64) as usize;
+            device.read_exact(&mut buffer[..requested]).map_err(|error| format!("Card read failed, possibly disconnected; partial cache retained: {error}"))?;
+            output_file.write_all(&buffer[..requested]).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
+            hasher.update(&buffer[..requested]);
+            remaining -= requested as u64;
+            bytes_written += requested as u64;
+        }
+    }
+    output_file.flush().map_err(|error| error.to_string())?;
+    output_file.sync_all().map_err(|error| error.to_string())?;
+    fs::rename(&part_path, &ready_path).map_err(|error| format!("Could not commit clip cache atomically: {error}"))?;
+    Ok(CachedClipReport {
+        cache_path: ready_path.to_string_lossy().to_string(),
+        bytes: bytes_written,
+        sha256: format!("{:x}", hasher.finalize()),
+        state: "ready".to_string(),
+        channel: Some(channel),
+        start_time: Some(start_time),
+        end_time: Some(end_time),
+    })
 }
 
 #[tauri::command]
@@ -937,6 +1032,12 @@ fn list_dhfs_partition_recordings(_disk_number: u32, _partition_number: u32) -> 
     Err("Direct DHFS partition reading is available in the Windows FCM Desktop application.".to_string())
 }
 
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn extract_dhfs_recording_to_cache(_disk_number: u32, _partition_number: u32, _dhfs_partition_index: u32, _descriptor_index: u32, _cache_directory: String) -> Result<CachedClipReport, String> {
+    Err("Direct DHFS recording extraction is available in the Windows FCM Desktop application.".to_string())
+}
+
 #[tauri::command]
 fn inspect_mounted_folder(folder_path: String) -> Result<MountedFolderReport, String> {
     const MAX_FILES: usize = 5_000;
@@ -987,7 +1088,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, extract_dhfs_recording_to_cache, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }

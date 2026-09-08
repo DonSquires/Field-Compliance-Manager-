@@ -10,7 +10,8 @@ Local Windows utility for inspecting a copied `SDFileInfo.db` CCTV index before 
 - Signs users in against FCM using public browser configuration fetched at startup; passwords and service credentials are never sent to the configuration endpoint.
 - Uploads exported MP4/MOV/AVI/MKV footage to private FCM storage and queues the existing VPS `video_motion` pipeline.
 - Stages one selected recording at a time through an atomic `.part` -> ready cache before upload; failed reads or uploads remain retryable and successful Bob registration clears the cache.
-- The built-in DHFS parser currently operates on a read-only image. Direct selected-record extraction from the physical DHFS partition is the next native acquisition step.
+- Reads normal DHFS recordings directly off the physical card and extracts one selected recording straight into the retryable cache, with no full-card image and no NVR/VMS client required.
+- The built-in DHFS parser also supports a read-only full image as an optional forensic-preservation mode; it is not required for normal clip intake.
 
 ## Security model
 
