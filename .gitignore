@@ -29,4 +29,9 @@ short_out*.txt
 # Large local media/model artifacts
 Build-Plan/EventBitMask.zip
 Build-Plan/Sample Data/
+Build-Plan/sample data/
 models/
+
+# Workspace-only credentials and local command output
+:USERPROFILE.sshrunpod_ed25519*
+output.txt
