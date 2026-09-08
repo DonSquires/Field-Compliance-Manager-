@@ -149,6 +149,13 @@ export const CCTVReviewPage: React.FC = () => {
         { event: '*', schema: 'public', table: 'inference_jobs', filter: `organization_id=eq.${profile.organizationId}` },
         () => void loadJobs()
       )
+      .on(
+        // The playback MP4 remux finishes after the job is already marked complete, so its
+        // metadata update on evidence_items needs its own trigger to refresh the video player.
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'evidence_items', filter: `organization_id=eq.${profile.organizationId}` },
+        () => void loadJobs()
+      )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
