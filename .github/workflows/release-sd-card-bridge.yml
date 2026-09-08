@@ -32,6 +32,21 @@ jobs:
           $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
           if ($null -eq $installer) { throw 'Tauri did not produce an NSIS installer.' }
           Copy-Item $installer.FullName release/FCM-SD-Card-Bridge-Setup.exe
+      - name: Sign Windows installer
+        if: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'fcm-desktop-signing.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $securePassword = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $imported = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if ($null -eq $signtool) { throw 'signtool.exe was not found on this runner.' }
+          & $signtool.FullName sign /sha1 $imported.Thumbprint /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d "FCM Desktop" release/FCM-SD-Card-Bridge-Setup.exe
+          if ($LASTEXITCODE -ne 0) { throw 'signtool failed to sign the installer.' }
+          Remove-Item $pfxPath -Force
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:

@@ -39,6 +39,7 @@ struct DhfsVideoExport {
     start_time: String,
     end_time: String,
     bytes_written: u64,
+    starts_with_nal_marker: bool,
 }
 
 #[derive(Serialize)]
@@ -70,6 +71,8 @@ struct CachedClipReport {
     start_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     end_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    starts_with_nal_marker: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -198,9 +201,11 @@ fn cache_video_clip(source_path: String, cache_directory: String, cache_name: St
     let mut hasher = Sha256::new();
     let mut bytes = 0_u64;
     let mut buffer = [0_u8; 1024 * 1024];
+    let mut nal_marker = false;
     loop {
         let read = input.read(&mut buffer).map_err(|error| format!("Recording read failed; partial cache retained: {error}"))?;
         if read == 0 { break; }
+        if bytes == 0 { nal_marker = starts_with_nal_marker(&buffer[..read]); }
         output.write_all(&buffer[..read]).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
         hasher.update(&buffer[..read]);
         bytes += read as u64;
@@ -208,7 +213,7 @@ fn cache_video_clip(source_path: String, cache_directory: String, cache_name: St
     output.flush().map_err(|error| error.to_string())?;
     output.sync_all().map_err(|error| error.to_string())?;
     fs::rename(&part_path, &ready_path).map_err(|error| format!("Could not commit clip cache atomically: {error}"))?;
-    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string(), channel: None, start_time: None, end_time: None })
+    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string(), channel: None, start_time: None, end_time: None, starts_with_nal_marker: Some(nal_marker) })
 }
 
 #[tauri::command]
@@ -240,6 +245,11 @@ fn media_signature_hint(bytes: &[u8]) -> String {
         return "All-zero sample".to_string();
     }
     "No standard media signature detected".to_string()
+}
+
+// Confirms the reconstructed fragment offset lands exactly on an H.264/H.265 NAL boundary.
+fn starts_with_nal_marker(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0, 0, 0, 1]) || bytes.starts_with(&[0, 0, 1])
 }
 
 fn inspect_sd_index_at_path(path: &Path) -> Result<IndexReport, String> {
@@ -527,12 +537,15 @@ fn dhfs_timestamp(timestamp: u32) -> String {
 fn dhfs_descriptor_chain(file: &mut File, descriptor_offset: u64, descriptor_count: u32, start: u32) -> Result<Vec<u32>, String> {
     let mut chain = Vec::new();
     let mut current = start;
-    while current != 0 && current != u32::MAX && current < descriptor_count {
+    loop {
+        if current == u32::MAX || current >= descriptor_count { break; }
         if chain.contains(&current) { return Err("DHFS descriptor chain is cyclic.".to_string()); }
         chain.push(current);
         let descriptor = dhfs_read_descriptor(file, descriptor_offset + current as u64 * 32)?;
-        current = u32::from_le_bytes(descriptor[12..16].try_into().expect("DHFS next descriptor field"));
+        let next = u32::from_le_bytes(descriptor[12..16].try_into().expect("DHFS next descriptor field"));
         if chain.len() > descriptor_count as usize { return Err("DHFS descriptor chain is invalid.".to_string()); }
+        if next == 0 { break; }
+        current = next;
     }
     if chain.is_empty() { return Err("DHFS recording has no fragments.".to_string()); }
     Ok(chain)
@@ -655,6 +668,7 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
     let mut output_file = File::create(&part_path).map_err(|error| format!("Could not create clip cache: {error}"))?;
     let mut hasher = Sha256::new();
     let mut bytes_written = 0_u64;
+    let mut nal_marker = false;
     for (position, fragment) in chain.iter().enumerate() {
         let bytes_to_copy = if position + 1 == chain.len() { last_size } else { fragment_size };
         device.seek(SeekFrom::Start(video_offset + *fragment as u64 * fragment_size))
@@ -664,6 +678,7 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
         while remaining > 0 {
             let requested = remaining.min(buffer.len() as u64) as usize;
             device.read_exact(&mut buffer[..requested]).map_err(|error| format!("Card read failed, possibly disconnected; partial cache retained: {error}"))?;
+            if bytes_written == 0 { nal_marker = starts_with_nal_marker(&buffer[..requested]); }
             output_file.write_all(&buffer[..requested]).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
             hasher.update(&buffer[..requested]);
             remaining -= requested as u64;
@@ -681,6 +696,7 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
         channel: Some(channel),
         start_time: Some(start_time),
         end_time: Some(end_time),
+        starts_with_nal_marker: Some(nal_marker),
     })
 }
 
@@ -740,6 +756,7 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
             let output_path = output.join(&file_name);
             let mut output_file = File::create(&output_path).map_err(|error| format!("Could not create {output_path:?}: {error}"))?;
             let mut bytes_written = 0_u64;
+            let mut nal_marker = false;
             for (position, fragment) in chain.iter().enumerate() {
                 let bytes_to_copy = if position + 1 == chain.len() { last_size } else { fragment_size };
                 file.seek(SeekFrom::Start(video_offset + *fragment as u64 * fragment_size)).map_err(|error| error.to_string())?;
@@ -748,12 +765,13 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
                 while remaining > 0 {
                     let requested = remaining.min(buffer.len() as u64) as usize;
                     file.read_exact(&mut buffer[..requested]).map_err(|error| error.to_string())?;
+                    if bytes_written == 0 { nal_marker = starts_with_nal_marker(&buffer[..requested]); }
                     output_file.write_all(&buffer[..requested]).map_err(|error| error.to_string())?;
                     remaining -= requested as u64;
                     bytes_written += requested as u64;
                 }
             }
-            exported.push(DhfsVideoExport { file_name, partition: partition_index, descriptor: descriptor_index, channel, start_time, end_time, bytes_written });
+            exported.push(DhfsVideoExport { file_name, partition: partition_index, descriptor: descriptor_index, channel, start_time, end_time, bytes_written, starts_with_nal_marker: nal_marker });
         }
     }
     Ok(DhfsConversionReport { source_path: image_path, source_sha256, output_directory, exported })
@@ -1091,4 +1109,93 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, extract_dhfs_recording_to_cache, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nal_marker_helper_distinguishes_frame_boundaries() {
+        assert!(starts_with_nal_marker(&[0, 0, 0, 1, 0x67]));
+        assert!(starts_with_nal_marker(&[0, 0, 1, 0x67]));
+        assert!(!starts_with_nal_marker(&[0xAA, 0xAA, 0xAA, 0xAA]));
+    }
+
+    fn write_le_u32(buffer: &mut [u8], offset: usize, value: u32) {
+        buffer[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_le_u64(buffer: &mut [u8], offset: usize, value: u64) {
+        buffer[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    // Builds a minimal DHFS4.1 image with one two-fragment recording, matching the real on-disk layout confirmed against a physical card.
+    fn build_synthetic_dhfs_image() -> Vec<u8> {
+        const PARTITION_OFFSET: u64 = 40 * 512;
+        const SUPERBLOCK_OFFSET: u64 = 2 * 512;
+        const BLOCK_SIZE: u32 = 512;
+        const FRAGMENT_SIZE_BLOCKS: u32 = 2;
+        const DESCRIPTOR_OFFSET_BLOCKS: u32 = 4;
+        const VIDEO_OFFSET_BLOCKS: u32 = 10;
+        let fragment_size = FRAGMENT_SIZE_BLOCKS as u64 * BLOCK_SIZE as u64;
+        let descriptor_offset = (PARTITION_OFFSET + DESCRIPTOR_OFFSET_BLOCKS as u64 * BLOCK_SIZE as u64) as usize;
+        let video_offset = (PARTITION_OFFSET + VIDEO_OFFSET_BLOCKS as u64 * BLOCK_SIZE as u64) as usize;
+        let mut buffer = vec![0_u8; video_offset + 2 * fragment_size as usize + 4096];
+        buffer[0..7].copy_from_slice(b"DHFS4.1");
+
+        let table_offset = 0x3c00_usize + 0x34;
+        write_le_u32(&mut buffer, table_offset + 20, (SUPERBLOCK_OFFSET / 512) as u32);
+        write_le_u64(&mut buffer, table_offset + 48, PARTITION_OFFSET / 512);
+        buffer[table_offset + 64..table_offset + 68].copy_from_slice(&[0xaa, 0x55, 0xaa, 0x55]);
+
+        let superblock = (PARTITION_OFFSET + SUPERBLOCK_OFFSET) as usize;
+        write_le_u32(&mut buffer, superblock + 0x2c, BLOCK_SIZE);
+        write_le_u32(&mut buffer, superblock + 0x30, FRAGMENT_SIZE_BLOCKS);
+        write_le_u32(&mut buffer, superblock + 0x44, DESCRIPTOR_OFFSET_BLOCKS);
+        write_le_u32(&mut buffer, superblock + 0x48, VIDEO_OFFSET_BLOCKS);
+        write_le_u32(&mut buffer, superblock + 0x4c, 2);
+
+        buffer[descriptor_offset] = 1;
+        buffer[descriptor_offset + 1] = b'0';
+        write_le_u32(&mut buffer, descriptor_offset + 4, 0x1000_0001);
+        write_le_u32(&mut buffer, descriptor_offset + 8, 0x1000_0002);
+        write_le_u32(&mut buffer, descriptor_offset + 12, 1);
+
+        let descriptor1 = descriptor_offset + 32;
+        buffer[descriptor1] = 2;
+        write_le_u32(&mut buffer, descriptor1 + 12, 0);
+        write_le_u32(&mut buffer, descriptor1 + 16, 1);
+
+        buffer[video_offset..video_offset + 4].copy_from_slice(&[0, 0, 0, 1]);
+        buffer[video_offset + 4..video_offset + fragment_size as usize].fill(0xAA);
+        buffer[video_offset + fragment_size as usize..video_offset + fragment_size as usize + BLOCK_SIZE as usize].fill(0xBB);
+        buffer
+    }
+
+    #[test]
+    fn reconstructs_multi_fragment_recording_and_trims_final_fragment() {
+        let image_dir = std::env::temp_dir().join(format!("fcm-dhfs-test-{}", std::process::id()));
+        std::fs::create_dir_all(&image_dir).expect("create temp dir");
+        let image_path = image_dir.join("synthetic.img");
+        std::fs::write(&image_path, build_synthetic_dhfs_image()).expect("write synthetic image");
+
+        let report = convert_dhfs_image(
+            image_path.to_string_lossy().to_string(),
+            image_dir.to_string_lossy().to_string(),
+        ).expect("conversion should succeed against a well-formed synthetic image");
+
+        assert_eq!(report.exported.len(), 1, "exactly one main recording should be reconstructed, not its chained fragment");
+        let export = &report.exported[0];
+        assert_eq!(export.bytes_written, 1024 + 512, "output must be the first fragment plus the trimmed final fragment, not the full reserved fragment size");
+        assert!(export.starts_with_nal_marker, "the fragment offset math must land exactly on the encoded frame boundary");
+
+        let output_bytes = std::fs::read(image_dir.join(&export.file_name)).expect("read reconstructed output");
+        assert_eq!(output_bytes.len(), 1536);
+        assert_eq!(&output_bytes[..4], &[0, 0, 0, 1]);
+        assert!(output_bytes[4..1024].iter().all(|byte| *byte == 0xAA), "first fragment content must be preserved exactly");
+        assert!(output_bytes[1024..].iter().all(|byte| *byte == 0xBB), "trimmed final fragment content must be preserved exactly, not padded with the full fragment size");
+
+        std::fs::remove_dir_all(&image_dir).ok();
+    }
 }

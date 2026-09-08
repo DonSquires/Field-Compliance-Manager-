@@ -31,3 +31,15 @@ npm run tauri dev
 ```
 
 Do not add raw-sector extraction until the format mapping is proven from a read-only disk image.
+
+## Code signing (required to avoid antivirus/SmartScreen warnings)
+
+Unsigned Windows executables are routinely flagged by AVG, Defender SmartScreen, and other antivirus products as "suspicious" purely because the publisher is unverified, regardless of what the code does. The release workflow (`.github/workflows/release-sd-card-bridge.yml`) will automatically sign the installer once a real Authenticode code-signing certificate is added as a GitHub Actions secret:
+
+1. Purchase an OV or EV code-signing certificate from a Certificate Authority such as DigiCert, Sectigo, or SSL.com. This requires real organization identity verification and cannot be generated or substituted in code; a self-signed certificate does not remove the warning.
+2. Export the certificate as a password-protected `.pfx`/`.p12` file.
+3. Base64-encode it (`certutil -encode cert.pfx cert.b64` on Windows, or `base64 -w0 cert.pfx` on Linux/macOS) and add it as the repository secret `WINDOWS_CERTIFICATE`.
+4. Add the certificate's export password as the repository secret `WINDOWS_CERTIFICATE_PASSWORD`.
+5. Tag a new release; the workflow signs `FCM-SD-Card-Bridge-Setup.exe` with `signtool` and a timestamp server automatically. Builds without these secrets remain unsigned and will continue to trigger antivirus warnings.
+
+An EV certificate gets immediate SmartScreen reputation; an OV certificate builds reputation over time as more people run the signed installer.

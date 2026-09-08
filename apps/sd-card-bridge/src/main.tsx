@@ -135,6 +135,7 @@ type DhfsConversionReport = {
     start_time: string;
     end_time: string;
     bytes_written: number;
+    starts_with_nal_marker: boolean;
   }>;
 };
 
@@ -146,6 +147,7 @@ type CachedClipReport = {
   channel?: number;
   start_time?: string;
   end_time?: string;
+  starts_with_nal_marker?: boolean;
 };
 
 type PhysicalDhfsRecording = {
@@ -163,6 +165,14 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function cacheStatusMessage(result: CachedClipReport): string {
+  const base = `Clip cached and verified (${result.sha256.slice(0, 12)}...).`;
+  if (result.starts_with_nal_marker === false) {
+    return `${base} Warning: the extracted bytes do not start on a recognised H.264/H.265 frame boundary; review the clip carefully before uploading.`;
+  }
+  return `${base} Review it, then upload it to Bob.`;
 }
 
 function App() {
@@ -502,7 +512,7 @@ function App() {
       const fileName = cacheResult.cache_path.replace(/^.*[\\/]/, '');
       setVideo(new File([bytes], fileName, { type: 'video/h264' }));
       setActiveView('video-upload');
-      setUploadStatus(`Clip cached and verified (${cacheResult.sha256.slice(0, 12)}...). Review it, then upload it to Bob.`);
+      setUploadStatus(cacheStatusMessage(cacheResult));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -529,7 +539,7 @@ function App() {
       setCachedClip(cacheResult);
       setVideo(new File([bytes], exported.file_name, { type: 'video/h264' }));
       setActiveView('video-upload');
-      setUploadStatus(`Clip cached and verified (${cacheResult.sha256.slice(0, 12)}...). Review it, then upload it to Bob.`);
+      setUploadStatus(cacheStatusMessage(cacheResult));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
