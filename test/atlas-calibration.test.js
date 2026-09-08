@@ -185,6 +185,23 @@ test('Atlas refresh derives explicit function URL variables passed to fetch', ()
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
 
+test('Atlas refresh derives named function URL variables passed to fetch', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-named-url-variable-'));
+  const sourcePath = path.join(rootDir, 'supabase/functions/process-officer-scan/index.ts');
+  const targetPath = path.join(rootDir, 'supabase/functions/classify-parking-scene/index.ts');
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, "const classifyUrl = `${SUPABASE_URL}/functions/v1/classify-parking-scene`; fetch(classifyUrl, {});");
+  fs.writeFileSync(targetPath, 'export default {}');
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'process-officer-scan'
+    && edge.target_name === 'classify-parking-scene'
+    && edge.edge_kind === 'calls'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
+
 test('Atlas refresh derives canonical schema trigger invocations', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-trigger-'));
   const schemaPath = path.join(rootDir, 'supabase/schema.sql');
