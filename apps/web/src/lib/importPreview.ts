@@ -7,6 +7,8 @@ export interface ImportSchemaPreview {
   row_count: number;
   duplicate_count: number;
   date_range: string;
+  headers?: string[];
+  sample_rows?: string[][];
   mappings: Array<{ source: string; target: string; confidence: string }>;
   warnings: string[];
 }
@@ -99,6 +101,8 @@ function buildPreview(rows: string[][], fileName: string, parser: string): Impor
     row_count: records.length,
     duplicate_count: records.length - unique.size,
     date_range: dateRange,
+    headers,
+    sample_rows: records.slice(0, 5),
     mappings,
     warnings,
   };

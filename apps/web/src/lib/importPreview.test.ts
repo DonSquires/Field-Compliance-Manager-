@@ -12,6 +12,8 @@ describe('CSV import preview', () => {
     ]));
     expect(preview.date_range).toContain('02/01/2026');
     expect(preview.warnings).toContain('Preview only: no canonical records will be written');
+    expect(preview.headers).toEqual(['ID', 'RecordedDate', 'REGO', 'Title']);
+    expect(preview.sample_rows).toHaveLength(3);
   });
 
   it('rejects an invalid XLSX payload safely before any promotion', async () => {
