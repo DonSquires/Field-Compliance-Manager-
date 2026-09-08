@@ -235,6 +235,13 @@ The following items are still genuinely incomplete or only partially proven:
 - **Credential picker filter:** the roster board displays credential risk and server-side write guards remain authoritative, but the compressed create dialog still lists all `workReady` staff instead of filtering the picker to `credentialRisk = clear`; refactor that dialog before adding the UI filter.
 - **Credential assignment guard:** create, copied-draft, and draft-edit submission now block non-clear credential states before the governed write; the picker refactor remains a UX follow-up.
 - **Credential assignment notice:** the create workflow now explicitly tells operators that risk-state staff remain visible for context but cannot be submitted; the compressed picker refactor remains the only UX follow-up.
+
+### Progress: required skill configuration UI complete
+
+- Work-unit creation now accepts comma-separated required skill names.
+- Skills are normalized and saved through the governed work-unit skill RPC.
+- Work-unit catalog entries display their required skills.
+- Human desktop/mobile coverage verifies the skill payload and receipt.
 - **Authorization proof:** the full provider/branch/officer/corporate authorization matrix still needs explicit RPC tests for the new migrations.
 - **Atlas:** dry-run inventory is current, but live refresh remains blocked by the 108-row retirement safety gate and needs a reviewed retirement list.
 

@@ -18,6 +18,7 @@ interface Unit {
   workplace_id: string | null;
   team_id: string | null;
   cost_centre_id: string | null;
+  required_skill_names: string[];
 }
 interface Option {
   id: string;
@@ -67,17 +68,17 @@ const RosterTargetsPage: React.FC = () => {
     costId: '',
     address: '',
     code: '',
+    requiredSkills: '',
   });
   const load = useCallback(async () => {
     const org = operatingOrganizationId ?? profile?.organizationId;
     if (!org) return;
     setLoading(true);
     setError(null);
-    const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code')]);
+    const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,required_skill_names').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code')]);
     const [a, b, c, d, e, f, g, h, i] = responses;
     setUnits((a.data as Unit[]) ?? []);
     setRoutes((b.data as Option[]) ?? []);
-    setLocations((c.data as AgreementLocation[]) ?? []);
     setModules((d.data as Module[]) ?? []);
     setSites((e.data as Option[]) ?? []);
     setZones((f.data as Option[]) ?? []);
@@ -114,6 +115,7 @@ const RosterTargetsPage: React.FC = () => {
       costId: '',
       address: '',
       code: '',
+      requiredSkills: '',
     });
   const createUnit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -135,6 +137,12 @@ const RosterTargetsPage: React.FC = () => {
     });
     if (rpcError || !data) setError(rpcError?.message ?? 'Work unit creation was not confirmed.');
     else {
+      const createdUnit = Array.isArray(data) ? data[0] : data;
+      const requiredSkills = form.requiredSkills.split(',').map((skill) => skill.trim()).filter(Boolean);
+      if (requiredSkills.length && createdUnit?.id) {
+        const { error: skillError } = await supabase.rpc('manage_roster_work_unit_skill_requirements', { p_work_unit_id: createdUnit.id, p_required_skill_names: requiredSkills });
+        if (skillError) { setError(skillError.message); setBusy(false); return; }
+      }
       setNotice(`${type} work unit created.`);
       setDialog(null);
       reset();
@@ -283,6 +291,7 @@ const RosterTargetsPage: React.FC = () => {
                         )
                       : [names.get(unit.workplace_id ?? ''), names.get(unit.team_id ?? ''), names.get(unit.cost_centre_id ?? '')].filter(Boolean).join(' · ')}
                 </small>
+                    {unit.required_skill_names?.length > 0 && <small>Required skills: {unit.required_skill_names.join(', ')}</small>}
               </div>
               {workflowContext.workUnitId === unit.id && (
                 <button className="is-primary" onClick={() => navigate(`/admin/roster${workflowContextQuery(workflowContext)}`)}>
@@ -331,6 +340,10 @@ const RosterTargetsPage: React.FC = () => {
             <label>
               <span>Service type</span>
               <input required value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })} />
+            </label>
+            <label>
+              <span>Required skills (comma-separated)</span>
+              <input value={form.requiredSkills} onChange={(e) => setForm({ ...form, requiredSkills: e.target.value })} placeholder="e.g. First aid, radio operations" />
             </label>
             {type === 'patrol' && (
               <label>
