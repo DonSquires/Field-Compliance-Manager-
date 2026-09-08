@@ -386,17 +386,27 @@ fn image_dhfs_partition(disk_number: u32, partition_number: u32, output_path: St
     let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
     let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
         .map_err(|error| format!("Could not open {device_path} read-only: {error}"))?;
+    let magic = read_device_aligned(&mut device, coordinates.offset_bytes, 7)?;
+    if magic != b"DHFS4.1" {
+        return Err("This partition does not begin with a DHFS4.1 signature. Analyse the card again to confirm the correct partition.".to_string());
+    }
     let mut image = OpenOptions::new().write(true).create_new(true).open(&output_path)
-        .map_err(|error| format!("Could not create image without overwriting an existing file: {error}"))?;
-    device.seek(SeekFrom::Start(coordinates.offset_bytes)).map_err(|error| error.to_string())?;
+        .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("A file already exists at {output_path}. Choose a new file name or delete the existing file before imaging again.")
+        } else {
+            format!("Could not create the image file: {error}")
+        })?;
     let mut hasher = Sha256::new();
+    let mut current_offset = coordinates.offset_bytes;
     let mut remaining = coordinates.size_bytes;
-    let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+    const CHUNK_BYTES: u64 = 4 * 1024 * 1024;
     while remaining > 0 {
-        let requested = remaining.min(buffer.len() as u64) as usize;
-        device.read_exact(&mut buffer[..requested]).map_err(|error| format!("Read-only DHFS imaging failed: {error}"))?;
-        image.write_all(&buffer[..requested]).map_err(|error| format!("Writing DHFS image failed: {error}"))?;
-        hasher.update(&buffer[..requested]);
+        let requested = remaining.min(CHUNK_BYTES) as usize;
+        let chunk = read_device_aligned(&mut device, current_offset, requested)
+            .map_err(|error| format!("Read-only DHFS imaging failed: {error}"))?;
+        image.write_all(&chunk).map_err(|error| format!("Writing DHFS image failed: {error}"))?;
+        hasher.update(&chunk);
+        current_offset += requested as u64;
         remaining -= requested as u64;
     }
     image.flush().map_err(|error| error.to_string())?;
@@ -551,6 +561,49 @@ fn dhfs_descriptor_chain(file: &mut File, descriptor_offset: u64, descriptor_cou
     Ok(chain)
 }
 
+// Windows raw \\.\PhysicalDriveN handles generally reject reads whose offset or length is not sector-aligned.
+const DEVICE_READ_ALIGNMENT: u64 = 4096;
+
+fn read_device_aligned(device: &mut File, absolute_offset: u64, length: usize) -> Result<Vec<u8>, String> {
+    let aligned_start = (absolute_offset / DEVICE_READ_ALIGNMENT) * DEVICE_READ_ALIGNMENT;
+    let aligned_end = (absolute_offset + length as u64).div_ceil(DEVICE_READ_ALIGNMENT) * DEVICE_READ_ALIGNMENT;
+    let aligned_len = (aligned_end - aligned_start) as usize;
+    device.seek(SeekFrom::Start(aligned_start))
+        .map_err(|error| format!("Card seek failed at sector-aligned offset {aligned_start}: {error}"))?;
+    let mut aligned_buffer = vec![0_u8; aligned_len];
+    device.read_exact(&mut aligned_buffer)
+        .map_err(|error| format!("Card read failed at sector-aligned offset {aligned_start}, length {aligned_len} (requested {length} bytes at {absolute_offset}): {error}"))?;
+    let start_within = (absolute_offset - aligned_start) as usize;
+    Ok(aligned_buffer[start_within..start_within + length].to_vec())
+}
+
+fn read_device_u32(device: &mut File, absolute_offset: u64) -> Result<u32, String> {
+    let bytes = read_device_aligned(device, absolute_offset, 4)?;
+    Ok(u32::from_le_bytes(bytes.try_into().expect("aligned read returns exactly the requested length")))
+}
+
+fn read_device_descriptor(device: &mut File, absolute_offset: u64) -> Result<[u8; 32], String> {
+    let bytes = read_device_aligned(device, absolute_offset, 32)?;
+    Ok(bytes.try_into().expect("aligned read returns exactly the requested length"))
+}
+
+fn device_descriptor_chain(device: &mut File, descriptor_offset: u64, descriptor_count: u32, start: u32) -> Result<Vec<u32>, String> {
+    let mut chain = Vec::new();
+    let mut current = start;
+    loop {
+        if current == u32::MAX || current >= descriptor_count { break; }
+        if chain.contains(&current) { return Err("DHFS descriptor chain is cyclic.".to_string()); }
+        chain.push(current);
+        let descriptor = read_device_descriptor(device, descriptor_offset + current as u64 * 32)?;
+        let next = u32::from_le_bytes(descriptor[12..16].try_into().expect("DHFS next descriptor field"));
+        if chain.len() > descriptor_count as usize { return Err("DHFS descriptor chain is invalid.".to_string()); }
+        if next == 0 { break; }
+        current = next;
+    }
+    if chain.is_empty() { return Err("DHFS recording has no fragments.".to_string()); }
+    Ok(chain)
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Result<Vec<PhysicalDhfsRecording>, String> {
@@ -559,17 +612,13 @@ fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Re
     let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
         .map_err(|error| format!("Could not read {device_path} read-only: {error}"))?;
     let base = coordinates.offset_bytes;
-    let mut magic = [0_u8; 7];
-    device.seek(SeekFrom::Start(base)).map_err(|error| error.to_string())?;
-    device.read_exact(&mut magic).map_err(|error| error.to_string())?;
-    if &magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
+    let magic = read_device_aligned(&mut device, base, 7)?;
+    if magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
 
     let mut table_offset = base + 0x3c00 + 0x34;
     let mut partitions = Vec::new();
     for _ in 0..64 {
-        device.seek(SeekFrom::Start(table_offset)).map_err(|error| error.to_string())?;
-        let mut entry = [0_u8; 64];
-        device.read_exact(&mut entry).map_err(|error| error.to_string())?;
+        let entry = read_device_aligned(&mut device, table_offset, 64)?;
         if &entry[..4] == [0xaa, 0x55, 0xaa, 0x55] { break; }
         let superblock_offset = u32::from_le_bytes(entry[20..24].try_into().expect("DHFS superblock field")) as u64 * 512;
         let partition_offset = u64::from_le_bytes(entry[48..56].try_into().expect("DHFS partition field")) * 512;
@@ -577,22 +626,23 @@ fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Re
         partitions.push((partition_offset, superblock_offset));
         table_offset += 64;
     }
+    if partitions.is_empty() { return Err("No DHFS partitions were found on this card.".to_string()); }
     let mut recordings = Vec::new();
     for (partition_index, (partition_offset, superblock_offset)) in partitions.iter().enumerate() {
         let superblock = base + partition_offset + superblock_offset;
-        let block_size = dhfs_read_u32(&mut device, superblock + 0x2c)? as u64;
-        let fragment_size = dhfs_read_u32(&mut device, superblock + 0x30)? as u64 * block_size;
-        let descriptor_offset = base + partition_offset + dhfs_read_u32(&mut device, superblock + 0x44)? as u64 * block_size;
-        let descriptor_count = dhfs_read_u32(&mut device, superblock + 0x4c)?;
+        let block_size = read_device_u32(&mut device, superblock + 0x2c)? as u64;
+        let fragment_size = read_device_u32(&mut device, superblock + 0x30)? as u64 * block_size;
+        let descriptor_offset = base + partition_offset + read_device_u32(&mut device, superblock + 0x44)? as u64 * block_size;
+        let descriptor_count = read_device_u32(&mut device, superblock + 0x4c)?;
         if block_size == 0 || fragment_size == 0 || descriptor_count == 0 { continue; }
         for descriptor_index in 0..descriptor_count {
-            let descriptor = dhfs_read_descriptor(&mut device, descriptor_offset + descriptor_index as u64 * 32)?;
+            let descriptor = read_device_descriptor(&mut device, descriptor_offset + descriptor_index as u64 * 32)?;
             if descriptor[0] != 1 { continue; }
             let start = u32::from_le_bytes(descriptor[4..8].try_into().expect("DHFS start timestamp"));
             let end = u32::from_le_bytes(descriptor[8..12].try_into().expect("DHFS end timestamp"));
             if start == end { continue; }
-            let chain = dhfs_descriptor_chain(&mut device, descriptor_offset, descriptor_count, descriptor_index)?;
-            let last = dhfs_read_descriptor(&mut device, descriptor_offset + *chain.last().expect("non-empty chain") as u64 * 32)?;
+            let chain = device_descriptor_chain(&mut device, descriptor_offset, descriptor_count, descriptor_index)?;
+            let last = read_device_descriptor(&mut device, descriptor_offset + *chain.last().expect("non-empty chain") as u64 * 32)?;
             let last_size = u32::from_le_bytes(last[16..20].try_into().expect("DHFS final fragment size")) as u64 * block_size;
             if last_size == 0 || last_size > fragment_size { continue; }
             recordings.push(PhysicalDhfsRecording {
@@ -618,17 +668,13 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
     let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
         .map_err(|error| format!("Could not read {device_path} read-only: {error}"))?;
     let base = coordinates.offset_bytes;
-    let mut magic = [0_u8; 7];
-    device.seek(SeekFrom::Start(base)).map_err(|error| error.to_string())?;
-    device.read_exact(&mut magic).map_err(|error| error.to_string())?;
-    if &magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
+    let magic = read_device_aligned(&mut device, base, 7)?;
+    if magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
 
     let mut table_offset = base + 0x3c00 + 0x34;
     let mut partitions = Vec::new();
     for _ in 0..64 {
-        device.seek(SeekFrom::Start(table_offset)).map_err(|error| error.to_string())?;
-        let mut entry = [0_u8; 64];
-        device.read_exact(&mut entry).map_err(|error| error.to_string())?;
+        let entry = read_device_aligned(&mut device, table_offset, 64)?;
         if &entry[..4] == [0xaa, 0x55, 0xaa, 0x55] { break; }
         let superblock_offset = u32::from_le_bytes(entry[20..24].try_into().expect("DHFS superblock field")) as u64 * 512;
         let partition_offset = u64::from_le_bytes(entry[48..56].try_into().expect("DHFS partition field")) * 512;
@@ -639,22 +685,22 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
     let (partition_offset, superblock_offset) = partitions.get(dhfs_partition_index as usize)
         .ok_or("The selected DHFS partition is no longer present on this card.")?;
     let superblock = base + partition_offset + superblock_offset;
-    let block_size = dhfs_read_u32(&mut device, superblock + 0x2c)? as u64;
-    let fragment_size = dhfs_read_u32(&mut device, superblock + 0x30)? as u64 * block_size;
-    let descriptor_offset = base + partition_offset + dhfs_read_u32(&mut device, superblock + 0x44)? as u64 * block_size;
-    let video_offset = base + partition_offset + dhfs_read_u32(&mut device, superblock + 0x48)? as u64 * block_size;
-    let descriptor_count = dhfs_read_u32(&mut device, superblock + 0x4c)?;
+    let block_size = read_device_u32(&mut device, superblock + 0x2c)? as u64;
+    let fragment_size = read_device_u32(&mut device, superblock + 0x30)? as u64 * block_size;
+    let descriptor_offset = base + partition_offset + read_device_u32(&mut device, superblock + 0x44)? as u64 * block_size;
+    let video_offset = base + partition_offset + read_device_u32(&mut device, superblock + 0x48)? as u64 * block_size;
+    let descriptor_count = read_device_u32(&mut device, superblock + 0x4c)?;
     if block_size == 0 || fragment_size == 0 || descriptor_index >= descriptor_count {
         return Err("The selected recording is no longer valid on this card.".to_string());
     }
 
-    let descriptor = dhfs_read_descriptor(&mut device, descriptor_offset + descriptor_index as u64 * 32)?;
+    let descriptor = read_device_descriptor(&mut device, descriptor_offset + descriptor_index as u64 * 32)?;
     if descriptor[0] != 1 { return Err("The selected descriptor is not a normal recording.".to_string()); }
     let start = u32::from_le_bytes(descriptor[4..8].try_into().expect("DHFS start timestamp"));
     let end = u32::from_le_bytes(descriptor[8..12].try_into().expect("DHFS end timestamp"));
     let channel = descriptor[1].saturating_sub(b'0') as u32 + 1;
-    let chain = dhfs_descriptor_chain(&mut device, descriptor_offset, descriptor_count, descriptor_index)?;
-    let last = dhfs_read_descriptor(&mut device, descriptor_offset + *chain.last().expect("non-empty chain") as u64 * 32)?;
+    let chain = device_descriptor_chain(&mut device, descriptor_offset, descriptor_count, descriptor_index)?;
+    let last = read_device_descriptor(&mut device, descriptor_offset + *chain.last().expect("non-empty chain") as u64 * 32)?;
     let last_size = u32::from_le_bytes(last[16..20].try_into().expect("DHFS final fragment size")) as u64 * block_size;
     if last_size == 0 || last_size > fragment_size { return Err("The selected recording's final fragment size is invalid.".to_string()); }
 
@@ -669,19 +715,19 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
     let mut hasher = Sha256::new();
     let mut bytes_written = 0_u64;
     let mut nal_marker = false;
+    const READ_CHUNK: u64 = 1024 * 1024;
     for (position, fragment) in chain.iter().enumerate() {
         let bytes_to_copy = if position + 1 == chain.len() { last_size } else { fragment_size };
-        device.seek(SeekFrom::Start(video_offset + *fragment as u64 * fragment_size))
-            .map_err(|error| format!("Card seek failed; partial cache retained: {error}"))?;
-        let mut remaining = bytes_to_copy;
-        let mut buffer = [0_u8; 1024 * 1024];
-        while remaining > 0 {
-            let requested = remaining.min(buffer.len() as u64) as usize;
-            device.read_exact(&mut buffer[..requested]).map_err(|error| format!("Card read failed, possibly disconnected; partial cache retained: {error}"))?;
-            if bytes_written == 0 { nal_marker = starts_with_nal_marker(&buffer[..requested]); }
-            output_file.write_all(&buffer[..requested]).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
-            hasher.update(&buffer[..requested]);
-            remaining -= requested as u64;
+        let fragment_start = video_offset + *fragment as u64 * fragment_size;
+        let mut copied = 0_u64;
+        while copied < bytes_to_copy {
+            let requested = (bytes_to_copy - copied).min(READ_CHUNK) as usize;
+            let chunk = read_device_aligned(&mut device, fragment_start + copied, requested)
+                .map_err(|error| format!("Card read failed, possibly disconnected; partial cache retained: {error}"))?;
+            if bytes_written == 0 { nal_marker = starts_with_nal_marker(&chunk); }
+            output_file.write_all(&chunk).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
+            hasher.update(&chunk);
+            copied += requested as u64;
             bytes_written += requested as u64;
         }
     }
