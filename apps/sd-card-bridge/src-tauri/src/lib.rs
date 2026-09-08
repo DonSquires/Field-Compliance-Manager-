@@ -604,6 +604,15 @@ fn device_descriptor_chain(device: &mut File, descriptor_offset: u64, descriptor
     Ok(chain)
 }
 
+// A fixed 0x3c00 table offset does not hold on every DHFS4.1 card; locate the real "DHFS_DPT:" marker instead.
+fn locate_dhfs_dpt_marker(device: &mut File, base: u64) -> Result<u64, String> {
+    const SCAN_BYTES: usize = 96 * 1024;
+    let scan = read_device_aligned(device, base, SCAN_BYTES)?;
+    let marker_offset = scan.windows(9).position(|window| window == b"DHFS_DPT:")
+        .ok_or("No DHFS_DPT metadata marker was found near the start of this partition.")?;
+    Ok(base + marker_offset as u64)
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Result<Vec<PhysicalDhfsRecording>, String> {
@@ -615,7 +624,7 @@ fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Re
     let magic = read_device_aligned(&mut device, base, 7)?;
     if magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
 
-    let mut table_offset = base + 0x3c00 + 0x34;
+    let mut table_offset = locate_dhfs_dpt_marker(&mut device, base)? + 0x34;
     let mut partitions = Vec::new();
     for _ in 0..64 {
         let entry = read_device_aligned(&mut device, table_offset, 64)?;
@@ -671,7 +680,7 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
     let magic = read_device_aligned(&mut device, base, 7)?;
     if magic != b"DHFS4.1" { return Err("The selected partition is not DHFS4.1.".to_string()); }
 
-    let mut table_offset = base + 0x3c00 + 0x34;
+    let mut table_offset = locate_dhfs_dpt_marker(&mut device, base)? + 0x34;
     let mut partitions = Vec::new();
     for _ in 0..64 {
         let entry = read_device_aligned(&mut device, table_offset, 64)?;
