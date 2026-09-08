@@ -300,6 +300,11 @@ function collectSqlFunctionEdges(rootDir) {
     for (const match of definition.body.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
       add(rpcName, 'table', match[1], 'writes', definition.file, `SQL writes public.${match[1]}`);
     }
+    for (const match of definition.body.matchAll(/\bpublic\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
+      if (match[1] !== rpcName && latestFunctions.has(match[1])) {
+        add(rpcName, 'rpc', match[1], 'calls', definition.file, `SQL calls public.${match[1]}`);
+      }
+    }
     for (const match of definition.body.matchAll(/\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
       add(rpcName, 'edge_function', match[1], 'calls', definition.file, `SQL HTTP call to ${match[1]}`);
     }

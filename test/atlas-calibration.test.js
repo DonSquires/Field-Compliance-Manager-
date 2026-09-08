@@ -270,3 +270,21 @@ test('Atlas refresh derives edge-function URLs supplied to a client library', ()
     && edge.edge_kind === 'calls'));
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
+
+test('Atlas refresh derives direct SQL RPC calls', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-sql-rpc-call-'));
+  const schemaPath = path.join(rootDir, 'supabase/schema.sql');
+  fs.mkdirSync(path.dirname(schemaPath), { recursive: true });
+  fs.writeFileSync(schemaPath, `
+    create function public.target_helper() returns void language plpgsql as $$ begin end; $$;
+    create function public.source_worker() returns void language plpgsql as $$ begin perform public.target_helper(); end; $$;
+  `);
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'source_worker'
+    && edge.target_type === 'rpc'
+    && edge.target_name === 'target_helper'
+    && edge.edge_kind === 'calls'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
