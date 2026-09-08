@@ -53,7 +53,8 @@ serve(async (req)=>{
   }, 405);
   // Service-role only — internal (CI / server-to-server) call.
   const authHeader = req.headers.get('Authorization') ?? '';
-  if (!authHeader.includes(SUPABASE_SERVICE_ROLE_KEY) && !authHeader.startsWith('Bearer ')) {
+  const isServiceRole = Boolean(SUPABASE_SERVICE_ROLE_KEY) && authHeader === `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`;
+  if (!isServiceRole) {
     return json({
       error: 'Unauthorized'
     }, 401);
