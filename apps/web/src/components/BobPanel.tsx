@@ -511,6 +511,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: registerError.message } : item));
           throw registerError;
         }
+      } else if (['grand_master', 'master', 'admin', 'admin_officer'].includes(profile.role)) {
+        const { error: registerError } = await supabase.functions.invoke('bob-document-register', { body: { attachment_id: attachmentId } });
+        if (registerError) {
+          setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: registerError.message } : item));
+          throw registerError;
+        }
       }
       const attachment = { id: attachmentId, name: pending.file.name, type: pending.file.type || 'application/octet-stream', storage_bucket: 'bob-uploads', storage_path: storagePath };
       uploaded.push(attachment);
