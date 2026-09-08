@@ -37,9 +37,16 @@ serve(async (request) => {
     if (!profile?.organization_id) return json({ error: 'Active organization not found' }, 404);
     const requiredPrefix = `desktop/${user.id}/${attachmentId}-`;
     if (!storagePath.startsWith(requiredPrefix)) return json({ error: 'Storage path does not belong to this desktop import' }, 403);
-    const { data: storedObject, error: objectError } = await admin.schema('storage').from('objects')
-      .select('name, metadata').eq('bucket_id', 'bob-uploads').eq('name', storagePath).maybeSingle();
-    if (objectError || !storedObject) return json({ error: 'Uploaded video object not found' }, 404);
+    // Resumable (tus) uploads can return success to the client slightly before the storage.objects
+    // row is queryable; retry briefly rather than failing a genuinely-completed upload outright.
+    let storedObject = null;
+    for (const delayMs of [0, 300, 800, 1500]) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const { data } = await admin.schema('storage').from('objects')
+        .select('name, metadata').eq('bucket_id', 'bob-uploads').eq('name', storagePath).maybeSingle();
+      if (data) { storedObject = data; break; }
+    }
+    if (!storedObject) return json({ error: 'Uploaded video object not found' }, 404);
 
     const { data: conversation, error: conversationError } = await admin.from('bob_conversations').insert({
       organization_id: profile.organization_id,
