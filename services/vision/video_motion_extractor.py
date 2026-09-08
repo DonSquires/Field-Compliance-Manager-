@@ -73,9 +73,9 @@ def _validate_input(video_path: Path, max_input_bytes: int) -> None:
 
 def _timestamp_seconds(capture: cv2.VideoCapture, frame_index: int, fps: float) -> float:
     timestamp = capture.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-    if frame_index == 0 and np.isfinite(timestamp) and timestamp >= 0:
+    if np.isfinite(timestamp) and timestamp >= 0 and (frame_index == 0 or timestamp > 0):
         return timestamp
-    # Some backends report 0 or a repeated timestamp for compressed streams.
+    # Some backends report 0 or an invalid timestamp for compressed streams.
     return frame_index / fps
 
 
@@ -191,6 +191,12 @@ def extract_motion_summary(
         while True:
             success, frame = capture.read()
             if not success:
+                # DVR H.265 streams can contain isolated damaged access units. Keep
+                # scanning when the backend can advance; stop only at end-of-stream.
+                next_position = capture.get(cv2.CAP_PROP_POS_FRAMES)
+                if np.isfinite(next_position) and next_position > frame_index:
+                    frame_index = int(next_position)
+                    continue
                 break
             timestamp = max(last_timestamp, _timestamp_seconds(capture, frame_index, fps))
             last_timestamp = timestamp
@@ -238,13 +244,22 @@ def extract_motion_summary(
                 if len(frame_indices) < end - start + 1:
                     segment.frames_truncated = True
                     truncated = True
+                target_index = 0
                 for index in frame_indices:
-                    capture.set(cv2.CAP_PROP_POS_FRAMES, index)
-                    success, frame = capture.read()
-                    if not success:
-                        raise VideoExtractionError(f"Unable to decode frame {index}")
+                    decoded_frame = None
+                    while target_index <= index:
+                        success, frame = capture.read()
+                        if not success:
+                            segment.frames_truncated = True
+                            truncated = True
+                            target_index += 1
+                            continue
+                        decoded_frame = frame
+                        target_index += 1
+                    if decoded_frame is None:
+                        continue
                     digest, file_path = _write_frame(
-                        frame, artifacts_dir, output_quality, scale_width, scale_height
+                        decoded_frame, artifacts_dir, output_quality, scale_width, scale_height
                     )
                     segment.frames.append(
                         FrameArtifact(index, round(index / fps, 3), digest, file_path)

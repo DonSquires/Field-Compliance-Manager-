@@ -15,7 +15,7 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const openaiApiKey = process.env.OPENAI_API_KEY || '';
 const openaiBaseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
 const openaiPlanModel = process.env.OPENAI_PLAN_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const maxBodyBytes = 2 * 1024 * 1024;
+const maxBodyBytes = Number(process.env.MAX_BODY_BYTES || 256 * 1024 * 1024);
 const supabase = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
   : null;
@@ -214,7 +214,10 @@ http.createServer(async (request, response) => {
       return await ingestMotion(request, response);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'motion ingestion failed';
-      const status = /token|credential|signature|expired|claim|invalid/.test(message) ? 401 : 502;
+      console.error(JSON.stringify({ event: 'motion_ingestion_failed', message }));
+      const status = /token|credential|signature|expired|claim|invalid/.test(message)
+        ? 401
+        : message === 'request_body_too_large' ? 413 : 502;
       return json(response, status, { ok: false, error: message });
     }
   }

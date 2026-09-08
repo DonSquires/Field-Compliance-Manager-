@@ -11,7 +11,7 @@ const INGESTION_URL = (process.env.VISION_INGESTION_URL || '').replace(/\/+$/, '
 const WORKLOAD_SIGNING_SECRET = process.env.WORKLOAD_SIGNING_SECRET || '';
 const INFERENCE_SERVICE_URL = (process.env.INFERENCE_SERVICE_URL || 'http://fcm-inference:3000').replace(/\/+$/, '');
 const INFERENCE_API_KEY = process.env.INFERENCE_API_KEY || '';
-const RUNPOD_API_URL = (process.env.RUNPOD_API_URL || 'https://api.runpod.ai/v2/n0bp1ifmq01cx2').replace(/\/+$/, '');
+const RUNPOD_API_URL = (process.env.RUNPOD_API_URL || 'https://api.runpod.ai/v2/katqqnmds1dphs').replace(/\/+$/, '');
 const RUNPOD_API_KEY = process.env.RUNPOD_API || '';
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
 const DERIVED_ROOT = path.resolve(process.env.VISION_DERIVED_ROOT || '/opt/fcm/derived');
@@ -23,6 +23,10 @@ const POLL_INTERVAL_MS = Number(process.env.VISION_POLL_INTERVAL_MS || 5000);
 const EXTRACTOR_TIMEOUT_MS = Number(process.env.VISION_EXTRACTOR_TIMEOUT_MS || 30 * 60 * 1000);
 const MAX_SUMMARY_BYTES = Number(process.env.VISION_MAX_SUMMARY_BYTES || 2 * 1024 * 1024);
 const MAX_CLASSIFICATION_FRAMES = Number(process.env.VISION_MAX_CLASSIFICATION_FRAMES || 120);
+const RUNPOD_BATCH_SIZE = Number(process.env.VISION_RUNPOD_BATCH_SIZE || 6);
+const STORAGE_DOWNLOAD_TIMEOUT_MS = Number(process.env.VISION_STORAGE_DOWNLOAD_TIMEOUT_MS || 120_000);
+const LOCAL_VEHICLE_INFERENCE = process.env.VISION_LOCAL_VEHICLE_INFERENCE !== 'false';
+const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'false';
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
@@ -73,7 +77,11 @@ async function ensureVideoPath(evidence) {
   }
 
   const bucket = evidence.metadata?.storage_bucket || 'bob-uploads';
-  const { data, error } = await supabase.storage.from(bucket).download(evidence.storage_path);
+  const download = supabase.storage.from(bucket).download(evidence.storage_path);
+  const { data, error } = await Promise.race([
+    download,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('video download timed out')), STORAGE_DOWNLOAD_TIMEOUT_MS)),
+  ]);
   if (error) throw new Error(`video download failed from ${bucket}: ${error.message}`);
 
   await fs.mkdir(path.dirname(cachedPath), { recursive: true });
@@ -155,7 +163,10 @@ async function ingest(job, summary) {
     }),
     signal: AbortSignal.timeout(30_000)
   });
-  if (!response.ok) throw new Error(`motion ingestion returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 1000);
+    throw new Error(`motion ingestion returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+  }
 }
 
 // Spreads the classification budget fairly across every motion segment (vehicle/person event),
@@ -182,53 +193,68 @@ async function classifyFrames(summary) {
   if (!INFERENCE_API_KEY) throw new Error('INFERENCE_API_KEY is required for frame classification');
   const totalFrames = summary.motion_segments.reduce((total, segment) => total + (segment.frames?.length || 0), 0);
   const selectedFrames = selectFramesForClassification(summary.motion_segments, MAX_CLASSIFICATION_FRAMES);
-  for (const frame of selectedFrames) {
-    const image = await fs.readFile(frame.file_path);
-    const buildForm = () => {
-      const form = new FormData();
-      form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);
-      return form;
-    };
-    const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
-    const runpodResult = await classifyWithRunpod(image);
-    const [alprResponse, faceResponse, peopleResponse, inferenceResponse] = await Promise.all([
-      fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
-      fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
-      fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
-      fetch(`${INFERENCE_SERVICE_URL}/infer`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) })
-    ]);
-    frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
-    frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
-    frame.people = peopleResponse.ok ? await peopleResponse.json() : { success: false, error: `people_http_${peopleResponse.status}` };
-    frame.inference = inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` };
-    if (runpodResult) frame.runpod = runpodResult;
+  const frameInputs = await Promise.all(selectedFrames.map(async (frame) => ({
+    frame,
+    image: await fs.readFile(frame.file_path),
+  })));
+  for (let batchStart = 0; batchStart < frameInputs.length; batchStart += RUNPOD_BATCH_SIZE) {
+    const batch = frameInputs.slice(batchStart, batchStart + RUNPOD_BATCH_SIZE);
+    const runpodResults = await classifyWithRunpodBatch(batch);
+    for (const { frame, image } of batch) {
+      const buildForm = () => {
+        const form = new FormData();
+        form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);
+        return form;
+      };
+      const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
+      const localRequests = [
+        fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
+        fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
+        LOCAL_PEOPLE_INFERENCE ? fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }) : Promise.resolve(null),
+        LOCAL_VEHICLE_INFERENCE ? fetch(`${INFERENCE_SERVICE_URL}/infer`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }) : Promise.resolve(null),
+      ];
+      const [alprResponse, faceResponse, peopleResponse, inferenceResponse] = await Promise.all(localRequests);
+      frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
+      frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
+      frame.people = peopleResponse ? (peopleResponse.ok ? await peopleResponse.json() : { success: false, error: `people_http_${peopleResponse.status}` }) : { success: false, error: 'people_runpod_primary' };
+      frame.inference = inferenceResponse ? (inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` }) : { success: false, error: 'vehicle_runpod_primary' };
+      const runpodResult = runpodResults.get(frame.sha256_hash);
+      if (runpodResult) frame.runpod = runpodResult;
+    }
   }
   if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
   return summary;
 }
 
-async function classifyWithRunpod(image) {
-  if (!RUNPOD_API_KEY) return null;
+async function classifyWithRunpodBatch(batch) {
+  if (!RUNPOD_API_KEY) return new Map();
   try {
     const response = await fetch(`${RUNPOD_API_URL}/runsync`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${RUNPOD_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: { action: 'infer', image_base64: image.toString('base64'), tasks: ['person', 'vehicle', 'plate', 'face'] } }),
+      body: JSON.stringify({
+        input: {
+          action: 'infer_batch',
+          frames: batch.map(({ frame, image }) => ({ frame_id: frame.sha256_hash, image_base64: image.toString('base64') })),
+          tasks: ['person', 'vehicle', 'plate', 'face'],
+        },
+      }),
       signal: AbortSignal.timeout(45_000),
     });
     if (!response.ok) {
       log('runpod_inference_degraded', { status: response.status });
-      return null;
+      return new Map();
     }
     const payload = await response.json();
     if (payload.status && payload.status !== 'COMPLETED') {
       log('runpod_inference_deferred', { status: payload.status, job_id: payload.id });
-      return null;
+      return new Map();
     }
-    return payload.output || payload;
+    const results = payload.output?.results || payload.results;
+    return new Map(Array.isArray(results) ? results.filter((item) => item?.frame_id).map((item) => [item.frame_id, item.result || item]) : []);
   } catch (error) {
     log('runpod_inference_unavailable', { error: error.message });
-    return null;
+    return new Map();
   }
 }
 
@@ -322,7 +348,9 @@ async function processOne() {
     if (evidence.evidence_kind !== 'video') throw new Error('evidence item is not video');
     const videoPath = await ensureVideoPath(evidence);
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
+    log('motion_extraction_started', { job_id: job.id });
     const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
+    log('motion_extraction_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
     await classifyFrames(summary);
     await consolidateMotionSummary(summary, {
       metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null,

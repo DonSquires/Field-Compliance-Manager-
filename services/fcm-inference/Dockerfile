@@ -12,6 +12,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py ./
 COPY download_models.py ./
+COPY runpod_handler.py ./
 
 RUN mkdir -p /app/models && python download_models.py
 
@@ -19,4 +20,4 @@ RUN useradd --create-home --uid 10001 appuser
 USER appuser
 
 EXPOSE 3000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["python", "runpod_handler.py"]

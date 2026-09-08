@@ -20,6 +20,9 @@ services:
       NODE_ENV: production
       PORT: "3000"
       FCM_API_TOKEN: ${API_TOKEN:?set API_TOKEN}
+      # CCTV summaries may contain up to 120 base64 keyframe thumbnails plus
+      # classification metadata. Keep the body cap explicit and bounded.
+      MAX_BODY_BYTES: ${MAX_BODY_BYTES:-268435456}
       OSRM_URL: "http://osrm:5000"
       SOLVER_URL: "http://fcm-solver:5001"
       # In-house embeddings (Bob RAG). Reachable by compose service name on fcm-net.
@@ -190,9 +193,10 @@ services:
       VISION_DERIVED_ROOT: /opt/fcm/derived
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
       INFERENCE_SERVICE_URL: http://fcm-inference:3000
-      RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/n0bp1ifmq01cx2}
+      RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
       RUNPOD_API: ${RUNPOD_API:-}
       VISION_MAX_CLASSIFICATION_FRAMES: 120
+      VISION_RUNPOD_BATCH_SIZE: ${VISION_RUNPOD_BATCH_SIZE:-6}
       # Set per camera after calibration; without this, CCTV reports px/s only.
       VISION_METERS_PER_PIXEL: ${VISION_METERS_PER_PIXEL:-}
       VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}

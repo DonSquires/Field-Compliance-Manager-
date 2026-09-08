@@ -16,6 +16,7 @@ import {
   UserRound,
   X,
   XCircle,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -69,6 +70,11 @@ type FaceCandidate = {
   review_state: string;
 };
 
+type CCTVReviewPageProps = {
+  initialFilter?: ReviewFilter;
+  libraryMode?: boolean;
+};
+
 const CCTV_DOMAINS = ['video_motion', 'vehicle', 'face'] as const;
 
 const FILTERS: Array<{ value: ReviewFilter; label: string }> = [
@@ -89,10 +95,10 @@ function timeLabel(value: string): string {
   return new Date(value).toLocaleString('en-NZ', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export const CCTVReviewPage: React.FC = () => {
+export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 'all', libraryMode = false }) => {
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<CCTVJob[]>([]);
-  const [filter, setFilter] = useState<ReviewFilter>('all');
+  const [filter, setFilter] = useState<ReviewFilter>(initialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +113,7 @@ export const CCTVReviewPage: React.FC = () => {
   const [identityDrafts, setIdentityDrafts] = useState<Record<string, { personRecordId: string; displayName: string }>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
-  const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'archive' | null>(null);
+  const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -170,10 +176,14 @@ export const CCTVReviewPage: React.FC = () => {
 
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
 
-  const manageSelectedJob = useCallback(async (action: 'retry' | 'cancel' | 'archive') => {
-    if (!selected || !profile?.organizationId) return;
+  const manageJob = useCallback(async (job: CCTVJob, action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
+    if (!profile?.organizationId) return;
     const confirmation = action === 'archive'
       ? 'Archive this CCTV queue item? The video and inference record will be retained and available under Archived.'
+      : action === 'delete'
+        ? 'Delete this terminal CCTV job? The queue record and inference results will be permanently removed; the original evidence video will be retained.'
+        : action === 'close'
+          ? 'Close this failed CCTV job without retrying it?'
       : action === 'cancel'
         ? 'Cancel this CCTV job?'
         : 'Retry this CCTV job?';
@@ -182,19 +192,23 @@ export const CCTVReviewPage: React.FC = () => {
     setError(null);
     try {
       const { error: actionError } = await supabase.rpc('manage_cctv_inference_job', {
-        p_job_id: selected.id,
+        p_job_id: job.id,
         p_organization_id: profile.organizationId,
         p_action: action,
       });
       if (actionError) throw actionError;
-      if (action === 'archive') setSelectedId(null);
+      if (action === 'archive' || action === 'delete') setSelectedId(null);
       await loadJobs();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : `CCTV job could not be ${action === 'archive' ? 'archived' : `${action}ed`}.`);
+      setError(actionError instanceof Error ? actionError.message : `CCTV job could not be updated.`);
     } finally {
       setJobAction(null);
     }
-  }, [loadJobs, profile?.organizationId, selected]);
+  }, [loadJobs, profile?.organizationId]);
+
+  const manageSelectedJob = useCallback((action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
+    if (selected) void manageJob(selected, action);
+  }, [manageJob, selected]);
 
   // Load Signed URL for the selected video
   useEffect(() => {
@@ -320,8 +334,8 @@ export const CCTVReviewPage: React.FC = () => {
       <header className="cctv-review-header">
         <div>
           <span>Field outcomes</span>
-          <h1>CCTV review</h1>
-          <p>Review camera evidence, consolidated AI observations, and evidential findings.</p>
+          <h1>{libraryMode ? 'Completed video library' : 'CCTV review'}</h1>
+          <p>{libraryMode ? 'Review completed camera footage, keyframes, and governed observations.' : 'Review camera evidence, consolidated AI observations, and evidential findings.'}</p>
         </div>
         <button
           type="button"
@@ -395,30 +409,29 @@ export const CCTVReviewPage: React.FC = () => {
               const frameCount = jobConsolidated.summary_counts.total_frames_parsed;
 
               return (
-                <button
-                  key={job.id}
-                  type="button"
-                  className={`cctv-job-row ${selectedId === job.id ? 'is-selected' : ''}`}
-                  onClick={() => setSelectedId(job.id)}
-                >
-                  <span className="cctv-job-icon">
-                    <FileVideo2 size={19} />
-                  </span>
-                  <span className="cctv-job-copy">
-                    <strong>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</strong>
-                    <small>
-                      {timeLabel(job.created_at)} · {job.domain} · {String(job.id).slice(0, 8)}
-                    </small>
-                  </span>
-                  <span className="cctv-job-findings">
-                    {frameCount > 0 ? `${frameCount} frames` : 'Pending frames'}
-                    {vehicleCount > 0 ? ` · ${vehicleCount} vehicle ${vehicleCount === 1 ? 'event' : 'events'}` : ''}
-                    {faceCount + personCount > 0 ? ` · ${faceCount + personCount} person ${faceCount + personCount === 1 ? 'event' : 'events'}` : ''}
-                  </span>
-                  <span className={`cctv-status status-${job.status}`}>
-                    <CircleDot size={13} /> {statusLabel(job.status)}
-                  </span>
-                </button>
+                <div key={job.id} className={`cctv-job-row ${selectedId === job.id ? 'is-selected' : ''}`}>
+                  <button type="button" className="cctv-job-row-main" onClick={() => setSelectedId(job.id)}>
+                    <span className="cctv-job-icon"><FileVideo2 size={19} /></span>
+                    <span className="cctv-job-copy">
+                      <strong>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</strong>
+                      <small>{timeLabel(job.created_at)} · {job.domain} · {String(job.id).slice(0, 8)}</small>
+                    </span>
+                    <span className="cctv-job-findings">
+                      {frameCount > 0 ? `${frameCount} frames` : 'Pending frames'}
+                      {vehicleCount > 0 ? ` · ${vehicleCount} vehicle ${vehicleCount === 1 ? 'event' : 'events'}` : ''}
+                      {faceCount + personCount > 0 ? ` · ${faceCount + personCount} person ${faceCount + personCount === 1 ? 'event' : 'events'}` : ''}
+                    </span>
+                    <span className={`cctv-status status-${job.status}`}><CircleDot size={13} /> {statusLabel(job.status)}</span>
+                  </button>
+                  {job.status === 'failed' && (
+                    <div className="cctv-row-actions" aria-label="Failed CCTV job actions">
+                      <button type="button" title="Retry failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'retry')}><RotateCcw size={13} /><span>Retry</span></button>
+                      <button type="button" title="Close failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'close')}><XCircle size={13} /><span>Close</span></button>
+                      <button type="button" title="Archive failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'archive')}><Archive size={13} /><span>Archive</span></button>
+                      <button type="button" title="Delete failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'delete')}><Trash2 size={13} /><span>Delete</span></button>
+                    </div>
+                  )}
+                </div>
               );
             })
           )}
@@ -442,6 +455,11 @@ export const CCTVReviewPage: React.FC = () => {
                     <RotateCcw size={13} /> {jobAction === 'retry' ? 'Retrying...' : 'Retry'}
                   </button>
                 )}
+                {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
+                  <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => manageSelectedJob('close')}>
+                    <XCircle size={13} /> {jobAction === 'close' ? 'Closing...' : 'Close'}
+                  </button>
+                )}
                 {['queued', 'processing'].includes(selected.status) && (
                   <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('cancel')}>
                     <XCircle size={13} /> {jobAction === 'cancel' ? 'Cancelling...' : 'Cancel'}
@@ -450,6 +468,11 @@ export const CCTVReviewPage: React.FC = () => {
                 {['complete', 'failed', 'inconclusive', 'manual_review_required', 'cancelled'].includes(selected.status) && (
                   <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('archive')}>
                     <Archive size={13} /> {jobAction === 'archive' ? 'Archiving...' : 'Archive'}
+                  </button>
+                )}
+                {['failed', 'inconclusive', 'cancelled', 'archived'].includes(selected.status) && (
+                  <button type="button" className="cctv-btn-danger" disabled={jobAction !== null} onClick={() => manageSelectedJob('delete')}>
+                    <Trash2 size={13} /> {jobAction === 'delete' ? 'Deleting...' : 'Delete job'}
                   </button>
                 )}
               </div>

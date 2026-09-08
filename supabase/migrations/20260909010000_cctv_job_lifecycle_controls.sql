@@ -65,6 +65,17 @@ BEGIN
     RETURN;
   END IF;
 
+  IF p_action = 'close' THEN
+    IF v_job.status NOT IN ('failed', 'inconclusive', 'manual_review_required') THEN
+      RAISE EXCEPTION 'Only failed or reviewable CCTV jobs can be closed';
+    END IF;
+    UPDATE public.inference_jobs
+       SET status = 'cancelled', completed_at = clock_timestamp()
+     WHERE id = v_job.id;
+    RETURN QUERY SELECT v_job.id, p_action, 'cancelled'::text;
+    RETURN;
+  END IF;
+
   IF p_action = 'archive' THEN
     IF v_job.status IN ('queued', 'processing') THEN
       RAISE EXCEPTION 'Running CCTV jobs must be cancelled before archiving';
@@ -73,6 +84,15 @@ BEGIN
        SET status = 'archived', completed_at = COALESCE(completed_at, clock_timestamp())
      WHERE id = v_job.id;
     RETURN QUERY SELECT v_job.id, p_action, 'archived'::text;
+    RETURN;
+  END IF;
+
+  IF p_action = 'delete' THEN
+    IF v_job.status NOT IN ('failed', 'inconclusive', 'cancelled', 'archived') THEN
+      RAISE EXCEPTION 'Only terminal CCTV jobs can be deleted';
+    END IF;
+    DELETE FROM public.inference_jobs WHERE id = v_job.id;
+    RETURN QUERY SELECT v_job.id, p_action, 'deleted'::text;
     RETURN;
   END IF;
 
