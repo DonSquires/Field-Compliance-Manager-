@@ -48,4 +48,12 @@ describe('Account Onboarding failure state', () => {
     expect(source).toContain('onNavigate("crm", { accountId: account.id })');
     expect(source).not.toMatch(/supabase\.(from|rpc)\(['"]organizations['"]/);
   });
+
+  it('keeps client authentication out of provider setup and sends the final invite through Supabase', () => {
+    expect(source).toContain('prepare_crm_client_invitation');
+    expect(source).toContain('functions.invoke("invite-org"');
+    expect(source).toContain('Invite client');
+    expect(source).toContain('Confirm and invite');
+    expect(source).toContain('Client access begins after the recipient accepts.');
+  });
 });

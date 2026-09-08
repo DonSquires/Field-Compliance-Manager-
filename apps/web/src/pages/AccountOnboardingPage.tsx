@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   History,
+  MailPlus,
   Plus,
   RefreshCw,
   Rocket,
@@ -75,7 +76,9 @@ export default function AccountOnboardingPage({
     [assignedTo, setAssignedTo] = useState(""),
     [stageNote, setStageNote] = useState(""),
     [history, setHistory] = useState<OnboardingEvent[]>([]),
-    [showCreateAccount, setShowCreateAccount] = useState(false);
+    [showCreateAccount, setShowCreateAccount] = useState(false),
+    [confirmingInvite, setConfirmingInvite] = useState(false),
+    [inviting, setInviting] = useState(false);
   const selected = rows.find((row) => row.ledger_id === selectedId) ?? null;
   const loadQueue = useCallback(async (preferred?: string) => {
     setLoading(true);
@@ -156,6 +159,28 @@ export default function AccountOnboardingPage({
       await loadQueue();
     }
     setSaving(false);
+  };
+  const inviteClient = async () => {
+    if (!selected) return;
+    setInviting(true);
+    setError(null);
+    const { data: prepared, error: prepareError } = await supabase.rpc("prepare_crm_client_invitation", { p_account_organization_id: selected.account_organization_id });
+    if (prepareError || !prepared) {
+      setError(prepareError?.message ?? "The client invitation could not be prepared.");
+      setInviting(false);
+      return;
+    }
+    const invitation = prepared as { email: string; display_name?: string };
+    const { error: inviteError } = await supabase.functions.invoke("invite-org", {
+      body: { target_organization_id: selected.account_organization_id, email: invitation.email, display_name: invitation.display_name?.trim() || selected.account_name },
+    });
+    if (inviteError) setError(inviteError.message);
+    else {
+      setNotice(`Client invitation sent to ${invitation.email}. The account remains provider-managed until the client accepts.`);
+      setConfirmingInvite(false);
+      await loadQueue(selected.ledger_id);
+    }
+    setInviting(false);
   };
   const blockers = [
     ...(selected?.has_primary_contact
@@ -386,6 +411,10 @@ export default function AccountOnboardingPage({
                       Activate account
                     </button>
                   )}
+                  <button className="is-invite" onClick={() => setConfirmingInvite(true)} disabled={saving || inviting}>
+                    <MailPlus size={15} />
+                    Invite client
+                  </button>
                 </div>
               </section>
               <section className="onboarding-history">
@@ -477,6 +506,15 @@ export default function AccountOnboardingPage({
                 {saving ? "Activating" : "Confirm activation"}
               </button>
             </footer>
+          </section>
+        </div>
+      )}
+      {confirmingInvite && selected && (
+        <div className="activation-backdrop">
+          <section role="dialog" aria-modal="true" aria-labelledby="invite-client-title">
+            <header><div><span>Provider handoff</span><h2 id="invite-client-title">Invite {selected.account_name}?</h2></div><button onClick={() => setConfirmingInvite(false)} aria-label="Close client invitation confirmation"><X size={17} /></button></header>
+            <p>The server will verify the primary client contact, service agreement, active site, and active zone. The invitation is sent only when the provider setup is ready. Client access begins after the recipient accepts.</p>
+            <footer><button onClick={() => setConfirmingInvite(false)}>Back</button><button className="is-primary" onClick={() => void inviteClient()} disabled={inviting}>{inviting ? "Preparing invitation" : "Confirm and invite"}</button></footer>
           </section>
         </div>
       )}
