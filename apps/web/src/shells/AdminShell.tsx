@@ -29,6 +29,7 @@ import {
   DollarSign,
   Download,
   FileBarChart,
+  FolderOpen,
   FlaskConical,
   Grid3X3,
   KeyRound,
@@ -84,6 +85,7 @@ const GrandMasterPlatformPage = React.lazy(() => import('../pages/GrandMasterPla
 const ProviderBillingPage = React.lazy(() => import('../pages/ProviderBillingPage'));
 const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlRoomPage'));
 const ReportsHubPage = React.lazy(() => import('../pages/ReportsHubPage'));
+const FileSystemPage = React.lazy(() => import('../pages/FileSystemPage'));
 const PatrolOversightPage = React.lazy(() => import('../pages/PatrolOversightPage'));
 const DispatchConsolePage = React.lazy(() => import('../pages/DispatchConsolePage'));
 const WelfareAlertsPage = React.lazy(() => import('../pages/WelfareAlertsPage'));
@@ -102,7 +104,7 @@ const DebriefFollowupPage = React.lazy(() => import('../pages/DebriefFollowupPag
 const CCTVReviewPage = React.lazy(() => import('../pages/CCTVReviewPage'));
 
 type AdminPage =
-  | 'hub' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -160,6 +162,7 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
 const NAVIGATION_MAP = {
   'Start Here': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
+    { id: 'files', label: 'File System', icon: FolderOpen },
   ],
   'Clients & Commercial': [
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
@@ -435,6 +438,8 @@ const AdminShell: React.FC = () => {
     switch (activePage) {
       case 'hub':
         return <AdminHubPage onNavigate={navigateFromHub} />;
+      case 'files':
+        return <FileSystemPage />;
       case 'relationships':
         return <RelationshipWorkspacePage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'onboarding':

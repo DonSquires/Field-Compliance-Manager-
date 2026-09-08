@@ -1,0 +1,54 @@
+import { expect, test } from '@playwright/test';
+import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
+
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
+  await installSupabaseFixtures(page);
+});
+
+test('administrator reviews extraction evidence before promoting a document', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/approvals');
+  await expect(page.getByRole('heading', { name: 'Approvals and activity' })).toBeVisible();
+  const queue = page.getByRole('region', { name: 'Document promotion queue' });
+  await expect(queue.getByText('107 Gorge Road - Service Agreement.pdf')).toBeVisible();
+  await expect(queue.getByText('Operational security')).toBeVisible();
+  await expect(queue.getByText('Financial data')).toBeVisible();
+  await expect(queue.getByText('Review pending')).toBeVisible();
+  await queue.getByText('Extracted source preview').click();
+  await expect(queue.getByText('Service agreement for contracted security services at 107 Gorge Road.')).toBeVisible();
+  await queue.getByRole('button', { name: 'Review classification' }).click();
+  const reviewDialog = page.getByRole('dialog', { name: 'Review document classification' });
+  await reviewDialog.getByLabel('Review reason').fill('Confirmed as tenant-sensitive contract material with operational and financial content.');
+  await reviewDialog.getByRole('button', { name: 'Record classification review' }).click();
+  await expect(page.getByRole('status')).toContainText('classification review recorded');
+  await queue.getByRole('button', { name: 'Prepare CRM agreement proposal' }).click();
+  await expect(page.getByRole('status')).toContainText('ready for human CRM agreement review');
+  await expect(page.getByRole('heading', { name: 'Promotion proposals' })).toBeVisible();
+  await expect(page.getByText('Crm Agreement · proposed')).toBeVisible();
+  await page.getByRole('button', { name: 'Approve proposal' }).click();
+  const proposalDialog = page.getByRole('dialog', { name: 'Approve promotion proposal' });
+  await proposalDialog.getByLabel('Decision reasoning').fill('The agreement source and tenant scope are appropriate for the CRM intake queue.');
+  await proposalDialog.getByRole('button', { name: 'Approve proposal' }).click();
+  await expect(page.getByRole('status')).toContainText('Promotion proposal approved');
+  await expect(page.getByText('Crm Agreement · approved')).toBeVisible();
+  await expect(page.getByText('No authoritative CRM record has been created by this approval.').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Apply to CRM' }).click();
+  const crmDialog = page.getByRole('dialog', { name: 'Apply approved agreement' });
+  await crmDialog.getByLabel('Client organisation').selectOption('40404040-4040-4040-8040-404040404040');
+  await crmDialog.getByLabel('Starts').fill('2026-09-01');
+  await crmDialog.getByRole('button', { name: 'Create service agreement' }).click();
+  await expect(page.getByRole('status')).toContainText('CRM agreement created from approved proposal');
+  await page.getByRole('button', { name: /Create draft invoice for FIRST Security/ }).click();
+  const financeDialog = page.getByRole('dialog', { name: 'Create draft invoice' });
+  await financeDialog.getByLabel('Client organisation').selectOption('40404040-4040-4040-8040-404040404040');
+  await financeDialog.getByLabel('Invoice number').fill('INV-DOC-0001');
+  await financeDialog.getByLabel('Subtotal').fill('1000');
+  await financeDialog.getByLabel('GST').fill('150');
+  await financeDialog.getByLabel('Total', { exact: true }).fill('1150');
+  await financeDialog.getByRole('button', { name: 'Create draft invoice' }).click();
+  await expect(page.getByRole('status')).toContainText('Draft invoice created from approved proposal');
+  await queue.getByRole('button', { name: 'Promote to tenant library' }).click();
+  await expect(page.getByRole('status')).toContainText('promoted to the tenant reference library');
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});

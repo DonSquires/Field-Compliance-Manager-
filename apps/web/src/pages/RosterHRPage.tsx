@@ -73,6 +73,9 @@ interface CredentialRow {
   verified: boolean;
 }
 
+interface StaffDocumentRow { id: string; staff_id: string; document_type: string; file_name: string; file_size_bytes: number | null; mime_type: string | null; notes: string | null; expiry_date: string | null; uploaded_at: string | null; }
+interface StaffTrainingRow { id: string; staff_id: string | null; officer_id: string | null; training_name: string; training_type: string; provider: string | null; completed_date: string; expiry_date: string | null; passed: boolean | null; score: number | null; notes: string | null; }
+
 interface ShiftTemplateRow {
   id: string;
   name: string;
@@ -309,6 +312,8 @@ const RosterHRPage: React.FC = () => {
   const [offerAction, setOfferAction] = useState<{ candidate: RecruitmentCandidate; role: string; employmentType: string; startDate: string; note: string; accepted: boolean } | null>(null);
   const [readinessAssessments, setReadinessAssessments] = useState<ReadinessAssessment[]>([]);
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
+  const [staffDocuments, setStaffDocuments] = useState<StaffDocumentRow[]>([]);
+  const [trainingRecords, setTrainingRecords] = useState<StaffTrainingRow[]>([]);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplateRow[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
@@ -402,7 +407,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, payLineReviewsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes, skillCatalogRes, siteInductionRes, staffSiteInductionsRes, sitesRes, zonesRes, agreementLocationsRes] =
+      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, payLineReviewsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes, skillCatalogRes, siteInductionRes, staffSiteInductionsRes, sitesRes, zonesRes, agreementLocationsRes, staffDocumentsRes, trainingRecordsRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -473,6 +478,8 @@ const RosterHRPage: React.FC = () => {
           supabase.from('client_sites').select('id, name').eq('active', true).order('name'),
           supabase.from('location_zones').select('id, name').eq('is_active', true).order('name'),
           supabase.from('service_agreement_locations').select('id, service_agreement_id, site_id, zone_id').eq('status', 'active').order('id'),
+          supabase.from('staff_documents').select('id,staff_id,document_type,file_name,file_size_bytes,mime_type,notes,expiry_date,uploaded_at').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(200),
+          supabase.from('staff_training_records').select('id,staff_id,officer_id,training_name,training_type,provider,completed_date,expiry_date,passed,score,notes').eq('organization_id', orgId).order('completed_date', { ascending: false }).limit(200),
         ]);
       const shiftSwapsRes = await supabase
         .from('shift_swaps')
@@ -485,6 +492,8 @@ const RosterHRPage: React.FC = () => {
       if (staffProfilesRes.error) throw staffProfilesRes.error;
       if (roleCodesRes.error) throw roleCodesRes.error;
       if (credentialsRes.error) throw credentialsRes.error;
+      if (staffDocumentsRes.error) throw staffDocumentsRes.error;
+      if (trainingRecordsRes.error) throw trainingRecordsRes.error;
       if (templatesRes.error) throw templatesRes.error;
       if (leaveRes.error) throw leaveRes.error;
       if (timesheetsRes.error) throw timesheetsRes.error;
@@ -554,6 +563,8 @@ const RosterHRPage: React.FC = () => {
       setReadinessAssessments((readinessRes.data as ReadinessAssessment[]) || []);
       setStaffNames(names);
       setCredentials((credentialsRes.data as CredentialRow[]) || []);
+      setStaffDocuments((staffDocumentsRes.data as StaffDocumentRow[]) || []);
+      setTrainingRecords((trainingRecordsRes.data as StaffTrainingRow[]) || []);
       setShiftTemplates((templatesRes.data as ShiftTemplateRow[]) || []);
       setLeaveRequests((leaveRes.data as LeaveRequestRow[]) || []);
       setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
@@ -1409,6 +1420,50 @@ const RosterHRPage: React.FC = () => {
             </table>
           </div>
         </section>
+      )}
+
+      {tab === 'credentials' && (
+        <>
+          <section className="reports-section">
+            <h2>Staff documents ({staffDocuments.length})</h2>
+            <div className="reports-table-wrapper">
+              <table className="reports-table">
+                <thead><tr><th>Staff</th><th>Type</th><th>File</th><th>Expiry</th><th>Uploaded</th></tr></thead>
+                <tbody>
+                  {staffDocuments.length === 0 ? <tr><td colSpan={5} className="text-center">No staff documents recorded</td></tr> : staffDocuments.map((document) => (
+                    <tr key={document.id}>
+                      <td>{staffNames[document.staff_id] || document.staff_id}</td>
+                      <td>{document.document_type.replaceAll('_', ' ')}</td>
+                      <td title={document.mime_type || undefined}>{document.file_name}</td>
+                      <td><span className={isExpiringSoon(document.expiry_date) ? 'severity-badge severity-high' : ''}>{document.expiry_date ? new Date(document.expiry_date).toLocaleDateString() : 'No expiry'}</span></td>
+                      <td>{document.uploaded_at ? new Date(document.uploaded_at).toLocaleDateString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="reports-section">
+            <h2>Training records ({trainingRecords.length})</h2>
+            <div className="reports-table-wrapper">
+              <table className="reports-table">
+                <thead><tr><th>Staff</th><th>Training</th><th>Provider</th><th>Completed</th><th>Expiry</th><th>Result</th></tr></thead>
+                <tbody>
+                  {trainingRecords.length === 0 ? <tr><td colSpan={6} className="text-center">No training records recorded</td></tr> : trainingRecords.map((record) => (
+                    <tr key={record.id}>
+                      <td>{staffNames[record.staff_id || record.officer_id || ''] || record.staff_id || record.officer_id || 'Unassigned'}</td>
+                      <td>{record.training_name}<div className="contact-meta">{record.training_type}</div></td>
+                      <td>{record.provider || '—'}</td>
+                      <td>{new Date(record.completed_date).toLocaleDateString()}</td>
+                      <td><span className={isExpiringSoon(record.expiry_date) ? 'severity-badge severity-high' : ''}>{record.expiry_date ? new Date(record.expiry_date).toLocaleDateString() : 'No expiry'}</span></td>
+                      <td>{record.passed === null ? 'Not assessed' : record.passed ? `Passed${record.score !== null ? ` (${record.score})` : ''}` : 'Not passed'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
       )}
 
       {tab === 'coverage' && (

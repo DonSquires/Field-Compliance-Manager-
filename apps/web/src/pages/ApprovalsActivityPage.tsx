@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, ListChecks, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
 import { formatGovernedPayload } from '../lib/governedPayload';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './ApprovalsActivityPage.css';
 
@@ -56,8 +57,43 @@ interface DocumentPromotionRow {
   confidence: number | null;
   rationale: string | null;
   ocr_required: boolean;
+  extracted_text: string | null;
+  contains_pii: boolean;
+  contains_operational_security: boolean;
+  contains_financial_data: boolean;
+  contains_legal_privilege: boolean;
+  classifier_source: string | null;
+  reviewed_at: string | null;
   created_at: string;
 }
+
+interface PromotionProposalRow {
+  id: string;
+  target_type: string;
+  status: string;
+  proposed_payload: Record<string, unknown>;
+  source_map: Record<string, unknown>;
+  created_at: string;
+  review_reason: string | null;
+  document_version?: { documents?: { original_filename: string } | null } | null;
+}
+
+type DomainProposalTarget = 'crm_agreement' | 'site_brief' | 'credential' | 'finance_reconciliation' | 'hr_case' | 'investigation_link';
+
+function domainProposalTarget(fileName: string): { type: DomainProposalTarget; label: string } | null {
+  const name = fileName.toLowerCase();
+  if (/agreement|contract|terms|proforma|supply/.test(name)) return { type: 'crm_agreement', label: 'Prepare CRM agreement proposal' };
+  if (/certificate|coc|coa|licence|license/.test(name)) return { type: 'credential', label: 'Prepare credential proposal' };
+  if (/expense|costing|invoice|reimbursement|pay/.test(name)) return { type: 'finance_reconciliation', label: 'Prepare finance proposal' };
+  if (/discip|affidavit|emergency|employment/.test(name)) return { type: 'hr_case', label: 'Prepare HR case proposal' };
+  if (/attendance|assignment|handout|site/.test(name)) return { type: 'site_brief', label: 'Prepare site brief proposal' };
+  if (/incident|linz|monthly report/.test(name)) return { type: 'investigation_link', label: 'Prepare investigation proposal' };
+  return null;
+}
+
+interface ClientOrganizationOption { id: string; name: string; }
+interface StaffOption { id: string; display_name: string | null; email: string | null; }
+interface InvestigationOption { id: string; investigation_reference: string; title: string; status: string; }
 
 const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
   { id: 'pending', label: 'Pending' },
@@ -69,6 +105,7 @@ const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
 ];
 
 const ApprovalsActivityPage: React.FC = () => {
+  const { operatingOrganizationId, profile } = useAuth();
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [plans, setPlans] = useState<JobPlanRow[]>([]);
   const [planSteps, setPlanSteps] = useState<Record<string, JobPlanStep[]>>({});
@@ -86,13 +123,28 @@ const ApprovalsActivityPage: React.FC = () => {
   const [planDecision, setPlanDecision] = useState<'approve' | 'reject' | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [documentPromotions, setDocumentPromotions] = useState<DocumentPromotionRow[]>([]);
+  const [promotionProposals, setPromotionProposals] = useState<PromotionProposalRow[]>([]);
+  const [selectedProposal, setSelectedProposal] = useState<PromotionProposalRow | null>(null);
+  const [proposalDecision, setProposalDecision] = useState<'approved' | 'rejected' | null>(null);
+  const [clientOrganizations, setClientOrganizations] = useState<ClientOrganizationOption[]>([]);
+  const [executionProposal, setExecutionProposal] = useState<PromotionProposalRow | null>(null);
+  const [executionForm, setExecutionForm] = useState({ clientOrganizationId: '', name: '', startsOn: '', endsOn: '' });
+  const [financeProposal, setFinanceProposal] = useState<PromotionProposalRow | null>(null);
+  const [financeForm, setFinanceForm] = useState({ clientOrganizationId: '', serviceAgreementId: '', invoiceNumber: '', invoiceDate: '', dueDate: '', subtotal: '', gstAmount: '', totalAmount: '', notes: '' });
+  const [targetExecution, setTargetExecution] = useState<{ proposal: PromotionProposalRow; target: DomainProposalTarget } | null>(null);
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
+  const [investigationOptions, setInvestigationOptions] = useState<InvestigationOption[]>([]);
+  const [targetForm, setTargetForm] = useState({ staffId: '', credentialType: 'certificate_of_authority', credentialNumber: '', issuingAuthority: '', issuedDate: '', expiryDate: '', fileName: '', storagePath: '', documentType: 'certificate', notes: '', name: '', workUnitType: 'patrol', serviceType: 'patrol', investigationId: '', entityType: 'field_report', entityId: '', linkRole: 'supporting', linkReason: '' });
   const [promotingDocumentId, setPromotingDocumentId] = useState<string | null>(null);
+  const [proposingDocumentId, setProposingDocumentId] = useState<string | null>(null);
+  const [classificationReview, setClassificationReview] = useState<DocumentPromotionRow | null>(null);
+  const [classificationForm, setClassificationForm] = useState({ privacyClass: 'tenant_sensitive', containsPii: false, containsOperationalSecurity: false, containsFinancialData: false, containsLegalPrivilege: false, reason: '' });
 
   const loadActivity = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [activityResponse, plansResponse, stepsResponse, documentsResponse] = await Promise.all([
+      const [activityResponse, plansResponse, stepsResponse, documentsResponse, proposalsResponse, clientsResponse, staffResponse, investigationsResponse] = await Promise.all([
         supabase.rpc('get_approvals_activity', {
         p_limit: 100,
         p_offset: 0,
@@ -101,12 +153,20 @@ const ApprovalsActivityPage: React.FC = () => {
         }),
         supabase.from('bob_job_plans').select('id,goal,status,reasoning,created_at,organization_id').in('status', filter === 'all' ? ['proposed', 'executing', 'needs_review'] : filter === 'pending' ? ['proposed'] : []).order('created_at', { ascending: false }).limit(30),
         supabase.from('bob_job_plan_steps').select('id,plan_id,sequence,action_type,status').order('sequence'),
-        supabase.from('documents').select('id,original_filename,current_scope,document_versions(id,version_label,extraction_confidence,ocr_required,created_at,document_classifications(privacy_class,confidence,rationale,created_at))').in('current_scope', ['conversation_only', 'tenant', 'quarantined']).order('created_at', { ascending: false }).limit(50),
+        supabase.from('documents').select('id,original_filename,current_scope,document_versions(id,version_label,extracted_text,extraction_confidence,ocr_required,created_at,document_classifications(privacy_class,confidence,rationale,contains_pii,contains_operational_security,contains_financial_data,contains_legal_privilege,classifier_source,reviewed_at,created_at))').in('current_scope', ['conversation_only', 'tenant', 'quarantined']).order('created_at', { ascending: false }).limit(50),
+        supabase.from('document_promotion_proposals').select('id,target_type,status,proposed_payload,source_map,created_at,review_reason,document_version:document_versions(documents(original_filename))').order('created_at', { ascending: false }).limit(50),
+        supabase.from('organizations').select('id,name').eq('organization_type', 'client').eq('active', true).order('name').limit(100),
+        supabase.from('staff_profiles').select('id,user_id,display_name:user_id').eq('organization_id', operatingOrganizationId ?? profile?.organizationId ?? '').limit(100),
+        supabase.from('investigations').select('id,investigation_reference,title,status').eq('organization_id', operatingOrganizationId ?? profile?.organizationId ?? '').in('status', ['open','active','awaiting_evidence','awaiting_review']).order('created_at', { ascending: false }).limit(100),
       ]);
       if (activityResponse.error) throw activityResponse.error;
       if (plansResponse.error) throw plansResponse.error;
       if (stepsResponse.error) throw stepsResponse.error;
       if (documentsResponse.error) throw documentsResponse.error;
+      if (proposalsResponse.error) throw proposalsResponse.error;
+      if (clientsResponse.error) throw clientsResponse.error;
+      if (staffResponse.error) throw staffResponse.error;
+      if (investigationsResponse.error) throw investigationsResponse.error;
       const activity = (activityResponse.data as ApprovalRow[]) ?? [];
       setRows(activity);
       const planRows = (plansResponse.data as JobPlanRow[]) ?? [];
@@ -115,12 +175,16 @@ const ApprovalsActivityPage: React.FC = () => {
         (grouped[step.plan_id] ??= []).push(step);
         return grouped;
       }, {}));
-      setDocumentPromotions(((documentsResponse.data as Array<{ original_filename: string; current_scope: string; document_versions?: Array<{ id: string; extraction_confidence: number | null; ocr_required: boolean; created_at: string; document_classifications?: Array<{ privacy_class: string; confidence: number | null; rationale: string | null; created_at: string }> }> }>) ?? []).flatMap((document) => {
+      setDocumentPromotions(((documentsResponse.data as Array<{ original_filename: string; current_scope: string; document_versions?: Array<{ id: string; extracted_text: string | null; extraction_confidence: number | null; ocr_required: boolean; created_at: string; document_classifications?: Array<{ privacy_class: string; confidence: number | null; rationale: string | null; contains_pii: boolean; contains_operational_security: boolean; contains_financial_data: boolean; contains_legal_privilege: boolean; classifier_source: string; reviewed_at: string | null; created_at: string }> }> }>) ?? []).flatMap((document) => {
         const version = [...(document.document_versions ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
         if (!version) return [];
         const classification = [...(version.document_classifications ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
-        return [{ version_id: version.id, file_name: document.original_filename, scope: document.current_scope, privacy_class: classification?.privacy_class ?? null, confidence: classification?.confidence ?? version.extraction_confidence, rationale: classification?.rationale ?? null, ocr_required: version.ocr_required, created_at: version.created_at }];
+        return [{ version_id: version.id, file_name: document.original_filename, scope: document.current_scope, privacy_class: classification?.privacy_class ?? null, confidence: classification?.confidence ?? version.extraction_confidence, rationale: classification?.rationale ?? null, ocr_required: version.ocr_required, extracted_text: version.extracted_text ?? null, contains_pii: classification?.contains_pii ?? false, contains_operational_security: classification?.contains_operational_security ?? false, contains_financial_data: classification?.contains_financial_data ?? false, contains_legal_privilege: classification?.contains_legal_privilege ?? false, classifier_source: classification?.classifier_source ?? null, reviewed_at: classification?.reviewed_at ?? null, created_at: version.created_at }];
       }));
+      setPromotionProposals((proposalsResponse.data as PromotionProposalRow[]) ?? []);
+      setClientOrganizations((clientsResponse.data as ClientOrganizationOption[]) ?? []);
+      setStaffOptions(((staffResponse.data as Array<{ id: string; user_id: string | null }>) ?? []).map((staff) => ({ id: staff.id, display_name: null, email: staff.user_id })));
+      setInvestigationOptions((investigationsResponse.data as InvestigationOption[]) ?? []);
       setSelectedId((current) => current && activity.some((row) => row.id === current) ? current : activity[0]?.id ?? null);
     } catch (loadError) {
       setRows([]);
@@ -137,6 +201,107 @@ const ApprovalsActivityPage: React.FC = () => {
     if (promoteError) setError(promoteError.message);
     else { setNotice(`${document.file_name} promoted to the tenant reference library.`); await loadActivity(); }
     setPromotingDocumentId(null);
+  };
+
+  const proposeDocumentPromotion = async (document: DocumentPromotionRow, targetType: DomainProposalTarget) => {
+    setProposingDocumentId(document.version_id); setError(null); setNotice(null);
+    const { error: proposalError } = await supabase.rpc('propose_document_promotion', {
+      p_document_version_id: document.version_id,
+      p_target_type: targetType,
+      p_proposed_payload: { title: document.file_name, document_type: targetType, extracted_summary: document.extracted_text?.slice(0, 1200) ?? null },
+      p_source_map: { document_version_id: document.version_id, source_excerpt: document.extracted_text?.slice(0, 1200) ?? null },
+    });
+    if (proposalError) setError(proposalError.message);
+    else { setNotice(`${document.file_name} is ready for human ${targetType === 'crm_agreement' ? 'CRM agreement' : formatActionType(targetType)} review.`); await loadActivity(); }
+    setProposingDocumentId(null);
+  };
+
+  const reviewClassification = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!classificationReview || !classificationForm.reason.trim()) return;
+    setBusyId(classificationReview.version_id); setError(null); setNotice(null);
+    const { error: reviewError } = await supabase.rpc('review_document_classification', {
+      p_document_version_id: classificationReview.version_id,
+      p_privacy_class: classificationForm.privacyClass,
+      p_contains_pii: classificationForm.containsPii,
+      p_contains_operational_security: classificationForm.containsOperationalSecurity,
+      p_contains_financial_data: classificationForm.containsFinancialData,
+      p_contains_legal_privilege: classificationForm.containsLegalPrivilege,
+      p_reason: classificationForm.reason.trim(),
+    });
+    if (reviewError) setError(reviewError.message);
+    else { setNotice(`${classificationReview.file_name} classification review recorded.`); setClassificationReview(null); await loadActivity(); }
+    setBusyId(null);
+  };
+
+  const reviewPromotionProposal = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedProposal || !proposalDecision || !reasoning.trim()) return;
+    setBusyId(selectedProposal.id); setError(null); setNotice(null);
+    const { error: reviewError } = await supabase.rpc('review_document_promotion_proposal', {
+      p_proposal_id: selectedProposal.id,
+      p_decision: proposalDecision,
+      p_reason: reasoning.trim(),
+    });
+    if (reviewError) setError(reviewError.message);
+    else { setNotice(`Promotion proposal ${proposalDecision}.`); setSelectedProposal(null); setProposalDecision(null); setReasoning(''); await loadActivity(); }
+    setBusyId(null);
+  };
+
+  const applyCrmAgreementProposal = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!executionProposal || !executionForm.clientOrganizationId || !executionForm.name.trim() || !operatingOrganizationId) return;
+    setBusyId(executionProposal.id); setError(null); setNotice(null);
+    const { data, error: applyError } = await supabase.rpc('apply_crm_agreement_promotion_proposal', {
+      p_proposal_id: executionProposal.id,
+      p_provider_organization_id: operatingOrganizationId,
+      p_client_organization_id: executionForm.clientOrganizationId,
+      p_name: executionForm.name.trim(),
+      p_starts_on: executionForm.startsOn || null,
+      p_ends_on: executionForm.endsOn || null,
+      p_enabled_modules: [],
+    });
+    if (applyError) setError(applyError.message);
+    else { setNotice(`CRM agreement created from approved proposal ${(data as { agreement_id?: string } | null)?.agreement_id ?? ''}.`); setExecutionProposal(null); await loadActivity(); }
+    setBusyId(null);
+  };
+
+  const applyFinanceProposal = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!financeProposal || !financeForm.clientOrganizationId || !financeForm.invoiceNumber.trim() || !financeForm.invoiceDate || !financeForm.subtotal || !financeForm.totalAmount) return;
+    setBusyId(financeProposal.id); setError(null); setNotice(null);
+    const { data, error: applyError } = await supabase.rpc('apply_finance_reconciliation_proposal', {
+      p_proposal_id: financeProposal.id,
+      p_client_organization_id: financeForm.clientOrganizationId,
+      p_service_agreement_id: financeForm.serviceAgreementId || null,
+      p_invoice_number: financeForm.invoiceNumber.trim(),
+      p_invoice_date: financeForm.invoiceDate,
+      p_due_date: financeForm.dueDate || null,
+      p_subtotal: Number(financeForm.subtotal),
+      p_gst_amount: Number(financeForm.gstAmount || 0),
+      p_total_amount: Number(financeForm.totalAmount),
+      p_notes: financeForm.notes.trim() || null,
+    });
+    if (applyError) setError(applyError.message);
+    else { setNotice(`Draft invoice created from approved proposal ${(data as { invoice_id?: string } | null)?.invoice_id ?? ''}.`); setFinanceProposal(null); await loadActivity(); }
+    setBusyId(null);
+  };
+
+  const applyTargetProposal = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!targetExecution) return;
+    const { proposal, target } = targetExecution;
+    setBusyId(proposal.id); setError(null); setNotice(null);
+    let rpc = '';
+    let args: Record<string, unknown> = { p_proposal_id: proposal.id };
+    if (target === 'credential') { rpc = 'apply_credential_promotion_proposal'; args = { ...args, p_staff_id: targetForm.staffId, p_credential_type: targetForm.credentialType, p_credential_number: targetForm.credentialNumber || null, p_issuing_authority: targetForm.issuingAuthority || null, p_issued_date: targetForm.issuedDate || null, p_expiry_date: targetForm.expiryDate || null, p_authorized_activities: [] }; }
+    if (target === 'hr_case') { rpc = 'apply_hr_document_promotion_proposal'; args = { ...args, p_staff_id: targetForm.staffId, p_document_type: targetForm.documentType, p_file_name: targetForm.fileName || targetForm.name, p_storage_path: targetForm.storagePath || targetForm.notes, p_expiry_date: targetForm.expiryDate || null, p_notes: targetForm.notes || null }; }
+    if (target === 'site_brief') { rpc = 'apply_site_brief_promotion_proposal'; args = { ...args, p_name: targetForm.name, p_work_unit_type: targetForm.workUnitType, p_service_type: targetForm.serviceType }; }
+    if (target === 'investigation_link') { rpc = 'apply_investigation_link_promotion_proposal'; args = { ...args, p_investigation_id: targetForm.investigationId || targetForm.staffId, p_entity_type: targetForm.entityType, p_entity_id: targetForm.entityId || targetForm.name, p_link_role: targetForm.linkRole, p_link_reason: targetForm.linkReason || targetForm.notes }; }
+    const { error: applyError } = await supabase.rpc(rpc, args);
+    if (applyError) setError(applyError.message);
+    else { setNotice(`${formatActionType(target)} applied from approved proposal.`); setTargetExecution(null); await loadActivity(); }
+    setBusyId(null);
   };
 
   useEffect(() => {
@@ -243,6 +408,7 @@ const ApprovalsActivityPage: React.FC = () => {
 
   return (
     <div className="approvals-page">
+      {targetExecution && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={applyTargetProposal} role="dialog" aria-modal="true" aria-labelledby="target-proposal-apply-title"><div className="approvals-panel-heading"><div><span>Approved proposal</span><h2 id="target-proposal-apply-title">Apply approved {formatActionType(targetExecution.target)}</h2></div><button type="button" onClick={() => setTargetExecution(null)}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">Enter the authoritative target details explicitly. No inference is applied silently.</p><label><span>Primary target ID</span><input required value={targetForm.staffId || targetForm.investigationId} onChange={(event) => setTargetForm({ ...targetForm, staffId: event.target.value, investigationId: event.target.value })} /></label><label><span>Target name or type</span><input required value={targetForm.name || targetForm.credentialType} onChange={(event) => setTargetForm({ ...targetForm, name: event.target.value, credentialType: event.target.value, entityId: event.target.value })} /></label><label><span>Notes, reason, or secure path</span><textarea required rows={4} value={targetForm.notes || targetForm.linkReason || targetForm.storagePath} onChange={(event) => setTargetForm({ ...targetForm, notes: event.target.value, linkReason: event.target.value, storagePath: event.target.value })} /></label><div className="approvals-dialog-actions"><button type="button" onClick={() => setTargetExecution(null)}>Cancel</button><button type="submit" className="is-approve" disabled={busyId === targetExecution.proposal.id}>Apply approved proposal</button></div></form></div>}
       <header className="approvals-heading">
         <div><span>Governed operations</span><h1>Approvals and activity</h1><p>Review consequential actions before they enter the application.</p></div>
         <button type="button" onClick={() => void loadActivity()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh</button>
@@ -257,8 +423,11 @@ const ApprovalsActivityPage: React.FC = () => {
 
       {plans.length > 0 && <section className="approvals-queue" aria-label="Governed job plans"><div className="approvals-panel-heading"><div><span>Whole-plan approval</span><h2>Job plans awaiting review</h2></div><ListChecks size={18} /></div><div className="approvals-list">{plans.map((plan) => { const steps = planSteps[plan.id] ?? []; return <article className={`status-${plan.status}`} key={plan.id}><div><strong>{plan.goal}</strong><small>{steps.length} ordered step{steps.length === 1 ? '' : 's'} · {formatAge(plan.created_at)}</small></div><p>{plan.reasoning ?? 'No plan reasoning was recorded.'}</p><small>{steps.map((step) => `${step.sequence + 1}. ${formatActionType(step.action_type)} (${step.status})`).join(' · ')}</small>{plan.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openPlanDecision(plan, 'reject')}><XCircle size={17} /> Reject plan</button><button type="button" className="is-approve" onClick={() => openPlanDecision(plan, 'approve')}><CheckCircle2 size={17} /> Review plan</button></div>}</article>; })}</div></section>}
 
-      {documentPromotions.length > 0 && <section className="approvals-queue" aria-label="Document promotion queue"><div className="approvals-panel-heading"><div><span>Reference library</span><h2>Documents awaiting promotion</h2></div><ShieldCheck size={18} /></div><div className="approvals-list">{documentPromotions.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.file_name}</strong><small>{document.privacy_class ?? 'Unclassified'} · {document.confidence == null ? 'No confidence' : `${Math.round(document.confidence * 100)}% confidence`}</small></div><p>{document.ocr_required ? 'OCR is still required before reliable classification.' : document.rationale ?? 'Review the classification and tenant scope before promotion.'}</p><div className="approvals-actions"><button type="button" className="is-approve" disabled={promotingDocumentId === document.version_id || document.ocr_required || !document.privacy_class} onClick={() => void promoteDocument(document)}>{promotingDocumentId === document.version_id ? 'Promoting...' : 'Promote to tenant library'}</button></div></article>)}</div></section>}
+      {documentPromotions.length > 0 && <section className="approvals-queue" aria-label="Document promotion queue"><div className="approvals-panel-heading"><div><span>Reference library</span><h2>Documents awaiting promotion</h2></div><ShieldCheck size={18} /></div><div className="approvals-list">{documentPromotions.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.file_name}</strong><small>{document.privacy_class ?? 'Unclassified'} · {document.confidence == null ? 'No confidence' : `${Math.round(document.confidence * 100)}% confidence`} · {document.reviewed_at ? 'Human reviewed' : 'Review pending'}</small></div><div className="approvals-document-flags">{document.contains_pii && <span>PII</span>}{document.contains_operational_security && <span>Operational security</span>}{document.contains_financial_data && <span>Financial data</span>}{document.contains_legal_privilege && <span>Legal privilege</span>}</div><p>{document.ocr_required ? 'OCR is still required before reliable classification.' : document.rationale ?? 'Review the classification and tenant scope before promotion.'}</p>{document.extracted_text && <details className="approvals-payload"><summary>Extracted source preview</summary><p>{document.extracted_text.slice(0, 900)}</p></details>}<small>Classifier: {document.classifier_source ?? 'Unavailable'} · Scope: {document.scope.replaceAll('_', ' ')}</small><div className="approvals-actions">{domainProposalTarget(document.file_name) && <button type="button" className="is-secondary" disabled={proposingDocumentId === document.version_id} onClick={() => void proposeDocumentPromotion(document, domainProposalTarget(document.file_name)!.type)}>{proposingDocumentId === document.version_id ? 'Preparing proposal...' : domainProposalTarget(document.file_name)!.label}</button>}<button type="button" className="is-secondary" onClick={() => { setClassificationReview(document); setClassificationForm({ privacyClass: document.privacy_class ?? 'tenant_sensitive', containsPii: document.contains_pii, containsOperationalSecurity: document.contains_operational_security, containsFinancialData: document.contains_financial_data, containsLegalPrivilege: document.contains_legal_privilege, reason: '' }); }}>Review classification</button><button type="button" className="is-approve" disabled={promotingDocumentId === document.version_id || document.ocr_required || !document.privacy_class} onClick={() => void promoteDocument(document)}>{promotingDocumentId === document.version_id ? 'Promoting...' : 'Promote to tenant library'}</button></div></article>)}</div></section>}
+      {promotionProposals.length > 0 && <section className="approvals-queue" aria-label="Document promotion proposals"><div className="approvals-panel-heading"><div><span>Domain intake</span><h2>Promotion proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{promotionProposals.map((proposal) => <article className={`status-${proposal.status}`} key={proposal.id}><div><strong>{proposal.document_version?.documents?.original_filename ?? 'Document proposal'}</strong><small>{formatActionType(proposal.target_type)} · {proposal.status} · {formatAge(proposal.created_at)}</small></div><p>{String(proposal.proposed_payload.title ?? 'Prepared domain promotion proposal')}</p><small>Source: {String(proposal.source_map.source_excerpt ?? 'Source map recorded')}</small>{proposal.review_reason && <small>Review reason: {proposal.review_reason}</small>}{proposal.status === 'approved' && <p className="approvals-proposal-boundary">No authoritative CRM record has been created by this approval.</p>}{proposal.status === 'approved' && proposal.target_type === 'crm_agreement' && <div className="approvals-actions"><button type="button" className="is-approve" onClick={() => { setExecutionProposal(proposal); setExecutionForm({ clientOrganizationId: '', name: String(proposal.proposed_payload.title ?? ''), startsOn: '', endsOn: '' }); }}>Apply to CRM</button></div>}{proposal.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => { setSelectedProposal(proposal); setProposalDecision('rejected'); setReasoning(''); }}>Reject proposal</button><button type="button" className="is-approve" onClick={() => { setSelectedProposal(proposal); setProposalDecision('approved'); setReasoning(''); }}>Approve proposal</button></div>}</article>)}</div></section>}
 
+      {promotionProposals.some((proposal) => proposal.status === 'approved' && proposal.target_type === 'finance_reconciliation') && <section className="approvals-queue" aria-label="Approved finance proposals"><div className="approvals-panel-heading"><div><span>Finance intake</span><h2>Approved finance proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-actions">{promotionProposals.filter((proposal) => proposal.status === 'approved' && proposal.target_type === 'finance_reconciliation').map((proposal) => <button type="button" className="is-approve" key={proposal.id} onClick={() => { setFinanceProposal(proposal); setFinanceForm({ clientOrganizationId: '', serviceAgreementId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().slice(0, 10), dueDate: '', subtotal: '', gstAmount: '', totalAmount: '', notes: '' }); }}>Create draft invoice for {proposal.document_version?.documents?.original_filename ?? 'approved proposal'}</button>)}</div></section>}
+      {promotionProposals.some((proposal) => proposal.status === 'approved' && ['credential','hr_case','site_brief','investigation_link'].includes(proposal.target_type)) && <section className="approvals-queue" aria-label="Approved operational proposals"><div className="approvals-panel-heading"><div><span>Operational intake</span><h2>Approved operational proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{promotionProposals.filter((proposal) => proposal.status === 'approved' && ['credential','hr_case','site_brief','investigation_link'].includes(proposal.target_type)).map((proposal) => <article className="status-approved" key={proposal.id}><strong>{proposal.document_version?.documents?.original_filename ?? 'Approved proposal'}</strong><small>{formatActionType(proposal.target_type)}</small><div className="approvals-actions"><button type="button" className="is-approve" onClick={() => { setTargetExecution({ proposal, target: proposal.target_type as DomainProposalTarget }); setTargetForm({ ...targetForm, name: String(proposal.proposed_payload.title ?? '') }); }}>{`Apply ${formatActionType(proposal.target_type)}`}</button></div></article>)}</div></section>}
       {error && <div className="approvals-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
       {notice && <div className={`approvals-message ${notice.includes('failed') ? 'is-warning' : 'is-success'}`} role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
 
@@ -332,6 +501,10 @@ const ApprovalsActivityPage: React.FC = () => {
       {planDecision && selectedPlanId && (
         <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={submitPlanDecision} role="dialog" aria-modal="true" aria-labelledby="plan-decision-title"><div className="approvals-panel-heading"><div><span>Whole-plan decision</span><h2 id="plan-decision-title">{planDecision === 'approve' ? 'Approve job plan' : 'Reject job plan'}</h2></div><button type="button" onClick={() => { setPlanDecision(null); setSelectedPlanId(null); }}><X size={18} /><span className="sr-only">Close</span></button></div><label><span>Decision reasoning</span><textarea required rows={4} value={reasoning} onChange={(event) => setReasoning(event.target.value)} placeholder="Record why this whole plan should proceed or stop." /></label><div className="approvals-dialog-actions"><button type="button" onClick={() => { setPlanDecision(null); setSelectedPlanId(null); }}>Cancel</button><button type="submit" className={planDecision === 'approve' ? 'is-approve' : 'is-reject'} disabled={busyId === selectedPlanId || !reasoning.trim()}>{busyId === selectedPlanId ? 'Recording decision' : planDecision === 'approve' ? 'Approve plan' : 'Reject plan'}</button></div></form></div>
       )}
+      {classificationReview && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={reviewClassification} role="dialog" aria-modal="true" aria-labelledby="classification-review-title"><div className="approvals-panel-heading"><div><span>Human classification</span><h2 id="classification-review-title">Review document classification</h2></div><button type="button" onClick={() => setClassificationReview(null)}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">{classificationReview.file_name}</p><label><span>Privacy class</span><select value={classificationForm.privacyClass} onChange={(event) => setClassificationForm({ ...classificationForm, privacyClass: event.target.value })}><option value="public">Public</option><option value="internal_non_sensitive">Internal non-sensitive</option><option value="tenant_sensitive">Tenant sensitive</option><option value="restricted">Restricted</option></select></label><div className="approvals-review-checks"><label><input type="checkbox" checked={classificationForm.containsPii} onChange={(event) => setClassificationForm({ ...classificationForm, containsPii: event.target.checked })} /><span>Contains PII</span></label><label><input type="checkbox" checked={classificationForm.containsOperationalSecurity} onChange={(event) => setClassificationForm({ ...classificationForm, containsOperationalSecurity: event.target.checked })} /><span>Operational security</span></label><label><input type="checkbox" checked={classificationForm.containsFinancialData} onChange={(event) => setClassificationForm({ ...classificationForm, containsFinancialData: event.target.checked })} /><span>Financial data</span></label><label><input type="checkbox" checked={classificationForm.containsLegalPrivilege} onChange={(event) => setClassificationForm({ ...classificationForm, containsLegalPrivilege: event.target.checked })} /><span>Legal privilege</span></label></div><label><span>Review reason</span><textarea required rows={4} value={classificationForm.reason} onChange={(event) => setClassificationForm({ ...classificationForm, reason: event.target.value })} placeholder="Why this classification is accurate and what scope it permits" /></label><div className="approvals-dialog-actions"><button type="button" onClick={() => setClassificationReview(null)}>Cancel</button><button type="submit" className="is-approve" disabled={busyId === classificationReview.version_id || !classificationForm.reason.trim()}>{busyId === classificationReview.version_id ? 'Recording review' : 'Record classification review'}</button></div></form></div>}
+      {selectedProposal && proposalDecision && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={reviewPromotionProposal} role="dialog" aria-modal="true" aria-labelledby="proposal-review-title"><div className="approvals-panel-heading"><div><span>Domain proposal</span><h2 id="proposal-review-title">{proposalDecision === 'approved' ? 'Approve promotion proposal' : 'Reject promotion proposal'}</h2></div><button type="button" onClick={() => { setSelectedProposal(null); setProposalDecision(null); }}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">{selectedProposal.document_version?.documents?.original_filename ?? 'Document proposal'} · {formatActionType(selectedProposal.target_type)}</p><label><span>Decision reasoning</span><textarea required rows={4} value={reasoning} onChange={(event) => setReasoning(event.target.value)} placeholder="Why this domain proposal should proceed or stop" /></label><div className="approvals-dialog-actions"><button type="button" onClick={() => { setSelectedProposal(null); setProposalDecision(null); }}>Cancel</button><button type="submit" className={proposalDecision === 'approved' ? 'is-approve' : 'is-reject'} disabled={busyId === selectedProposal.id || !reasoning.trim()}>{busyId === selectedProposal.id ? 'Recording decision' : proposalDecision === 'approved' ? 'Approve proposal' : 'Reject proposal'}</button></div></form></div>}
+      {executionProposal && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={applyCrmAgreementProposal} role="dialog" aria-modal="true" aria-labelledby="crm-proposal-apply-title"><div className="approvals-panel-heading"><div><span>Authoritative CRM action</span><h2 id="crm-proposal-apply-title">Apply approved agreement</h2></div><button type="button" onClick={() => setExecutionProposal(null)}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">Explicit party and date confirmation is required before a service agreement is created.</p><label><span>Client organisation</span><select required value={executionForm.clientOrganizationId} onChange={(event) => setExecutionForm({ ...executionForm, clientOrganizationId: event.target.value })}><option value="">Select client organisation</option>{clientOrganizations.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label><label><span>Agreement name</span><input required value={executionForm.name} onChange={(event) => setExecutionForm({ ...executionForm, name: event.target.value })} /></label><div className="approvals-review-checks"><label><span>Starts</span><input type="date" value={executionForm.startsOn} onChange={(event) => setExecutionForm({ ...executionForm, startsOn: event.target.value })} /></label><label><span>Ends</span><input type="date" value={executionForm.endsOn} onChange={(event) => setExecutionForm({ ...executionForm, endsOn: event.target.value })} /></label></div><div className="approvals-dialog-actions"><button type="button" onClick={() => setExecutionProposal(null)}>Cancel</button><button type="submit" className="is-approve" disabled={busyId === executionProposal.id || !executionForm.clientOrganizationId || !executionForm.name.trim()}>{busyId === executionProposal.id ? 'Creating agreement...' : 'Create service agreement'}</button></div></form></div>}
+      {financeProposal && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={applyFinanceProposal} role="dialog" aria-modal="true" aria-labelledby="finance-proposal-apply-title"><div className="approvals-panel-heading"><div><span>Finance action</span><h2 id="finance-proposal-apply-title">Create draft invoice</h2></div><button type="button" onClick={() => setFinanceProposal(null)}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">Enter and reconcile the financial values explicitly. This creates a draft only.</p><label><span>Client organisation</span><select required value={financeForm.clientOrganizationId} onChange={(event) => setFinanceForm({ ...financeForm, clientOrganizationId: event.target.value })}><option value="">Select client organisation</option>{clientOrganizations.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label><label><span>Service agreement ID (optional)</span><input value={financeForm.serviceAgreementId} onChange={(event) => setFinanceForm({ ...financeForm, serviceAgreementId: event.target.value })} /></label><div className="approvals-review-checks"><label><span>Invoice number</span><input required value={financeForm.invoiceNumber} onChange={(event) => setFinanceForm({ ...financeForm, invoiceNumber: event.target.value })} /></label><label><span>Invoice date</span><input required type="date" value={financeForm.invoiceDate} onChange={(event) => setFinanceForm({ ...financeForm, invoiceDate: event.target.value })} /></label><label><span>Due date</span><input type="date" value={financeForm.dueDate} onChange={(event) => setFinanceForm({ ...financeForm, dueDate: event.target.value })} /></label><label><span>Subtotal</span><input required type="number" min="0" step="0.01" value={financeForm.subtotal} onChange={(event) => setFinanceForm({ ...financeForm, subtotal: event.target.value })} /></label><label><span>GST</span><input type="number" min="0" step="0.01" value={financeForm.gstAmount} onChange={(event) => setFinanceForm({ ...financeForm, gstAmount: event.target.value })} /></label><label><span>Total</span><input required type="number" min="0.01" step="0.01" value={financeForm.totalAmount} onChange={(event) => setFinanceForm({ ...financeForm, totalAmount: event.target.value })} /></label></div><label><span>Notes</span><textarea rows={3} value={financeForm.notes} onChange={(event) => setFinanceForm({ ...financeForm, notes: event.target.value })} /></label><div className="approvals-dialog-actions"><button type="button" onClick={() => setFinanceProposal(null)}>Cancel</button><button type="submit" className="is-approve" disabled={busyId === financeProposal.id || !financeForm.clientOrganizationId || !financeForm.invoiceNumber.trim() || !financeForm.invoiceDate || !financeForm.subtotal || !financeForm.totalAmount}>{busyId === financeProposal.id ? 'Creating draft invoice...' : 'Create draft invoice'}</button></div></form></div>}
     </div>
   );
 };

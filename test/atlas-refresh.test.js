@@ -215,6 +215,75 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(atlas.edges.some((edge) => edge.source_name === 'components/CrmOrganizationDialog' && edge.edge_kind === 'writes'), false);
 });
 
+test('managed Atlas includes governed document classification review writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('review_document_classification', 'document_classifications', 'writes'), true);
+  assert.equal(hasEdge('review_document_classification', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes domain document promotion proposals', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('propose_document_promotion', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('propose_document_promotion', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes domain promotion proposal review writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('review_document_promotion_proposal', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('review_document_promotion_proposal', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes explicit CRM agreement proposal application writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('apply_crm_agreement_promotion_proposal', 'service_agreements', 'writes'), true);
+  assert.equal(hasEdge('apply_crm_agreement_promotion_proposal', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('apply_crm_agreement_promotion_proposal', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes explicit credential proposal application writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('apply_credential_promotion_proposal', 'staff_credentials', 'writes'), true);
+  assert.equal(hasEdge('apply_credential_promotion_proposal', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('apply_credential_promotion_proposal', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes explicit finance proposal application writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('apply_finance_reconciliation_proposal', 'invoices', 'writes'), true);
+  assert.equal(hasEdge('apply_finance_reconciliation_proposal', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('apply_finance_reconciliation_proposal', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes explicit HR document proposal application writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('apply_hr_document_promotion_proposal', 'staff_documents', 'writes'), true);
+  assert.equal(hasEdge('apply_hr_document_promotion_proposal', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('apply_hr_document_promotion_proposal', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes explicit site brief proposal application writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('apply_site_brief_promotion_proposal', 'create_roster_work_unit', 'calls'), true);
+  assert.equal(hasEdge('apply_site_brief_promotion_proposal', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('apply_site_brief_promotion_proposal', 'audit_log', 'writes'), true);
+});
+
+test('managed Atlas includes explicit investigation link proposal application writes', () => {
+  const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);
+  assert.equal(hasEdge('apply_investigation_link_promotion_proposal', 'link_investigation_entity', 'calls'), true);
+  assert.equal(hasEdge('apply_investigation_link_promotion_proposal', 'document_promotion_proposals', 'writes'), true);
+  assert.equal(hasEdge('apply_investigation_link_promotion_proposal', 'audit_log', 'writes'), true);
+});
+
 test('managed user spine routes identity and access through governed RPCs', () => {
   const atlas = collectManagedAtlas(path.resolve(__dirname, '..'));
   const hasEdge = (source, target, kind) => atlas.edges.some((edge) => edge.source_name === source && edge.target_name === target && edge.edge_kind === kind);

@@ -110,6 +110,28 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     { id: '23232323-2323-4323-8323-232323232323', name: 'Roster Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: workplaces[0].id, team_id: null, cost_centre_id: costCentres[0].id },
   ];
   const rateRules: Array<Record<string, unknown>> = [];
+  const sampleDocuments = [{
+    id: 'abababab-abab-4bab-8bab-ababababab10', attachment_id: null, storage_bucket: 'bob-uploads',
+    storage_object_ref: 'org/33333333-3333-4333-8333-333333333333/bob/sample/service-agreement.pdf',
+    original_filename: '107 Gorge Road - Service Agreement.pdf', mime_type: 'application/pdf',
+    sha256: 'a'.repeat(64), uploaded_by: ADMIN_ID, source_channel: 'chat_upload', organization_id: ORG_ID,
+    current_scope: 'tenant_reference', created_at: '2026-08-30T08:00:00.000Z', updated_at: '2026-08-30T08:15:00.000Z',
+    document_versions: [{
+      id: 'abababab-abab-4bab-8bab-ababababab11', version_label: 'v1',
+      extracted_text: 'Service agreement for contracted security services at 107 Gorge Road.',
+      extraction_confidence: 0.94, ocr_required: false, created_at: '2026-08-30T08:10:00.000Z',
+      document_classifications: [{ privacy_class: 'tenant_sensitive', confidence: 0.82, rationale: 'Contract and operational-security content remains tenant-scoped.', contains_pii: false, contains_operational_security: true, contains_financial_data: true, contains_legal_privilege: false, classifier_source: 'bob', reviewed_at: null, created_at: '2026-08-30T08:11:00.000Z' }],
+    }],
+  }];
+  const sampleDocumentVersions = [{
+    id: 'abababab-abab-4bab-8bab-ababababab11', document_id: 'abababab-abab-4bab-8bab-ababababab10',
+    version_label: 'v1', effective_from: '2026-08-01', effective_to: null,
+    extracted_text: 'Service agreement for contracted security services at 107 Gorge Road.',
+    extraction_confidence: 0.94, ocr_required: false, metadata_json: { source_page: 1 }, created_at: '2026-08-30T08:10:00.000Z',
+    document_classifications: [{ id: 'abababab-abab-4bab-8bab-ababababab12', privacy_class: 'tenant_sensitive', contains_pii: false, contains_operational_security: true, contains_financial_data: true, contains_legal_privilege: false, classifier_source: 'bob', confidence: 0.82, rationale: 'Contract and operational-security content remains tenant-scoped.', reviewed_at: null }],
+  }];
+  const promotionProposals: Array<Record<string, unknown>> = [{ id: 'abababab-abab-4bab-8bab-ababababab17', status: 'approved', target_type: 'finance_reconciliation', proposed_payload: { title: 'FIRST Security Guard Services Limited - HR Pay Costing.pdf' }, source_map: { source_excerpt: 'Approved finance reconciliation source.' }, created_at: '2026-08-30T08:25:00.000Z', review_reason: 'Finance source reviewed and approved for draft reconciliation.', document_version: { documents: { original_filename: 'FIRST Security Guard Services Limited - HR Pay Costing.pdf' } } }];
+  const pendingIntake = [{ id: 'abababab-abab-4bab-8bab-ababababab16', file_name: 'First Security Template Service Agreement.docx', file_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', file_size_bytes: 84500, processing_state: 'pending', created_at: '2026-08-30T08:20:00.000Z' }, { id: 'abababab-abab-4bab-8bab-ababababab19', file_name: 'OfficeSetup.exe', file_type: 'application/octet-stream', file_size_bytes: 7340032, processing_state: 'pending', created_at: '2026-08-30T08:21:00.000Z' }];
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}');
     authenticatedUser = payload.email === officerUser.email ? officerUser : user;
@@ -148,12 +170,22 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
       await route.fulfill(fulfillJson(body));
       return;
     }
+    if (table === 'documents') { await route.fulfill(fulfillJson(sampleDocuments)); return; }
+    if (table === 'document_versions') { await route.fulfill(fulfillJson(sampleDocumentVersions)); return; }
+    if (table === 'bob_attachments') { await route.fulfill(fulfillJson(pendingIntake)); return; }
+    if (table === 'review_document_classification') { await route.fulfill(fulfillJson({ id: 'abababab-abab-4bab-8bab-ababababab13', classifier_source: 'human_review', privacy_class: 'tenant_sensitive', reviewed_at: '2026-08-30T09:40:00.000Z' })); return; }
+    if (table === 'propose_document_promotion') { const proposal = { id: 'abababab-abab-4bab-8bab-ababababab14', status: 'proposed', target_type: 'crm_agreement', proposed_payload: { title: '107 Gorge Road - Service Agreement.pdf' }, source_map: { source_excerpt: 'Service agreement for contracted security services at 107 Gorge Road.' }, created_at: '2026-08-30T09:45:00.000Z', review_reason: null, document_version: { documents: { original_filename: '107 Gorge Road - Service Agreement.pdf' } } }; promotionProposals.unshift(proposal); await route.fulfill(fulfillJson(proposal)); return; }
+    if (table === 'document_promotion_proposals') { await route.fulfill(fulfillJson(promotionProposals)); return; }
+    if (table === 'review_document_promotion_proposal') { const payload = JSON.parse(request.postData() ?? '{}'); const proposal = promotionProposals.find((item) => item.id === payload.p_proposal_id); if (proposal) { proposal.status = payload.p_decision; proposal.review_reason = payload.p_reason; } await route.fulfill(fulfillJson(proposal)); return; }
+    if (table === 'apply_crm_agreement_promotion_proposal') { const payload = JSON.parse(request.postData() ?? '{}'); const proposal = promotionProposals.find((item) => item.id === payload.p_proposal_id); if (proposal) proposal.status = 'applied'; await route.fulfill(fulfillJson({ proposal_id: payload.p_proposal_id, agreement_id: 'abababab-abab-4bab-8bab-ababababab15', created: true })); return; }
+    if (table === 'apply_finance_reconciliation_proposal') { const payload = JSON.parse(request.postData() ?? '{}'); const proposal = promotionProposals.find((item) => item.id === payload.p_proposal_id); if (proposal) proposal.status = 'applied'; await route.fulfill(fulfillJson({ proposal_id: payload.p_proposal_id, invoice_id: 'abababab-abab-4bab-8bab-ababababab18', created: true })); return; }
     if (table === 'organizations') {
       const accountQuery = url.searchParams.has('parent_organization_id');
+      const clientQuery = url.searchParams.get('organization_type') === 'eq.client';
       const idFilter = url.searchParams.get('id') ?? '';
       const portfolioQuery = idFilter.startsWith('in.');
       const portfolioRows = crmOrganizations.filter((organization) => idFilter.includes(String(organization.id)));
-      await route.fulfill(fulfillJson(accountQuery ? crmOrganizations : portfolioQuery ? portfolioRows : { id: ORG_ID, name: 'Harbour Compliance Services', organization_type: 'service_provider', parent_organization_id: null, active: true, status: 'active', updated_at: '2026-08-29T20:00:00.000Z', contact_email: 'operations@harbour.test', contact_phone: '03 555 0100', billing_email: 'accounts@harbour.test', billing_address: '10 Port Road, Nelson', enforcement_workflow_mode: 'officer_direct', jurisdiction_verification: 'verified' }));
+      await route.fulfill(fulfillJson(clientQuery ? crmOrganizations.filter((organization) => organization.organization_type === 'client') : accountQuery ? crmOrganizations : portfolioQuery ? portfolioRows : { id: ORG_ID, name: 'Harbour Compliance Services', organization_type: 'service_provider', parent_organization_id: null, active: true, status: 'active', updated_at: '2026-08-29T20:00:00.000Z', contact_email: 'operations@harbour.test', contact_phone: '03 555 0100', billing_email: 'accounts@harbour.test', billing_address: '10 Port Road, Nelson', enforcement_workflow_mode: 'officer_direct', jurisdiction_verification: 'verified' }));
       return;
     }
     if (table === 'crm_contacts') { const primaryOnly = url.searchParams.get('is_primary') === 'eq.true'; await route.fulfill(fulfillJson(primaryOnly ? crmContacts.map(({ organization_id, first_name, last_name, is_primary }) => ({ organization_id, first_name, last_name, is_primary })) : crmContacts.filter((contact) => !contact.deactivated_at))); return; }
@@ -314,9 +346,13 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     const request = route.request(); const functionName = new URL(request.url()).pathname.split('/').at(-1); const payload = JSON.parse(request.postData() ?? '{}');
     if (functionName === 'linz-lookup') { if (payload.action === 'address_autocomplete' || payload.action === 'reverse_geocode') await route.fulfill(fulfillJson({ candidates: [{ label: '1 Civic Square, Nelson 7010', lat: -41.274, lng: 173.283, source: 'linz_address' }] })); else await route.fulfill(fulfillJson({ geometry: { type: 'Polygon', coordinates: [[[173.2815, -41.2752], [173.2845, -41.2752], [173.2845, -41.2728], [173.2815, -41.2728], [173.2815, -41.2752]]] }, properties: { appellation: 'LOT 1 DP 12345' }, kind: 'parcel', matched_via: { exact: true, layer: 'parcel', radius_m: 0 } })); return; }
     if (functionName === 'create-user') { identityUsers.push({ id: '56565656-5656-4656-8656-565656565656', display_name: payload.display_name, email: payload.email, phone: null, role: payload.role, organization_id: ORG_ID, module_access: [], deactivated_at: null, updated_at: '2026-08-30T09:55:00.000Z' }); await route.fulfill(fulfillJson({ user: { id: '56565656-5656-4656-8656-565656565656' }, access_preset: payload.access_preset_key ?? null })); return; }
+    if (functionName === 'bob-document-register') { const payload = JSON.parse(request.postData() ?? '{}'); const index = pendingIntake.findIndex((item) => item.id === payload.attachment_id); if (index >= 0) pendingIntake.splice(index, 1); await route.fulfill(fulfillJson({ success: true })); return; }
     if (functionName === 'resend-invite') { await route.fulfill(fulfillJson({ success: true })); return; }
     if (functionName === 'deactivate-user') { const identity = identityUsers.find((row) => row.id === payload.user_id); if (identity) identity.deactivated_at = payload.action === 'deactivate' ? '2026-08-30T10:00:00.000Z' : null; await route.fulfill(fulfillJson({ success: true })); return; }
     await route.fulfill(fulfillJson({ success: true }));
+  });
+  await page.route('**/storage/v1/object/sign/**', async (route) => {
+    await route.fulfill(fulfillJson({ signedURL: 'https://storage.example.test/signed/sample-document.pdf' }));
   });
 }
 

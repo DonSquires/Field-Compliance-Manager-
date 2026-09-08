@@ -103,6 +103,8 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
   'supabase/migrations/20260901020000_resolve_contracted_operational_context.sql',
   'supabase/migrations/20260905005900_govern_operating_branch_configuration.sql',
+  'supabase/migrations/20260908100000_review_document_classification.sql',
+  'supabase/migrations/20260908102000_document_promotion_proposals.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];
