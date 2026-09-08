@@ -688,6 +688,30 @@ fn diagnose_dhfs_partition_table(_disk_number: u32, _partition_number: u32) -> R
     Err("DHFS partition table diagnostics are available in the Windows FCM Desktop application.".to_string())
 }
 
+// Writes a small, bounded byte range (not the whole card) to a local file so it can be attached
+// directly for exact byte-level inspection, instead of retyping/pasting values by hand.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn export_dhfs_diagnostic_bytes(disk_number: u32, partition_number: u32, output_path: String) -> Result<u64, String> {
+    const DIAGNOSTIC_BYTES: usize = 1024 * 1024;
+    let coordinates = partition_coordinates(disk_number, partition_number)?;
+    let device_path = format!(r"\\.\PhysicalDrive{disk_number}");
+    let mut device = OpenOptions::new().read(true).write(false).open(&device_path)
+        .map_err(|error| format!("Could not read {device_path} read-only: {error}"))?;
+    let base = coordinates.offset_bytes;
+    let bytes = read_device_aligned(&mut device, base, DIAGNOSTIC_BYTES)?;
+    let mut output = File::create(&output_path)
+        .map_err(|error| format!("Could not create {output_path}: {error}"))?;
+    output.write_all(&bytes).map_err(|error| format!("Could not write {output_path}: {error}"))?;
+    Ok(bytes.len() as u64)
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn export_dhfs_diagnostic_bytes(_disk_number: u32, _partition_number: u32, _output_path: String) -> Result<u64, String> {
+    Err("DHFS diagnostic byte export is available in the Windows FCM Desktop application.".to_string())
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn list_dhfs_partition_recordings(disk_number: u32, partition_number: u32) -> Result<Vec<PhysicalDhfsRecording>, String> {
@@ -1236,7 +1260,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, extract_dhfs_recording_to_cache, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, diagnose_dhfs_partition_table, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, extract_dhfs_recording_to_cache, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, diagnose_dhfs_partition_table, export_dhfs_diagnostic_bytes, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }

@@ -426,6 +426,27 @@ function App() {
     }
   };
 
+  const exportDiagnosticBytes = async () => {
+    const disk = removableDisks.find((item) => item.partitions.some((partition) => !partition.drive_letter));
+    const partition = disk?.partitions.filter((item) => !item.drive_letter).sort((left, right) => right.size_bytes - left.size_bytes)[0];
+    if (!disk || !partition) {
+      setError('Detect the inserted SD card before exporting diagnostic bytes.');
+      return;
+    }
+    setError(null);
+    const outputPath = await save({ title: 'Save a small (1 MB) raw diagnostic byte range for exact review', defaultPath: 'C:\\Users\\Public\\Documents\\fcm-dhfs-diagnostic-bytes.bin', filters: [{ name: 'Raw bytes', extensions: ['bin'] }] });
+    if (!outputPath) return;
+    setDhfsLoading(true);
+    try {
+      const bytesWritten = await invoke<number>('export_dhfs_diagnostic_bytes', { diskNumber: disk.disk_number, partitionNumber: partition.partition_number, outputPath });
+      setStatus(`Wrote ${formatBytes(bytesWritten)} of raw partition-start bytes to ${outputPath}. Attach that file directly for exact byte-level review.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDhfsLoading(false);
+    }
+  };
+
   const detectDahuaExportTools = async () => {
     setError(null);
     setToolDetectionLoading(true);
@@ -644,6 +665,7 @@ function App() {
         <button type="button" onClick={() => void imageInsertedDhfsPartition()} disabled={imagingLoading}><HardDrive size={18} /> {imagingLoading ? 'Imaging DHFS card...' : 'Image inserted DHFS card'}</button>
         <button type="button" onClick={() => void listPhysicalDhfsRecordings()} disabled={physicalRecordingsLoading}><Database size={18} /> {physicalRecordingsLoading ? 'Reading card recordings...' : 'Read card recordings directly'}</button>
         <button type="button" onClick={() => { void inspectDhfsHeaders(); void inspectDhfsDpt(); void diagnosePartitionTable(); }} disabled={dhfsLoading}><Database size={18} /> {dhfsLoading ? 'Diagnosing DHFS layout...' : 'Diagnose DHFS layout'}</button>
+        <button type="button" onClick={() => void exportDiagnosticBytes()} disabled={dhfsLoading}><Database size={18} /> Export raw diagnostic bytes (1 MB)</button>
         <button type="button" className={activeView === 'video-upload' ? 'is-active' : ''} onClick={() => setActiveView('video-upload')}><Upload size={18} /> Video upload</button>
         <a href={FCM_WEB_URL} target="_blank" rel="noreferrer"><ExternalLink size={18} /> FCM web portal</a>
       </nav>
