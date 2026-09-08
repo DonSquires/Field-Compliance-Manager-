@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.file_import_batches (
   batch_name text NOT NULL,
   source_file text NOT NULL,
   source_sha256 text,
+  duplicate_of_batch_id uuid REFERENCES public.file_import_batches(id) ON DELETE SET NULL,
   parser text NOT NULL,
   status text NOT NULL DEFAULT 'preview',
   manifest_json jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -26,6 +27,9 @@ CREATE TABLE IF NOT EXISTS public.file_import_batches (
 
 CREATE INDEX IF NOT EXISTS file_import_batches_org_status
   ON public.file_import_batches (organization_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS file_import_batches_source_hash
+  ON public.file_import_batches (organization_id, source_sha256)
+  WHERE source_sha256 IS NOT NULL;
 
 ALTER TABLE public.file_import_batches ENABLE ROW LEVEL SECURITY;
 CREATE POLICY file_import_batches_select ON public.file_import_batches
@@ -50,23 +54,31 @@ DECLARE
   v_actor uuid := auth.uid();
   v_org_id uuid := p_organization_id;
   v_batch public.file_import_batches%rowtype;
+  v_duplicate_of uuid;
 BEGIN
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
   IF v_org_id IS NULL THEN RAISE EXCEPTION 'Organisation is required'; END IF;
   IF NOT public.is_admin_for_org(v_org_id) AND NOT public.is_grand_master() THEN RAISE EXCEPTION 'Import batch creation denied'; END IF;
   IF nullif(trim(coalesce(p_batch_name, '')), '') IS NULL OR nullif(trim(coalesce(p_source_file, '')), '') IS NULL THEN RAISE EXCEPTION 'Batch name and source file are required'; END IF;
   IF p_row_count < 0 OR p_duplicate_count < 0 OR p_unresolved_count < 0 THEN RAISE EXCEPTION 'Import counts cannot be negative'; END IF;
+  IF nullif(trim(coalesce(p_source_sha256, '')), '') IS NOT NULL THEN
+    SELECT id INTO v_duplicate_of
+    FROM public.file_import_batches
+    WHERE organization_id = v_org_id AND source_sha256 = trim(p_source_sha256)
+    ORDER BY created_at ASC
+    LIMIT 1;
+  END IF;
   INSERT INTO public.file_import_batches (
-    organization_id, batch_name, source_file, source_sha256, parser,
+    organization_id, batch_name, source_file, source_sha256, duplicate_of_batch_id, parser,
     manifest_json, schema_json, row_count, duplicate_count, unresolved_count, created_by
   ) VALUES (
-    v_org_id, trim(p_batch_name), trim(p_source_file), nullif(trim(coalesce(p_source_sha256, '')), ''), trim(p_parser),
+    v_org_id, trim(p_batch_name), trim(p_source_file), nullif(trim(coalesce(p_source_sha256, '')), ''), v_duplicate_of, trim(p_parser),
     coalesce(p_manifest_json, '{}'::jsonb), coalesce(p_schema_json, '{}'::jsonb),
     p_row_count, p_duplicate_count, p_unresolved_count, v_actor
   ) RETURNING * INTO v_batch;
   INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
   VALUES (v_org_id, v_actor, 'file_import_batch_created', 'file_import_batches', v_batch.id,
-    jsonb_build_object('source_file', v_batch.source_file, 'parser', v_batch.parser, 'row_count', v_batch.row_count, 'duplicate_count', v_batch.duplicate_count, 'unresolved_count', v_batch.unresolved_count));
+    jsonb_build_object('source_file', v_batch.source_file, 'parser', v_batch.parser, 'row_count', v_batch.row_count, 'duplicate_count', v_batch.duplicate_count, 'unresolved_count', v_batch.unresolved_count, 'duplicate_of_batch_id', v_batch.duplicate_of_batch_id));
   RETURN v_batch;
 END;
 $$;

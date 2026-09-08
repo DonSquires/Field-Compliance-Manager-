@@ -8,6 +8,8 @@ describe('file import batch governance', () => {
   it('persists review-only batches with tenant scope and audit provenance', () => {
     expect(migration).toContain('CREATE TABLE IF NOT EXISTS public.file_import_batches');
     expect(migration).toContain('organization_id uuid NOT NULL');
+    expect(migration).toContain('duplicate_of_batch_id uuid REFERENCES public.file_import_batches');
+    expect(migration).toContain('file_import_batches_source_hash');
     expect(migration).toContain('public.is_admin_for_org(organization_id) OR public.is_grand_master()');
     expect(migration).toContain("status IN ('preview','needs_review','approved','rejected','applied','failed')");
     expect(migration).toContain('CREATE OR REPLACE FUNCTION public.create_file_import_batch');

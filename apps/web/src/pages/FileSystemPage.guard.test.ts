@@ -65,6 +65,8 @@ describe('organisation file system', () => {
     expect(page).toContain('sha256Hex');
     expect(page).toContain('p_source_sha256');
     expect(page).toContain('SHA-256');
+    expect(page).toContain('duplicate_of_batch_id');
+    expect(page).toContain('Duplicate source linked');
   });
 
   it('is registered as a first-class admin page', () => {
