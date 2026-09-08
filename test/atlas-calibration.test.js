@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const { collectCalibrationStatus, syncCalibrationStatus } = require('../scripts/atlas-calibration');
 const { buildAtlasGraph, syncAtlasGraph } = require('../scripts/atlas-graph');
+const { buildRefreshPlan } = require('../scripts/atlas-refresh');
 
 test('atlas, oracle, caddie, conductor, endpoint, db, and UI/UX calibration stays synchronized', () => {
   const rootDir = path.resolve(__dirname, '..');
@@ -287,4 +288,42 @@ test('Atlas refresh derives direct SQL RPC calls', () => {
     && edge.target_name === 'target_helper'
     && edge.edge_kind === 'calls'));
   fs.rmSync(rootDir, { recursive: true, force: true });
+});
+
+test('Atlas derives dispatch pay and travel feature capabilities from SQL flow', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-rate-features-'));
+  const schemaPath = path.join(rootDir, 'supabase/schema.sql');
+  fs.mkdirSync(path.dirname(schemaPath), { recursive: true });
+  fs.writeFileSync(schemaPath, `
+    create function public.compute_travel_distance_km() returns void language plpgsql as $$ begin end; $$;
+    create function public.resolve_dispatch_job_pay_lines() returns void language plpgsql as $$ begin perform public.compute_travel_distance_km(); end; $$;
+    create function public.advance_dispatch_job_status() returns void language plpgsql as $$ begin perform public.resolve_dispatch_job_pay_lines(); end; $$;
+  `);
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.capabilities.some((capability) => capability.entity_type === 'feature'
+    && capability.entity_name === 'rate_rules_pay_resolve_pay_lines'
+    && capability.wired));
+  assert.ok(manifest.capabilities.some((capability) => capability.entity_type === 'feature'
+    && capability.entity_name === 'travel_km_rate_context_distance'
+    && capability.wired));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
+
+test('derived feature wiring replaces stale manual exercise assertions with unknown', () => {
+  const plan = buildRefreshPlan({
+    capabilities: [{
+      entity_type: 'feature', entity_name: 'rate_rules_pay_resolve_pay_lines', present: true,
+      wired: true, exercised: null, caller_summary: 'advance_dispatch_job_status', notes: 'derived',
+      refresh_source: 'ci_generator', retirement_status: 'live'
+    }],
+    edges: [],
+    repository_files: []
+  }, [{
+    id: 'feature-id', entity_type: 'feature', entity_name: 'rate_rules_pay_resolve_pay_lines', present: true,
+    wired: false, exercised: false, caller_summary: null, notes: 'legacy', refresh_source: 'manual_seed', retirement_status: 'live'
+  }], []);
+
+  assert.equal(plan.capabilityUpserts[0].exercised, null);
 });

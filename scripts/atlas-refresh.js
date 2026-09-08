@@ -450,6 +450,36 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   const sourceEdges = collectSourceEdges(rootDir, { tables, rpcs, edgeFunctions });
   const edgesByKey = new Map();
   for (const edge of [...sourceEdges, ...collectSqlFunctionEdges(rootDir)]) edgesByKey.set(edgeKey(edge), edge);
+  const addDerivedFeature = (sourceName, featureName, sourceFile, context) => {
+    const edge = {
+      source_type: 'rpc',
+      source_name: sourceName,
+      target_type: 'feature',
+      target_name: featureName,
+      edge_kind: 'calls',
+      evidence_class: 'live-schema',
+      retirement_status: 'live',
+      source_file: sourceFile,
+      migration_name: sourceFile.startsWith('supabase/migrations/') ? path.basename(sourceFile, '.sql') : null,
+      caller_context: `${OWNER_MARKER} ${context}`,
+      refresh_source: 'ci_generator'
+    };
+    edgesByKey.set(edgeKey(edge), edge);
+  };
+  const completionPayEdge = [...edgesByKey.values()].find((edge) => edge.source_type === 'rpc'
+    && edge.source_name === 'advance_dispatch_job_status'
+    && edge.target_type === 'rpc'
+    && edge.target_name === 'resolve_dispatch_job_pay_lines');
+  if (completionPayEdge) {
+    addDerivedFeature('advance_dispatch_job_status', 'rate_rules_pay_resolve_pay_lines', completionPayEdge.source_file, 'derived completed-dispatch pay-line resolution');
+  }
+  const travelContextEdge = [...edgesByKey.values()].find((edge) => edge.source_type === 'rpc'
+    && edge.source_name === 'resolve_dispatch_job_pay_lines'
+    && edge.target_type === 'rpc'
+    && edge.target_name === 'compute_travel_distance_km');
+  if (completionPayEdge && travelContextEdge) {
+    addDerivedFeature('resolve_dispatch_job_pay_lines', 'travel_km_rate_context_distance', travelContextEdge.source_file, 'derived completed-dispatch travel distance context');
+  }
   const edges = [...edgesByKey.values()].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
   const callersByTarget = new Map();
   for (const edge of edges) {
@@ -477,6 +507,7 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   addCapabilities('table', tables);
   addCapabilities('rpc', rpcs);
   addCapabilities('edge_function', edgeFunctions);
+  addCapabilities('feature', new Set(edges.filter((edge) => edge.target_type === 'feature').map((edge) => edge.target_name)));
 
   return {
     generated_at: new Date().toISOString(),
@@ -504,7 +535,10 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     const existing = capabilityByKey.get(capabilityKey(capability));
     const desired = {
       ...capability,
-      exercised: existing?.exercised ?? null,
+      exercised: capability.entity_type === 'feature' && capability.refresh_source === 'ci_generator'
+        && existing?.refresh_source !== 'runtime_telemetry'
+        ? null
+        : existing?.exercised ?? null,
       wired: capability.wired,
       caller_summary: capability.caller_summary,
       notes: capability.notes
