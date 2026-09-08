@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ServiceRelationshipProvider } from './context/ServiceRelationshipContext';
 import { RoleRouter } from './routing/RoleRouter';
 import LoginPage from './pages/LoginPage';
+import PublicDisputePage from './pages/PublicDisputePage';
 
 function AuthGate() {
   const { profile, hasSession, recoveryMode, loading } = useAuth();
@@ -34,6 +35,7 @@ export function App() {
       <ServiceRelationshipProvider>
         <BrowserRouter>
           <Routes>
+            <Route path="/dispute" element={<PublicDisputePage />} />
             <Route path="*" element={<AuthGate />} />
             <Route path="/" element={<Navigate to="/officer" replace />} />
           </Routes>
