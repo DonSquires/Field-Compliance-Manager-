@@ -55,6 +55,13 @@ interface StaffSiteInductionRow {
   expires_at: string | null;
   evidence_notes: string | null;
 }
+interface SiteInductionStateRow {
+  requirement_id: string;
+  induction_name: string;
+  required: boolean;
+  completed: boolean;
+  expires_at: string | null;
+}
 interface CredentialRow {
   id: string;
   staff_id: string;
@@ -346,6 +353,7 @@ const RosterHRPage: React.FC = () => {
   const [payrollExport, setPayrollExport] = useState<{ from: string; to: string } | null>(null);
   const [onboardingAction, setOnboardingAction] = useState<{ staffId: string; ledgerId?: string; version?: number; nextStage?: string; name: string; note: string } | null>(null);
   const [evidenceAction, setEvidenceAction] = useState<{ staffId: string; name: string; action: 'add_skill' | 'assign_line_manager' | 'record_induction' | 'record_document'; note: string; skillId: string; proficiency: string; managerId: string; trainingName: string; siteRequirementId: string; expiresAt: string; documentType: string; fileName: string; storagePath: string } | null>(null);
+  const [siteInductionState, setSiteInductionState] = useState<SiteInductionStateRow[]>([]);
   const [catalogSkills, setCatalogSkills] = useState<CatalogSkill[]>([]);
   const [skillCatalogDraft, setSkillCatalogDraft] = useState<{ id: string | null; name: string; category: string }>({ id: null, name: '', category: 'technical' });
   const [siteInductionRequirements, setSiteInductionRequirements] = useState<SiteInductionRequirementRow[]>([]);
@@ -588,6 +596,28 @@ const RosterHRPage: React.FC = () => {
     setTabGroup('workforce');
     document.getElementById(`credential-${requestedCredentialId}`)?.scrollIntoView({ block: 'center' });
   }, [credentials, requestedCredentialId]);
+
+  useEffect(() => {
+    if (evidenceAction?.action !== 'record_induction' || !evidenceAction.siteRequirementId) {
+      setSiteInductionState([]);
+      return;
+    }
+    const requirement = siteInductionRequirements.find((item) => item.id === evidenceAction.siteRequirementId);
+    if (!requirement?.service_agreement_location_id) {
+      setSiteInductionState([]);
+      return;
+    }
+    let cancelled = false;
+    void supabase.rpc('get_site_induction_state', {
+      p_staff_id: evidenceAction.staffId,
+      p_service_agreement_location_id: requirement.service_agreement_location_id,
+    }).then(({ data, error: stateError }) => {
+      if (cancelled) return;
+      if (stateError) setError(stateError.message);
+      else setSiteInductionState((data as SiteInductionStateRow[]) ?? []);
+    });
+    return () => { cancelled = true; };
+  }, [evidenceAction?.action, evidenceAction?.siteRequirementId, evidenceAction?.staffId, siteInductionRequirements]);
 
   const handleReview = async (event: React.FormEvent) => {
     event.preventDefault();if (!review) return;setSaving(true);setError(null);setNotice(null);
@@ -1052,6 +1082,7 @@ const RosterHRPage: React.FC = () => {
         </div>
       )}
       {notice && <div className="alert alert-success" role="status">{notice}</div>}
+      {evidenceAction?.action === 'record_induction' && siteInductionState.length > 0 && <div className="alert alert-info" role="status">Current induction state: {siteInductionState.filter((item) => item.completed).length} of {siteInductionState.length} requirements complete.</div>}
 
       <div className="crm-branch-filter" aria-label="Roster and HR workspace">
         {TAB_GROUPS.map((group) => (

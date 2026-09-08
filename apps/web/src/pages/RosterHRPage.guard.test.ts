@@ -104,6 +104,12 @@ describe('governed HR administration', () => {
     expect(page).not.toMatch(/from\('(site_induction_requirements|staff_site_inductions)'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
   });
 
+  it('reads agreement-location induction state through the governed RPC', () => {
+    expect(page).toContain("supabase.rpc('get_site_induction_state'");
+    expect(page).toContain('p_staff_id: evidenceAction.staffId');
+    expect(page).toContain('p_service_agreement_location_id: requirement.service_agreement_location_id');
+  });
+
   it('appends retry-safe credential lineage and closes direct mutations', () => {
     for (const evidence of ['for update', 'is_admin_for_org', 'is distinct from p_expected_expiry_date', 'replaces_credential_id', 'client_request_id', 'pg_advisory_xact_lock', "'staff_credential_renewed'"]) expect(credentialSql).toContain(evidence);
     expect(credentialSql).toContain('revoke insert,update,delete on table public.staff_credentials from authenticated');
