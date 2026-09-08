@@ -18589,6 +18589,20 @@ export type Database = {
           path: string[]
         }[]
       }
+      bob_atlas_gap_report: {
+        Args: { p_limit?: number; p_offset?: number }
+        Returns: {
+          caller_summary: string | null
+          entity_name: string
+          entity_type: string
+          exercised: boolean | null
+          gap_kind: string
+          notes: string | null
+          present: boolean
+          retirement_status: string
+          wired: boolean
+        }[]
+      }
       bob_cards_needing_embedding: {
         Args: { match_limit?: number }
         Returns: {

@@ -34,7 +34,27 @@ interface StaffRow {
 interface RoleCodeRow { code: string; name: string; }
 
 interface ReadinessAssessment { staff_id: string; user_id: string | null; work_ready: boolean; identity_status: string; employment_status: string; credential_status: string; training_status: string; blockers: string[]; }
-
+interface CatalogSkill { id: string; skill_name: string; skill_category: string; active: boolean; }
+interface SiteInductionRequirementRow {
+  id: string;
+  organization_id: string;
+  client_site_id: string | null;
+  zone_id: string | null;
+  service_agreement_location_id: string | null;
+  induction_name: string;
+  version: string | null;
+  required: boolean;
+  expires_after_days: number | null;
+  active: boolean;
+}
+interface StaffSiteInductionRow {
+  id: string;
+  requirement_id: string;
+  staff_id: string;
+  completed_at: string;
+  expires_at: string | null;
+  evidence_notes: string | null;
+}
 interface CredentialRow {
   id: string;
   staff_id: string;
@@ -315,7 +335,16 @@ const RosterHRPage: React.FC = () => {
   const [assetCheck, setAssetCheck] = useState<{ asset: AssetRow; condition: string; odometer: string; fuel: string; defects: string } | null>(null);
   const [payrollExport, setPayrollExport] = useState<{ from: string; to: string } | null>(null);
   const [onboardingAction, setOnboardingAction] = useState<{ staffId: string; ledgerId?: string; version?: number; nextStage?: string; name: string; note: string } | null>(null);
-  const [evidenceAction, setEvidenceAction] = useState<{ staffId: string; name: string; action: 'add_skill' | 'assign_line_manager' | 'record_induction' | 'record_document'; note: string; skillName: string; skillCategory: string; proficiency: string; managerId: string; trainingName: string; documentType: string; fileName: string; storagePath: string } | null>(null);
+  const [evidenceAction, setEvidenceAction] = useState<{ staffId: string; name: string; action: 'add_skill' | 'assign_line_manager' | 'record_induction' | 'record_document'; note: string; skillId: string; proficiency: string; managerId: string; trainingName: string; siteRequirementId: string; expiresAt: string; documentType: string; fileName: string; storagePath: string } | null>(null);
+  const [catalogSkills, setCatalogSkills] = useState<CatalogSkill[]>([]);
+  const [skillCatalogDraft, setSkillCatalogDraft] = useState<{ id: string | null; name: string; category: string }>({ id: null, name: '', category: 'technical' });
+  const [siteInductionRequirements, setSiteInductionRequirements] = useState<SiteInductionRequirementRow[]>([]);
+  const [siteInductionDraft, setSiteInductionDraft] = useState<{ id: string | null; name: string; siteId: string; zoneId: string; serviceAgreementLocationId: string; version: string; required: boolean; expiresAfterDays: string; active: boolean }>({ id: null, name: '', siteId: '', zoneId: '', serviceAgreementLocationId: '', version: '', required: true, expiresAfterDays: '', active: true });
+  const [showSkillCatalogForm, setShowSkillCatalogForm] = useState(false);
+  const [showSiteInductionForm, setShowSiteInductionForm] = useState(false);
+  const [sites, setSites] = useState<Array<{ id: string; name: string }>>([]);
+  const [zones, setZones] = useState<Array<{ id: string; name: string }>>([]);
+  const [agreementLocations, setAgreementLocations] = useState<Array<{ id: string; service_agreement_id: string; site_id: string | null; zone_id: string | null }>>([]);
   const [templateForm, setTemplateForm] = useState({
     name: '',
     shift_type: 'day',
@@ -330,13 +359,30 @@ const RosterHRPage: React.FC = () => {
   // shift_templates, leave_requests, timesheets, shift_coverage_requests
   const loadAll = useCallback(async () => {
     const orgId = profile?.organizationId;
-    if (!orgId) return;
+    const org_access_allowed = Boolean(orgId);
+    if (!org_access_allowed) {
+      setCatalogSkills([]);
+      setSiteInductionRequirements([]);
+      setRoleCodes([]);
+      setStaff([]);
+      setReadinessAssessments([]);
+      setCredentials([]);
+      setLeaveRequests([]);
+      setTimesheets([]);
+      setDispatchPayLines([]);
+      setCoverageRequests([]);
+      setSites([]);
+      setZones([]);
+      setAgreementLocations([]);
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, payLineReviewsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes] =
+      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, payLineReviewsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes, skillCatalogRes, siteInductionRes, staffSiteInductionsRes, sitesRes, zonesRes, agreementLocationsRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -386,7 +432,7 @@ const RosterHRPage: React.FC = () => {
             .order('urgency', { ascending: false })
             .order('shift_date', { ascending: true }),
           supabase.rpc('get_staff_readiness_assessment', { p_organization_id: orgId }),
-                  supabase.from('roster_work_units').select('id,name,work_unit_type').eq('organization_id',orgId).eq('active',true).order('name'),
+          supabase.from('roster_work_units').select('id,name,work_unit_type').eq('organization_id',orgId).eq('active',true).order('name'),
           supabase.from('assets').select('id,asset_type,name,registration,make,model,status,assigned_to,last_inspection_date,next_inspection_date').eq('organization_id', orgId).order('asset_type').order('name'),
           supabase.from('on_call_periods').select('id,officer_user_id,period_type,starts_at,ends_at,flat_rate,status').eq('organization_id', orgId).order('starts_at', { ascending: false }).limit(50),
           supabase.from('callout_shifts').select('id,on_call_period_id,officer_user_id,status,minimum_pay_hours,callout_received_at,work_started_at,work_ended_at').eq('organization_id', orgId).order('callout_received_at', { ascending: false }).limit(50),
@@ -397,6 +443,16 @@ const RosterHRPage: React.FC = () => {
           supabase.from('performance_review_cycles').select('id,name,period_start,period_end,due_date,status').eq('organization_id', orgId).order('due_date', { ascending: false }),
           supabase.from('performance_reviews').select('id,staff_id,reviewer_user_id,status,rating,cycle_id').eq('organization_id', orgId).order('created_at', { ascending: false }),
           supabase.from('hr_cases').select('id,staff_id,case_type,severity,status,subject,opened_at').eq('organization_id', orgId).order('opened_at', { ascending: false }),
+          supabase.from('roster_skill_catalog').select('id, skill_name, skill_category, active').eq('organization_id', orgId).order('skill_name'),
+          org_access_allowed
+            ? supabase.from('site_induction_requirements').select('id, organization_id, client_site_id, zone_id, service_agreement_location_id, induction_name, version, required, expires_after_days, active').eq('organization_id', orgId).order('induction_name')
+            : supabase.from('site_induction_requirements').select('id').limit(0),
+          org_access_allowed
+            ? supabase.from('staff_site_inductions').select('id, requirement_id, staff_id, completed_at, expires_at, evidence_notes').eq('organization_id', orgId).order('completed_at', { ascending: false })
+            : supabase.from('staff_site_inductions').select('id').limit(0),
+          supabase.from('client_sites').select('id, name').eq('active', true).order('name'),
+          supabase.from('location_zones').select('id, name').eq('is_active', true).order('name'),
+          supabase.from('service_agreement_locations').select('id, service_agreement_id, site_id, zone_id').eq('status', 'active').order('id'),
         ]);
       const shiftSwapsRes = await supabase
         .from('shift_swaps')
@@ -424,7 +480,15 @@ const RosterHRPage: React.FC = () => {
         if (cyclesRes.error) throw cyclesRes.error;
         if (reviewsRes.error) throw reviewsRes.error;
         if (casesRes.error) throw casesRes.error;
+      if (skillCatalogRes.error) throw skillCatalogRes.error;
+      if (siteInductionRes.error) throw siteInductionRes.error;
+      if (staffSiteInductionsRes.error) throw staffSiteInductionsRes.error;
+      if (sitesRes.error) throw sitesRes.error;
+      if (zonesRes.error) throw zonesRes.error;
+      if (agreementLocationsRes.error) throw agreementLocationsRes.error;
 
+      setCatalogSkills((skillCatalogRes.data as CatalogSkill[]) ?? []);
+      setSiteInductionRequirements((siteInductionRes.data as SiteInductionRequirementRow[]) ?? []);
       setAssets((assetsRes.data as AssetRow[]) ?? []);
       setOnCallPeriods((onCallRes.data as OnCallRow[]) ?? []);
       setCallouts((calloutRes.data as CalloutRow[]) ?? []);
@@ -485,6 +549,9 @@ const RosterHRPage: React.FC = () => {
       );
       setCoverageWorkUnits((workUnitsRes.data as CoverageWorkUnit[])||[]);
       setShiftSwaps((shiftSwapsRes.data as ShiftSwapRow[]) || []);
+      setSites((sitesRes.data as Array<{ id: string; name: string }> ) ?? []);
+      setZones((zonesRes.data as Array<{ id: string; name: string }> ) ?? []);
+      setAgreementLocations((agreementLocationsRes.data as Array<{ id: string; service_agreement_id: string; site_id: string | null; zone_id: string | null }> ) ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load roster data');
     } finally {
@@ -711,23 +778,119 @@ const RosterHRPage: React.FC = () => {
   const recordOnboardingEvidence = async (event: React.FormEvent) => {
     event.preventDefault(); if (!evidenceAction) return;
     setSaving(true); setError(null); setNotice(null);
-    const { error: evidenceError } = await supabase.rpc('manage_staff_onboarding_evidence', {
-      p_client_request_id: crypto.randomUUID(), p_staff_id: evidenceAction.staffId, p_action: evidenceAction.action,
-      p_skill_name: evidenceAction.skillName.trim() || null, p_skill_category: evidenceAction.skillCategory || null,
-      p_proficiency_level: evidenceAction.proficiency || null, p_reports_to_user_id: evidenceAction.managerId || null,
-      p_training_name: evidenceAction.trainingName.trim() || null, p_document_type: evidenceAction.documentType || null,
-      p_file_name: evidenceAction.fileName.trim() || null, p_storage_path: evidenceAction.storagePath.trim() || null,
-      p_notes: evidenceAction.note.trim() || null,
-    });
-    if (evidenceError) setError(evidenceError.message);
-    else { setNotice('Staff onboarding evidence recorded.'); setEvidenceAction(null); await loadAll(); }
+    if (evidenceAction.action === 'add_skill') {
+      const { error: skillError } = await supabase.rpc('assign_roster_skill_to_staff', {
+        p_staff_id: evidenceAction.staffId, p_skill_id: evidenceAction.skillId, p_proficiency_level: evidenceAction.proficiency, p_certified: false, p_notes: evidenceAction.note.trim() || null
+      });
+      if (skillError) setError(skillError.message);
+      else { setNotice('Skill assigned and recorded.'); setEvidenceAction(null); await loadAll(); }
+    } else if (evidenceAction.action === 'record_induction') {
+      if (!evidenceAction.siteRequirementId) {
+        setError('Select the site induction requirement before recording completion.');
+        setSaving(false);
+        return;
+      }
+      const { error: inductionError } = await supabase.rpc('record_staff_site_induction', {
+        p_staff_id: evidenceAction.staffId,
+        p_requirement_id: evidenceAction.siteRequirementId,
+        p_expires_at: evidenceAction.expiresAt ? new Date(`${evidenceAction.expiresAt}T00:00:00Z`).toISOString() : null,
+        p_evidence_notes: evidenceAction.note.trim() || null,
+      });
+      if (inductionError) setError(inductionError.message);
+      else { setNotice('Site induction recorded for this staff member.'); setEvidenceAction(null); await loadAll(); }
+    } else {
+      const { error: evidenceError } = await supabase.rpc('manage_staff_onboarding_evidence', {
+        p_client_request_id: crypto.randomUUID(), p_staff_id: evidenceAction.staffId, p_action: evidenceAction.action,
+        p_skill_name: null, p_skill_category: null,
+        p_proficiency_level: null, p_reports_to_user_id: evidenceAction.managerId || null,
+        p_training_name: evidenceAction.trainingName.trim() || null, p_document_type: evidenceAction.documentType || null,
+        p_file_name: evidenceAction.fileName.trim() || null, p_storage_path: evidenceAction.storagePath.trim() || null,
+        p_notes: evidenceAction.note.trim() || null,
+      });
+      if (evidenceError) setError(evidenceError.message);
+      else { setNotice('Staff onboarding evidence recorded.'); setEvidenceAction(null); await loadAll(); }
+    }
     setSaving(false);
   };
 
   const nextOnboardingStage = (stage: string) => ({ identity: 'employment', employment: 'evidence', evidence: 'supervision', supervision: 'induction', induction: 'review', review: 'ready' } as Record<string, string>)[stage] ?? null;
 
   const openEvidence = (staffId: string, name: string, action: 'add_skill' | 'assign_line_manager' | 'record_induction' | 'record_document') => {
-    setEvidenceAction({ staffId, name, action, note: '', skillName: '', skillCategory: 'technical', proficiency: 'competent', managerId: '', trainingName: '', documentType: 'policy_acknowledgement', fileName: '', storagePath: '' });
+    setEvidenceAction({ staffId, name, action, note: '', skillId: '', proficiency: 'competent', managerId: '', trainingName: '', siteRequirementId: '', expiresAt: '', documentType: 'policy_acknowledgement', fileName: '', storagePath: '' });
+  };
+
+  const saveCatalogSkill = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!skillCatalogDraft.name.trim()) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: catalogError } = await supabase.rpc('manage_roster_skill_catalog', {
+      p_skill_id: skillCatalogDraft.id,
+      p_skill_name: skillCatalogDraft.name.trim(),
+      p_skill_category: skillCatalogDraft.category || null,
+      p_action: skillCatalogDraft.id ? 'update' : 'create',
+    });
+    if (catalogError) setError(catalogError.message);
+    else {
+      setNotice(skillCatalogDraft.id ? 'Skill catalog entry updated.' : 'Skill added to the canonical catalog.');
+      setSkillCatalogDraft({ id: null, name: '', category: 'technical' });
+      setShowSkillCatalogForm(false);
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const deactivateCatalogSkill = async (skillId: string) => {
+    setSaving(true); setError(null); setNotice(null);
+    const { error: catalogError } = await supabase.rpc('manage_roster_skill_catalog', {
+      p_skill_id: skillId,
+      p_skill_name: null,
+      p_skill_category: null,
+      p_action: 'deactivate',
+    });
+    if (catalogError) setError(catalogError.message);
+    else { setNotice('Catalog skill deactivated.'); await loadAll(); }
+    setSaving(false);
+  };
+
+  const saveSiteInductionRequirement = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!profile?.organizationId || !siteInductionDraft.name.trim()) return;
+    if (!siteInductionDraft.siteId && !siteInductionDraft.zoneId && !siteInductionDraft.serviceAgreementLocationId) {
+      setError('Choose a site, zone, or contract location for this induction requirement.');
+      return;
+    }
+    setSaving(true); setError(null); setNotice(null);
+    const { error: inductionError } = await supabase.rpc('manage_site_induction_requirement', {
+      p_requirement_id: siteInductionDraft.id,
+      p_client_site_id: siteInductionDraft.siteId || null,
+      p_zone_id: siteInductionDraft.zoneId || null,
+      p_service_agreement_location_id: siteInductionDraft.serviceAgreementLocationId || null,
+      p_induction_name: siteInductionDraft.name.trim(),
+      p_version: siteInductionDraft.version.trim() || null,
+      p_required: siteInductionDraft.required,
+      p_expires_after_days: siteInductionDraft.expiresAfterDays ? Number(siteInductionDraft.expiresAfterDays) : null,
+      p_active: siteInductionDraft.active,
+      p_action: siteInductionDraft.id ? 'update' : 'create',
+    });
+    if (inductionError) setError(inductionError.message);
+    else {
+      setNotice(siteInductionDraft.id ? 'Site induction requirement updated.' : 'Site induction requirement created.');
+      setSiteInductionDraft({ id: null, name: '', siteId: '', zoneId: '', serviceAgreementLocationId: '', version: '', required: true, expiresAfterDays: '', active: true });
+      setShowSiteInductionForm(false);
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const deactivateSiteInductionRequirement = async (requirementId: string) => {
+    setSaving(true); setError(null); setNotice(null);
+    const { error: requirementError } = await supabase.rpc('manage_site_induction_requirement', {
+      p_requirement_id: requirementId,
+      p_action: 'deactivate',
+    });
+    if (requirementError) setError(requirementError.message);
+    else { setNotice('Site induction requirement deactivated.'); await loadAll(); }
+    setSaving(false);
   };
 
   const createVacancy = async (event: React.FormEvent) => {
@@ -892,7 +1055,147 @@ const RosterHRPage: React.FC = () => {
 
       {tab === 'staff' && (
         <section className="reports-section">
-          <h2>Staff ({staff.length})</h2>
+          <h2>Skill catalog</h2>
+          <div className="assessment-actions" style={{ marginBottom: '1rem' }}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => { setShowSkillCatalogForm((value) => !value); if (!showSkillCatalogForm) setSkillCatalogDraft({ id: null, name: '', category: 'technical' }); }}>
+              {showSkillCatalogForm ? 'Cancel' : 'Add catalog skill'}
+            </button>
+          </div>
+          {showSkillCatalogForm && (
+            <form className="assessment-form" onSubmit={saveCatalogSkill} style={{ marginBottom: '1rem' }}>
+              <div className="form-row">
+                <label>
+                  <span>Skill name</span>
+                  <input required value={skillCatalogDraft.name} onChange={(event) => setSkillCatalogDraft({ ...skillCatalogDraft, name: event.target.value })} />
+                </label>
+                <label>
+                  <span>Category</span>
+                  <select value={skillCatalogDraft.category} onChange={(event) => setSkillCatalogDraft({ ...skillCatalogDraft, category: event.target.value })}>
+                    <option value="enforcement">Enforcement</option>
+                    <option value="technical">Technical</option>
+                    <option value="medical">Medical</option>
+                    <option value="language">Language</option>
+                    <option value="driving">Driving</option>
+                    <option value="equipment">Equipment</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={saving || !skillCatalogDraft.name.trim()}>{saving ? 'Saving' : 'Save skill'}</button>
+            </form>
+          )}
+          <div className="contacts-list">
+            {catalogSkills.length === 0 ? (
+              <div className="empty-state"><p>No canonical roster skills configured.</p></div>
+            ) : (
+              catalogSkills.map((skill) => (
+                <div key={skill.id} className="contact-card">
+                  <div className="contact-header">
+                    <h3>{skill.skill_name}</h3>
+                    <span className={`status-badge ${skill.active ? 'status-active' : 'status-inactive'}`}>{skill.active ? 'active' : 'inactive'}</span>
+                  </div>
+                  <div className="contact-details">
+                    <p>{skill.skill_category || 'uncategorised'}</p>
+                  </div>
+                  <div className="assessment-actions">
+                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setSkillCatalogDraft({ id: skill.id, name: skill.skill_name, category: skill.skill_category || 'technical' }); setShowSkillCatalogForm(true); }}>Edit</button>
+                    <button type="button" className="btn btn-sm btn-danger" disabled={!skill.active || saving} onClick={() => void deactivateCatalogSkill(skill.id)}>Deactivate</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <h2 style={{ marginTop: '1.5rem' }}>Site induction requirements</h2>
+          <div className="assessment-actions" style={{ marginBottom: '1rem' }}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => { setShowSiteInductionForm((value) => !value); if (!showSiteInductionForm) setSiteInductionDraft({ id: null, name: '', siteId: '', zoneId: '', serviceAgreementLocationId: '', version: '', required: true, expiresAfterDays: '', active: true }); }}>
+              {showSiteInductionForm ? 'Cancel' : 'Add site induction'}
+            </button>
+          </div>
+          {showSiteInductionForm && (
+            <form className="assessment-form" onSubmit={saveSiteInductionRequirement} style={{ marginBottom: '1rem' }}>
+              <div className="form-row">
+                <label>
+                  <span>Induction name</span>
+                  <input required value={siteInductionDraft.name} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, name: event.target.value })} />
+                </label>
+                <label>
+                  <span>Version</span>
+                  <input value={siteInductionDraft.version} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, version: event.target.value })} placeholder="e.g. 2026.1" />
+                </label>
+              </div>
+              <div className="form-row">
+                <label>
+                  <span>Site</span>
+                  <select value={siteInductionDraft.siteId} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, siteId: event.target.value, zoneId: '', serviceAgreementLocationId: '' })}>
+                    <option value="">No site</option>
+                    {sites.map((site) => <option value={site.id} key={site.id}>{site.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Zone</span>
+                  <select value={siteInductionDraft.zoneId} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, zoneId: event.target.value, siteId: '', serviceAgreementLocationId: '' })}>
+                    <option value="">No zone</option>
+                    {zones.map((zone) => <option value={zone.id} key={zone.id}>{zone.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="form-row">
+                <label>
+                  <span>Agreement location</span>
+                  <select value={siteInductionDraft.serviceAgreementLocationId} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, serviceAgreementLocationId: event.target.value, siteId: '', zoneId: '' })}>
+                    <option value="">No service agreement location</option>
+                    {agreementLocations.map((location) => <option value={location.id} key={location.id}>{location.site_id ? `${sites.find((site) => site.id === location.site_id)?.name ?? 'Site'} / ${zones.find((zone) => zone.id === location.zone_id)?.name ?? 'Zone'}` : location.zone_id ? `Zone ${zones.find((zone) => zone.id === location.zone_id)?.name ?? 'Unknown'}` : `Location ${location.id.slice(0, 8)}`}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Expiry (days)</span>
+                  <input type="number" min="0" value={siteInductionDraft.expiresAfterDays} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, expiresAfterDays: event.target.value })} placeholder="365" />
+                </label>
+              </div>
+              <div className="form-row">
+                <label>
+                  <span>Required</span>
+                  <select value={siteInductionDraft.required ? 'true' : 'false'} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, required: event.target.value === 'true' })}>
+                    <option value="true">Required</option>
+                    <option value="false">Optional</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Active</span>
+                  <select value={siteInductionDraft.active ? 'true' : 'false'} onChange={(event) => setSiteInductionDraft({ ...siteInductionDraft, active: event.target.value === 'true' })}>
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                  </select>
+                </label>
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={saving || !siteInductionDraft.name.trim()}>{saving ? 'Saving' : 'Save induction'}</button>
+            </form>
+          )}
+          <div className="contacts-list">
+            {siteInductionRequirements.length === 0 ? (
+              <div className="empty-state"><p>No site induction requirements configured.</p></div>
+            ) : (
+              siteInductionRequirements.map((requirement) => (
+                <div key={requirement.id} className="contact-card">
+                  <div className="contact-header">
+                    <h3>{requirement.induction_name}</h3>
+                    <span className={`status-badge ${requirement.active ? 'status-active' : 'status-inactive'}`}>{requirement.active ? 'active' : 'inactive'}</span>
+                  </div>
+                  <div className="contact-details">
+                    <p>{requirement.required ? 'Required' : 'Optional'}{requirement.expires_after_days ? ` · expires in ${requirement.expires_after_days} days` : ''}{requirement.version ? ` · v${requirement.version}` : ''}</p>
+                    <p className="contact-meta">{requirement.client_site_id ? `Site ${sites.find((site) => site.id === requirement.client_site_id)?.name ?? requirement.client_site_id.slice(0,8)}` : requirement.zone_id ? `Zone ${zones.find((zone) => zone.id === requirement.zone_id)?.name ?? requirement.zone_id.slice(0,8)}` : requirement.service_agreement_location_id ? `Location ${agreementLocations.find((location) => location.id === requirement.service_agreement_location_id)?.id.slice(0,8) ?? requirement.service_agreement_location_id.slice(0,8)}` : 'Unscoped requirement'}</p>
+                  </div>
+                  <div className="assessment-actions">
+                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setSiteInductionDraft({ id: requirement.id, name: requirement.induction_name, siteId: requirement.client_site_id ?? '', zoneId: requirement.zone_id ?? '', serviceAgreementLocationId: requirement.service_agreement_location_id ?? '', version: requirement.version ?? '', required: requirement.required, expiresAfterDays: requirement.expires_after_days ? String(requirement.expires_after_days) : '', active: requirement.active }); setShowSiteInductionForm(true); }}>Edit</button>
+                    <button type="button" className="btn btn-sm btn-danger" disabled={!requirement.active || saving} onClick={() => void deactivateSiteInductionRequirement(requirement.id)}>Deactivate</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <h2 style={{ marginTop: '1.5rem' }}>Staff ({staff.length})</h2>
           <div className="contacts-list">
             {staff.length === 0 ? (
               <div className="empty-state">
@@ -965,7 +1268,7 @@ const RosterHRPage: React.FC = () => {
         </section>
       )}
 
-      {tab === 'onboarding' && <section className="reports-section"><h2>Record Onboarding Evidence</h2><div className="contacts-list">{staff.filter((person) => person.staff_id).map((person) => <div className="contact-card" key={`evidence-${person.id}`}><div className="contact-header"><h3>{person.display_name ?? person.email ?? 'Staff member'}</h3><span className="contact-type-badge">Evidence</span></div><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'add_skill')}>Add skill</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'assign_line_manager')}>Assign manager</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'record_induction')}>Record induction</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'record_document')}>Register document</button></div></div>)}</div></section>}
+      {tab === 'onboarding' && <section className="reports-section"><h2>Record Onboarding Evidence</h2><div className="contacts-list">{staff.filter((person) => person.staff_id).map((person) => <div className="contact-card" key={`evidence-${person.id}`}><div className="contact-header"><h3>{person.display_name ?? person.email ?? 'Staff member'}</h3><span className="contact-type-badge">Evidence</span></div><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'add_skill')}>Add skill</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'assign_line_manager')}>Assign manager</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'record_induction')}>Record site induction</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, person.display_name ?? person.email ?? 'Staff member', 'record_document')}>Register document</button></div></div>)}</div></section>}
 
       {tab === 'credentials' && (
         <section className="reports-section">
@@ -1486,7 +1789,7 @@ const RosterHRPage: React.FC = () => {
 
       {caseAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="hr-case-action-title" onSubmit={manageHrCase}><header><div><span>Private HR case</span><h2 id="hr-case-action-title">{caseAction.action === 'note' ? 'Add case note' : `${caseAction.action[0].toUpperCase()}${caseAction.action.slice(1)} case`}</h2></div><button type="button" onClick={() => setCaseAction(null)} aria-label="Close HR case action">×</button></header><p>{caseAction.item.subject}. This is an employer-only record and is never linked to a field incident.</p><label><span>{caseAction.action === 'note' ? 'Case note' : 'Decision note'}</span><textarea required rows={4} value={caseAction.note} onChange={(event) => setCaseAction({ ...caseAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setCaseAction(null)}>Cancel</button><button type="submit" className={caseAction.action === 'withdraw' ? 'btn btn-danger' : 'btn btn-primary'} disabled={saving || !caseAction.note.trim()}>{saving ? 'Saving' : caseAction.action === 'note' ? 'Record note' : 'Confirm action'}</button></footer></form></div>}
 
-      {evidenceAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="onboarding-evidence-title" onSubmit={recordOnboardingEvidence}><header><div><span>Staff onboarding evidence</span><h2 id="onboarding-evidence-title">{evidenceAction.action === 'add_skill' ? 'Add skill' : evidenceAction.action === 'assign_line_manager' ? 'Assign line manager' : evidenceAction.action === 'record_induction' ? 'Record induction' : 'Register document'}</h2></div><button type="button" onClick={() => setEvidenceAction(null)} aria-label="Close evidence form">×</button></header><p>{evidenceAction.name}. Record only confirmed evidence; the readiness evaluator will update after this receipt.</p>{evidenceAction.action === 'add_skill' && <><label><span>Skill</span><input required value={evidenceAction.skillName} onChange={(event) => setEvidenceAction({ ...evidenceAction, skillName: event.target.value })} /></label><div className="form-row"><label><span>Category</span><select value={evidenceAction.skillCategory} onChange={(event) => setEvidenceAction({ ...evidenceAction, skillCategory: event.target.value })}><option value="enforcement">Enforcement</option><option value="technical">Technical</option><option value="medical">Medical</option><option value="language">Language</option><option value="driving">Driving</option><option value="equipment">Equipment</option><option value="other">Other</option></select></label><label><span>Proficiency</span><select value={evidenceAction.proficiency} onChange={(event) => setEvidenceAction({ ...evidenceAction, proficiency: event.target.value })}><option value="basic">Basic</option><option value="competent">Competent</option><option value="proficient">Proficient</option><option value="expert">Expert</option></select></label></div></>}{evidenceAction.action === 'assign_line_manager' && <label><span>Line manager</span><select required value={evidenceAction.managerId} onChange={(event) => setEvidenceAction({ ...evidenceAction, managerId: event.target.value })}><option value="">Select active staff member</option>{staff.filter((person) => person.id !== evidenceAction.staffId).map((person) => <option value={person.id} key={person.id}>{person.display_name ?? person.email}</option>)}</select></label>}{evidenceAction.action === 'record_induction' && <label><span>Induction name</span><input required value={evidenceAction.trainingName} onChange={(event) => setEvidenceAction({ ...evidenceAction, trainingName: event.target.value })} /></label>}{evidenceAction.action === 'record_document' && <><label><span>Document type</span><select value={evidenceAction.documentType} onChange={(event) => setEvidenceAction({ ...evidenceAction, documentType: event.target.value })}><option value="policy_acknowledgement">Policy acknowledgement</option><option value="contract">Contract</option><option value="certificate">Certificate</option><option value="credential_evidence">Credential evidence</option><option value="other">Other</option></select></label><label><span>File name</span><input required value={evidenceAction.fileName} onChange={(event) => setEvidenceAction({ ...evidenceAction, fileName: event.target.value })} /></label><label><span>Existing secure storage path</span><input required value={evidenceAction.storagePath} onChange={(event) => setEvidenceAction({ ...evidenceAction, storagePath: event.target.value })} /></label></>}<label><span>Evidence note</span><textarea rows={3} value={evidenceAction.note} onChange={(event) => setEvidenceAction({ ...evidenceAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setEvidenceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || (evidenceAction.action === 'add_skill' && !evidenceAction.skillName.trim()) || (evidenceAction.action === 'assign_line_manager' && !evidenceAction.managerId) || (evidenceAction.action === 'record_induction' && !evidenceAction.trainingName.trim()) || (evidenceAction.action === 'record_document' && (!evidenceAction.fileName.trim() || !evidenceAction.storagePath.trim()))}>{saving ? 'Saving' : 'Record evidence'}</button></footer></form></div>}
+      {evidenceAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="onboarding-evidence-title" onSubmit={recordOnboardingEvidence}><header><div><span>Staff onboarding evidence</span><h2 id="onboarding-evidence-title">{evidenceAction.action === 'add_skill' ? 'Add skill' : evidenceAction.action === 'assign_line_manager' ? 'Assign line manager' : evidenceAction.action === 'record_induction' ? 'Record site induction' : 'Register document'}</h2></div><button type="button" onClick={() => setEvidenceAction(null)} aria-label="Close evidence form">×</button></header><p>{evidenceAction.name}. Record only confirmed evidence; the readiness evaluator will update after this receipt.</p>{evidenceAction.action === 'add_skill' && <><label><span>Skill from catalog</span><select required value={evidenceAction.skillId} onChange={(event) => setEvidenceAction({ ...evidenceAction, skillId: event.target.value })}><option value="">Select a skill</option>{catalogSkills.map((skill) => <option value={skill.id} key={skill.id}>{skill.skill_name} ({skill.skill_category})</option>)}</select></label><label><span>Proficiency</span><select value={evidenceAction.proficiency} onChange={(event) => setEvidenceAction({ ...evidenceAction, proficiency: event.target.value })}><option value="basic">Basic</option><option value="competent">Competent</option><option value="proficient">Proficient</option><option value="expert">Expert</option></select></label><label><span>Notes</span><textarea rows={3} value={evidenceAction.note} onChange={(event) => setEvidenceAction({ ...evidenceAction, note: event.target.value })} /></label></>}{evidenceAction.action === 'assign_line_manager' && <label><span>Line manager</span><select required value={evidenceAction.managerId} onChange={(event) => setEvidenceAction({ ...evidenceAction, managerId: event.target.value })}><option value="">Select active staff member</option>{staff.filter((person) => person.id !== evidenceAction.staffId).map((person) => <option value={person.id} key={person.id}>{person.display_name ?? person.email}</option>)}</select></label>}{evidenceAction.action === 'record_induction' && <><label><span>Site induction requirement</span><select required value={evidenceAction.siteRequirementId} onChange={(event) => setEvidenceAction({ ...evidenceAction, siteRequirementId: event.target.value, expiresAt: siteInductionRequirements.find((requirement) => requirement.id === event.target.value)?.expires_after_days ? new Date(Date.now() + Number(siteInductionRequirements.find((requirement) => requirement.id === event.target.value)?.expires_after_days) * 86_400_000).toISOString().slice(0, 10) : '' })}><option value="">Select site induction requirement</option>{siteInductionRequirements.filter((requirement) => requirement.active).map((requirement) => <option value={requirement.id} key={requirement.id}>{requirement.induction_name}{requirement.version ? ` · v${requirement.version}` : ''}</option>)}</select></label>{evidenceAction.siteRequirementId && <label><span>Expiry date</span><input type="date" value={evidenceAction.expiresAt} onChange={(event) => setEvidenceAction({ ...evidenceAction, expiresAt: event.target.value })} /></label>}</>}{evidenceAction.action === 'record_document' && <><label><span>Document type</span><select value={evidenceAction.documentType} onChange={(event) => setEvidenceAction({ ...evidenceAction, documentType: event.target.value })}><option value="policy_acknowledgement">Policy acknowledgement</option><option value="contract">Contract</option><option value="certificate">Certificate</option><option value="credential_evidence">Credential evidence</option><option value="other">Other</option></select></label><label><span>File name</span><input required value={evidenceAction.fileName} onChange={(event) => setEvidenceAction({ ...evidenceAction, fileName: event.target.value })} /></label><label><span>Existing secure storage path</span><input required value={evidenceAction.storagePath} onChange={(event) => setEvidenceAction({ ...evidenceAction, storagePath: event.target.value })} /></label></>}<label><span>Evidence note</span><textarea rows={3} value={evidenceAction.note} onChange={(event) => setEvidenceAction({ ...evidenceAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setEvidenceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || (evidenceAction.action === 'add_skill' && !evidenceAction.skillId.trim()) || (evidenceAction.action === 'assign_line_manager' && !evidenceAction.managerId) || (evidenceAction.action === 'record_induction' && !evidenceAction.siteRequirementId) || (evidenceAction.action === 'record_document' && (!evidenceAction.fileName.trim() || !evidenceAction.storagePath.trim()))}>{saving ? 'Saving' : 'Record evidence'}</button></footer></form></div>}
 
       {onboardingAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-onboarding-title" onSubmit={manageOnboarding}><header><div><span>Staff onboarding</span><h2 id="staff-onboarding-title">{onboardingAction.ledgerId ? `Advance to ${onboardingAction.nextStage}` : 'Start onboarding'}</h2></div><button type="button" onClick={() => setOnboardingAction(null)} aria-label="Close staff onboarding">×</button></header><p>{onboardingAction.name}. The server will recheck canonical evidence before advancing.</p><label><span>Stage note</span><textarea required rows={4} value={onboardingAction.note} onChange={(event) => setOnboardingAction({ ...onboardingAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOnboardingAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !onboardingAction.note.trim()}>{saving ? 'Saving' : onboardingAction.ledgerId ? 'Advance stage' : 'Start onboarding'}</button></footer></form></div>}
 

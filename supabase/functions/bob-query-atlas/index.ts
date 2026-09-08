@@ -84,7 +84,10 @@ serve(async (req)=>{
       });
     }
     if (action === 'gap_report') {
-      const { data, error, count } = await admin.from('bob_capability_map').select('entity_type, entity_name, present, wired, exercised, notes, retirement_status', { count: 'exact' }).or('wired.eq.false,exercised.is.null').neq('retirement_status', 'retired').order('entity_type').range(offset, offset + limit - 1);
+      const { data, error } = await admin.rpc('bob_atlas_gap_report', {
+        p_limit: limit,
+        p_offset: offset
+      });
       if (error) return json({
         error: error.message
       }, 500);
@@ -92,9 +95,9 @@ serve(async (req)=>{
         ok: true,
         action,
         count: (data ?? []).length,
-        total: count ?? null,
+        total: null,
         offset,
-        next_offset: count !== null && offset + (data ?? []).length < count ? offset + (data ?? []).length : null,
+        next_offset: (data ?? []).length === limit ? offset + (data ?? []).length : null,
         results: data ?? []
       });
     }

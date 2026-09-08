@@ -90,5 +90,17 @@ describe('new roster lifecycle migrations remain governed', () => {
     expect(inductions).toContain('service_agreement_location_id');
     expect(inductions).toContain('get_site_induction_state');
     expect(inductions).toContain('expires_at');
+    expect(inductions).toContain('manage_site_induction_requirement');
+    expect(inductions).toContain('record_staff_site_induction');
+    expect(inductions).toContain('is_admin_for_org');
+    expect(inductions).toContain('has_location_access');
+    expect(inductions).toContain('sa.provider_organization_id = v_org');
+  });
+
+  it('enforces required site inductions at roster slot write time', () => {
+    expect(inductions).toContain('tg_enforce_roster_slot_site_induction_requirements');
+    expect(inductions).toContain('site_induction_requirements');
+    expect(inductions).toContain('Assigned staff member lacks required current site induction');
+    expect(inductions).toContain('before insert or update of staff_id, work_unit_id');
   });
 });

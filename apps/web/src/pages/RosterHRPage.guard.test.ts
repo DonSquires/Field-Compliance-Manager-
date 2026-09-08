@@ -83,6 +83,20 @@ describe('governed HR administration', () => {
     expect(page).not.toMatch(/from\('staff_credentials'\)[\s\S]{0,220}\.(insert|update|upsert)\(/);
   });
 
+  it('loads site induction requirements and records completions through governed RPCs', () => {
+    expect(page).toContain("from('site_induction_requirements')");
+    expect(page).toContain("from('staff_site_inductions')");
+    expect(page).toContain("supabase.rpc('manage_site_induction_requirement'");
+    expect(page).toContain("supabase.rpc('record_staff_site_induction'");
+    expect(page).toContain('Record site induction');
+    expect(page).toContain('siteInductionDraft');
+    expect(page).toContain('siteRequirementId');
+    expect(page).toContain('siteInductionRequirements.map((requirement) =>');
+    expect(page).toContain('Select site induction requirement');
+    expect(page).toContain("(evidenceAction.action === 'record_induction' && !evidenceAction.siteRequirementId)");
+    expect(page).not.toMatch(/from\('(site_induction_requirements|staff_site_inductions)'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
+  });
+
   it('appends retry-safe credential lineage and closes direct mutations', () => {
     for (const evidence of ['for update', 'is_admin_for_org', 'is distinct from p_expected_expiry_date', 'replaces_credential_id', 'client_request_id', 'pg_advisory_xact_lock', "'staff_credential_renewed'"]) expect(credentialSql).toContain(evidence);
     expect(credentialSql).toContain('revoke insert,update,delete on table public.staff_credentials from authenticated');

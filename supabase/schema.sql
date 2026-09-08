@@ -559,6 +559,45 @@ COMMENT ON FUNCTION "public"."bob_atlas_flow_reach"("p_from_type" "text", "p_fro
 
 
 
+CREATE OR REPLACE FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer DEFAULT 200, "p_offset" integer DEFAULT 0) RETURNS TABLE("entity_type" "text", "entity_name" "text", "gap_kind" "text", "present" boolean, "wired" boolean, "exercised" boolean, "caller_summary" "text", "notes" "text", "retirement_status" "text")
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select
+    c.entity_type,
+    c.entity_name,
+    case
+      when c.present = true and c.wired = false then 'unwired'
+      when c.present = true and (c.exercised is null or c.exercised = false) then 'unexercised'
+      else 'dormant'
+    end as gap_kind,
+    c.present,
+    c.wired,
+    c.exercised,
+    c.caller_summary,
+    c.notes,
+    c.retirement_status
+  from public.bob_capability_map c
+  where c.retirement_status <> 'retired'
+    and c.present = true
+    and (
+      c.wired = false
+      or c.exercised is null
+      or c.exercised = false
+    )
+  order by c.entity_type, c.entity_name
+  limit greatest(1, least(coalesce(p_limit, 200), 500))
+  offset greatest(0, coalesce(p_offset, 0));
+$$;
+
+
+ALTER FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer) IS 'Atlas gap-report: list capabilities that are present but not wired or not exercised, scoped to live non-retired entities. This is the formal gap layer for Bob/Atlas and is distinct from the raw bob_capability_map inventory.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."bob_cards_needing_embedding"("match_limit" integer DEFAULT 25) RETURNS TABLE("id" "uuid", "title" "text", "content" "text")
     LANGUAGE "sql" SECURITY DEFINER
     SET "search_path" TO 'public'
