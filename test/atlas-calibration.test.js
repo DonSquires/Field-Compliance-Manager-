@@ -236,3 +236,20 @@ test('Atlas refresh derives Ops scheduler HTTP calls to edge functions', () => {
     && edge.edge_kind === 'calls'));
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
+
+test('Atlas refresh derives FCM Desktop evidence registration calls', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-desktop-bridge-'));
+  const sourcePath = path.join(rootDir, 'apps/sd-card-bridge/src/main.tsx');
+  const targetPath = path.join(rootDir, 'supabase/functions/register-desktop-video-import/index.ts');
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(sourcePath, "supabase.functions.invoke('register-desktop-video-import', { body: {} });");
+  fs.writeFileSync(targetPath, 'export default {}');
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'apps/sd-card-bridge/src/main'
+    && edge.target_name === 'register-desktop-video-import'
+    && edge.edge_kind === 'calls'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
