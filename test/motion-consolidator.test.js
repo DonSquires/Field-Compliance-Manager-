@@ -40,29 +40,23 @@ test('consolidateFaces clusters continuous frames into one subject and handles r
   const { events, uniqueSubjectsCount } = await consolidateFaces(frames, { maxGapSeconds: 15.0 });
 
   assert.equal(uniqueSubjectsCount, 2, 'Should identify exactly 2 unique persons');
-  assert.equal(events.length, 3, 'Should have 3 consolidated events (Person 1 initial, Person 2, Person 1 return)');
+  assert.equal(events.length, 2, 'Should have one representative event per unique person');
 
   // Check Person 1 initial event
   assert.equal(events[0].subject_id, 1);
   assert.equal(events[0].subject_label, 'Person #1');
-  assert.equal(events[0].is_return, false);
-  assert.equal(events[0].frame_count, 3);
+  assert.equal(events[0].is_return, true);
+  assert.equal(events[0].visit_count, 2);
+  assert.equal(events[0].frame_count, 5);
   assert.equal(events[0].first_seen_seconds, 0.0);
-  assert.equal(events[0].last_seen_seconds, 2.0);
-  assert.equal(events[0].duration_seconds, 2.0);
+  assert.equal(events[0].last_seen_seconds, 36.0);
+  assert.equal(events[0].duration_seconds, 36.0);
 
   // Check Person 2 event
   assert.equal(events[1].subject_id, 2);
   assert.equal(events[1].subject_label, 'Person #2');
   assert.equal(events[1].frame_count, 1);
 
-  // Check Person 1 return event
-  assert.equal(events[2].subject_id, 1);
-  assert.equal(events[2].subject_label, 'Person #1 (Return)');
-  assert.equal(events[2].is_return, true);
-  assert.equal(events[2].frame_count, 2);
-  assert.equal(events[2].first_seen_seconds, 35.0);
-  assert.equal(events[2].last_seen_seconds, 36.0);
 });
 
 test('consolidateVehicles clusters ALPR plate detections and handles returns', async () => {
@@ -80,24 +74,22 @@ test('consolidateVehicles clusters ALPR plate detections and handles returns', a
   const { events, uniqueVehiclesCount } = await consolidateVehicles(frames, { maxGapSeconds: 15.0, metersPerPixel: 0.5 });
 
   assert.equal(uniqueVehiclesCount, 2);
-  assert.equal(events.length, 3);
+  assert.equal(events.length, 2);
 
   assert.equal(events[0].plate, 'ABC123');
-  assert.equal(events[0].frame_count, 3);
+  assert.equal(events[0].frame_count, 4);
+  assert.equal(events[0].visit_count, 2);
   assert.equal(events[0].first_seen_seconds, 1.0);
-  assert.equal(events[0].last_seen_seconds, 3.0);
-  assert.equal(events[0].duration_seconds, 2.0);
+  assert.equal(events[0].last_seen_seconds, 40.0);
+  assert.equal(events[0].duration_seconds, 39.0);
   assert.equal(events[0].confidence, 0.95);
-  assert.equal(events[0].is_return, false);
+  assert.equal(events[0].is_return, true);
   assert.equal(events[0].speed_px_per_second, 10);
   assert.equal(events[0].speed_kmh, 18);
 
   assert.equal(events[1].plate, 'XYZ789');
   assert.equal(events[1].frame_count, 1);
 
-  assert.equal(events[2].plate, 'ABC123');
-  assert.equal(events[2].is_return, true);
-  assert.equal(events[2].first_seen_seconds, 40.0);
 });
 
 test('consolidateMotionSummary wraps events and counts into summary', async () => {

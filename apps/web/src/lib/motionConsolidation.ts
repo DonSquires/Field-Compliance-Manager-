@@ -15,6 +15,7 @@ export interface ConsolidatedFaceEvent {
   last_seen_seconds: number;
   duration_seconds: number;
   frame_count: number;
+  visit_count?: number;
   best_frame_hash: string | null;
   best_bbox?: BoundingBox | null;
   thumbnail?: string | null;
@@ -31,6 +32,7 @@ export interface ConsolidatedVehicleEvent {
   last_seen_seconds: number;
   duration_seconds: number;
   frame_count: number;
+  visit_count?: number;
   best_frame_hash: string | null;
   thumbnail?: string | null;
   vehicle_make?: string | null;
@@ -53,6 +55,7 @@ export interface ConsolidatedPersonEvent {
   last_seen_seconds: number;
   duration_seconds: number;
   frame_count: number;
+  visit_count?: number;
   confidence: number;
   best_frame_hash: string | null;
   best_bbox?: BoundingBox | null;

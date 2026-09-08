@@ -625,7 +625,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                         </div>
                         <div className="cctv-card-meta">
                           <span><strong>Window:</strong> {person.first_seen_seconds}s – {person.last_seen_seconds}s</span>
-                          <span><strong>Sightings:</strong> {person.frame_count} frames</span>
+                          <span><strong>Sightings:</strong> {person.frame_count} frames{person.visit_count ? ` · ${person.visit_count} visit${person.visit_count === 1 ? '' : 's'}` : ''}</span>
                         </div>
                         <div className="cctv-card-actions">
                           <button type="button" className="cctv-btn-jump" onClick={() => jumpToTime(person.first_seen_seconds)}>
@@ -678,7 +678,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                             <strong>Window:</strong> {face.first_seen_seconds}s – {face.last_seen_seconds}s ({face.duration_seconds}s)
                           </span>
                           <span>
-                            <strong>Sightings:</strong> {face.frame_count} frames consolidated
+                            <strong>Sightings:</strong> {face.frame_count} frames{face.visit_count ? ` · ${face.visit_count} visit${face.visit_count === 1 ? '' : 's'}` : ''} consolidated
                           </span>
                         </div>
                         <div className="cctv-card-actions">
@@ -804,7 +804,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                             <strong>Window:</strong> {veh.first_seen_seconds}s – {veh.last_seen_seconds}s ({veh.duration_seconds}s)
                           </span>
                           <span>
-                            <strong>Sightings:</strong> {veh.frame_count} frames consolidated
+                            <strong>Sightings:</strong> {veh.frame_count} frames{veh.visit_count ? ` · ${veh.visit_count} visit${veh.visit_count === 1 ? '' : 's'}` : ''} consolidated
                           </span>
                           {(veh.vehicle_make || veh.vehicle_model || veh.vehicle_year || veh.vehicle_colour || veh.vehicle_type) && (
                             <span>

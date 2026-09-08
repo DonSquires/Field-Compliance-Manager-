@@ -142,25 +142,42 @@ async function consolidateFaces(frames, options = {}) {
     allTracks.push(...subj.completedTracks.map((track) => ({ ...track, faceEmbedding: subj.avgEmbedding })));
   }
 
-  // Sort by firstSeen
-  allTracks.sort((a, b) => a.firstSeen - b.firstSeen);
+  // Return one representative event per identity. Visit windows remain in the
+  // aggregate fields so repeated sightings are not lost, but the UI receives
+  // one review card per person.
+  const representativeTracks = subjects.map((subject) => {
+    const tracks = subject.completedTracks;
+    const bestTrack = tracks.reduce((best, track) => track.bestBboxArea > best.bestBboxArea ? track : best, tracks[0]);
+    return {
+      ...bestTrack,
+      subjectId: subject.subjectId,
+      subjectLabel: subject.subjectLabel,
+      firstSeen: Math.min(...tracks.map((track) => track.firstSeen)),
+      lastSeen: Math.max(...tracks.map((track) => track.lastSeen)),
+      frameCount: tracks.reduce((sum, track) => sum + track.frameCount, 0),
+      visitCount: tracks.length,
+      isReturn: tracks.length > 1,
+      faceEmbedding: subject.avgEmbedding,
+    };
+  }).sort((a, b) => a.firstSeen - b.firstSeen);
 
   // Format into consolidated face events
   const events = [];
-  for (let i = 0; i < allTracks.length; i++) {
-    const tr = allTracks[i];
+  for (let i = 0; i < representativeTracks.length; i++) {
+    const tr = representativeTracks[i];
     const duration = Math.max(0, Number((tr.lastSeen - tr.firstSeen).toFixed(2)));
     const thumbnail = await loadBase64Thumbnail(tr.bestFrame?.file_path);
     events.push({
       event_id: `face-${tr.subjectId}-${i + 1}`,
       event_type: 'face',
       subject_id: tr.subjectId,
-      subject_label: tr.isReturn ? `${tr.subjectLabel} (Return)` : tr.subjectLabel,
+      subject_label: tr.subjectLabel,
       is_return: tr.isReturn,
       first_seen_seconds: Number(tr.firstSeen.toFixed(2)),
       last_seen_seconds: Number(tr.lastSeen.toFixed(2)),
       duration_seconds: duration,
       frame_count: tr.frameCount,
+      visit_count: tr.visitCount,
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
       best_bbox: tr.bestBbox,
       thumbnail,
@@ -316,14 +333,20 @@ async function consolidateVehicles(frames, options = {}) {
     }
   }
 
-  // Flatten and sort by firstSeen
-  const allTracks = [];
-  for (const group of vehicleTracks) {
-    for (let i = 0; i < group.tracks.length; i++) {
-      allTracks.push({ ...group.tracks[i], groupPlate: group.plate, trackIndex: i + 1 });
-    }
-  }
-  allTracks.sort((a, b) => a.firstSeen - b.firstSeen);
+  // Return one representative event per plate. Preserve the full observation
+  // window and return count instead of emitting a card for every visit.
+  const allTracks = vehicleTracks.map((group) => {
+    const bestTrack = group.tracks.reduce((best, track) => track.bestConfidence > best.bestConfidence ? track : best, group.tracks[0]);
+    return {
+      ...bestTrack,
+      groupPlate: group.plate,
+      firstSeen: Math.min(...group.tracks.map((track) => track.firstSeen)),
+      lastSeen: Math.max(...group.tracks.map((track) => track.lastSeen)),
+      frameCount: group.tracks.reduce((sum, track) => sum + track.frameCount, 0),
+      visitCount: group.tracks.length,
+      isReturn: group.tracks.length > 1,
+    };
+  }).sort((a, b) => a.firstSeen - b.firstSeen);
 
   const events = [];
   for (const tr of allTracks) {
@@ -342,6 +365,7 @@ async function consolidateVehicles(frames, options = {}) {
       last_seen_seconds: Number(tr.lastSeen.toFixed(2)),
       duration_seconds: duration,
       frame_count: tr.frameCount,
+      visit_count: tr.visitCount,
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
       thumbnail,
       vehicle_make: tr.bestFrame?.inference?.data?.vehicle_make ?? null,
