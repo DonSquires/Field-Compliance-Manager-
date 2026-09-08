@@ -9,7 +9,7 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   };
-  const QUERY_TYPES = new Set(['find_org', 'get_org', 'list_orgs', 'list_sites', 'list_routes', 'list_zones', 'find_user']);
+  const QUERY_TYPES = new Set(['find_org', 'get_org', 'list_orgs', 'list_sites', 'list_routes', 'list_zones', 'find_user', 'search_observations']);
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   function json(body: unknown, status = 200) {
@@ -108,6 +108,26 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
         const { data, error } = await admin.from('location_zones').select('id, organization_id, name, rule_type, is_active, boundary_status, boundary_verification').eq('organization_id', scopedOrgId).order('name').limit(limit);
         if (error) throw error;
         return json({ results: (data ?? []).map((zone) => ({ ...zone, has_boundary: zone.boundary_status === 'authoritative' || zone.boundary_verification === 'verified' })) });
+      }
+
+      if (query === 'search_observations') {
+        if (!scopedOrgId) return json({ error: 'An organization ID is required' }, 422);
+        const uuidArg = (key: string) => asUuid(args[key]);
+        const { data, error } = await admin.rpc('search_observations', {
+          p_organization_id: scopedOrgId,
+          p_search: String(args.search ?? args.name ?? args.term ?? '').trim() || null,
+          p_site_id: uuidArg('site_id'),
+          p_zone_id: uuidArg('zone_id'),
+          p_location_id: uuidArg('location_id'),
+          p_vehicle_id: uuidArg('vehicle_id'),
+          p_person_id: uuidArg('person_id'),
+          p_incident_id: uuidArg('incident_id'),
+          p_poi: typeof args.poi === 'boolean' ? args.poi : null,
+          p_loi: typeof args.loi === 'boolean' ? args.loi : null,
+          p_limit: limit,
+        });
+        if (error) throw error;
+        return json({ results: data ?? [] });
       }
 
       const name = String(args.name ?? args.search ?? '').trim();

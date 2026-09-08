@@ -20090,6 +20090,36 @@ export type Database = {
         }[]
       }
     }
+      link_observation_entities: {
+        Args: {
+          p_canonical_vehicle_id?: string | null
+          p_incident_id?: string | null
+          p_location_id?: string | null
+          p_observation_id: string
+          p_organization_id: string
+          p_person_record_id?: string | null
+          p_site_id?: string | null
+          p_zone_id?: string | null
+        }
+        Returns: Json
+      }
+      search_observations: {
+        Args: {
+          p_incident_id?: string | null
+          p_limit?: number
+          p_location_id?: string | null
+          p_loi?: boolean | null
+          p_person_id?: string | null
+          p_poi?: boolean | null
+          p_search?: string | null
+          p_site_id?: string | null
+          p_vehicle_id?: string | null
+          p_zone_id?: string | null
+          p_organization_id: string
+        }
+        Returns: Json[]
+      }
+    }
     Enums: {
       report_severity: "low" | "medium" | "high" | "critical"
       report_status: "draft" | "submitted" | "reviewed" | "closed"

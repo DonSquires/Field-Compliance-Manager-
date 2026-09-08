@@ -14,7 +14,8 @@
   'list_sites',
   'list_routes',
   'list_zones',
-  'find_user'
+  'find_user',
+  'search_observations'
 ]);
 /**
  * Query types that are ORG-shaped — eligible for name-promotion to find_org.
@@ -231,6 +232,14 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
   // The generic formatter is unreachable for find_user.
   if (q === 'find_user') {
     return renderPersonResults(results);
+  }
+  if (q === 'search_observations') {
+    if (!results.length) return 'I looked but found no matching observations.';
+    const lines = results.slice(0, 10).map((row) => {
+      const anchors = [row.site_name, row.zone_name, row.vehicle_label, row.person_label, row.incident_label].filter(Boolean).join(' | ');
+      return `- ${row.observed_at ?? 'unknown time'}${row.plate_number ? ` — ${row.plate_number}` : ''}${anchors ? ` — ${anchors}` : ''}${row.compliance_status ? ` [${row.compliance_status}]` : ''}`;
+    }).join('\n');
+    return `Found ${results.length} observation(s):\n${lines}`;
   }
   // Org-shaped formatters (existing behaviour, unchanged).
   if (!results.length) {
