@@ -62,3 +62,12 @@ test('corporate profiles are Caddie-routed pending proposals', () => {
   assert.match(chat, /callFn\('bob-propose-corporate-profile', authHeader/);
   assert.match(chat, /case 'propose_corporate_profile':/);
 });
+
+test('national client roots remain grandmaster-only Caddie-routed proposals', () => {
+  assert.match(caddie, /propose_client_root_org: \{/);
+  assert.match(caddie, /'bob-propose-client-root-org'/);
+  assert.match(chat, /async function execProposeClientRootOrg/);
+  assert.match(chat, /caps\.tier !== 'admiral'/);
+  assert.match(chat, /callFn\('bob-propose-client-root-org', authHeader/);
+  assert.match(chat, /case 'propose_client_root_org':/);
+});

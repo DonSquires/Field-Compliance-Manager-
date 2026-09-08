@@ -124,6 +124,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; needs approval; explicit organization ID; never submit residential addresses',
     effect_class: 'draft_governed_write'
   },
+  propose_client_root_org: {
+    purpose: 'PROPOSE a new national client tenant root with no parent organization. This is a high-impact, grandmaster-only action and creates a pending approval only. Args: { client: { name, contact_email?, contact_phone?, billing_email?, billing_address?, account_notes? }, reasoning? }.',
+    governance: 'WRITE-draft; grandmaster only; needs approval; creates a tenant root',
+    effect_class: 'draft_governed_write'
+  },
   promote_action: {
     purpose: 'Prepare a governed draft (e.g. service agreement) into the approval bell.',
     governance: 'WRITE-draft; needs approval',
@@ -566,6 +571,7 @@ const TOOL_REGISTRY = {
     propose_site_risk: 'bob-propose-site-risk',
     propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
     propose_corporate_profile: 'bob-propose-corporate-profile',
+    propose_client_root_org: 'bob-propose-client-root-org',
     plan_import: 'bob-plan-import',
     perceive_media: 'bob-perceive-image',
     web_research: 'bob-web-research',

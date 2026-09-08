@@ -852,7 +852,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
   // sql_read: admiral unrestricted, captain+commander org-scoped.
-  if (tier === 'admiral') allowedTools.push('sql_read', 'repo_search', 'check_proposals', 'self_audit', 'write_self_memory', 'read_self_memory', 'query_atlas', 'read_issues');
+  if (tier === 'admiral') allowedTools.push('sql_read', 'repo_search', 'check_proposals', 'self_audit', 'write_self_memory', 'read_self_memory', 'query_atlas', 'read_issues', 'propose_client_root_org');
   else if (tier === 'captain' || tier === 'commander') allowedTools.push('sql_read', 'check_proposals');
   else if (tier === 'officer' || tier === 'ensign') allowedTools.push('check_proposals');
   // C2 (issue #3): resolve the caller's area x level matrix for this org. Admiral
@@ -1417,6 +1417,7 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'propose_site_risk' && caps.canPromote || // site_risk is a read-only assessment.
     t.tool === 'site_risk' && caps.canCompareData ||
     t.tool === 'propose_corporate_profile' && caps.canPromote ||
+    t.tool === 'propose_client_root_org' && caps.tier === 'admiral' ||
     // same gate as every single-action propose_* tool; a plan approval is the
     // same kind of human decision, just at plan granularity (#86 Phase 3).
     t.tool === 'job_plan_create' && caps.canPromote || // propose_freedom_camping_org_strategy is a governed WRITE-draft — same gate.
@@ -4572,6 +4573,39 @@ async function execProposeCorporateProfile(authHeader, caps, args) {
     meta: { tool: 'propose_corporate_profile', outcome: 'ok', action_id: r.data.action_id ?? null }
   };
 }
+async function execProposeClientRootOrg(authHeader, caps, args) {
+  if (caps.tier !== 'admiral') return {
+    reply: 'Creating a national client tenant root is restricted to the grand master.',
+    meta: { tool: 'propose_client_root_org', outcome: 'forbidden' }
+  };
+  const client = args.client && typeof args.client === 'object' ? args.client : {};
+  const name = String(client.name ?? args.client_name ?? args.name ?? '').trim();
+  if (!name) return {
+    reply: 'Provide the national client tenant name before I prepare this proposal.',
+    meta: { tool: 'propose_client_root_org', outcome: 'need_client_name' }
+  };
+  const r = await callFn('bob-propose-client-root-org', authHeader, {
+    client: {
+      name,
+      contact_email: client.contact_email,
+      contact_phone: client.contact_phone,
+      billing_email: client.billing_email,
+      billing_address: client.billing_address,
+      account_notes: client.account_notes
+    },
+    reasoning: typeof args.reasoning === 'string' ? args.reasoning : undefined,
+    conversation_id: args._conversation_id,
+    _idempotency_key: args._idempotency_key
+  });
+  if (!r.ok || !r.data?.success) return {
+    reply: 'I could not prepare the national client tenant proposal right now.',
+    meta: { tool: 'propose_client_root_org', outcome: 'failed' }
+  };
+  return {
+    reply: String(r.data.note ?? 'The national client tenant proposal is ready for approval.'),
+    meta: { tool: 'propose_client_root_org', outcome: 'ok', action_id: r.data.action_id ?? null }
+  };
+}
 // Bob PROPOSES a freedom-camping ENFORCEMENT zone (geofence + night limits) into
 // the bell. Calls bob-propose-freedom-camping-zone. Bob must have RESOLVED the
 // geofence himself first (verify address -> LINZ parcel -> Google fallback, per
@@ -7692,6 +7726,8 @@ serve(async (req)=>{
           return execProposePatrolRouteServiceArea(authHeader, caps, toolArgs);
         case 'propose_corporate_profile':
           return execProposeCorporateProfile(authHeader, caps, toolArgs);
+        case 'propose_client_root_org':
+          return execProposeClientRootOrg(authHeader, caps, toolArgs);
         case 'propose_client_onboarding':
           return execProposeClientOnboarding(authHeader, caps, orgId, toolArgs);
         case 'propose_freedom_camping_zone':
