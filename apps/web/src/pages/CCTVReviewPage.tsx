@@ -172,9 +172,10 @@ export const CCTVReviewPage: React.FC = () => {
       const bucket = String(selected.evidence.metadata?.storage_bucket || 'bob-uploads');
       const playbackPath = selected.evidence.metadata?.playback_storage_path;
       const rawFileType = String(selected.evidence.metadata?.file_type || '');
-      // Raw h264 elementary streams (direct SD-card extraction) cannot play in a <video> element
-      // until the vision worker remuxes them into MP4; show that state instead of a broken player.
-      if (!playbackPath && rawFileType === 'video/h264') {
+      // Raw h264/h265 elementary streams (direct SD-card extraction) cannot play in a <video>
+      // element until the vision worker remuxes them into MP4; show that state instead of a
+      // broken player.
+      if (!playbackPath && (rawFileType === 'video/h264' || rawFileType === 'video/h265')) {
         setVideoUrl(null);
         setVideoError('CONVERTING');
         setVideoLoading(false);

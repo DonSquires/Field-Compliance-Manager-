@@ -158,6 +158,7 @@ type DhfsConversionReport = {
     start_time: string;
     end_time: string;
     bytes_written: number;
+    content_type: string;
     starts_with_nal_marker: boolean;
   }>;
 };
@@ -167,6 +168,7 @@ type CachedClipReport = {
   bytes: number;
   sha256: string;
   state: string;
+  content_type: string;
   channel?: number;
   start_time?: string;
   end_time?: string;
@@ -575,7 +577,7 @@ function App() {
       const bytes = await readFile(cacheResult.cache_path);
       setCachedClip(cacheResult);
       const fileName = cacheResult.cache_path.replace(/^.*[\\/]/, '');
-      setVideo(new File([bytes], fileName, { type: 'video/h264' }));
+      setVideo(new File([bytes], fileName, { type: cacheResult.content_type }));
       setActiveView('video-upload');
       setUploadStatus(cacheStatusMessage(cacheResult));
     } catch (cause) {
@@ -602,7 +604,7 @@ function App() {
       });
       const bytes = await readFile(cacheResult.cache_path);
       setCachedClip(cacheResult);
-      setVideo(new File([bytes], exported.file_name, { type: 'video/h264' }));
+      setVideo(new File([bytes], exported.file_name, { type: exported.content_type }));
       setActiveView('video-upload');
       setUploadStatus(cacheStatusMessage(cacheResult));
     } catch (cause) {

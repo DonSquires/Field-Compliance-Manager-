@@ -39,6 +39,7 @@ struct DhfsVideoExport {
     start_time: String,
     end_time: String,
     bytes_written: u64,
+    content_type: String,
     starts_with_nal_marker: bool,
 }
 
@@ -65,6 +66,7 @@ struct CachedClipReport {
     bytes: u64,
     sha256: String,
     state: String,
+    content_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     channel: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,7 +192,7 @@ fn cache_video_clip(source_path: String, cache_directory: String, cache_name: St
     let source = PathBuf::from(&source_path);
     let cache_dir = PathBuf::from(&cache_directory);
     if !source.is_file() { return Err("The selected recording is no longer available.".to_string()); }
-    if cache_name.is_empty() || cache_name.contains(['/', '\\']) || !cache_name.ends_with(".h264") {
+    if cache_name.is_empty() || cache_name.contains(['/', '\\']) || !(cache_name.ends_with(".h264") || cache_name.ends_with(".h265")) {
         return Err("Invalid cache clip name.".to_string());
     }
     fs::create_dir_all(&cache_dir).map_err(|error| format!("Could not create clip cache: {error}"))?;
@@ -213,7 +215,8 @@ fn cache_video_clip(source_path: String, cache_directory: String, cache_name: St
     output.flush().map_err(|error| error.to_string())?;
     output.sync_all().map_err(|error| error.to_string())?;
     fs::rename(&part_path, &ready_path).map_err(|error| format!("Could not commit clip cache atomically: {error}"))?;
-    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string(), channel: None, start_time: None, end_time: None, starts_with_nal_marker: Some(nal_marker) })
+    let content_type = if cache_name.ends_with(".h265") { "video/h265" } else { "video/h264" };
+    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string(), content_type: content_type.to_string(), channel: None, start_time: None, end_time: None, starts_with_nal_marker: Some(nal_marker) })
 }
 
 #[tauri::command]
@@ -250,6 +253,27 @@ fn media_signature_hint(bytes: &[u8]) -> String {
 // Confirms the reconstructed fragment offset lands exactly on an H.264/H.265 NAL boundary.
 fn starts_with_nal_marker(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0, 0, 0, 1]) || bytes.starts_with(&[0, 0, 1])
+}
+
+// Real Dahua cards prepend a proprietary "DHII" stream-configuration header (magic bytes, fixed
+// fields, and a JSON blob describing audio/video parameters) before the actual elementary stream
+// begins, but only on a recording's first fragment. Verified against a real card: the true stream
+// start is the first NAL unit whose type is a parameter set (HEVC VPS/SPS or H.264 SPS), which
+// reliably distinguishes it from incidental start-code-like byte patterns in that leading header.
+fn locate_elementary_stream_start(bytes: &[u8]) -> Option<(usize, bool)> {
+    let mut index = 0;
+    while index + 5 <= bytes.len() {
+        let is_four_byte = &bytes[index..index + 4] == [0, 0, 0, 1];
+        let is_three_byte = !is_four_byte && &bytes[index..index + 3] == [0, 0, 1];
+        if is_four_byte || is_three_byte {
+            let header_byte = bytes[index + if is_four_byte { 4 } else { 3 }];
+            let hevc_type = (header_byte >> 1) & 0x3f;
+            if hevc_type == 32 || hevc_type == 33 { return Some((index, true)); }
+            if header_byte & 0x1f == 7 { return Some((index, false)); }
+        }
+        index += 1;
+    }
+    None
 }
 
 fn inspect_sd_index_at_path(path: &Path) -> Result<IndexReport, String> {
@@ -855,17 +879,42 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
 
     let start_time = dhfs_timestamp(start);
     let end_time = dhfs_timestamp(end);
-    let cache_name = format!("FCM-card-p{dhfs_partition_index}-d{descriptor_index:06}-{start_time}-{end_time}-ch{channel:02}.h264");
     let cache_dir = PathBuf::from(&cache_directory);
     fs::create_dir_all(&cache_dir).map_err(|error| format!("Could not create clip cache: {error}"))?;
+
+    // The first fragment may carry a proprietary stream-configuration header before the real
+    // elementary stream; read it fully so it can be trimmed and the real codec identified.
+    let first_bytes_to_copy = if chain.len() == 1 { last_size } else { fragment_size };
+    let first_fragment_start = video_offset + chain[0] as u64 * fragment_size;
+    let mut first_fragment = Vec::with_capacity(first_bytes_to_copy as usize);
+    {
+        let mut copied = 0_u64;
+        const READ_CHUNK: u64 = 1024 * 1024;
+        while copied < first_bytes_to_copy {
+            let requested = (first_bytes_to_copy - copied).min(READ_CHUNK) as usize;
+            let chunk = read_device_aligned(&mut device, first_fragment_start + copied, requested)
+                .map_err(|error| format!("Card read failed, possibly disconnected; partial cache retained: {error}"))?;
+            first_fragment.extend_from_slice(&chunk);
+            copied += requested as u64;
+        }
+    }
+    let (trim_start, is_hevc) = locate_elementary_stream_start(&first_fragment)
+        .unwrap_or((0, false));
+    let extension = if is_hevc { "h265" } else { "h264" };
+    let cache_name = format!("FCM-card-p{dhfs_partition_index}-d{descriptor_index:06}-{start_time}-{end_time}-ch{channel:02}.{extension}");
     let ready_path = cache_dir.join(&cache_name);
     let part_path = cache_dir.join(format!("{cache_name}.part"));
     let mut output_file = File::create(&part_path).map_err(|error| format!("Could not create clip cache: {error}"))?;
     let mut hasher = Sha256::new();
     let mut bytes_written = 0_u64;
-    let mut nal_marker = false;
+    let first_fragment_trimmed = &first_fragment[trim_start..];
+    let nal_marker = starts_with_nal_marker(first_fragment_trimmed);
+    output_file.write_all(first_fragment_trimmed).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
+    hasher.update(first_fragment_trimmed);
+    bytes_written += first_fragment_trimmed.len() as u64;
+
     const READ_CHUNK: u64 = 1024 * 1024;
-    for (position, fragment) in chain.iter().enumerate() {
+    for (position, fragment) in chain.iter().enumerate().skip(1) {
         let bytes_to_copy = if position + 1 == chain.len() { last_size } else { fragment_size };
         let fragment_start = video_offset + *fragment as u64 * fragment_size;
         let mut copied = 0_u64;
@@ -873,7 +922,6 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
             let requested = (bytes_to_copy - copied).min(READ_CHUNK) as usize;
             let chunk = read_device_aligned(&mut device, fragment_start + copied, requested)
                 .map_err(|error| format!("Card read failed, possibly disconnected; partial cache retained: {error}"))?;
-            if bytes_written == 0 { nal_marker = starts_with_nal_marker(&chunk); }
             output_file.write_all(&chunk).map_err(|error| format!("Clip cache write failed; partial cache retained: {error}"))?;
             hasher.update(&chunk);
             copied += requested as u64;
@@ -888,6 +936,7 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
         bytes: bytes_written,
         sha256: format!("{:x}", hasher.finalize()),
         state: "ready".to_string(),
+        content_type: if is_hevc { "video/h265".to_string() } else { "video/h264".to_string() },
         channel: Some(channel),
         start_time: Some(start_time),
         end_time: Some(end_time),
@@ -948,12 +997,23 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
             let channel = descriptor[1].saturating_sub(b'0') as u32 + 1;
             let start_time = dhfs_timestamp(start_timestamp);
             let end_time = dhfs_timestamp(end_timestamp);
-            let file_name = format!("FCM-p{}-d{:06}-{}-{}-ch{:02}.h264", partition_index, descriptor_index, start_time, end_time, channel);
+
+            let first_bytes_to_copy = if chain.len() == 1 { last_size } else { fragment_size };
+            file.seek(SeekFrom::Start(video_offset + chain[0] as u64 * fragment_size)).map_err(|error| error.to_string())?;
+            let mut first_fragment = vec![0_u8; first_bytes_to_copy as usize];
+            file.read_exact(&mut first_fragment).map_err(|error| error.to_string())?;
+            let (trim_start, is_hevc) = locate_elementary_stream_start(&first_fragment).unwrap_or((0, false));
+            let extension = if is_hevc { "h265" } else { "h264" };
+            let content_type = if is_hevc { "video/h265" } else { "video/h264" };
+
+            let file_name = format!("FCM-p{}-d{:06}-{}-{}-ch{:02}.{}", partition_index, descriptor_index, start_time, end_time, channel, extension);
             let output_path = output.join(&file_name);
             let mut output_file = File::create(&output_path).map_err(|error| format!("Could not create {output_path:?}: {error}"))?;
-            let mut bytes_written = 0_u64;
-            let mut nal_marker = false;
-            for (position, fragment) in chain.iter().enumerate() {
+            let first_fragment_trimmed = &first_fragment[trim_start..];
+            let nal_marker = starts_with_nal_marker(first_fragment_trimmed);
+            output_file.write_all(first_fragment_trimmed).map_err(|error| error.to_string())?;
+            let mut bytes_written = first_fragment_trimmed.len() as u64;
+            for (position, fragment) in chain.iter().enumerate().skip(1) {
                 let bytes_to_copy = if position + 1 == chain.len() { last_size } else { fragment_size };
                 file.seek(SeekFrom::Start(video_offset + *fragment as u64 * fragment_size)).map_err(|error| error.to_string())?;
                 let mut remaining = bytes_to_copy;
@@ -961,13 +1021,12 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
                 while remaining > 0 {
                     let requested = remaining.min(buffer.len() as u64) as usize;
                     file.read_exact(&mut buffer[..requested]).map_err(|error| error.to_string())?;
-                    if bytes_written == 0 { nal_marker = starts_with_nal_marker(&buffer[..requested]); }
                     output_file.write_all(&buffer[..requested]).map_err(|error| error.to_string())?;
                     remaining -= requested as u64;
                     bytes_written += requested as u64;
                 }
             }
-            exported.push(DhfsVideoExport { file_name, partition: partition_index, descriptor: descriptor_index, channel, start_time, end_time, bytes_written, starts_with_nal_marker: nal_marker });
+            exported.push(DhfsVideoExport { file_name, partition: partition_index, descriptor: descriptor_index, channel, start_time, end_time, bytes_written, content_type: content_type.to_string(), starts_with_nal_marker: nal_marker });
         }
     }
     Ok(DhfsConversionReport { source_path: image_path, source_sha256, output_directory, exported })
@@ -1316,6 +1375,31 @@ mod tests {
         assert!(starts_with_nal_marker(&[0, 0, 0, 1, 0x67]));
         assert!(starts_with_nal_marker(&[0, 0, 1, 0x67]));
         assert!(!starts_with_nal_marker(&[0xAA, 0xAA, 0xAA, 0xAA]));
+    }
+
+    // Verified against a real card: the first fragment carries a proprietary "DHII" stream-config
+    // header (magic bytes + JSON) before the real HEVC elementary stream begins with a VPS unit.
+    #[test]
+    fn locates_hevc_stream_start_past_a_proprietary_dhii_header() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"DHII");
+        bytes.extend_from_slice(&[0_u8; 64]); // fixed header fields, not relevant to detection
+        bytes.extend_from_slice(b"{\"Audio\":{\"Bitrate\":64}}"); // embedded JSON metadata
+        bytes.extend_from_slice(&[0_u8; 1024]); // padding / non-video index data
+        let real_stream_offset = bytes.len();
+        bytes.extend_from_slice(&[0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01]); // real HEVC VPS NAL
+
+        let (offset, is_hevc) = locate_elementary_stream_start(&bytes).expect("stream start should be found");
+        assert_eq!(offset, real_stream_offset);
+        assert!(is_hevc);
+    }
+
+    #[test]
+    fn locate_elementary_stream_start_ignores_incidental_start_code_patterns() {
+        // A start-code-like byte pattern inside the proprietary header whose following byte is
+        // not a recognised parameter-set NAL type must not be mistaken for the real stream start.
+        let bytes = [0_u8, 0, 0, 1, 0xAA, 0xAA, 0xAA, 0xAA];
+        assert_eq!(locate_elementary_stream_start(&bytes), None);
     }
 
     fn write_le_u32(buffer: &mut [u8], offset: usize, value: u32) {
