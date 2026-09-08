@@ -170,7 +170,17 @@ export const CCTVReviewPage: React.FC = () => {
       setVideoLoading(true);
       setVideoError(null);
       const bucket = String(selected.evidence.metadata?.storage_bucket || 'bob-uploads');
-      const storagePath = selected.evidence.storage_path;
+      const playbackPath = selected.evidence.metadata?.playback_storage_path;
+      const rawFileType = String(selected.evidence.metadata?.file_type || '');
+      // Raw h264 elementary streams (direct SD-card extraction) cannot play in a <video> element
+      // until the vision worker remuxes them into MP4; show that state instead of a broken player.
+      if (!playbackPath && rawFileType === 'video/h264') {
+        setVideoUrl(null);
+        setVideoError('CONVERTING');
+        setVideoLoading(false);
+        return;
+      }
+      const storagePath = typeof playbackPath === 'string' ? playbackPath : selected.evidence.storage_path;
       try {
         const { data, error: signError } = await supabase.storage
           .from(bucket)
@@ -193,7 +203,7 @@ export const CCTVReviewPage: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [selected?.id, selected?.evidence?.storage_path, selected?.evidence?.metadata?.storage_bucket]);
+  }, [selected?.id, selected?.evidence?.storage_path, selected?.evidence?.metadata?.storage_bucket, selected?.evidence?.metadata?.playback_storage_path, selected?.evidence?.metadata?.file_type]);
 
   // Consolidated observation data
   const consolidated = useMemo(() => {
@@ -402,6 +412,11 @@ export const CCTVReviewPage: React.FC = () => {
                       preload="metadata"
                       className="cctv-video-player"
                     />
+                  </div>
+                ) : videoError === 'CONVERTING' ? (
+                  <div className="cctv-media-loading">
+                    <RefreshCw className="is-spinning" size={20} />
+                    <span>Converting to a playable format for review...</span>
                   </div>
                 ) : (
                   <div className="cctv-media-placeholder">

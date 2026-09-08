@@ -185,6 +185,58 @@ async function failJob(jobId, message) {
   log('job_failed', { job_id: jobId, error: message });
 }
 
+function playbackStoragePath(sourceStoragePath) {
+  const withoutExtension = sourceStoragePath.replace(/\.[^./\\]+$/, '');
+  return `${withoutExtension}.playback.mp4`;
+}
+
+function runFfmpegRemux(sourcePath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', ['-y', '-fflags', '+genpts', '-i', sourcePath, '-c', 'copy', '-movflags', '+faststart', outputPath], {
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+    let errorOutput = '';
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('ffmpeg remux timed out'));
+    }, EXTRACTOR_TIMEOUT_MS);
+    child.stderr.on('data', (chunk) => { errorOutput += chunk.toString().slice(-4000); });
+    child.once('error', (error) => { clearTimeout(timeout); reject(error); });
+    child.once('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) return reject(new Error(`ffmpeg exited ${code}: ${errorOutput || 'unknown error'}`));
+      resolve();
+    });
+  });
+}
+
+// Evidence is decoded straight from its source (h264 elementary streams, proprietary DVR
+// containers, etc.) for motion analysis, but browsers/Windows/phones can't play those directly.
+// Remux (stream-copy, no re-encode) into a real MP4 so the evidence is playable everywhere,
+// while the original bytes remain untouched and available for court/chain-of-custody purposes.
+async function ensurePlaybackCopy(job, evidence, videoPath) {
+  if (evidence.metadata?.playback_storage_path) return;
+  const outputDir = path.join(DERIVED_ROOT, job.id);
+  await fs.mkdir(outputDir, { recursive: true });
+  const outputPath = path.join(outputDir, 'playback.mp4');
+  await runFfmpegRemux(videoPath, outputPath);
+
+  const bucket = evidence.metadata?.storage_bucket || 'bob-uploads';
+  const destinationPath = playbackStoragePath(evidence.storage_path);
+  const bytes = await fs.readFile(outputPath);
+  const { error: uploadError } = await supabase.storage
+    .from(bucket)
+    .upload(destinationPath, bytes, { contentType: 'video/mp4', upsert: true });
+  if (uploadError) throw new Error(`playback upload failed: ${uploadError.message}`);
+
+  const { error: updateError } = await supabase
+    .from('evidence_items')
+    .update({ metadata: { ...(evidence.metadata || {}), playback_storage_path: destinationPath, playback_content_type: 'video/mp4' } })
+    .eq('id', evidence.id);
+  if (updateError) throw new Error(`evidence playback metadata update failed: ${updateError.message}`);
+  log('playback_copy_ready', { job_id: job.id, evidence_item_id: evidence.id, destination_path: destinationPath });
+}
+
 async function processOne() {
   if (processing) return;
   if (!INGESTION_URL || !WORKLOAD_SIGNING_SECRET) return;
@@ -217,6 +269,12 @@ async function processOne() {
     await classifyFrames(summary);
     await consolidateMotionSummary(summary);
     await ingest(job, summary);
+    try {
+      await ensurePlaybackCopy(job, evidence, videoPath);
+    } catch (playbackError) {
+      // Motion analysis is the compliance-critical result; a playback-copy failure must not fail the job.
+      log('playback_copy_failed', { job_id: job.id, evidence_item_id: job.evidence_item_id, error: playbackError.message });
+    }
     log('job_completed', {
       job_id: job.id,
       total_frames_parsed: summary.total_frames_parsed,
@@ -241,4 +299,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy };
