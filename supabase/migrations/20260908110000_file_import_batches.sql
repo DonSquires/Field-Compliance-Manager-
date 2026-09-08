@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS file_import_batches_org_status
 
 ALTER TABLE public.file_import_batches ENABLE ROW LEVEL SECURITY;
 CREATE POLICY file_import_batches_select ON public.file_import_batches
-  FOR SELECT TO authenticated USING (public.org_access_allowed(organization_id));
+  FOR SELECT TO authenticated USING (public.is_admin_for_org(organization_id) OR public.is_grand_master());
 REVOKE INSERT, UPDATE, DELETE ON public.file_import_batches FROM anon, authenticated;
 GRANT SELECT ON public.file_import_batches TO authenticated;
 
