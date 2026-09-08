@@ -1,14 +1,14 @@
 # FCM SD Card Bridge
 
-Local Windows utility for inspecting a copied `SDFileInfo.db` CCTV index before footage extraction is implemented.
+Local Windows utility for read-only SD/DHFS inspection, evidence preparation, and hybrid CCTV handoff.
 
 ## Current milestone
 
-- Opens only a user-selected `SDFileInfo.db` file.
+- Opens a user-selected `SDFileInfo.db` file or reads supported recordings directly from a connected card.
 - Opens SQLite in read-only mode and calculates a source SHA-256.
 - Displays motion-recording metadata, event labels, timestamps, and vendor cluster references.
 - Signs users in against FCM using public browser configuration fetched at startup; passwords and service credentials are never sent to the configuration endpoint.
-- Uploads exported MP4/MOV/AVI/MKV footage to private FCM storage and queues the existing VPS `video_motion` pipeline.
+- Uploads exported MP4/MOV/AVI/MKV footage to private FCM storage and queues the hybrid `video_motion` pipeline: RunPod GPU inference first, with VPS inference as the fallback.
 - Stages one selected recording at a time through an atomic `.part` -> ready cache before upload; failed reads or uploads remain retryable and successful Bob registration clears the cache.
 - Reads normal DHFS recordings directly off the physical card and extracts one selected recording straight into the retryable cache, with no full-card image and no NVR/VMS client required.
 - The built-in DHFS parser also supports a read-only full image as an optional forensic-preservation mode; it is not required for normal clip intake.
