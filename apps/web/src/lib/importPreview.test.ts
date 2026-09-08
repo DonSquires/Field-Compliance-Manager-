@@ -24,4 +24,12 @@ describe('CSV import preview', () => {
     const bytes = new TextEncoder().encode('source-row').buffer as ArrayBuffer;
     await expect(sha256Hex(bytes)).resolves.toBe('e7b8190cd3763566ca3061365d327050fe7d6d7dcf3a51ebb5585150e40f5547');
   });
+
+  it('separates malformed rows and unresolved mapped values from informational warnings', () => {
+    const preview = parseCsvPreview('Registration,Site\nKDQ873,Lowburn\n,Lowburn\nBROKEN\n', 'quality.csv');
+    expect(preview.malformed_row_count).toBe(1);
+    expect(preview.unresolved_count).toBe(1);
+    expect(preview.warnings).toContain('1 malformed rows have a different column count');
+    expect(preview.warnings).toContain('1 rows have unresolved mapped values');
+  });
 });

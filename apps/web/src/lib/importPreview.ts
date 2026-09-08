@@ -6,6 +6,8 @@ export interface ImportSchemaPreview {
   parser: string;
   row_count: number;
   duplicate_count: number;
+  malformed_row_count?: number;
+  unresolved_count?: number;
   date_range: string;
   headers?: string[];
   sample_rows?: string[][];
@@ -85,13 +87,18 @@ export function parseXlsxPreview(data: ArrayBuffer, fileName: string): Promise<I
 function buildPreview(rows: string[][], fileName: string, parser: string): ImportSchemaPreview {
   const headers = rows[0] ?? [];
   const records = rows.slice(1).filter((row) => row.some(Boolean));
+  const malformedRowCount = records.filter((row) => row.length !== headers.length).length;
   const signatures = records.map((row) => row.join('\u001f'));
   const unique = new Set(signatures);
   const dates = records.flatMap((row) => row).filter((value) => /\d{4}[-/]\d{1,2}[-/\d]|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|T\d{2}:\d{2}/.test(value)).map((value) => Date.parse(value)).filter(Number.isFinite).sort((left, right) => left - right);
   const dateRange = dates.length > 1 ? `${formatDate(dates[0])} - ${formatDate(dates[dates.length - 1])}` : 'No date range detected';
   const mappings = mappingFor(headers);
   const warnings: string[] = [];
+  const mappedIndexes = new Set(mappings.map((mapping) => headers.indexOf(mapping.source)));
+  const unresolvedCount = records.filter((row) => row.length === headers.length && mappedIndexes.size > 0 && Array.from(mappedIndexes).some((index) => !row[index]?.trim())).length;
   if (unique.size !== records.length) warnings.push(`${records.length - unique.size} duplicate rows require review`);
+  if (malformedRowCount > 0) warnings.push(`${malformedRowCount} malformed rows have a different column count`);
+  if (unresolvedCount > 0) warnings.push(`${unresolvedCount} rows have unresolved mapped values`);
   if (!mappings.some((mapping) => mapping.target === 'vehicle.registration')) warnings.push('No vehicle registration column detected');
   if (!mappings.some((mapping) => mapping.target === 'observation.site_name')) warnings.push('No site or location column detected');
   warnings.push('Preview only: no canonical records will be written');
@@ -100,6 +107,8 @@ function buildPreview(rows: string[][], fileName: string, parser: string): Impor
     parser,
     row_count: records.length,
     duplicate_count: records.length - unique.size,
+    malformed_row_count: malformedRowCount,
+    unresolved_count: unresolvedCount,
     date_range: dateRange,
     headers,
     sample_rows: records.slice(0, 5),

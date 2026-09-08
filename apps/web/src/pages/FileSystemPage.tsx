@@ -80,6 +80,7 @@ interface FileImportBatch {
   row_count: number;
   duplicate_count: number;
   unresolved_count: number;
+  malformed_row_count?: number;
   review_reason: string | null;
   reviewed_at: string | null;
   manifest_json: Record<string, unknown>;
@@ -318,10 +319,10 @@ const FileSystemPage: React.FC = () => {
       p_source_sha256: activeImportPreview.source_sha256 ?? null,
       p_parser: activeImportPreview.parser,
       p_manifest_json: { staged: true, source_file: activeImportPreview.source_file, date_range: activeImportPreview.date_range },
-      p_schema_json: { mappings: activeImportPreview.mappings, warnings: activeImportPreview.warnings, headers: activeImportPreview.headers, sample_rows: activeImportPreview.sample_rows },
+      p_schema_json: { mappings: activeImportPreview.mappings, warnings: activeImportPreview.warnings, headers: activeImportPreview.headers, sample_rows: activeImportPreview.sample_rows, malformed_row_count: activeImportPreview.malformed_row_count ?? 0 },
       p_row_count: activeImportPreview.row_count,
       p_duplicate_count: activeImportPreview.duplicate_count,
-      p_unresolved_count: activeImportPreview.warnings.length,
+      p_unresolved_count: activeImportPreview.unresolved_count ?? 0,
       p_organization_id: organizationId,
     });
     if (batchError) setPreviewError(batchError.message);
@@ -395,9 +396,9 @@ const FileSystemPage: React.FC = () => {
         <small className="file-system-import-hash">SHA-256: {activeImportPreview.source_sha256 ?? 'Generated when a local source is selected'}</small>
         {previewError && <p className="file-system-import-warning" role="alert">{previewError}</p>}
         <button type="button" className="file-system-import-create" onClick={() => void createReviewBatch()} disabled={creatingBatch}>{creatingBatch ? 'Creating review batch' : 'Create review batch'}</button>
-        <div className="file-system-import-facts"><div><small>Parser</small><strong>{activeImportPreview.parser}</strong></div><div><small>Rows</small><strong>{activeImportPreview.row_count.toLocaleString()}</strong></div><div><small>duplicate rows</small><strong>{activeImportPreview.duplicate_count}</strong></div><div><small>Date range</small><strong>{activeImportPreview.date_range}</strong></div></div>
+        <div className="file-system-import-facts"><div><small>Parser</small><strong>{activeImportPreview.parser}</strong></div><div><small>Rows</small><strong>{activeImportPreview.row_count.toLocaleString()}</strong></div><div><small>duplicate rows</small><strong>{activeImportPreview.duplicate_count}</strong></div><div><small>Malformed rows</small><strong>{activeImportPreview.malformed_row_count ?? 0}</strong></div><div><small>Unresolved values</small><strong>{activeImportPreview.unresolved_count ?? 0}</strong></div><div><small>Date range</small><strong>{activeImportPreview.date_range}</strong></div></div>
         {activeImportPreview.headers && activeImportPreview.sample_rows && <div className="file-system-import-sample"><span>Sample rows, first 5 only</span><div className="file-system-import-table-wrap"><table><thead><tr>{activeImportPreview.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{activeImportPreview.sample_rows.map((row, rowIndex) => <tr key={`sample-${rowIndex}`}>{activeImportPreview.headers?.map((header, columnIndex) => <td key={`${header}-${rowIndex}`}>{row[columnIndex] || '-'}</td>)}</tr>)}</tbody></table></div></div>}
-        <div className="file-system-import-columns"><div><span>Column mapping</span>{activeImportPreview.mappings.map((mapping) => <div className="file-system-import-mapping" key={`${mapping.source}-${mapping.target}`}><strong>{mapping.source}</strong><span>to {mapping.target}</span><small>{mapping.confidence}</small></div>)}</div><div><span>Review warnings</span>{activeImportPreview.warnings.map((warning) => <p key={warning}>{warning}</p>)}<p className="file-system-import-warning">{activeImportPreview.warnings.length} unresolved references</p></div></div>
+        <div className="file-system-import-columns"><div><span>Column mapping</span>{activeImportPreview.mappings.map((mapping) => <div className="file-system-import-mapping" key={`${mapping.source}-${mapping.target}`}><strong>{mapping.source}</strong><span>to {mapping.target}</span><small>{mapping.confidence}</small></div>)}</div><div><span>Review warnings</span>{activeImportPreview.warnings.map((warning) => <p key={warning}>{warning}</p>)}<p className="file-system-import-warning">{activeImportPreview.unresolved_count ?? 0} unresolved values</p></div></div>
       </div>
     </section>
     <section className="file-system-batches" aria-label="Import batch history">

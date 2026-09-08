@@ -69,6 +69,9 @@ describe('organisation file system', () => {
     expect(page).toContain('Duplicate source linked');
     expect(page).toContain('Sample rows, first 5 only');
     expect(page).toContain('sample_rows');
+    expect(page).toContain('Malformed rows');
+    expect(page).toContain('Unresolved values');
+    expect(page).toContain('activeImportPreview.unresolved_count');
   });
 
   it('is registered as a first-class admin page', () => {
