@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Archive,
   Car,
   CheckCircle2,
   CircleDot,
@@ -9,6 +10,7 @@ import {
   FileVideo2,
   Maximize2,
   Play,
+  RotateCcw,
   RefreshCw,
   ShieldAlert,
   UserRound,
@@ -20,13 +22,14 @@ import { supabase } from '../lib/supabase';
 import { consolidateResultData } from '../lib/motionConsolidation';
 import type {
   ConsolidatedFaceEvent,
+  ConsolidatedPersonEvent,
   ConsolidatedVehicleEvent,
   KeyframeItem,
 } from '../lib/motionConsolidation';
 import './PageStyles.css';
 import './CCTVReviewPage.css';
 
-type ReviewFilter = 'all' | 'queued' | 'processing' | 'manual_review_required' | 'complete' | 'failed';
+type ReviewFilter = 'all' | 'queued' | 'processing' | 'manual_review_required' | 'complete' | 'failed' | 'archived';
 
 type CCTVJob = {
   id: string;
@@ -75,6 +78,7 @@ const FILTERS: Array<{ value: ReviewFilter; label: string }> = [
   { value: 'manual_review_required', label: 'Needs review' },
   { value: 'complete', label: 'Complete' },
   { value: 'failed', label: 'Failed' },
+  { value: 'archived', label: 'Archived' },
 ];
 
 function statusLabel(status: string): string {
@@ -103,6 +107,7 @@ export const CCTVReviewPage: React.FC = () => {
   const [identityDrafts, setIdentityDrafts] = useState<Record<string, { personRecordId: string; displayName: string }>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
+  const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'archive' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -120,7 +125,8 @@ export const CCTVReviewPage: React.FC = () => {
         .in('domain', [...CCTV_DOMAINS])
         .order('created_at', { ascending: false })
         .limit(100);
-      if (filter !== 'all') query = query.eq('status', filter);
+      if (filter === 'all') query = query.neq('status', 'archived');
+      else query = query.eq('status', filter);
       const { data, error: queryError } = await query;
       if (queryError) throw queryError;
       const mappedJobs = ((data ?? []) as unknown as CCTVJob[]).map((job) => ({
@@ -163,6 +169,32 @@ export const CCTVReviewPage: React.FC = () => {
   }, [loadJobs, profile?.organizationId]);
 
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
+
+  const manageSelectedJob = useCallback(async (action: 'retry' | 'cancel' | 'archive') => {
+    if (!selected || !profile?.organizationId) return;
+    const confirmation = action === 'archive'
+      ? 'Archive this CCTV queue item? The video and inference record will be retained and available under Archived.'
+      : action === 'cancel'
+        ? 'Cancel this CCTV job?'
+        : 'Retry this CCTV job?';
+    if (!window.confirm(confirmation)) return;
+    setJobAction(action);
+    setError(null);
+    try {
+      const { error: actionError } = await supabase.rpc('manage_cctv_inference_job', {
+        p_job_id: selected.id,
+        p_organization_id: profile.organizationId,
+        p_action: action,
+      });
+      if (actionError) throw actionError;
+      if (action === 'archive') setSelectedId(null);
+      await loadJobs();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : `CCTV job could not be ${action === 'archive' ? 'archived' : `${action}ed`}.`);
+    } finally {
+      setJobAction(null);
+    }
+  }, [loadJobs, profile?.organizationId, selected]);
 
   // Load Signed URL for the selected video
   useEffect(() => {
@@ -358,6 +390,7 @@ export const CCTVReviewPage: React.FC = () => {
             jobs.map((job) => {
               const jobConsolidated = consolidateResultData(job.result?.result);
               const faceCount = jobConsolidated.summary_counts.face_events;
+              const personCount = jobConsolidated.summary_counts.person_events;
               const vehicleCount = jobConsolidated.summary_counts.vehicle_events;
               const frameCount = jobConsolidated.summary_counts.total_frames_parsed;
 
@@ -380,7 +413,7 @@ export const CCTVReviewPage: React.FC = () => {
                   <span className="cctv-job-findings">
                     {frameCount > 0 ? `${frameCount} frames` : 'Pending frames'}
                     {vehicleCount > 0 ? ` · ${vehicleCount} vehicle ${vehicleCount === 1 ? 'event' : 'events'}` : ''}
-                    {faceCount > 0 ? ` · ${faceCount} person ${faceCount === 1 ? 'event' : 'events'}` : ''}
+                    {faceCount + personCount > 0 ? ` · ${faceCount + personCount} person ${faceCount + personCount === 1 ? 'event' : 'events'}` : ''}
                   </span>
                   <span className={`cctv-status status-${job.status}`}>
                     <CircleDot size={13} /> {statusLabel(job.status)}
@@ -401,6 +434,24 @@ export const CCTVReviewPage: React.FC = () => {
                   <h2>{selected.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</h2>
                 </div>
                 <Eye size={19} />
+              </div>
+
+              <div className="cctv-card-actions">
+                {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
+                  <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('retry')}>
+                    <RotateCcw size={13} /> {jobAction === 'retry' ? 'Retrying...' : 'Retry'}
+                  </button>
+                )}
+                {['queued', 'processing'].includes(selected.status) && (
+                  <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('cancel')}>
+                    <XCircle size={13} /> {jobAction === 'cancel' ? 'Cancelling...' : 'Cancel'}
+                  </button>
+                )}
+                {['complete', 'failed', 'inconclusive', 'manual_review_required', 'cancelled'].includes(selected.status) && (
+                  <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('archive')}>
+                    <Archive size={13} /> {jobAction === 'archive' ? 'Archiving...' : 'Archive'}
+                  </button>
+                )}
               </div>
 
               {/* Video Player */}
@@ -438,7 +489,7 @@ export const CCTVReviewPage: React.FC = () => {
               <div className="cctv-finding-grid">
                 <div>
                   <UserRound size={17} />
-                  <strong>{consolidated.summary_counts.face_events}</strong>
+                  <strong>{consolidated.summary_counts.face_events + consolidated.summary_counts.person_events}</strong>
                   <span>Consolidated Persons</span>
                 </div>
                 <div>
@@ -461,7 +512,7 @@ export const CCTVReviewPage: React.FC = () => {
                   onClick={() => setActiveTab('events')}
                 >
                   Observations (
-                  {consolidated.summary_counts.face_events + consolidated.summary_counts.vehicle_events})
+                  {consolidated.summary_counts.face_events + consolidated.summary_counts.person_events + consolidated.summary_counts.vehicle_events})
                 </button>
                 <button
                   type="button"
@@ -483,12 +534,32 @@ export const CCTVReviewPage: React.FC = () => {
               {activeTab === 'events' && (
                 <div className="cctv-events-list">
                   {identityError && <div className="page-error">{identityError}</div>}
-                  {consolidated.face_events.length === 0 && consolidated.vehicle_events.length === 0 ? (
+                  {consolidated.face_events.length === 0 && consolidated.person_events.length === 0 && consolidated.vehicle_events.length === 0 ? (
                     <div className="cctv-empty-small">
                       <Clock3 size={18} />
                       <span>No consolidated observations detected yet.</span>
                     </div>
                   ) : null}
+
+                  {consolidated.person_events.map((person: ConsolidatedPersonEvent) => (
+                    <div key={person.event_id} className="cctv-observation-card">
+                      <div className="cctv-card-body">
+                        <div className="cctv-card-header">
+                          <span className="cctv-badge cctv-badge-confidence">Person detected</span>
+                          <span className="cctv-badge cctv-badge-confidence">{Math.round(person.confidence * 100)}%</span>
+                        </div>
+                        <div className="cctv-card-meta">
+                          <span><strong>Window:</strong> {person.first_seen_seconds}s – {person.last_seen_seconds}s</span>
+                          <span><strong>Sightings:</strong> {person.frame_count} frames</span>
+                        </div>
+                        <div className="cctv-card-actions">
+                          <button type="button" className="cctv-btn-jump" onClick={() => jumpToTime(person.first_seen_seconds)}>
+                            <Play size={12} /> Jump to {person.first_seen_seconds}s
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
 
                   {/* Face Events */}
                   {consolidated.face_events.map((face: ConsolidatedFaceEvent) => (
@@ -660,6 +731,22 @@ export const CCTVReviewPage: React.FC = () => {
                           <span>
                             <strong>Sightings:</strong> {veh.frame_count} frames consolidated
                           </span>
+                          {(veh.vehicle_make || veh.vehicle_model || veh.vehicle_year || veh.vehicle_colour || veh.vehicle_type) && (
+                            <span>
+                              <strong>Vehicle:</strong>{' '}
+                              {[veh.vehicle_make, veh.vehicle_model, veh.vehicle_year, veh.vehicle_colour, veh.vehicle_type]
+                                .filter((value) => value !== null && value !== undefined && value !== '')
+                                .join(' · ')}
+                            </span>
+                          )}
+                          {veh.speed_px_per_second !== null && veh.speed_px_per_second !== undefined && (
+                            <span>
+                              <strong>Inferred speed:</strong>{' '}
+                              {veh.speed_kmh !== null && veh.speed_kmh !== undefined
+                                ? `${veh.speed_kmh.toFixed(1)} km/h`
+                                : `${veh.speed_px_per_second.toFixed(1)} px/s · calibration required`}
+                            </span>
+                          )}
                         </div>
                         <div className="cctv-card-actions">
                           <button

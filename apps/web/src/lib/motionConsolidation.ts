@@ -33,6 +33,30 @@ export interface ConsolidatedVehicleEvent {
   frame_count: number;
   best_frame_hash: string | null;
   thumbnail?: string | null;
+  vehicle_make?: string | null;
+  vehicle_model?: string | null;
+  vehicle_year?: number | null;
+  vehicle_colour?: string | null;
+  vehicle_type?: string | null;
+  vehicle_attribute_confidence?: number | null;
+  inference_provider?: string | null;
+  speed_px_per_second?: number | null;
+  speed_kmh?: number | null;
+  speed_calibration?: string | null;
+  review_required: boolean;
+}
+
+export interface ConsolidatedPersonEvent {
+  event_id: string;
+  event_type: 'person';
+  first_seen_seconds: number;
+  last_seen_seconds: number;
+  duration_seconds: number;
+  frame_count: number;
+  confidence: number;
+  best_frame_hash: string | null;
+  best_bbox?: BoundingBox | null;
+  thumbnail?: string | null;
   review_required: boolean;
 }
 
@@ -45,10 +69,12 @@ export interface KeyframeItem {
 
 export interface ConsolidatedResult {
   vehicle_events: ConsolidatedVehicleEvent[];
+  person_events: ConsolidatedPersonEvent[];
   face_events: ConsolidatedFaceEvent[];
   keyframes: KeyframeItem[];
   summary_counts: {
     vehicle_events: number;
+    person_events: number;
     unique_vehicles: number;
     face_events: number;
     unique_faces: number;
@@ -126,10 +152,12 @@ export function consolidateResultData(
     const raw = resultData.consolidated_events as unknown as ConsolidatedResult;
     return {
       vehicle_events: raw.vehicle_events || [],
+      person_events: raw.person_events || [],
       face_events: raw.face_events || [],
       keyframes: raw.keyframes || [],
       summary_counts: raw.summary_counts || {
         vehicle_events: (raw.vehicle_events || []).length,
+        person_events: (raw.person_events || []).length,
         unique_vehicles: (raw.vehicle_events || []).length,
         face_events: (raw.face_events || []).length,
         unique_faces: (raw.face_events || []).length,
@@ -375,10 +403,12 @@ export function consolidateResultData(
 
   return {
     vehicle_events,
+    person_events: (resultData?.person_events || []) as ConsolidatedPersonEvent[],
     face_events,
     keyframes,
     summary_counts: {
       vehicle_events: vehicle_events.length,
+      person_events: Array.isArray(resultData?.person_events) ? resultData.person_events.length : 0,
       unique_vehicles: vehicleGroups.length,
       face_events: face_events.length,
       unique_faces: subjects.length,

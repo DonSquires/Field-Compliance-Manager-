@@ -11,6 +11,8 @@ const INGESTION_URL = (process.env.VISION_INGESTION_URL || '').replace(/\/+$/, '
 const WORKLOAD_SIGNING_SECRET = process.env.WORKLOAD_SIGNING_SECRET || '';
 const INFERENCE_SERVICE_URL = (process.env.INFERENCE_SERVICE_URL || 'http://fcm-inference:3000').replace(/\/+$/, '');
 const INFERENCE_API_KEY = process.env.INFERENCE_API_KEY || '';
+const RUNPOD_API_URL = (process.env.RUNPOD_API_URL || 'https://api.runpod.ai/v2/n0bp1ifmq01cx2').replace(/\/+$/, '');
+const RUNPOD_API_KEY = process.env.RUNPOD_API || '';
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
 const DERIVED_ROOT = path.resolve(process.env.VISION_DERIVED_ROOT || '/opt/fcm/derived');
 const VIDEO_CACHE_ROOT = path.resolve(process.env.VISION_VIDEO_CACHE_ROOT || path.join(DERIVED_ROOT, 'source-cache'));
@@ -188,15 +190,46 @@ async function classifyFrames(summary) {
       return form;
     };
     const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
-    const [alprResponse, faceResponse] = await Promise.all([
+    const runpodResult = await classifyWithRunpod(image);
+    const [alprResponse, faceResponse, peopleResponse, inferenceResponse] = await Promise.all([
       fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
-      fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) })
+      fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
+      fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
+      fetch(`${INFERENCE_SERVICE_URL}/infer`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) })
     ]);
     frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
     frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
+    frame.people = peopleResponse.ok ? await peopleResponse.json() : { success: false, error: `people_http_${peopleResponse.status}` };
+    frame.inference = inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` };
+    if (runpodResult) frame.runpod = runpodResult;
   }
   if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
   return summary;
+}
+
+async function classifyWithRunpod(image) {
+  if (!RUNPOD_API_KEY) return null;
+  try {
+    const response = await fetch(`${RUNPOD_API_URL}/runsync`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${RUNPOD_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { action: 'infer', image_base64: image.toString('base64'), tasks: ['person', 'vehicle', 'plate', 'face'] } }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!response.ok) {
+      log('runpod_inference_degraded', { status: response.status });
+      return null;
+    }
+    const payload = await response.json();
+    if (payload.status && payload.status !== 'COMPLETED') {
+      log('runpod_inference_deferred', { status: payload.status, job_id: payload.id });
+      return null;
+    }
+    return payload.output || payload;
+  } catch (error) {
+    log('runpod_inference_unavailable', { error: error.message });
+    return null;
+  }
 }
 
 async function failJob(jobId, message) {
@@ -212,7 +245,11 @@ function playbackStoragePath(sourceStoragePath) {
 
 function runFfmpegRemux(sourcePath, outputPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', ['-y', '-fflags', '+genpts', '-i', sourcePath, '-c', 'copy', '-movflags', '+faststart', outputPath], {
+    const child = spawn('ffmpeg', [
+      '-y', '-fflags', '+genpts', '-i', sourcePath,
+      '-map', '0:v:0', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outputPath
+    ], {
       stdio: ['ignore', 'ignore', 'pipe']
     });
     let errorOutput = '';
@@ -287,7 +324,9 @@ async function processOne() {
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
     const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
     await classifyFrames(summary);
-    await consolidateMotionSummary(summary);
+    await consolidateMotionSummary(summary, {
+      metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null,
+    });
     await ingest(job, summary);
     try {
       await ensurePlaybackCopy(job, evidence, videoPath);

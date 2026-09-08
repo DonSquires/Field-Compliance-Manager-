@@ -203,10 +203,23 @@ function inferenceHeaders() {
     return null;
   }
 }
-/** Step 7: Movement detection — POST /infer/compare */ async function runMovementCheck(newEmbedding, prevEmbedding) {
+/** Step 7: Movement detection — compare vehicle embedding and prior scene evidence. */ async function runMovementCheck(newEmbedding, prevEmbedding, currentImageBase64 = null, previousPhotoPath = null, supabase = null) {
   if (!INFERENCE_SERVICE_URL || !INFERENCE_API_KEY) return null;
   if (!newEmbedding?.length || !prevEmbedding?.length) return null;
   try {
+    let previousImageBase64 = null;
+    if (supabase && previousPhotoPath) {
+      const { data: signed } = await supabase.storage.from(SCAN_BUCKET).createSignedUrl(previousPhotoPath, 60);
+      if (signed?.signedUrl) {
+        const previousImage = await fetch(signed.signedUrl);
+        if (previousImage.ok) {
+          const bytes = new Uint8Array(await previousImage.arrayBuffer());
+          let binary = '';
+          for (const byte of bytes) binary += String.fromCharCode(byte);
+          previousImageBase64 = btoa(binary);
+        }
+      }
+    }
     const controller = new AbortController();
     const timeout = setTimeout(()=>controller.abort(), 10_000);
     const res = await fetch(`${INFERENCE_SERVICE_URL}/infer/compare`, {
@@ -217,17 +230,22 @@ function inferenceHeaders() {
       },
       body: JSON.stringify({
         embedding1: prevEmbedding,
-        embedding2: newEmbedding
+        embedding2: newEmbedding,
+        image1: previousImageBase64,
+        image2: currentImageBase64
       }),
       signal: controller.signal
     });
     clearTimeout(timeout);
     if (!res.ok) return null;
     const data = await res.json();
+    const decision = data.confidence === 'different' ? 'moved' : data.confidence === 'same' ? 'stationary' : 'inconclusive';
     return {
-      moved: !data.same_vehicle,
+      moved: decision === 'moved',
       similarity: data.similarity ?? 0,
-      decision: data.confidence === 'different' ? 'moved' : data.same_vehicle ? 'stationary' : 'inconclusive'
+      decision,
+      scene_similarity: data.scene_similarity ?? null,
+      scene_confidence: data.scene_confidence ?? 'unavailable'
     };
   } catch (err) {
     console.warn(`[scan] /infer/compare error: ${err instanceof Error ? err.message : String(err)}`);
@@ -864,7 +882,7 @@ serve(async (req)=>{
         // a. canonical_vehicles lookup (same as FC — VOI/flags + rego/WoF/CoF compliance)
         supabase.from('canonical_vehicles').select('id, make, model, year, colour, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, compliance_checked_at').eq('plate_number', plateNumber).maybeSingle(),
         // b. Most recent active chalk record for this plate in this zone/org
-        supabase.from('parking_chalk_records').select('id, chalked_at, return_by, status, embedding, zone_id').eq('organization_id', orgId).eq('plate', plateNumber).eq('status', 'active').order('chalked_at', {
+        supabase.from('parking_chalk_records').select('id, chalked_at, return_by, status, embedding, photo_url, zone_id').eq('organization_id', orgId).eq('plate', plateNumber).eq('status', 'active').order('chalked_at', {
           ascending: false
         }).limit(1).maybeSingle(),
         // c. Zone parking rules from location_zones
@@ -987,7 +1005,7 @@ serve(async (req)=>{
       const priorChalkEmbedding = priorChalk?.embedding;
       const parkingNewEmbedding = inferResult?.embedding ?? null;
       if (parkingNewEmbedding && priorChalkEmbedding) {
-        parkingMovement = await runMovementCheck(parkingNewEmbedding, priorChalkEmbedding);
+        parkingMovement = await runMovementCheck(parkingNewEmbedding, priorChalkEmbedding, imageBase64, priorChalk?.photo_url, supabase);
         console.log(`[scan:parking] movement: ${parkingMovement?.decision ?? 'skipped'}`);
       }
       // If moved: update prior chalk record to status='compliant'
@@ -1236,7 +1254,7 @@ serve(async (req)=>{
       // Fetch previous observation embedding + observed_at for movement detection.
       // observed_at is needed by the single_daily_observation path to determine
       // calendar-day adjacency (consecutive-day pair → inferred overnight).
-      zoneId ? supabase.from('observations').select('id, embedding, observed_at').eq('plate_number', plateNumber).eq('zone_id', zoneId).eq('organization_id', orgId).order('observed_at', {
+      zoneId ? supabase.from('observations').select('id, embedding, observed_at, original_photo_url').eq('plate_number', plateNumber).eq('zone_id', zoneId).eq('organization_id', orgId).order('observed_at', {
         ascending: false
       }).limit(1).maybeSingle() : Promise.resolve({
         data: null
@@ -1262,7 +1280,7 @@ serve(async (req)=>{
     const prevEmbedding = prevObs?.embedding;
     const newEmbedding = inferResult?.embedding ?? null;
     if (newEmbedding && prevEmbedding && prevObs) {
-      movementResult = await runMovementCheck(newEmbedding, prevEmbedding);
+      movementResult = await runMovementCheck(newEmbedding, prevEmbedding, imageBase64, prevObs.original_photo_url, supabase);
       console.log(`[scan] movement: ${movementResult?.decision ?? 'skipped'}`);
     }
     // Step 7a: Classify overnight window + peek at existing session (read-only).

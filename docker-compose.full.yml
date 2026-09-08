@@ -190,7 +190,11 @@ services:
       VISION_DERIVED_ROOT: /opt/fcm/derived
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
       INFERENCE_SERVICE_URL: http://fcm-inference:3000
+      RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/n0bp1ifmq01cx2}
+      RUNPOD_API: ${RUNPOD_API:-}
       VISION_MAX_CLASSIFICATION_FRAMES: 120
+      # Set per camera after calibration; without this, CCTV reports px/s only.
+      VISION_METERS_PER_PIXEL: ${VISION_METERS_PER_PIXEL:-}
       VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}
     volumes:
       - /opt/fcm/storage:/opt/fcm/storage:ro

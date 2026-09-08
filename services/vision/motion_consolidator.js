@@ -172,6 +172,46 @@ async function consolidateFaces(frames, options = {}) {
   return { events, uniqueSubjectsCount: subjects.length };
 }
 
+async function consolidatePeople(frames, options = {}) {
+  const maxGap = options.maxGapSeconds ?? DEFAULT_MAX_GAP_SECONDS;
+  const tracks = [];
+  for (const frame of frames) {
+    const detections = Array.isArray(frame?.people?.people) ? frame.people.people : [];
+    const timestamp = Number(frame.relative_timestamp_seconds) || 0;
+    for (const detection of detections) {
+      const bbox = detection.bbox;
+      if (!bbox) continue;
+      const center = { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+      let track = tracks.find((candidate) => timestamp - candidate.lastSeen <= maxGap && Math.hypot(center.x - candidate.center.x, center.y - candidate.center.y) < Math.max(bbox.width, bbox.height));
+      if (!track) {
+        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, center };
+        tracks.push(track);
+      }
+      track.lastSeen = timestamp;
+      track.frameCount += 1;
+      track.confidence = Math.max(track.confidence, Number(detection.confidence) || 0);
+      track.center = center;
+      if ((bbox.width * bbox.height) > (track.bestBbox.width * track.bestBbox.height)) {
+        track.bestBbox = bbox;
+        track.bestFrame = frame;
+      }
+    }
+  }
+  return Promise.all(tracks.map(async (track, index) => ({
+    event_id: `person-${index + 1}`,
+    event_type: 'person',
+    first_seen_seconds: Number(track.firstSeen.toFixed(2)),
+    last_seen_seconds: Number(track.lastSeen.toFixed(2)),
+    duration_seconds: Number(Math.max(0, track.lastSeen - track.firstSeen).toFixed(2)),
+    frame_count: track.frameCount,
+    confidence: Number(track.confidence.toFixed(2)),
+    best_frame_hash: track.bestFrame?.sha256_hash || null,
+    best_bbox: track.bestBbox,
+    thumbnail: await loadBase64Thumbnail(track.bestFrame?.file_path),
+    review_required: true,
+  })));
+}
+
 function isPlatish(plate, confidence) {
   if (!plate || typeof plate !== 'string') return false;
   const clean = plate.trim().toUpperCase();
@@ -208,6 +248,7 @@ function levenshteinDistance(a, b) {
 
 async function consolidateVehicles(frames, options = {}) {
   const maxGap = options.maxGapSeconds ?? DEFAULT_MAX_GAP_SECONDS;
+  const metersPerPixel = Number(options.metersPerPixel) > 0 ? Number(options.metersPerPixel) : null;
 
   const alprFrames = frames.filter((f) => {
     if (!f || !f.alpr?.success || typeof f.alpr?.plate !== 'string') return false;
@@ -222,6 +263,10 @@ async function consolidateVehicles(frames, options = {}) {
     const timestamp = Number(frame.relative_timestamp_seconds) || 0;
     const plate = String(frame.alpr.plate).trim().toUpperCase();
     const confidence = Number(frame.alpr.confidence) || 0;
+    const box = frame.alpr.box || frame.alpr.results?.[0]?.box || null;
+    const center = box && Number.isFinite(Number(box.x)) && Number.isFinite(Number(box.y))
+      ? { x: Number(box.x) + Number(box.width || 0) / 2, y: Number(box.y) + Number(box.height || 0) / 2 }
+      : null;
 
     // Find group by exact plate or close fuzzy match (Levenshtein <= 1 for length >= 4)
     let matchingGroup = vehicleTracks.find((g) => {
@@ -242,6 +287,13 @@ async function consolidateVehicles(frames, options = {}) {
       // Extend current observation
       currentTrack.lastSeen = timestamp;
       currentTrack.frameCount++;
+      if (center && currentTrack.lastCenter && timestamp > currentTrack.lastTimestamp) {
+        const elapsed = timestamp - currentTrack.lastTimestamp;
+        const distance = Math.hypot(center.x - currentTrack.lastCenter.x, center.y - currentTrack.lastCenter.y);
+        currentTrack.speedSamples.push(distance / elapsed);
+      }
+      if (center) currentTrack.lastCenter = center;
+      currentTrack.lastTimestamp = timestamp;
       if (confidence >= currentTrack.bestConfidence || (plate.length > currentTrack.bestPlate.length && confidence >= 0.6)) {
         currentTrack.bestConfidence = Math.max(currentTrack.bestConfidence, confidence);
         currentTrack.bestPlate = plate.length >= currentTrack.bestPlate.length ? plate : currentTrack.bestPlate;
@@ -257,6 +309,9 @@ async function consolidateVehicles(frames, options = {}) {
         bestConfidence: confidence,
         bestPlate: plate,
         bestFrame: frame,
+        lastCenter: center,
+        lastTimestamp: timestamp,
+        speedSamples: [],
       });
     }
   }
@@ -274,6 +329,9 @@ async function consolidateVehicles(frames, options = {}) {
   for (const tr of allTracks) {
     const duration = Math.max(0, Number((tr.lastSeen - tr.firstSeen).toFixed(2)));
     const thumbnail = await loadBase64Thumbnail(tr.bestFrame?.file_path);
+    const speedPxPerSecond = tr.speedSamples.length
+      ? Number((tr.speedSamples.reduce((sum, value) => sum + value, 0) / tr.speedSamples.length).toFixed(2))
+      : null;
     events.push({
       event_id: `vehicle-${tr.bestPlate}-${tr.trackIndex}`,
       event_type: 'vehicle',
@@ -286,6 +344,18 @@ async function consolidateVehicles(frames, options = {}) {
       frame_count: tr.frameCount,
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
       thumbnail,
+      vehicle_make: tr.bestFrame?.inference?.data?.vehicle_make ?? null,
+      vehicle_model: tr.bestFrame?.inference?.data?.vehicle_model ?? null,
+      vehicle_year: tr.bestFrame?.inference?.data?.vehicle_year ?? null,
+      vehicle_colour: tr.bestFrame?.inference?.data?.vehicle_colour ?? tr.bestFrame?.inference?.data?.vehicle_color ?? null,
+      vehicle_type: tr.bestFrame?.inference?.data?.vehicle_type ?? null,
+      vehicle_attribute_confidence: tr.bestFrame?.inference?.data?.vehicle_attribute_confidence ?? null,
+      inference_provider: tr.bestFrame?.inference?.data?.inference_provider ?? null,
+      speed_px_per_second: speedPxPerSecond,
+      speed_kmh: speedPxPerSecond !== null && metersPerPixel !== null
+        ? Number((speedPxPerSecond * metersPerPixel * 3.6).toFixed(2))
+        : null,
+      speed_calibration: metersPerPixel === null ? 'uncalibrated' : 'camera_scale',
       review_required: true,
     });
   }
@@ -314,20 +384,23 @@ async function consolidateMotionSummary(summary, options = {}) {
   if (!summary || !Array.isArray(summary.motion_segments)) return summary;
   const allFrames = summary.motion_segments.flatMap((s) => s.frames || []);
   
-  const [faceResult, vehicleResult, keyframes] = await Promise.all([
+  const [faceResult, personEvents, vehicleResult, keyframes] = await Promise.all([
     consolidateFaces(allFrames, options),
+    consolidatePeople(allFrames, options),
     consolidateVehicles(allFrames, options),
     extractKeyframes(allFrames, options.keyframeCount ?? DEFAULT_KEYFRAME_COUNT),
   ]);
 
   summary.consolidated_events = {
     vehicle_events: vehicleResult.events,
+    person_events: personEvents,
     face_events: faceResult.events,
     keyframes,
     summary_counts: {
       vehicle_events: vehicleResult.events.length,
       unique_vehicles: vehicleResult.uniqueVehiclesCount,
       face_events: faceResult.events.length,
+      person_events: personEvents.length,
       unique_faces: faceResult.uniqueSubjectsCount,
       total_frames_with_motion: allFrames.length,
       total_frames_parsed: summary.total_frames_parsed || allFrames.length,
@@ -340,6 +413,7 @@ async function consolidateMotionSummary(summary, options = {}) {
 module.exports = {
   cosineSimilarity,
   consolidateFaces,
+  consolidatePeople,
   consolidateVehicles,
   extractKeyframes,
   consolidateMotionSummary,

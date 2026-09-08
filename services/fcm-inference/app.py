@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hmac
 import math
 import os
@@ -13,14 +14,26 @@ import pytesseract
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
+from openvino import Core
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 SIMILARITY_THRESHOLD = 0.92
-MODELS_DIR = Path(os.getenv("MODELS_DIR", "/app/models"))
+DIFFERENT_VEHICLE_THRESHOLD = 0.75
+APP_PATH = Path(__file__).resolve()
+REPO_MODELS_DIR = APP_PATH.parents[2] / "models" if len(APP_PATH.parents) > 2 else APP_PATH.parent / "models"
+DEFAULT_MODELS_DIR = Path("/app/models") if Path("/app/models").is_dir() else REPO_MODELS_DIR
+MODELS_DIR = Path(os.getenv("MODELS_DIR", str(DEFAULT_MODELS_DIR)))
 YUNET_MODEL_PATH = Path(os.getenv("YUNET_MODEL_PATH", MODELS_DIR / "face_detection_yunet_2023mar.onnx"))
 SFACE_MODEL_PATH = Path(os.getenv("SFACE_MODEL_PATH", MODELS_DIR / "face_recognition_sface_2021dec.onnx"))
+VEHICLE_MODEL_PATH = Path(os.getenv("VEHICLE_MODEL_PATH", MODELS_DIR / "vehicle-attributes-recognition-barrier-0039.xml"))
+PERSON_MODEL_PATH = Path(os.getenv("PERSON_MODEL_PATH", MODELS_DIR / "person-detection-retail-0013.xml"))
 _face_detector: cv2.FaceDetectorYN | None = None
 _face_recognizer: cv2.FaceRecognizerSF | None = None
+_vehicle_model: Any = None
+_vehicle_compiled: Any = None
+_person_compiled: Any = None
+VEHICLE_COLOURS = ("white", "gray", "yellow", "red", "green", "blue", "black")
+VEHICLE_TYPES = ("car", "van", "truck", "bus")
 
 app = FastAPI(title="FCM Inference", docs_url=None, redoc_url=None)
 
@@ -28,6 +41,8 @@ app = FastAPI(title="FCM Inference", docs_url=None, redoc_url=None)
 class CompareRequest(BaseModel):
     embedding1: list[float] = Field(min_length=1, max_length=4096)
     embedding2: list[float] = Field(min_length=1, max_length=4096)
+    image1: str | None = Field(default=None, max_length=14_000_000)
+    image2: str | None = Field(default=None, max_length=14_000_000)
 
 
 def _configured_key() -> str:
@@ -61,16 +76,191 @@ def _capability_unavailable(capability: str) -> JSONResponse:
         content={"success": False, "error": "capability_unavailable", "capability": capability},
     )
 
+def _decode_image_data(value: str) -> np.ndarray | None:
+    try:
+        raw = value.split(",", 1)[1] if "," in value else value
+        image = cv2.imdecode(np.frombuffer(base64.b64decode(raw), dtype=np.uint8), cv2.IMREAD_COLOR)
+        return image
+    except (ValueError, TypeError, base64.binascii.Error):
+        return None
+
+def _scene_similarity(first: np.ndarray, second: np.ndarray) -> float:
+    """Compare stable low-frequency scene structure, including wheel-level context."""
+    first_small = cv2.resize(first, (48, 48), interpolation=cv2.INTER_AREA)
+    second_small = cv2.resize(second, (48, 48), interpolation=cv2.INTER_AREA)
+    first_gray = cv2.cvtColor(first_small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    second_gray = cv2.cvtColor(second_small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    first_gray = (first_gray - first_gray.mean()) / (first_gray.std() + 1e-6)
+    second_gray = (second_gray - second_gray.mean()) / (second_gray.std() + 1e-6)
+    return float(np.mean(first_gray * second_gray))
+
+
+def _vehicle_embedding(image: np.ndarray) -> list[float]:
+    """Create a stable, local 384D appearance descriptor for vehicle comparison."""
+    thumbnail = cv2.resize(image, (16, 8), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
+    vector = thumbnail.reshape(-1)
+    norm = float(np.linalg.norm(vector))
+    if math.isclose(norm, 0.0):
+        return [0.0] * 384
+    return [round(float(value / norm), 7) for value in vector]
+
+
+def _vehicle_runtime() -> Any:
+    global _vehicle_model, _vehicle_compiled
+    if _vehicle_compiled is not None:
+        return _vehicle_compiled
+    if not VEHICLE_MODEL_PATH.is_file() or not VEHICLE_MODEL_PATH.with_suffix('.bin').is_file():
+        raise FileNotFoundError("vehicle attributes model is not staged")
+    _vehicle_model = Core().read_model(str(VEHICLE_MODEL_PATH))
+    _vehicle_compiled = Core().compile_model(_vehicle_model, "CPU")
+    return _vehicle_compiled
+
+
+def _vehicle_region(image: np.ndarray) -> np.ndarray:
+    regions = _locate_plate_regions(image, max_regions=1) if image.size else []
+    if regions:
+        x, y, width, height = regions[0]
+        x0 = max(0, x - round(width * 2.5))
+        x1 = min(image.shape[1], x + width + round(width * 2.5))
+        y0 = max(0, y - round(height * 5))
+        y1 = min(image.shape[0], y + height + round(height * 5))
+        crop = image[y0:y1, x0:x1]
+        if crop.size:
+            return crop
+    height, width = image.shape[:2]
+    return image[round(height * 0.1):round(height * 0.95), round(width * 0.1):round(width * 0.9)]
+
+
+def _trained_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
+    runtime = _vehicle_runtime()
+    region = _vehicle_region(image)
+    blob = cv2.dnn.blobFromImage(region, 1.0, (72, 72), swapRB=False)
+    outputs = runtime([blob])
+    by_name = {output.any_name: np.asarray(value).reshape(-1) for output, value in outputs.items()}
+    colour_scores = by_name.get("color")
+    type_scores = by_name.get("type")
+    colour_index = int(np.argmax(colour_scores)) if colour_scores is not None else -1
+    type_index = int(np.argmax(type_scores)) if type_scores is not None else -1
+    colour_confidence = float(colour_scores[colour_index]) if colour_index >= 0 else 0.0
+    type_confidence = float(type_scores[type_index]) if type_index >= 0 else 0.0
+    return {
+        "vehicle_colour": VEHICLE_COLOURS[colour_index] if colour_index >= 0 and colour_confidence >= 0.45 else None,
+        "vehicle_type": VEHICLE_TYPES[type_index] if type_index >= 0 and type_confidence >= 0.45 else None,
+        "vehicle_attribute_confidence": round(min(colour_confidence, type_confidence), 3),
+        "vehicle_colour_confidence": round(colour_confidence, 3),
+        "vehicle_type_confidence": round(type_confidence, 3),
+        "vehicle_model_name": VEHICLE_MODEL_PATH.name,
+    }
+
+
+def _person_runtime() -> Any:
+    global _person_compiled
+    if _person_compiled is not None:
+        return _person_compiled
+    if not PERSON_MODEL_PATH.is_file() or not PERSON_MODEL_PATH.with_suffix('.bin').is_file():
+        raise FileNotFoundError("person detection model is not staged")
+    core = Core()
+    _person_compiled = core.compile_model(core.read_model(str(PERSON_MODEL_PATH)), "CPU")
+    return _person_compiled
+
+
+def _detect_people(image: np.ndarray) -> list[dict[str, Any]]:
+    runtime = _person_runtime()
+    height, width = image.shape[:2]
+    blob = cv2.dnn.blobFromImage(image, 1.0, (544, 320), swapRB=False)
+    detections = np.asarray(runtime([blob])[runtime.outputs[0]]).reshape(-1, 7)
+    people = []
+    for detection in detections:
+        confidence = float(detection[2])
+        if confidence < 0.35 or int(detection[1]) != 1:
+            continue
+        x0 = max(0, round(float(detection[3]) * width))
+        y0 = max(0, round(float(detection[4]) * height))
+        x1 = min(width, round(float(detection[5]) * width))
+        y1 = min(height, round(float(detection[6]) * height))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        people.append({"bbox": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}, "confidence": round(confidence, 3)})
+    return people
+
+
+def _vehicle_colour(image: np.ndarray) -> tuple[str | None, float]:
+    height, width = image.shape[:2]
+    x0, x1 = round(width * 0.15), round(width * 0.85)
+    y0, y1 = round(height * 0.25), round(height * 0.9)
+    crop = image[y0:y1, x0:x1]
+    if crop.size == 0:
+        return None, 0.0
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    value = hsv[:, 2]
+    saturation = hsv[:, 1]
+    valid = value > 25
+    if not np.any(valid):
+        return None, 0.0
+    value = value[valid]
+    saturation = saturation[valid]
+    hue = hsv[valid, 0]
+    achromatic = saturation < 35
+    counts: dict[str, int] = {
+        "black": int(np.sum(value < 55)),
+        "white": int(np.sum(achromatic & (value >= 170))),
+        "silver": int(np.sum(achromatic & (value >= 90) & (value < 170))),
+        "grey": int(np.sum(achromatic & (value >= 55) & (value < 90))),
+        "red": int(np.sum((saturation >= 35) & ((hue < 10) | (hue >= 170)))),
+        "orange": int(np.sum((saturation >= 35) & (hue >= 10) & (hue < 25))),
+        "yellow": int(np.sum((saturation >= 35) & (hue >= 25) & (hue < 40))),
+        "green": int(np.sum((saturation >= 35) & (hue >= 40) & (hue < 85))),
+        "blue": int(np.sum((saturation >= 35) & (hue >= 85) & (hue < 135))),
+        "purple": int(np.sum((saturation >= 35) & (hue >= 135) & (hue < 170))),
+    }
+    colour, count = max(counts.items(), key=lambda item: item[1])
+    confidence = count / len(value)
+    return (colour, round(float(confidence), 3)) if confidence >= 0.12 else ("mixed", round(float(confidence), 3))
+
+
+def _infer_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
+    height, width = image.shape[:2]
+    trained = _trained_vehicle_attributes(image)
+    colour, heuristic_confidence = _vehicle_colour(image)
+    if trained["vehicle_colour"] is None and colour is not None:
+        trained["vehicle_colour"] = colour
+        trained["vehicle_colour_confidence"] = round(heuristic_confidence, 3)
+    return {
+        "embedding": _vehicle_embedding(image),
+        "embedding_quality": round(min(1.0, max(0.0, (width * height) / (1280 * 720))), 3),
+        "detection": {
+            "bbox": {"x": 0, "y": 0, "width": width, "height": height},
+            "confidence": 0.25,
+        },
+        "vehicle_make": None,
+        "vehicle_model": None,
+        "vehicle_year": None,
+        "vehicle_colour": trained["vehicle_colour"],
+        "vehicle_type": trained["vehicle_type"],
+        "vehicle_attribute_confidence": trained["vehicle_attribute_confidence"],
+        "vehicle_colour_confidence": trained["vehicle_colour_confidence"],
+        "vehicle_type_confidence": trained["vehicle_type_confidence"],
+        "vehicle_model_name": trained["vehicle_model_name"],
+        "inference_provider": "openvino_vehicle_attributes_0039",
+        "review_required": True,
+        "attribute_status": "trained_colour_type_identity_manual_review",
+        "sticker": {"presence": None, "color": None, "detection_confidence": None},
+    }
+
 
 def _normalize_nz_plate(raw: str) -> tuple[str, str] | None:
     value = re.sub(r"[^A-Z0-9]", "", raw.upper())
-    if not 2 <= len(value) <= 7:
+    if not 3 <= len(value) <= 7:
+        return None
+    if not any(ch.isalpha() for ch in value):
+        return None
+    if not any(ch.isdigit() for ch in value):
         return None
     if re.fullmatch(r"[A-Z]{3}[0-9]{3}", value):
         return value, "standard_modern"
     if re.fullmatch(r"[A-Z]{2}[0-9]{4}", value):
         return value, "standard_older"
-    if re.fullmatch(r"[A-Z0-9]{2,6}", value):
+    if re.fullmatch(r"[A-Z0-9]{4,7}", value):
         return value, "personalised"
     return None
 
@@ -94,6 +284,8 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "service": "fcm-inference",
         "face_models": "ready" if YUNET_MODEL_PATH.is_file() and SFACE_MODEL_PATH.is_file() else "not_staged",
+        "vehicle_model": "ready" if VEHICLE_MODEL_PATH.is_file() and VEHICLE_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
+        "person_model": "ready" if PERSON_MODEL_PATH.is_file() and PERSON_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
     }
 
 
@@ -117,10 +309,29 @@ async def compare_embeddings(
 
     similarity = float(np.dot(first, second) / denominator)
     same_vehicle = similarity >= SIMILARITY_THRESHOLD
+    different_vehicle = similarity <= DIFFERENT_VEHICLE_THRESHOLD
+    scene_similarity = None
+    scene_confidence = "unavailable"
+    if payload.image1 and payload.image2:
+        first_image = _decode_image_data(payload.image1)
+        second_image = _decode_image_data(payload.image2)
+        if first_image is not None and second_image is not None:
+            scene_similarity = round(_scene_similarity(first_image, second_image), 6)
+            scene_confidence = "same" if scene_similarity >= 0.82 else "changed" if scene_similarity <= 0.45 else "inconclusive"
+            if scene_confidence == "same":
+                different_vehicle = False
+            elif scene_confidence == "changed":
+                different_vehicle = different_vehicle and not same_vehicle
+            else:
+                same_vehicle = False
+                different_vehicle = False
+    confidence = "same" if same_vehicle else "different" if different_vehicle else "inconclusive"
     return {
-        "same_vehicle": same_vehicle,
+        "same_vehicle": same_vehicle if same_vehicle or different_vehicle else None,
         "similarity": round(similarity, 6),
-        "confidence": "same" if same_vehicle else "different",
+        "scene_similarity": scene_similarity,
+        "scene_confidence": scene_confidence,
+        "confidence": confidence,
     }
 
 
@@ -149,6 +360,51 @@ async def watermark(
     return Response(content=jpeg.tobytes(), media_type="image/jpeg")
 
 
+def _locate_plate_regions(image: np.ndarray, max_regions: int = 5) -> list[tuple[int, int, int, int]]:
+    """Finds rectangular, plate-shaped candidate regions using classical edge/contour geometry.
+
+    This is a purpose-built, self-hosted heuristic (no external model weights, no license) that
+    stands in for a trained plate detector: license plates are solid rectangles with a fairly
+    consistent aspect ratio, so edge density + contour shape is a reasonable, fully local signal
+    for where to crop before OCR, instead of running OCR across an entire uncropped photo.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    filtered = cv2.bilateralFilter(gray, 11, 17, 17)
+    edges = cv2.Canny(filtered, 30, 200)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    image_area = image.shape[0] * image.shape[1]
+    scored: list[tuple[float, tuple[int, int, int, int]]] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if w == 0 or h == 0:
+            continue
+        area = w * h
+        aspect_ratio = w / h
+        area_ratio = area / image_area if image_area else 0
+        if not (1.8 <= aspect_ratio <= 6.0) or not (0.0005 <= area_ratio <= 0.25):
+            continue
+        contour_area = cv2.contourArea(contour)
+        fill_ratio = (contour_area / area) if area else 0.0
+        # Plates are solid, mostly-filled rectangles close to a ~3:1 ratio; score candidates by
+        # how well they match both traits rather than accepting any rectangle-shaped edge blob.
+        plate_likeness = fill_ratio * max(0.0, 1 - abs(aspect_ratio - 3.0) / 3.0)
+        scored.append((plate_likeness, (x, y, w, h)))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [box for _, box in scored[:max_regions]]
+
+
+def _read_plate_candidates(gray_image: np.ndarray, psm: int) -> list[tuple[str, float]]:
+    enlarged = cv2.resize(gray_image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    prepared = cv2.threshold(enlarged, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    data = pytesseract.image_to_data(
+        prepared,
+        config=f"--psm {psm} -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        output_type=pytesseract.Output.DICT,
+    )
+    return list(zip(data.get("text", []), data.get("conf", [])))
+
+
 @app.post("/infer/alpr")
 async def alpr(
     photo: Annotated[UploadFile, File()],
@@ -158,29 +414,48 @@ async def alpr(
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    enlarged = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    prepared = cv2.threshold(enlarged, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-    try:
-        data = pytesseract.image_to_data(
-            prepared,
-            config="--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-            output_type=pytesseract.Output.DICT,
-        )
-    except (pytesseract.TesseractError, OSError) as error:
-        raise HTTPException(status_code=503, detail=f"ALPR unavailable: {error}") from error
 
     candidates: dict[str, dict[str, Any]] = {}
-    for raw, confidence in zip(data.get("text", []), data.get("conf", [])):
+
+    def _consider(raw: str, confidence: Any, box: tuple[int, int, int, int] | None, region_bonus: float) -> None:
         normalized = _normalize_nz_plate(raw.strip())
+        if not normalized:
+            return
         try:
             score = max(0.0, min(1.0, float(confidence) / 100))
         except (TypeError, ValueError):
             score = 0.0
-        if normalized and score >= 0.35:
-            plate, pattern = normalized
-            adjusted = min(0.99, score + (0.15 if pattern.startswith("standard_") else 0.0))
-            if plate not in candidates or adjusted > candidates[plate]["score"]:
-                candidates[plate] = {"plate": plate, "score": round(adjusted, 2), "pattern": pattern}
+        if score < 0.35:
+            return
+        plate, pattern = normalized
+        adjusted = min(0.99, score + (0.15 if pattern.startswith("standard_") else 0.0) + region_bonus)
+        if plate not in candidates or adjusted > candidates[plate]["score"]:
+            candidates[plate] = {
+                "plate": plate, "score": round(adjusted, 2), "pattern": pattern,
+                "box": {"x": box[0], "y": box[1], "width": box[2], "height": box[3]} if box else None,
+            }
+
+    try:
+        for box in _locate_plate_regions(image):
+            x, y, w, h = box
+            pad_x, pad_y = round(w * 0.08), round(h * 0.2)
+            x0, y0 = max(0, x - pad_x), max(0, y - pad_y)
+            x1, y1 = min(gray.shape[1], x + w + pad_x), min(gray.shape[0], y + h + pad_y)
+            region = gray[y0:y1, x0:x1]
+            if region.size == 0:
+                continue
+            for raw, confidence in _read_plate_candidates(region, psm=7):
+                # A cropped, detected plate region is much stronger evidence than a whole-frame
+                # OCR hit, so it earns a confidence bonus over the fallback pass below.
+                _consider(raw, confidence, box, region_bonus=0.1)
+
+        # Fallback: whole-frame OCR, in case the classical detector missed the plate (e.g. an
+        # unusual angle or lighting the contour heuristic doesn't handle well).
+        for raw, confidence in _read_plate_candidates(gray, psm=6):
+            _consider(raw, confidence, None, region_bonus=0.0)
+    except (pytesseract.TesseractError, OSError) as error:
+        raise HTTPException(status_code=503, detail=f"ALPR unavailable: {error}") from error
+
     ordered = sorted(candidates.values(), key=lambda item: item["score"], reverse=True)
     best = ordered[0] if ordered else None
     return JSONResponse({
@@ -188,11 +463,11 @@ async def alpr(
         "plate": best["plate"] if best else None,
         "confidence": best["score"] if best else 0,
         "results": [
-            {"plate": item["plate"], "score": item["score"], "box": None,
+            {"plate": item["plate"], "score": item["score"], "box": item["box"],
              "valid_nz_format": True, "nz_pattern": item["pattern"]}
             for item in ordered[:5]
         ],
-        "alpr_provider": "local_tesseract",
+        "alpr_provider": "local_tesseract_plate_region",
         "review_required": best is None or best["score"] < 0.75,
     })
 
@@ -243,5 +518,22 @@ async def infer(
     x_inference_api_key: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     _authorize(authorization, x_inference_api_key)
-    await _read_image(photo)
-    return _capability_unavailable("vehicle_attribute_model")
+    image = await _read_image(photo)
+    return JSONResponse({"success": True, "data": _infer_vehicle_attributes(image)})
+
+
+@app.post("/infer/people")
+async def people(
+    photo: Annotated[UploadFile, File()],
+    authorization: Annotated[str | None, Header()] = None,
+    x_inference_api_key: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    _authorize(authorization, x_inference_api_key)
+    image = await _read_image(photo)
+    try:
+        detections = _detect_people(image)
+        return JSONResponse({"success": True, "people": detections, "detector": "openvino_person_detection_0013"})
+    except FileNotFoundError:
+        return _capability_unavailable("person_detection_model")
+    except (RuntimeError, cv2.error) as error:
+        raise HTTPException(status_code=503, detail=f"person detection unavailable: {error}") from error

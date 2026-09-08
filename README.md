@@ -37,6 +37,8 @@ On the protected VPS, keep the production environment at `/var/lib/bob/control-p
 
 `BOB_WORKFLOW_MODE=local` keeps development jobs in the VPS JSON state file. Set `BOB_WORKFLOW_MODE=remote` only in the protected VPS environment after supplying `SUPABASE_SERVICE_ROLE_KEY`; Bob will then create workflow jobs through the Supabase `wf-create-job` Edge Function. Never expose the service-role key to a browser, worker, or repository.
 
+CCTV frame inference uses the configured RunPod Serverless endpoint first (`RUNPOD_API` and `RUNPOD_API_URL`). The local `fcm-inference` service remains an automatic fallback when RunPod is queued, unavailable, or returns a non-success response. Keep `RUNPOD_API` server-only; never expose it to the web app.
+
 Worker integrations use a separate `BOB_RUNNER_TOKEN` and these routes:
 
 - `POST /jobs/:id/pickup` with `{ "runnerId": "..." }`

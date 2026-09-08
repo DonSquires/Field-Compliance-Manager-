@@ -11,6 +11,9 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py ./
+COPY download_models.py ./
+
+RUN mkdir -p /app/models && python download_models.py
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser

@@ -100,6 +100,14 @@ def _merge_windows(windows: list[tuple[int, int]], frame_count: int) -> list[tup
     return [(start, end) for start, end in merged]
 
 
+def _sample_frame_indices(start: int, end: int, limit: int) -> list[int]:
+    """Spread a capped artifact budget across the complete motion window."""
+    if start > end or limit <= 0:
+        return []
+    count = min(end - start + 1, limit)
+    return np.linspace(start, end, num=count, dtype=np.int64).tolist()
+
+
 def _write_frame(
     frame: np.ndarray,
     output_dir: Path,
@@ -223,16 +231,15 @@ def extract_motion_summary(
         capture = cv2.VideoCapture(str(video_path))
         try:
             for segment, (start, end) in zip(segments, windows):
-                segment_limit = min(end, start + max_segment_frames - 1)
-                if segment_limit < end:
+                remaining_budget = max_job_frames - job_frames
+                frame_indices = _sample_frame_indices(
+                    start, end, min(max_segment_frames, remaining_budget)
+                )
+                if len(frame_indices) < end - start + 1:
                     segment.frames_truncated = True
                     truncated = True
-                capture.set(cv2.CAP_PROP_POS_FRAMES, start)
-                for index in range(start, segment_limit + 1):
-                    if job_frames >= max_job_frames:
-                        segment.frames_truncated = True
-                        truncated = True
-                        break
+                for index in frame_indices:
+                    capture.set(cv2.CAP_PROP_POS_FRAMES, index)
                     success, frame = capture.read()
                     if not success:
                         raise VideoExtractionError(f"Unable to decode frame {index}")

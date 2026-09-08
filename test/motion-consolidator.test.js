@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   cosineSimilarity,
   consolidateFaces,
+  consolidatePeople,
   consolidateVehicles,
   extractKeyframes,
   consolidateMotionSummary,
@@ -67,16 +68,16 @@ test('consolidateFaces clusters continuous frames into one subject and handles r
 test('consolidateVehicles clusters ALPR plate detections and handles returns', async () => {
   const frames = [
     // Vehicle ABC123 seen across t=1.0 -> 3.0
-    { frame_index: 10, relative_timestamp_seconds: 1.0, sha256_hash: 'v0', alpr: { success: true, plate: 'ABC123', confidence: 0.85 } },
-    { frame_index: 20, relative_timestamp_seconds: 2.0, sha256_hash: 'v1', alpr: { success: true, plate: 'ABC123', confidence: 0.95 } },
-    { frame_index: 30, relative_timestamp_seconds: 3.0, sha256_hash: 'v2', alpr: { success: true, plate: 'ABC123', confidence: 0.90 } },
+    { frame_index: 10, relative_timestamp_seconds: 1.0, sha256_hash: 'v0', alpr: { success: true, plate: 'ABC123', confidence: 0.85, box: { x: 10, y: 20, width: 20, height: 10 } } },
+    { frame_index: 20, relative_timestamp_seconds: 2.0, sha256_hash: 'v1', alpr: { success: true, plate: 'ABC123', confidence: 0.95, box: { x: 20, y: 20, width: 20, height: 10 } } },
+    { frame_index: 30, relative_timestamp_seconds: 3.0, sha256_hash: 'v2', alpr: { success: true, plate: 'ABC123', confidence: 0.90, box: { x: 30, y: 20, width: 20, height: 10 } } },
     // Vehicle XYZ789 seen at t=5.0
     { frame_index: 50, relative_timestamp_seconds: 5.0, sha256_hash: 'v3', alpr: { success: true, plate: 'XYZ789', confidence: 0.92 } },
     // Vehicle ABC123 returns at t=40.0 (gap > 15s)
     { frame_index: 400, relative_timestamp_seconds: 40.0, sha256_hash: 'v4', alpr: { success: true, plate: 'ABC123', confidence: 0.88 } },
   ];
 
-  const { events, uniqueVehiclesCount } = await consolidateVehicles(frames, { maxGapSeconds: 15.0 });
+  const { events, uniqueVehiclesCount } = await consolidateVehicles(frames, { maxGapSeconds: 15.0, metersPerPixel: 0.5 });
 
   assert.equal(uniqueVehiclesCount, 2);
   assert.equal(events.length, 3);
@@ -88,6 +89,8 @@ test('consolidateVehicles clusters ALPR plate detections and handles returns', a
   assert.equal(events[0].duration_seconds, 2.0);
   assert.equal(events[0].confidence, 0.95);
   assert.equal(events[0].is_return, false);
+  assert.equal(events[0].speed_px_per_second, 10);
+  assert.equal(events[0].speed_kmh, 18);
 
   assert.equal(events[1].plate, 'XYZ789');
   assert.equal(events[1].frame_count, 1);
@@ -106,8 +109,8 @@ test('consolidateMotionSummary wraps events and counts into summary', async () =
         start_time_seconds: 0,
         end_time_seconds: 10,
         frames: [
-          { frame_index: 0, relative_timestamp_seconds: 0.0, sha256_hash: 'f0', alpr: { success: true, plate: 'TES789', confidence: 0.9 } },
-          { frame_index: 30, relative_timestamp_seconds: 1.0, sha256_hash: 'f1', alpr: { success: true, plate: 'TES789', confidence: 0.95 } },
+          { frame_index: 0, relative_timestamp_seconds: 0.0, sha256_hash: 'f0', alpr: { success: true, plate: 'TES789', confidence: 0.9 }, inference: { success: true, data: { vehicle_make: 'Toyota', vehicle_model: 'Corolla', vehicle_year: 2020, vehicle_colour: 'white', vehicle_attribute_confidence: 0.88, inference_provider: 'local' } } },
+          { frame_index: 30, relative_timestamp_seconds: 1.0, sha256_hash: 'f1', alpr: { success: true, plate: 'TES789', confidence: 0.95 }, inference: { success: true, data: { vehicle_make: 'Toyota', vehicle_model: 'Corolla', vehicle_year: 2020, vehicle_colour: 'white', vehicle_attribute_confidence: 0.91, inference_provider: 'local' } } },
         ]
       }
     ]
@@ -117,5 +120,18 @@ test('consolidateMotionSummary wraps events and counts into summary', async () =
   assert.ok(consolidated.consolidated_events);
   assert.equal(consolidated.consolidated_events.summary_counts.vehicle_events, 1);
   assert.equal(consolidated.consolidated_events.vehicle_events[0].plate, 'TES789');
+  assert.equal(consolidated.consolidated_events.vehicle_events[0].vehicle_make, 'Toyota');
+  assert.equal(consolidated.consolidated_events.vehicle_events[0].vehicle_model, 'Corolla');
+  assert.equal(consolidated.consolidated_events.vehicle_events[0].vehicle_year, 2020);
+  assert.equal(consolidated.consolidated_events.vehicle_events[0].vehicle_colour, 'white');
   assert.equal(consolidated.consolidated_events.keyframes.length, 2);
+});
+
+test('consolidatePeople retains side-on full-body detections without a face', async () => {
+  const result = await consolidatePeople([
+    { relative_timestamp_seconds: 59, sha256_hash: 'p0', people: { success: true, people: [{ confidence: 0.392, bbox: { x: 664, y: 469, width: 674, height: 598 } }] } },
+  ]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].event_type, 'person');
+  assert.equal(result[0].best_bbox.width, 674);
 });
