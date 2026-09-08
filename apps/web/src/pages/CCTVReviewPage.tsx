@@ -40,6 +40,10 @@ type CCTVJob = {
   stage?: string | null;
   error_message?: string | null;
   attempt_count?: number | null;
+  progress_percent?: number | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  progress_label?: string | null;
   created_at: string;
   evidence: {
     storage_path: string | null;
@@ -98,6 +102,12 @@ function timeLabel(value: string): string {
   return new Date(value).toLocaleString('en-NZ', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+const PROGRESS_STAGES = ['loading_evidence', 'converting', 'extracting_motion', 'running_inference', 'running_alpr', 'consolidating_observations', 'persisting_result'];
+
+function progressLabel(job: CCTVJob): string {
+  return job.progress_label || (job.stage ? statusLabel(job.stage) : statusLabel(job.status));
+}
+
 export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 'all', libraryMode = false }) => {
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<CCTVJob[]>([]);
@@ -130,7 +140,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       let query = supabase
         .from('inference_jobs')
         .select(
-          'id, evidence_item_id, domain, status, stage, error_message, attempt_count, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)'
+          'id, evidence_item_id, domain, status, stage, error_message, attempt_count, progress_percent, progress_current, progress_total, progress_label, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)'
         )
         .eq('organization_id', profile.organizationId)
         .in('domain', [...CCTV_DOMAINS])
@@ -445,6 +455,12 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                       {vehicleCount > 0 ? ` · ${vehicleCount} vehicle ${vehicleCount === 1 ? 'event' : 'events'}` : ''}
                       {faceCount + personCount > 0 ? ` · ${faceCount + personCount} person ${faceCount + personCount === 1 ? 'event' : 'events'}` : ''}
                     </span>
+                    {['queued', 'processing'].includes(job.status) && (
+                      <span className="cctv-progress-guide" aria-label={`Processing progress: ${progressLabel(job)}`}>
+                        <span className="cctv-progress-track"><span style={{ width: `${Math.max(0, Math.min(100, job.progress_percent ?? 0))}%` }} /></span>
+                        <small>{progressLabel(job)}{job.progress_total ? ` · ${job.progress_current ?? 0}/${job.progress_total}` : ''}</small>
+                      </span>
+                    )}
                     <span className={`cctv-status status-${job.status}`}><CircleDot size={13} /> {statusLabel(job.status)}</span>
                   </button>
                   {job.status === 'failed' && (
@@ -501,6 +517,17 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   </button>
                 )}
               </div>
+
+              {['queued', 'processing'].includes(selected.status) && (
+                <div className="cctv-progress-panel" aria-label="CCTV processing progress">
+                  <div className="cctv-progress-panel-heading"><strong>Processing progress</strong><span>{Math.round(selected.progress_percent ?? 0)}%</span></div>
+                  <div className="cctv-progress-track cctv-progress-track-large"><span style={{ width: `${Math.max(0, Math.min(100, selected.progress_percent ?? 0))}%` }} /></div>
+                  <div className="cctv-progress-steps">
+                    {PROGRESS_STAGES.map((stage) => <span key={stage} className={selected.stage === stage ? 'is-current' : PROGRESS_STAGES.indexOf(selected.stage || '') > PROGRESS_STAGES.indexOf(stage) ? 'is-done' : ''}>{statusLabel(stage)}</span>)}
+                  </div>
+                  <small>{progressLabel(selected)}{selected.progress_total ? ` · iteration ${selected.progress_current ?? 0} of ${selected.progress_total}` : ''}</small>
+                </div>
+              )}
 
               {/* Video Player */}
               <div className="cctv-media-container">

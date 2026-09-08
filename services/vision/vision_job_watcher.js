@@ -60,6 +60,28 @@ function safeCacheVideoPath(storagePath) {
   return candidate;
 }
 
+function classificationCheckpointPath(jobId) {
+  return path.join(DERIVED_ROOT, jobId, 'classification-progress.json');
+}
+
+async function readClassificationCheckpoint(jobId) {
+  try {
+    const value = JSON.parse(await fs.readFile(classificationCheckpointPath(jobId), 'utf8'));
+    return value && typeof value.frames === 'object' ? value.frames : {};
+  } catch (error) {
+    if (error?.code !== 'ENOENT') log('classification_checkpoint_unreadable', { job_id: jobId, error: error.message });
+    return {};
+  }
+}
+
+async function writeClassificationCheckpoint(jobId, frames) {
+  const checkpointPath = classificationCheckpointPath(jobId);
+  const temporaryPath = `${checkpointPath}.tmp`;
+  await fs.mkdir(path.dirname(checkpointPath), { recursive: true });
+  await fs.writeFile(temporaryPath, JSON.stringify({ version: 1, frames }), { mode: 0o600 });
+  await fs.rename(temporaryPath, checkpointPath);
+}
+
 async function ensureVideoPath(evidence) {
   const sourcePath = safeVideoPath(evidence.storage_path);
   try {
@@ -115,6 +137,18 @@ async function heartbeatJob(job, stage) {
   });
   if (error) throw new Error(`job heartbeat failed: ${error.message}`);
   if (data !== true) throw new Error('CCTV job lease was lost');
+}
+
+async function updateProgress(job, stage, progress = {}) {
+  await heartbeatJob(job, stage);
+  const { error } = await supabase.from('inference_jobs').update({
+    stage,
+    progress_percent: Math.max(0, Math.min(100, Math.round(Number(progress.percent) || 0))),
+    progress_current: Math.max(0, Math.round(Number(progress.current) || 0)),
+    progress_total: Math.max(0, Math.round(Number(progress.total) || 0)),
+    progress_label: progress.label || null,
+  }).eq('id', job.id).eq('status', 'processing').eq('lease_token', job.lease_token);
+  if (error) throw new Error(`job progress update failed: ${error.message}`);
 }
 
 function runExtractor(videoPath, outputDir) {
@@ -199,18 +233,31 @@ function selectFramesForClassification(segments, maxFrames) {
   return selected;
 }
 
-async function classifyFrames(summary) {
+async function classifyFrames(summary, job) {
   if (!INFERENCE_API_KEY) throw new Error('INFERENCE_API_KEY is required for frame classification');
   const totalFrames = summary.motion_segments.reduce((total, segment) => total + (segment.frames?.length || 0), 0);
   const selectedFrames = selectFramesForClassification(summary.motion_segments, MAX_CLASSIFICATION_FRAMES);
+  const totalBatches = Math.ceil(selectedFrames.length / RUNPOD_BATCH_SIZE);
+  const checkpointFrames = await readClassificationCheckpoint(job.id);
   const frameInputs = await Promise.all(selectedFrames.map(async (frame) => ({
     frame,
     image: await fs.readFile(frame.file_path),
   })));
   for (let batchStart = 0; batchStart < frameInputs.length; batchStart += RUNPOD_BATCH_SIZE) {
     const batch = frameInputs.slice(batchStart, batchStart + RUNPOD_BATCH_SIZE);
-    const runpodResults = await classifyWithRunpodBatch(batch);
-    for (const { frame, image } of batch) {
+    const batchNumber = Math.floor(batchStart / RUNPOD_BATCH_SIZE) + 1;
+    const pendingBatch = batch.filter(({ frame }) => !checkpointFrames[frame.sha256_hash]);
+    for (const { frame } of batch) {
+      if (checkpointFrames[frame.sha256_hash]) Object.assign(frame, checkpointFrames[frame.sha256_hash]);
+    }
+    await updateProgress(job, 'running_inference', {
+      current: batchStart,
+      total: selectedFrames.length,
+      percent: (batchStart / Math.max(1, selectedFrames.length)) * 100,
+      label: pendingBatch.length ? `Running inference batch ${batchNumber} of ${totalBatches}` : `Resuming completed batch ${batchNumber} of ${totalBatches}`,
+    });
+    const runpodResults = await classifyWithRunpodBatch(pendingBatch);
+    for (const [batchIndex, { frame, image }] of pendingBatch.entries()) {
       const buildForm = () => {
         const form = new FormData();
         form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);
@@ -224,6 +271,12 @@ async function classifyFrames(summary) {
         LOCAL_VEHICLE_INFERENCE ? fetch(`${INFERENCE_SERVICE_URL}/infer`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }) : Promise.resolve(null),
       ];
       const [alprResponse, faceResponse, peopleResponse, inferenceResponse] = await Promise.all(localRequests);
+      await updateProgress(job, 'running_alpr', {
+        current: batchStart + batchIndex + 1,
+        total: selectedFrames.length,
+        percent: ((batchStart + batchIndex + 1) / Math.max(1, selectedFrames.length)) * 100,
+        label: `Running ALPR and face checks, frame ${batchStart + batchIndex + 1} of ${selectedFrames.length}`,
+      });
       frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
       frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
       const runpodResult = runpodResults.get(frame.sha256_hash);
@@ -245,7 +298,15 @@ async function classifyFrames(summary) {
       } else {
         frame.inference = await classifyLocally(INFERENCE_SERVICE_URL, '/infer', headers, buildForm);
       }
+      checkpointFrames[frame.sha256_hash] = {
+        alpr: frame.alpr,
+        face: frame.face,
+        people: frame.people,
+        inference: frame.inference,
+        runpod: frame.runpod,
+      };
     }
+    await writeClassificationCheckpoint(job.id, checkpointFrames);
   }
   if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
   return summary;
@@ -374,7 +435,7 @@ async function processOne() {
     const job = await claimJob(jobs[0]);
     if (!job) return;
     currentJobId = job.id;
-    await heartbeatJob(job, 'loading_evidence');
+    await updateProgress(job, 'loading_evidence', { label: 'Loading evidence file' });
     const { data: evidence, error: evidenceError } = await supabase
       .from('evidence_items')
       .select('id, organization_id, evidence_kind, storage_path, metadata')
@@ -383,26 +444,28 @@ async function processOne() {
       .maybeSingle();
     if (evidenceError || !evidence) throw new Error(`evidence lookup failed: ${evidenceError?.message || 'not found'}`);
     if (evidence.evidence_kind !== 'video') throw new Error('evidence item is not video');
+    await updateProgress(job, 'converting', { label: 'Preparing video for analysis' });
     const videoPath = await ensureVideoPath(evidence);
-    log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
-    log('motion_extraction_started', { job_id: job.id });
-    await heartbeatJob(job, 'extracting_motion');
-    const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
-    log('motion_extraction_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
-    await heartbeatJob(job, 'classifying_frames');
-    await classifyFrames(summary);
-    await heartbeatJob(job, 'consolidating_observations');
-    await consolidateMotionSummary(summary, {
-      metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null,
-    });
-    await heartbeatJob(job, 'persisting_result');
-    await ingest(job, summary);
     try {
       await ensurePlaybackCopy(job, evidence, videoPath);
     } catch (playbackError) {
-      // Motion analysis is the compliance-critical result; a playback-copy failure must not fail the job.
-      log('playback_copy_failed', { job_id: job.id, evidence_item_id: job.evidence_item_id, error: playbackError.message });
+      // Keep inference available if remuxing fails, but make conversion failure visible.
+      log('playback_copy_failed', { job_id: job.id, evidence_item_id: evidence.id, error: playbackError.message });
     }
+    log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
+    log('motion_extraction_started', { job_id: job.id });
+    await updateProgress(job, 'extracting_motion', { label: 'Extracting motion segments' });
+    const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));
+    log('motion_extraction_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
+    await heartbeatJob(job, 'classifying_frames');
+    await classifyFrames(summary, job);
+    await updateProgress(job, 'consolidating_observations', { label: 'Consolidating observations' });
+    await consolidateMotionSummary(summary, {
+      metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null,
+    });
+    await updateProgress(job, 'persisting_result', { label: 'Saving results and evidence links' });
+    await ingest(job, summary);
+    await fs.rm(classificationCheckpointPath(job.id), { force: true });
     log('job_completed', {
       job_id: job.id,
       total_frames_parsed: summary.total_frames_parsed,
