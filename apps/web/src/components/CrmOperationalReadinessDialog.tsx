@@ -26,8 +26,8 @@ export function CrmOperationalReadinessDialog({ agreement, onClose, onNavigate }
 
   const loadReadiness = async () => {
     setLoading(true); setError(null);
-    const { data, error: loadError } = await supabase.rpc('get_crm_operational_readiness', { p_agreement_id: agreement.id });
-    if (loadError || !data) setError(loadError?.message ?? 'Operational readiness evidence could not be loaded.');
+    const { data, error: loadError } = await supabase.rpc('get_crm_enterprise_readiness', { p_agreement_id: agreement.id });
+    if (loadError || !data) setError(loadError?.message ?? 'Enterprise readiness evidence could not be loaded.');
     else setReadiness(data as OperationalReadiness);
     setLoading(false);
   };
