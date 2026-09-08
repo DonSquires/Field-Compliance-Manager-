@@ -18603,6 +18603,24 @@ export type Database = {
           wired: boolean
         }[]
       }
+      bob_atlas_expectation_report: {
+        Args: { p_limit?: number; p_offset?: number }
+        Returns: {
+          assertion_kind: string
+          expectation_id: string
+          expectation_status: string
+          from_name: string
+          from_type: string
+          gap_kind: string | null
+          rationale: string | null
+          signal_weight: number
+          spine: string
+          to_name: string
+          to_type: string
+          via_name: string | null
+          via_type: string | null
+        }[]
+      }
       bob_cards_needing_embedding: {
         Args: { match_limit?: number }
         Returns: {

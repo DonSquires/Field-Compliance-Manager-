@@ -101,6 +101,24 @@ serve(async (req)=>{
         results: data ?? []
       });
     }
+    if (action === 'expectation_report') {
+      const { data, error } = await admin.rpc('bob_atlas_expectation_report', {
+        p_limit: limit,
+        p_offset: offset
+      });
+      if (error) return json({
+        error: error.message
+      }, 500);
+      return json({
+        ok: true,
+        action,
+        count: (data ?? []).length,
+        total: null,
+        offset,
+        next_offset: (data ?? []).length === limit ? offset + (data ?? []).length : null,
+        results: data ?? []
+      });
+    }
     if (action === 'blast_radius') {
       // "If we touch this node, what does it reach - glass to core?"
       // TWO DISTINCT layers, never conflated: FLOW (data-flow, directed) and
@@ -167,7 +185,7 @@ serve(async (req)=>{
       });
     }
     return json({
-      error: `Unknown action '${action}'. Valid: capability_map, terrain_edges, gap_report, blast_radius`
+      error: `Unknown action '${action}'. Valid: capability_map, terrain_edges, gap_report, expectation_report, blast_radius`
     }, 422);
   } catch (err) {
     console.error('[bob-query-atlas]', err);
