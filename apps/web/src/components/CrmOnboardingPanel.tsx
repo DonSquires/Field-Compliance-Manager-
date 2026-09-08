@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, Clock3, Rocket, UserRound } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, Clock3, MailPlus, Rocket, UserRound, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface ReadinessDimension {
@@ -56,6 +56,8 @@ export function CrmOnboardingPanel({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [confirmingInvite, setConfirmingInvite] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const [activated, setActivated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -130,6 +132,22 @@ export function CrmOnboardingPanel({
     setSaving(false);
   };
 
+  const inviteClient = async () => {
+    if (!row) return;
+    setInviting(true); setError(null); setNotice(null);
+    const { data: prepared, error: prepareError } = await supabase.rpc('prepare_crm_client_invitation', { p_account_organization_id: row.account_organization_id });
+    if (prepareError || !prepared) {
+      setError(prepareError?.message ?? 'The client invitation could not be prepared.');
+      setInviting(false);
+      return;
+    }
+    const invitation = prepared as { email: string; display_name?: string };
+    const { error: inviteError } = await supabase.functions.invoke('invite-org', { body: { target_organization_id: row.account_organization_id, email: invitation.email, display_name: invitation.display_name?.trim() || row.account_name } });
+    if (inviteError) setError(inviteError.message);
+    else { setConfirmingInvite(false); setNotice(`Client invitation sent to ${invitation.email}. Client access begins after acceptance.`); await load(); await onChanged?.(); }
+    setInviting(false);
+  };
+
   if (loading) return <section className="crm-onboarding-panel"><p className="crm-workspace-subtle"><Clock3 size={14} /> Loading activation evidence…</p></section>;
 
   if (!row) return <section className="crm-onboarding-panel is-ready"><div><CheckCircle2 size={17} /><div><strong>{activated || accountStatus === 'active' ? 'Account active' : 'No onboarding ledger open'}</strong><span>{activated || accountStatus === 'active' ? 'Activation is complete and this portfolio is operational.' : 'A prospect ledger will appear here when onboarding is required.'}</span></div></div>{notice && <p role="status">{notice}</p>}</section>;
@@ -156,7 +174,9 @@ export function CrmOnboardingPanel({
         <button type="button" className="btn btn-sm btn-secondary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(false)}>Save ownership</button>
         {nextStage && <button type="button" className="btn btn-sm btn-primary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(true)}>Advance to {nextStage}<ChevronRight size={14} /></button>}
         {row.current_stage === 'review' && row.readiness?.ready && row.agreement_id && !confirming && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setConfirming(true)}><Rocket size={14} />Activate account</button>}
+        {row.readiness?.ready && !confirmingInvite && <button type="button" className="btn btn-sm btn-secondary" disabled={saving || inviting} onClick={() => setConfirmingInvite(true)}><MailPlus size={14} />Invite client</button>}
         {confirming && <><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => setConfirming(false)}>Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void activate()}>{saving ? 'Activating' : 'Confirm activation'}</button></>}
+        {confirmingInvite && <><button type="button" className="btn btn-sm btn-secondary" disabled={inviting} onClick={() => setConfirmingInvite(false)}><X size={14} />Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={inviting} onClick={() => void inviteClient()}>{inviting ? 'Preparing invitation' : 'Confirm and invite'}</button></>}
       </div>
     </footer>
   </section>;
