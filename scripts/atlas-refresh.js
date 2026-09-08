@@ -266,11 +266,11 @@ function collectSqlFunctionEdges(rootDir) {
     ...walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort()
   ];
   const latestFunctions = new Map();
-  const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?AS\s+\$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\2\$\s*;/gi;
+  const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:(?:"?(public|ops)"?)\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?AS\s+\$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\3\$\s*;/gi;
   for (const file of files) {
     const content = fs.existsSync(path.join(rootDir, file)) ? fs.readFileSync(path.join(rootDir, file), 'utf8') : '';
     for (const match of content.matchAll(functionPattern)) {
-      latestFunctions.set(match[1], { body: match[3], file });
+      latestFunctions.set(match[2], { body: match[4], file });
     }
   }
 
@@ -299,6 +299,9 @@ function collectSqlFunctionEdges(rootDir) {
     }
     for (const match of definition.body.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
       add(rpcName, 'table', match[1], 'writes', definition.file, `SQL writes public.${match[1]}`);
+    }
+    for (const match of definition.body.matchAll(/\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
+      add(rpcName, 'edge_function', match[1], 'calls', definition.file, `SQL HTTP call to ${match[1]}`);
     }
   }
   const schema = fs.existsSync(path.join(rootDir, schemaFile)) ? fs.readFileSync(path.join(rootDir, schemaFile), 'utf8') : '';

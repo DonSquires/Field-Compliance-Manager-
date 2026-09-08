@@ -219,3 +219,20 @@ test('Atlas refresh derives canonical schema trigger invocations', () => {
     && edge.edge_kind === 'triggers'));
   fs.rmSync(rootDir, { recursive: true, force: true });
 });
+
+test('Atlas refresh derives Ops scheduler HTTP calls to edge functions', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-ops-scheduler-'));
+  const migrationPath = path.join(rootDir, 'supabase/migrations/20260908005000_schedule.sql');
+  const targetPath = path.join(rootDir, 'supabase/functions/welfare-escalation-tick/index.ts');
+  fs.mkdirSync(path.dirname(migrationPath), { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(migrationPath, `create function ops.enqueue_tick() returns bigint language plpgsql as $$ begin perform net.http_post(url := v_project_url || '/functions/v1/welfare-escalation-tick'); return 1; end; $$;`);
+  fs.writeFileSync(targetPath, 'export default {}');
+
+  const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
+
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'enqueue_tick'
+    && edge.target_name === 'welfare-escalation-tick'
+    && edge.edge_kind === 'calls'));
+  fs.rmSync(rootDir, { recursive: true, force: true });
+});
