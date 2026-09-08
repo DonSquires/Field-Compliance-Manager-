@@ -42,6 +42,14 @@ describe('OfficerShell state routing', () => {
     expect(source).toContain("<OfficerDebriefPage onNavigate={(destination) => navigateToModule(destination === 'home' ? null : destination)} />");
   });
 
+  it('blocks unauthorized module URLs and hides unapproved features from the officer shell', () => {
+    expect(source).toContain('const canAccessOfficerModule = useCallback');
+    expect(source).toContain("if (!canAccessOfficerModule(module)) {");
+    expect(source).toContain("navigate('/officer', { replace: true });");
+    expect(source).toContain('grantedModules.includes');
+    expect(source).toContain('module === \'modules\'');
+  });
+
   it('exposes stateful accessible semantics on persistent controls', () => {
     expect(source).toContain('aria-expanded={bobOpen}');
     expect(source).toContain("bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'");

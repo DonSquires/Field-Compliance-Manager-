@@ -141,12 +141,8 @@ serve(async (req)=>{
     }, 401);
     const { data: profile } = await supabase.from('user_profiles').select('id, role, organization_id').eq('id', user.id).single();
     const role = String(profile?.role ?? '');
-    if (![
-      'admin',
-      'master',
-      'grand_master'
-    ].includes(role)) return json({
-      error: 'Forbidden'
+    if (role !== 'grand_master') return json({
+      error: 'Forbidden: grand_master infrastructure owner required'
     }, 403);
     const body = await req.json();
     // Accept either csv_text (parse here) or a pre-parsed rows[] array.

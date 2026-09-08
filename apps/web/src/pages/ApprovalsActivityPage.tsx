@@ -48,6 +48,17 @@ interface JobPlanStep {
   status: string;
 }
 
+interface DocumentPromotionRow {
+  version_id: string;
+  file_name: string;
+  scope: string;
+  privacy_class: string | null;
+  confidence: number | null;
+  rationale: string | null;
+  ocr_required: boolean;
+  created_at: string;
+}
+
 const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
   { id: 'pending', label: 'Pending' },
   { id: 'approved', label: 'Approved' },
@@ -74,12 +85,14 @@ const ApprovalsActivityPage: React.FC = () => {
   const [payloadLabels, setPayloadLabels] = useState<Record<string, string>>({});
   const [planDecision, setPlanDecision] = useState<'approve' | 'reject' | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [documentPromotions, setDocumentPromotions] = useState<DocumentPromotionRow[]>([]);
+  const [promotingDocumentId, setPromotingDocumentId] = useState<string | null>(null);
 
   const loadActivity = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [activityResponse, plansResponse, stepsResponse] = await Promise.all([
+      const [activityResponse, plansResponse, stepsResponse, documentsResponse] = await Promise.all([
         supabase.rpc('get_approvals_activity', {
         p_limit: 100,
         p_offset: 0,
@@ -88,10 +101,12 @@ const ApprovalsActivityPage: React.FC = () => {
         }),
         supabase.from('bob_job_plans').select('id,goal,status,reasoning,created_at,organization_id').in('status', filter === 'all' ? ['proposed', 'executing', 'needs_review'] : filter === 'pending' ? ['proposed'] : []).order('created_at', { ascending: false }).limit(30),
         supabase.from('bob_job_plan_steps').select('id,plan_id,sequence,action_type,status').order('sequence'),
+        supabase.from('documents').select('id,original_filename,current_scope,document_versions(id,version_label,extraction_confidence,ocr_required,created_at,document_classifications(privacy_class,confidence,rationale,created_at))').in('current_scope', ['conversation_only', 'tenant', 'quarantined']).order('created_at', { ascending: false }).limit(50),
       ]);
       if (activityResponse.error) throw activityResponse.error;
       if (plansResponse.error) throw plansResponse.error;
       if (stepsResponse.error) throw stepsResponse.error;
+      if (documentsResponse.error) throw documentsResponse.error;
       const activity = (activityResponse.data as ApprovalRow[]) ?? [];
       setRows(activity);
       const planRows = (plansResponse.data as JobPlanRow[]) ?? [];
@@ -100,6 +115,12 @@ const ApprovalsActivityPage: React.FC = () => {
         (grouped[step.plan_id] ??= []).push(step);
         return grouped;
       }, {}));
+      setDocumentPromotions(((documentsResponse.data as Array<{ original_filename: string; current_scope: string; document_versions?: Array<{ id: string; extraction_confidence: number | null; ocr_required: boolean; created_at: string; document_classifications?: Array<{ privacy_class: string; confidence: number | null; rationale: string | null; created_at: string }> }> }>) ?? []).flatMap((document) => {
+        const version = [...(document.document_versions ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
+        if (!version) return [];
+        const classification = [...(version.document_classifications ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
+        return [{ version_id: version.id, file_name: document.original_filename, scope: document.current_scope, privacy_class: classification?.privacy_class ?? null, confidence: classification?.confidence ?? version.extraction_confidence, rationale: classification?.rationale ?? null, ocr_required: version.ocr_required, created_at: version.created_at }];
+      }));
       setSelectedId((current) => current && activity.some((row) => row.id === current) ? current : activity[0]?.id ?? null);
     } catch (loadError) {
       setRows([]);
@@ -109,6 +130,14 @@ const ApprovalsActivityPage: React.FC = () => {
       setLoading(false);
     }
   }, [filter]);
+
+  const promoteDocument = async (document: DocumentPromotionRow) => {
+    setPromotingDocumentId(document.version_id); setError(null); setNotice(null);
+    const { error: promoteError } = await supabase.functions.invoke('bob-document-promote', { body: { document_version_id: document.version_id, target_scope: 'tenant_reference', metadata: { title: document.file_name } } });
+    if (promoteError) setError(promoteError.message);
+    else { setNotice(`${document.file_name} promoted to the tenant reference library.`); await loadActivity(); }
+    setPromotingDocumentId(null);
+  };
 
   useEffect(() => {
     void loadActivity();
@@ -227,6 +256,8 @@ const ApprovalsActivityPage: React.FC = () => {
       </section>
 
       {plans.length > 0 && <section className="approvals-queue" aria-label="Governed job plans"><div className="approvals-panel-heading"><div><span>Whole-plan approval</span><h2>Job plans awaiting review</h2></div><ListChecks size={18} /></div><div className="approvals-list">{plans.map((plan) => { const steps = planSteps[plan.id] ?? []; return <article className={`status-${plan.status}`} key={plan.id}><div><strong>{plan.goal}</strong><small>{steps.length} ordered step{steps.length === 1 ? '' : 's'} · {formatAge(plan.created_at)}</small></div><p>{plan.reasoning ?? 'No plan reasoning was recorded.'}</p><small>{steps.map((step) => `${step.sequence + 1}. ${formatActionType(step.action_type)} (${step.status})`).join(' · ')}</small>{plan.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openPlanDecision(plan, 'reject')}><XCircle size={17} /> Reject plan</button><button type="button" className="is-approve" onClick={() => openPlanDecision(plan, 'approve')}><CheckCircle2 size={17} /> Review plan</button></div>}</article>; })}</div></section>}
+
+      {documentPromotions.length > 0 && <section className="approvals-queue" aria-label="Document promotion queue"><div className="approvals-panel-heading"><div><span>Reference library</span><h2>Documents awaiting promotion</h2></div><ShieldCheck size={18} /></div><div className="approvals-list">{documentPromotions.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.file_name}</strong><small>{document.privacy_class ?? 'Unclassified'} · {document.confidence == null ? 'No confidence' : `${Math.round(document.confidence * 100)}% confidence`}</small></div><p>{document.ocr_required ? 'OCR is still required before reliable classification.' : document.rationale ?? 'Review the classification and tenant scope before promotion.'}</p><div className="approvals-actions"><button type="button" className="is-approve" disabled={promotingDocumentId === document.version_id || document.ocr_required || !document.privacy_class} onClick={() => void promoteDocument(document)}>{promotingDocumentId === document.version_id ? 'Promoting...' : 'Promote to tenant library'}</button></div></article>)}</div></section>}
 
       {error && <div className="approvals-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
       {notice && <div className={`approvals-message ${notice.includes('failed') ? 'is-warning' : 'is-success'}`} role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}

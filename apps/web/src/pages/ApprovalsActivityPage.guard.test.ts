@@ -30,4 +30,11 @@ describe('governed approvals workbench', () => {
     expect(source).toContain('owns this decision');
     expect(source).not.toContain('Decision authority</dt><dd>');
   });
+
+  it('promotes classified document versions through the tenant-scoped edge function', () => {
+    expect(source).toContain("functions.invoke('bob-document-promote'");
+    expect(source).toContain('document_version_id: document.version_id');
+    expect(source).toContain("target_scope: 'tenant_reference'");
+    expect(source).not.toMatch(/from\('(documents|document_versions|document_classifications)'\)[\s\S]{0,240}\.(insert|update|upsert|delete)\(/);
+  });
 });

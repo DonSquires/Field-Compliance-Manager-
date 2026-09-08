@@ -102,6 +102,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831095000_operational_place_editor.sql',
   'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
   'supabase/migrations/20260901020000_resolve_contracted_operational_context.sql',
+  'supabase/migrations/20260905005900_govern_operating_branch_configuration.sql',
   'supabase/schemas/public/functions/resolve_context.sql',
   'supabase/schemas/public/functions/is_zone_closed.sql'
 ];
@@ -183,6 +184,11 @@ function collectComponentEdges(sourceFile, content) {
   }
   for (const match of content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*rpc\(\s*['"]([^'"]+)['"]/g)) {
     edges.push({ ...source, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in source' });
+  }
+  for (const match of content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*rpc\([^;]*?\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/g)) {
+    for (const rpcName of [match[1], match[2]]) {
+      edges.push({ ...source, target_type: 'rpc', target_name: rpcName, edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in source' });
+    }
   }
   return edges;
 }
