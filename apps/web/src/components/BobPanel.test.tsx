@@ -300,7 +300,7 @@ describe('BobPanel', () => {
 
     expect(await screen.findByText('Idle')).toBeTruthy();
     expect(screen.getByText('Ready for input. No Bob work is running.')).toBeTruthy();
-    expect(screen.getByText(/PDF, DOCX, CSV\/XLSX, TXT, JSON, images, audio, and video up to 500 MB each/)).toBeTruthy();
+    expect(screen.getByText(/Any file type up to 128 GB each/)).toBeTruthy();
     expect(screen.getByLabelText('Attach files')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'New chat' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Start voice capture' })).toBeTruthy();

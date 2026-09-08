@@ -7763,7 +7763,7 @@ CREATE TABLE IF NOT EXISTS "public"."bob_attachments" (
     "source_type" "text" DEFAULT 'upload'::"text" NOT NULL,
     "source_url" "text",
     CONSTRAINT "bob_attachments_confidence_check" CHECK ((("confidence" IS NULL) OR (("confidence" >= (0)::double precision) AND ("confidence" <= (1)::double precision)))),
-    CONSTRAINT "bob_attachments_file_size_bytes_check" CHECK ((("file_size_bytes" > 0) AND ("file_size_bytes" <= 524288000))),
+    CONSTRAINT "bob_attachments_file_size_bytes_check" CHECK ((("file_size_bytes" > 0) AND ("file_size_bytes" <= 137438953472))),
     CONSTRAINT "bob_attachments_processing_state_check" CHECK (("processing_state" = ANY (ARRAY['pending'::"text", 'processing'::"text", 'extracted'::"text", 'failed'::"text", 'manual_review_required'::"text"]))),
     CONSTRAINT "bob_attachments_purpose_check" CHECK (("purpose" = ANY (ARRAY['document_intake'::"text", 'photo_intake'::"text", 'video_intake'::"text"]))),
     CONSTRAINT "bob_attachments_source_type_check" CHECK (("source_type" = ANY (ARRAY['upload'::"text", 'url'::"text"]))),
@@ -7786,7 +7786,7 @@ COMMENT ON COLUMN "public"."bob_attachments"."source_url" IS 'The external URL t
 
 
 
-COMMENT ON CONSTRAINT "bob_attachments_file_size_bytes_check" ON "public"."bob_attachments" IS 'File size 1 byte .. 500 MB (524288000) for video intake.';
+COMMENT ON CONSTRAINT "bob_attachments_file_size_bytes_check" ON "public"."bob_attachments" IS 'File size 1 byte through 128 GiB. Any MIME type is stored privately; extraction and inference remain format-specific.';
 
 
 

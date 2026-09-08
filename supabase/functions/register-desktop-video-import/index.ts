@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const MAX_VIDEO_BYTES = 524288000;
+const MAX_ATTACHMENT_BYTES = 128 * 1024 * 1024 * 1024;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -28,8 +28,8 @@ serve(async (request) => {
     const fileName = String(body.file_name ?? '').trim();
     const fileType = String(body.file_type ?? '').trim();
     const fileSizeBytes = Number(body.file_size_bytes);
-    if (!attachmentId || !storagePath || !fileName || !fileType.startsWith('video/') || !Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > MAX_VIDEO_BYTES) {
-      return json({ error: 'Valid video attachment_id, storage_path, file_name, file_type, and file_size_bytes are required' }, 422);
+    if (!attachmentId || !storagePath || !fileName || !fileType || !Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > MAX_ATTACHMENT_BYTES) {
+      return json({ error: 'Valid attachment_id, storage_path, file_name, file_type, and file_size_bytes are required' }, 422);
     }
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -58,11 +58,12 @@ serve(async (request) => {
       file_size_bytes: fileSizeBytes,
       storage_bucket: 'bob-uploads',
       storage_path: storagePath,
-      purpose: 'video_intake',
+      purpose: fileType.startsWith('video/') ? 'video_intake' : 'document_intake',
       processing_state: 'pending',
       source_type: 'upload',
     });
     if (attachmentError) throw new Error(attachmentError.message);
+    if (!fileType.startsWith('video/')) return json({ success: true, attachment_id: attachmentId, inference_job_id: null });
     const { data: jobId, error: jobError } = await admin.rpc('register_bob_video_attachment_for_review', { p_attachment_id: attachmentId });
     if (jobError) throw new Error(jobError.message);
     return json({ success: true, attachment_id: attachmentId, inference_job_id: jobId });

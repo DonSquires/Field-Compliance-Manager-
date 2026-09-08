@@ -26,11 +26,10 @@ import { BobMarkdown } from './BobMarkdown';
 import { BobStudio } from './BobStudio';
 import './BobPanel.css';
 
-const MAX_BOB_UPLOAD_BYTES = 500 * 1024 * 1024;
+const MAX_BOB_UPLOAD_BYTES = 128 * 1024 * 1024 * 1024;
 const RESUMABLE_UPLOAD_THRESHOLD = 8 * 1024 * 1024;
 const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024;
-const ACCEPTED_BOB_UPLOADS = 'image/*,video/*,audio/*,.csv,.txt,.pdf,.doc,.docx,.xls,.xlsx,.json,.md';
-const ACCEPTED_BOB_UPLOAD_LABEL = 'PDF, DOCX, CSV/XLSX, TXT, JSON, images, audio, and video up to 500 MB each';
+const ACCEPTED_BOB_UPLOAD_LABEL = 'Any file type up to 128 GB each';
 
 interface BobMessage {
   id: string;
@@ -422,7 +421,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       file,
       status: 'queued' as const,
     }));
-    if (rejected.length) setError('One or more files are empty or larger than the 500 MB upload limit.');
+    if (rejected.length) setError('One or more files are empty or larger than the 128 GB upload limit.');
     setPendingFiles(current => [...current, ...accepted].slice(0, 8));
   };
 
@@ -793,7 +792,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </div>
 
           <form onSubmit={handleSend} className="bob-composer">
-            <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_BOB_UPLOADS} onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />
+            <input ref={fileInputRef} type="file" multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />
             <textarea
               ref={composerRef}
               value={input}
