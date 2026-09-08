@@ -16,8 +16,9 @@ const batchPreview = read('20260907002300_preview_batch_publish.sql');
 const repeat = read('20260907002400_repeat_roster_slot_range.sql');
 const batchFailures = read('20260907002500_batch_publish_failure_audit.sql');
 const attendanceAck = read('20260907002600_acknowledge_roster_attendance_exception.sql');
+const skills = read('20260907002800_roster_skill_requirements.sql');
 
-const migrations = [swap, notify, attendance, templatePreview, batchPreview, repeat, batchFailures, attendanceAck];
+const migrations = [swap, notify, attendance, templatePreview, batchPreview, repeat, batchFailures, attendanceAck, skills];
 
 describe('new roster lifecycle migrations remain governed', () => {
   it('restricts every new executable function to authenticated and service roles', () => {
@@ -54,5 +55,13 @@ describe('new roster lifecycle migrations remain governed', () => {
     expect(attendanceAck).toContain("'roster_attendance_exception_acknowledged'");
     expect(attendanceAck).toContain('enqueue_notification');
     expect(batchFailures).toContain("'roster_batch_publish_materialization_failed'");
+  });
+
+  it('enforces current required skills at roster slot write time', () => {
+    expect(skills).toContain('required_skill_names');
+    expect(skills).toContain('manage_roster_work_unit_skill_requirements');
+    expect(skills).toContain('tg_enforce_roster_slot_skill_requirements');
+    expect(skills).toContain('certification_expiry >= current_date');
+    expect(skills).toContain('Assigned staff member lacks required current skill');
   });
 });
