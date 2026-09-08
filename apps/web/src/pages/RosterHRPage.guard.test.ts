@@ -39,6 +39,13 @@ describe('governed HR administration', () => {
     expect(page).not.toMatch(/from\('dispatch_job_pay_lines'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
   });
 
+  it('loads callout pay evidence through the server-owned summary RPC', () => {
+    expect(page).toContain("supabase.rpc('get_callout_pay_summary'");
+    expect(page).toContain('calloutPaySummaries');
+    expect(page).toContain('summary?.minimum_applied');
+    expect(page).not.toContain('Math.max(worked, Number(c.minimum_pay_hours))');
+  });
+
   it('uses governed coverage creation and reasoned review', () => {
     expect(page).toContain("supabase.rpc('create_shift_coverage_request'");
     expect(page).not.toContain(".from('shift_coverage_requests').insert");

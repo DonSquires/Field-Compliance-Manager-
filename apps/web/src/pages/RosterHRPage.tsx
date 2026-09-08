@@ -220,6 +220,15 @@ interface CalloutRow {
   work_ended_at: string | null;
 }
 
+interface CalloutPaySummary {
+  callout_id: string;
+  worked_hours: number;
+  minimum_pay_hours: number;
+  payable_hours: number;
+  minimum_applied: boolean;
+  response_minutes: number | null;
+}
+
 interface CourtRow {
   id: string;
   officer_user_id: string;
@@ -331,6 +340,7 @@ const RosterHRPage: React.FC = () => {
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [onCallPeriods, setOnCallPeriods] = useState<OnCallRow[]>([]);
   const [callouts, setCallouts] = useState<CalloutRow[]>([]);
+  const [calloutPaySummaries, setCalloutPaySummaries] = useState<Record<string, CalloutPaySummary>>({});
   const [courtAppearances, setCourtAppearances] = useState<CourtRow[]>([]);
   const [assetCheck, setAssetCheck] = useState<{ asset: AssetRow; condition: string; odometer: string; fuel: string; defects: string } | null>(null);
   const [payrollExport, setPayrollExport] = useState<{ from: string; to: string } | null>(null);
@@ -370,6 +380,7 @@ const RosterHRPage: React.FC = () => {
       setLeaveRequests([]);
       setTimesheets([]);
       setDispatchPayLines([]);
+      setCalloutPaySummaries({});
       setCoverageRequests([]);
       setSites([]);
       setZones([]);
@@ -491,7 +502,15 @@ const RosterHRPage: React.FC = () => {
       setSiteInductionRequirements((siteInductionRes.data as SiteInductionRequirementRow[]) ?? []);
       setAssets((assetsRes.data as AssetRow[]) ?? []);
       setOnCallPeriods((onCallRes.data as OnCallRow[]) ?? []);
-      setCallouts((calloutRes.data as CalloutRow[]) ?? []);
+      const calloutRows = (calloutRes.data as CalloutRow[]) ?? [];
+      setCallouts(calloutRows);
+      const paySummaryEntries = await Promise.all(calloutRows.map(async (callout) => {
+        const { data: summary, error: summaryError } = await supabase.rpc('get_callout_pay_summary', { p_callout_id: callout.id });
+        if (summaryError) throw summaryError;
+        const row = (summary as CalloutPaySummary[] | null)?.[0];
+        return row ? [callout.id, row] as const : null;
+      }));
+      setCalloutPaySummaries(Object.fromEntries(paySummaryEntries.filter((entry): entry is readonly [string, CalloutPaySummary] => entry !== null)));
       setCourtAppearances((courtRes.data as CourtRow[]) ?? []);
       setOnboarding((onboardingRes.data as StaffOnboardingRow[]) ?? []);
       setVacancies((vacanciesRes.data as RecruitmentVacancy[]) ?? []);
@@ -1728,10 +1747,7 @@ const RosterHRPage: React.FC = () => {
               <div className="empty-state"><p>No callouts raised.</p></div>
             ) : (
               callouts.map((c) => {
-                const worked = c.work_started_at && c.work_ended_at
-                  ? (new Date(c.work_ended_at).getTime() - new Date(c.work_started_at).getTime()) / 3_600_000
-                  : 0;
-                const payable = Math.max(worked, Number(c.minimum_pay_hours));
+                const summary = calloutPaySummaries[c.id];
                 return (
                   <div key={c.id} className="contact-card">
                     <div className="contact-header">
@@ -1741,8 +1757,9 @@ const RosterHRPage: React.FC = () => {
                     <div className="contact-details">
                       <p>{c.callout_received_at ? `Received ${new Date(c.callout_received_at).toLocaleString('en-NZ')}` : 'Not yet received'}</p>
                       <p className="contact-meta">
-                        Worked {worked.toFixed(2)}h · Payable {payable.toFixed(2)}h
-                        {payable > worked ? ` (${Number(c.minimum_pay_hours)}h minimum applied)` : ''}
+                        {summary ? `Worked ${Number(summary.worked_hours).toFixed(2)}h · Payable ${Number(summary.payable_hours).toFixed(2)}h` : 'Pay summary unavailable'}
+                        {summary?.minimum_applied ? ` (${Number(summary.minimum_pay_hours)}h minimum applied)` : ''}
+                        {summary?.response_minutes != null ? ` · Response ${Number(summary.response_minutes).toFixed(1)}m` : ''}
                       </p>
                     </div>
                   </div>
