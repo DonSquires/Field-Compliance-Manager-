@@ -420,11 +420,19 @@ function App() {
       return;
     }
     setError(null);
-    const outputPath = await save({ title: 'Save DHFS image on the local computer (not the SD card)', defaultPath: 'C:\\Users\\Public\\Documents\\fcm-dhfs-evidence.img', filters: [{ name: 'Disk image', extensions: ['img'] }] });
+    const outputPath = await save({ title: 'Save DHFS image on the internal hard drive or another external drive (not this SD card)', defaultPath: 'C:\\Users\\Public\\Documents\\fcm-dhfs-evidence.img', filters: [{ name: 'Disk image', extensions: ['img'] }] });
     if (!outputPath) return;
     setImagingLoading(true);
-    setStatus('Creating a read-only image on the local computer. Keep the SD card connected; this may take a while...');
+    setStatus('Checking free space on the chosen drive...');
     try {
+      const space = await invoke<{ drive: string; free_bytes: number; sufficient: boolean }>('check_destination_free_space', {
+        outputPath,
+        requiredBytes: partition.size_bytes,
+      });
+      if (!space.sufficient) {
+        throw new Error(`Drive ${space.drive} only has ${Math.round(space.free_bytes / 1024 / 1024 / 1024)} GB free. Choose the internal hard drive or another external drive with at least ${Math.round(partition.size_bytes / 1024 / 1024 / 1024)} GB free.`);
+      }
+      setStatus(`Creating a read-only image on ${space.drive}. Keep the SD card connected; this may take a while...`);
       const result = await invoke<{ bytes_copied: number; sha256: string; output_path: string }>('image_dhfs_partition', {
         diskNumber: disk.disk_number,
         partitionNumber: partition.partition_number,

@@ -67,6 +67,14 @@ struct CachedClipReport {
 }
 
 #[derive(Serialize)]
+struct DestinationSpaceReport {
+    drive: String,
+    free_bytes: u64,
+    required_bytes: u64,
+    sufficient: bool,
+}
+
+#[derive(Serialize)]
 struct PhysicalDhfsRecording {
     partition_number: u32,
     descriptor: u32,
@@ -319,6 +327,25 @@ fn partition_coordinates(disk_number: u32, partition_number: u32) -> Result<Part
         return Err(format!("Partition query failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
     }
     serde_json::from_slice(&output.stdout).map_err(|error| format!("Could not parse selected partition: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn check_destination_free_space(output_path: String, required_bytes: u64) -> Result<DestinationSpaceReport, String> {
+    use std::process::Command;
+
+    let normalized = output_path.replace('/', "\\");
+    let drive = normalized.get(0..2).filter(|prefix| prefix.ends_with(':')).ok_or("Choose a destination on a lettered drive, such as C:\\ or an external drive.")?.to_ascii_uppercase();
+    let script = format!("(New-Object System.IO.DriveInfo('{drive}\\')).AvailableFreeSpace");
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|error| format!("Could not check free space on {drive}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("Could not check free space on {drive}: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    let free_bytes: u64 = String::from_utf8_lossy(&output.stdout).trim().parse().map_err(|error| format!("Could not parse free space on {drive}: {error}"))?;
+    Ok(DestinationSpaceReport { drive, free_bytes, required_bytes, sufficient: free_bytes > required_bytes })
 }
 
 #[cfg(target_os = "windows")]
@@ -900,6 +927,12 @@ fn image_dhfs_partition(_disk_number: u32, _partition_number: u32, _output_path:
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
+fn check_destination_free_space(_output_path: String, _required_bytes: u64) -> Result<DestinationSpaceReport, String> {
+    Err("Destination free-space checks are available in the Windows FCM Desktop application.".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
 fn list_dhfs_partition_recordings(_disk_number: u32, _partition_number: u32) -> Result<Vec<PhysicalDhfsRecording>, String> {
     Err("Direct DHFS partition reading is available in the Windows FCM Desktop application.".to_string())
 }
@@ -954,7 +987,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_deep_link::init())
-        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, image_dhfs_partition, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
+        .invoke_handler(tauri::generate_handler![analyse_inserted_sd_card, cache_video_clip, clear_cached_clip, list_dhfs_partition_recordings, image_dhfs_partition, check_destination_free_space, convert_dhfs_image, detect_removable_disks, probe_partition_header, probe_indexed_cluster, scan_dhfs_metadata, inspect_dhfs_headers, inspect_dhfs_dpt, detect_dahua_export_tools, launch_dahua_export_tool, inspect_mounted_folder, inspect_sd_index])
         .run(tauri::generate_context!())
         .expect("error while running FCM SD Card Bridge");
 }
