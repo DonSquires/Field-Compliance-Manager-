@@ -119,6 +119,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; needs approval; exact route ID required',
     effect_class: 'draft_governed_write'
   },
+  propose_corporate_profile: {
+    purpose: 'PROPOSE a verified corporate profile for an explicitly resolved organization, including company standing and public officer records. Requires source-backed information and creates a pending approval only. Args: { organization_id, company_registration_number?, nzbn?, corporate_status?, corporate_status_as_of?, officers?, reasoning? }.',
+    governance: 'WRITE-draft; needs approval; explicit organization ID; never submit residential addresses',
+    effect_class: 'draft_governed_write'
+  },
   promote_action: {
     purpose: 'Prepare a governed draft (e.g. service agreement) into the approval bell.',
     governance: 'WRITE-draft; needs approval',
@@ -560,6 +565,7 @@ const TOOL_REGISTRY = {
     site_risk: 'bob-site-risk',
     propose_site_risk: 'bob-propose-site-risk',
     propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
+    propose_corporate_profile: 'bob-propose-corporate-profile',
     plan_import: 'bob-plan-import',
     perceive_media: 'bob-perceive-image',
     web_research: 'bob-web-research',

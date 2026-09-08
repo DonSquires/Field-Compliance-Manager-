@@ -54,3 +54,11 @@ test('patrol route service areas are Caddie-routed governed proposals', () => {
   assert.match(chat, /callFn\('bob-propose-patrol-route-service-area', authHeader/);
   assert.match(chat, /case 'propose_patrol_route_service_area':/);
 });
+
+test('corporate profiles are Caddie-routed pending proposals', () => {
+  assert.match(caddie, /propose_corporate_profile: \{/);
+  assert.match(caddie, /'bob-propose-corporate-profile'/);
+  assert.match(chat, /async function execProposeCorporateProfile/);
+  assert.match(chat, /callFn\('bob-propose-corporate-profile', authHeader/);
+  assert.match(chat, /case 'propose_corporate_profile':/);
+});

@@ -847,7 +847,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -1416,6 +1416,7 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'propose_patrol_route_service_area' && caps.canPromote || // propose_site_risk is a governed WRITE-draft — same gate.
     t.tool === 'propose_site_risk' && caps.canPromote || // site_risk is a read-only assessment.
     t.tool === 'site_risk' && caps.canCompareData ||
+    t.tool === 'propose_corporate_profile' && caps.canPromote ||
     // same gate as every single-action propose_* tool; a plan approval is the
     // same kind of human decision, just at plan granularity (#86 Phase 3).
     t.tool === 'job_plan_create' && caps.canPromote || // propose_freedom_camping_org_strategy is a governed WRITE-draft — same gate.
@@ -4541,6 +4542,36 @@ async function execProposePatrolRouteServiceArea(authHeader, caps, args) {
     meta: { tool: 'propose_patrol_route_service_area', outcome: 'ok', action_id: r.data.action_id ?? null }
   };
 }
+async function execProposeCorporateProfile(authHeader, caps, args) {
+  if (!caps.canPromote) return {
+    reply: 'Preparing a corporate-profile proposal needs an admin, master, or grand master.',
+    meta: { tool: 'propose_corporate_profile', outcome: 'forbidden' }
+  };
+  const organizationId = String(args.organization_id ?? '').trim();
+  if (!organizationId) return {
+    reply: 'Provide the explicit organization ID before I prepare a corporate-profile proposal.',
+    meta: { tool: 'propose_corporate_profile', outcome: 'need_organization_id' }
+  };
+  const r = await callFn('bob-propose-corporate-profile', authHeader, {
+    organization_id: organizationId,
+    company_registration_number: args.company_registration_number,
+    nzbn: args.nzbn,
+    corporate_status: args.corporate_status,
+    corporate_status_as_of: args.corporate_status_as_of,
+    officers: Array.isArray(args.officers) ? args.officers : [],
+    reasoning: typeof args.reasoning === 'string' ? args.reasoning : undefined,
+    context_summary: typeof args.context_summary === 'string' ? args.context_summary : undefined,
+    conversation_id: args._conversation_id
+  });
+  if (!r.ok || !r.data?.success) return {
+    reply: 'I could not prepare the corporate-profile proposal right now.',
+    meta: { tool: 'propose_corporate_profile', outcome: 'failed' }
+  };
+  return {
+    reply: String(r.data.note ?? 'The corporate-profile proposal is ready for approval.'),
+    meta: { tool: 'propose_corporate_profile', outcome: 'ok', action_id: r.data.action_id ?? null }
+  };
+}
 // Bob PROPOSES a freedom-camping ENFORCEMENT zone (geofence + night limits) into
 // the bell. Calls bob-propose-freedom-camping-zone. Bob must have RESOLVED the
 // geofence himself first (verify address -> LINZ parcel -> Google fallback, per
@@ -7659,6 +7690,8 @@ serve(async (req)=>{
           return execProposeSiteRisk(authHeader, caps, toolArgs);
         case 'propose_patrol_route_service_area':
           return execProposePatrolRouteServiceArea(authHeader, caps, toolArgs);
+        case 'propose_corporate_profile':
+          return execProposeCorporateProfile(authHeader, caps, toolArgs);
         case 'propose_client_onboarding':
           return execProposeClientOnboarding(authHeader, caps, orgId, toolArgs);
         case 'propose_freedom_camping_zone':
