@@ -38,6 +38,14 @@ test('site risk is available only through Caddie and its scoped edge function', 
   assert.match(chat, /case 'site_risk':/);
 });
 
+test('GPS point context is resolved through Caddie and the scoped field service', () => {
+  assert.match(caddie, /resolve_point_context: \{/);
+  assert.match(caddie, /resolve_point_context: 'resolve-point-context'/);
+  assert.match(chat, /async function execResolvePointContext/);
+  assert.match(chat, /callFn\('resolve-point-context', authHeader/);
+  assert.match(chat, /case 'resolve_point_context':/);
+});
+
 test('site risk changes are routed through Caddie to the governed proposal producer', () => {
   assert.match(caddie, /propose_site_risk: \{/);
   assert.match(caddie, /propose_site_risk: 'bob-propose-site-risk'/);

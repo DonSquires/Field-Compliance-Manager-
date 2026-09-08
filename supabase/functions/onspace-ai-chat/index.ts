@@ -844,7 +844,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
     'describe_image',
     'retrieve_knowledge'
   ];
-  if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_geofence');
+  if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
   if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
@@ -1416,6 +1416,7 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'propose_patrol_route_service_area' && caps.canPromote || // propose_site_risk is a governed WRITE-draft — same gate.
     t.tool === 'propose_site_risk' && caps.canPromote || // site_risk is a read-only assessment.
     t.tool === 'site_risk' && caps.canCompareData ||
+    t.tool === 'resolve_point_context' && caps.canCompareData ||
     t.tool === 'propose_corporate_profile' && caps.canPromote ||
     t.tool === 'propose_client_root_org' && caps.tier === 'admiral' ||
     // same gate as every single-action propose_* tool; a plan approval is the
@@ -4464,6 +4465,36 @@ async function execSiteRisk(authHeader, args) {
       outcome: 'ok',
       rating: assessment.rating ?? null,
       active_concern_count: counts.active ?? 0
+    }
+  };
+}
+async function execResolvePointContext(authHeader, caps, orgId, args) {
+  const lat = Number(args.lat ?? args.gps_lat);
+  const lng = Number(args.lng ?? args.gps_lng);
+  const organizationId = String(args.organization_id ?? orgId ?? '').trim();
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !organizationId) return {
+    reply: 'Provide GPS latitude, longitude, and the organization context before I resolve this point.',
+    meta: { tool: 'resolve_point_context', outcome: 'need_coordinates_or_organization' }
+  };
+  const r = await callFn('resolve-point-context', authHeader, {
+    lat,
+    lng,
+    organization_id: organizationId
+  });
+  if (!r.ok) return {
+    reply: 'I could not resolve the operational context for that GPS point right now.',
+    meta: { tool: 'resolve_point_context', outcome: 'failed' }
+  };
+  const context = r.data ?? {};
+  const place = context.zone_name ?? context.site_name ?? context.address ?? 'no authorized operational place';
+  const kind = context.zone_name ? 'zone' : context.site_name ? 'site' : context.address ? 'address' : 'location';
+  return {
+    reply: `This point resolves to ${kind}: ${place}.`,
+    meta: {
+      tool: 'resolve_point_context',
+      outcome: 'ok',
+      in_zone: context.in_zone === true,
+      site_match_kind: context.site_match_kind ?? null
     }
   };
 }
@@ -7720,6 +7751,8 @@ serve(async (req)=>{
           return execScvLookup(authHeader, toolArgs);
         case 'site_risk':
           return execSiteRisk(authHeader, toolArgs);
+        case 'resolve_point_context':
+          return execResolvePointContext(authHeader, caps, orgId, toolArgs);
         case 'propose_site_risk':
           return execProposeSiteRisk(authHeader, caps, toolArgs);
         case 'propose_patrol_route_service_area':

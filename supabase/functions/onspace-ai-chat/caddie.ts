@@ -109,6 +109,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only; access-scoped; cross-organization proximity signals are de-identified',
     effect_class: 'internal_observation'
   },
+  resolve_point_context: {
+    purpose: 'Resolve a GPS point to the authorized operational zone, site, location, jurisdiction rules, or fallback street address. Args: { lat, lng, organization_id }.',
+    governance: 'read-only; access-scoped to the supplied organization',
+    effect_class: 'internal_observation'
+  },
   propose_site_risk: {
     purpose: 'PROPOSE an updated site risk rating from a site assessment. Creates a pending approval only; it never changes the rating directly. Args: { site_id, risk_level? }.',
     governance: 'WRITE-draft; needs approval',
@@ -568,6 +573,7 @@ const TOOL_REGISTRY = {
     client_site_compare: 'bob-client-site-compare',
     scv_lookup: 'bob-scv-lookup',
     site_risk: 'bob-site-risk',
+    resolve_point_context: 'resolve-point-context',
     propose_site_risk: 'bob-propose-site-risk',
     propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
     propose_corporate_profile: 'bob-propose-corporate-profile',
