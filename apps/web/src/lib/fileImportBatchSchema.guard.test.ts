@@ -11,6 +11,9 @@ describe('file import batch governance', () => {
     expect(migration).toContain("status IN ('preview','needs_review','approved','rejected','applied','failed')");
     expect(migration).toContain('CREATE OR REPLACE FUNCTION public.create_file_import_batch');
     expect(migration).toContain("'file_import_batch_created'");
+    expect(migration).toContain('CREATE OR REPLACE FUNCTION public.review_file_import_batch');
+    expect(migration).toContain("'file_import_batch_reviewed'");
+    expect(migration).toContain('Review reason is required');
   });
 
   it('blocks browser table writes and exposes only the governed RPC', () => {

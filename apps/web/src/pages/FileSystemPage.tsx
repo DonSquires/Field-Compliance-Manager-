@@ -78,6 +78,8 @@ interface FileImportBatch {
   row_count: number;
   duplicate_count: number;
   unresolved_count: number;
+  review_reason: string | null;
+  reviewed_at: string | null;
   manifest_json: Record<string, unknown>;
   schema_json: { mappings?: Array<{ source: string; target: string; confidence: string }>; warnings?: string[] };
   created_at: string;
@@ -198,6 +200,8 @@ const FileSystemPage: React.FC = () => {
   const [importBatches, setImportBatches] = useState<FileImportBatch[]>([]);
   const [batchStatus, setBatchStatus] = useState<'all' | FileImportBatch['status']>('all');
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [reviewReason, setReviewReason] = useState('');
+  const [reviewingBatch, setReviewingBatch] = useState(false);
 
   const loadDocuments = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
@@ -321,6 +325,23 @@ const FileSystemPage: React.FC = () => {
     setCreatingBatch(false);
   };
 
+  const reviewBatch = async (decision: 'approved' | 'rejected') => {
+    if (!selectedBatch || !reviewReason.trim()) {
+      setPreviewError('A review reason is required before approving or rejecting a batch.');
+      return;
+    }
+    setReviewingBatch(true);
+    setPreviewError(null);
+    const { data, error: reviewError } = await supabase.rpc('review_file_import_batch', { p_batch_id: selectedBatch.id, p_decision: decision, p_reason: reviewReason.trim() });
+    if (reviewError) setPreviewError(reviewError.message);
+    else {
+      setImportBatches((current) => current.map((batch) => batch.id === selectedBatch.id ? data as FileImportBatch : batch));
+      setReviewReason('');
+      setNotice(`Batch ${decision}. No canonical records were changed.`);
+    }
+    setReviewingBatch(false);
+  };
+
   return <div className="file-system-page">
     <header className="file-system-header"><div><span>Organisation workspace / Files</span><h1>File system</h1><p>Find source documents, inspect provenance, and review extracted versions before anything becomes an authoritative record.</p></div><div className="file-system-header-actions"><button type="button" onClick={() => navigate('/admin/approvals')}><ShieldCheck size={17} />Review promotions</button><button type="button" onClick={() => void loadDocuments()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></div></header>
     {error && <div className="file-system-message is-error" role="alert"><span>{error}</span><button type="button" title="Dismiss" onClick={() => setError(null)}><X size={16} /></button></div>}
@@ -376,7 +397,7 @@ const FileSystemPage: React.FC = () => {
     <section className="file-system-batches" aria-label="Import batch history">
       <div className="file-system-batches-heading"><div><span>Review history</span><h2>Import batches</h2></div><select aria-label="Import batch status" value={batchStatus} onChange={(event) => setBatchStatus(event.target.value as typeof batchStatus)}><option value="all">All statuses</option><option value="preview">Preview</option><option value="needs_review">Needs review</option><option value="approved">Approved</option><option value="applied">Applied</option><option value="rejected">Rejected</option><option value="failed">Failed</option></select></div>
       {visibleBatches.length === 0 ? <p className="file-system-muted">No persisted review batches match this status.</p> : <div className="file-system-batch-grid">{visibleBatches.map((batch) => <button type="button" key={batch.id} className={selectedBatchId === batch.id ? 'is-selected' : ''} onClick={() => setSelectedBatchId(batch.id)}><strong>{batch.source_file}</strong><span>{batch.status.replaceAll('_', ' ')} · {batch.row_count.toLocaleString()} rows</span><small>{batch.duplicate_count} duplicates · {batch.unresolved_count} unresolved · {new Date(batch.created_at).toLocaleDateString('en-NZ')}</small></button>)}</div>}
-      {selectedBatch && <article className="file-system-batch-detail"><div><strong>{selectedBatch.batch_name}</strong><span>{selectedBatch.parser} · {selectedBatch.status.replaceAll('_', ' ')}</span></div><div><span>Mappings</span>{(selectedBatch.schema_json.mappings ?? []).map((mapping) => <small key={`${mapping.source}-${mapping.target}`}>{mapping.source} to {mapping.target} ({mapping.confidence})</small>)}</div><div><span>Warnings</span>{(selectedBatch.schema_json.warnings ?? []).map((warning) => <small key={warning}>{warning}</small>)}</div></article>}
+      {selectedBatch && <article className="file-system-batch-detail"><div><strong>{selectedBatch.batch_name}</strong><span>{selectedBatch.parser} · {selectedBatch.status.replaceAll('_', ' ')}</span>{selectedBatch.review_reason && <small>Reason: {selectedBatch.review_reason}</small>}</div><div><span>Mappings</span>{(selectedBatch.schema_json.mappings ?? []).map((mapping) => <small key={`${mapping.source}-${mapping.target}`}>{mapping.source} to {mapping.target} ({mapping.confidence})</small>)}</div><div><span>Warnings</span>{(selectedBatch.schema_json.warnings ?? []).map((warning) => <small key={warning}>{warning}</small>)}</div>{(selectedBatch.status === 'preview' || selectedBatch.status === 'needs_review') && <div className="file-system-batch-review"><label htmlFor="batch-review-reason">Review reason</label><textarea id="batch-review-reason" rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Explain the review decision" /><div><button type="button" onClick={() => void reviewBatch('approved')} disabled={reviewingBatch}>Approve batch</button><button type="button" onClick={() => void reviewBatch('rejected')} disabled={reviewingBatch}>Reject batch</button></div></div>}</article>}
     </section>
     {intakeAttachments.length > 0 && <section className="file-system-intake" aria-label="Bob intake waiting registration"><div><span>Bob intake</span><h2>Files waiting registration</h2><p>These uploads are not yet canonical Files records. Registration extracts, hashes, classifies, and preserves upload provenance.</p></div><div>{intakeAttachments.map((attachment) => { const disposition = intakeDisposition(attachment); return <article key={attachment.id}><strong>{attachment.file_name}</strong><small>{attachment.file_type} · {Math.round(attachment.file_size_bytes / 1024)} KB · {new Date(attachment.created_at).toLocaleDateString('en-NZ')}</small>{disposition.allowed ? <button type="button" onClick={() => void registerAttachment(attachment)}>Register in Files</button> : <span className="file-system-quarantine">Quarantined: {disposition.reason}</span>}</article>; })}</div></section>}
     <section className="file-system-spaces" aria-label="File spaces">{FILE_SPACES.map((item) => <button type="button" key={item.key} className={space === item.key ? 'is-active' : ''} onClick={() => setSpace(item.key)}><FolderOpen size={16} /><span>{item.label}</span></button>)}</section>

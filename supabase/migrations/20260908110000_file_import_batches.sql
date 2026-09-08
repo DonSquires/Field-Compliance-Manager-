@@ -73,3 +73,34 @@ $$;
 
 REVOKE ALL ON FUNCTION public.create_file_import_batch(text, text, text, text, jsonb, jsonb, integer, integer, integer, uuid) FROM public, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_file_import_batch(text, text, text, text, jsonb, jsonb, integer, integer, integer, uuid) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.review_file_import_batch(
+  p_batch_id uuid,
+  p_decision text,
+  p_reason text
+) RETURNS public.file_import_batches
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_actor uuid := auth.uid();
+  v_batch public.file_import_batches%rowtype;
+BEGIN
+  IF v_actor IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF p_decision NOT IN ('approved', 'rejected') THEN RAISE EXCEPTION 'Decision must be approved or rejected'; END IF;
+  IF nullif(trim(coalesce(p_reason, '')), '') IS NULL THEN RAISE EXCEPTION 'Review reason is required'; END IF;
+  SELECT * INTO v_batch FROM public.file_import_batches WHERE id = p_batch_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Import batch not found'; END IF;
+  IF NOT public.is_admin_for_org(v_batch.organization_id) AND NOT public.is_grand_master() THEN RAISE EXCEPTION 'Import batch review denied'; END IF;
+  IF v_batch.status NOT IN ('preview', 'needs_review') THEN RAISE EXCEPTION 'Only preview batches can be reviewed'; END IF;
+  UPDATE public.file_import_batches
+  SET status = p_decision, reviewed_by = v_actor, reviewed_at = clock_timestamp(), review_reason = trim(p_reason), updated_at = clock_timestamp()
+  WHERE id = v_batch.id
+  RETURNING * INTO v_batch;
+  INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+  VALUES (v_batch.organization_id, v_actor, 'file_import_batch_reviewed', 'file_import_batches', v_batch.id,
+    jsonb_build_object('decision', p_decision, 'reason', trim(p_reason), 'source_file', v_batch.source_file));
+  RETURN v_batch;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.review_file_import_batch(uuid, text, text) FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.review_file_import_batch(uuid, text, text) TO authenticated, service_role;

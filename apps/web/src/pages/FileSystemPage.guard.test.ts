@@ -58,6 +58,10 @@ describe('organisation file system', () => {
     expect(page).toContain("from('file_import_batches')");
     expect(page).toContain('Import batch status');
     expect(page).toContain('Review history');
+    expect(page).toContain("rpc('review_file_import_batch'");
+    expect(page).toContain('Approve batch');
+    expect(page).toContain('Reject batch');
+    expect(page).toContain('A review reason is required');
   });
 
   it('is registered as a first-class admin page', () => {
