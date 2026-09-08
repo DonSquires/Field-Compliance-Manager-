@@ -17,4 +17,11 @@ describe('client portfolio hub', () => {
     expect(source).toContain('Finance <strong>');
     expect(source).toContain('Location house 360');
   });
+
+  it('keeps schedules in the portfolio while handing staff assignment to roster', () => {
+    expect(source).toContain('Operations <strong>{deliverySchedules.length}</strong>');
+    expect(source).toContain('Schedules and roster readiness stay in the portfolio context');
+    expect(source).toContain("onNavigate?.('roster'");
+    expect(source).toContain('deliverySchedules.map');
+  });
 });
