@@ -23,4 +23,10 @@ describe('authentication entry flow', () => {
     expect(loginSource).not.toContain('signUp');
     expect(loginSource).toContain('Access is restricted to invited users.');
   });
+
+  it('identifies Iron Eagle as the builder and excludes the retired attribution', () => {
+    expect(loginSource).toContain('Built and designed by Iron Eagle Security');
+    expect(loginSource).not.toMatch(/Trusted by Iron Eagle Security and OnSpace AI/i);
+    expect(loginSource).not.toMatch(/OnSpace AI/i);
+  });
 });

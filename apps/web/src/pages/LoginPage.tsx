@@ -73,7 +73,7 @@ const LoginPage: React.FC = () => {
             alt="Iron Eagle Security"
             className="login-logo-img"
           />
-          <div><strong>Field Compliance Manager</strong><small>Iron Eagle Security · Secure operations access</small></div>
+          <div><strong>Field Compliance Manager</strong><small>Built and designed by Iron Eagle Security · Secure operations access</small></div>
         </header>
 
         <div className="login-rule" />
