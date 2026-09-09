@@ -10,8 +10,8 @@ const tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge/sr
 const capability = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge/src-tauri/capabilities/default.json'), 'utf8'));
 
 test('FCM Desktop product surface is versioned and focused on production workflows', () => {
-  assert.equal(packageJson.version, '0.1.48');
-  assert.equal(tauri.version, '0.1.48');
+  assert.equal(packageJson.version, '0.1.49');
+  assert.equal(tauri.version, '0.1.49');
   assert.match(source, /if \(!signedInAs\)/);
   assert.match(source, /Secure evidence workstation/);
   assert.match(source, /Only authorised users can inspect recordings/);
