@@ -10,8 +10,8 @@ const tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge/sr
 const capability = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge/src-tauri/capabilities/default.json'), 'utf8'));
 
 test('FCM Desktop product surface is versioned and focused on production workflows', () => {
-  assert.equal(packageJson.version, '0.1.52');
-  assert.equal(tauri.version, '0.1.52');
+  assert.equal(packageJson.version, '0.1.53');
+  assert.equal(tauri.version, '0.1.53');
   assert.match(source, /if \(!signedInAs\)/);
   assert.match(source, /Secure evidence workstation/);
   assert.match(source, /Only authorised users can inspect recordings/);
@@ -40,7 +40,7 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.match(source, /const FCM_WEB_URL = 'https:\/\/fcmanager\.co\.nz'/);
   assert.doesNotMatch(source, /vercel\.app/);
   const adminShell = fs.readFileSync(path.join(root, 'apps/web/src/shells/AdminShell.tsx'), 'utf8');
-  assert.match(adminShell, /releases\/download\/sd-card-bridge-v0\.1\.52\/FCM-SD-Card-Bridge-Setup\.exe/);
+  assert.match(adminShell, /releases\/download\/sd-card-bridge-v0\.1\.53\/FCM-SD-Card-Bridge-Setup\.exe/);
   assert.match(adminShell, /releases\/download\/sd-card-bridge-v2-v0\.1\.2\/FCM-Desktop-V2-Setup\.exe/);
   assert.match(adminShell, /Unsigned development build/);
   assert.ok(capability.permissions.includes('opener:default'));
