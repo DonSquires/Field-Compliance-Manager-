@@ -2,7 +2,15 @@
 -- rewriting existing conversation history.
 
 ALTER TABLE public.bob_conversations
-  ADD COLUMN IF NOT EXISTS module_key text NOT NULL DEFAULT 'operations',
+  ADD COLUMN IF NOT EXISTS module_key text;
+
+UPDATE public.bob_conversations
+SET module_key = 'operations'
+WHERE module_key IS NULL OR module_key <> 'builder';
+
+ALTER TABLE public.bob_conversations
+  ALTER COLUMN module_key SET DEFAULT 'operations',
+  ALTER COLUMN module_key SET NOT NULL,
   ADD CONSTRAINT bob_conversations_module_key_check CHECK (module_key IN ('operations', 'builder'));
 
 CREATE INDEX IF NOT EXISTS bob_conversations_user_org_mode_updated_idx

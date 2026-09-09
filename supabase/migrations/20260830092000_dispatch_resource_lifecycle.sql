@@ -127,7 +127,7 @@ create or replace function public.advance_dispatch_job_status(
   p_expected_status text,
   p_next_status text,
   p_outcome_notes text default null
-) returns table (id uuid, status text)
+) returns table (id uuid, status text, shift_id uuid, completed_at timestamptz)
 language plpgsql
 security definer
 set search_path = public
@@ -192,7 +192,8 @@ begin
     where dispatch_resources.id = v_job.dispatch_resource_id;
   end if;
 
-  return query select p_job_id, p_next_status;
+  return query select p_job_id, p_next_status, v_job.shift_id,
+    case when p_next_status = 'completed' then now() else v_job.completed_at end;
 end;
 $$;
 

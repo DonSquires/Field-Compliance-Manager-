@@ -60,8 +60,10 @@ ALTER TABLE public.evidence_items
 ALTER TABLE public.custodian_legal_holds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.custodian_actions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS custodian_legal_holds_select ON public.custodian_legal_holds;
 CREATE POLICY custodian_legal_holds_select ON public.custodian_legal_holds
   FOR SELECT USING (public.org_access_allowed(organization_id));
+DROP POLICY IF EXISTS custodian_actions_select ON public.custodian_actions;
 CREATE POLICY custodian_actions_select ON public.custodian_actions
   FOR SELECT USING (public.org_access_allowed(organization_id));
 REVOKE INSERT, UPDATE, DELETE ON public.custodian_legal_holds FROM public, anon, authenticated;

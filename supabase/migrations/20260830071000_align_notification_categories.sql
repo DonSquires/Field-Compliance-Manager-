@@ -7,6 +7,7 @@ alter table public.notifications
     'credential_expiry'::text,
     'sla_breach'::text,
     'report_ready'::text,
+    'report_reviewed'::text,
     'welfare'::text,
     'dispatch'::text,
     'roster'::text,

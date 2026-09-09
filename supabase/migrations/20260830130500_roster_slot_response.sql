@@ -6,7 +6,7 @@ create policy roster_slots_select on public.roster_slots for select to authentic
   )
 );
 
-create function public.respond_to_roster_slot(p_slot_id uuid,p_expected_status text,p_response text,p_decline_reason text default null)
+create or replace function public.respond_to_roster_slot(p_slot_id uuid,p_expected_status text,p_response text,p_decline_reason text default null)
 returns table(slot_id uuid,slot_status text,shift_id uuid,shift_status text) language plpgsql volatile security definer set search_path=public as $$
 declare v_user uuid:=auth.uid();v_slot public.roster_slots%rowtype;v_staff public.staff_profiles%rowtype;v_next text;v_shift_status text;
 begin
