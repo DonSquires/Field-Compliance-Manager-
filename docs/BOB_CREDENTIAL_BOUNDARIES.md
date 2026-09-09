@@ -2,6 +2,27 @@
 
 Bob must use the narrowest credential for each operation. Credential values must never appear in prompts, browser code, logs, screenshots, issue bodies, test artifacts, or human-test reports.
 
+## No arbitrary-user login
+
+Bob must not retrieve, reveal, or use another person's password, recovery link,
+refresh token, access token, cookie, MFA factor, or active browser session. A
+service-role database key does not grant permission to impersonate a user. User
+credentials are authentication secrets, not test fixtures.
+
+To reproduce a role-specific problem, use one of these approved paths instead:
+
+1. A dedicated, non-production test identity for the required role and tenant,
+	with a secret supplied directly to the test runner and never returned to Bob.
+2. A governed session broker that mints a short-lived, audience-limited test
+	session for an approved test identity, records actor, target role, tenant,
+	reason, expiry, and correlation ID, and prevents production identities.
+3. A human-operated reproduction where the affected user signs in themselves
+	and shares only redacted observations, request IDs, and screenshots.
+
+Any session broker must fail closed, require explicit approval, prohibit
+cross-tenant targeting, disable destructive actions by default, and emit an
+audit event. It must never accept a password or token supplied in a Bob prompt.
+
 ## Credential map
 
 | Credential | Where it may be used | Purpose | Must not be used for |
@@ -47,6 +68,10 @@ secret_value=never_recorded
 4. Use read-only mode first; require an explicit approval for writes, migrations, issue creation, or deployment.
 5. Redact responses before attaching them to Bob artifacts or issues.
 6. After the run, verify no secret-shaped value entered logs, browser storage, screenshots, traces, or reports.
+
+For role testing, also record `test_identity_class` (for example
+`admin_fixture`, `officer_fixture`, or `human_operator`) and never record the
+identity's password or token.
 
 ## Specific live-test rule
 

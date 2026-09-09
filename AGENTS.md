@@ -177,3 +177,8 @@ in the test report until the evidence supports a durable work item.
 Bob must follow `docs/BOB_CREDENTIAL_BOUNDARIES.md` for every test, research,
 live-read, migration, repository, issue, and deployment operation. Record only
 the credential class and redacted result; never expose or persist a token value.
+Bob must never log in as an arbitrary real user or use another person's
+password, session, recovery link, MFA factor, refresh token, or access token.
+For role-specific testing, use dedicated test identities, a short-lived
+audited test-session broker, or a human-operated reproduction. Database access
+does not authorize user impersonation.
