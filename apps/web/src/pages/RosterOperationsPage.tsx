@@ -31,7 +31,7 @@ const isoDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset
 const localInput = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
 const RosterOperationsPage: React.FC = () => {
-  const { profile, operatingOrganizationId } = useAuth();
+  const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const workflowContext = readWorkflowContext(location.search);
@@ -75,6 +75,12 @@ const RosterOperationsPage: React.FC = () => {
   const load = useCallback(async () => {
     const org = operatingOrganizationId ?? profile?.organizationId;
     if (!org) return;
+    const operatingContext = operatingOrganizations.find((context) => context.organizationId === org);
+    if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
+      setError('Select a delivery branch to view roster operations.');
+      setLoading(false);
+      return;
+    }
     setLoading(true); setError(null);
     const responses = await Promise.all([
       supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org }),
@@ -100,7 +106,7 @@ const RosterOperationsPage: React.FC = () => {
       return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk };
     }));
     setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setLoading(false);
-  }, [operatingOrganizationId, profile?.organizationId, weekEnd, weekStart]);
+  }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart]);
   useEffect(() => { void load(); }, [load]);
   const syncOfficerResponses = useCallback(async () => {
     const org = operatingOrganizationId ?? profile?.organizationId;

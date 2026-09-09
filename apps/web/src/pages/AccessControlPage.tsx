@@ -52,7 +52,7 @@ interface UserLite {
 }
 
 const AccessControlPage: React.FC = () => {
-  const { profile, operatingOrganizationId } = useAuth();
+  const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
   const [presets, setPresets] = useState<AccessPreset[]>([]);
   const [assignments, setAssignments] = useState<PresetAssignment[]>([]);
   const [grants, setGrants] = useState<AreaGrant[]>([]);
@@ -69,6 +69,12 @@ const AccessControlPage: React.FC = () => {
     const orgId = profile?.organizationId;
     const operatingBranchId = operatingOrganizationId ?? orgId;
     if (!orgId || !operatingBranchId) return;
+    const operatingContext = operatingOrganizations.find((context) => context.organizationId === operatingBranchId);
+    if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
+      setError('Select a delivery branch to manage branch access.');
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
@@ -104,7 +110,7 @@ const AccessControlPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [operatingOrganizationId, profile?.organizationId]);
+  }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId]);
 
   useEffect(() => {
     loadAll();

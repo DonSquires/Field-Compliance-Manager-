@@ -54,6 +54,12 @@ const UserManagementPage: React.FC = () => {
   const loadIdentity = useCallback(async () => {
     const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
     if (!operatingBranchId || !profile?.organizationId) return;
+    const operatingContext = operatingOrganizations.find((context) => context.organizationId === operatingBranchId);
+    if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
+      setError('Select a delivery branch to manage branch-scoped people.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -83,7 +89,7 @@ const UserManagementPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [operatingOrganizationId, profile?.organizationId]);
+  }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId]);
 
   useEffect(() => {
     void loadIdentity();
