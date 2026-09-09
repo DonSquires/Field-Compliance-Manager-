@@ -173,6 +173,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [decisionSaving, setDecisionSaving] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
+  const [reportReceipt, setReportReceipt] = useState<{ reportId: string; generatedAt: string; sha256: string; observationCount: number } | null>(null);
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -567,7 +568,12 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     reportWindow.document.close();
     reportWindow.focus();
     reportWindow.print();
-    setDecisionMessage(`Report receipt issued: ${receipt.report_id} · SHA-256 ${receipt.sha256}`);
+    setReportReceipt({
+      reportId: receipt.report_id,
+      generatedAt: receipt.generated_at,
+      sha256: receipt.sha256,
+      observationCount: receipt.observation_count,
+    });
   };
 
   return (
@@ -1219,6 +1225,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 </button>
               </div>
               {decisionMessage && <p className="cctv-decision-message" role="status">{decisionMessage}</p>}
+              {reportReceipt && (
+                <div className="cctv-quality-panel" aria-label="CCTV report receipt">
+                  <strong>Report receipt issued</strong>
+                  <span>{reportReceipt.observationCount} observations · {timeLabel(reportReceipt.generatedAt)}</span>
+                  <span>Receipt ID: {reportReceipt.reportId}</span>
+                  <span>SHA-256: {reportReceipt.sha256}</span>
+                </div>
+              )}
             </>
           ) : (
             <div className="cctv-empty">
