@@ -61,7 +61,7 @@ import './AdminShell.css';
 import AdminHubPage from '../pages/AdminHubPage';
 
 const DESKTOP_V1_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v0.1.52/FCM-SD-Card-Bridge-Setup.exe';
-const DESKTOP_V2_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v2-v0.1.1/FCM-Desktop-V2-Setup.exe';
+const DESKTOP_V2_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v2-v0.1.2/FCM-Desktop-V2-Setup.exe';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
