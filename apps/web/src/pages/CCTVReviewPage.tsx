@@ -204,7 +204,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [reportReceipt, setReportReceipt] = useState<{ reportId: string; generatedAt: string; sha256: string; observationCount: number } | null>(null);
   const [exportSaving, setExportSaving] = useState(false);
   const [exportReceipt, setExportReceipt] = useState<{ id: string; manifestSha256: string } | null>(null);
-  const [currentExport, setCurrentExport] = useState<{ id: string; approval_state: string; manifest_sha256: string } | null>(null);
+  const [currentExport, setCurrentExport] = useState<{ id: string; approval_state: string; manifest_sha256: string; manifest: Record<string, unknown> } | null>(null);
+  const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchJobs, setBatchJobs] = useState<CCTVJob[]>([]);
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
@@ -288,6 +289,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     setBatchJobs([]);
     setExportReceipt(null);
     setCurrentExport(null);
+    setExportDownloadUrl(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -296,7 +298,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       if (!profile?.organizationId || !selected?.evidence_item_id) return;
       const { data, error: exportError } = await supabase
         .from('cctv_exports')
-        .select('id, approval_state, manifest_sha256')
+        .select('id, approval_state, manifest_sha256, manifest')
         .eq('organization_id', profile.organizationId)
         .eq('evidence_item_id', selected.evidence_item_id)
         .order('generated_at', { ascending: false })
@@ -304,7 +306,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         .maybeSingle();
       if (!active) return;
       if (exportError) setIdentityError(exportError.message);
-      else setCurrentExport(data as { id: string; approval_state: string; manifest_sha256: string } | null);
+      else setCurrentExport(data as { id: string; approval_state: string; manifest_sha256: string; manifest: Record<string, unknown> } | null);
     };
     void loadCurrentExport();
     return () => { active = false; };
@@ -690,7 +692,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     if (exportError || !draft) setIdentityError(exportError?.message || 'CCTV export draft could not be created.');
     else {
       setExportReceipt({ id: draft.id, manifestSha256: draft.manifest_sha256 });
-      setCurrentExport({ id: draft.id, approval_state: draft.approval_state, manifest_sha256: draft.manifest_sha256 });
+      setCurrentExport({ id: draft.id, approval_state: draft.approval_state, manifest_sha256: draft.manifest_sha256, manifest: draft.manifest });
       setDecisionMessage('CCTV export draft created. It still requires approval and sealing.');
     }
     setExportSaving(false);
@@ -707,8 +709,45 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     const result = Array.isArray(data) ? data[0] : data;
     if (transitionError || !result) setIdentityError(transitionError?.message || 'CCTV export transition failed.');
     else {
-      setCurrentExport({ id: result.id, approval_state: result.approval_state, manifest_sha256: result.manifest_sha256 });
+      setCurrentExport({ id: result.id, approval_state: result.approval_state, manifest_sha256: result.manifest_sha256, manifest: result.manifest || currentExport.manifest });
       setDecisionMessage(`CCTV export is now ${result.approval_state}.`);
+    }
+    setExportSaving(false);
+  };
+
+  const issueAndDownloadExport = async () => {
+    if (!currentExport || currentExport.approval_state !== 'sealed' || !profile?.organizationId) return;
+    setExportSaving(true);
+    setIdentityError(null);
+    const bucket = 'bob-uploads';
+    const path = `cctv-exports/${profile.organizationId}/${currentExport.id}/manifest-${currentExport.manifest_sha256}.json`;
+    const { error: uploadError } = await supabase.storage.from(bucket).upload(path, JSON.stringify(currentExport.manifest), {
+      contentType: 'application/json',
+      upsert: false,
+    });
+    if (uploadError && !uploadError.message.toLowerCase().includes('already exists')) {
+      setIdentityError(uploadError.message);
+      setExportSaving(false);
+      return;
+    }
+    const { data: issued, error: issueError } = await supabase.rpc('issue_cctv_export', {
+      p_export_id: currentExport.id,
+      p_artifact_bucket: bucket,
+      p_artifact_path: path,
+    });
+    const issuedExport = Array.isArray(issued) ? issued[0] : issued;
+    if (issueError || !issuedExport) {
+      setIdentityError(issueError?.message || 'Sealed CCTV export could not be issued.');
+      setExportSaving(false);
+      return;
+    }
+    const { data: signed, error: signedError } = await supabase.storage.from(bucket).createSignedUrl(path, 600);
+    if (signedError || !signed?.signedUrl) setIdentityError(signedError?.message || 'A signed export URL could not be created.');
+    else {
+      setExportDownloadUrl(signed.signedUrl);
+      window.open(signed.signedUrl, '_blank', 'noopener,noreferrer');
+      setCurrentExport({ ...currentExport, approval_state: 'issued' });
+      setDecisionMessage('Sealed CCTV export issued with a short-lived signed download URL.');
     }
     setExportSaving(false);
   };
@@ -1583,6 +1622,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                     {currentExport.approval_state === 'draft' && <button type="button" className="cctv-btn-jump" disabled={exportSaving} onClick={() => void transitionExport('submitted')}>Submit for approval</button>}
                     {currentExport.approval_state === 'submitted' && <button type="button" className="cctv-btn-confirm" disabled={exportSaving} onClick={() => void transitionExport('approved')}>Approve export</button>}
                     {currentExport.approval_state === 'approved' && <button type="button" className="cctv-btn-confirm" disabled={exportSaving} onClick={() => void transitionExport('sealed')}>Seal export</button>}
+                    {currentExport.approval_state === 'sealed' && <button type="button" className="cctv-btn-confirm" disabled={exportSaving} onClick={() => void issueAndDownloadExport()}>Issue and download</button>}
+                    {currentExport.approval_state === 'issued' && exportDownloadUrl && <a className="cctv-btn-jump" href={exportDownloadUrl} target="_blank" rel="noreferrer">Open issued export</a>}
                   </div>
                 </div>
               )}

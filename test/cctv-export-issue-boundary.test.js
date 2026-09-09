@@ -14,4 +14,8 @@ test('CCTV export issuance requires a sealed export and records an audited priva
   assert.match(migration, /artifact_bucket = trim\(p_artifact_bucket\)/);
   assert.match(migration, /cctv_export_issued/);
   assert.match(migration, /manifest_sha256/);
+  const page = fs.readFileSync(path.join(__dirname, '..', 'apps/web/src/pages/CCTVReviewPage.tsx'), 'utf8');
+  assert.match(page, /issueAndDownloadExport/);
+  assert.match(page, /createSignedUrl\(path, 600\)/);
+  assert.match(page, /Issue and download/);
 });
