@@ -300,18 +300,6 @@ async function classifyFrames(summary, job) {
           reason: frame.visual_quality_reason || 'visual_quality_gate',
           human_review_required: true,
         };
-        frame.alpr = { success: false, error: 'visual_quality_gate' };
-        frame.face = { success: false, error: 'visual_quality_gate' };
-        frame.people = { success: false, error: 'visual_quality_gate' };
-        frame.inference = { success: false, error: 'visual_quality_gate', review_required: true };
-        checkpointFrames[frame.sha256_hash] = {
-          inference_quality: frame.inference_quality,
-          alpr: frame.alpr,
-          face: frame.face,
-          people: frame.people,
-          inference: frame.inference,
-        };
-        continue;
       }
       const buildForm = (vehicleBbox = null) => {
         const form = new FormData();
@@ -354,6 +342,7 @@ async function classifyFrames(summary, job) {
       } else {
         frame.people = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm);
       }
+      frame.animals = runpodResult?.animals || runpodResult?.animal || { success: false, error: 'animal_inference_unavailable', review_required: true };
       if (runpodResult?.vehicle) {
         frame.inference = { success: true, data: runpodResult.vehicle, provider: 'runpod' };
       } else if (inferenceResponse) {
@@ -365,6 +354,7 @@ async function classifyFrames(summary, job) {
         alpr: frame.alpr,
         face: frame.face,
         people: frame.people,
+        animals: frame.animals,
         inference: frame.inference,
         runpod: frame.runpod,
       };
@@ -394,7 +384,7 @@ async function classifyWithRunpodBatch(batch) {
         input: {
           action: 'infer_batch',
           frames: batch.map(({ frame, image }) => ({ frame_id: frame.sha256_hash, image_base64: image.toString('base64') })),
-          tasks: ['person', 'vehicle', 'plate', 'face'],
+          tasks: ['person', 'vehicle', 'animal', 'plate', 'face'],
         },
       }),
       signal: AbortSignal.timeout(45_000),

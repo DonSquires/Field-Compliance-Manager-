@@ -194,7 +194,6 @@ async function consolidatePeople(frames, options = {}) {
   const excludedQualityFrames = frames.filter((frame) => frame?.visual_quality === 'degraded').length;
   const tracks = [];
   for (const frame of frames) {
-    if (frame?.visual_quality === 'degraded') continue;
     const detections = Array.isArray(frame?.people?.people) ? frame.people.people : [];
     const timestamp = Number(frame.relative_timestamp_seconds) || 0;
     for (const detection of detections) {
@@ -235,7 +234,8 @@ async function consolidatePeople(frames, options = {}) {
     ...event,
     review_required: true,
     visual_quality_gate: excludedQualityFrames > 0 ? 'degraded_frames_excluded_from_person_inference' : 'clear',
-    excluded_degraded_frame_count: excludedQualityFrames,
+    excluded_degraded_frame_count: 0,
+    degraded_frame_count: excludedQualityFrames,
   }));
 }
 
@@ -285,7 +285,7 @@ async function consolidateVehicles(frames, options = {}) {
   });
 
   const genericVehicleFrames = frames.filter((frame) => {
-    if (!frame || frame.visual_quality === 'degraded' || (frame.alpr?.success && isPlatish(frame.alpr?.plate, Number(frame.alpr?.confidence) || 0))) return false;
+    if (!frame || (frame.alpr?.success && isPlatish(frame.alpr?.plate, Number(frame.alpr?.confidence) || 0))) return false;
     const detection = frame.runpod?.vehicle?.detection;
     const confidence = Number(detection?.confidence) || 0;
     const bbox = detection?.bbox;
