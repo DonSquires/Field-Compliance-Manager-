@@ -24,6 +24,9 @@ jobs:
           cache-dependency-path: apps/sd-card-bridge-v2/package-lock.json
       - name: Install V2 dependencies
         run: npm ci
+      - name: Reuse the approved FCM desktop icon set
+        shell: pwsh
+        run: Copy-Item ../sd-card-bridge/src-tauri/icons src-tauri/icons -Recurse -Force
       - name: Build unsigned development installer
         run: npm run tauri build
       - name: Locate installer

@@ -30,4 +30,5 @@ test('Desktop V2 preserves V1 and implements clone-first acquisition boundaries'
   assert.match(workflow, /FCM-Desktop-V2-Setup\.exe/);
   assert.match(workflow, /Build unsigned development installer/);
   assert.match(workflow, /SmartScreen/);
+  assert.match(workflow, /Reuse the approved FCM desktop icon set/);
 });
