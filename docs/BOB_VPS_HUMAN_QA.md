@@ -9,6 +9,11 @@ executor. It does not replace the builder worker, the control plane, or RunPod.
 - Bob VPS: full Playwright human/visual suite and evidence artifacts.
 - RunPod: model/inference workloads only.
 
+RunPod may be enabled as a separate scale-to-zero overflow/visual-analysis
+worker using `runpod-qa-worker/`. It is optional and must not be treated as the
+inference endpoint. See that worker's README for the signed job contract and
+deployment boundary.
+
 ## Worker profile
 
 The `human-qa` profile uses the existing `Dockerfile.worker` Playwright image:
