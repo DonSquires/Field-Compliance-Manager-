@@ -94,6 +94,7 @@ type IdentityDraftState = {
 };
 
 type ReviewEventState = {
+  id?: string;
   review_state: string;
   reviewer_notes: string | null;
   linked_vehicle_id?: string | null;
@@ -201,6 +202,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [decisionSaving, setDecisionSaving] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [reportReceipt, setReportReceipt] = useState<{ reportId: string; generatedAt: string; sha256: string; observationCount: number } | null>(null);
+  const [exportSaving, setExportSaving] = useState(false);
+  const [exportReceipt, setExportReceipt] = useState<{ id: string; manifestSha256: string } | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchJobs, setBatchJobs] = useState<CCTVJob[]>([]);
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
@@ -416,7 +419,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         supabase.from('vehicles').select('id, plate, make, model').eq('organization_id', profile.organizationId).order('plate', { ascending: true }),
         supabase.from('incidents').select('id, incident_type, status, occurred_at').eq('organization_id', profile.organizationId).in('status', ['open', 'in_review', 'escalated']).order('occurred_at', { ascending: false }),
         supabase.from('cctv_identity_drafts').select('id, event_id, proposed_person_record_id, proposed_display_name, status, authority_level').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
-        supabase.from('cctv_review_events').select('source_event_id, review_state, reviewer_notes, linked_vehicle_id').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
+        supabase.from('cctv_review_events').select('id, source_event_id, review_state, reviewer_notes, linked_vehicle_id, linked_incident_id').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
       ]);
       if (!active) return;
       if (observationsError || recordsError || vehiclesError || incidentsError || draftsError || reviewEventsError) {
@@ -625,6 +628,48 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       setDecisionMessage(`${eventType} observation linked to incident.`);
     }
     setObservationSaving(null);
+  };
+
+  const createExportDraft = async () => {
+    if (!selected || !selected.evidence_item_id || !profile?.organizationId) return;
+    const acceptedEvents = Object.values(reviewEventStates).filter((event) => event.review_state === 'accepted' && event.id);
+    if (acceptedEvents.length === 0) {
+      setDecisionMessage('Accept and link at least one observation before creating an export draft.');
+      return;
+    }
+    const purpose = window.prompt('Export purpose, for example: incident review or legal disclosure.');
+    if (!purpose?.trim()) return;
+    const recipientScope = window.prompt('Recipient scope, for example: internal investigation team.');
+    if (!recipientScope?.trim()) return;
+    setExportSaving(true);
+    setIdentityError(null);
+    const manifest = {
+      schema_version: 1,
+      generated_at: new Date().toISOString(),
+      source_job_id: selected.id,
+      source_evidence_id: selected.evidence_item_id,
+      batch_id: selectedBatch?.batch_id || null,
+      accepted_event_count: acceptedEvents.length,
+      review_event_ids: acceptedEvents.map((event) => event.id),
+      source_metadata: selected.evidence?.metadata || {},
+    };
+    const { data, error: exportError } = await supabase.rpc('create_cctv_export_draft', {
+      p_job_id: selected.id,
+      p_evidence_id: selected.evidence_item_id,
+      p_organization_id: profile.organizationId,
+      p_purpose: purpose.trim(),
+      p_recipient_scope: recipientScope.trim(),
+      p_legal_hold: false,
+      p_selected_event_ids: acceptedEvents.map((event) => event.id),
+      p_manifest: manifest,
+    });
+    const draft = Array.isArray(data) ? data[0] : data;
+    if (exportError || !draft) setIdentityError(exportError?.message || 'CCTV export draft could not be created.');
+    else {
+      setExportReceipt({ id: draft.id, manifestSha256: draft.manifest_sha256 });
+      setDecisionMessage('CCTV export draft created. It still requires approval and sealing.');
+    }
+    setExportSaving(false);
   };
 
   const recordReviewDecision = async (decision: 'confirmed' | 'dismissed') => {
@@ -916,6 +961,9 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               </div>
 
               <div className="cctv-card-actions">
+                <button type="button" className="cctv-btn-jump" disabled={exportSaving} onClick={() => void createExportDraft()} title="Create an approval-gated export draft from accepted observations">
+                  {exportSaving ? 'Creating export...' : 'Create export draft'}
+                </button>
                 <button type="button" className="cctv-btn-jump" onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
                   <Printer size={13} /> Print draft report
                 </button>
@@ -1476,6 +1524,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <span>{reportReceipt.observationCount} observations · {timeLabel(reportReceipt.generatedAt)}</span>
                   <span>Receipt ID: {reportReceipt.reportId}</span>
                   <span>SHA-256: {reportReceipt.sha256}</span>
+                </div>
+              )}
+              {exportReceipt && (
+                <div className="cctv-quality-panel" aria-label="CCTV export draft receipt">
+                  <strong>Export draft created</strong>
+                  <span>Approval and sealing are still required.</span>
+                  <span>Export ID: {exportReceipt.id}</span>
+                  <span>Manifest SHA-256: {exportReceipt.manifestSha256}</span>
                 </div>
               )}
             </>
