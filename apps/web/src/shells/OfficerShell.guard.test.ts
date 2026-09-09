@@ -61,5 +61,6 @@ describe('OfficerShell state routing', () => {
     expect(source).toContain('navigator.onLine');
     expect(source).toContain('No connection — field evidence will remain queued');
     expect(source).toContain('officer-shell-offline-banner');
+    expect(source).toContain('officer-connectivity-chip');
   });
 });
