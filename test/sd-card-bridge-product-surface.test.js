@@ -14,6 +14,8 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.match(source, /if \(!signedInAs\)/);
   assert.match(source, /Secure evidence workstation/);
   assert.match(source, /Only authorised users can inspect recordings/);
+  assert.match(source, /const FCM_WEB_URL = 'https:\/\/fcmanager\.co\.nz'/);
+  assert.doesNotMatch(source, /vercel\.app/);
   for (const label of ['Desktop home', 'Import recordings', 'CCTV review', 'Video upload', 'FCM web portal']) {
     assert.match(source, new RegExp(label));
   }

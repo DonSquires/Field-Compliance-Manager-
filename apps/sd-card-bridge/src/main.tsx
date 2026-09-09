@@ -8,7 +8,7 @@ import { AlertTriangle, Camera, Database, ExternalLink, FileText, HardDrive, Log
 import { FCM_SUPABASE_URL, getSupabaseClient, SUPABASE_PUBLISHABLE_KEY } from './lib/supabase';
 import './styles.css';
 
-const FCM_WEB_URL = 'https://field-compliance-manager-8hs8ed7et-iron-eagle-security.vercel.app';
+const FCM_WEB_URL = 'https://fcmanager.co.nz';
 const FCM_CCTV_REVIEW_URL = `${FCM_WEB_URL}/admin/field-ops?area=cctv-review`;
 const DAHUA_TOOLBOX_DOWNLOAD_URL = 'https://www.dahuasecurity.com/support/downloadCenter';
 const MAX_BOB_UPLOAD_BYTES = 128 * 1024 * 1024 * 1024;
