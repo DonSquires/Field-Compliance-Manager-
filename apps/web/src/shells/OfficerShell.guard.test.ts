@@ -56,4 +56,10 @@ describe('OfficerShell state routing', () => {
     expect(source).toContain("aria-current={activeModule === 'modules' ? 'page' : undefined}");
     expect(source).toContain("aria-current={activeModule === 'report' ? 'page' : undefined}");
   });
+
+  it('shows field staff when evidence is queued because the device is offline', () => {
+    expect(source).toContain('navigator.onLine');
+    expect(source).toContain('No connection — field evidence will remain queued');
+    expect(source).toContain('officer-shell-offline-banner');
+  });
 });

@@ -1,3 +1,4 @@
+.officer-shell-offline-banner{padding:10px 16px;border-bottom:1px solid #8a6720;color:#f3d68b;background:#2c210d;font-size:11px;font-weight:750}
 .officer-shell {
   display: flex;
   flex-direction: column;

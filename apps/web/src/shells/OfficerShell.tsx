@@ -170,7 +170,16 @@ const OfficerShell: React.FC = () => {
   const [savingPassword, setSavingPassword] = useState(false);
   const [grantedModules, setGrantedModules] = useState<string[]>([]);
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
+  }, []);
 
   const canAccessOfficerModule = useCallback((module: ActiveModule): boolean => {
     if (!module) return true;
@@ -497,6 +506,7 @@ const OfficerShell: React.FC = () => {
             Location evidence not confirmed. {breadcrumbIssue.pendingCount} {breadcrumbIssue.pendingCount === 1 ? 'record is' : 'records are'} queued for retry. {breadcrumbIssue.error}
           </div>
         )}
+        {!isOnline && <div role="status" className="officer-shell-offline-banner">No connection — field evidence will remain queued until the device is back online.</div>}
         {(officerState === 'standby' || officerState === 'home') && (
           <React.Suspense fallback={<LazyPageFallback />}>
             <OfficerHomePage shift={activeShift} shiftLoading={shiftLoading} shiftError={shiftError} safety={safety} onNavigate={navigateToModule} onRefreshShift={refreshShift} />
