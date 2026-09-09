@@ -212,7 +212,7 @@ function App() {
   const [video, setVideo] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [activeView, setActiveView] = useState<'home' | 'sd-import' | 'sd-import-clean' | 'video-upload'>('home');
+  const [activeView, setActiveView] = useState<'home' | 'sd-import' | 'sd-import-clean' | 'cctv-review' | 'video-upload'>('home');
   const [mountedFiles, setMountedFiles] = useState<MountedFolderReport | null>(null);
   const [removableDisks, setRemovableDisks] = useState<RemovableDisk[]>([]);
   const [diskLoading, setDiskLoading] = useState(false);
@@ -266,6 +266,16 @@ function App() {
       await openUrl(url);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not open the external page.');
+    }
+  };
+
+  const copyExternalLink = async (url: string) => {
+    setError(null);
+    try {
+      await navigator.clipboard.writeText(url);
+      setStatus('CCTV review link copied. Paste it into your browser if the Open button is blocked by Windows policy.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not copy the review link.');
     }
   };
 
@@ -739,7 +749,7 @@ function App() {
       <nav className="companion-nav" aria-label="FCM Desktop navigation">
         <button type="button" className={activeView === 'home' ? 'is-active' : ''} onClick={() => setActiveView('home')}><MonitorPlay size={18} /> Desktop home</button>
         <button type="button" className={activeView === 'sd-import-clean' ? 'is-active' : ''} onClick={() => setActiveView('sd-import-clean')}><HardDrive size={18} /> Import recordings</button>
-        <button type="button" onClick={() => void openExternal(FCM_CCTV_REVIEW_URL)}><MonitorPlay size={18} /> CCTV review</button>
+        <button type="button" className={activeView === 'cctv-review' ? 'is-active' : ''} onClick={() => setActiveView('cctv-review')}><MonitorPlay size={18} /> CCTV review</button>
         <button type="button" className={activeView === 'video-upload' ? 'is-active' : ''} onClick={() => setActiveView('video-upload')}><Upload size={18} /> Video upload</button>
         <button type="button" onClick={() => void openExternal(FCM_WEB_URL)}><ExternalLink size={18} /> FCM web portal</button>
       </nav>
@@ -747,6 +757,7 @@ function App() {
         {error && <div className="companion-error" role="alert">{error}</div>}
         {!signedInAs && <section className="connection-notice"><strong>Sign in to begin</strong><span>Use your authorised FCM account. Evidence intake is local; hybrid GPU/VPS inference, review, approvals, and results remain centrally governed.</span></section>}
         {activeView === 'sd-import-clean' && <><div className="workspace-heading"><span>SD evidence intake</span><h2>Import Dahua camera footage</h2><p>FCM identifies the inserted DHFS card and prepares selected recordings for governed review. The SD card is never modified.</p></div><section className="tool"><button type="button" onClick={() => void analyseInsertedSdCard()} disabled={analysisLoading}><RefreshCw size={16} className={analysisLoading ? 'is-spinning' : ''} /> {analysisLoading ? 'Analysing card...' : 'Analyse inserted SD card'}</button><p>{status}</p></section>{report && <section className="results"><h2>Dahua DHFS card detected</h2><div className="metrics"><Metric label="Indexed recordings" value={report.valid_timestamped_record_count} /><Metric label="Media partition" value={removableDisks.flatMap((disk) => disk.partitions).filter((partition) => !partition.drive_letter).map((partition) => Math.round(partition.size_bytes / 1024 / 1024 / 1024)).join(', ') || 'Unknown'} suffix=" GB" /><Metric label="Card access" value="Read-only" /></div><p className="mounted-note">Select a recording below, or use Video upload for exported footage.</p></section>}</>}
+        {activeView === 'cctv-review' && <><div className="workspace-heading"><span>Governed review handoff</span><h2>Open CCTV Review</h2><p>CCTV Review runs in the secured FCM web portal so queue state, evidence links, and human decisions remain centrally governed.</p></div><section className="tool cctv-handoff"><button type="button" onClick={() => void openExternal(FCM_CCTV_REVIEW_URL)}><ExternalLink size={16} /> Open CCTV Review</button><button type="button" onClick={() => void copyExternalLink(FCM_CCTV_REVIEW_URL)}>Copy review link</button><p>{FCM_CCTV_REVIEW_URL}</p></section><section className="results"><h2>What opens there</h2><div className="metrics"><Metric label="Evidence queue" value="CCTV" /><Metric label="Review state" value="Live" /><Metric label="Authority" value="Human" /></div><p className="mounted-note">If Windows blocks external opening, copy the link and paste it into your signed-in browser.</p></section></>}
         {activeView === 'sd-import' && false && removableDisks.some((disk) => disk.partitions.some((partition) => !partition.drive_letter)) && <section className="tool"><button type="button" onClick={() => void inspectDhfsHeaders()} disabled={dhfsLoading || analysisLoading}><Database size={16} /> {dhfsLoading ? 'Decoding DHFS...' : 'Decode DHFS headers'}</button><p>Reads only DHFS-marked 4 KB metadata headers from the first 64 KB of the unmounted partition.</p></section>}
         {dhfsHeaders && <section className="results"><h2>DHFS header decode</h2><p>Disk {dhfsHeaders.disk_number}, partition {dhfsHeaders.partition_number} · {dhfsHeaders.headers.length} metadata headers decoded</p><table><thead><tr><th>Offset</th><th>ASCII preview</th><th>SHA-256</th></tr></thead><tbody>{dhfsHeaders.headers.map((header) => <tr key={header.absolute_offset_bytes}><td>{header.absolute_offset_bytes.toLocaleString()}</td><td className="hash">{header.ascii_preview}</td><td className="hash">{header.sha256}</td></tr>)}</tbody></table></section>}
         {dhfsDpt && <section className="results"><h2>DHFS DPT comparison</h2><button type="button" onClick={() => void navigator.clipboard.writeText(JSON.stringify({ dhfsHeaders, dhfsDpt, partitionTable }, null, 2)).then(() => setStatus('Copied diagnostic JSON to the clipboard.'))}>Copy diagnostic JSON</button><p>{dhfsDpt.headers_identical ? 'The redundant DPT headers are byte-identical.' : `${dhfsDpt.differing_byte_offsets.length} differing byte offsets were found.`}</p><p className="hash">DPT header offsets: {dhfsDpt.dpt_header_offsets.join(', ')}</p><table><thead><tr><th>Relative field offset</th><th>Little-endian value</th><th>Big-endian value</th></tr></thead><tbody>{dhfsDpt.non_zero_u32_fields.map((field) => <tr key={field.relative_offset_bytes}><td>{field.relative_offset_bytes}</td><td>{field.little_endian_u32}</td><td>{field.big_endian_u32}</td></tr>)}</tbody></table></section>}
