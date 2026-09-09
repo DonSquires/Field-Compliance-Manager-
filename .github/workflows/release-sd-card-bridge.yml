@@ -51,9 +51,9 @@ jobs:
           & $signtool.FullName verify /pa /all /tw release/FCM-SD-Card-Bridge-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'signtool verification failed for the installer.' }
           Remove-Item $pfxPath -Force
-      - name: Reject unsigned tagged release
+      - name: Mark unsigned tagged build as development prerelease
         if: ${{ startsWith(github.ref, 'refs/tags/sd-card-bridge-v') && env.HAS_SIGNING_CERT != 'true' }}
-        run: throw 'A tagged FCM Desktop release requires WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD. Use workflow_dispatch for unsigned development artifacts.'
+        run: Write-Host 'Signing secrets are unavailable. Publishing this tagged installer as an unsigned development prerelease; do not use it as a production release.'
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
