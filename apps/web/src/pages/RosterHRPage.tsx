@@ -447,12 +447,7 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId)
             .order('created_at', { ascending: false })
             .limit(100),
-          supabase
-            .from('dispatch_job_pay_line_reviews')
-            .select('id, pay_line_id, decision, review_notes, reviewed_at, supersedes_review_id')
-            .eq('organization_id', orgId)
-            .order('reviewed_at', { ascending: false })
-            .limit(200),
+          Promise.resolve({ data: [], error: null }),
           supabase
             .from('shift_coverage_requests')
             .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes, claimed_by, roster_slot_id, site:site_id(name)')
@@ -502,7 +497,7 @@ const RosterHRPage: React.FC = () => {
       if (leaveRes.error) throw leaveRes.error;
       if (timesheetsRes.error) throw timesheetsRes.error;
       if (payLinesRes.error) throw payLinesRes.error;
-      if (payLineReviewsRes.error && payLineReviewsRes.error.code !== 'PGRST205') throw payLineReviewsRes.error;
+      if (payLineReviewsRes.error) throw payLineReviewsRes.error;
       if (coverageRes.error) throw coverageRes.error;
       if (shiftSwapsRes.error) throw shiftSwapsRes.error;
       if (readinessRes.error) throw readinessRes.error;
@@ -574,7 +569,7 @@ const RosterHRPage: React.FC = () => {
       setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
       setDispatchPayLines((payLinesRes.data as DispatchPayLineRow[]) || []);
       setDispatchPayLineReviews((payLineReviewsRes.data as DispatchPayLineReviewRow[]) || []);
-      setPayReviewGovernanceAvailable(!payLineReviewsRes.error);
+      setPayReviewGovernanceAvailable(false);
       setCoverageRequests(
         ((coverageRes.data as any[]) || []).map((row) => ({
           id: row.id,
