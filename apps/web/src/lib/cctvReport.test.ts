@@ -27,8 +27,26 @@ describe('buildCCTVPrintableReport', () => {
     expect(report).toContain('North gate');
     expect(report).toContain('batch-1 (3 clips)');
     expect(report).toContain('&lt;Unknown person&gt;');
-    expect(report).toContain('Human review boundary');
+    expect(report).toContain('Draft report');
     expect(report).toContain('job-1');
+  });
+
+  it('labels unresolved observations as a draft report', () => {
+    const report = buildCCTVPrintableReport({
+      title: 'CCTV evidence report (Draft)',
+      reportStatus: 'draft',
+      generatedAt: '2026-09-09T12:00:00.000Z',
+      place: 'North gate',
+      jobId: 'job-1',
+      evidenceId: 'evidence-1',
+      personCount: 1,
+      vehicleCount: 0,
+      frameCount: 1,
+      observations: [{ kind: 'Person', label: 'Unknown', reviewState: 'Review required' }],
+    });
+
+    expect(report).toContain('Status: draft');
+    expect(report).toContain('This report is not final compliance or incident evidence');
   });
 
   it('marks a batch report partial when the queue has not loaded every clip', () => {

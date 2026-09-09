@@ -557,10 +557,13 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       vehicleCount: counts.vehicleCount + result.summary_counts.vehicle_events,
       frameCount: counts.frameCount + result.summary_counts.total_frames_parsed,
     }), { personCount: 0, vehicleCount: 0, frameCount: 0 });
+    const reportHasPendingReview = observations.some((observation) => observation.reviewState !== 'Approved identity' && observation.reviewState !== 'Confirmed');
+    const reportStatus = reportHasPendingReview ? 'draft' : 'review_ready';
     const generatedAt = new Date().toLocaleString('en-NZ');
     const reportPayload = {
       schema_version: 1,
       title: 'CCTV evidence report',
+      report_status: reportStatus,
       generated_at: generatedAt,
       place: evidencePlaceContext(selected.evidence?.metadata || null),
       job_id: selected.id,
@@ -587,7 +590,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       return;
     }
     const report = buildCCTVPrintableReport({
-      title: 'CCTV evidence report',
+      title: reportStatus === 'draft' ? 'CCTV evidence report (Draft)' : 'CCTV evidence report',
+      reportStatus,
       generatedAt,
       place: reportPayload.place,
       jobId: reportPayload.job_id,
@@ -770,7 +774,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
 
               <div className="cctv-card-actions">
                 <button type="button" className="cctv-btn-jump" onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
-                  <Printer size={13} /> Print report
+                  <Printer size={13} /> {reportReceipt ? 'Print report' : 'Print draft report'}
                 </button>
                 {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
                   <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('retry')}>

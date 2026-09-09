@@ -1,5 +1,6 @@
 export type CCTVPrintableReportInput = {
   title: string;
+  reportStatus?: 'draft' | 'review_ready';
   generatedAt: string;
   place: string;
   jobId: string;
@@ -49,8 +50,9 @@ export function buildCCTVPrintableReport(input: CCTVPrintableReportInput): strin
     ? input.observations.map(observationRow).join('')
     : '<tr><td colspan="5">No consolidated observations were recorded.</td></tr>';
 
+  const reportStatus = input.reportStatus || 'draft';
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(input.title)}</title><style>
     body{font-family:Arial,sans-serif;color:#18212b;margin:32px;line-height:1.4}h1{margin:0 0 6px}h2{margin-top:28px;border-bottom:1px solid #ccd6d8;padding-bottom:6px}.meta{color:#52646d;font-size:13px}table{border-collapse:collapse;width:100%;margin-top:12px}th,td{border:1px solid #ccd6d8;padding:8px;text-align:left;font-size:12px}th{background:#edf3f4}.notice{background:#fff7e7;border-left:4px solid #bd8419;padding:12px;margin-top:18px;font-size:13px}.stats{display:flex;gap:24px}.stats strong{display:block;font-size:22px}
     @media print{body{margin:16mm}.no-print{display:none}}
-  </style></head><body><h1>${escapeHtml(input.title)}</h1><p class="meta">Generated ${escapeHtml(input.generatedAt)}</p><h2>Evidence provenance</h2><p><strong>Place:</strong> ${escapeHtml(input.place)}</p>${batchLine}<p><strong>Inference job:</strong> ${escapeHtml(input.jobId)}</p><p><strong>Evidence item:</strong> ${escapeHtml(input.evidenceId)}</p><div class="stats"><p><strong>${input.personCount}</strong> persons</p><p><strong>${input.vehicleCount}</strong> vehicles</p><p><strong>${input.frameCount}</strong> parsed frames</p></div><h2>Consolidated observations</h2><table><thead><tr><th>Type</th><th>Observation</th><th>Time window</th><th>Confidence</th><th>Review state</th></tr></thead><tbody>${rows}</tbody></table><div class="notice"><strong>Human review boundary:</strong> AI inference is advisory. Identity, canonical placement, compliance action, and incident use require an explicit human decision recorded in the review system.</div></body></html>`;
+  </style></head><body><h1>${escapeHtml(input.title)}</h1><p class="meta">Status: ${escapeHtml(reportStatus.replace('_', ' '))} · Generated ${escapeHtml(input.generatedAt)}</p><h2>Evidence provenance</h2><p><strong>Place:</strong> ${escapeHtml(input.place)}</p>${batchLine}<p><strong>Inference job:</strong> ${escapeHtml(input.jobId)}</p><p><strong>Evidence item:</strong> ${escapeHtml(input.evidenceId)}</p><div class="stats"><p><strong>${input.personCount}</strong> persons</p><p><strong>${input.vehicleCount}</strong> vehicles</p><p><strong>${input.frameCount}</strong> parsed frames</p></div><h2>Consolidated observations</h2><table><thead><tr><th>Type</th><th>Observation</th><th>Time window</th><th>Confidence</th><th>Review state</th></tr></thead><tbody>${rows}</tbody></table><div class="notice"><strong>${reportStatus === 'draft' ? 'Draft report:' : 'Human review boundary:'}</strong> ${reportStatus === 'draft' ? 'One or more observations still require an explicit human decision. This report is not final compliance or incident evidence.' : 'AI inference is advisory. Identity, canonical placement, compliance action, and incident use require an explicit human decision recorded in the review system.'}</div></body></html>`;
 }
