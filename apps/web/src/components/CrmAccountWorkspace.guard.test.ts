@@ -41,6 +41,13 @@ describe('client portfolio hub', () => {
     expect(source).toContain('onClick={() => setView(\'operations\')}');
   });
 
+  it('preserves the legacy account-flow progression inside the portfolio', () => {
+    expect(source).toContain('Client portfolio account flow');
+    expect(source).toContain("{ label: 'Agreement'");
+    expect(source).toContain("{ label: 'Handoff'");
+    expect(source).toContain('crm-portfolio-flow');
+  });
+
   it('makes Bob portfolio scoping visible without creating a second assistant surface', () => {
     expect(source).toContain('Bob uses this portfolio context');
     expect(source).not.toContain('onspace-ai-chat');

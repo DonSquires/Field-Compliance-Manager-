@@ -121,6 +121,14 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const headlineInvitation = headlineAgreement?.invitation_status?.replaceAll('_', ' ') ?? 'not invited';
   const portfolioUpdatedAt = organizationDetails?.updated_at ?? null;
   const canAddBranch = ['owner', 'service_provider', 'branch'].includes(organizationDetails?.organization_type ?? '');
+  const portfolioFlow = [
+    { label: 'Account', complete: Boolean(organizationDetails?.name), current: view === 'overview' || view === 'structure' || view === 'contacts' },
+    { label: 'Agreement', complete: agreements.length > 0, current: view === 'agreements' },
+    { label: 'Places', complete: locations.length > 0 && sites.length > 0 && zones.length > 0, current: view === 'sites' },
+    { label: 'Operations', complete: deliverySchedules.length > 0, current: view === 'operations' || view === 'modules' },
+    { label: 'Invite', complete: headlineAgreement?.invitation_status === 'invited' || headlineAgreement?.invitation_status === 'accepted', current: view === 'readiness' && headlineAgreement?.invitation_status !== 'accepted' },
+    { label: 'Handoff', complete: organizationDetails?.status === 'active', current: Boolean(organizationDetails?.status === 'active') },
+  ];
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
@@ -314,6 +322,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   return <div className="crm-workspace-backdrop">
     <section className="crm-workspace" role="dialog" aria-modal="true" aria-labelledby="crm-workspace-title">
       <header><div><span>Client portfolio</span><h2 id="crm-workspace-title">{account.name}</h2><p>Commercial, operational, and relationship context for this organisation.</p><small className="crm-portfolio-context-note">Bob uses this portfolio context when you ask for help.</small>{portfolioUpdatedAt && <small className="crm-portfolio-freshness">Live account record updated {new Date(portfolioUpdatedAt).toLocaleString('en-NZ')}</small>}</div><button type="button" onClick={onClose} aria-label="Close client portfolio"><X size={19} /></button></header>
+      <div className="crm-portfolio-flow" aria-label="Client portfolio account flow">{portfolioFlow.map((stage) => <span className={`${stage.complete ? 'is-complete' : ''} ${stage.current ? 'is-current' : ''}`} key={stage.label}>{stage.label}</span>)}</div>
       {error && <div className="crm-workspace-message is-error" role="alert">{error}</div>}
       {notice && <div className="crm-workspace-message is-success" role="status">{notice}</div>}
       <nav className="crm-portfolio-nav" aria-label="Client portfolio views">
