@@ -18,6 +18,8 @@ test('CCTV review events provide append-only human state and tenant-safe canonic
   assert.match(migration, /REVOKE ALL ON FUNCTION public\.record_cctv_review_event/);
   assert.match(page, /record_cctv_review_event/);
   assert.match(page, /recordObservationState/);
+  assert.match(page, /from\('cctv_review_events'\)/);
+  assert.match(page, /reviewEventStates/);
   assert.match(page, />Uncertain<\/button>/);
   assert.match(page, />Reject<\/button>/);
 });

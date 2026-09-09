@@ -79,6 +79,11 @@ type IdentityDraftState = {
   authorityLevel?: string;
 };
 
+type ReviewEventState = {
+  review_state: string;
+  reviewer_notes: string | null;
+};
+
 type FaceObservationLink = {
   id: string;
   person_record_id: string | null;
@@ -171,6 +176,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [identityDrafts, setIdentityDrafts] = useState<Record<string, IdentityDraftState>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
   const [observationSaving, setObservationSaving] = useState<string | null>(null);
+  const [reviewEventStates, setReviewEventStates] = useState<Record<string, ReviewEventState>>({});
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [decisionSaving, setDecisionSaving] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
@@ -377,22 +383,25 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         setPersonRecords([]);
         setFaceObservationLinks({});
         setIdentityDrafts({});
+        setReviewEventStates({});
         return;
       }
-      const [{ data: observations, error: observationsError }, { data: records, error: recordsError }, { data: drafts, error: draftsError }] = await Promise.all([
+      const [{ data: observations, error: observationsError }, { data: records, error: recordsError }, { data: drafts, error: draftsError }, { data: reviewEvents, error: reviewEventsError }] = await Promise.all([
         supabase.from('face_observations').select('id, person_record_id, metadata').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
         supabase.from('person_records').select('id, display_name, review_state, metadata').eq('organization_id', profile.organizationId).order('created_at', { ascending: true }),
         supabase.from('cctv_identity_drafts').select('id, event_id, proposed_person_record_id, proposed_display_name, status, authority_level').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
+        supabase.from('cctv_review_events').select('source_event_id, review_state, reviewer_notes').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
       ]);
       if (!active) return;
-      if (observationsError || recordsError || draftsError) {
-        setIdentityError(observationsError?.message || recordsError?.message || draftsError?.message || 'Face identity records could not be loaded.');
+      if (observationsError || recordsError || draftsError || reviewEventsError) {
+        setIdentityError(observationsError?.message || recordsError?.message || draftsError?.message || reviewEventsError?.message || 'CCTV review records could not be loaded.');
         return;
       }
       const nextRecords = (records ?? []) as PersonRecordOption[];
       const recordById = new Map(nextRecords.map((record) => [record.id, record]));
       const nextLinks: Record<string, FaceObservationLink> = {};
       const nextDrafts: Record<string, IdentityDraftState> = {};
+      const nextReviewStates: Record<string, ReviewEventState> = {};
       for (const observation of (observations ?? []) as FaceObservationLink[]) {
         const record = observation.person_record_id ? recordById.get(observation.person_record_id) : null;
         const eventId = typeof record?.metadata?.source_event_id === 'string' ? record.metadata.source_event_id : null;
@@ -409,9 +418,13 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
           };
         }
       }
+      for (const reviewEvent of reviewEvents ?? []) {
+        if (reviewEvent.source_event_id) nextReviewStates[reviewEvent.source_event_id] = reviewEvent;
+      }
       setPersonRecords(nextRecords);
       setFaceObservationLinks(nextLinks);
       setIdentityDrafts(nextDrafts);
+      setReviewEventStates(nextReviewStates);
       setIdentityError(null);
     };
     void loadFaceIdentityLinks();
@@ -501,6 +514,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
           authorityLevel: 'approved',
         },
       }));
+      setReviewEventStates((current) => ({
+        ...current,
+        [face.event_id]: { review_state: 'accepted', reviewer_notes: `Accepted after explicit person-record approval for ${face.subject_label || 'person'} observation` },
+      }));
       setPersonRecords((current) => current.map((record) => record.id === draft.personRecordId
         ? { ...record, display_name: draft.displayName.trim() || record.display_name }
         : record));
@@ -526,7 +543,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       p_reviewer_notes: reason.trim(),
     });
     if (reviewError) setIdentityError(reviewError.message);
-    else setDecisionMessage(`${eventType} observation marked ${reviewState}.`);
+    else {
+      setReviewEventStates((current) => ({ ...current, [eventId]: { review_state: reviewState, reviewer_notes: reason.trim() } }));
+      setDecisionMessage(`${eventType} observation marked ${reviewState}.`);
+    }
     setObservationSaving(null);
   };
 
@@ -964,6 +984,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                         <div className="cctv-card-header">
                           <span className="cctv-badge cctv-badge-confidence">Person detected</span>
                           <span className="cctv-badge cctv-badge-confidence">{Math.round(person.confidence * 100)}%</span>
+                          {reviewEventStates[person.event_id] && <span className="cctv-badge cctv-badge-review">{statusLabel(reviewEventStates[person.event_id].review_state)}</span>}
                         </div>
                         <div className="cctv-card-meta">
                           <span><strong>Window:</strong> {person.first_seen_seconds}s – {person.last_seen_seconds}s</span>
@@ -1026,6 +1047,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                           ) : (
                             <span className="cctv-badge cctv-badge-review">Review required</span>
                           )}
+                          {reviewEventStates[face.event_id] && <span className="cctv-badge cctv-badge-review">{statusLabel(reviewEventStates[face.event_id].review_state)}</span>}
                         </div>
                         <div className="cctv-card-meta">
                           <span>
@@ -1178,6 +1200,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                             </span>
                           )}
                           {!veh.temporal_consensus && <span className="cctv-badge cctv-badge-review">Single-frame reading</span>}
+                          {reviewEventStates[veh.event_id] && <span className="cctv-badge cctv-badge-review">{statusLabel(reviewEventStates[veh.event_id].review_state)}</span>}
                         </div>
                         <div className="cctv-card-meta">
                           <span>
