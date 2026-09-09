@@ -133,6 +133,24 @@ the user/job affected, the tradeoff, and at least one viable alternative. Keep
 intentional decisions as documented rationale; turn only confirmed harmful
 behavior into an issue or code change.
 
+For every substantial finding, Bob must compare **expected versus present**
+behavior across three stages:
+
+- **Before:** preconditions, permissions, source records, configuration,
+  route/context, and the data the user should start with.
+- **During:** visible controls, requests/RPCs, loading and error states,
+  policy checks, writes, audit events, and intermediate UI transitions.
+- **After:** persisted records, receipts, derived status, notifications,
+  downstream screens, reports, and what the next actor should see.
+
+Use Atlas as the layered butterfly-effect map: capability state (present,
+wired, exercised), direct flow edges (reads/writes/calls/invokes), secured-by
+edges, weak references, and blast radius. Trace the smallest changed node
+outward and distinguish proven `flow_reach` from structural `fk_reach`. State
+what should be present based on the schema, migration, role/job, and source
+evidence; what is actually present; what is absent; and what contradicts.
+Then choose one smallest discriminating next check before proposing a fix.
+
 ## Bob: web research and live database verification
 
 Bob may use the governed `bob-web-research` path for current external evidence

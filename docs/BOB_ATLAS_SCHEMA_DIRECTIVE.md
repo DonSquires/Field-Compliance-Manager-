@@ -6,6 +6,20 @@ Every Dr. Bob human-test finding must follow this order before proposing a fix.
 
 Record the exact visible error, URL, action, browser, and timestamp. Preserve the browser/network status rather than paraphrasing it.
 
+## 1a. Compare expected and present across the flow
+
+Build a three-stage matrix before naming a root cause:
+
+| Stage | Expected | Present | Evidence | Gap |
+|---|---|---|---|---|
+| Before | Preconditions, role, tenant, source record, configuration | What the user actually entered or was given | UI, auth, live read, schema | Missing/incorrect precondition |
+| During | Control, request/RPC, policy, write, loading/error state | What fired and what the user saw | Network, console, Atlas edge, audit | Contract/policy/flow gap |
+| After | Persisted state, receipt, notification, downstream view | What survived and what the next actor sees | Live read-back, UI reload, report | Writer/refresh/propagation gap |
+
+Do not call a field or state missing until Bob has checked the stage where it
+should be created. A screen symptom may be downstream of a before-stage scope
+problem or a during-stage RPC failure.
+
 ## 2. Check Atlas capability state
 
 Query `bob_capability_map` for the page, RPC, table, and relevant column. Report all three states:
@@ -15,6 +29,16 @@ Query `bob_capability_map` for the page, RPC, table, and relevant column. Report
 - `exercised`: the path has actually run.
 
 Then query `bob_app_map_edges` for direct `reads`, `writes`, `calls`, `invokes`, and `secured_by` edges. Treat `references` and `fk_references` as weaker structural evidence, not proof of a live path.
+
+Use the layers as a butterfly-effect/blast-radius trace:
+
+1. Identify the changed or failing node.
+2. Check capability state: present, wired, exercised.
+3. Follow direct flow edges upstream and downstream.
+4. Check security edges and role/tenant gates.
+5. Check FK reach separately as structural context only.
+6. Verify the expected downstream surfaces with the human test and a scoped
+	live read.
 
 ## 3. Cross-check schema truth
 

@@ -115,6 +115,38 @@ Before changing a shared surface:
 
 If Atlas and schema disagree, report the disagreement as a finding. Do not silently redesign around the map or claim an edge is live because a symbol exists in source.
 
+### Expected versus present: before, during, after
+
+Bob should reason about a workflow as a temporal data and visual flow, not as a
+single page screenshot:
+
+| Flow stage | What Bob checks |
+|---|---|
+| Before | Who is acting, in which tenant/branch, with which agreement/place/staff context, permissions, source files, and existing records? |
+| During | What does the user see, click, type, and wait for? Which request/RPC/policy/write/audit event occurs? Are loading and failure states honest? |
+| After | What persisted, what receipt or notification appeared, what downstream page/report changed, and what should the next person do? |
+
+For each stage, write `expected`, `present`, `missing`, and `contradictory`
+observations. Use schema and source documents for expected behavior, human
+observation and live reads for present behavior, and Atlas for the path between
+them.
+
+### Butterfly effect and blast radius
+
+Atlas is useful because a small change to a shared organization, agreement,
+place, staff, work, evidence, RPC, or policy node can affect screens that were
+not the original target. Bob should trace the failing node outward through:
+
+- capability state: present, wired, exercised;
+- proven flow reach: reads, writes, calls, invokes;
+- authorization and tenant boundaries: secured-by edges and policies;
+- structural FK reach, kept separate from live flow reach;
+- downstream human workflows, reports, notifications, and audit views.
+
+The output should name the likely blast radius, the evidence supporting it, the
+uncertainty, and the smallest check that could disconfirm it. Do not repair one
+screen in isolation when the same node controls several workflows.
+
 ### 8. Human-test acceptance
 
 A UI is not complete because it compiles or matches a screenshot. Bob's human test must:
