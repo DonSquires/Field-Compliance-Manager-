@@ -37,5 +37,7 @@ describe('client portfolio hub', () => {
     expect(source).toContain('Commercial agreement');
     expect(source).toContain('Schedules');
     expect(source).toContain('headlineInvitation');
+    expect(source).toContain('onClick={() => setView(\'readiness\')}');
+    expect(source).toContain('onClick={() => setView(\'operations\')}');
   });
 });
