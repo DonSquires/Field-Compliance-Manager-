@@ -283,7 +283,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
             {openShifts.map((openShift) => (
               <article className={`officer-open-shift urgency-${openShift.urgency}`} key={openShift.id}>
                 <div className="officer-open-date"><strong>{new Date(`${openShift.shift_date}T00:00:00`).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric' })}</strong><span>{openShift.start_time.slice(0, 5)} - {openShift.end_time.slice(0, 5)}</span></div>
-                <div className="officer-open-detail"><strong>{openShift.site_name ?? 'Location to be confirmed'}</strong><span>{openShift.required_staff_count} officer{openShift.required_staff_count === 1 ? '' : 's'} needed{openShift.notes ? ` · ${openShift.notes}` : ''}</span></div>
+                <div className="officer-open-detail"><strong>{openShift.site_name ?? 'Location to be confirmed'}</strong><span>{openShift.required_staff_count} officer{openShift.required_staff_count === 1 ? '' : 's'} needed · {openShift.start_time.slice(0, 5)}-{openShift.end_time.slice(0, 5)}{openShift.notes ? ` · ${openShift.notes}` : ''}</span></div>
                 <span className="officer-urgency">{openShift.urgency}</span>
                 <button type="button" disabled={claimingId === openShift.id || !profile?.id} onClick={() => profile?.id && void claim(openShift.id)}>{claimingId === openShift.id ? 'Claiming' : 'Claim shift'}</button>
               </article>

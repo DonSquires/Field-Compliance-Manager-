@@ -1746,6 +1746,7 @@
 .officer-open-shift.urgency-high,
 .officer-open-shift.urgency-urgent {
   border-left-color: #ffd166;
+  background: #171c22;
 }
 
 .officer-open-date,
@@ -1771,7 +1772,14 @@
 
 .officer-urgency {
   min-height: 24px;
+  padding: 4px 6px;
+  border: 1px solid #34495d;
+  border-radius: 4px;
   color: #aabdd0;
+  font-size: 9px;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .urgency-high .officer-urgency,
