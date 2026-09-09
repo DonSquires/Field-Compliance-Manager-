@@ -62,6 +62,14 @@ def safe_extract(archive: Path, destination: Path) -> None:
         handle.extractall(destination)
 
 
+def source_root(destination: Path) -> Path:
+    """Support GitHub archives with one repository directory at the root."""
+    candidates = [item for item in destination.iterdir() if item.name != '__MACOSX']
+    if len(candidates) == 1 and candidates[0].is_dir() and (candidates[0] / 'apps' / 'web').is_dir():
+        return candidates[0]
+    return destination
+
+
 def upload_artifacts(archive: Path, upload_url: str) -> None:
     request = urllib.request.Request(
         upload_url,
@@ -120,7 +128,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             output.mkdir()
             source_bytes = download(source_url, archive)
             safe_extract(archive, source)
-            result = run_profile(source, profile, target_url, timeout, output)
+            result = run_profile(source_root(source), profile, target_url, timeout, output)
             manifest = {
                 "status": "succeeded" if result.returncode == 0 else "failed",
                 "profile": profile,
