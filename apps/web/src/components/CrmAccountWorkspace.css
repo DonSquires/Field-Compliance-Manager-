@@ -1,3 +1,4 @@
+.crm-workspace-form{top:18px;right:18px;bottom:auto;max-height:calc(100% - 36px);overflow-y:auto}.crm-workspace-form footer{flex-wrap:wrap}@media(max-width:700px){.crm-workspace-form{top:12px;right:12px;left:12px;width:auto;max-height:calc(100% - 24px)}}
 .crm-workspace{overflow-y:auto!important;overflow-x:hidden!important}
 .crm-portfolio-context-note{display:block;margin-top:6px;color:#73cabc!important;font-size:10px!important}
 .crm-portfolio-freshness{display:block;margin-top:3px;color:#718895;font-size:9px}
