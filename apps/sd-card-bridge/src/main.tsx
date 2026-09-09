@@ -4,7 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { Upload as TusUpload } from 'tus-js-client';
-import { AlertTriangle, Camera, Database, ExternalLink, FileText, HardDrive, LogOut, MonitorPlay, RefreshCw, Upload, Wifi } from 'lucide-react';
+import { AlertTriangle, Camera, Database, ExternalLink, FileText, HardDrive, LogOut, MonitorPlay, RefreshCw, ShieldCheck, Upload, Wifi } from 'lucide-react';
 import { FCM_SUPABASE_URL, getSupabaseClient, SUPABASE_PUBLISHABLE_KEY } from './lib/supabase';
 import './styles.css';
 
@@ -698,6 +698,27 @@ function App() {
       setUploadProgress(null);
     }
   };
+
+  if (!signedInAs) {
+    return <main className="desktop-companion login-shell">
+      <header className="companion-header">
+        <div className="companion-brand"><span className="companion-brand-mark" aria-hidden="true"><Camera size={24} /></span><div><span>Iron Eagle Security</span><h1>FCM Desktop</h1></div></div>
+      </header>
+      <section className="desktop-login-card" aria-labelledby="desktop-login-title">
+        <div className="desktop-login-icon"><ShieldCheck size={28} /></div>
+        <span className="workspace-heading-label">Secure evidence workstation</span>
+        <h2 id="desktop-login-title">Sign in to FCM Desktop</h2>
+        <p>Sign in with your authorised FCM account to access evidence intake, CCTV processing, and governed review. Your card data stays read-only locally; evidence and compliance decisions remain protected in FCM.</p>
+        <form className="desktop-login-form" onSubmit={(event) => void signIn(event)}>
+          <label><span>Email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@organisation.nz" required /></label>
+          <label><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" required /></label>
+          <button type="submit">Sign in securely</button>
+        </form>
+        {error && <div className="companion-error" role="alert">{error}</div>}
+        <div className="desktop-login-boundary"><strong>Why sign-in is required</strong><span>Only authorised users can inspect recordings, upload evidence, or open governed compliance workflows.</span></div>
+      </section>
+    </main>;
+  }
 
   return <main className="desktop-companion">
     <header className="companion-header">

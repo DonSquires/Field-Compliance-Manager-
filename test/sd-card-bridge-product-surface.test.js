@@ -11,6 +11,9 @@ const tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge/sr
 test('FCM Desktop product surface is versioned and focused on production workflows', () => {
   assert.equal(packageJson.version, '0.1.41');
   assert.equal(tauri.version, '0.1.41');
+  assert.match(source, /if \(!signedInAs\)/);
+  assert.match(source, /Secure evidence workstation/);
+  assert.match(source, /Only authorised users can inspect recordings/);
   for (const label of ['Desktop home', 'Import recordings', 'CCTV review', 'Video upload', 'FCM web portal']) {
     assert.match(source, new RegExp(label));
   }

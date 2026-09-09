@@ -8,3 +8,16 @@
 .status-panel { background: #fff; border: 1px solid #d3e0df; margin-top: 24px; padding: 18px 20px; }.status-panel-heading { align-items: flex-start; display: flex; justify-content: space-between; gap: 16px; }.status-panel-heading span { color: #63757a; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }.status-panel-heading h3 { font-size: 17px; margin: 4px 0 0; }.status-panel-heading > strong { border-radius: 999px; font-size: 11px; padding: 5px 9px; }.status-good { background: #e3f3ed; color: #187254; }.status-attention { background: #fff1d4; color: #976914; }.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 16px; background: #d3e0df; }.status-row { align-items: flex-start; background: #f8fbfb; display: flex; gap: 10px; min-height: 68px; padding: 14px; }.status-row > div { display: grid; gap: 4px; }.status-row b { color: #25363d; font-size: 12px; }.status-row span:not(.status-dot) { color: #63757a; font-size: 11px; line-height: 1.35; }.status-dot { border-radius: 50%; flex: 0 0 8px; height: 8px; margin-top: 4px; width: 8px; }.status-dot-good { background: #1b9b72; }.status-dot-attention { background: #d08b16; }
 @media (max-width: 780px) { .workflow-strip { grid-template-columns: 1fr; } }
 @media (max-width: 780px) { .status-grid { grid-template-columns: 1fr; } }
+.login-shell { background: #edf3f3; min-height: 100vh; }
+.desktop-login-card { background: #fff; border: 1px solid #d3e0df; border-radius: 8px; box-shadow: 0 18px 48px rgba(7, 29, 38, .08); display: grid; gap: 14px; margin: clamp(42px, 9vh, 100px) auto; max-width: 520px; padding: 34px; }
+.desktop-login-icon { align-items: center; background: #e3f3ed; border-radius: 50%; color: #117b72; display: flex; height: 52px; justify-content: center; width: 52px; }
+.workspace-heading-label { color: #117b72; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.desktop-login-card h2 { color: #1d2a31; font-size: 28px; margin: 0; }
+.desktop-login-card > p { color: #526971; line-height: 1.55; margin: 0; }
+.desktop-login-form { display: grid; gap: 12px; margin-top: 8px; }
+.desktop-login-form label { color: #25363d; display: grid; font-size: 12px; font-weight: 700; gap: 5px; }
+.desktop-login-form input { border: 1px solid #b8cbcf; border-radius: 4px; color: #1d2a31; min-height: 42px; padding: 0 11px; }
+.desktop-login-form button { background: #117b72; border: 0; border-radius: 4px; color: #fff; cursor: pointer; font-weight: 700; min-height: 42px; margin-top: 4px; }
+.desktop-login-boundary { background: #f4f8f7; border-left: 3px solid #57d3cf; display: grid; gap: 4px; padding: 12px 14px; }
+.desktop-login-boundary strong { color: #25363d; font-size: 12px; }
+.desktop-login-boundary span { color: #63757a; font-size: 11px; line-height: 1.4; }
