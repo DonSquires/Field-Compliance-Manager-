@@ -34,7 +34,7 @@ For `human`, the dedicated test identity is injected through the approved worker
 Build the image in a private registry, then create a distinct RunPod Serverless endpoint:
 
 ```bash
-docker build -t <private-registry>/fcm-bob-qa:playwright-1.62.1 runpod-qa-worker
+docker build -f runpod-qa-worker/Dockerfile -t <private-registry>/fcm-bob-qa:playwright-1.62.1 .
 docker push <private-registry>/fcm-bob-qa:playwright-1.62.1
 ```
 

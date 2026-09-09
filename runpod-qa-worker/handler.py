@@ -85,15 +85,14 @@ def upload_artifacts(archive: Path, upload_url: str) -> None:
 def run_profile(source: Path, profile: str, target_url: str | None, timeout: int, output: Path) -> subprocess.CompletedProcess[str]:
     if profile not in ALLOWED_PROFILES:
         raise ValueError("unsupported QA profile")
-    print("[bob-qa] installing web dependencies", flush=True)
-    install = subprocess.run(["npm", "ci", "--include=dev", "--ignore-scripts", "--no-audit", "--no-fund"], cwd=source / "apps/web", env={**os.environ, "CI": "true", "NODE_ENV": "development"}, text=True, capture_output=True, timeout=min(timeout, 600))
-    if install.returncode != 0:
-        print(f"[bob-qa] dependency install failed exit_code={install.returncode}", flush=True)
-        return install
-    playwright = source / "apps" / "web" / "node_modules" / ".bin" / "playwright"
+    baked_node_modules = Path('/opt/fcm-runpod-qa/web/node_modules')
+    source_node_modules = source / 'apps' / 'web' / 'node_modules'
+    if not baked_node_modules.exists():
+        return subprocess.CompletedProcess(['baked-dependencies'], 1, '', 'baked web dependencies are missing')
+    source_node_modules.symlink_to(baked_node_modules, target_is_directory=True)
+    playwright = baked_node_modules / '.bin' / 'playwright'
     if not playwright.exists():
-        print("[bob-qa] local Playwright binary missing after dependency install", flush=True)
-        return subprocess.CompletedProcess([str(playwright)], 1, "", "local Playwright binary was not installed")
+        return subprocess.CompletedProcess([str(playwright)], 1, '', 'baked Playwright binary is missing')
     print(f"[bob-qa] running Playwright profile={profile}", flush=True)
     command = [str(playwright), "test", *ALLOWED_PROFILES[profile], "--workers=1", "--reporter=line"]
     if profile == "human" and target_url:

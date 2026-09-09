@@ -7,7 +7,10 @@ RUN apt-get update \
   && pip3 install --no-cache-dir runpod
 
 WORKDIR /opt/fcm-runpod-qa
-COPY handler.py /opt/fcm-runpod-qa/handler.py
+COPY apps/web/package.json apps/web/package-lock.json /opt/fcm-runpod-qa/web/
+RUN cd /opt/fcm-runpod-qa/web \
+  && npm ci --include=dev --ignore-scripts --no-audit --no-fund
+COPY runpod-qa-worker/handler.py /opt/fcm-runpod-qa/handler.py
 
 ENV PYTHONUNBUFFERED=1
 CMD ["python3", "/opt/fcm-runpod-qa/handler.py"]
