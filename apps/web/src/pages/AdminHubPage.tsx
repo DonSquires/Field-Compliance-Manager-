@@ -302,7 +302,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             <div className="admin-queue-empty"><ClipboardCheck size={24} aria-hidden="true" /><strong>Queue clear</strong><span>No active items require review.</span></div>
           ) : (
             <div className="admin-queue-list">
-              {queue.map((item) => <QueueRow key={`${item.kind}-${item.id}`} item={item} onOpen={() => onNavigate?.(item.navigate)} />)}
+              {queue.map((item, index) => <QueueRow key={`${item.kind}-${item.id}`} item={item} isNext={index === 0} onOpen={() => onNavigate?.(item.navigate)} />)}
             </div>
           )}
         </section>
@@ -333,12 +333,12 @@ function Metric({ icon: Icon, label, metric, tone, onClick }: { icon: LucideIcon
   );
 }
 
-function QueueRow({ item, onOpen }: { item: QueueItem; onOpen: () => void }) {
+function QueueRow({ item, isNext, onOpen }: { item: QueueItem; isNext: boolean; onOpen: () => void }) {
   const Icon = item.kind === 'welfare' ? HeartPulse : item.kind === 'dispatch' ? Radio : item.kind === 'breach' ? ShieldAlert : item.kind === 'video' ? Binoculars : FileWarning;
   return (
-    <button type="button" className={`admin-queue-row kind-${item.kind}`} onClick={onOpen}>
+    <button type="button" className={`admin-queue-row kind-${item.kind} ${isNext ? 'is-next' : ''}`} onClick={onOpen}>
       <span className="admin-queue-icon"><Icon size={18} aria-hidden="true" /></span>
-      <div><strong>{item.title}</strong><span>{item.detail}</span></div>
+      <div><strong>{item.title}</strong><span>{isNext ? 'Next action · ' : ''}{item.detail}</span></div>
       <span className="admin-queue-status">{item.status.replace(/_/g, ' ')}</span>
       <time dateTime={item.occurredAt}>{relativeTime(item.occurredAt)}</time>
       <ArrowRight size={16} aria-hidden="true" />

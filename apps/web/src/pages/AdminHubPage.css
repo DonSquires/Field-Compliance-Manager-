@@ -241,6 +241,8 @@
   background: #102b37;
 }
 
+.admin-queue-row.is-next{border-top-color:#4cc38a;background:#0d2b26}.admin-queue-row.is-next .admin-queue-icon{color:#9ee0c2;background:#17342f}.admin-queue-row.is-next .admin-queue-status{border-color:#3b8068;color:#9ee0c2;background:#17342f}
+
 .admin-queue-icon {
   display: grid;
   place-items: center;
