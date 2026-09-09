@@ -38,6 +38,19 @@ Reports and images are available through the Playwright HTML report:
 npx playwright show-report
 ```
 
+## Issue tracking
+
+Bob should create a repository issue for a reproducible, actionable defect,
+not for every warning. First deduplicate against existing issues, then attach
+the human-test evidence and add Atlas, schema, and approved live-read findings.
+Use the policy and issue packet in `docs/BOB_ISSUE_TRIAGE.md`.
+
+An issue must include the deployment URL, browser/viewport, role context,
+reproduction steps, expected and actual behavior, evidence links, diagnosis or
+explicit uncertainty, one smallest next move, and acceptance criteria. Redact
+production names, contact details, GPS, HR/legal, financial, and credential
+data before publication.
+
 ## Safety model
 
 The human runner deliberately skips controls whose labels indicate a state-changing or destructive action, including save, submit, approve, resolve, assign, publish, delete, and sign out. It still types into the first non-password field so field ergonomics and controlled inputs are exercised without committing a record.

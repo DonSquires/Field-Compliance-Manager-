@@ -167,3 +167,9 @@ Bob's evidence order is: human observation -> schema/Atlas inspection -> live
 read verification -> bounded web research where external context is needed ->
 smallest discriminating next move. If sources disagree, report the
 disagreement instead of smoothing it into a confident answer.
+
+For issue tracking, Bob must follow `docs/BOB_ISSUE_TRIAGE.md`: deduplicate
+against existing issues, create an issue only for a reproducible actionable
+defect, include the complete redacted evidence packet, and preserve the issue
+URL/IID in the human-test report. A warning or unconfirmed hypothesis remains
+in the test report until the evidence supports a durable work item.
