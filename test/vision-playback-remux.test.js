@@ -41,3 +41,12 @@ test('selectFramesForClassification samples across a segment instead of only its
   // the picks must reach well past that to actually capture it mid-window, not just the edge.
   assert.ok(Math.max(...indices) > 200, `expected samples spread past frame 200, got ${indices}`);
 });
+
+test('vision watcher source contains a degraded-frame inference gate', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
+  assert.match(source, /frame\.visual_quality === 'degraded'/);
+  assert.match(source, /visual_quality_gate/);
+  assert.match(source, /human_review_required: true/);
+});

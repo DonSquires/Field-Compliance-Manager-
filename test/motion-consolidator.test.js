@@ -127,3 +127,14 @@ test('consolidatePeople retains side-on full-body detections without a face', as
   assert.equal(result[0].event_type, 'person');
   assert.equal(result[0].best_bbox.width, 674);
 });
+
+test('consolidatePeople excludes degraded glare/occlusion frames but records the quality gate', async () => {
+  const result = await consolidatePeople([
+    { relative_timestamp_seconds: 1, sha256_hash: 'degraded', visual_quality: 'degraded', visual_quality_reason: 'dominant_colour_cast_possible_glare_or_camera_artifact', people: { success: true, people: [{ confidence: 0.99, bbox: { x: 1, y: 1, width: 100, height: 200 } }] } },
+    { relative_timestamp_seconds: 2, sha256_hash: 'usable', visual_quality: 'usable', people: { success: true, people: [{ confidence: 0.88, bbox: { x: 2, y: 2, width: 100, height: 200 } }] } },
+  ]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].frame_count, 1);
+  assert.equal(result[0].visual_quality_gate, 'degraded_frames_excluded_from_person_inference');
+  assert.equal(result[0].excluded_degraded_frame_count, 1);
+});

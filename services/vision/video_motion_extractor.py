@@ -30,6 +30,8 @@ class FrameArtifact:
     relative_timestamp_seconds: float
     sha256_hash: str
     file_path: str
+    visual_quality: str = "usable"
+    visual_quality_reason: str | None = None
 
 
 @dataclass
@@ -114,7 +116,7 @@ def _write_frame(
     quality: int,
     width: int | None,
     height: int | None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str, str | None]:
     if not 1 <= quality <= 100:
         raise ValueError("output_quality must be between 1 and 100")
     rendered = frame
@@ -126,6 +128,22 @@ def _write_frame(
         rendered = cv2.resize(
             frame, (target_width, target_height), interpolation=cv2.INTER_AREA
         )
+    mean_channels = rendered.mean(axis=(0, 1))
+    brightness = float(rendered.mean())
+    contrast = float(rendered.std())
+    channel_mean = max(float(mean_channels.max()), 1.0)
+    other_channels = max(float(np.delete(mean_channels, int(mean_channels.argmax())).mean()), 1.0)
+    dominant_channel_ratio = channel_mean / other_channels
+    hsv = cv2.cvtColor(rendered, cv2.COLOR_BGR2HSV)
+    saturation = float(hsv[:, :, 1].mean())
+    if dominant_channel_ratio >= 1.8:
+        visual_quality, visual_quality_reason = "degraded", "dominant_colour_cast_possible_glare_or_camera_artifact"
+    elif contrast < 5:
+        visual_quality, visual_quality_reason = "degraded", "near_uniform_frame_possible_occlusion_or_blackout"
+    elif brightness > 250 and saturation < 20:
+        visual_quality, visual_quality_reason = "degraded", "overexposed_low_information_frame_possible_glare"
+    else:
+        visual_quality, visual_quality_reason = "usable", None
     encoded, jpeg = cv2.imencode(".jpg", rendered, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not encoded:
         raise VideoExtractionError("failed to encode extracted frame")
@@ -139,7 +157,7 @@ def _write_frame(
         temporary = destination.with_suffix(".jpg.tmp")
         temporary.write_bytes(content)
         os.replace(temporary, destination)
-    return digest, str(destination)
+    return digest, str(destination), visual_quality, visual_quality_reason
 
 
 def extract_motion_summary(
@@ -258,11 +276,11 @@ def extract_motion_summary(
                         target_index += 1
                     if decoded_frame is None:
                         continue
-                    digest, file_path = _write_frame(
+                    digest, file_path, visual_quality, visual_quality_reason = _write_frame(
                         decoded_frame, artifacts_dir, output_quality, scale_width, scale_height
                     )
                     segment.frames.append(
-                        FrameArtifact(index, round(index / fps, 3), digest, file_path)
+                        FrameArtifact(index, round(index / fps, 3), digest, file_path, visual_quality, visual_quality_reason)
                     )
                     job_frames += 1
                 if job_frames >= max_job_frames:

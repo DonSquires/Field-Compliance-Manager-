@@ -294,6 +294,25 @@ async function classifyFrames(summary, job) {
     });
     const runpodResults = await classifyWithRunpodBatch(pendingBatch);
     for (const [batchIndex, { frame, image }] of pendingBatch.entries()) {
+      if (frame.visual_quality === 'degraded') {
+        frame.inference_quality = {
+          state: 'degraded',
+          reason: frame.visual_quality_reason || 'visual_quality_gate',
+          human_review_required: true,
+        };
+        frame.alpr = { success: false, error: 'visual_quality_gate' };
+        frame.face = { success: false, error: 'visual_quality_gate' };
+        frame.people = { success: false, error: 'visual_quality_gate' };
+        frame.inference = { success: false, error: 'visual_quality_gate', review_required: true };
+        checkpointFrames[frame.sha256_hash] = {
+          inference_quality: frame.inference_quality,
+          alpr: frame.alpr,
+          face: frame.face,
+          people: frame.people,
+          inference: frame.inference,
+        };
+        continue;
+      }
       const buildForm = (vehicleBbox = null) => {
         const form = new FormData();
         form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);

@@ -191,8 +191,10 @@ async function consolidateFaces(frames, options = {}) {
 
 async function consolidatePeople(frames, options = {}) {
   const maxGap = options.maxGapSeconds ?? DEFAULT_MAX_GAP_SECONDS;
+  const excludedQualityFrames = frames.filter((frame) => frame?.visual_quality === 'degraded').length;
   const tracks = [];
   for (const frame of frames) {
+    if (frame?.visual_quality === 'degraded') continue;
     const detections = Array.isArray(frame?.people?.people) ? frame.people.people : [];
     const timestamp = Number(frame.relative_timestamp_seconds) || 0;
     for (const detection of detections) {
@@ -215,7 +217,7 @@ async function consolidatePeople(frames, options = {}) {
       }
     }
   }
-  return Promise.all(tracks.map(async (track, index) => ({
+  const events = await Promise.all(tracks.map(async (track, index) => ({
     event_id: `person-${index + 1}`,
     event_type: 'person',
     first_seen_seconds: Number(track.firstSeen.toFixed(2)),
@@ -229,6 +231,12 @@ async function consolidatePeople(frames, options = {}) {
     thumbnail: await loadBase64Thumbnail(track.bestFrame?.file_path),
     review_required: true,
   })));
+  return events.map((event) => ({
+    ...event,
+    review_required: true,
+    visual_quality_gate: excludedQualityFrames > 0 ? 'degraded_frames_excluded_from_person_inference' : 'clear',
+    excluded_degraded_frame_count: excludedQualityFrames,
+  }));
 }
 
 function isPlatish(plate, confidence) {
