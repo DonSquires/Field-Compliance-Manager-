@@ -192,6 +192,12 @@ type PhysicalDhfsRecording = {
   bytes: number;
 };
 
+type AutoFailedRecording = {
+  recording: PhysicalDhfsRecording;
+  attempts: number;
+  error: string;
+};
+
 type DesktopReviewBatchMetadata = {
   batch_id: string;
   clip_index: number;
@@ -207,6 +213,7 @@ type DesktopReviewBatchMetadata = {
 type AutoProcessStage = 'idle' | 'analysing' | 'enumerating' | 'caching' | 'uploading' | 'registered' | 'paused' | 'failed';
 
 const AUTO_PROCESS_ACTIVE_STAGES: AutoProcessStage[] = ['analysing', 'enumerating', 'caching', 'uploading'];
+const MAX_AUTO_CLIP_ATTEMPTS = 3;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -281,6 +288,7 @@ function App() {
   const [autoClipTotal, setAutoClipTotal] = useState(0);
   const [autoSucceeded, setAutoSucceeded] = useState(0);
   const [autoFailed, setAutoFailed] = useState(0);
+  const [autoFailedRecordings, setAutoFailedRecordings] = useState<AutoFailedRecording[]>([]);
   const [clockTick, setClockTick] = useState(Date.now());
   const pauseRequested = useRef(false);
 
@@ -800,6 +808,7 @@ function App() {
     setAutoClipTotal(0);
     setAutoSucceeded(0);
     setAutoFailed(0);
+    setAutoFailedRecordings([]);
     setAutoMessage('Ready to process every uploadable recording on the inserted SD card.');
   };
 
@@ -832,6 +841,7 @@ function App() {
       setAutoClipTotal(0);
       setAutoSucceeded(0);
       setAutoFailed(0);
+      setAutoFailedRecordings([]);
       setError(null);
       setAutoStage('analysing');
       setAutoProgress(2);
@@ -863,45 +873,59 @@ function App() {
         setAutoStage('caching');
         setBatchProgress(index, 0.15, uploadable.length);
         setAutoMessage(`Caching clip ${index + 1} of ${uploadable.length}: channel ${recording.channel}, ${recording.start_time} to ${recording.end_time}.`);
-        try {
-          const cacheResult = await invoke<CachedClipReport>('extract_dhfs_recording_to_cache', {
-            diskNumber: disk.disk_number,
-            partitionNumber: recording.partition_number,
-            dhfsPartitionIndex: recording.dhfs_partition_index,
-            descriptorIndex: recording.descriptor,
-            cacheDirectory: 'C:\\Users\\Public\\Documents\\fcm-cache',
-          });
-          const bytes = await readFile(cacheResult.cache_path);
-          const fileName = cacheResult.cache_path.replace(/^.*[\\/]/, '');
-          const prepared = new File([bytes], fileName, { type: cacheResult.content_type });
-          setCachedClip(cacheResult);
-          setVideo(prepared);
-          if (stopIfPaused()) return;
-          setAutoStage('uploading');
-          setBatchProgress(index, 0.55, uploadable.length);
-          setAutoMessage(`Uploading clip ${index + 1} of ${uploadable.length} and queuing it for CCTV Review.`);
-          const uploaded = await uploadPreparedVideo(prepared, true, (progress) => {
-            setBatchProgress(index, 0.55 + ((progress ?? 0) / 100) * 0.4, uploadable.length);
-          }, {
-            batch_id: batchId,
-            clip_index: index + 1,
-            clip_total: uploadable.length,
-            channel: recording.channel,
-            start_time: recording.start_time,
-            end_time: recording.end_time,
-            fragment_count: recording.fragment_count,
-            source_bytes: recording.bytes,
-            cache_sha256: cacheResult.sha256,
-          });
-          if (!uploaded) throw new Error('Upload or registration did not complete. The cached file was preserved.');
-          succeeded += 1;
-          setAutoSucceeded(succeeded);
-          setBatchProgress(index, 0.98, uploadable.length);
-          if (stopIfPaused()) return;
-        } catch (clipError) {
+        let completed = false;
+        let lastError = 'One recording did not complete.';
+        let attempts = 0;
+        for (attempts = 1; attempts <= MAX_AUTO_CLIP_ATTEMPTS && !completed; attempts += 1) {
+          try {
+            if (attempts > 1) {
+              setAutoMessage(`Retrying clip ${index + 1} of ${uploadable.length} (attempt ${attempts}/${MAX_AUTO_CLIP_ATTEMPTS})...`);
+              await new Promise((resolve) => window.setTimeout(resolve, 250 * attempts));
+            }
+            const cacheResult = await invoke<CachedClipReport>('extract_dhfs_recording_to_cache', {
+              diskNumber: disk.disk_number,
+              partitionNumber: recording.partition_number,
+              dhfsPartitionIndex: recording.dhfs_partition_index,
+              descriptorIndex: recording.descriptor,
+              cacheDirectory: 'C:\\Users\\Public\\Documents\\fcm-cache',
+            });
+            const bytes = await readFile(cacheResult.cache_path);
+            const fileName = cacheResult.cache_path.replace(/^.*[\\/]/, '');
+            const prepared = new File([bytes], fileName, { type: cacheResult.content_type });
+            setCachedClip(cacheResult);
+            setVideo(prepared);
+            if (stopIfPaused()) return;
+            setAutoStage('uploading');
+            setBatchProgress(index, 0.55, uploadable.length);
+            setAutoMessage(`Uploading clip ${index + 1} of ${uploadable.length} and queuing it for CCTV Review.`);
+            const uploaded = await uploadPreparedVideo(prepared, true, (progress) => {
+              setBatchProgress(index, 0.55 + ((progress ?? 0) / 100) * 0.4, uploadable.length);
+            }, {
+              batch_id: batchId,
+              clip_index: index + 1,
+              clip_total: uploadable.length,
+              channel: recording.channel,
+              start_time: recording.start_time,
+              end_time: recording.end_time,
+              fragment_count: recording.fragment_count,
+              source_bytes: recording.bytes,
+              cache_sha256: cacheResult.sha256,
+            });
+            if (!uploaded) throw new Error('Upload or registration did not complete. The cached file was preserved.');
+            completed = true;
+            succeeded += 1;
+            setAutoSucceeded(succeeded);
+            setBatchProgress(index, 0.98, uploadable.length);
+            if (stopIfPaused()) return;
+          } catch (clipError) {
+            lastError = clipError instanceof Error ? clipError.message : 'One recording did not complete.';
+            setError(`Clip ${index + 1} attempt ${attempts}/${MAX_AUTO_CLIP_ATTEMPTS}: ${lastError}`);
+          }
+        }
+        if (!completed) {
           failed += 1;
           setAutoFailed(failed);
-          setError(clipError instanceof Error ? clipError.message : 'One recording did not complete.');
+          setAutoFailedRecordings((current) => [...current, { recording, attempts: MAX_AUTO_CLIP_ATTEMPTS, error: lastError }]);
           if (stopIfPaused()) return;
         }
       }
@@ -967,6 +991,7 @@ function App() {
       const recordingKey = `${recording.dhfs_partition_index}-${recording.descriptor}`;
       return <tr key={recordingKey}><td>{recording.channel}</td><td>{recording.start_time}</td><td>{recording.end_time}</td><td>{recording.fragment_count}</td><td>{formatBytes(recording.bytes)}</td><td><button type="button" onClick={() => void extractCardRecordingToCache(recording)} disabled={cardExtractionLoading !== null}>{cardExtractionLoading === recordingKey ? 'Reading card...' : 'Extract to cache'}</button></td></tr>;
     })}</tbody></table><p className="hash">Showing up to 200 of {physicalRecordings.length.toLocaleString()} recordings.</p></section>}
+    {autoFailedRecordings.length > 0 && <section className="results"><h2>Recordings needing retry</h2><p className="mounted-note">Each failed recording was retried {MAX_AUTO_CLIP_ATTEMPTS} times. The card was not modified; use the row action above after reconnecting or stabilising the card.</p><table><thead><tr><th>Channel</th><th>Start</th><th>End</th><th>Attempts</th><th>Last error</th></tr></thead><tbody>{autoFailedRecordings.map(({ recording, attempts, error }) => <tr key={`${recording.dhfs_partition_index}-${recording.descriptor}`}><td>{recording.channel}</td><td>{recording.start_time}</td><td>{recording.end_time}</td><td>{attempts}</td><td>{error}</td></tr>)}</tbody></table></section>}
     {conversionReport && <section className="results"><h2>Converted DHFS recordings</h2><p className="hash">Source SHA-256: {conversionReport.source_sha256}</p><ul className="export-tool-list">{conversionReport.exported.map((exported) => <li key={exported.file_name}><strong>{exported.start_time} · Camera {exported.channel}</strong><span>{exported.file_name} · {formatBytes(exported.bytes_written)}</span><button type="button" onClick={() => void selectConvertedVideo(exported)} disabled={convertedVideoLoading !== null}>{convertedVideoLoading === exported.file_name ? 'Loading clip...' : 'Select clip for Bob'}</button></li>)}</ul></section>}
     {activeView === 'sd-import' && report && <section className="results">
       <div className="metrics"><Metric label="Indexed recordings" value={report.record_count} /><Metric label="Usable timestamps" value={report.valid_timestamped_record_count} /><Metric label="Event definitions" value={report.event_definitions.filter(Boolean).length} /></div>
