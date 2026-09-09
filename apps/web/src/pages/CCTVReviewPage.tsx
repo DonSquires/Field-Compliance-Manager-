@@ -241,6 +241,9 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     ? jobs.filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id)
     : selected ? [selected] : [];
   const selectedBatchComplete = !selectedBatch || selectedBatchJobs.length >= selectedBatch.clip_total;
+  const selectedBatchClipIndexes = selectedBatchJobs
+    .map((job) => desktopReviewBatch(job.evidence?.metadata || null)?.clip_index)
+    .filter((clipIndex): clipIndex is number => Number.isFinite(clipIndex));
 
   useEffect(() => {
     setReportReceipt(null);
@@ -718,6 +721,22 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 </div>
                 <Eye size={19} />
               </div>
+
+              {selectedBatch && (
+                <div className="cctv-batch-summary" aria-label="SD-card batch review status">
+                  <div>
+                    <strong>SD-card batch review</strong>
+                    <span>{selectedBatchClipIndexes.length} of {selectedBatch.clip_total} clips loaded</span>
+                  </div>
+                  <div className="cctv-batch-clip-list">
+                    {Array.from({ length: selectedBatch.clip_total }, (_, index) => index + 1).map((clipIndex) => {
+                      const clipJob = selectedBatchJobs.find((job) => desktopReviewBatch(job.evidence?.metadata || null)?.clip_index === clipIndex);
+                      return <span key={clipIndex} className={clipJob ? `is-${clipJob.status}` : 'is-missing'} title={clipJob ? `Clip ${clipIndex}: ${statusLabel(clipJob.status)}` : `Clip ${clipIndex}: not loaded`}>{clipIndex}</span>;
+                    })}
+                  </div>
+                  {!selectedBatchComplete && <small>Missing clips remain outside the current queue view. Do not issue a complete-card report yet.</small>}
+                </div>
+              )}
 
               <div className="cctv-card-actions">
                 <button type="button" className="cctv-btn-jump" onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">

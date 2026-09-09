@@ -87,6 +87,18 @@
 .cctv-detail-heading { align-items: center; border-bottom: 1px solid #e4eaec; padding-bottom: 14px; }
 .cctv-detail-heading h2 { font-size: 18px; }
 .cctv-place-context { color: #65727c; display: block; font-size: 11px; margin-top: 5px; }
+.cctv-batch-summary { background: #f4f8f7; border: 1px solid #d7e6e3; border-radius: 6px; display: grid; gap: 8px; padding: 11px 12px; }
+.cctv-batch-summary > div:first-child { display: flex; justify-content: space-between; gap: 10px; }
+.cctv-batch-summary strong { color: #315761; font-size: 12px; }
+.cctv-batch-summary span,
+.cctv-batch-summary small { color: #65727c; font-size: 11px; }
+.cctv-batch-clip-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.cctv-batch-clip-list span { align-items: center; background: #dcefe5; border-radius: 3px; color: #26724c; display: inline-flex; font-size: 10px; font-weight: 700; height: 22px; justify-content: center; width: 22px; }
+.cctv-batch-clip-list span.is-processing,
+.cctv-batch-clip-list span.is-queued { background: #fff0d3; color: #9a6a16; }
+.cctv-batch-clip-list span.is-failed,
+.cctv-batch-clip-list span.is-manual_review_required { background: #fbeae8; color: #a43a29; }
+.cctv-batch-clip-list span.is-missing { background: #e8edef; color: #7b8991; }
 
 /* Media player */
 .cctv-media-container { background: #0e151b; border-radius: 6px; overflow: hidden; min-height: 180px; display: flex; align-items: center; justify-content: center; }
