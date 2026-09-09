@@ -5,7 +5,7 @@ const WORKER_PROFILES = Object.freeze({
   test: Object.freeze(['npm', 'test']),
   build: Object.freeze(['npm', 'run', 'build']),
   lint: Object.freeze(['npm', 'run', 'lint']),
-  'human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test']),
+  'human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
   'frontend-verify': Object.freeze(['node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
   'backend-verify': Object.freeze(['node', '/opt/bob/backend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
   'security-review': Object.freeze(['node', '/opt/bob/security-worker.js', '/artifacts/validated.patch', '/artifacts/changed-files.json', '/artifacts/security-review.json'])
