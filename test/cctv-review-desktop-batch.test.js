@@ -15,7 +15,12 @@ test('CCTV Review surfaces desktop SD-card batch metadata for grouped review', (
   assert.match(page, /Desktop batch/);
   assert.match(page, /clip \{batch\.clip_index\}\/\{batch\.clip_total\}/);
   assert.match(page, /clip \{selectedBatch\.clip_index\} of \{selectedBatch\.clip_total\}/);
+  assert.match(page, /SD-card batch review/);
+  assert.match(page, /Missing clips remain outside the current queue view/);
+  assert.match(page, /selectedBatchClipIndexes/);
   assert.match(styles, /\.cctv-batch-link/);
+  assert.match(styles, /\.cctv-batch-clip-list/);
+  assert.match(styles, /\.is-missing/);
   assert.match(migration, /desktop_review_batch/);
   assert.match(migration, /attachment\.extraction_payload->'desktop_review_batch'/);
 });
