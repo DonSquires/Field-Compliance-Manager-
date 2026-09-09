@@ -1,4 +1,4 @@
-import { StrictMode, useRef, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
@@ -204,6 +204,21 @@ function cacheStatusMessage(result: CachedClipReport): string {
   return `${base} Review it, then upload it to Bob.`;
 }
 
+function formatDuration(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  if (minutes === 0) return `${remainder}s`;
+  return `${minutes}m ${remainder.toString().padStart(2, '0')}s`;
+}
+
+function estimateRemainingSeconds(startedAt: number | null, progress: number, now: number): number | null {
+  if (!startedAt || progress <= 2 || progress >= 100) return null;
+  const elapsed = (now - startedAt) / 1000;
+  const projectedTotal = elapsed / (progress / 100);
+  return Math.max(0, projectedTotal - elapsed);
+}
+
 function App() {
   const [report, setReport] = useState<IndexReport | null>(null);
   const [status, setStatus] = useState('Choose a copied SD-card index database to inspect it.');
@@ -240,7 +255,18 @@ function App() {
   const [autoStage, setAutoStage] = useState<AutoProcessStage>('idle');
   const [autoProgress, setAutoProgress] = useState(0);
   const [autoMessage, setAutoMessage] = useState('Ready to process the next recording.');
+  const [autoStartedAt, setAutoStartedAt] = useState<number | null>(null);
+  const [clockTick, setClockTick] = useState(Date.now());
   const pauseRequested = useRef(false);
+
+  useEffect(() => {
+    if (!['analysing', 'enumerating', 'caching', 'uploading'].includes(autoStage)) return;
+    const timer = window.setInterval(() => setClockTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [autoStage]);
+
+  const autoElapsedSeconds = autoStartedAt ? (clockTick - autoStartedAt) / 1000 : 0;
+  const autoRemainingSeconds = estimateRemainingSeconds(autoStartedAt, autoProgress, clockTick);
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -643,7 +669,7 @@ function App() {
     }
   };
 
-  const uploadPreparedVideo = async (file: File, preserveCachedClip = false): Promise<boolean> => {
+  const uploadPreparedVideo = async (file: File, preserveCachedClip = false, onUploadProgress?: (progress: number | null) => void): Promise<boolean> => {
     if (file.size <= 0 || file.size > MAX_BOB_UPLOAD_BYTES) {
       setError('This file is empty or exceeds the 128 GB upload limit.');
       return false;
@@ -679,6 +705,7 @@ function App() {
               const progress = bytesTotal > 0 ? Math.round((bytesSent / bytesTotal) * 100) : null;
               setUploadProgress(progress);
               setUploadStatus(progress === null ? 'Uploading private video...' : `Uploading private video... ${progress}%`);
+              onUploadProgress?.(progress);
             },
             onSuccess: () => resolve(),
           });
@@ -686,6 +713,7 @@ function App() {
         });
       } else {
         setUploadProgress(null);
+        onUploadProgress?.(100);
         const { error: uploadError } = await supabase.storage.from('bob-uploads').upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
         if (uploadError) throw uploadError;
       }
@@ -741,6 +769,7 @@ function App() {
     pauseRequested.current = false;
     setAutoStage('idle');
     setAutoProgress(0);
+    setAutoStartedAt(null);
     setAutoMessage('Ready to process the next recording.');
   };
 
@@ -763,6 +792,7 @@ function App() {
     };
     try {
       pauseRequested.current = false;
+      setAutoStartedAt(Date.now());
       setError(null);
       setAutoStage('analysing');
       setAutoProgress(10);
@@ -803,7 +833,9 @@ function App() {
       setAutoStage('uploading');
       setAutoProgress(70);
       setAutoMessage('Uploading and registering the cached recording.');
-      const uploaded = await uploadPreparedVideo(prepared, true);
+      const uploaded = await uploadPreparedVideo(prepared, true, (progress) => {
+        setAutoProgress(70 + Math.round(((progress ?? 0) / 100) * 25));
+      });
       if (!uploaded) throw new Error('Upload or registration did not complete. The cached file was preserved.');
       setAutoStage('registered');
       setAutoProgress(100);
@@ -852,7 +884,7 @@ function App() {
       <section className="companion-workspace">
         {error && <div className="companion-error" role="alert">{error}</div>}
         {!signedInAs && <section className="connection-notice"><strong>Sign in to begin</strong><span>Use your authorised FCM account. Evidence intake is local; hybrid GPU/VPS inference, review, approvals, and results remain centrally governed.</span></section>}
-        {activeView === 'sd-import-clean' && <><div className="workspace-heading"><span>SD evidence intake</span><h2>Import Dahua camera footage</h2><p>FCM identifies the inserted DHFS card and prepares selected recordings for governed review. The SD card is never modified.</p></div><section className="tool auto-process-panel"><div><button type="button" onClick={() => void processNextRecording()} disabled={['analysing', 'enumerating', 'caching', 'uploading'].includes(autoStage)}><RefreshCw size={16} className={['analysing', 'enumerating', 'caching', 'uploading'].includes(autoStage) ? 'is-spinning' : ''} /> {autoStage === 'idle' || autoStage === 'failed' || autoStage === 'paused' ? 'Process next recording' : 'Processing recording...'}</button><button type="button" onClick={pauseAutoProcess} disabled={!['analysing', 'enumerating', 'caching', 'uploading'].includes(autoStage)}>Pause after step</button><button type="button" onClick={restartAutoProcess}>Restart</button></div><div className="auto-process-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={autoProgress}><span style={{ width: `${autoProgress}%` }} /></div><p><strong>{autoStage.replace(/_/g, ' ')}</strong> · {autoMessage}</p>{cachedClip && <div className="cache-actions"><span>Local H.265 cache: {cachedClip.cache_path}</span><button type="button" onClick={() => void openCachedClip()}>Open file</button><button type="button" onClick={() => void revealCachedClip()}>Show in folder</button></div>}</section>{report && <section className="results"><h2>Dahua DHFS card detected</h2><div className="metrics"><Metric label="Indexed recordings" value={report.valid_timestamped_record_count} /><Metric label="Media partition" value={removableDisks.flatMap((disk) => disk.partitions).filter((partition) => !partition.drive_letter).map((partition) => Math.round(partition.size_bytes / 1024 / 1024 / 1024)).join(', ') || 'Unknown'} suffix=" GB" /><Metric label="Card access" value="Read-only" /></div><p className="mounted-note">Select a recording below, or use Video upload for exported footage.</p></section>}</>}
+        {activeView === 'sd-import-clean' && <><div className="workspace-heading"><span>SD evidence intake</span><h2>Import Dahua camera footage</h2><p>FCM identifies the inserted DHFS card and prepares selected recordings for governed review. The SD card is never modified.</p></div><section className="tool auto-process-panel"><div className="auto-process-heading"><div><span>One-shot workflow</span><h3>Process the next motion recording</h3></div><strong>{autoProgress}%</strong></div><div className="auto-process-steps" aria-label="Processing stages"><span className={autoStage === 'analysing' ? 'is-current' : ''}>Analyse card</span><span className={autoStage === 'enumerating' ? 'is-current' : ''}>Find recordings</span><span className={autoStage === 'caching' ? 'is-current' : ''}>Save H.265 cache</span><span className={autoStage === 'uploading' || autoStage === 'registered' ? 'is-current' : ''}>Queue CCTV review</span></div><div><button type="button" onClick={() => void processNextRecording()} disabled={['analysing', 'enumerating', 'caching', 'uploading'].includes(autoStage)}><RefreshCw size={16} className={['analysing', 'enumerating', 'caching', 'uploading'].includes(autoStage) ? 'is-spinning' : ''} /> {autoStage === 'idle' || autoStage === 'failed' || autoStage === 'paused' ? 'Process next recording' : 'Processing recording...'}</button><button type="button" onClick={pauseAutoProcess} disabled={!['analysing', 'enumerating', 'caching', 'uploading'].includes(autoStage)}>Pause after step</button><button type="button" onClick={restartAutoProcess}>Restart</button></div><div className="auto-process-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={autoProgress}><span style={{ width: `${autoProgress}%` }} /></div><div className="auto-process-timing"><span>Elapsed <strong>{formatDuration(autoElapsedSeconds)}</strong></span><span>ETA <strong>{autoRemainingSeconds === null ? 'Calculating' : formatDuration(autoRemainingSeconds)}</strong></span><span>Progress <strong>{autoProgress}%</strong></span></div><p><strong>{autoStage.replace(/_/g, ' ')}</strong> · {autoMessage}</p><p className="mounted-note">This processes one recording at a time, preserves the local H.265 file, and queues the uploaded evidence for governed CCTV Review.</p>{cachedClip && <div className="cache-actions"><span>Local H.265 cache: {cachedClip.cache_path}</span><button type="button" onClick={() => void openCachedClip()}>Open file</button><button type="button" onClick={() => void revealCachedClip()}>Show in folder</button></div>}</section>{report && <section className="results"><h2>Dahua DHFS card detected</h2><div className="metrics"><Metric label="Indexed recordings" value={report.valid_timestamped_record_count} /><Metric label="Media partition" value={removableDisks.flatMap((disk) => disk.partitions).filter((partition) => !partition.drive_letter).map((partition) => Math.round(partition.size_bytes / 1024 / 1024 / 1024)).join(', ') || 'Unknown'} suffix=" GB" /><Metric label="Card access" value="Read-only" /></div><p className="mounted-note">Select a recording below, or use Video upload for exported footage.</p></section>}</>}
         {activeView === 'cctv-review' && <><div className="workspace-heading"><span>Governed review handoff</span><h2>Open CCTV Review</h2><p>CCTV Review runs in the secured FCM web portal so queue state, evidence links, and human decisions remain centrally governed.</p></div><section className="tool cctv-handoff"><button type="button" onClick={() => void openExternal(FCM_CCTV_REVIEW_URL)}><ExternalLink size={16} /> Open CCTV Review</button><button type="button" onClick={() => void copyExternalLink(FCM_CCTV_REVIEW_URL)}>Copy review link</button><p>{FCM_CCTV_REVIEW_URL}</p></section><section className="results"><h2>What opens there</h2><div className="metrics"><Metric label="Evidence queue" value="CCTV" /><Metric label="Review state" value="Live" /><Metric label="Authority" value="Human" /></div><p className="mounted-note">If Windows blocks external opening, copy the link and paste it into your signed-in browser.</p></section></>}
         {activeView === 'sd-import' && false && removableDisks.some((disk) => disk.partitions.some((partition) => !partition.drive_letter)) && <section className="tool"><button type="button" onClick={() => void inspectDhfsHeaders()} disabled={dhfsLoading || analysisLoading}><Database size={16} /> {dhfsLoading ? 'Decoding DHFS...' : 'Decode DHFS headers'}</button><p>Reads only DHFS-marked 4 KB metadata headers from the first 64 KB of the unmounted partition.</p></section>}
         {dhfsHeaders && <section className="results"><h2>DHFS header decode</h2><p>Disk {dhfsHeaders.disk_number}, partition {dhfsHeaders.partition_number} · {dhfsHeaders.headers.length} metadata headers decoded</p><table><thead><tr><th>Offset</th><th>ASCII preview</th><th>SHA-256</th></tr></thead><tbody>{dhfsHeaders.headers.map((header) => <tr key={header.absolute_offset_bytes}><td>{header.absolute_offset_bytes.toLocaleString()}</td><td className="hash">{header.ascii_preview}</td><td className="hash">{header.sha256}</td></tr>)}</tbody></table></section>}
