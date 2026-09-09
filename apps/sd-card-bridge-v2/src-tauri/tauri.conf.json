@@ -5,5 +5,5 @@
   "identifier": "nz.fcmanager.desktop.v2",
   "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://localhost:1420", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
   "app": { "windows": [{ "title": "FCM Desktop V2 Prototype", "width": 1440, "height": 960, "minWidth": 1080, "minHeight": 720 }], "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://*.supabase.co; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com" } },
-  "bundle": { "active": false }
+  "bundle": { "active": true, "targets": "nsis", "windows": { "nsis": { "installMode": "currentUser" } } }
 }

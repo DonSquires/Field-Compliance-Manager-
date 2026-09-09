@@ -46,12 +46,20 @@ fn acquire_read_only_device_image(source_id: String, destination_path: String) -
     {
         let source_path = format!(r"\\.\{}", source_id);
         let mut source = OpenOptions::new().read(true).write(false).open(&source_path).map_err(|e| format!("Could not open source read-only: {e}"))?;
-        let mut image = OpenOptions::new().write(true).create_new(true).open(&destination_path).map_err(|e| format!("Could not create image: {e}"))?;
+        let destination = Path::new(&destination_path);
+        if destination.exists() { return Err("The destination already exists. Choose a new acquisition path; existing evidence will not be overwritten.".to_string()); }
+        if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|e| format!("Could not create acquisition directory: {e}"))?; }
+        let partial_path = destination.with_extension("img.part");
+        let mut image = OpenOptions::new().write(true).create_new(true).open(&partial_path).map_err(|e| format!("Could not create temporary image: {e}"))?;
         let mut source_hash = Sha256::new(); let mut image_hash = Sha256::new(); let mut total = 0_u64; let mut buffer = [0_u8; 4 * 1024 * 1024];
         loop { let count = source.read(&mut buffer).map_err(|e| format!("Read failed: {e}"))?; if count == 0 { break; } image.write_all(&buffer[..count]).map_err(|e| e.to_string())?; source_hash.update(&buffer[..count]); image_hash.update(&buffer[..count]); total += count as u64; }
         image.flush().map_err(|e| e.to_string())?; image.sync_all().map_err(|e| e.to_string())?;
-        let source_sha256 = format!("{:x}", source_hash.finalize()); let image_sha256 = format!("{:x}", image_hash.finalize());
-        return Ok(AcquisitionReceipt { source_id, image_path: destination_path, bytes_copied: total, source_sha256: source_sha256.clone(), image_sha256: image_sha256.clone(), verified: source_sha256 == image_sha256, read_errors: 0 });
+        drop(image);
+        fs::rename(&partial_path, destination).map_err(|e| format!("Could not commit verified image atomically: {e}"))?;
+        let (verified_bytes, image_sha256) = hash_reader(File::open(destination).map_err(|e| format!("Could not reopen image for verification: {e}"))?)?;
+        let source_sha256 = format!("{:x}", source_hash.finalize());
+        let verified = verified_bytes == total && image_sha256 == format!("{:x}", image_hash.finalize());
+        return Ok(AcquisitionReceipt { source_id, image_path: destination_path, bytes_copied: total, source_sha256, image_sha256, verified, read_errors: 0 });
     }
     #[cfg(not(target_os = "windows"))]
     Err("Whole-device acquisition is implemented for the Windows desktop prototype.".to_string())
