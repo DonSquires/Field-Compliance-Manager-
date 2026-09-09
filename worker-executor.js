@@ -37,7 +37,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
     args.push('--tmpfs=/work:rw,exec,nosuid,size=1024m');
   }
   if (profile === 'human-qa') {
-    args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=512m');
+    args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=512m,uid=1000,gid=1000,mode=0755');
   }
   args.push(
     '--mount', `type=bind,src=${sourceDir},dst=/workspace,readonly`,
