@@ -204,6 +204,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [reportReceipt, setReportReceipt] = useState<{ reportId: string; generatedAt: string; sha256: string; observationCount: number } | null>(null);
   const [exportSaving, setExportSaving] = useState(false);
   const [exportReceipt, setExportReceipt] = useState<{ id: string; manifestSha256: string } | null>(null);
+  const [currentExport, setCurrentExport] = useState<{ id: string; approval_state: string; manifest_sha256: string } | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchJobs, setBatchJobs] = useState<CCTVJob[]>([]);
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
@@ -285,7 +286,29 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   useEffect(() => {
     setReportReceipt(null);
     setBatchJobs([]);
+    setExportReceipt(null);
+    setCurrentExport(null);
   }, [selectedId]);
+
+  useEffect(() => {
+    let active = true;
+    const loadCurrentExport = async () => {
+      if (!profile?.organizationId || !selected?.evidence_item_id) return;
+      const { data, error: exportError } = await supabase
+        .from('cctv_exports')
+        .select('id, approval_state, manifest_sha256')
+        .eq('organization_id', profile.organizationId)
+        .eq('evidence_item_id', selected.evidence_item_id)
+        .order('generated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!active) return;
+      if (exportError) setIdentityError(exportError.message);
+      else setCurrentExport(data as { id: string; approval_state: string; manifest_sha256: string } | null);
+    };
+    void loadCurrentExport();
+    return () => { active = false; };
+  }, [profile?.organizationId, selected?.evidence_item_id]);
 
   const loadSelectedBatch = async () => {
     if (!selectedBatch || !profile?.organizationId) return;
@@ -667,7 +690,25 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     if (exportError || !draft) setIdentityError(exportError?.message || 'CCTV export draft could not be created.');
     else {
       setExportReceipt({ id: draft.id, manifestSha256: draft.manifest_sha256 });
+      setCurrentExport({ id: draft.id, approval_state: draft.approval_state, manifest_sha256: draft.manifest_sha256 });
       setDecisionMessage('CCTV export draft created. It still requires approval and sealing.');
+    }
+    setExportSaving(false);
+  };
+
+  const transitionExport = async (action: 'submitted' | 'approved' | 'sealed') => {
+    if (!currentExport) return;
+    setExportSaving(true);
+    const rpc = action === 'sealed' ? 'seal_cctv_export' : 'approve_cctv_export';
+    const args = action === 'sealed'
+      ? { p_export_id: currentExport.id }
+      : { p_export_id: currentExport.id, p_approval_state: action };
+    const { data, error: transitionError } = await supabase.rpc(rpc, args);
+    const result = Array.isArray(data) ? data[0] : data;
+    if (transitionError || !result) setIdentityError(transitionError?.message || 'CCTV export transition failed.');
+    else {
+      setCurrentExport({ id: result.id, approval_state: result.approval_state, manifest_sha256: result.manifest_sha256 });
+      setDecisionMessage(`CCTV export is now ${result.approval_state}.`);
     }
     setExportSaving(false);
   };
@@ -1532,6 +1573,17 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <span>Approval and sealing are still required.</span>
                   <span>Export ID: {exportReceipt.id}</span>
                   <span>Manifest SHA-256: {exportReceipt.manifestSha256}</span>
+                </div>
+              )}
+              {currentExport && (
+                <div className="cctv-quality-panel" aria-label="CCTV export lifecycle">
+                  <strong>Export lifecycle: {statusLabel(currentExport.approval_state)}</strong>
+                  <span>Manifest SHA-256: {currentExport.manifest_sha256}</span>
+                  <div className="cctv-card-actions">
+                    {currentExport.approval_state === 'draft' && <button type="button" className="cctv-btn-jump" disabled={exportSaving} onClick={() => void transitionExport('submitted')}>Submit for approval</button>}
+                    {currentExport.approval_state === 'submitted' && <button type="button" className="cctv-btn-confirm" disabled={exportSaving} onClick={() => void transitionExport('approved')}>Approve export</button>}
+                    {currentExport.approval_state === 'approved' && <button type="button" className="cctv-btn-confirm" disabled={exportSaving} onClick={() => void transitionExport('sealed')}>Seal export</button>}
+                  </div>
                 </div>
               )}
             </>

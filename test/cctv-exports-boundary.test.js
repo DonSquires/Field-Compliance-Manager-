@@ -20,4 +20,8 @@ test('CCTV exports require accepted events and separate approval and sealing', (
   assert.match(page, /Create export draft/);
   assert.match(page, /p_selected_event_ids: acceptedEvents\.map/);
   assert.match(page, /Approval and sealing are still required/);
+  assert.match(page, /transitionExport/);
+  assert.match(page, /Submit for approval/);
+  assert.match(page, /Approve export/);
+  assert.match(page, /Seal export/);
 });
