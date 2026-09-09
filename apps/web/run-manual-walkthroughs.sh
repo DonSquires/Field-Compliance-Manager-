@@ -37,7 +37,11 @@ echo ""
 for test in e2e/*manual-walkthrough*.spec.ts; do
     if [ -f "$test" ]; then
         name=$(basename "$test" .spec.ts)
-        echo "  • $name"
+        if [[ $name == "live-"* ]]; then
+          echo "  • $name (🌐 LIVE DEPLOYMENT)"
+        else
+          echo "  • $name (local fixtures)"
+        fi
     fi
 done
 
