@@ -1,0 +1,63 @@
+# Bob Credential Boundaries and Monitoring
+
+Bob must use the narrowest credential for each operation. Credential values must never appear in prompts, browser code, logs, screenshots, issue bodies, test artifacts, or human-test reports.
+
+## Credential map
+
+| Credential | Where it may be used | Purpose | Must not be used for |
+|---|---|---|---|
+| `FIELD_COMPLIANCE_CODESPACE` | Codespaces terminal, explicitly approved Supabase CLI command | Migration status, migration repair, database push | Edge Function runtime, browser, Bob prompt, live data API header |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Functions/server-side diagnostics and explicitly approved Codespaces read checks | Bypassed-RLS server-side reads, governed service operations, Atlas checks | Browser/frontend, external web research, issue text, screenshots |
+| `SUPABASE_ANON_KEY` | Supabase client/Edge Function caller client | Establish caller-authenticated Supabase context | Privileged database access |
+| Caller `Authorization: Bearer <user JWT>` | Request forwarding from an authenticated Edge Function | Preserve the user's identity, role, tenant, and RLS context | Replacing service-role authorization for approved server operations |
+| `GITLAB_TOKEN` / `GITLAB_READ_TOKEN` | Bob repository-search/read-issues functions | Read the allowlisted GitLab repository and issues | Supabase, Vercel, arbitrary repositories, write operations |
+| `GITEA_TOKEN` | `bob-gitea-maintainer` server-side function | Governed issue/PR/file operations on the allowlisted Gitea repository | Browser, Supabase, arbitrary repositories |
+| `VERCEL_TOKEN` | Vercel viewer function/server-side deployment tooling | Inspect approved Vercel deployment state | Supabase, database migrations, browser |
+| VPS/PTT/control-plane tokens | Their specific server-side viewer or control-plane function | Inspect or operate the named approved service | General repository, database, or browser access |
+
+## Monitoring record
+
+Every Bob diagnostic or human-test run should record only:
+
+- Credential class used, never the value.
+- Environment and target project/repository/deployment.
+- Caller role and organization scope where applicable.
+- Read/write mode.
+- Tool/function name.
+- Query or action purpose.
+- Result status and redacted error code.
+- Timestamp and request/correlation ID.
+
+Example:
+
+```text
+credential_class=FIELD_COMPLIANCE_CODESPACE
+operation=supabase_migration_dry_run
+project=dotczcyyzgabmtmnglqj
+mode=read-only
+result=blocked_duplicate_migration_version
+secret_value=never_recorded
+```
+
+## Required checks before a Bob run
+
+1. Confirm the target URL/project/repository explicitly.
+2. Confirm the credential class matches the operation.
+3. Confirm the caller role and tenant scope for live record reads.
+4. Use read-only mode first; require an explicit approval for writes, migrations, issue creation, or deployment.
+5. Redact responses before attaching them to Bob artifacts or issues.
+6. After the run, verify no secret-shaped value entered logs, browser storage, screenshots, traces, or reports.
+
+## Specific live-test rule
+
+The Playwright human test uses user credentials only to authenticate the deployed app. It must not receive `SUPABASE_SERVICE_ROLE_KEY`, `FIELD_COMPLIANCE_CODESPACE`, Git provider tokens, or Vercel tokens through browser context or page scripts. Direct Supabase checks belong in a separate server-side diagnostic step and must be redacted.
+
+## Incident response
+
+If a token appears in output or an incorrect credential is used:
+
+1. Stop the run and invalidate/rotate the exposed credential.
+2. Preserve only the redacted request ID, tool, target, and timestamp.
+3. Review audit logs for the affected function/provider.
+4. Re-run using the correct credential class in read-only mode.
+5. Create a security issue only with redacted evidence.

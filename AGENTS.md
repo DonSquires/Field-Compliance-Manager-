@@ -173,3 +173,7 @@ against existing issues, create an issue only for a reproducible actionable
 defect, include the complete redacted evidence packet, and preserve the issue
 URL/IID in the human-test report. A warning or unconfirmed hypothesis remains
 in the test report until the evidence supports a durable work item.
+
+Bob must follow `docs/BOB_CREDENTIAL_BOUNDARIES.md` for every test, research,
+live-read, migration, repository, issue, and deployment operation. Record only
+the credential class and redacted result; never expose or persist a token value.
