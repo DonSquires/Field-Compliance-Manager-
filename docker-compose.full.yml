@@ -195,6 +195,10 @@ services:
       INFERENCE_SERVICE_URL: http://fcm-inference:3000
       RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
       RUNPOD_API: ${RUNPOD_API:-${RUNPOD_API_KEY:-}}
+      # Optional dedicated recognition-capture endpoint. Keep separate from the
+      # general detector so enhancement/ALPR/face work can be tuned independently.
+      RUNPOD_CAPTURE_API_URL: ${RUNPOD_CAPTURE_API_URL:-}
+      RUNPOD_CAPTURE_API_KEY: ${RUNPOD_CAPTURE_API_KEY:-${RUNPOD_API_KEY:-}}
       VISION_MAX_CLASSIFICATION_FRAMES: 120
       VISION_RUNPOD_BATCH_SIZE: ${VISION_RUNPOD_BATCH_SIZE:-6}
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
