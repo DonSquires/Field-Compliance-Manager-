@@ -899,7 +899,7 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
         }
     }
     let (trim_start, is_hevc) = locate_elementary_stream_start(&first_fragment)
-        .unwrap_or((0, false));
+        .ok_or_else(|| "Could not identify an H.264/H.265 parameter-set NAL in the first DHFS fragment; recording was not cached.".to_string())?;
     let extension = if is_hevc { "h265" } else { "h264" };
     let cache_name = format!("FCM-card-p{dhfs_partition_index}-d{descriptor_index:06}-{start_time}-{end_time}-ch{channel:02}.{extension}");
     let ready_path = cache_dir.join(&cache_name);
@@ -1002,7 +1002,8 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
             file.seek(SeekFrom::Start(video_offset + chain[0] as u64 * fragment_size)).map_err(|error| error.to_string())?;
             let mut first_fragment = vec![0_u8; first_bytes_to_copy as usize];
             file.read_exact(&mut first_fragment).map_err(|error| error.to_string())?;
-            let (trim_start, is_hevc) = locate_elementary_stream_start(&first_fragment).unwrap_or((0, false));
+            let (trim_start, is_hevc) = locate_elementary_stream_start(&first_fragment)
+                .ok_or_else(|| format!("Recording descriptor {descriptor_index} has no identifiable H.264/H.265 parameter-set NAL; export skipped."))?;
             let extension = if is_hevc { "h265" } else { "h264" };
             let content_type = if is_hevc { "video/h265" } else { "video/h264" };
 
@@ -1401,6 +1402,29 @@ mod tests {
         // not a recognised parameter-set NAL type must not be mistaken for the real stream start.
         let bytes = [0_u8, 0, 0, 1, 0xAA, 0xAA, 0xAA, 0xAA];
         assert_eq!(locate_elementary_stream_start(&bytes), None);
+    }
+
+    #[test]
+    fn conversion_rejects_a_recording_without_a_recognised_stream_start() {
+        let mut image = build_synthetic_dhfs_image();
+        let video_offset = (10_u64 * 512 + 40_u64 * 512) as usize;
+        image[video_offset..video_offset + 1536].fill(0xAA);
+        let image_dir = std::env::temp_dir().join(format!("fcm-dhfs-invalid-stream-{}", std::process::id()));
+        std::fs::create_dir_all(&image_dir).expect("create temp dir");
+        let image_path = image_dir.join("invalid-stream.img");
+        std::fs::write(&image_path, image).expect("write invalid image");
+
+        let error = convert_dhfs_image(
+            image_path.to_string_lossy().to_string(),
+            image_dir.to_string_lossy().to_string(),
+        ).expect_err("unrecognised elementary stream must not be exported");
+
+        assert!(error.contains("no identifiable H.264/H.265 parameter-set NAL"));
+        assert!(std::fs::read_dir(&image_dir)
+            .expect("read output directory")
+            .filter_map(Result::ok)
+            .all(|entry| entry.path() == image_path));
+        std::fs::remove_dir_all(&image_dir).ok();
     }
 
     fn write_le_u32(buffer: &mut [u8], offset: usize, value: u32) {
