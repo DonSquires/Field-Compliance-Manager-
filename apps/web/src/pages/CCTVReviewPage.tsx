@@ -10,6 +10,7 @@ import {
   FileVideo2,
   Maximize2,
   Play,
+  Printer,
   RotateCcw,
   RefreshCw,
   ShieldAlert,
@@ -21,6 +22,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { consolidateResultData } from '../lib/motionConsolidation';
+import { buildCCTVPrintableReport } from '../lib/cctvReport';
 import type {
   ConsolidatedFaceEvent,
   ConsolidatedPersonEvent,
@@ -67,6 +69,14 @@ type PersonRecordOption = {
   display_name: string | null;
   review_state: string;
   metadata: Record<string, unknown> | null;
+};
+
+type IdentityDraftState = {
+  personRecordId: string;
+  displayName: string;
+  draftId?: string;
+  status?: string;
+  authorityLevel?: string;
 };
 
 type FaceObservationLink = {
@@ -158,7 +168,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [enlargedImage, setEnlargedImage] = useState<{ src: string; title: string; subtitle?: string } | null>(null);
   const [personRecords, setPersonRecords] = useState<PersonRecordOption[]>([]);
   const [faceObservationLinks, setFaceObservationLinks] = useState<Record<string, FaceObservationLink>>({});
-  const [identityDrafts, setIdentityDrafts] = useState<Record<string, { personRecordId: string; displayName: string }>>({});
+  const [identityDrafts, setIdentityDrafts] = useState<Record<string, IdentityDraftState>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [decisionSaving, setDecisionSaving] = useState(false);
@@ -226,6 +236,9 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
 
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
   const selectedBatch = desktopReviewBatch(selected?.evidence?.metadata || null);
+  const selectedBatchJobs = selectedBatch
+    ? jobs.filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id)
+    : selected ? [selected] : [];
 
   const manageJob = useCallback(async (job: CCTVJob, action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (!profile?.organizationId) return;
@@ -321,27 +334,42 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       if (!profile?.organizationId || !selected?.evidence_item_id) {
         setPersonRecords([]);
         setFaceObservationLinks({});
+        setIdentityDrafts({});
         return;
       }
-      const [{ data: observations, error: observationsError }, { data: records, error: recordsError }] = await Promise.all([
+      const [{ data: observations, error: observationsError }, { data: records, error: recordsError }, { data: drafts, error: draftsError }] = await Promise.all([
         supabase.from('face_observations').select('id, person_record_id, metadata').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
         supabase.from('person_records').select('id, display_name, review_state, metadata').eq('organization_id', profile.organizationId).order('created_at', { ascending: true }),
+        supabase.from('cctv_identity_drafts').select('id, event_id, proposed_person_record_id, proposed_display_name, status, authority_level').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
       ]);
       if (!active) return;
-      if (observationsError || recordsError) {
-        setIdentityError(observationsError?.message || recordsError?.message || 'Face identity records could not be loaded.');
+      if (observationsError || recordsError || draftsError) {
+        setIdentityError(observationsError?.message || recordsError?.message || draftsError?.message || 'Face identity records could not be loaded.');
         return;
       }
       const nextRecords = (records ?? []) as PersonRecordOption[];
       const recordById = new Map(nextRecords.map((record) => [record.id, record]));
       const nextLinks: Record<string, FaceObservationLink> = {};
+      const nextDrafts: Record<string, IdentityDraftState> = {};
       for (const observation of (observations ?? []) as FaceObservationLink[]) {
         const record = observation.person_record_id ? recordById.get(observation.person_record_id) : null;
         const eventId = typeof record?.metadata?.source_event_id === 'string' ? record.metadata.source_event_id : null;
         if (eventId) nextLinks[eventId] = observation;
       }
+      for (const draft of drafts ?? []) {
+        if (draft.event_id) {
+          nextDrafts[draft.event_id] = {
+            personRecordId: draft.proposed_person_record_id ?? '',
+            displayName: draft.proposed_display_name ?? '',
+            draftId: draft.id,
+            status: draft.status,
+            authorityLevel: draft.authority_level,
+          };
+        }
+      }
       setPersonRecords(nextRecords);
       setFaceObservationLinks(nextLinks);
+      setIdentityDrafts(nextDrafts);
       setIdentityError(null);
     };
     void loadFaceIdentityLinks();
@@ -356,17 +384,74 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     if (!link?.id || !draft?.personRecordId) return;
     setIdentitySaving(face.event_id);
     setIdentityError(null);
-    const { error: saveError } = await supabase.rpc('assign_face_observation_person', {
-      p_observation_id: link.id,
-      p_person_record_id: draft.personRecordId,
-      p_display_name: draft.displayName.trim() || null,
-    });
-    if (saveError) {
-      setIdentityError(saveError.message);
-    } else {
+    try {
+      const { data, error: saveError } = await supabase.rpc('record_cctv_identity_draft', {
+        p_job_id: selected?.id,
+        p_evidence_id: selected?.evidence_item_id,
+        p_organization_id: profile?.organizationId,
+        p_event_id: face.event_id,
+        p_event_type: 'face',
+        p_subject_kind: 'person',
+        p_proposed_person_record_id: draft.personRecordId,
+        p_proposed_display_name: draft.displayName.trim() || null,
+        p_candidate_matches: link.metadata?.candidates ?? [],
+        p_reason: 'Provisional person match awaiting human review',
+      });
+      if (saveError) throw saveError;
+      if (data) {
+        setIdentityDrafts((current) => ({
+          ...current,
+          [face.event_id]: {
+            ...current[face.event_id],
+            personRecordId: draft.personRecordId,
+            displayName: draft.displayName,
+            draftId: data.id,
+            status: data.status,
+            authorityLevel: data.authority_level,
+          },
+        }));
+      }
+    } catch (saveError) {
+      setIdentityError(saveError instanceof Error ? saveError.message : 'Draft identity could not be saved.');
+    }
+    setIdentitySaving(null);
+  };
+
+  const approveFaceIdentity = async (face: ConsolidatedFaceEvent) => {
+    const link = faceObservationLinks[face.event_id];
+    const draft = identityDrafts[face.event_id];
+    if (!link?.id || !draft?.draftId || !draft?.personRecordId || !profile?.organizationId || !selected?.id) return;
+    setIdentitySaving(face.event_id);
+    setIdentityError(null);
+    try {
+      const { error: approveError } = await supabase.rpc('approve_cctv_identity_draft', {
+        p_draft_id: draft.draftId,
+        p_final_action: 'match_existing',
+        p_final_person_record_id: draft.personRecordId,
+        p_review_notes: `Approved by reviewer for ${face.subject_label || 'person'} observation`,
+      });
+      if (approveError) throw approveError;
+
+      const { error: assignError } = await supabase.rpc('assign_face_observation_person', {
+        p_observation_id: link.id,
+        p_person_record_id: draft.personRecordId,
+        p_display_name: draft.displayName.trim() || null,
+      });
+      if (assignError) throw assignError;
+
+      setIdentityDrafts((current) => ({
+        ...current,
+        [face.event_id]: {
+          ...current[face.event_id],
+          status: 'approved',
+          authorityLevel: 'approved',
+        },
+      }));
       setPersonRecords((current) => current.map((record) => record.id === draft.personRecordId
         ? { ...record, display_name: draft.displayName.trim() || record.display_name }
         : record));
+    } catch (approveError) {
+      setIdentityError(approveError instanceof Error ? approveError.message : 'Identity approval could not be completed.');
     }
     setIdentitySaving(null);
   };
@@ -397,6 +482,92 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         /* autoplay policy */
       });
     }
+  };
+
+  const printSelectedReport = async () => {
+    if (!selected) return;
+    const batchConsolidated = selectedBatchJobs.map((job) => ({ job, result: consolidateResultData(job.result?.result) }));
+    const observations = batchConsolidated.flatMap(({ result }) => [
+      ...result.person_events.map((event) => ({
+        kind: 'Person',
+        label: `Person observation ${event.event_id.slice(0, 8)}`,
+        confidence: event.confidence,
+        startSeconds: event.first_seen_seconds,
+        endSeconds: event.last_seen_seconds,
+        reviewState: 'Review required',
+      })),
+      ...result.face_events.map((event) => ({
+        kind: 'Face',
+        label: event.subject_label || 'Unknown person',
+        confidence: null,
+        startSeconds: event.first_seen_seconds,
+        endSeconds: event.last_seen_seconds,
+        reviewState: identityDrafts[event.event_id]?.authorityLevel === 'approved' ? 'Approved identity' : identityDrafts[event.event_id]?.status === 'draft' ? 'Draft match' : 'Review required',
+      })),
+      ...result.vehicle_events.map((event) => ({
+        kind: 'Vehicle',
+        label: event.plate || 'Unreadable plate',
+        confidence: event.confidence,
+        startSeconds: event.first_seen_seconds,
+        endSeconds: event.last_seen_seconds,
+        reviewState: event.temporal_consensus ? 'Review required' : 'Single-frame reading',
+      })),
+    ]);
+    const reportCounts = batchConsolidated.reduce((counts, { result }) => ({
+      personCount: counts.personCount + result.summary_counts.face_events + result.summary_counts.person_events,
+      vehicleCount: counts.vehicleCount + result.summary_counts.vehicle_events,
+      frameCount: counts.frameCount + result.summary_counts.total_frames_parsed,
+    }), { personCount: 0, vehicleCount: 0, frameCount: 0 });
+    const generatedAt = new Date().toLocaleString('en-NZ');
+    const reportPayload = {
+      schema_version: 1,
+      title: 'CCTV evidence report',
+      generated_at: generatedAt,
+      place: evidencePlaceContext(selected.evidence?.metadata || null),
+      job_id: selected.id,
+      evidence_id: selected.evidence_item_id || 'Not specified',
+      batch_id: selectedBatch?.batch_id || null,
+      clip_count: selectedBatch?.clip_total || null,
+      person_count: reportCounts.personCount,
+      vehicle_count: reportCounts.vehicleCount,
+      frame_count: reportCounts.frameCount,
+      observations,
+    };
+    const { data: receiptData, error: receiptError } = await supabase.rpc('issue_cctv_report_receipt', {
+      p_job_id: selected.id,
+      p_evidence_id: selected.evidence_item_id,
+      p_organization_id: profile?.organizationId,
+      p_batch_id: selectedBatch?.batch_id || null,
+      p_payload: reportPayload,
+    });
+    const receipt = Array.isArray(receiptData) ? receiptData[0] : receiptData;
+    if (receiptError || !receipt) {
+      setDecisionMessage(receiptError?.message || 'The CCTV report receipt could not be issued. The report was not opened.');
+      return;
+    }
+    const report = buildCCTVPrintableReport({
+      title: 'CCTV evidence report',
+      generatedAt,
+      place: reportPayload.place,
+      jobId: reportPayload.job_id,
+      evidenceId: reportPayload.evidence_id,
+      batchId: reportPayload.batch_id,
+      clipCount: reportPayload.clip_count,
+      personCount: reportCounts.personCount,
+      vehicleCount: reportCounts.vehicleCount,
+      frameCount: reportCounts.frameCount,
+      observations,
+    });
+    const reportWindow = window.open('', '_blank', 'noopener,noreferrer');
+    if (!reportWindow) {
+      setDecisionMessage('The printable report could not open. Allow pop-ups for this site and try again.');
+      return;
+    }
+    reportWindow.document.write(report);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
+    setDecisionMessage(`Report receipt issued: ${receipt.report_id} · SHA-256 ${receipt.sha256}`);
   };
 
   return (
@@ -531,6 +702,9 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               </div>
 
               <div className="cctv-card-actions">
+                <button type="button" className="cctv-btn-jump" onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
+                  <Printer size={13} /> Print report
+                </button>
                 {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
                   <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('retry')}>
                     <RotateCcw size={13} /> {jobAction === 'retry' ? 'Retrying...' : 'Retry'}
@@ -768,6 +942,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                         ) : null}
                         {faceObservationLinks[face.event_id] ? (
                           <div className="cctv-identity-editor">
+                            {identityDrafts[face.event_id]?.draftId && (
+                              <div className="cctv-review-note">
+                                <ShieldAlert size={17} />
+                                <span>
+                                  Draft match saved for human review. This suggestion is provisional and not yet authoritative.
+                                </span>
+                              </div>
+                            )}
                             <label>
                               Person record
                               <select
@@ -778,6 +960,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                                   setIdentityDrafts((current) => ({
                                     ...current,
                                     [face.event_id]: {
+                                        ...(current[face.event_id] ?? {}),
                                       personRecordId,
                                       displayName: current[face.event_id]?.displayName || selectedRecord?.display_name || '',
                                     },
@@ -798,20 +981,33 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                                 onChange={(event) => setIdentityDrafts((current) => ({
                                   ...current,
                                   [face.event_id]: {
+                                    ...(current[face.event_id] ?? {}),
                                     personRecordId: current[face.event_id]?.personRecordId || faceObservationLinks[face.event_id].person_record_id || '',
                                     displayName: event.target.value,
                                   },
                                 }))}
                               />
                             </label>
-                            <button
-                              type="button"
-                              className="cctv-btn-jump"
-                              disabled={identitySaving === face.event_id}
-                              onClick={() => void saveFaceIdentity(face)}
-                            >
-                              {identitySaving === face.event_id ? 'Saving...' : 'Save identity'}
-                            </button>
+                            <div className="cctv-card-actions">
+                              <button
+                                type="button"
+                                className="cctv-btn-jump"
+                                disabled={identitySaving === face.event_id || !identityDrafts[face.event_id]?.personRecordId}
+                                onClick={() => void saveFaceIdentity(face)}
+                              >
+                                {identitySaving === face.event_id ? 'Saving...' : identityDrafts[face.event_id]?.draftId ? 'Update draft' : 'Save draft'}
+                              </button>
+                              {identityDrafts[face.event_id]?.draftId && (
+                                <button
+                                  type="button"
+                                  className="cctv-btn-confirm"
+                                  disabled={identitySaving === face.event_id}
+                                  onClick={() => void approveFaceIdentity(face)}
+                                >
+                                  {identitySaving === face.event_id ? 'Approving...' : 'Approve draft'}
+                                </button>
+                              )}
+                            </div>
                           </div>
                         ) : (
                           <small className="cctv-identity-pending">Identity record pending for this observation.</small>
