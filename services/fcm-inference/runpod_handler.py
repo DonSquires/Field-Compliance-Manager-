@@ -14,10 +14,36 @@ from app import (
     VEHICLE_MODEL_PATH,
     YUNET_MODEL_PATH,
     _detect_people,
+    _face_models,
+    _infer_plate_from_image,
     _infer_vehicle_attributes,
 )
 
 MAX_IMAGE_PIXELS = 20_000_000
+
+
+def _enhance_capture(image: np.ndarray, scale: int = 3) -> tuple[np.ndarray, dict[str, Any]]:
+    source_hash = __import__('hashlib').sha256(image.tobytes()).hexdigest()
+    height, width = image.shape[:2]
+    upscaled = cv2.resize(image, (width * scale, height * scale), interpolation=cv2.INTER_CUBIC)
+    lab = cv2.cvtColor(upscaled, cv2.COLOR_BGR2LAB)
+    lightness, green_red, blue_yellow = cv2.split(lab)
+    lightness = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lightness)
+    equalized = cv2.cvtColor(cv2.merge((lightness, green_red, blue_yellow)), cv2.COLOR_LAB2BGR)
+    denoised = cv2.bilateralFilter(equalized, d=5, sigmaColor=35, sigmaSpace=35)
+    blurred = cv2.GaussianBlur(denoised, (0, 0), 1.1)
+    enhanced = np.clip(cv2.addWeighted(denoised, 1.35, blurred, -0.35, 0), 0, 255).astype(np.uint8)
+    return enhanced, {
+        "profile": "deterministic_capture_v1",
+        "operations": ["crop", f"resize_{scale}x", "clahe_luminance", "bilateral_denoise", "unsharp_mask"],
+        "generative": False,
+        "source_sha256": source_hash,
+        "enhanced_sha256": __import__('hashlib').sha256(enhanced.tobytes()).hexdigest(),
+        "source_width": width,
+        "source_height": height,
+        "output_width": enhanced.shape[1],
+        "output_height": enhanced.shape[0],
+    }
 
 
 def _image_from_input(value: str) -> np.ndarray:
@@ -52,6 +78,23 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             result = _infer_frame(_image_from_input(frame.get("image_base64", "")), tasks)
             results.append({"frame_id": frame.get("frame_id"), "result": result})
         return {"success": True, "results": results}
+    if payload.get("action") == "capture_recognition":
+        image = _image_from_input(payload.get("image_base64", ""))
+        enhanced, enhancement = _enhance_capture(image)
+        tasks = set(payload.get("tasks") or [])
+        result = {
+            "schema_version": 1,
+            "source_frame_hash": payload.get("source_frame_hash"),
+            "enhanced_crop_hash": enhancement["enhanced_sha256"],
+            "enhancement": enhancement,
+            "authority": "provisional",
+            "review_required": True,
+            "alpr": {"state": "candidate", "result": _infer_alpr_if_requested(enhanced) if "alpr" in tasks else None, "review_required": True},
+            "face": {"state": "candidate", "result": _infer_face_if_requested(enhanced) if "face_embedding" in tasks else None, "review_required": True},
+            "vehicle": {"state": "ready" if "vehicle_attributes" in tasks else "not_requested", "result": _infer_vehicle_attributes(enhanced) if "vehicle_attributes" in tasks else None, "review_required": True},
+            "animals": {"state": "unavailable", "reason": "animal_model_not_staged", "detections": [], "review_required": True} if "animal_detection" in tasks else {"state": "not_requested"},
+        }
+        return result
     if payload.get("action") != "infer":
         return {"success": False, "error": "unsupported_action"}
 
@@ -72,6 +115,32 @@ def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
         result["faces"] = []
         result["face_review_required"] = True
     return result
+
+
+def _infer_alpr_if_requested(image: np.ndarray) -> dict[str, Any]:
+    try:
+        return {"state": "candidate", "result": _infer_plate_from_image(image), "review_required": True}
+    except Exception as error:
+        return {"state": "unavailable", "reason": str(error), "review_required": True}
+
+
+def _infer_face_if_requested(image: np.ndarray) -> dict[str, Any]:
+    try:
+        detector, recognizer = _face_models()
+        height, width = image.shape[:2]
+        detector.setInputSize((width, height))
+        _, detections = detector.detect(image)
+        faces = []
+        for index, detection in enumerate(detections if detections is not None else []):
+            aligned = recognizer.alignCrop(image, detection)
+            vector = np.asarray(recognizer.feature(aligned), dtype=np.float32).reshape(-1)
+            norm = float(np.linalg.norm(vector))
+            if not np.isfinite(vector).all() or norm == 0: continue
+            vector /= norm
+            faces.append({"subject_label": f"Unidentified subject #{index + 1}", "face_index": index, "bbox": {"x": float(detection[0]), "y": float(detection[1]), "width": float(detection[2]), "height": float(detection[3])}, "embedding": [round(float(value), 7) for value in vector], "review_state": "manual_review_required"})
+        return {"state": "candidate", "result": {"success": True, "faces": faces, "identity_resolution": "manual_review_required"}, "review_required": True}
+    except Exception as error:
+        return {"state": "unavailable", "reason": str(error), "review_required": True}
 
 
 if __name__ == "__main__":
