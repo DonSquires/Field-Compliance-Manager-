@@ -60,7 +60,7 @@ import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
 
-const DESKTOP_APP_DOWNLOAD_URL = 'https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/desktop-releases/FCM-SD-Card-Bridge-Setup.exe';
+const DESKTOP_APP_DOWNLOAD_URL = 'https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/desktop-releases/0.1.44/FCM-SD-Card-Bridge-Setup.exe';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
