@@ -108,6 +108,14 @@ function progressLabel(job: CCTVJob): string {
   return job.progress_label || (job.stage ? statusLabel(job.stage) : statusLabel(job.status));
 }
 
+function evidencePlaceContext(metadata: Record<string, unknown> | null): string {
+  const source = metadata || {};
+  const labels = ['site_name', 'zone_name', 'location_name', 'place_name']
+    .map((key) => typeof source[key] === 'string' ? source[key].trim() : '')
+    .filter(Boolean);
+  return labels.length ? labels.join(' · ') : 'Unassigned place context';
+}
+
 export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 'all', libraryMode = false }) => {
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<CCTVJob[]>([]);
@@ -486,6 +494,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 <div>
                   <span>Evidence inspection</span>
                   <h2>{selected.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</h2>
+                  <small className="cctv-place-context">Place: {evidencePlaceContext(selected.evidence?.metadata || null)}</small>
                 </div>
                 <Eye size={19} />
               </div>
@@ -915,6 +924,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <div>
                     <dt>Evidence ID</dt>
                     <dd>{selected.evidence_item_id || 'Not specified'}</dd>
+                  </div>
+                  <div>
+                    <dt>Place context</dt>
+                    <dd>{evidencePlaceContext(selected.evidence?.metadata || null)}</dd>
                   </div>
                   <div>
                     <dt>Job ID</dt>

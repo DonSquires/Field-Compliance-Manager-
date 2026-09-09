@@ -85,6 +85,7 @@
 .cctv-detail { padding: 20px; position: sticky; top: 18px; display: grid; gap: 16px; }
 .cctv-detail-heading { align-items: center; border-bottom: 1px solid #e4eaec; padding-bottom: 14px; }
 .cctv-detail-heading h2 { font-size: 18px; }
+.cctv-place-context { color: #65727c; display: block; font-size: 11px; margin-top: 5px; }
 
 /* Media player */
 .cctv-media-container { background: #0e151b; border-radius: 6px; overflow: hidden; min-height: 180px; display: flex; align-items: center; justify-content: center; }
