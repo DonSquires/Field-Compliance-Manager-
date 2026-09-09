@@ -19,7 +19,8 @@ test('Bob accepts arbitrary file types through private resumable storage up to 1
   assert.match(registrar, /const MAX_ATTACHMENT_BYTES = 128 \* 1024 \* 1024 \* 1024/);
   assert.match(registrar, /sanitizeDesktopReviewBatch/);
   assert.match(registrar, /desktop_review_batch: desktopReviewBatch/);
-  assert.match(registrar, /createSignedUrl\(storagePath, 60\)/);
+  assert.match(registrar, /requiredPrefix/);
+  assert.doesNotMatch(registrar, /createSignedUrl\(storagePath/);
   assert.doesNotMatch(registrar, /\.list\(directory, \{ search: objectName/);
   assert.match(desktop, /desktop_review_batch: reviewBatch/);
   assert.match(desktop, /batch_id: batchId/);

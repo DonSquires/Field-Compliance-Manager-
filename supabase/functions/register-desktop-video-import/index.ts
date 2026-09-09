@@ -64,16 +64,6 @@ serve(async (request) => {
     if (!profile?.organization_id) return json({ error: 'Active organization not found' }, 404);
     const requiredPrefix = `desktop/${user.id}/${attachmentId}-`;
     if (!storagePath.startsWith(requiredPrefix)) return json({ error: 'Storage path does not belong to this desktop import' }, 403);
-    // Confirm the exact nested object through the Storage API. Directory listing is not reliable
-    // for deeply nested Tus uploads, so use signed-URL generation as the existence probe.
-    let objectExists = false;
-    for (const delayMs of [0, 300, 800, 1500]) {
-      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
-      const { data: signedObject, error: signedObjectError } = await admin.storage.from('bob-uploads').createSignedUrl(storagePath, 60);
-      if (signedObject?.signedUrl && !signedObjectError) { objectExists = true; break; }
-    }
-    if (!objectExists) return json({ error: 'Uploaded video object not found' }, 404);
-
     const { data: conversation, error: conversationError } = await admin.from('bob_conversations').insert({
       organization_id: profile.organization_id,
       user_id: user.id,
