@@ -626,6 +626,16 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                         <div className="cctv-card-meta">
                           <span><strong>Window:</strong> {person.first_seen_seconds}s – {person.last_seen_seconds}s</span>
                           <span><strong>Sightings:</strong> {person.frame_count} frames{person.visit_count ? ` · ${person.visit_count} visit${person.visit_count === 1 ? '' : 's'}` : ''}</span>
+                          {person.attributes && (
+                            <span>
+                              <strong>Visual estimate:</strong>{' '}
+                              {[person.attributes.upper_body_colour, person.attributes.lower_body_colour]
+                                .filter((value): value is string => typeof value === 'string' && value.length > 0)
+                                .map((value) => value.replaceAll('_', ' '))
+                                .join(' upper/lower, ') || 'appearance unavailable'}
+                              {' · height requires camera calibration'}
+                            </span>
+                          )}
                         </div>
                         <div className="cctv-card-actions">
                           <button type="button" className="cctv-btn-jump" onClick={() => jumpToTime(person.first_seen_seconds)}>
