@@ -82,6 +82,42 @@ async function writeClassificationCheckpoint(jobId, frames) {
   await fs.rename(temporaryPath, checkpointPath);
 }
 
+function cameraKeyFromEvidence(evidence) {
+  const metadata = evidence.metadata || {};
+  const explicit = metadata.camera_key || metadata.camera_id || metadata.channel;
+  if (explicit) return String(explicit);
+  const source = String(evidence.storage_path || '').replace(/^[^/]+\//, '').replace(/\/[^/]+$/, '');
+  return source || evidence.id;
+}
+
+function sceneFingerprint(summary) {
+  const frames = summary.motion_segments.flatMap((segment) => segment.frames || []);
+  const sample = frames.slice(0, 12).map((frame) => frame.sha256_hash).filter(Boolean);
+  return {
+    source_filename: summary.source_filename || null,
+    codec_fourcc: summary.codec_fourcc || null,
+    frame_width: summary.frame_width || null,
+    frame_height: summary.frame_height || null,
+    duration_seconds: summary.total_duration || null,
+    sample_frame_hashes: sample,
+  };
+}
+
+async function recordSceneMemory(job, evidence, summary) {
+  const metadata = evidence.metadata || {};
+  const { error } = await supabase.rpc('record_cctv_scene_observation', {
+    p_organization_id: job.organization_id,
+    p_evidence_id: job.evidence_item_id,
+    p_inference_job_id: job.id,
+    p_camera_key: cameraKeyFromEvidence(evidence),
+    p_scene_fingerprint: sceneFingerprint(summary),
+    p_location_id: metadata.location_id || null,
+    p_site_id: metadata.site_id || null,
+    p_zone_id: metadata.zone_id || null,
+  });
+  if (error) log('scene_memory_record_failed', { job_id: job.id, error: error.message });
+}
+
 async function ensureVideoPath(evidence) {
   const sourcePath = safeVideoPath(evidence.storage_path);
   try {
@@ -482,6 +518,7 @@ async function processOne() {
     });
     await updateProgress(job, 'persisting_result', { label: 'Saving results and evidence links' });
     await ingest(job, summary);
+    await recordSceneMemory(job, evidence, summary);
     await fs.rm(classificationCheckpointPath(job.id), { force: true });
     log('job_completed', {
       job_id: job.id,
