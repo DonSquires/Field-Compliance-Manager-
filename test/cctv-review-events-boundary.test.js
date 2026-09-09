@@ -25,4 +25,7 @@ test('CCTV review events provide append-only human state and tenant-safe canonic
     assert.match(page, /from\('vehicles'\)/);
     assert.match(page, /Accept and link/);
     assert.match(page, /p_vehicle_id: vehicleId/);
+    assert.match(page, /from\('incidents'\)/);
+    assert.match(page, /Link incident/);
+    assert.match(page, /p_incident_id: incidentId/);
 });

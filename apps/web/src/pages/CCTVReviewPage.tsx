@@ -78,6 +78,13 @@ type VehicleRecordOption = {
   model: string | null;
 };
 
+type IncidentRecordOption = {
+  id: string;
+  incident_type: string;
+  status: string;
+  occurred_at: string;
+};
+
 type IdentityDraftState = {
   personRecordId: string;
   displayName: string;
@@ -90,6 +97,7 @@ type ReviewEventState = {
   review_state: string;
   reviewer_notes: string | null;
   linked_vehicle_id?: string | null;
+  linked_incident_id?: string | null;
 };
 
 type FaceObservationLink = {
@@ -181,11 +189,13 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [enlargedImage, setEnlargedImage] = useState<{ src: string; title: string; subtitle?: string } | null>(null);
   const [personRecords, setPersonRecords] = useState<PersonRecordOption[]>([]);
   const [vehicleRecords, setVehicleRecords] = useState<VehicleRecordOption[]>([]);
+  const [incidentRecords, setIncidentRecords] = useState<IncidentRecordOption[]>([]);
   const [faceObservationLinks, setFaceObservationLinks] = useState<Record<string, FaceObservationLink>>({});
   const [identityDrafts, setIdentityDrafts] = useState<Record<string, IdentityDraftState>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
   const [observationSaving, setObservationSaving] = useState<string | null>(null);
   const [vehicleDrafts, setVehicleDrafts] = useState<Record<string, string>>({});
+  const [incidentDrafts, setIncidentDrafts] = useState<Record<string, string>>({});
   const [reviewEventStates, setReviewEventStates] = useState<Record<string, ReviewEventState>>({});
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [decisionSaving, setDecisionSaving] = useState(false);
@@ -392,22 +402,25 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       if (!profile?.organizationId || !selected?.evidence_item_id) {
         setPersonRecords([]);
         setVehicleRecords([]);
+        setIncidentRecords([]);
         setFaceObservationLinks({});
         setIdentityDrafts({});
         setVehicleDrafts({});
+        setIncidentDrafts({});
         setReviewEventStates({});
         return;
       }
-      const [{ data: observations, error: observationsError }, { data: records, error: recordsError }, { data: vehicles, error: vehiclesError }, { data: drafts, error: draftsError }, { data: reviewEvents, error: reviewEventsError }] = await Promise.all([
+      const [{ data: observations, error: observationsError }, { data: records, error: recordsError }, { data: vehicles, error: vehiclesError }, { data: incidents, error: incidentsError }, { data: drafts, error: draftsError }, { data: reviewEvents, error: reviewEventsError }] = await Promise.all([
         supabase.from('face_observations').select('id, person_record_id, metadata').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
         supabase.from('person_records').select('id, display_name, review_state, metadata').eq('organization_id', profile.organizationId).order('created_at', { ascending: true }),
         supabase.from('vehicles').select('id, plate, make, model').eq('organization_id', profile.organizationId).order('plate', { ascending: true }),
+        supabase.from('incidents').select('id, incident_type, status, occurred_at').eq('organization_id', profile.organizationId).in('status', ['open', 'in_review', 'escalated']).order('occurred_at', { ascending: false }),
         supabase.from('cctv_identity_drafts').select('id, event_id, proposed_person_record_id, proposed_display_name, status, authority_level').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
         supabase.from('cctv_review_events').select('source_event_id, review_state, reviewer_notes, linked_vehicle_id').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
       ]);
       if (!active) return;
-      if (observationsError || recordsError || vehiclesError || draftsError || reviewEventsError) {
-        setIdentityError(observationsError?.message || recordsError?.message || vehiclesError?.message || draftsError?.message || reviewEventsError?.message || 'CCTV review records could not be loaded.');
+      if (observationsError || recordsError || vehiclesError || incidentsError || draftsError || reviewEventsError) {
+        setIdentityError(observationsError?.message || recordsError?.message || vehiclesError?.message || incidentsError?.message || draftsError?.message || reviewEventsError?.message || 'CCTV review records could not be loaded.');
         return;
       }
       const nextRecords = (records ?? []) as PersonRecordOption[];
@@ -436,6 +449,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       }
       setPersonRecords(nextRecords);
       setVehicleRecords((vehicles ?? []) as VehicleRecordOption[]);
+      setIncidentRecords((incidents ?? []) as IncidentRecordOption[]);
       setFaceObservationLinks(nextLinks);
       setIdentityDrafts(nextDrafts);
       setReviewEventStates(nextReviewStates);
@@ -586,6 +600,29 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         [vehicle.event_id]: { review_state: 'accepted', reviewer_notes: `Accepted ALPR observation for plate ${vehicle.plate}`, linked_vehicle_id: vehicleId },
       }));
       setDecisionMessage(`Vehicle observation ${vehicle.plate} accepted and linked.`);
+    }
+    setObservationSaving(null);
+  };
+
+  const linkObservationIncident = async (eventId: string, eventType: 'person' | 'face' | 'vehicle') => {
+    const incidentId = incidentDrafts[eventId] || reviewEventStates[eventId]?.linked_incident_id || '';
+    if (!selected || !selected.evidence_item_id || !profile?.organizationId || !incidentId) return;
+    setObservationSaving(eventId);
+    setIdentityError(null);
+    const { error: linkError } = await supabase.rpc('record_cctv_review_event', {
+      p_job_id: selected.id,
+      p_evidence_id: selected.evidence_item_id,
+      p_organization_id: profile.organizationId,
+      p_source_event_id: eventId,
+      p_event_type: eventType,
+      p_review_state: reviewEventStates[eventId]?.review_state === 'accepted' ? 'accepted' : 'needs_more_context',
+      p_reviewer_notes: 'Linked to an existing incident by a human reviewer.',
+      p_incident_id: incidentId,
+    });
+    if (linkError) setIdentityError(linkError.message);
+    else {
+      setReviewEventStates((current) => ({ ...current, [eventId]: { ...current[eventId], review_state: current[eventId]?.review_state || 'needs_more_context', reviewer_notes: 'Linked to an existing incident by a human reviewer.', linked_incident_id: incidentId } }));
+      setDecisionMessage(`${eventType} observation linked to incident.`);
     }
     setObservationSaving(null);
   };
@@ -1276,6 +1313,16 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                           </button>
                           <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === veh.event_id} onClick={() => void recordObservationState(veh.event_id, 'vehicle', 'uncertain')}>Uncertain</button>
                           <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === veh.event_id} onClick={() => void recordObservationState(veh.event_id, 'vehicle', 'rejected')}>Reject</button>
+                        </div>
+                        <div className="cctv-identity-editor cctv-vehicle-link-editor">
+                          <label>
+                            Incident link
+                            <select value={incidentDrafts[veh.event_id] || reviewEventStates[veh.event_id]?.linked_incident_id || ''} onChange={(event) => setIncidentDrafts((current) => ({ ...current, [veh.event_id]: event.target.value }))}>
+                              <option value="">Select an active incident</option>
+                              {incidentRecords.map((incident) => <option key={incident.id} value={incident.id}>{incident.incident_type} · {incident.status} · {timeLabel(incident.occurred_at)}</option>)}
+                            </select>
+                          </label>
+                          <button type="button" className="cctv-btn-jump" disabled={observationSaving === veh.event_id || !(incidentDrafts[veh.event_id] || reviewEventStates[veh.event_id]?.linked_incident_id)} onClick={() => void linkObservationIncident(veh.event_id, 'vehicle')}>Link incident</button>
                         </div>
                         <div className="cctv-identity-editor cctv-vehicle-link-editor">
                           <label>
