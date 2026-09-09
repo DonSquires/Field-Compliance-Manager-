@@ -433,6 +433,21 @@ async function consolidateMotionSummary(summary, options = {}) {
       total_frames_with_motion: allFrames.length,
       total_frames_parsed: summary.total_frames_parsed || allFrames.length,
     },
+    quality_summary: {
+      review_required_count: [
+        ...vehicleResult.events,
+        ...personEvents,
+        ...faceResult.events,
+      ].filter((event) => event.review_required !== false).length,
+      single_frame_vehicle_count: vehicleResult.events.filter((event) => event.temporal_consensus !== true).length,
+      provider_counts: vehicleResult.events.reduce((counts, event) => {
+        const provider = event.inference_provider || 'unknown';
+        counts[provider] = (counts[provider] || 0) + 1;
+        return counts;
+      }, {}),
+      animal_detection_status: 'model_not_staged',
+      policy: 'AI output is advisory and requires human confirmation before enforcement or identity commitment.',
+    },
   };
 
   return summary;

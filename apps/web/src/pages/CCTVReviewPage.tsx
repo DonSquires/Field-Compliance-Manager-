@@ -578,6 +578,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <span>Parsed Frames</span>
                 </div>
               </div>
+              {consolidated.quality_summary && (
+                <div className="cctv-quality-panel" aria-label="Inference quality and governance">
+                  <strong>Inference quality and governance</strong>
+                  <span>{consolidated.quality_summary.review_required_count ?? 0} finding{consolidated.quality_summary.review_required_count === 1 ? '' : 's'} require human review.</span>
+                  {(consolidated.quality_summary.single_frame_vehicle_count ?? 0) > 0 && <span>{consolidated.quality_summary.single_frame_vehicle_count} vehicle reading{consolidated.quality_summary.single_frame_vehicle_count === 1 ? '' : 's'} came from a single frame.</span>}
+                  <span>Animal detection: {consolidated.quality_summary.animal_detection_status === 'model_not_staged' ? 'not enabled for this deployment' : consolidated.quality_summary.animal_detection_status || 'not reported'}.</span>
+                </div>
+              )}
 
               {/* Tabs */}
               <div className="cctv-tab-bar">

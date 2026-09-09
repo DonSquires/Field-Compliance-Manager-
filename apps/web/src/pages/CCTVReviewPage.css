@@ -99,6 +99,9 @@
 .cctv-finding-grid svg { color: #187a70; }
 .cctv-finding-grid strong { font-size: 18px; color: #192730; }
 .cctv-finding-grid span { color: #65727c; font-size: 11px; line-height: 1.25; }
+.cctv-quality-panel { background: #fff7e7; border-left: 4px solid #bd8419; color: #75541b; display: grid; gap: 4px; line-height: 1.35; padding: 11px 12px; }
+.cctv-quality-panel strong { font-size: 12px; }
+.cctv-quality-panel span { font-size: 11px; }
 
 /* Tabs */
 .cctv-tab-bar { display: flex; border-bottom: 1px solid #dde3e6; gap: 8px; }

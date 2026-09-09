@@ -86,6 +86,13 @@ export interface ConsolidatedResult {
     total_frames_with_motion: number;
     total_frames_parsed: number;
   };
+  quality_summary?: {
+    review_required_count?: number;
+    single_frame_vehicle_count?: number;
+    provider_counts?: Record<string, number>;
+    animal_detection_status?: string;
+    policy?: string;
+  };
 }
 
 export function cosineSimilarity(a: number[] | undefined, b: number[] | undefined): number {
@@ -169,6 +176,7 @@ export function consolidateResultData(
         total_frames_with_motion: 0,
         total_frames_parsed: Number(resultData.total_frames_parsed) || 0,
       },
+      quality_summary: raw.quality_summary,
     };
   }
 
