@@ -45,4 +45,9 @@ describe('client portfolio hub', () => {
     expect(source).toContain('Bob uses this portfolio context');
     expect(source).not.toContain('onspace-ai-chat');
   });
+
+  it('shows live record freshness without inventing a separate audit source', () => {
+    expect(source).toContain('portfolioUpdatedAt');
+    expect(source).toContain('Live account record updated');
+  });
 });

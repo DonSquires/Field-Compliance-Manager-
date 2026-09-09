@@ -119,6 +119,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const activityRequestId = useRef(crypto.randomUUID());
   const headlineAgreement = agreements.find((agreement) => agreement.agreement_type === 'operational') ?? agreements[0] ?? null;
   const headlineInvitation = headlineAgreement?.invitation_status?.replaceAll('_', ' ') ?? 'not invited';
+  const portfolioUpdatedAt = organizationDetails?.updated_at ?? null;
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
@@ -303,7 +304,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
 
   return <div className="crm-workspace-backdrop">
     <section className="crm-workspace" role="dialog" aria-modal="true" aria-labelledby="crm-workspace-title">
-      <header><div><span>Client portfolio</span><h2 id="crm-workspace-title">{account.name}</h2><p>Commercial, operational, and relationship context for this organisation.</p><small className="crm-portfolio-context-note">Bob uses this portfolio context when you ask for help.</small></div><button type="button" onClick={onClose} aria-label="Close client portfolio"><X size={19} /></button></header>
+      <header><div><span>Client portfolio</span><h2 id="crm-workspace-title">{account.name}</h2><p>Commercial, operational, and relationship context for this organisation.</p><small className="crm-portfolio-context-note">Bob uses this portfolio context when you ask for help.</small>{portfolioUpdatedAt && <small className="crm-portfolio-freshness">Live account record updated {new Date(portfolioUpdatedAt).toLocaleString('en-NZ')}</small>}</div><button type="button" onClick={onClose} aria-label="Close client portfolio"><X size={19} /></button></header>
       {error && <div className="crm-workspace-message is-error" role="alert">{error}</div>}
       {notice && <div className="crm-workspace-message is-success" role="status">{notice}</div>}
       <nav className="crm-portfolio-nav" aria-label="Client portfolio views">
