@@ -42,7 +42,7 @@ async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0]
 }
 
 async function dismissDesktopPrompt(page: Parameters<typeof installSupabaseFixtures>[0], session: HumanTestSession) {
-  const prompt = page.getByRole('dialog', { name: 'Use local hardware with FCM' });
+  const prompt = page.getByRole('dialog', { name: 'Choose your evidence workstation' });
   if (await prompt.isVisible({ timeout: 1000 }).catch(() => false)) {
     await session.step('dismiss the optional desktop companion prompt', async () => {
       await prompt.getByRole('button', { name: 'Not now', exact: true }).click();
