@@ -80,4 +80,13 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain('p_organization_id: operatingBranchId');
     expect(source).toContain(".eq('organization_id', operatingBranchId)");
   });
+
+  it('exposes governed operator controls for jobs, stops, and shifts', () => {
+    expect(source).toContain("operatorAction('job', 'amend')");
+    expect(source).toContain("operatorAction('job', 'reassign')");
+    expect(source).toContain("operatorAction('job', 'escalate')");
+    expect(source).toContain("operatorAction('stop', 'reorder')");
+    expect(source).toContain("operatorAction('shift', 'cancel')");
+    expect(source).toContain('supabase.rpc(rpc, payload)');
+  });
 });

@@ -181,12 +181,16 @@ const ShiftCard: React.FC<{
 );
 
 // Component: Stop Card
-const StopCard: React.FC<{ stop: ShiftStop }> = ({ stop }) => (
+const StopCard: React.FC<{ stop: ShiftStop; selected?: boolean; onSelect?: () => void }> = ({ stop, selected, onSelect }) => (
   <div
+    role="button"
+    tabIndex={0}
+    onClick={onSelect}
+    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelect?.(); }}
     style={{
       padding: '12px',
       backgroundColor: 'var(--color-bg-secondary)',
-      border: '1px solid var(--color-border)',
+      border: selected ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
       borderRadius: '4px',
       marginBottom: '8px',
     }}
@@ -282,6 +286,7 @@ const DispatchConsolePage: React.FC = () => {
   // State: Phase B (Shift stops)
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(requestedJobId);
+  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [shiftStops, setShiftStops] = useState<ShiftStop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
 
@@ -303,6 +308,7 @@ const DispatchConsolePage: React.FC = () => {
   const [formRequestId, setFormRequestId] = useState(() => crypto.randomUUID());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [operatorBusy, setOperatorBusy] = useState(false);
 
   // State: Phase D (Billing rates)
   const [billingRules, setBillingRules] = useState<DispatchBillingRule[]>([]);
@@ -642,6 +648,7 @@ const DispatchConsolePage: React.FC = () => {
   const handleSelectShift = useCallback(
     (shiftId: string) => {
       setSelectedShiftId(shiftId);
+      setSelectedStopId(null);
       loadPhaseB(shiftId);
       if (isMobile) setMobileTab('stops');
     },
@@ -649,6 +656,20 @@ const DispatchConsolePage: React.FC = () => {
   );
 
   const handleSelectSite = useCallback((siteId: string) => setFormSiteId(siteId), []);
+
+  const operatorAction = async (target: 'job' | 'stop' | 'shift', action: string) => {
+    const reason = window.prompt(`Reason for ${action.replaceAll('_', ' ')}:`)?.trim();
+    if (!reason) return;
+    const targetId = target === 'job' ? selectedJobId : target === 'stop' ? selectedStopId : selectedShiftId;
+    if (!targetId) return;
+    setOperatorBusy(true); setError(null);
+    const currentStatus = target === 'job' ? jobs.find((job) => job.id === targetId)?.status : target === 'stop' ? shiftStops.find((stop) => stop.id === targetId)?.status : activeShifts.find((shift) => shift.id === targetId)?.status;
+    const rpc = target === 'job' ? 'manage_dispatch_job' : target === 'stop' ? 'manage_shift_stop' : 'manage_active_shift';
+    const payload = target === 'job' ? { p_job_id: targetId, p_expected_status: currentStatus, p_action: action, p_reason: reason } : target === 'stop' ? { p_stop_id: targetId, p_expected_status: currentStatus, p_action: action, p_reason: reason } : { p_shift_id: targetId, p_expected_status: currentStatus, p_action: action, p_reason: reason };
+    const { error: actionError } = await supabase.rpc(rpc, payload);
+    if (actionError) setError(actionError.message); else { await loadPhaseA(); if (selectedShiftId) await loadPhaseB(selectedShiftId); }
+    setOperatorBusy(false);
+  };
 
   // Mobile: Shift + Stops + Jobs tabs
   if (isMobile) {
@@ -802,6 +823,7 @@ const DispatchConsolePage: React.FC = () => {
             ))}
           </div>
         )}
+        {selectedShiftId && <div className="dispatch-operator-actions"><strong>Selected shift</strong><div><button type="button" onClick={() => void operatorAction('shift', 'amend')} disabled={operatorBusy}>Amend shift</button><button type="button" onClick={() => void operatorAction('shift', 'escalate')} disabled={operatorBusy}>Escalate attendance</button><button type="button" onClick={() => void operatorAction('shift', 'cancel')} disabled={operatorBusy}>Cancel shift</button></div></div>}
       </div>
 
       {/* Column 2: Stops */}
@@ -824,10 +846,11 @@ const DispatchConsolePage: React.FC = () => {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {shiftStops.map((stop) => (
-              <StopCard key={stop.id} stop={stop} />
+              <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => setSelectedStopId(stop.id)} />
             ))}
           </div>
         )}
+        {selectedStopId && <div className="dispatch-operator-actions"><strong>Selected stop</strong><div><button type="button" onClick={() => void operatorAction('stop', 'reorder')} disabled={operatorBusy}>Change position</button><button type="button" onClick={() => void operatorAction('stop', 'skip')} disabled={operatorBusy}>Skip stop</button><button type="button" onClick={() => void operatorAction('stop', 'cancel')} disabled={operatorBusy}>Cancel stop</button></div></div>}
       </div>
 
       {/* Column 3: Jobs + Form */}
@@ -1126,6 +1149,7 @@ const DispatchConsolePage: React.FC = () => {
               <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />
           ))}
         </div>
+        {selectedJobId && <div className="dispatch-operator-actions"><strong>Selected job</strong><div><button type="button" onClick={() => void operatorAction('job', 'amend')} disabled={operatorBusy}>Amend details</button><button type="button" onClick={() => void operatorAction('job', 'reassign')} disabled={operatorBusy}>Reassign</button><button type="button" onClick={() => void operatorAction('job', 'escalate')} disabled={operatorBusy}>Escalate</button><button type="button" onClick={() => void operatorAction('job', 'cancel')} disabled={operatorBusy}>Cancel job</button></div></div>}
       </div>
     </div>
   );

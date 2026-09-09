@@ -1,3 +1,4 @@
+.dispatch-operator-actions{display:grid;gap:7px;margin-top:10px;padding:9px;border:1px solid #5b4b21;border-radius:5px;background:#211b0d}.dispatch-operator-actions strong{color:#f2d487;font-size:10px;text-transform:uppercase}.dispatch-operator-actions>div{display:flex;flex-wrap:wrap;gap:6px}.dispatch-operator-actions button{min-height:30px;padding:0 8px;border:1px solid #6e5714;border-radius:4px;color:#f3d68b;background:#30250d;font-size:10px;font-weight:750;cursor:pointer}.dispatch-operator-actions button:last-child{color:#ffd0c9;border-color:#7a3030;background:#351a1a}.dispatch-operator-actions button:disabled{opacity:.5;cursor:wait}
 .dispatch-job-card {
   display: block;
   width: 100%;
