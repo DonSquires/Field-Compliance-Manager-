@@ -16,6 +16,8 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.match(source, /Only authorised users can inspect recordings/);
   assert.match(source, /const FCM_WEB_URL = 'https:\/\/fcmanager\.co\.nz'/);
   assert.doesNotMatch(source, /vercel\.app/);
+  const adminShell = fs.readFileSync(path.join(root, 'apps/web/src/shells/AdminShell.tsx'), 'utf8');
+  assert.match(adminShell, /storage\/v1\/object\/public\/desktop-releases\/FCM-SD-Card-Bridge-Setup\.exe/);
   for (const label of ['Desktop home', 'Import recordings', 'CCTV review', 'Video upload', 'FCM web portal']) {
     assert.match(source, new RegExp(label));
   }
