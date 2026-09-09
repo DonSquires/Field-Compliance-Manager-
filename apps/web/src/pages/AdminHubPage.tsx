@@ -287,7 +287,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       {queueWarnings.length > 0 && (
         <div className="admin-data-warning" role="alert">
           <AlertTriangle size={18} aria-hidden="true" />
-          <div><strong>Some operational data is unavailable</strong><span>{queueWarnings.join(' · ')}</span></div>
+          <div><strong>Some operational data is unavailable</strong><span>{queueWarnings.join(' · ')}</span><small>Refresh the view. If the warning persists, check service health and access scope before relying on the queue.</small></div>
         </div>
       )}
 
