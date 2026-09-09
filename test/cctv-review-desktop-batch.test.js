@@ -18,6 +18,8 @@ test('CCTV Review surfaces desktop SD-card batch metadata for grouped review', (
   assert.match(page, /SD-card batch review/);
   assert.match(page, /Missing clips remain outside the current queue view/);
   assert.match(page, /selectedBatchClipIndexes/);
+  assert.match(page, /Load full batch/);
+  assert.match(page, /setBatchJobs\(mappedJobs\)/);
   assert.match(styles, /\.cctv-batch-link/);
   assert.match(styles, /\.cctv-batch-clip-list/);
   assert.match(styles, /\.is-missing/);

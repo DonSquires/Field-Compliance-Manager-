@@ -174,6 +174,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [decisionSaving, setDecisionSaving] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [reportReceipt, setReportReceipt] = useState<{ reportId: string; generatedAt: string; sha256: string; observationCount: number } | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchJobs, setBatchJobs] = useState<CCTVJob[]>([]);
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -238,7 +240,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
   const selectedBatch = desktopReviewBatch(selected?.evidence?.metadata || null);
   const selectedBatchJobs = selectedBatch
-    ? jobs.filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id)
+    ? (batchJobs.length > 0 ? batchJobs : jobs.filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id))
     : selected ? [selected] : [];
   const selectedBatchComplete = !selectedBatch || selectedBatchJobs.length >= selectedBatch.clip_total;
   const selectedBatchClipIndexes = selectedBatchJobs
@@ -247,7 +249,32 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
 
   useEffect(() => {
     setReportReceipt(null);
+    setBatchJobs([]);
   }, [selectedId]);
+
+  const loadSelectedBatch = async () => {
+    if (!selectedBatch || !profile?.organizationId) return;
+    setBatchLoading(true);
+    setError(null);
+    try {
+      const { data, error: batchError } = await supabase
+        .from('inference_jobs')
+        .select('id, evidence_item_id, domain, status, stage, error_message, attempt_count, progress_percent, progress_current, progress_total, progress_label, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)')
+        .eq('organization_id', profile.organizationId)
+        .in('domain', [...CCTV_DOMAINS])
+        .order('created_at', { ascending: false })
+        .limit(Math.max(100, selectedBatch.clip_total * 2));
+      if (batchError) throw batchError;
+      const mappedJobs = ((data ?? []) as unknown as CCTVJob[])
+        .map((job) => ({ ...job, result: Array.isArray(job.result) ? job.result[0] ?? null : job.result }))
+        .filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id);
+      setBatchJobs(mappedJobs);
+    } catch (batchError) {
+      setError(batchError instanceof Error ? batchError.message : 'The selected SD-card batch could not be loaded.');
+    } finally {
+      setBatchLoading(false);
+    }
+  };
 
   const manageJob = useCallback(async (job: CCTVJob, action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (!profile?.organizationId) return;
@@ -728,6 +755,9 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                     <strong>SD-card batch review</strong>
                     <span>{selectedBatchClipIndexes.length} of {selectedBatch.clip_total} clips loaded</span>
                   </div>
+                  <button type="button" className="cctv-btn-jump" onClick={() => void loadSelectedBatch()} disabled={batchLoading}>
+                    <RefreshCw size={12} className={batchLoading ? 'is-spinning' : ''} /> {batchLoading ? 'Loading batch...' : 'Load full batch'}
+                  </button>
                   <div className="cctv-batch-clip-list">
                     {Array.from({ length: selectedBatch.clip_total }, (_, index) => index + 1).map((clipIndex) => {
                       const clipJob = selectedBatchJobs.find((job) => desktopReviewBatch(job.evidence?.metadata || null)?.clip_index === clipIndex);
