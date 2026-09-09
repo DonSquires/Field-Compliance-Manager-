@@ -909,6 +909,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               {activeTab === 'raw' && (
                 <dl className="cctv-provenance-list">
                   <div>
+                    <dt>Organization scope</dt>
+                    <dd>{profile?.organizationId || 'Current operator scope'}</dd>
+                  </div>
+                  <div>
+                    <dt>Evidence ID</dt>
+                    <dd>{selected.evidence_item_id || 'Not specified'}</dd>
+                  </div>
+                  <div>
                     <dt>Job ID</dt>
                     <dd>{selected.id}</dd>
                   </div>
@@ -931,6 +939,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <div>
                     <dt>Status</dt>
                     <dd>{statusLabel(selected.status)}</dd>
+                  </div>
+                  <div>
+                    <dt>Decision authority</dt>
+                    <dd>Human reviewer required before compliance or incident action</dd>
                   </div>
                 </dl>
               )}
