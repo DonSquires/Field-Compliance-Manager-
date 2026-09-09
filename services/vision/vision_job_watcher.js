@@ -258,9 +258,10 @@ async function classifyFrames(summary, job) {
     });
     const runpodResults = await classifyWithRunpodBatch(pendingBatch);
     for (const [batchIndex, { frame, image }] of pendingBatch.entries()) {
-      const buildForm = () => {
+      const buildForm = (vehicleBbox = null) => {
         const form = new FormData();
         form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);
+        if (vehicleBbox) form.append('vehicle_bbox', JSON.stringify(vehicleBbox));
         return form;
       };
       const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
@@ -268,9 +269,8 @@ async function classifyFrames(summary, job) {
         fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
         fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
         LOCAL_PEOPLE_INFERENCE ? fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }) : Promise.resolve(null),
-        LOCAL_VEHICLE_INFERENCE ? fetch(`${INFERENCE_SERVICE_URL}/infer`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }) : Promise.resolve(null),
       ];
-      const [alprResponse, faceResponse, peopleResponse, inferenceResponse] = await Promise.all(localRequests);
+      const [alprResponse, faceResponse, peopleResponse] = await Promise.all(localRequests);
       await updateProgress(job, 'running_alpr', {
         current: batchStart + batchIndex + 1,
         total: selectedFrames.length,
@@ -280,6 +280,14 @@ async function classifyFrames(summary, job) {
       frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
       frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
       const runpodResult = runpodResults.get(frame.sha256_hash);
+      const inferenceResponse = !runpodResult?.vehicle && LOCAL_VEHICLE_INFERENCE
+        ? await fetch(`${INFERENCE_SERVICE_URL}/infer`, {
+          method: 'POST',
+          headers,
+          body: buildForm(frame.alpr.plate_bbox),
+          signal: AbortSignal.timeout(30_000),
+        })
+        : null;
       if (runpodResult) frame.runpod = runpodResult;
 
       // RunPod is primary for vehicle and people work. The VPS is called only
@@ -296,7 +304,7 @@ async function classifyFrames(summary, job) {
       } else if (inferenceResponse) {
         frame.inference = inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` };
       } else {
-        frame.inference = await classifyLocally(INFERENCE_SERVICE_URL, '/infer', headers, buildForm);
+        frame.inference = { success: false, error: 'vehicle_crop_unavailable', review_required: true };
       }
       checkpointFrames[frame.sha256_hash] = {
         alpr: frame.alpr,

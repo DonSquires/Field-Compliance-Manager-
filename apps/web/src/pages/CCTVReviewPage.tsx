@@ -790,7 +790,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                       </div>
                       <div className="cctv-card-body">
                         <div className="cctv-card-header">
-                          <span className="cctv-plate-badge">{veh.plate}</span>
+                          <span className="cctv-badge cctv-badge-vehicle"><Car size={12} /> Vehicle</span>
+                          <span className="cctv-plate-value">Plate {veh.plate}</span>
                           {veh.is_return ? (
                             <span className="cctv-badge cctv-badge-return">Returned</span>
                           ) : (
@@ -798,6 +799,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                               {Math.round(veh.confidence * 100)}% ALPR
                             </span>
                           )}
+                          {!veh.temporal_consensus && <span className="cctv-badge cctv-badge-review">Single-frame reading</span>}
                         </div>
                         <div className="cctv-card-meta">
                           <span>

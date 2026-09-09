@@ -122,7 +122,8 @@
 .cctv-badge-return { background: #fef0db; color: #9c5c0a; }
 .cctv-badge-review { background: #fbeae8; color: #a43a29; }
 .cctv-badge-confidence { background: #eaf1f9; color: #1d5f99; }
-.cctv-plate-badge { background: #000; color: #fff; font-family: monospace; font-size: 13px; font-weight: 700; letter-spacing: .08em; padding: 2px 8px; border-radius: 3px; border: 1px solid #ccc; }
+.cctv-badge-vehicle { background: #e6f4f2; color: #0d6e65; }
+.cctv-plate-value { background: #f1f4f5; border: 1px solid #d6e0e2; border-radius: 4px; color: #42545c; font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 3px 7px; }
 
 .cctv-card-meta { display: grid; gap: 2px; font-size: 11px; color: #687780; line-height: 1.35; margin-top: 2px; }
 .cctv-card-actions { margin-top: 6px; }

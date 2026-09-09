@@ -46,6 +46,7 @@ export interface ConsolidatedVehicleEvent {
   speed_kmh?: number | null;
   speed_calibration?: string | null;
   review_required: boolean;
+  temporal_consensus?: boolean;
 }
 
 export interface ConsolidatedPersonEvent {
@@ -61,6 +62,7 @@ export interface ConsolidatedPersonEvent {
   best_bbox?: BoundingBox | null;
   thumbnail?: string | null;
   review_required: boolean;
+  attributes?: Record<string, unknown> | null;
 }
 
 export interface KeyframeItem {

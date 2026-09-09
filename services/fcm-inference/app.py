@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import json
 import math
 import os
 from pathlib import Path
@@ -18,6 +19,9 @@ from openvino import Core
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
+MIN_PLATE_REGION_WIDTH = 24
+MIN_PLATE_REGION_HEIGHT = 8
+MIN_PLATE_SCORE = 0.55
 SIMILARITY_THRESHOLD = 0.92
 DIFFERENT_VEHICLE_THRESHOLD = 0.75
 APP_PATH = Path(__file__).resolve()
@@ -134,6 +138,28 @@ def _vehicle_region(image: np.ndarray) -> np.ndarray:
     return image[round(height * 0.1):round(height * 0.95), round(width * 0.1):round(width * 0.9)]
 
 
+def _expand_vehicle_bbox(image: np.ndarray, bbox: dict[str, Any] | None) -> np.ndarray:
+    if not bbox:
+        return image
+    try:
+        x = float(bbox['x'])
+        y = float(bbox['y'])
+        width = float(bbox['width'])
+        height = float(bbox['height'])
+    except (KeyError, TypeError, ValueError):
+        return image
+    if width <= 0 or height <= 0:
+        return image
+    padding_x = width * 3.5
+    padding_y = height * 5.0
+    x0 = max(0, round(x - padding_x))
+    y0 = max(0, round(y - padding_y))
+    x1 = min(image.shape[1], round(x + width + padding_x))
+    y1 = min(image.shape[0], round(y + height + padding_y))
+    crop = image[y0:y1, x0:x1]
+    return crop if crop.size else image
+
+
 def _trained_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
     runtime = _vehicle_runtime()
     region = _vehicle_region(image)
@@ -167,6 +193,63 @@ def _person_runtime() -> Any:
     return _person_compiled
 
 
+def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> dict[str, Any]:
+    x0 = max(0, int(bbox['x']))
+    y0 = max(0, int(bbox['y']))
+    x1 = min(image.shape[1], x0 + int(bbox['width']))
+    y1 = min(image.shape[0], y0 + int(bbox['height']))
+    crop = image[y0:y1, x0:x1]
+    if crop.size == 0:
+        return {
+            "appearance_status": "insufficient_crop",
+            "height_status": "camera_calibration_required",
+            "review_required": True,
+        }
+    resized = cv2.resize(crop, (16, 32), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
+    embedding = resized.reshape(-1)
+    norm = float(np.linalg.norm(embedding))
+    if norm > 0:
+        embedding = embedding / norm
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    midpoint = max(1, hsv.shape[0] // 2)
+    upper = hsv[:midpoint]
+    lower = hsv[midpoint:]
+
+    def dominant_colour(region: np.ndarray) -> str:
+        if region.size == 0:
+            return "unknown"
+        value = region[:, :, 2]
+        saturation = region[:, :, 1]
+        valid = value > 25
+        if not np.any(valid):
+            return "unknown"
+        average_saturation = float(np.mean(saturation[valid]))
+        average_value = float(np.mean(value[valid]))
+        if average_saturation < 35:
+            return "dark" if average_value < 85 else "light"
+        hue = float(np.mean(region[:, :, 0][valid]))
+        if hue < 12 or hue >= 165:
+            return "red"
+        if hue < 35:
+            return "yellow_or_orange"
+        if hue < 85:
+            return "green"
+        if hue < 135:
+            return "blue"
+        return "purple_or_pink"
+
+    return {
+        "appearance_status": "visual_estimate_review_required",
+        "appearance_embedding": [round(float(value), 6) for value in embedding],
+        "appearance_embedding_dimension": int(embedding.size),
+        "upper_body_colour": dominant_colour(upper),
+        "lower_body_colour": dominant_colour(lower),
+        "height_status": "camera_calibration_required",
+        "height_estimate_meters": None,
+        "review_required": True,
+    }
+
+
 def _detect_people(image: np.ndarray) -> list[dict[str, Any]]:
     runtime = _person_runtime()
     height, width = image.shape[:2]
@@ -183,7 +266,12 @@ def _detect_people(image: np.ndarray) -> list[dict[str, Any]]:
         y1 = min(height, round(float(detection[6]) * height))
         if x1 <= x0 or y1 <= y0:
             continue
-        people.append({"bbox": {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}, "confidence": round(confidence, 3)})
+        person_bbox = {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+        people.append({
+            "bbox": person_bbox,
+            "confidence": round(confidence, 3),
+            "attributes": _person_appearance_attributes(image, person_bbox),
+        })
     return people
 
 
@@ -235,6 +323,7 @@ def _infer_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
             "bbox": {"x": 0, "y": 0, "width": width, "height": height},
             "confidence": 0.25,
         },
+        "vehicle_crop_status": "full_frame_review_only",
         "vehicle_make": None,
         "vehicle_model": None,
         "vehicle_year": None,
@@ -408,6 +497,66 @@ def _read_plate_candidates(gray_image: np.ndarray, psm: int) -> list[tuple[str, 
     return list(zip(data.get("text", []), data.get("conf", [])))
 
 
+def _infer_plate_from_image(image: np.ndarray) -> dict[str, Any]:
+    """Return ALPR only when OCR is anchored to a plausible plate region.
+
+    A missing plate is a valid result. Full-frame OCR is deliberately excluded:
+    timestamps, road signs, and watermarks are not registration evidence.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    candidates: dict[str, dict[str, Any]] = {}
+
+    def consider(raw: str, confidence: Any, box: tuple[int, int, int, int]) -> None:
+        normalized = _normalize_nz_plate(raw.strip())
+        if not normalized:
+            return
+        try:
+            score = max(0.0, min(1.0, float(confidence) / 100))
+        except (TypeError, ValueError):
+            score = 0.0
+        plate, pattern = normalized
+        adjusted = min(0.99, score + (0.15 if pattern.startswith("standard_") else 0.0) + 0.1)
+        if adjusted < MIN_PLATE_SCORE:
+            return
+        candidates[plate] = {
+            "plate": plate,
+            "score": round(adjusted, 2),
+            "pattern": pattern,
+            "box": {"x": box[0], "y": box[1], "width": box[2], "height": box[3]},
+        }
+
+    for box in _locate_plate_regions(image):
+        x, y, width, height = box
+        if width < MIN_PLATE_REGION_WIDTH or height < MIN_PLATE_REGION_HEIGHT:
+            continue
+        pad_x, pad_y = round(width * 0.08), round(height * 0.2)
+        x0, y0 = max(0, x - pad_x), max(0, y - pad_y)
+        x1, y1 = min(gray.shape[1], x + width + pad_x), min(gray.shape[0], y + height + pad_y)
+        region = gray[y0:y1, x0:x1]
+        if region.size == 0:
+            continue
+        for raw, confidence in _read_plate_candidates(region, psm=7):
+            consider(raw, confidence, box)
+
+    ordered = sorted(candidates.values(), key=lambda item: item["score"], reverse=True)
+    best = ordered[0] if ordered else None
+    return {
+        "success": True,
+        "plate": best["plate"] if best else None,
+        "confidence": best["score"] if best else 0,
+        "plate_status": "plate_detected" if best else "no_plate_detected",
+        "plate_bbox": best["box"] if best else None,
+        "evidence_quality": "reviewable" if best and best["score"] >= 0.75 else "insufficient",
+        "results": [
+            {"plate": item["plate"], "score": item["score"], "box": item["box"],
+             "valid_nz_format": True, "nz_pattern": item["pattern"]}
+            for item in ordered[:5]
+        ],
+        "alpr_provider": "local_tesseract_plate_region",
+        "review_required": best is None or best["score"] < 0.75,
+    }
+
+
 @app.post("/infer/alpr")
 async def alpr(
     photo: Annotated[UploadFile, File()],
@@ -416,63 +565,11 @@ async def alpr(
 ) -> JSONResponse:
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    candidates: dict[str, dict[str, Any]] = {}
-
-    def _consider(raw: str, confidence: Any, box: tuple[int, int, int, int] | None, region_bonus: float) -> None:
-        normalized = _normalize_nz_plate(raw.strip())
-        if not normalized:
-            return
-        try:
-            score = max(0.0, min(1.0, float(confidence) / 100))
-        except (TypeError, ValueError):
-            score = 0.0
-        if score < 0.35:
-            return
-        plate, pattern = normalized
-        adjusted = min(0.99, score + (0.15 if pattern.startswith("standard_") else 0.0) + region_bonus)
-        if plate not in candidates or adjusted > candidates[plate]["score"]:
-            candidates[plate] = {
-                "plate": plate, "score": round(adjusted, 2), "pattern": pattern,
-                "box": {"x": box[0], "y": box[1], "width": box[2], "height": box[3]} if box else None,
-            }
-
     try:
-        for box in _locate_plate_regions(image):
-            x, y, w, h = box
-            pad_x, pad_y = round(w * 0.08), round(h * 0.2)
-            x0, y0 = max(0, x - pad_x), max(0, y - pad_y)
-            x1, y1 = min(gray.shape[1], x + w + pad_x), min(gray.shape[0], y + h + pad_y)
-            region = gray[y0:y1, x0:x1]
-            if region.size == 0:
-                continue
-            for raw, confidence in _read_plate_candidates(region, psm=7):
-                # A cropped, detected plate region is much stronger evidence than a whole-frame
-                # OCR hit, so it earns a confidence bonus over the fallback pass below.
-                _consider(raw, confidence, box, region_bonus=0.1)
-
-        # Fallback: whole-frame OCR, in case the classical detector missed the plate (e.g. an
-        # unusual angle or lighting the contour heuristic doesn't handle well).
-        for raw, confidence in _read_plate_candidates(gray, psm=6):
-            _consider(raw, confidence, None, region_bonus=0.0)
+        result = _infer_plate_from_image(image)
     except (pytesseract.TesseractError, OSError) as error:
         raise HTTPException(status_code=503, detail=f"ALPR unavailable: {error}") from error
-
-    ordered = sorted(candidates.values(), key=lambda item: item["score"], reverse=True)
-    best = ordered[0] if ordered else None
-    return JSONResponse({
-        "success": True,
-        "plate": best["plate"] if best else None,
-        "confidence": best["score"] if best else 0,
-        "results": [
-            {"plate": item["plate"], "score": item["score"], "box": item["box"],
-             "valid_nz_format": True, "nz_pattern": item["pattern"]}
-            for item in ordered[:5]
-        ],
-        "alpr_provider": "local_tesseract_plate_region",
-        "review_required": best is None or best["score"] < 0.75,
-    })
+    return JSONResponse(result)
 
 
 @app.post("/infer/face")
@@ -517,12 +614,23 @@ async def face(
 @app.post("/infer")
 async def infer(
     photo: Annotated[UploadFile, File()],
+    vehicle_bbox: Annotated[str | None, Form()] = None,
     authorization: Annotated[str | None, Header()] = None,
     x_inference_api_key: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
-    return JSONResponse({"success": True, "data": _infer_vehicle_attributes(image)})
+    bbox = None
+    if vehicle_bbox:
+        try:
+            parsed = json.loads(vehicle_bbox)
+            bbox = parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=422, detail="vehicle_bbox must be valid JSON")
+    cropped = _expand_vehicle_bbox(image, bbox)
+    result = _infer_vehicle_attributes(cropped)
+    result["vehicle_crop_status"] = "plate_anchored_crop" if bbox else "full_frame_review_only"
+    return JSONResponse({"success": True, "data": result})
 
 
 @app.post("/infer/people")
@@ -535,7 +643,13 @@ async def people(
     image = await _read_image(photo)
     try:
         detections = _detect_people(image)
-        return JSONResponse({"success": True, "people": detections, "detector": "openvino_person_detection_0013"})
+        return JSONResponse({
+            "success": True,
+            "people": detections,
+            "detector": "openvino_person_detection_0013",
+            "animals": [],
+            "animal_detection_status": "model_not_staged",
+        })
     except FileNotFoundError:
         return _capability_unavailable("person_detection_model")
     except (RuntimeError, cv2.error) as error:

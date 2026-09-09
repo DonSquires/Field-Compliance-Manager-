@@ -707,7 +707,7 @@ function App() {
     <div className="companion-layout">
       <nav className="companion-nav" aria-label="FCM Desktop navigation">
         <button type="button" className={activeView === 'home' ? 'is-active' : ''} onClick={() => setActiveView('home')}><MonitorPlay size={18} /> Desktop home</button>
-        <button type="button" className={activeView === 'sd-import-clean' ? 'is-active' : ''} onClick={() => setActiveView('sd-import-clean')}><HardDrive size={18} /> SD card import</button>
+        <button type="button" className={activeView === 'sd-import-clean' ? 'is-active' : ''} onClick={() => setActiveView('sd-import-clean')}><HardDrive size={18} /> Import recordings</button>
         <a href={FCM_CCTV_REVIEW_URL} target="_blank" rel="noreferrer"><MonitorPlay size={18} /> CCTV review</a>
         <button type="button" className={activeView === 'video-upload' ? 'is-active' : ''} onClick={() => setActiveView('video-upload')}><Upload size={18} /> Video upload</button>
         <a href={FCM_WEB_URL} target="_blank" rel="noreferrer"><ExternalLink size={18} /> FCM web portal</a>

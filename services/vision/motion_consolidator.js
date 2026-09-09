@@ -201,7 +201,7 @@ async function consolidatePeople(frames, options = {}) {
       const center = { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
       let track = tracks.find((candidate) => timestamp - candidate.lastSeen <= maxGap && Math.hypot(center.x - candidate.center.x, center.y - candidate.center.y) < Math.max(bbox.width, bbox.height));
       if (!track) {
-        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, center };
+        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, bestAttributes: detection.attributes || null, center };
         tracks.push(track);
       }
       track.lastSeen = timestamp;
@@ -211,6 +211,7 @@ async function consolidatePeople(frames, options = {}) {
       if ((bbox.width * bbox.height) > (track.bestBbox.width * track.bestBbox.height)) {
         track.bestBbox = bbox;
         track.bestFrame = frame;
+        track.bestAttributes = detection.attributes || track.bestAttributes;
       }
     }
   }
@@ -224,6 +225,7 @@ async function consolidatePeople(frames, options = {}) {
     confidence: Number(track.confidence.toFixed(2)),
     best_frame_hash: track.bestFrame?.sha256_hash || null,
     best_bbox: track.bestBbox,
+    attributes: track.bestAttributes,
     thumbnail: await loadBase64Thumbnail(track.bestFrame?.file_path),
     review_required: true,
   })));
@@ -345,6 +347,7 @@ async function consolidateVehicles(frames, options = {}) {
       frameCount: group.tracks.reduce((sum, track) => sum + track.frameCount, 0),
       visitCount: group.tracks.length,
       isReturn: group.tracks.length > 1,
+      temporalConsensus: group.tracks.reduce((sum, track) => sum + track.frameCount, 0) >= 2,
     };
   }).sort((a, b) => a.firstSeen - b.firstSeen);
 
@@ -366,6 +369,7 @@ async function consolidateVehicles(frames, options = {}) {
       duration_seconds: duration,
       frame_count: tr.frameCount,
       visit_count: tr.visitCount,
+      temporal_consensus: tr.temporalConsensus,
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
       thumbnail,
       vehicle_make: tr.bestFrame?.inference?.data?.vehicle_make ?? null,
@@ -380,7 +384,7 @@ async function consolidateVehicles(frames, options = {}) {
         ? Number((speedPxPerSecond * metersPerPixel * 3.6).toFixed(2))
         : null,
       speed_calibration: metersPerPixel === null ? 'uncalibrated' : 'camera_scale',
-      review_required: true,
+      review_required: !tr.temporalConsensus || tr.bestConfidence < 0.75,
     });
   }
 

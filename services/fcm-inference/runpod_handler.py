@@ -66,6 +66,8 @@ def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
         result["vehicle"] = _infer_vehicle_attributes(image)
     if "person" in tasks:
         result["people"] = _detect_people(image)
+    result["animals"] = []
+    result["animal_detection_status"] = "model_not_staged"
     if "face" in tasks:
         result["faces"] = []
         result["face_review_required"] = True

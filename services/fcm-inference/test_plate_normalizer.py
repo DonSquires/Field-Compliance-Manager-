@@ -51,3 +51,44 @@ def test_vehicle_inference_returns_embedding_and_explicit_review_state():
     assert result['vehicle_year'] is None
     assert result['vehicle_colour'] == 'white'
     assert result['review_required'] is True
+
+
+def test_alpr_rejects_full_frame_text_without_plate_region(monkeypatch):
+    image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    monkeypatch.setattr(mod, '_locate_plate_regions', lambda _image: [])
+    monkeypatch.setattr(mod, '_read_plate_candidates', lambda _image, psm: [('RIVER', '99')])
+
+    result = mod._infer_plate_from_image(image)
+
+    assert result['plate'] is None
+    assert result['plate_status'] == 'no_plate_detected'
+    assert result['plate_bbox'] is None
+    assert result['evidence_quality'] == 'insufficient'
+
+
+def test_alpr_requires_a_plate_bbox_for_accepted_reading(monkeypatch):
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    monkeypatch.setattr(mod, '_locate_plate_regions', lambda _image: [(300, 400, 120, 32)])
+    monkeypatch.setattr(mod, '_read_plate_candidates', lambda _image, psm: [('ABC123', '90')])
+
+    result = mod._infer_plate_from_image(image)
+
+    assert result['plate'] == 'ABC123'
+    assert result['plate_bbox'] == {'x': 300, 'y': 400, 'width': 120, 'height': 32}
+    assert result['plate_status'] == 'plate_detected'
+
+
+def test_person_appearance_is_explicitly_calibration_aware():
+    image = np.zeros((120, 60, 3), dtype=np.uint8)
+    image[:60] = (255, 0, 0)
+    result = mod._person_appearance_attributes(image, {'x': 0, 'y': 0, 'width': 60, 'height': 120})
+
+    assert result['appearance_status'] == 'visual_estimate_review_required'
+    assert result['height_status'] == 'camera_calibration_required'
+    assert result['height_estimate_meters'] is None
+    assert result['appearance_embedding_dimension'] == 1536
+    assert result['review_required'] is True
+
+
+def test_animal_capability_is_explicitly_unavailable_until_model_staged():
+    assert mod._capability_unavailable('animal_detection_model').status_code == 503
