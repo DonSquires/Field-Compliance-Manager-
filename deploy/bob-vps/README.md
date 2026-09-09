@@ -15,6 +15,9 @@ chmod 600 /srv/fcm/.env
 Populate `BOB_RUNNER_TOKEN` directly on the VPS. Do not commit the populated
 file or place user credentials in it.
 
+The deployed VPS control plane is exposed through Docker's host bridge at
+`172.16.0.1:8091`; `127.0.0.1:8091` belongs to another service on this host.
+
 Build the worker image from the checked-out commit:
 
 ```bash
