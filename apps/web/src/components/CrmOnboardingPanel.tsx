@@ -156,6 +156,12 @@ export function CrmOnboardingPanel({
   const blocked = row.readiness?.dimensions.filter((dimension) => dimension.status === 'blocked') ?? [];
   const invitationStatus = row.invitation_status ?? 'not_invited';
   const canInvite = row.readiness?.ready && invitationStatus !== 'accepted' && invitationStatus !== 'invited';
+  const handoffStages = [
+    { label: 'Provider setup', complete: Boolean(row.readiness?.ready) },
+    { label: 'Client invited', complete: invitationStatus === 'invited' || invitationStatus === 'accepted' },
+    { label: 'Client accepted', complete: invitationStatus === 'accepted' },
+    { label: 'Operational handoff', complete: activated || accountStatus === 'active' },
+  ];
 
   return <section className="crm-onboarding-panel" aria-label="Client activation">
     <header>
@@ -165,6 +171,7 @@ export function CrmOnboardingPanel({
     {error && <p className="is-error" role="alert"><AlertTriangle size={14} />{error}</p>}
     {notice && <p className="is-success" role="status"><CheckCircle2 size={14} />{notice}</p>}
     <div className="crm-onboarding-stage-row">{stages.map((stage) => <span key={stage} className={stage === row.current_stage ? 'is-current' : stages.indexOf(stage) < stages.indexOf(row.current_stage) ? 'is-complete' : ''}>{stage}</span>)}</div>
+    <div className="crm-handoff-timeline" aria-label="Client access lifecycle">{handoffStages.map((stage) => <div className={stage.complete ? 'is-complete' : ''} key={stage.label}><span>{stage.complete ? <CheckCircle2 size={13} /> : <Clock3 size={13} />}</span><small>{stage.label}</small></div>)}</div>
     {row.readiness && <div className="crm-onboarding-readiness">{row.readiness.dimensions.map((dimension) => <article key={dimension.key} className={dimension.status === 'ready' ? 'is-ready' : 'is-blocked'}><strong>{dimension.label}</strong><span>{dimension.detail}</span><small>{dimension.owner}</small></article>)}</div>}
     <div className="crm-onboarding-controls">
       <label><span><UserRound size={12} /> Workflow owner</span><select value={assignedTo} onChange={(event) => setAssignedTo(event.target.value)}>{assignees.map((assignee) => <option key={assignee.user_id} value={assignee.user_id}>{assignee.display_name} · {assignee.role.replace('_', ' ')}</option>)}</select></label>

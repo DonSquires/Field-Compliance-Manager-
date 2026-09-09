@@ -16,5 +16,8 @@ describe('client portfolio activation handoff', () => {
     expect(source).toContain('canInvite');
     expect(source).toContain('Waiting for client acceptance');
     expect(source).toContain('Client accepted · ready for activation');
+    expect(source).toContain('crm-handoff-timeline');
+    expect(source).toContain('Provider setup');
+    expect(source).toContain('Operational handoff');
   });
 });
