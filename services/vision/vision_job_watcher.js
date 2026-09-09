@@ -376,8 +376,9 @@ function runFfmpegRemux(sourcePath, outputPath) {
   return new Promise((resolve, reject) => {
     const child = spawn('ffmpeg', [
       '-y', '-fflags', '+genpts', '-i', sourcePath,
-      '-map', '0:v:0', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outputPath
+      '-map', '0:v:0', '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+      '-profile:v', 'high', '-level:v', '4.2', '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart', outputPath
     ], {
       stdio: ['ignore', 'ignore', 'pipe']
     });
@@ -398,10 +399,12 @@ function runFfmpegRemux(sourcePath, outputPath) {
 
 // Evidence is decoded straight from its source (h264 elementary streams, proprietary DVR
 // containers, etc.) for motion analysis, but browsers/Windows/phones can't play those directly.
-// Remux (stream-copy, no re-encode) into a real MP4 so the evidence is playable everywhere,
-// while the original bytes remain untouched and available for court/chain-of-custody purposes.
+// Create a high-quality browser-compatible playback derivative. The original H.265 bytes remain
+// untouched and available for court/chain-of-custody purposes; this H.264 copy exists for broad
+// browser support because native HEVC playback is platform-dependent.
 async function ensurePlaybackCopy(job, evidence, videoPath) {
-  if (evidence.metadata?.playback_storage_path) return;
+  if (evidence.metadata?.playback_storage_path
+    && evidence.metadata?.playback_transcode_profile === 'h264-slow-crf18') return;
   const outputDir = path.join(DERIVED_ROOT, job.id);
   await fs.mkdir(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, 'playback.mp4');
@@ -417,7 +420,13 @@ async function ensurePlaybackCopy(job, evidence, videoPath) {
 
   const { error: updateError } = await supabase
     .from('evidence_items')
-    .update({ metadata: { ...(evidence.metadata || {}), playback_storage_path: destinationPath, playback_content_type: 'video/mp4' } })
+    .update({ metadata: {
+      ...(evidence.metadata || {}),
+      playback_storage_path: destinationPath,
+      playback_content_type: 'video/mp4',
+      playback_transcode_profile: 'h264-slow-crf18',
+      playback_source_preserved: true,
+    } })
     .eq('id', evidence.id);
   if (updateError) throw new Error(`evidence playback metadata update failed: ${updateError.message}`);
   log('playback_copy_ready', { job_id: job.id, evidence_item_id: evidence.id, destination_path: destinationPath });
