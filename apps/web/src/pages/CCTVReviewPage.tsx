@@ -246,6 +246,11 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const selectedBatchClipIndexes = selectedBatchJobs
     .map((job) => desktopReviewBatch(job.evidence?.metadata || null)?.clip_index)
     .filter((clipIndex): clipIndex is number => Number.isFinite(clipIndex));
+  const selectedBatchConsolidated = selectedBatchJobs.map((job) => consolidateResultData(job.result?.result));
+  const pendingObservationCount = selectedBatchConsolidated.reduce((count, result) => (
+    count + result.person_events.length + result.vehicle_events.filter((event) => event.temporal_consensus).length + result.face_events.filter((event) => identityDrafts[event.event_id]?.authorityLevel !== 'approved').length
+  ), 0);
+  const reportReady = selectedBatchComplete && pendingObservationCount === 0;
 
   useEffect(() => {
     setReportReceipt(null);
@@ -772,9 +777,20 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 </div>
               )}
 
+              <div className={`cctv-report-readiness ${reportReady ? 'is-ready' : 'is-pending'}`} aria-label="CCTV report readiness">
+                <div>
+                  <strong>{reportReady ? 'Final report ready' : 'Review required before final report'}</strong>
+                  <span>{pendingObservationCount} unresolved observation{pendingObservationCount === 1 ? '' : 's'}{!selectedBatchComplete ? ' · batch is incomplete' : ''}</span>
+                </div>
+                <small>{reportReady ? 'All loaded observations have an approved review state.' : 'Use the draft report for working evidence, then resolve every observation before issuing final evidence.'}</small>
+              </div>
+
               <div className="cctv-card-actions">
                 <button type="button" className="cctv-btn-jump" onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
-                  <Printer size={13} /> {reportReceipt ? 'Print report' : 'Print draft report'}
+                  <Printer size={13} /> Print draft report
+                </button>
+                <button type="button" className="cctv-btn-confirm" disabled={!reportReady} onClick={() => void printSelectedReport()} title={reportReady ? 'Print the final evidence report' : 'Resolve all observations and load the complete batch first'}>
+                  <Printer size={13} /> Final report
                 </button>
                 {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
                   <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('retry')}>

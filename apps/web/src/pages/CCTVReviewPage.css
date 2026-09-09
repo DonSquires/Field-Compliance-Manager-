@@ -99,6 +99,13 @@
 .cctv-batch-clip-list span.is-failed,
 .cctv-batch-clip-list span.is-manual_review_required { background: #fbeae8; color: #a43a29; }
 .cctv-batch-clip-list span.is-missing { background: #e8edef; color: #7b8991; }
+.cctv-report-readiness { border-left: 4px solid #bd8419; display: grid; gap: 4px; padding: 10px 12px; }
+.cctv-report-readiness.is-pending { background: #fff7e7; color: #75541b; }
+.cctv-report-readiness.is-ready { background: #edf8f2; border-left-color: #26724c; color: #26724c; }
+.cctv-report-readiness > div { display: flex; justify-content: space-between; gap: 10px; }
+.cctv-report-readiness strong { font-size: 12px; }
+.cctv-report-readiness span,
+.cctv-report-readiness small { font-size: 11px; line-height: 1.35; }
 
 /* Media player */
 .cctv-media-container { background: #0e151b; border-radius: 6px; overflow: hidden; min-height: 180px; display: flex; align-items: center; justify-content: center; }

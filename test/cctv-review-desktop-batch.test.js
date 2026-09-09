@@ -20,6 +20,9 @@ test('CCTV Review surfaces desktop SD-card batch metadata for grouped review', (
   assert.match(page, /selectedBatchClipIndexes/);
   assert.match(page, /Load full batch/);
   assert.match(page, /setBatchJobs\(mappedJobs\)/);
+  assert.match(page, /Review required before final report/);
+  assert.match(page, /disabled=\{!reportReady\}/);
+  assert.match(styles, /\.cctv-report-readiness/);
   assert.match(styles, /\.cctv-batch-link/);
   assert.match(styles, /\.cctv-batch-clip-list/);
   assert.match(styles, /\.is-missing/);
