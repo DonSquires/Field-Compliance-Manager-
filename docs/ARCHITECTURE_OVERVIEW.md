@@ -1,4 +1,7 @@
 # Bob Multi-Layer Architecture Summary
+
+FCM product architecture and domain ownership are defined in [FCM_PLATFORM_ARCHITECTURE_BRIEF.md](FCM_PLATFORM_ARCHITECTURE_BRIEF.md). This Bob-layer summary sits on top of that shared organization-and-place spine; it does not replace it.
+
 ## Phase 1 + Phase 2 Complete (10/10 Build-Plan Steps Attempted)
 
 ```

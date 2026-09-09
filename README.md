@@ -6,6 +6,8 @@ Backend and deployment workspace for the Field Compliance Manager project.
 
 ## Architecture
 
+Read the canonical product and governance model in [FCM_PLATFORM_ARCHITECTURE_BRIEF.md](docs/FCM_PLATFORM_ARCHITECTURE_BRIEF.md) before changing shared domains, UI workflows, Bob behavior, or schema ownership.
+
 GitHub `DonSquires/Field-Compliance-Manager-` on `main` is the authoritative source and Vercel deployment branch for the customer-facing web app. Gitea is a direct downstream mirror used by the VPS-facing Bob development workflow. The VPS contains the Node-based Field Compliance Manager backend, Bob's control plane, a PTT service, and Docker deployment definitions. Supabase provides the database, authentication, storage, row-level security, and workflow data used by the application.
 
 The live public Supabase schema is stored in [`supabase/schema.sql`](supabase/schema.sql). It includes organizations, users, staff, sites, patrols, shifts, dispatch, observations, incidents, enforcement, documents, reporting, and Bob/workflow tables.
