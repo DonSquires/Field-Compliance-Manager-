@@ -6,6 +6,8 @@ export type CCTVPrintableReportInput = {
   evidenceId: string;
   batchId?: string | null;
   clipCount?: number | null;
+  loadedClipCount?: number | null;
+  batchComplete?: boolean;
   personCount: number;
   vehicleCount: number;
   frameCount: number;
@@ -41,7 +43,7 @@ function observationRow(observation: CCTVPrintableReportInput['observations'][nu
 
 export function buildCCTVPrintableReport(input: CCTVPrintableReportInput): string {
   const batchLine = input.batchId
-    ? `<p><strong>SD-card batch:</strong> ${escapeHtml(input.batchId)}${input.clipCount ? ` (${input.clipCount} clips)` : ''}</p>`
+    ? `<p><strong>SD-card batch:</strong> ${escapeHtml(input.batchId)}${input.clipCount ? ` (${input.clipCount} clips)` : ''}${input.batchComplete === false ? ` <strong>PARTIAL: ${input.loadedClipCount ?? 0} clips loaded</strong>` : ''}</p>`
     : '';
   const rows = input.observations.length
     ? input.observations.map(observationRow).join('')

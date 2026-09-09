@@ -240,6 +240,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const selectedBatchJobs = selectedBatch
     ? jobs.filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id)
     : selected ? [selected] : [];
+  const selectedBatchComplete = !selectedBatch || selectedBatchJobs.length >= selectedBatch.clip_total;
 
   useEffect(() => {
     setReportReceipt(null);
@@ -536,6 +537,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       evidence_id: selected.evidence_item_id,
       batch_id: selectedBatch?.batch_id || null,
       clip_count: selectedBatch?.clip_total || null,
+      loaded_clip_count: selectedBatchJobs.length,
+      batch_complete: selectedBatchComplete,
       person_count: reportCounts.personCount,
       vehicle_count: reportCounts.vehicleCount,
       frame_count: reportCounts.frameCount,
@@ -561,6 +564,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       evidenceId: reportPayload.evidence_id,
       batchId: reportPayload.batch_id,
       clipCount: reportPayload.clip_count,
+      loadedClipCount: reportPayload.loaded_clip_count,
+      batchComplete: reportPayload.batch_complete,
       personCount: reportCounts.personCount,
       vehicleCount: reportCounts.vehicleCount,
       frameCount: reportCounts.frameCount,
