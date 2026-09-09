@@ -61,6 +61,7 @@ import './AdminShell.css';
 import AdminHubPage from '../pages/AdminHubPage';
 
 const DESKTOP_V1_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v0.1.52/FCM-SD-Card-Bridge-Setup.exe';
+const DESKTOP_V2_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v2-v0.1.1/FCM-Desktop-V2-Setup.exe';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
@@ -618,7 +619,7 @@ const AdminShell: React.FC = () => {
           onClose={() => setBobOpen(false)}
           context={bobContext}
         />
-        {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop releases</span><h2 id="desktop-download-title">Choose your evidence workstation</h2><p>V1 is the current signed production bridge. V2 remains an acquisition prototype until its signed Windows installer is published.</p></div><div className="desktop-download-options"><a href={DESKTOP_V1_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V1</strong><small>Stable SD-card bridge · current production workflow</small></span><Download size={16} aria-hidden="true" /></a><div className="desktop-download-unavailable"><span><strong>FCM Desktop V2</strong><small>Prototype · signed installer not published yet</small></span><em>Coming soon</em></div></div><div className="desktop-download-actions"><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
+        {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop releases</span><h2 id="desktop-download-title">Choose your evidence workstation</h2><p>V1 is the stable production bridge. V2 is an unsigned development prototype for clone-first acquisition research.</p></div><div className="desktop-download-options"><a href={DESKTOP_V1_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V1</strong><small>Stable SD-card bridge · current production workflow</small></span><Download size={16} aria-hidden="true" /></a><a href={DESKTOP_V2_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V2</strong><small>Unsigned development build · SmartScreen warning possible</small></span><Download size={16} aria-hidden="true" /></a></div><div className="desktop-download-actions"><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
 
       </div>
     );
