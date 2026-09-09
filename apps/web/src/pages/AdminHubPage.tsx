@@ -309,12 +309,16 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
 
         <aside className="admin-command-panel">
           <div className="admin-section-heading"><div><span>Navigation</span><h2>Command areas</h2></div></div>
+          <div className="admin-command-group"><span>Respond now</span>
           <CommandLink icon={Radio} label="Dispatch console" detail="Jobs, resources, and SLA state" onClick={() => onNavigate?.('dispatch')} />
           <CommandLink icon={Map} label="Operational map" detail="Officers, sites, and zones" onClick={() => onNavigate?.('live-map')} />
           <CommandLink icon={Route} label="Patrol operations" detail="Shifts, routes, and checkpoints" onClick={() => onNavigate?.('patrol')} />
+          </div>
+          <div className="admin-command-group"><span>Review and investigate</span>
           <CommandLink icon={FileWarning} label="Field reports" detail="Review and follow-up" onClick={() => onNavigate?.('field-reports')} />
           <CommandLink icon={FileSearch} label="Officer timeline" detail="Evidence and investigation chronology" onClick={() => onNavigate?.('officer-activity')} />
           <CommandLink icon={Car} label="Vehicle lookup" detail="Observation and compliance history" onClick={() => onNavigate?.('vehicle-search')} />
+          </div>
         </aside>
       </div>
     </div>

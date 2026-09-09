@@ -1,3 +1,4 @@
+.admin-command-group{display:grid;gap:6px;margin-top:12px}.admin-command-group>span{color:#67e4e8;font-size:9px;font-weight:850;text-transform:uppercase}
 .admin-overview {
   width: 100%;
   max-width: 1320px;
