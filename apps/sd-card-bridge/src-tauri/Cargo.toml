@@ -1,6 +1,6 @@
 [package]
 name = "fcm-sd-card-bridge"
-version = "0.1.40"
+version = "0.1.44"
 description = "Read-only local SD-card evidence bridge for Field Compliance Manager"
 authors = ["Field Compliance Manager"]
 edition = "2021"
@@ -22,3 +22,4 @@ tauri = { version = "2.11.1", features = [] }
 tauri-plugin-deep-link = "2.4.10"
 tauri-plugin-dialog = "2.7.3"
 tauri-plugin-fs = "2.5.2"
+tauri-plugin-opener = "2.5.0"
