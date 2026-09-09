@@ -8,6 +8,7 @@ import numpy as np
 import runpod
 
 from capture_enhancement import enhance_capture
+from model_adapters import capability_status
 
 MAX_IMAGE_PIXELS = 20_000_000
 MAX_CROP_PIXELS = 8_000_000
@@ -43,7 +44,7 @@ def _crop(image: np.ndarray, crop: dict[str, Any] | None) -> np.ndarray:
 def handler(job: dict[str, Any]) -> dict[str, Any]:
     payload = job.get("input") or {}
     if payload.get("action") == "ping":
-        return {"status": "ok", "service": "fcm-capture-inference", "enhancement": "deterministic_capture_v1"}
+        return {"status": "ok", "service": "fcm-capture-inference", "enhancement": "deterministic_capture_v1", "capabilities": capability_status()}
     if payload.get("action") != "capture_recognition":
         return {"success": False, "error": "unsupported_action"}
     source_hash = str(payload.get("source_frame_hash") or "")
@@ -61,6 +62,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "enhancement": receipt.as_dict(),
             "authority": "provisional",
             "review_required": True,
+            "capabilities": capability_status(),
         }
         response["alpr"] = {"state": "unavailable", "reason": "alpr_model_not_staged", "review_required": True} if "alpr" in tasks else {"state": "not_requested"}
         response["face"] = {"state": "unavailable", "reason": "face_model_not_staged", "candidate_matches": [], "review_required": True} if "face_embedding" in tasks else {"state": "not_requested"}

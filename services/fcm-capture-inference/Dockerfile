@@ -5,4 +5,5 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY capture_enhancement.py runpod_handler.py ./
+COPY model_adapters.py ./
 CMD ["python", "runpod_handler.py"]

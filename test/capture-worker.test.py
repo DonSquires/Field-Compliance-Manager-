@@ -33,6 +33,13 @@ class CaptureWorkerTests(unittest.TestCase):
         result = handler({'input': {'action': 'capture_recognition', 'image_base64': 'bad'}})
         self.assertEqual(result['error'], 'source_frame_hash_required')
 
+    def test_response_reports_independent_model_capabilities(self):
+        result = handler({'input': {'action': 'ping'}})
+        self.assertEqual(result['service'], 'fcm-capture-inference')
+        self.assertIn('face_embedding', result['capabilities'])
+        self.assertIn('vehicle_attributes', result['capabilities'])
+        self.assertIn('animal_detection', result['capabilities'])
+
 
 if __name__ == '__main__':
     unittest.main()
