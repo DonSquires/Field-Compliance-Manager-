@@ -14,6 +14,9 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
+// Keep the read path dormant until the corresponding Supabase table is deployed.
+const PAY_LINE_REVIEW_TABLE_DEPLOYED = false;
+
 type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'pay-review' | 'assets' | 'oncall' | 'court';
 type RosterTabGroup = 'workforce' | 'people' | 'rostering' | 'pay-assets';
 
@@ -447,7 +450,14 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId)
             .order('created_at', { ascending: false })
             .limit(100),
-          Promise.resolve({ data: [], error: null }),
+          PAY_LINE_REVIEW_TABLE_DEPLOYED
+            ? supabase
+              .from('dispatch_job_pay_line_reviews')
+              .select('id, pay_line_id, decision, review_notes, reviewed_at, supersedes_review_id')
+              .eq('organization_id', orgId)
+              .order('reviewed_at', { ascending: false })
+              .limit(200)
+            : Promise.resolve({ data: [], error: null }),
           supabase
             .from('shift_coverage_requests')
             .select('id, shift_date, start_time, end_time, required_staff_count, urgency, status, notes, claimed_by, roster_slot_id, site:site_id(name)')
