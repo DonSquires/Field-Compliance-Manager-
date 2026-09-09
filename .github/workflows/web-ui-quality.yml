@@ -44,7 +44,7 @@ jobs:
           VITE_SUPABASE_URL: https://example.supabase.co
           VITE_SUPABASE_ANON_KEY: ci-anon-key
       - name: Browser interactions and visual regression
-        run: npm run test:e2e
+        run: npm run test:e2e:ci-smoke
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4

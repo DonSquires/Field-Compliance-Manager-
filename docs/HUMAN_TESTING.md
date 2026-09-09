@@ -74,3 +74,23 @@ The runner treats browser errors and failed interactions as failures. The fixtur
 - `apps/web/run-manual-walkthroughs.sh` lists and documents the manual suites.
 
 This complements workflow-specific tests such as the CRM, welfare, and dispatch walkthroughs. The workflow tests verify known data contracts; this human test verifies that a person can actually see and move through the product.
+
+## CI versus Bob ownership
+
+GitHub Actions runs the bounded `npm run test:e2e:ci-smoke` suite so every push
+gets fast coverage of shell/navigation, dispatch, geofence, module entitlement,
+and automation contracts. It does not run the entire 55-spec browser matrix.
+
+Bob owns the expansive human/visual pass, which is intentionally slower and
+produces screenshots, UX findings, HTTP evidence, traces, and before/during/after
+workflow reports:
+
+```bash
+cd apps/web
+npm run test:e2e
+npm run test:e2e:human
+```
+
+Run the live human suite separately with the approved test identity and deploy
+freshness preflight. A cancelled CI browser job does not erase Bob's evidence;
+it indicates the broad suite belongs in the dedicated Bob run.
