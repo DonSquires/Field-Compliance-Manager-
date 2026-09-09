@@ -96,6 +96,16 @@ Assessment mode must not:
 - Read secret values, production customer data, private keys, or unrestricted environment files
 - Execute arbitrary shell commands
 
+An explicitly approved diagnostic mode may perform scoped, read-only live
+verification through the governed Bob paths (`bob-query-records`,
+`bob-sql-read`, `bob-schema-inspect`, and `bob-query-atlas`). This is not broad
+assessment access: queries must be tenant/environment scoped, results minimized
+or redacted, service-role credentials remain server-side, and no live data or
+schema may be mutated. The diagnostic artifact must record the query purpose,
+scope, source, timestamp, and uncertainty. Web research follows the same
+boundary: it may provide cited external context but never receives secrets,
+private files, or raw production records.
+
 The assessment output should include a system inventory, product/workflow map, dependency graph, data-flow summary, security boundary review, unknowns, proposed implementation slices, and a list of files or services that would be affected. These become reviewable artifacts attached to a planning job.
 
 Implementation is a separate capability. It requires a new approved job, a fresh isolated workspace with a writable copy, a fixed coding profile, and a human approval tied to the exact repository and commit. Merge and deployment require additional approval gates.

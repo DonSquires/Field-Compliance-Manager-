@@ -1,0 +1,188 @@
+import { expect, type Page, type TestInfo } from '@playwright/test';
+
+export type HumanFindingSeverity = 'info' | 'warning' | 'error';
+
+export interface HumanFinding {
+  severity: HumanFindingSeverity;
+  message: string;
+  url: string;
+  step: string;
+}
+
+interface HumanStep {
+  name: string;
+  startedAt: string;
+  finishedAt: string;
+  url: string;
+  status: 'passed' | 'failed';
+  details?: string;
+}
+
+const SAFE_SAMPLE_VALUES: Record<string, string> = {
+  search: 'Civic Events',
+  email: 'human-test@example.invalid',
+  text: 'Human test observation',
+  number: '1',
+};
+
+const UNSAFE_ACTION = /^(delete|remove|destroy|approve|reject|resolve|acknowledge|submit|save|create|sign out|log out|logout|publish|send|apply|confirm|assign|claim|complete|finish|activate|deactivate|retry)/i;
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function compact(value: string | null | undefined, max = 180): string {
+  return (value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+/**
+ * A human-style browser session. It records what a person could see and do,
+ * rather than only asserting a predefined DOM snapshot.
+ */
+export class HumanTestSession {
+  readonly findings: HumanFinding[] = [];
+  readonly steps: HumanStep[] = [];
+  private currentStep = 'session';
+  private readonly consoleErrors: string[] = [];
+  private readonly failedRequests: string[] = [];
+
+  constructor(private readonly page: Page, private readonly testInfo: TestInfo) {
+    page.on('console', (message) => {
+      if (message.type() === 'error') this.consoleErrors.push(compact(message.text()));
+    });
+    page.on('pageerror', (error) => this.consoleErrors.push(compact(error.message)));
+    page.on('requestfailed', (request) => {
+      this.failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? ''}`.trim());
+    });
+  }
+
+  async step<T>(name: string, action: () => Promise<T>): Promise<T | undefined> {
+    this.currentStep = name;
+    const startedAt = now();
+    console.log(`\n[HUMAN ${this.steps.length + 1}] ${name}`);
+    try {
+      const result = await action();
+      this.steps.push({ name, startedAt, finishedAt: now(), url: this.page.url(), status: 'passed' });
+      return result;
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      this.steps.push({ name, startedAt, finishedAt: now(), url: this.page.url(), status: 'failed', details });
+      this.findings.push({ severity: 'error', message: details, url: this.page.url(), step: name });
+      console.log(`[HUMAN ERROR] ${details}`);
+      await this.capture(`failure-${this.steps.length}`);
+      return undefined;
+    }
+  }
+
+  async observe(label: string): Promise<void> {
+    this.currentStep = label;
+    const bodyText = compact(await this.page.locator('body').textContent(), 500);
+    const heading = compact(await this.page.locator('h1, h2, [role="heading"]').first().textContent());
+    const buttons = await this.visibleLabels('button');
+    const links = await this.visibleLabels('a');
+    const fields = await this.page.locator('input:visible, textarea:visible, select:visible').count();
+    console.log(`[HUMAN OBSERVE] ${label}`);
+    console.log(`  url: ${this.page.url()}`);
+    console.log(`  heading: ${heading || '(none)'}`);
+    console.log(`  fields: ${fields}; buttons: ${buttons.slice(0, 8).join(' | ') || '(none)'}`);
+    console.log(`  links: ${links.slice(0, 8).join(' | ') || '(none)'}`);
+    console.log(`  text: ${bodyText || '(empty)'}`);
+    if (!bodyText) {
+      this.findings.push({ severity: 'warning', message: 'The rendered page contains no visible text.', url: this.page.url(), step: label });
+    }
+    await this.capture(label);
+  }
+
+  async clickSafe(label: string | RegExp): Promise<boolean> {
+    const candidate = this.page.getByRole('button', { name: label }).or(this.page.getByRole('link', { name: label })).first();
+    if (!(await candidate.isVisible({ timeout: 1500 }).catch(() => false))) return false;
+    const name = compact(await candidate.textContent()) || String(label);
+    if (UNSAFE_ACTION.test(name)) {
+      console.log(`[HUMAN SKIP] Unsafe action: ${name}`);
+      return false;
+    }
+    await candidate.click();
+    await this.page.waitForLoadState('domcontentloaded').catch(() => undefined);
+    await this.page.waitForTimeout(150);
+    console.log(`[HUMAN CLICK] ${name}`);
+    return true;
+  }
+
+  async fillSafeField(): Promise<boolean> {
+    const field = this.page.locator('input:visible, textarea:visible').filter({ hasNot: this.page.locator('[type="password"]') }).first();
+    if (!(await field.isVisible({ timeout: 1000 }).catch(() => false))) return false;
+    const type = await field.getAttribute('type');
+    if (type === 'password' || type === 'file' || type === 'hidden') return false;
+    const name = `${await field.getAttribute('aria-label') ?? ''} ${await field.getAttribute('placeholder') ?? ''} ${await field.getAttribute('name') ?? ''}`.toLowerCase();
+    const value = name.includes('email') ? SAFE_SAMPLE_VALUES.email : name.includes('search') ? SAFE_SAMPLE_VALUES.search : name.includes('number') ? SAFE_SAMPLE_VALUES.number : SAFE_SAMPLE_VALUES.text;
+    await field.fill(value);
+    console.log(`[HUMAN TYPE] ${name.trim() || 'field'} = ${value}`);
+    return true;
+  }
+
+  async walkVisibleAdminNavigation(): Promise<void> {
+    const navItems = this.page.locator('button.admin-nav-item:visible');
+    const count = await navItems.count();
+    console.log(`[HUMAN NAV] Found ${count} visible admin navigation items`);
+    for (let index = 0; index < count; index += 1) {
+      const item = navItems.nth(index);
+      const label = compact(await item.textContent());
+      if (!label || UNSAFE_ACTION.test(label)) continue;
+      await item.click();
+      await this.page.waitForTimeout(250);
+      await this.observe(`admin navigation: ${label}`);
+    }
+  }
+
+  async walkSafeTabsAndFields(): Promise<void> {
+    const tabs = this.page.locator('[role="tab"]:visible');
+    const tabCount = await tabs.count();
+    for (let index = 0; index < Math.min(tabCount, 12); index += 1) {
+      const tab = tabs.nth(index);
+      const label = compact(await tab.textContent());
+      if (!label || UNSAFE_ACTION.test(label)) continue;
+      await tab.click();
+      await this.page.waitForTimeout(150);
+      await this.observe(`tab: ${label}`);
+    }
+    await this.fillSafeField();
+  }
+
+  async capture(label: string): Promise<void> {
+    const safeLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'page';
+    const path = this.testInfo.outputPath('human', `${String(this.steps.length + 1).padStart(2, '0')}-${safeLabel}.png`);
+    await this.page.screenshot({ path, fullPage: true }).catch(() => undefined);
+    await this.testInfo.attach(`human-${safeLabel}`, { path, contentType: 'image/png' }).catch(() => undefined);
+  }
+
+  async finish(): Promise<void> {
+    for (const message of this.consoleErrors) {
+      // The fixture server intentionally does not provide Supabase Realtime.
+      // Keep real application errors fatal while ignoring that expected noise.
+      if (/127\.0\.0\.1:54321\/realtime\/v1\/websocket.*ERR_CONNECTION_REFUSED/i.test(message)) continue;
+      this.findings.push({ severity: 'error', message: `Browser console error: ${message}`, url: this.page.url(), step: this.currentStep });
+    }
+    for (const message of this.failedRequests) {
+      this.findings.push({ severity: 'warning', message: `Failed request: ${message}`, url: this.page.url(), step: this.currentStep });
+    }
+    const report = {
+      generatedAt: now(),
+      project: this.testInfo.project.name,
+      title: this.testInfo.title,
+      finalUrl: this.page.url(),
+      steps: this.steps,
+      findings: this.findings,
+      consoleErrors: this.consoleErrors,
+      failedRequests: this.failedRequests,
+    };
+    await this.testInfo.attach('human-test-report.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
+    const errors = this.findings.filter((finding) => finding.severity === 'error');
+    console.log(`\n[HUMAN SUMMARY] ${this.steps.length} steps, ${this.findings.length} findings, ${errors.length} errors`);
+    expect(errors, 'Human test found browser errors or failed interactions').toEqual([]);
+  }
+
+  private async visibleLabels(selector: string): Promise<string[]> {
+    const values = await this.page.locator(`${selector}:visible`).evaluateAll((elements) => elements.map((element) => (element.textContent ?? element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean));
+    return values.slice(0, 12);
+  }
+}

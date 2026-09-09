@@ -665,7 +665,11 @@ const DispatchConsolePage: React.FC = () => {
     setOperatorBusy(true); setError(null);
     const currentStatus = target === 'job' ? jobs.find((job) => job.id === targetId)?.status : target === 'stop' ? shiftStops.find((stop) => stop.id === targetId)?.status : activeShifts.find((shift) => shift.id === targetId)?.status;
     const rpc = target === 'job' ? 'manage_dispatch_job' : target === 'stop' ? 'manage_shift_stop' : 'manage_active_shift';
-    const payload = target === 'job' ? { p_job_id: targetId, p_expected_status: currentStatus, p_action: action, p_reason: reason } : target === 'stop' ? { p_stop_id: targetId, p_expected_status: currentStatus, p_action: action, p_reason: reason } : { p_shift_id: targetId, p_expected_status: currentStatus, p_action: action, p_reason: reason };
+    const payload = target === 'job'
+      ? { p_job_id: targetId, p_expected_status: currentStatus, p_action: action, p_priority: null, p_briefing_notes: null, p_dispatch_resource_id: null, p_reason: reason }
+      : target === 'stop'
+        ? { p_stop_id: targetId, p_expected_status: currentStatus, p_action: action, p_new_order: null, p_reason: reason }
+        : { p_shift_id: targetId, p_expected_status: currentStatus, p_action: action, p_notes: null, p_reason: reason };
     const { error: actionError } = await supabase.rpc(rpc, payload);
     if (actionError) setError(actionError.message); else { await loadPhaseA(); if (selectedShiftId) await loadPhaseB(selectedShiftId); }
     setOperatorBusy(false);

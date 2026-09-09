@@ -9,6 +9,8 @@
     "holidays:generate": "node scripts/generate-nz-holidays.cjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:human": "playwright test e2e/dr-bob-human-test.spec.ts",
+    "test:e2e:human:live": "HUMAN_TEST_LIVE=true playwright test e2e/dr-bob-human-test.spec.ts",
     "test:e2e:update": "playwright test --update-snapshots",
     "test:e2e:report": "playwright show-report",
     "lint": "tsc --noEmit"

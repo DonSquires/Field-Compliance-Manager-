@@ -44,13 +44,18 @@ for test in e2e/*manual-walkthrough*.spec.ts; do
         fi
     fi
 done
+echo "  • dr-bob-human-test (local fixtures; screenshots + JSON report)"
 
 echo ""
 echo "To run a specific test:"
 echo "  npx playwright test e2e/crm-portfolio-manual-walkthrough.spec.ts"
+echo "  npx playwright test e2e/dr-bob-human-test.spec.ts"
 echo ""
 echo "To run all manual walkthroughs:"
 echo "  npx playwright test e2e/*manual-walkthrough*.spec.ts"
+echo ""
+echo "To run the human observer against production (read-only exploration):"
+echo "  HUMAN_TEST_LIVE=true npx playwright test e2e/dr-bob-human-test.spec.ts"
 echo ""
 echo "To view the report:"
 echo "  npx playwright show-report"
@@ -66,4 +71,4 @@ echo "✓ Playwright is installed ($(npx playwright --version 2>&1 | head -1))"
 echo ""
 echo "Ready to run manual walkthroughs!"
 echo ""
-echo "Documentation: See docs/MANUAL_TESTING_PLAYBOOK.md"
+echo "Documentation: See docs/MANUAL_TESTING_PLAYBOOK.md and docs/HUMAN_TESTING.md"

@@ -95,3 +95,75 @@ See also: `docs/ATLAS_BUILD_REPORT.md`, `docs/ATLAS_REBUILD_ORDER.md`,
 `docs/ATLAS_WIRING_STATUS.md`, and repo memory
 (`/memories/repo/fcm-architecture.md` for coding agents that keep persistent
 notes) for prior findings and conventions worth not re-deriving from scratch.
+
+## Bob: repository sample corpus and enterprise SaaS UX
+
+Bob has permission to use the repository's sample corpus as **live reference
+material for testing, extraction, mapping, and acceptance checks**. The corpus
+is under `Build-Plan/sample data` and includes real-shaped contracts, site
+instructions, rosters, patrol/noise/vehicle exports, HR/legal documents,
+spreadsheets, PDFs, images, and historical Freedom Camping material.
+
+Before using a file, Bob must:
+
+1. Read `docs/SAMPLE_DATA_CAPABILITY_MATRIX.md` and classify the file as
+   supported, partial, gap, or exclude.
+2. Treat the file as potentially sensitive. Do not upload it to a live tenant,
+   send it to an external model, or promote extracted values into business
+   records without an explicit governed path and human approval.
+3. Use excluded, empty, lock, binary, and diagnostic files only to verify that
+   quarantine and exclusion behavior works.
+4. Preserve provenance: file path, hash/version where available, extracted
+   fields, confidence, source location, reviewer, and promotion decision.
+5. Compare extracted or displayed values against the source file and the
+   canonical schema/Atlas path. A sample file is evidence for acceptance, not
+   permission to invent a table, field, workflow, or UI.
+
+Bob must also use `docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md` as the minimum
+design/build standard. Every UI change requires a user/role/job-to-be-done,
+schema-backed information architecture, responsive behavior, accessible
+states, loading/empty/error/success/permission states, safe next actions,
+human-test evidence, and Atlas/schema verification. Do not produce a polished
+screen-first mock that is disconnected from the organization, agreement, place,
+staff, work, evidence, finance, and audit spines.
+
+## Bob: web research and live database verification
+
+Bob may use the governed `bob-web-research` path for current external evidence
+and the governed read paths `bob-query-records`, `bob-sql-read`, and
+`bob-schema-inspect` for live database verification. These are complementary
+evidence sources, not substitutes for one another.
+
+For web research, Bob must:
+
+1. Use it for current standards, browser/platform behavior, accessibility,
+   enterprise UX patterns, NZ public-sector/security context, and official
+   vendor documentation.
+2. Prefer primary sources and record URL, publisher, publication/update date
+   when available, retrieval date, and the exact claim supported.
+3. Separate sourced fact, interpretation, and recommendation. Research cannot
+   authorize a write, deployment, entitlement change, or compliance conclusion.
+4. Never use web research to identify or enrich a named private individual,
+   employee, customer, or officer. Do not send secrets, private files,
+   credentials, or raw production records to external research.
+
+For live database verification, Bob must:
+
+1. Start read-only and scope every query to the relevant organization,
+   environment, table, record, and time window. Prefer aggregate, sampled, or
+   redacted results over bulk exports.
+2. Use the caller's authorized context where possible. Service-role reads are
+   reserved for explicitly approved diagnostics and must never be exposed to a
+   browser, model prompt, log, screenshot, or artifact.
+3. Check live records, RPC signatures, migration ledger, grants/policies, and
+   timestamps against `supabase/schema.sql`, migrations, Atlas, and the
+   human-test observation.
+4. Never mutate live data through a read-verification path. Any write must use
+   a governed RPC/proposal/approval path with idempotency and audit evidence.
+5. Redact names, contact details, credentials, GPS, legal, HR, financial, and
+   security data from reports unless the reviewer explicitly needs the value.
+
+Bob's evidence order is: human observation -> schema/Atlas inspection -> live
+read verification -> bounded web research where external context is needed ->
+smallest discriminating next move. If sources disagree, report the
+disagreement instead of smoothing it into a confident answer.
