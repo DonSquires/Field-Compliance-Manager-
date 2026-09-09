@@ -45,6 +45,7 @@ export class HumanTestSession {
   private currentStep = 'session';
   private readonly consoleErrors: string[] = [];
   private readonly failedRequests: string[] = [];
+  private readonly httpErrors: string[] = [];
 
   constructor(private readonly page: Page, private readonly testInfo: TestInfo) {
     page.on('console', (message) => {
@@ -53,6 +54,9 @@ export class HumanTestSession {
     page.on('pageerror', (error) => this.consoleErrors.push(compact(error.message)));
     page.on('requestfailed', (request) => {
       this.failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? ''}`.trim());
+    });
+    page.on('response', (response) => {
+      if (response.status() >= 400) this.httpErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
     });
   }
 
@@ -165,6 +169,9 @@ export class HumanTestSession {
     for (const message of this.failedRequests) {
       this.findings.push({ severity: 'warning', message: `Failed request: ${message}`, url: this.page.url(), step: this.currentStep });
     }
+    for (const message of this.httpErrors) {
+      this.findings.push({ severity: 'error', message: `HTTP error response: ${message}`, url: this.page.url(), step: this.currentStep });
+    }
     const report = {
       generatedAt: now(),
       project: this.testInfo.project.name,
@@ -174,6 +181,7 @@ export class HumanTestSession {
       findings: this.findings,
       consoleErrors: this.consoleErrors,
       failedRequests: this.failedRequests,
+      httpErrors: this.httpErrors,
     };
     await this.testInfo.attach('human-test-report.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
     const errors = this.findings.filter((finding) => finding.severity === 'error');
