@@ -241,6 +241,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     ? jobs.filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id)
     : selected ? [selected] : [];
 
+  useEffect(() => {
+    setReportReceipt(null);
+  }, [selectedId]);
+
   const manageJob = useCallback(async (job: CCTVJob, action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (!profile?.organizationId) return;
     const confirmation = action === 'archive'
@@ -486,7 +490,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   };
 
   const printSelectedReport = async () => {
-    if (!selected) return;
+    if (!selected || !selected.evidence_item_id || !profile?.organizationId) {
+      setDecisionMessage('A printable report requires an organization-scoped evidence item.');
+      return;
+    }
     const batchConsolidated = selectedBatchJobs.map((job) => ({ job, result: consolidateResultData(job.result?.result) }));
     const observations = batchConsolidated.flatMap(({ result }) => [
       ...result.person_events.map((event) => ({
@@ -526,7 +533,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       generated_at: generatedAt,
       place: evidencePlaceContext(selected.evidence?.metadata || null),
       job_id: selected.id,
-      evidence_id: selected.evidence_item_id || 'Not specified',
+      evidence_id: selected.evidence_item_id,
       batch_id: selectedBatch?.batch_id || null,
       clip_count: selectedBatch?.clip_total || null,
       person_count: reportCounts.personCount,
@@ -537,7 +544,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     const { data: receiptData, error: receiptError } = await supabase.rpc('issue_cctv_report_receipt', {
       p_job_id: selected.id,
       p_evidence_id: selected.evidence_item_id,
-      p_organization_id: profile?.organizationId,
+      p_organization_id: profile.organizationId,
       p_batch_id: selectedBatch?.batch_id || null,
       p_payload: reportPayload,
     });
