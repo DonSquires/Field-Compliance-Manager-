@@ -17,7 +17,7 @@ function workerCommand(profile) {
   return [...command];
 }
 
-function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g', cpus = '1', pidsLimit = 256 }) {
+function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g', cpus = '1', pidsLimit = 256, environment = {} }) {
   if (!image) throw new Error('worker image is required');
   if (!sourceDir || !artifactDir) throw new Error('sourceDir and artifactDir are required');
   const command = workerCommand(profile);
@@ -38,6 +38,9 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   }
   if (profile === 'human-qa') {
     args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=512m,uid=1000,gid=1000,mode=0755');
+    for (const key of ['HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD']) {
+      if (environment[key]) args.push('--env', `${key}=${environment[key]}`);
+    }
   }
   args.push(
     '--mount', `type=bind,src=${sourceDir},dst=/workspace,readonly`,
@@ -50,7 +53,12 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
 
 function executeWorker(options, { spawnImpl = spawn } = {}) {
   const timeoutMs = options.timeoutMs || 10 * 60 * 1000;
-  const args = dockerArguments(options);
+  const args = dockerArguments({ ...options, environment: {
+    HUMAN_TEST_LIVE: process.env.HUMAN_TEST_LIVE,
+    HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
+    GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
+    GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD
+  } });
   return new Promise((resolve, reject) => {
     const child = spawnImpl('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
