@@ -128,6 +128,24 @@ A UI is not complete because it compiles or matches a screenshot. Bob's human te
 - Reload and verify persistence where a write was intentionally tested
 - Attach a structured report with findings, URLs, evidence, and next move
 
+The human observer also performs a conservative visual UX audit at each
+checkpoint. It records measurable findings for horizontal overflow and
+clipping, page-title hierarchy, unnamed controls, missing image alt text,
+sub-12px text, body contrast, large fixed overlays, dialog semantics, and
+mobile viewport fit. Bob must then review the screenshot and decide whether the
+finding is a real defect, an intentional design choice, or a recommendation.
+The audit is evidence for human judgment, not a replacement for visual review.
+
+For each surface, Bob should also ask:
+
+- Is the primary action in the user's natural scan path?
+- Is the information density appropriate for repeated enterprise work?
+- Should this interaction remain inline, be a modal, use a drawer, or become a
+	dedicated page based on task scope, context retention, and interruption cost?
+- Do color, typography, imagery, iconography, and positioning communicate
+	hierarchy and state without relying on decoration or color alone?
+- Does the mobile layout preserve context and the next safe action?
+
 Each failure must be classified as UX, caller contract, schema/migration drift, deployment drift, authorization/RLS, unwired, unexercised, or unknown.
 
 ### 9. Web research and live truth

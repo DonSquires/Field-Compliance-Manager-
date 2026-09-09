@@ -94,7 +94,66 @@ export class HumanTestSession {
     if (!bodyText) {
       this.findings.push({ severity: 'warning', message: 'The rendered page contains no visible text.', url: this.page.url(), step: label });
     }
+    await this.auditVisualUx(label);
     await this.capture(label);
+  }
+
+  private async auditVisualUx(step: string): Promise<void> {
+    const audit = await this.page.evaluate(() => {
+      const root = document.documentElement;
+      const body = document.body;
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const visible = (element: Element) => {
+        const style = window.getComputedStyle(element);
+        const rect = (element as HTMLElement).getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      };
+      const parseRgb = (value: string) => {
+        const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+        return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+      };
+      const luminance = (rgb: number[]) => rgb.map((value) => value / 255).map((value) => value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+      const contrast = (foreground: string, background: string) => {
+        const fg = parseRgb(foreground); const bg = parseRgb(background);
+        if (!fg || !bg) return null;
+        const light = Math.max(luminance(fg), luminance(bg));
+        const dark = Math.min(luminance(fg), luminance(bg));
+        return (light + 0.05) / (dark + 0.05);
+      };
+      const issues: string[] = [];
+      if (root.scrollWidth > viewport.width + 2 || body.scrollWidth > viewport.width + 2) issues.push('horizontal overflow may clip content at this viewport');
+      const headings = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].filter(visible);
+      if (!headings.length) issues.push('no visible heading establishes the page hierarchy');
+      if (headings.filter((heading) => (heading.textContent ?? '').trim()).length > 1 && !document.querySelector('h1')) issues.push('page has headings but no h1-level page title');
+      const unnamedControls = [...document.querySelectorAll('button,a,input,textarea,select')].filter(visible).filter((element) => {
+        const label = element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || element.getAttribute('placeholder') || '';
+        return !label.trim();
+      }).length;
+      if (unnamedControls) issues.push(`${unnamedControls} visible interactive control(s) have no accessible name`);
+      const missingAlt = [...document.querySelectorAll('img')].filter(visible).filter((image) => !image.hasAttribute('alt')).length;
+      if (missingAlt) issues.push(`${missingAlt} visible image(s) have no alt text`);
+      const smallText = [...document.querySelectorAll('body *')].filter(visible).filter((element) => {
+        const style = window.getComputedStyle(element);
+        return Number.parseFloat(style.fontSize) < 12 && (element.textContent ?? '').trim().length > 0;
+      }).length;
+      if (smallText > 3) issues.push(`${smallText} visible text element(s) are below 12px and may be difficult to scan`);
+      const bodyStyle = window.getComputedStyle(body);
+      const bodyContrast = contrast(bodyStyle.color, bodyStyle.backgroundColor);
+      if (bodyContrast !== null && bodyContrast < 4.5) issues.push(`body text contrast is approximately ${bodyContrast.toFixed(1)}:1`);
+      const fixedOverlays = [...document.querySelectorAll('*')].filter(visible).filter((element) => window.getComputedStyle(element).position === 'fixed').filter((element) => {
+        const rect = (element as HTMLElement).getBoundingClientRect();
+        return rect.width > viewport.width * 0.6 && rect.height > viewport.height * 0.35;
+      });
+      if (fixedOverlays.length && !document.querySelector('[role="dialog"][aria-modal="true"]')) issues.push('large fixed overlay has no modal semantics; check whether it should block or be repositioned');
+      const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
+      if (dialogs.some((dialog) => !dialog.getAttribute('aria-labelledby') && !dialog.textContent?.trim())) issues.push('visible dialog has no clear title or content');
+      return { issues, viewport, fontFamily: bodyStyle.fontFamily };
+    });
+    console.log(`[HUMAN UX AUDIT] ${step} viewport=${audit.viewport.width}x${audit.viewport.height} font=${audit.fontFamily}`);
+    for (const issue of audit.issues) {
+      console.log(`[HUMAN UX FINDING] ${issue}`);
+      this.findings.push({ severity: 'warning', message: `UX/layout: ${issue}`, url: this.page.url(), step });
+    }
   }
 
   async clickSafe(label: string | RegExp): Promise<boolean> {
