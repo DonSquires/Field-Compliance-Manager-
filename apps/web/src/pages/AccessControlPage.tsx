@@ -79,6 +79,7 @@ const AccessControlPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      const canLoadBranchAccess = operatingContext?.authorityBasis === 'branch_authorisation';
 
       const [presetsRes, assignmentsRes, grantsRes, usersRes] = await Promise.all([
         supabase
@@ -86,9 +87,12 @@ const AccessControlPage: React.FC = () => {
           .select('id, key, name, description, role, is_system')
           .or(`organization_id.eq.${orgId},is_system.eq.true`),
         supabase.from('preset_assignments').select('id, user_id, preset_id, status').eq('scope_org_id', orgId),
-        supabase
-          .rpc('get_branch_area_grants', { p_operating_organization_id: operatingBranchId }),
-        supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId }),
+        canLoadBranchAccess
+          ? supabase.rpc('get_branch_area_grants', { p_operating_organization_id: operatingBranchId })
+          : Promise.resolve({ data: [], error: null }),
+        canLoadBranchAccess
+          ? supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId })
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       if (presetsRes.error) throw presetsRes.error;

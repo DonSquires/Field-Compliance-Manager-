@@ -62,9 +62,12 @@ const UserManagementPage: React.FC = () => {
     }
     setLoading(true);
     setError(null);
+    const canLoadBranchUsers = operatingContext?.authorityBasis === 'branch_authorisation';
     try {
       const [usersResponse, auditResponse, presetResponse, assignmentResponse, readinessResponse] = await Promise.all([
-        supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId }),
+        canLoadBranchUsers
+          ? supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId })
+          : Promise.resolve({ data: [], error: null }),
         supabase
           .from('user_management_audit')
           .select('id, target_user_id, action_type, performed_by, metadata, created_at')
