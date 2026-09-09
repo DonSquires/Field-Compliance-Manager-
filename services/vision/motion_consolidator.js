@@ -284,6 +284,17 @@ async function consolidateVehicles(frames, options = {}) {
     return isPlatish(plate, conf);
   });
 
+  const genericVehicleFrames = frames.filter((frame) => {
+    if (!frame || frame.visual_quality === 'degraded' || (frame.alpr?.success && isPlatish(frame.alpr?.plate, Number(frame.alpr?.confidence) || 0))) return false;
+    const detection = frame.runpod?.vehicle?.detection;
+    const confidence = Number(detection?.confidence) || 0;
+    const bbox = detection?.bbox;
+    if (!bbox || confidence < 0.25) return false;
+    // A full-frame low-confidence detection is a camera/model artifact, not a vehicle candidate.
+    if (Number(bbox.x) === 0 && Number(bbox.y) === 0 && Number(bbox.width) >= 1000 && Number(bbox.height) >= 700) return false;
+    return Number(bbox.width) > 0 && Number(bbox.height) > 0;
+  });
+
   const vehicleTracks = []; // Array of groups: { plate, tracks: [...] }
 
   for (const frame of alprFrames) {
@@ -396,7 +407,46 @@ async function consolidateVehicles(frames, options = {}) {
     });
   }
 
-  return { events, uniqueVehiclesCount: vehicleTracks.length };
+  const genericTracks = [];
+  for (const frame of genericVehicleFrames) {
+    const detection = frame.runpod.vehicle.detection;
+    const timestamp = Number(frame.relative_timestamp_seconds) || 0;
+    const bbox = detection.bbox;
+    const center = { x: Number(bbox.x) + Number(bbox.width) / 2, y: Number(bbox.y) + Number(bbox.height) / 2 };
+    let track = genericTracks.find((candidate) => timestamp - candidate.lastSeen <= maxGap && Math.hypot(center.x - candidate.center.x, center.y - candidate.center.y) < Math.max(Number(bbox.width), Number(bbox.height)));
+    if (!track) {
+      track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, center };
+      genericTracks.push(track);
+    }
+    track.lastSeen = timestamp;
+    track.frameCount += 1;
+    track.confidence = Math.max(track.confidence, Number(detection.confidence) || 0);
+    track.center = center;
+    if ((Number(bbox.width) * Number(bbox.height)) > (Number(track.bestBbox.width) * Number(track.bestBbox.height))) {
+      track.bestBbox = bbox;
+      track.bestFrame = frame;
+    }
+  }
+  for (const [index, track] of genericTracks.entries()) {
+    const thumbnail = await loadBase64Thumbnail(track.bestFrame?.file_path);
+    events.push({
+      event_id: `vehicle-unconfirmed-${index + 1}`,
+      event_type: 'vehicle',
+      plate: 'Unconfirmed vehicle',
+      confidence: Number(track.confidence.toFixed(2)),
+      is_return: false,
+      first_seen_seconds: Number(track.firstSeen.toFixed(2)),
+      last_seen_seconds: Number(track.lastSeen.toFixed(2)),
+      duration_seconds: Number(Math.max(0, track.lastSeen - track.firstSeen).toFixed(2)),
+      frame_count: track.frameCount,
+      visit_count: 1,
+      thumbnail,
+      review_required: true,
+      temporal_consensus: track.frameCount >= 2,
+      candidate_state: 'unconfirmed_vehicle_without_plate',
+    });
+  }
+  return { events, uniqueVehiclesCount: vehicleTracks.length + genericTracks.length };
 }
 
 async function extractKeyframes(frames, count = DEFAULT_KEYFRAME_COUNT) {

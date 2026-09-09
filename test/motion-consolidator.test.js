@@ -138,3 +138,14 @@ test('consolidatePeople excludes degraded glare/occlusion frames but records the
   assert.equal(result[0].visual_quality_gate, 'degraded_frames_excluded_from_person_inference');
   assert.equal(result[0].excluded_degraded_frame_count, 1);
 });
+
+test('consolidateVehicles preserves a bounded no-plate vehicle candidate for review', async () => {
+  const result = await consolidateVehicles([
+    { relative_timestamp_seconds: 1, sha256_hash: 'v0', runpod: { vehicle: { detection: { confidence: 0.72, bbox: { x: 40, y: 50, width: 220, height: 120 } } } }, alpr: { success: true, plate: null } },
+    { relative_timestamp_seconds: 2, sha256_hash: 'v1', runpod: { vehicle: { detection: { confidence: 0.68, bbox: { x: 45, y: 52, width: 220, height: 120 } } } }, alpr: { success: true, plate: null } },
+  ]);
+  assert.equal(result.events.length, 1);
+  assert.equal(result.events[0].plate, 'Unconfirmed vehicle');
+  assert.equal(result.events[0].candidate_state, 'unconfirmed_vehicle_without_plate');
+  assert.equal(result.events[0].review_required, true);
+});
