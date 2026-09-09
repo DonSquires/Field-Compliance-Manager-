@@ -188,6 +188,18 @@ type PhysicalDhfsRecording = {
   bytes: number;
 };
 
+type DesktopReviewBatchMetadata = {
+  batch_id: string;
+  clip_index: number;
+  clip_total: number;
+  channel: number;
+  start_time: string;
+  end_time: string;
+  fragment_count: number;
+  source_bytes: number;
+  cache_sha256: string;
+};
+
 type AutoProcessStage = 'idle' | 'analysing' | 'enumerating' | 'caching' | 'uploading' | 'registered' | 'paused' | 'failed';
 
 const AUTO_PROCESS_ACTIVE_STAGES: AutoProcessStage[] = ['analysing', 'enumerating', 'caching', 'uploading'];
@@ -675,7 +687,7 @@ function App() {
     }
   };
 
-  const uploadPreparedVideo = async (file: File, preserveCachedClip = false, onUploadProgress?: (progress: number | null) => void): Promise<boolean> => {
+  const uploadPreparedVideo = async (file: File, preserveCachedClip = false, onUploadProgress?: (progress: number | null) => void, reviewBatch?: DesktopReviewBatchMetadata): Promise<boolean> => {
     if (file.size <= 0 || file.size > MAX_BOB_UPLOAD_BYTES) {
       setError('This file is empty or exceeds the 128 GB upload limit.');
       return false;
@@ -731,6 +743,7 @@ function App() {
           file_name: file.name,
           file_type: file.type || 'video/mp4',
           file_size_bytes: file.size,
+          desktop_review_batch: reviewBatch ?? null,
         },
       });
       if (registerError) {
@@ -834,6 +847,7 @@ function App() {
       setAutoClipTotal(uploadable.length);
       if (!uploadable.length) throw new Error('No uploadable recordings were found on this card.');
       if (stopIfPaused()) return;
+      const batchId = crypto.randomUUID();
       let succeeded = 0;
       let failed = 0;
       for (let index = 0; index < uploadable.length; index += 1) {
@@ -861,6 +875,16 @@ function App() {
           setAutoMessage(`Uploading clip ${index + 1} of ${uploadable.length} and queuing it for CCTV Review.`);
           const uploaded = await uploadPreparedVideo(prepared, true, (progress) => {
             setBatchProgress(index, 0.55 + ((progress ?? 0) / 100) * 0.4, uploadable.length);
+          }, {
+            batch_id: batchId,
+            clip_index: index + 1,
+            clip_total: uploadable.length,
+            channel: recording.channel,
+            start_time: recording.start_time,
+            end_time: recording.end_time,
+            fragment_count: recording.fragment_count,
+            source_bytes: recording.bytes,
+            cache_sha256: cacheResult.sha256,
           });
           if (!uploaded) throw new Error('Upload or registration did not complete. The cached file was preserved.');
           succeeded += 1;

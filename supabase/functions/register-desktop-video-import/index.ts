@@ -14,6 +14,32 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 }
 
+function sanitizeDesktopReviewBatch(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const batchId = String(source.batch_id ?? '').trim();
+  const clipIndex = Number(source.clip_index);
+  const clipTotal = Number(source.clip_total);
+  const channel = Number(source.channel);
+  const startTime = String(source.start_time ?? '').trim();
+  const endTime = String(source.end_time ?? '').trim();
+  const fragmentCount = Number(source.fragment_count);
+  const sourceBytes = Number(source.source_bytes);
+  const cacheSha256 = String(source.cache_sha256 ?? '').trim();
+  if (!batchId || !Number.isInteger(clipIndex) || !Number.isInteger(clipTotal) || clipIndex < 1 || clipTotal < clipIndex) return null;
+  return {
+    batch_id: batchId.slice(0, 80),
+    clip_index: clipIndex,
+    clip_total: clipTotal,
+    channel: Number.isFinite(channel) ? channel : null,
+    start_time: startTime.slice(0, 80),
+    end_time: endTime.slice(0, 80),
+    fragment_count: Number.isFinite(fragmentCount) ? fragmentCount : null,
+    source_bytes: Number.isFinite(sourceBytes) ? sourceBytes : null,
+    cache_sha256: cacheSha256.slice(0, 80),
+  };
+}
+
 serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
@@ -28,6 +54,7 @@ serve(async (request) => {
     const fileName = String(body.file_name ?? '').trim();
     const fileType = String(body.file_type ?? '').trim();
     const fileSizeBytes = Number(body.file_size_bytes);
+    const desktopReviewBatch = sanitizeDesktopReviewBatch(body.desktop_review_batch);
     if (!attachmentId || !storagePath || !fileName || !fileType || !Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > MAX_ATTACHMENT_BYTES) {
       return json({ error: 'Valid attachment_id, storage_path, file_name, file_type, and file_size_bytes are required' }, 422);
     }
@@ -70,6 +97,7 @@ serve(async (request) => {
       storage_path: storagePath,
       purpose: fileType.startsWith('video/') ? 'video_intake' : 'document_intake',
       processing_state: 'pending',
+      extraction_payload: desktopReviewBatch ? { desktop_review_batch: desktopReviewBatch } : {},
       source_type: 'upload',
     });
     if (attachmentError) throw new Error(attachmentError.message);
