@@ -39,7 +39,7 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.doesNotMatch(source, /vercel\.app/);
   const adminShell = fs.readFileSync(path.join(root, 'apps/web/src/shells/AdminShell.tsx'), 'utf8');
   assert.match(adminShell, /releases\/download\/sd-card-bridge-v0\.1\.52\/FCM-SD-Card-Bridge-Setup\.exe/);
-  assert.match(adminShell, /releases\/download\/sd-card-bridge-v2-v0\.1\.0\/FCM-Desktop-V2-Setup\.exe/);
+  assert.match(adminShell, /signed installer not published yet/);
   assert.ok(capability.permissions.includes('opener:default'));
   for (const label of ['Desktop home', 'One-shot SD import', 'Review in web portal', 'Upload exported video', 'FCM web portal']) {
     assert.match(source, new RegExp(label));

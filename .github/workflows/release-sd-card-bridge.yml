@@ -3,7 +3,7 @@ name: Release SD Card Bridge
 on:
   push:
     tags:
-      - 'sd-card-bridge-v*'
+      - 'sd-card-bridge-v0.*'
   workflow_dispatch:
 
 permissions:

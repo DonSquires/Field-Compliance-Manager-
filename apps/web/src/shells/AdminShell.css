@@ -227,6 +227,11 @@
 .desktop-download-options strong { color: #e8f7f8; font-size: 13px; }
 .desktop-download-options small { color: #9cb8bf; font-size: 11px; font-weight: 500; }
 .desktop-download-options svg { color: #67e4e8; flex: 0 0 auto; }
+.desktop-download-unavailable { align-items: center; display: flex; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #34484f; border-radius: 5px; color: #90a2a8; background: #16262c; }
+.desktop-download-unavailable > span { display: grid; gap: 4px; text-transform: none; }
+.desktop-download-unavailable strong { color: #b7c7ca; font-size: 13px; }
+.desktop-download-unavailable small { color: #84999f; font-size: 11px; font-weight: 500; }
+.desktop-download-unavailable em { color: #e8b06a; font-size: 10px; font-style: normal; font-weight: 700; text-transform: uppercase; }
 .desktop-download-actions { grid-column: 2; display: flex; gap: 10px; margin-top: 4px; }
 .desktop-download-actions button { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; border-radius: 4px; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .desktop-download-actions button { padding: 0 10px; border: 1px solid #44626c; color: #c7d8dc; background: transparent; }
