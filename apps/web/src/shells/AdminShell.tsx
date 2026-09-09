@@ -60,7 +60,8 @@ import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
 
-const DESKTOP_APP_DOWNLOAD_URL = 'https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/desktop-releases/0.1.44/FCM-SD-Card-Bridge-Setup.exe';
+const DESKTOP_V1_DOWNLOAD_URL = 'https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/desktop-releases/0.1.44/FCM-SD-Card-Bridge-Setup.exe';
+const DESKTOP_V2_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v2-v0.1.0/FCM-Desktop-V2-Setup.exe';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
@@ -590,7 +591,7 @@ const AdminShell: React.FC = () => {
             <div className="admin-shell-tools">
               {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'corporate_oversight' ? ' (corporate)' : ''}</option>)}</select></label>}
               <NotificationCenter onNavigate={navigateFromNotification} />
-              <a className="admin-shell-icon admin-desktop-download" href={DESKTOP_APP_DOWNLOAD_URL} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></a>
+              <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>
@@ -618,7 +619,7 @@ const AdminShell: React.FC = () => {
           onClose={() => setBobOpen(false)}
           context={bobContext}
         />
-        {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop companion</span><h2 id="desktop-download-title">Use local hardware with FCM</h2><p>Install the desktop companion to import SD-card footage, prepare large video files locally, and queue VPS analysis.</p></div><div className="desktop-download-actions"><a href={DESKTOP_APP_DOWNLOAD_URL} onClick={dismissDesktopDownload}><Download size={16} aria-hidden="true" /> Download desktop app</a><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
+        {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop releases</span><h2 id="desktop-download-title">Choose your evidence workstation</h2><p>Both applications are signed Windows desktop tracks. V1 is the current working bridge; V2 is the clone-first acquisition prototype.</p></div><div className="desktop-download-options"><a href={DESKTOP_V1_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V1</strong><small>Stable SD-card bridge · current production workflow</small></span><Download size={16} aria-hidden="true" /></a><a href={DESKTOP_V2_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V2</strong><small>Prototype · whole-device clone and decoder lab</small></span><Download size={16} aria-hidden="true" /></a></div><div className="desktop-download-actions"><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
 
       </div>
     );
