@@ -60,8 +60,9 @@ serve(async (request) => {
     }
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: profile } = await admin.from('user_profiles').select('organization_id').eq('id', user.id).single();
-    if (!profile?.organization_id) return json({ error: 'Active organization not found' }, 404);
+    const { data: profile, error: profileError } = await admin.from('user_profiles').select('organization_id').eq('id', user.id).single();
+    if (profileError) return json({ error: `profile_lookup: ${profileError.message}` }, 500);
+    if (!profile?.organization_id) return json({ error: 'profile_lookup: active organization not found' }, 404);
     const requiredPrefix = `desktop/${user.id}/${attachmentId}-`;
     if (!storagePath.startsWith(requiredPrefix)) return json({ error: 'Storage path does not belong to this desktop import' }, 403);
     const { data: conversation, error: conversationError } = await admin.from('bob_conversations').insert({
@@ -70,7 +71,7 @@ serve(async (request) => {
       module_key: 'cctv_review',
       title: `Desktop CCTV import: ${fileName.slice(0, 160)}`,
     }).select('id').single();
-    if (conversationError || !conversation) throw new Error(conversationError?.message ?? 'Could not create import conversation');
+    if (conversationError || !conversation) throw new Error(`conversation_insert: ${conversationError?.message ?? 'Could not create import conversation'}`);
     const { error: attachmentError } = await admin.from('bob_attachments').insert({
       id: attachmentId,
       organization_id: profile.organization_id,
@@ -86,10 +87,10 @@ serve(async (request) => {
       extraction_payload: desktopReviewBatch ? { desktop_review_batch: desktopReviewBatch } : {},
       source_type: 'upload',
     });
-    if (attachmentError) throw new Error(attachmentError.message);
+    if (attachmentError) throw new Error(`attachment_insert: ${attachmentError.message}`);
     if (!fileType.startsWith('video/')) return json({ success: true, attachment_id: attachmentId, inference_job_id: null });
     const { data: jobId, error: jobError } = await admin.rpc('register_bob_video_attachment_for_review', { p_attachment_id: attachmentId });
-    if (jobError) throw new Error(jobError.message);
+    if (jobError) throw new Error(`job_registration: ${jobError.message}`);
     return json({ success: true, attachment_id: attachmentId, inference_job_id: jobId });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Desktop video registration failed' }, 500);
