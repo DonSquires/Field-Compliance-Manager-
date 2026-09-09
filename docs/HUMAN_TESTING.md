@@ -23,6 +23,16 @@ npm run test:e2e:human:live
 
 Set `HUMAN_TEST_BASE_URL` to point at another deployment. Live mode performs navigation and observation only. It does not submit, save, approve, resolve, publish, assign, delete, or sign out.
 
+## Deployment preflight
+
+Before a live human journey, Bob performs a server-side deployment preflight. If
+`VERCEL_TOKEN` and `VERCEL_PROJECT_ID` are available to the test process, it
+checks the target production deployment state and compares its Git SHA with
+`HUMAN_TEST_EXPECTED_SHA` or `GITHUB_SHA`. Set
+`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true` when a stale deployment must block
+the test rather than produce a warning. Vercel credentials never enter the
+browser context.
+
 ## Evidence
 
 Each test produces:

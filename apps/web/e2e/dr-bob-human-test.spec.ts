@@ -60,6 +60,7 @@ test.describe("Dr. Bob's human browser test", () => {
     const session = new HumanTestSession(page, testInfo);
     console.log(`\n[HUMAN TEST MODE] ${liveMode ? `live: ${liveBaseUrl}` : 'fixture-backed local app'}`);
 
+    if (liveMode) await session.verifyDeployment(liveBaseUrl);
     await signInAsHuman(page, session);
     await session.step('explore the visible admin navigation', () => session.walkVisibleAdminNavigation());
     await session.step('open safe tabs and type into the first safe field', () => session.walkSafeTabsAndFields());

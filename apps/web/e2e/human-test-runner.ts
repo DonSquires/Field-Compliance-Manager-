@@ -78,6 +78,39 @@ export class HumanTestSession {
     }
   }
 
+  async verifyDeployment(targetUrl: string): Promise<void> {
+    this.currentStep = 'deployment preflight';
+    const token = process.env.VERCEL_TOKEN;
+    const projectId = process.env.VERCEL_PROJECT_ID;
+    const expectedSha = process.env.HUMAN_TEST_EXPECTED_SHA || process.env.GITHUB_SHA || '';
+    if (!token || !projectId) {
+      console.log('[HUMAN DEPLOYMENT PREFLIGHT] unverified: VERCEL_TOKEN/VERCEL_PROJECT_ID not supplied');
+      if (process.env.HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH === 'true') {
+        this.findings.push({ severity: 'error', message: 'Deployment preflight could not verify the target deployment commit.', url: targetUrl, step: this.currentStep });
+      }
+      return;
+    }
+    const teamId = process.env.VERCEL_TEAM_ID;
+    const query = new URLSearchParams({ projectId, limit: '20', target: 'production' });
+    if (teamId) query.set('teamId', teamId);
+    const response = await fetch(`https://api.vercel.com/v6/deployments?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      this.findings.push({ severity: 'error', message: `Deployment preflight failed with HTTP ${response.status}.`, url: targetUrl, step: this.currentStep });
+      return;
+    }
+    const body = await response.json() as { deployments?: Array<Record<string, unknown>> };
+    const hostname = new URL(targetUrl).hostname;
+    const deployment = (body.deployments ?? []).find((item) => {
+      const aliases = Array.isArray(item.aliases) ? item.aliases.map(String) : [];
+      return aliases.includes(hostname) || item.url === hostname || item.name === hostname;
+    }) ?? body.deployments?.[0];
+    const deployedSha = String((deployment?.meta as Record<string, unknown> | undefined)?.githubCommitSha ?? (deployment?.gitSource as Record<string, unknown> | undefined)?.sha ?? '');
+    console.log(`[HUMAN DEPLOYMENT PREFLIGHT] target=${hostname} state=${String(deployment?.state ?? 'unknown')} deployed_sha=${deployedSha || 'unknown'} expected_sha=${expectedSha || 'not supplied'}`);
+    if (expectedSha && deployedSha && !deployedSha.startsWith(expectedSha) && !expectedSha.startsWith(deployedSha)) {
+      this.findings.push({ severity: process.env.HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH === 'true' ? 'error' : 'warning', message: `Deployment is stale: expected ${expectedSha}, serving ${deployedSha}.`, url: targetUrl, step: this.currentStep });
+    }
+  }
+
   async observe(label: string): Promise<void> {
     this.currentStep = label;
     const bodyText = compact(await this.page.locator('body').textContent(), 500);
