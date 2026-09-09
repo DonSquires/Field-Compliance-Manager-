@@ -96,26 +96,26 @@ type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 type OfficerState = 'standby' | 'home' | 'selector' | 'portal';
 
 // Module metadata
-const MODULE_METADATA: Record<string, { label: string; icon: LucideIcon }> = {
-  freedom_camping: { label: 'Freedom Camping', icon: Tent },
-  parking: { label: 'Parking', icon: Car },
-  noise_control: { label: 'Noise Control', icon: Volume2 },
-  biosecurity: { label: 'Biosecurity', icon: Activity },
-  smoke_control: { label: 'Smoke Control', icon: Wind },
-  site_guard: { label: 'Site Guard', icon: Shield },
-  ems: { label: 'EMS', icon: Activity },
-  patrol: { label: 'Patrol', icon: Route },
-  report: { label: 'Reports', icon: FileText },
-  leave: { label: 'Leave', icon: CalendarDays },
-  timesheet: { label: 'Timesheet', icon: Clock3 },
-  schedule: { label: 'Schedule', icon: ClipboardList },
-  overnight_verification: { label: 'Overnight', icon: Moon },
-  checkpoint_scan: { label: 'Checkpoints', icon: MapPin },
-  map: { label: 'Map', icon: Map },
-  dispatch: { label: 'Dispatch', icon: Radio },
-  debrief: { label: 'Debrief', icon: MessageSquare },
-  vehicle_lookup: { label: 'Vehicle', icon: Car },
-  credentials: { label: 'Credentials', icon: BadgeCheck },
+const MODULE_METADATA: Record<string, { label: string; description: string; icon: LucideIcon }> = {
+  freedom_camping: { label: 'Freedom Camping', description: 'Vehicle scans and breach observations', icon: Tent },
+  parking: { label: 'Parking', description: 'Chalk, recheck, and enforcement', icon: Car },
+  noise_control: { label: 'Noise Control', description: 'Assessments and notices', icon: Volume2 },
+  biosecurity: { label: 'Biosecurity', description: 'Inspections and compliance evidence', icon: Activity },
+  smoke_control: { label: 'Smoke Control', description: 'Complaints and field outcomes', icon: Wind },
+  site_guard: { label: 'Site Guard', description: 'Checkpoints and site security', icon: Shield },
+  ems: { label: 'EMS', description: 'Emergency response reporting', icon: Activity },
+  patrol: { label: 'Patrol', description: 'Routes, stops, and checkpoints', icon: Route },
+  report: { label: 'Reports', description: 'Submit a field report', icon: FileText },
+  leave: { label: 'Leave', description: 'Request and review leave', icon: CalendarDays },
+  timesheet: { label: 'Timesheet', description: 'Record worked time', icon: Clock3 },
+  schedule: { label: 'Schedule', description: 'View shifts and coverage', icon: ClipboardList },
+  overnight_verification: { label: 'Overnight', description: 'Verify overnight activity', icon: Moon },
+  checkpoint_scan: { label: 'Checkpoints', description: 'Scan assigned checkpoints', icon: MapPin },
+  map: { label: 'Map', description: 'View operational places', icon: Map },
+  dispatch: { label: 'Dispatch', description: 'Live jobs and response', icon: Radio },
+  debrief: { label: 'Debrief', description: 'Close the shift and follow up', icon: MessageSquare },
+  vehicle_lookup: { label: 'Vehicle', description: 'Search vehicle history', icon: Car },
+  credentials: { label: 'Credentials', description: 'View capability and expiry', icon: BadgeCheck },
 };
 
 const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'credentials', 'map']);
@@ -445,6 +445,7 @@ const OfficerShell: React.FC = () => {
                     <button key={mod} onClick={() => navigateToModule(mod as ActiveModule)}>
                       <span><Icon size={21} /></span>
                       <strong>{meta.label}</strong>
+                      <small>{meta.description}</small>
                     </button>
                   );
                 })}
