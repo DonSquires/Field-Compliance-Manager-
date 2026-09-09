@@ -41,6 +41,8 @@ struct DhfsVideoExport {
     bytes_written: u64,
     content_type: String,
     starts_with_nal_marker: bool,
+    codec: String,
+    stream_start_offset: u64,
 }
 
 #[derive(Serialize)]
@@ -75,6 +77,8 @@ struct CachedClipReport {
     end_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     starts_with_nal_marker: Option<bool>,
+    codec: String,
+    stream_start_offset: u64,
 }
 
 #[derive(Serialize)]
@@ -192,7 +196,7 @@ fn cache_video_clip(source_path: String, cache_directory: String, cache_name: St
     let source = PathBuf::from(&source_path);
     let cache_dir = PathBuf::from(&cache_directory);
     if !source.is_file() { return Err("The selected recording is no longer available.".to_string()); }
-    if cache_name.is_empty() || cache_name.contains(['/', '\\']) || !(cache_name.ends_with(".h264") || cache_name.ends_with(".h265")) {
+    if cache_name.is_empty() || cache_name.contains(['/', '\\']) || !(cache_name.ends_with(".h264") || cache_name.ends_with(".h265") || cache_name.ends_with(".dhfs")) {
         return Err("Invalid cache clip name.".to_string());
     }
     fs::create_dir_all(&cache_dir).map_err(|error| format!("Could not create clip cache: {error}"))?;
@@ -215,8 +219,8 @@ fn cache_video_clip(source_path: String, cache_directory: String, cache_name: St
     output.flush().map_err(|error| error.to_string())?;
     output.sync_all().map_err(|error| error.to_string())?;
     fs::rename(&part_path, &ready_path).map_err(|error| format!("Could not commit clip cache atomically: {error}"))?;
-    let content_type = if cache_name.ends_with(".h265") { "video/h265" } else { "video/h264" };
-    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string(), content_type: content_type.to_string(), channel: None, start_time: None, end_time: None, starts_with_nal_marker: Some(nal_marker) })
+    let (content_type, codec) = if cache_name.ends_with(".h265") { ("video/h265", "hevc") } else if cache_name.ends_with(".h264") { ("video/h264", "avc") } else { ("video/dahua-elementary", "unknown") };
+    Ok(CachedClipReport { cache_path: ready_path.to_string_lossy().to_string(), bytes, sha256: format!("{:x}", hasher.finalize()), state: "ready".to_string(), content_type: content_type.to_string(), channel: None, start_time: None, end_time: None, starts_with_nal_marker: Some(nal_marker), codec: codec.to_string(), stream_start_offset: 0 })
 }
 
 #[tauri::command]
@@ -898,9 +902,12 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
             copied += requested as u64;
         }
     }
-    let (trim_start, is_hevc) = locate_elementary_stream_start(&first_fragment)
-        .ok_or_else(|| "Could not identify an H.264/H.265 parameter-set NAL in the first DHFS fragment; recording was not cached.".to_string())?;
-    let extension = if is_hevc { "h265" } else { "h264" };
+    let detection = locate_elementary_stream_start(&first_fragment);
+    let (trim_start, extension, content_type, codec) = match detection {
+        Some((offset, true)) => (offset, "h265", "video/h265", "hevc"),
+        Some((offset, false)) => (offset, "h264", "video/h264", "avc"),
+        None => (0, "dhfs", "video/dahua-elementary", "unknown"),
+    };
     let cache_name = format!("FCM-card-p{dhfs_partition_index}-d{descriptor_index:06}-{start_time}-{end_time}-ch{channel:02}.{extension}");
     let ready_path = cache_dir.join(&cache_name);
     let part_path = cache_dir.join(format!("{cache_name}.part"));
@@ -936,7 +943,9 @@ fn extract_dhfs_recording_to_cache(disk_number: u32, partition_number: u32, dhfs
         bytes: bytes_written,
         sha256: format!("{:x}", hasher.finalize()),
         state: "ready".to_string(),
-        content_type: if is_hevc { "video/h265".to_string() } else { "video/h264".to_string() },
+        content_type: content_type.to_string(),
+        codec: codec.to_string(),
+        stream_start_offset: trim_start as u64,
         channel: Some(channel),
         start_time: Some(start_time),
         end_time: Some(end_time),
@@ -1002,10 +1011,12 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
             file.seek(SeekFrom::Start(video_offset + chain[0] as u64 * fragment_size)).map_err(|error| error.to_string())?;
             let mut first_fragment = vec![0_u8; first_bytes_to_copy as usize];
             file.read_exact(&mut first_fragment).map_err(|error| error.to_string())?;
-            let (trim_start, is_hevc) = locate_elementary_stream_start(&first_fragment)
-                .ok_or_else(|| format!("Recording descriptor {descriptor_index} has no identifiable H.264/H.265 parameter-set NAL; export skipped."))?;
-            let extension = if is_hevc { "h265" } else { "h264" };
-            let content_type = if is_hevc { "video/h265" } else { "video/h264" };
+            let detection = locate_elementary_stream_start(&first_fragment);
+            let (trim_start, extension, content_type, codec) = match detection {
+                Some((offset, true)) => (offset, "h265", "video/h265", "hevc"),
+                Some((offset, false)) => (offset, "h264", "video/h264", "avc"),
+                None => (0, "dhfs", "video/dahua-elementary", "unknown"),
+            };
 
             let file_name = format!("FCM-p{}-d{:06}-{}-{}-ch{:02}.{}", partition_index, descriptor_index, start_time, end_time, channel, extension);
             let output_path = output.join(&file_name);
@@ -1027,7 +1038,7 @@ fn convert_dhfs_image(image_path: String, output_directory: String) -> Result<Dh
                     bytes_written += requested as u64;
                 }
             }
-            exported.push(DhfsVideoExport { file_name, partition: partition_index, descriptor: descriptor_index, channel, start_time, end_time, bytes_written, content_type: content_type.to_string(), starts_with_nal_marker: nal_marker });
+            exported.push(DhfsVideoExport { file_name, partition: partition_index, descriptor: descriptor_index, channel, start_time, end_time, bytes_written, content_type: content_type.to_string(), starts_with_nal_marker: nal_marker, codec: codec.to_string(), stream_start_offset: trim_start as u64 });
         }
     }
     Ok(DhfsConversionReport { source_path: image_path, source_sha256, output_directory, exported })
@@ -1405,7 +1416,7 @@ mod tests {
     }
 
     #[test]
-    fn conversion_rejects_a_recording_without_a_recognised_stream_start() {
+    fn conversion_preserves_a_recording_without_a_recognised_stream_start() {
         let mut image = build_synthetic_dhfs_image();
         let video_offset = (10_u64 * 512 + 40_u64 * 512) as usize;
         image[video_offset..video_offset + 1536].fill(0xAA);
@@ -1414,16 +1425,15 @@ mod tests {
         let image_path = image_dir.join("invalid-stream.img");
         std::fs::write(&image_path, image).expect("write invalid image");
 
-        let error = convert_dhfs_image(
+        let report = convert_dhfs_image(
             image_path.to_string_lossy().to_string(),
             image_dir.to_string_lossy().to_string(),
-        ).expect_err("unrecognised elementary stream must not be exported");
+        ).expect("unclassified elementary stream should still be preserved");
 
-        assert!(error.contains("no identifiable H.264/H.265 parameter-set NAL"));
-        assert!(std::fs::read_dir(&image_dir)
-            .expect("read output directory")
-            .filter_map(Result::ok)
-            .all(|entry| entry.path() == image_path));
+        assert_eq!(report.exported.len(), 1);
+        assert_eq!(report.exported[0].codec, "unknown");
+        assert_eq!(report.exported[0].content_type, "video/dahua-elementary");
+        assert_eq!(report.exported[0].stream_start_offset, 0);
         std::fs::remove_dir_all(&image_dir).ok();
     }
 

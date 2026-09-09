@@ -21,6 +21,7 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.match(source, /Copy review link/);
   assert.match(source, /Analyse SD card and process all clips/);
   assert.match(source, /Process all SD recordings/);
+  assert.match(source, /Codec was not classified locally/);
   assert.match(source, /autoRemainingSeconds/);
   assert.match(source, /Elapsed/);
   assert.match(source, /Clip/);

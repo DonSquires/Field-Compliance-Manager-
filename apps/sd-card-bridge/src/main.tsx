@@ -162,6 +162,8 @@ type DhfsConversionReport = {
     bytes_written: number;
     content_type: string;
     starts_with_nal_marker: boolean;
+    codec: string;
+    stream_start_offset: number;
   }>;
 };
 
@@ -175,6 +177,8 @@ type CachedClipReport = {
   start_time?: string;
   end_time?: string;
   starts_with_nal_marker?: boolean;
+  codec: string;
+  stream_start_offset: number;
 };
 
 type PhysicalDhfsRecording = {
@@ -214,6 +218,9 @@ function cacheStatusMessage(result: CachedClipReport): string {
   const base = `Clip cached and verified (${result.sha256.slice(0, 12)}...).`;
   if (result.starts_with_nal_marker === false) {
     return `${base} Warning: the extracted bytes do not start on a recognised H.264/H.265 frame boundary; review the clip carefully before uploading.`;
+  }
+  if (result.codec === 'unknown') {
+    return `${base} Codec was not classified locally; the original DHFS elementary stream is preserved for central decoder analysis.`;
   }
   return `${base} Review it, then upload it to Bob.`;
 }
