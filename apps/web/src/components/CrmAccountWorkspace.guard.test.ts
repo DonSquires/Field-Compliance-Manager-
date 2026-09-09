@@ -50,4 +50,10 @@ describe('client portfolio hub', () => {
     expect(source).toContain('portfolioUpdatedAt');
     expect(source).toContain('Live account record updated');
   });
+
+  it('shows where corporate work is maintained from the portfolio overview', () => {
+    expect(source).toContain('Where work lives');
+    expect(source).toContain('identity and relationship');
+    expect(source).toContain('schedules and coverage');
+  });
 });
