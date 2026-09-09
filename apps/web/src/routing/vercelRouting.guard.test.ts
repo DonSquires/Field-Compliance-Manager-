@@ -10,6 +10,6 @@ describe('Vercel client routing', () => {
       rewrites?: Array<{ source: string; destination: string }>;
     };
 
-    expect(config.rewrites).toContainEqual({ source: '/(.*)', destination: '/index.html' });
+    expect(config.rewrites).toContainEqual({ source: '/((?!assets/).*)', destination: '/index.html' });
   });
 });
