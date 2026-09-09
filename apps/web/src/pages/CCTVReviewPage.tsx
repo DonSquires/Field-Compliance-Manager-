@@ -170,6 +170,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [faceObservationLinks, setFaceObservationLinks] = useState<Record<string, FaceObservationLink>>({});
   const [identityDrafts, setIdentityDrafts] = useState<Record<string, IdentityDraftState>>({});
   const [identitySaving, setIdentitySaving] = useState<string | null>(null);
+  const [observationSaving, setObservationSaving] = useState<string | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [decisionSaving, setDecisionSaving] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
@@ -480,6 +481,18 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       });
       if (assignError) throw assignError;
 
+      const { error: reviewEventError } = await supabase.rpc('record_cctv_review_event', {
+        p_job_id: selected.id,
+        p_evidence_id: selected.evidence_item_id,
+        p_organization_id: profile.organizationId,
+        p_source_event_id: face.event_id,
+        p_event_type: 'face',
+        p_review_state: 'accepted',
+        p_reviewer_notes: `Accepted after explicit person-record approval for ${face.subject_label || 'person'} observation`,
+        p_person_record_id: draft.personRecordId,
+      });
+      if (reviewEventError) throw reviewEventError;
+
       setIdentityDrafts((current) => ({
         ...current,
         [face.event_id]: {
@@ -495,6 +508,26 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       setIdentityError(approveError instanceof Error ? approveError.message : 'Identity approval could not be completed.');
     }
     setIdentitySaving(null);
+  };
+
+  const recordObservationState = async (eventId: string, eventType: 'person' | 'face' | 'vehicle', reviewState: 'uncertain' | 'rejected') => {
+    if (!selected || !selected.evidence_item_id || !profile?.organizationId) return;
+    const reason = window.prompt(`Record why this ${eventType} observation is ${reviewState}.`);
+    if (!reason?.trim()) return;
+    setObservationSaving(eventId);
+    setIdentityError(null);
+    const { error: reviewError } = await supabase.rpc('record_cctv_review_event', {
+      p_job_id: selected.id,
+      p_evidence_id: selected.evidence_item_id,
+      p_organization_id: profile.organizationId,
+      p_source_event_id: eventId,
+      p_event_type: eventType,
+      p_review_state: reviewState,
+      p_reviewer_notes: reason.trim(),
+    });
+    if (reviewError) setIdentityError(reviewError.message);
+    else setDecisionMessage(`${eventType} observation marked ${reviewState}.`);
+    setObservationSaving(null);
   };
 
   const recordReviewDecision = async (decision: 'confirmed' | 'dismissed') => {
@@ -950,6 +983,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                           <button type="button" className="cctv-btn-jump" onClick={() => jumpToTime(person.first_seen_seconds)}>
                             <Play size={12} /> Jump to {person.first_seen_seconds}s
                           </button>
+                          <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === person.event_id} onClick={() => void recordObservationState(person.event_id, 'person', 'uncertain')}>Uncertain</button>
+                          <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === person.event_id} onClick={() => void recordObservationState(person.event_id, 'person', 'rejected')}>Reject</button>
                         </div>
                       </div>
                     </div>
@@ -1008,6 +1043,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                           >
                             <Play size={12} /> Jump to {face.first_seen_seconds}s
                           </button>
+                          <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === face.event_id} onClick={() => void recordObservationState(face.event_id, 'face', 'uncertain')}>Uncertain</button>
+                          <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === face.event_id} onClick={() => void recordObservationState(face.event_id, 'face', 'rejected')}>Reject</button>
                         </div>
                         {faceObservationLinks[face.event_id]?.metadata?.candidates?.length ? (
                           <div className="cctv-candidate-list">
@@ -1174,6 +1211,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                           >
                             <Play size={12} /> Jump to {veh.first_seen_seconds}s
                           </button>
+                          <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === veh.event_id} onClick={() => void recordObservationState(veh.event_id, 'vehicle', 'uncertain')}>Uncertain</button>
+                          <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === veh.event_id} onClick={() => void recordObservationState(veh.event_id, 'vehicle', 'rejected')}>Reject</button>
                         </div>
                       </div>
                     </div>
