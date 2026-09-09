@@ -668,6 +668,20 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     if (!recipientScope?.trim()) return;
     setExportSaving(true);
     setIdentityError(null);
+    const manifestClips = selectedBatchJobs.map((job) => {
+      const batch = desktopReviewBatch(job.evidence?.metadata || null);
+      const metadata = job.evidence?.metadata || {};
+      const result = consolidateResultData(job.result?.result);
+      return {
+        clip_index: batch?.clip_index ?? null,
+        clip_total: batch?.clip_total ?? null,
+        evidence_item_id: job.evidence_item_id,
+        source_storage_path: job.evidence?.storage_path || null,
+        source_sha256: typeof metadata.sha256 === 'string' ? metadata.sha256 : typeof metadata.source_sha256 === 'string' ? metadata.source_sha256 : null,
+        playback_storage_path: typeof metadata.playback_storage_path === 'string' ? metadata.playback_storage_path : null,
+        derived_keyframe_hashes: result.keyframes.map((keyframe) => keyframe.sha256_hash),
+      };
+    });
     const manifest = {
       schema_version: 1,
       generated_at: new Date().toISOString(),
@@ -676,6 +690,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       batch_id: selectedBatch?.batch_id || null,
       accepted_event_count: acceptedEvents.length,
       review_event_ids: acceptedEvents.map((event) => event.id),
+      media_assets: manifestClips,
       source_metadata: selected.evidence?.metadata || {},
     };
     const { data, error: exportError } = await supabase.rpc('create_cctv_export_draft', {
