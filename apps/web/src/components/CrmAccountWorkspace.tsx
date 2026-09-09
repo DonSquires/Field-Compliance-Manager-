@@ -120,6 +120,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
   const headlineAgreement = agreements.find((agreement) => agreement.agreement_type === 'operational') ?? agreements[0] ?? null;
   const headlineInvitation = headlineAgreement?.invitation_status?.replaceAll('_', ' ') ?? 'not invited';
   const portfolioUpdatedAt = organizationDetails?.updated_at ?? null;
+  const canAddBranch = ['owner', 'service_provider', 'branch'].includes(organizationDetails?.organization_type ?? '');
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
@@ -259,7 +260,15 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
 
   const createChildOrganization = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setError(null); setNotice(null);
-    const { data, error: createError } = await supabase.rpc('manage_crm_organization_child', { p_client_request_id: crypto.randomUUID(), p_parent_organization_id: account.id, p_name: childOrganizationForm.name.trim(), p_organization_type: childOrganizationForm.type, p_nzbn: childOrganizationForm.nzbn.trim() || null, p_notes: childOrganizationForm.notes.trim() || null });
+    const childType = !canAddBranch && childOrganizationForm.type === 'branch' ? 'department' : childOrganizationForm.type;
+      const { data, error: createError } = await supabase.rpc('manage_crm_organization_child', { 
+        p_client_request_id: crypto.randomUUID(), 
+        p_parent_organization_id: account.id, 
+        p_name: childOrganizationForm.name.trim(), 
+        p_organization_type: childType, 
+        p_nzbn: childOrganizationForm.nzbn.trim() || null, 
+        p_notes: childOrganizationForm.notes.trim() || null 
+      });
     if (createError || !data) setError(createError?.message ?? 'Child organization receipt was not confirmed.');
     else { setNotice(`${data.name} added under ${account.name}.`); setChildOrganizationForm(emptyChildOrganization); setShowChildOrganizationForm(false); await loadWorkspace(); }
     setSaving(false);

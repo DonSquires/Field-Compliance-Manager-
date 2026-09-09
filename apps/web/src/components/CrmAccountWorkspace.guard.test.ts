@@ -56,4 +56,9 @@ describe('client portfolio hub', () => {
     expect(source).toContain('identity and relationship');
     expect(source).toContain('schedules and coverage');
   });
+
+  it('prevents invalid branch creation under a client parent', () => {
+    expect(source).toContain('const childType = !canAddBranch');
+    expect(source).toContain("'department' : childOrganizationForm.type");
+  });
 });
