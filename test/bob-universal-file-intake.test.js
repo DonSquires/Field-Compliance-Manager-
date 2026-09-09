@@ -14,7 +14,7 @@ test('Bob accepts arbitrary file types through private resumable storage up to 1
   assert.doesNotMatch(panel, /ACCEPTED_BOB_UPLOADS/);
   assert.match(panel, /new Upload\(pending\.file/);
   assert.match(desktop, /const MAX_BOB_UPLOAD_BYTES = 128 \* 1024 \* 1024 \* 1024/);
-  assert.match(desktop, /new TusUpload\(video/);
+  assert.match(desktop, /new TusUpload\((video|file)/);
   assert.match(desktop, /Upload evidence or partition image/);
   assert.match(registrar, /const MAX_ATTACHMENT_BYTES = 128 \* 1024 \* 1024 \* 1024/);
   assert.match(registrar, /purpose: fileType\.startsWith\('video\/'\) \? 'video_intake' : 'document_intake'/);
