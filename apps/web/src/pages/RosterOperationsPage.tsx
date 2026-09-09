@@ -82,8 +82,11 @@ const RosterOperationsPage: React.FC = () => {
       return;
     }
     setLoading(true); setError(null);
+    const canLoadBranchStaff = operatingContext?.authorityBasis === 'branch_authorisation';
     const responses = await Promise.all([
-      supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org }),
+      canLoadBranchStaff
+        ? supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org })
+        : Promise.resolve({ data: [], error: null }),
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_work_units').select('id,name,work_unit_type,service_type').eq('organization_id', org).eq('active', true).order('name'),
       supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
