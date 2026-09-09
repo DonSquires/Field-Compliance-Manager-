@@ -208,6 +208,11 @@ type DesktopReviewBatchMetadata = {
   fragment_count: number;
   source_bytes: number;
   cache_sha256: string;
+  source_index_sha256?: string | null;
+  source_record_number?: number | null;
+  source_cluster_number?: number | null;
+  source_index_start_time_utc?: string | null;
+  source_index_end_time_utc?: string | null;
 };
 
 type AutoProcessStage = 'idle' | 'analysing' | 'enumerating' | 'caching' | 'uploading' | 'registered' | 'paused' | 'failed';
@@ -869,6 +874,11 @@ function App() {
       let failed = 0;
       for (let index = 0; index < uploadable.length; index += 1) {
         const recording = uploadable[index];
+        const sourceIndexRecord = analysis.index_report?.records.find((record) => (
+          record.channel === recording.channel
+          && typeof record.start_time_utc === 'string'
+          && record.start_time_utc.replace(/[^0-9]/g, '').includes(recording.start_time.replace(/[^0-9]/g, ''))
+        ));
         setAutoClipIndex(index + 1);
         setAutoStage('caching');
         setBatchProgress(index, 0.15, uploadable.length);
@@ -910,6 +920,11 @@ function App() {
               fragment_count: recording.fragment_count,
               source_bytes: recording.bytes,
               cache_sha256: cacheResult.sha256,
+              source_index_sha256: analysis.index_report?.database_sha256 ?? null,
+              source_record_number: sourceIndexRecord?.record_number ?? null,
+              source_cluster_number: sourceIndexRecord?.cluster_number ?? null,
+              source_index_start_time_utc: sourceIndexRecord?.start_time_utc ?? null,
+              source_index_end_time_utc: sourceIndexRecord?.end_time_utc ?? null,
             });
             if (!uploaded) throw new Error('Upload or registration did not complete. The cached file was preserved.');
             completed = true;
