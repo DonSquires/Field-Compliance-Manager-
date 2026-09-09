@@ -154,6 +154,8 @@ export function CrmOnboardingPanel({
   if (!row) return <section className="crm-onboarding-panel is-ready"><div><CheckCircle2 size={17} /><div><strong>{activated || accountStatus === 'active' ? 'Account active' : 'No onboarding ledger open'}</strong><span>{activated || accountStatus === 'active' ? 'Activation is complete and this portfolio is operational.' : 'A prospect ledger will appear here when onboarding is required.'}</span></div></div>{notice && <p role="status">{notice}</p>}</section>;
 
   const blocked = row.readiness?.dimensions.filter((dimension) => dimension.status === 'blocked') ?? [];
+  const invitationStatus = row.invitation_status ?? 'not_invited';
+  const canInvite = row.readiness?.ready && invitationStatus !== 'accepted' && invitationStatus !== 'invited';
 
   return <section className="crm-onboarding-panel" aria-label="Client activation">
     <header>
@@ -174,8 +176,10 @@ export function CrmOnboardingPanel({
       <div>
         <button type="button" className="btn btn-sm btn-secondary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(false)}>Save ownership</button>
         {nextStage && <button type="button" className="btn btn-sm btn-primary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(true)}>Advance to {nextStage}<ChevronRight size={14} /></button>}
-        {row.current_stage === 'review' && row.readiness?.ready && row.agreement_id && !confirming && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setConfirming(true)}><Rocket size={14} />Activate account</button>}
-        {row.readiness?.ready && !confirmingInvite && <button type="button" className="btn btn-sm btn-secondary" disabled={saving || inviting} onClick={() => setConfirmingInvite(true)}><MailPlus size={14} />Invite client</button>}
+        {row.current_stage === 'review' && row.readiness?.ready && row.agreement_id && !confirming && invitationStatus === 'accepted' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setConfirming(true)}><Rocket size={14} />Activate account</button>}
+        {canInvite && !confirmingInvite && <button type="button" className="btn btn-sm btn-secondary" disabled={saving || inviting} onClick={() => setConfirmingInvite(true)}><MailPlus size={14} />Invite client</button>}
+        {invitationStatus === 'invited' && <span className="crm-invitation-next-state">Waiting for client acceptance</span>}
+        {invitationStatus === 'accepted' && !confirming && <span className="crm-invitation-next-state is-accepted">Client accepted · ready for activation</span>}
         {confirming && <><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => setConfirming(false)}>Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void activate()}>{saving ? 'Activating' : 'Confirm activation'}</button></>}
         {confirmingInvite && <><button type="button" className="btn btn-sm btn-secondary" disabled={inviting} onClick={() => setConfirmingInvite(false)}><X size={14} />Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={inviting} onClick={() => void inviteClient()}>{inviting ? 'Preparing invitation' : 'Confirm and invite'}</button></>}
       </div>

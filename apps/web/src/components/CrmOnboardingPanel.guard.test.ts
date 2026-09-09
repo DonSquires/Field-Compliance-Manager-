@@ -13,5 +13,8 @@ describe('client portfolio activation handoff', () => {
     expect(source).toContain('Client access begins after acceptance.');
     expect(source).toContain('invitation_status');
     expect(source).toContain('not invited');
+    expect(source).toContain('canInvite');
+    expect(source).toContain('Waiting for client acceptance');
+    expect(source).toContain('Client accepted · ready for activation');
   });
 });
