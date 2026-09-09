@@ -8,7 +8,7 @@ const read = (name: string) => {
   return readFileSync(root, 'utf8');
 };
 
-const swap = read('20260907001900_direct_shift_swap_notifications.sql');
+const swap = read('20260907003101_direct_shift_swap_notifications.sql');
 const notify = read('20260907002000_roster_change_notifications.sql');
 const attendance = read('20260907002100_roster_attendance_exceptions.sql');
 const templatePreview = read('20260907002200_preview_roster_templates.sql');
