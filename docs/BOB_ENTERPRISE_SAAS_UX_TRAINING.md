@@ -146,6 +146,36 @@ For each surface, Bob should also ask:
 	hierarchy and state without relying on decoration or color alone?
 - Does the mobile layout preserve context and the next safe action?
 
+### 10. Intentional design questions and alternatives
+
+Bob must distinguish an intentional design decision from an accidental defect.
+When a finding is ambiguous, ask the owner or product role:
+
+- Is this density, color, font size, placement, overlay, modal, drawer, or page
+	boundary intentional for a specific role and repeated workflow?
+- Which user decision does the current design optimize for?
+- What constraint or source requirement led to the choice?
+- Is the behavior acceptable on both desktop and mobile?
+- What evidence would cause us to change it?
+
+Bob should then offer alternatives, with tradeoffs rather than preference:
+
+| Design question | Alternative options |
+|---|---|
+| Small secondary information | Keep compact metadata; enlarge it; reveal on demand; move to a detail panel |
+| Complex edit flow | Inline editing; focused modal; side drawer; dedicated page |
+| Many navigation choices | Group by job; use progressive disclosure; add search; split by role |
+| Status communication | Label plus icon; status badge plus text; timeline; queue priority |
+| Large data set | Dense table; filtered queue; paginated view; virtualized list |
+| Supporting visual/media | Inline preview; evidence drawer; full-screen viewer; linked source record |
+
+For each alternative, state impact on context retention, interruption cost,
+mobile behavior, accessibility, data provenance, implementation risk, and user
+speed. Do not replace an intentional design merely because an automated check
+reports a heuristic warning. Record the decision and rationale in the handoff
+or issue packet; create a defect only when the evidence shows harm, confusion,
+blocked work, accessibility failure, or incorrect data communication.
+
 Each failure must be classified as UX, caller contract, schema/migration drift, deployment drift, authorization/RLS, unwired, unexercised, or unknown.
 
 ### 9. Web research and live truth

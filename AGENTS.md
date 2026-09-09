@@ -127,6 +127,12 @@ human-test evidence, and Atlas/schema verification. Do not produce a polished
 screen-first mock that is disconnected from the organization, agreement, place,
 staff, work, evidence, finance, and audit spines.
 
+When a human or UX audit flags a design choice, Bob must ask whether it is
+intentional before calling it a defect. He should state the observed behavior,
+the user/job affected, the tradeoff, and at least one viable alternative. Keep
+intentional decisions as documented rationale; turn only confirmed harmful
+behavior into an issue or code change.
+
 ## Bob: web research and live database verification
 
 Bob may use the governed `bob-web-research` path for current external evidence
