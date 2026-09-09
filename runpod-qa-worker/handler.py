@@ -85,7 +85,17 @@ def upload_artifacts(archive: Path, upload_url: str) -> None:
 def run_profile(source: Path, profile: str, target_url: str | None, timeout: int, output: Path) -> subprocess.CompletedProcess[str]:
     if profile not in ALLOWED_PROFILES:
         raise ValueError("unsupported QA profile")
-    command = ["npx", "playwright", "test", *ALLOWED_PROFILES[profile], "--workers=1", "--reporter=line"]
+    print("[bob-qa] installing web dependencies", flush=True)
+    install = subprocess.run(["npm", "ci", "--include=dev", "--ignore-scripts", "--no-audit", "--no-fund"], cwd=source / "apps/web", env={**os.environ, "CI": "true", "NODE_ENV": "development"}, text=True, capture_output=True, timeout=min(timeout, 600))
+    if install.returncode != 0:
+        print(f"[bob-qa] dependency install failed exit_code={install.returncode}", flush=True)
+        return install
+    playwright = source / "apps" / "web" / "node_modules" / ".bin" / "playwright"
+    if not playwright.exists():
+        print("[bob-qa] local Playwright binary missing after dependency install", flush=True)
+        return subprocess.CompletedProcess([str(playwright)], 1, "", "local Playwright binary was not installed")
+    print(f"[bob-qa] running Playwright profile={profile}", flush=True)
+    command = [str(playwright), "test", *ALLOWED_PROFILES[profile], "--workers=1", "--reporter=line"]
     if profile == "human" and target_url:
         command = ["npx", "playwright", "test", ALLOWED_PROFILES[profile][0], "--workers=1", "--reporter=line"]
     environment = {
@@ -119,6 +129,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     if profile == "human" and not target_url:
         return fail("human profile requires an explicit target_url")
     try:
+        print(f"[bob-qa] accepted profile={profile} expected_sha={expected_sha or 'none'}", flush=True)
         with tempfile.TemporaryDirectory(prefix="fcm-runpod-qa-") as temporary:
             root = Path(temporary)
             archive = root / "source.tar.gz"
@@ -127,6 +138,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             source.mkdir()
             output.mkdir()
             source_bytes = download(source_url, archive)
+            print(f"[bob-qa] source downloaded bytes={source_bytes}", flush=True)
             safe_extract(archive, source)
             result = run_profile(source_root(source), profile, target_url, timeout, output)
             manifest = {
@@ -142,7 +154,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             bundle = root / "artifacts.tar.gz"
             with tarfile.open(bundle, "w:gz") as handle:
                 handle.add(output, arcname="artifacts")
+            print("[bob-qa] uploading artifacts", flush=True)
             upload_artifacts(bundle, artifact_url)
+            print(f"[bob-qa] completed status={manifest['status']} exit_code={result.returncode}", flush=True)
             return {
                 "status": manifest["status"],
                 "profile": profile,
