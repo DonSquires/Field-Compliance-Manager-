@@ -53,6 +53,15 @@ type CCTVJob = {
   result: { status: string; result: Record<string, unknown> } | null;
 };
 
+type DesktopReviewBatch = {
+  batch_id: string;
+  clip_index: number;
+  clip_total: number;
+  channel?: number | null;
+  start_time?: string | null;
+  end_time?: string | null;
+};
+
 type PersonRecordOption = {
   id: string;
   display_name: string | null;
@@ -114,6 +123,24 @@ function evidencePlaceContext(metadata: Record<string, unknown> | null): string 
     .map((key) => typeof source[key] === 'string' ? source[key].trim() : '')
     .filter(Boolean);
   return labels.length ? labels.join(' · ') : 'Unassigned place context';
+}
+
+function desktopReviewBatch(metadata: Record<string, unknown> | null): DesktopReviewBatch | null {
+  const value = metadata?.desktop_review_batch;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const batchId = typeof source.batch_id === 'string' ? source.batch_id : '';
+  const clipIndex = Number(source.clip_index);
+  const clipTotal = Number(source.clip_total);
+  if (!batchId || !Number.isFinite(clipIndex) || !Number.isFinite(clipTotal)) return null;
+  return {
+    batch_id: batchId,
+    clip_index: clipIndex,
+    clip_total: clipTotal,
+    channel: Number.isFinite(Number(source.channel)) ? Number(source.channel) : null,
+    start_time: typeof source.start_time === 'string' ? source.start_time : null,
+    end_time: typeof source.end_time === 'string' ? source.end_time : null,
+  };
 }
 
 export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 'all', libraryMode = false }) => {
@@ -198,6 +225,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   }, [loadJobs, profile?.organizationId]);
 
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
+  const selectedBatch = desktopReviewBatch(selected?.evidence?.metadata || null);
 
   const manageJob = useCallback(async (job: CCTVJob, action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (!profile?.organizationId) return;
@@ -449,6 +477,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               const personCount = jobConsolidated.summary_counts.person_events;
               const vehicleCount = jobConsolidated.summary_counts.vehicle_events;
               const frameCount = jobConsolidated.summary_counts.total_frames_parsed;
+              const batch = desktopReviewBatch(job.evidence?.metadata || null);
 
               return (
                 <div key={job.id} className={`cctv-job-row ${selectedId === job.id ? 'is-selected' : ''}`}>
@@ -457,6 +486,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                     <span className="cctv-job-copy">
                       <strong>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</strong>
                       <small>{timeLabel(job.created_at)} · {job.domain} · {String(job.id).slice(0, 8)}{job.stage ? ` · ${statusLabel(job.stage)}` : ''}</small>
+                      {batch && <small className="cctv-batch-link">Desktop batch {batch.batch_id.slice(0, 8)} · clip {batch.clip_index}/{batch.clip_total}{batch.channel ? ` · camera ${batch.channel}` : ''}</small>}
                     </span>
                     <span className="cctv-job-findings">
                       {frameCount > 0 ? `${frameCount} frames` : 'Pending frames'}
@@ -495,6 +525,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <span>Evidence inspection</span>
                   <h2>{selected.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</h2>
                   <small className="cctv-place-context">Place: {evidencePlaceContext(selected.evidence?.metadata || null)}</small>
+                  {selectedBatch && <small className="cctv-place-context">Desktop batch {selectedBatch.batch_id.slice(0, 8)} · clip {selectedBatch.clip_index} of {selectedBatch.clip_total}{selectedBatch.start_time && selectedBatch.end_time ? ` · ${selectedBatch.start_time} to ${selectedBatch.end_time}` : ''}</small>}
                 </div>
                 <Eye size={19} />
               </div>
