@@ -40,4 +40,9 @@ describe('client portfolio hub', () => {
     expect(source).toContain('onClick={() => setView(\'readiness\')}');
     expect(source).toContain('onClick={() => setView(\'operations\')}');
   });
+
+  it('makes Bob portfolio scoping visible without creating a second assistant surface', () => {
+    expect(source).toContain('Bob uses this portfolio context');
+    expect(source).not.toContain('onspace-ai-chat');
+  });
 });
