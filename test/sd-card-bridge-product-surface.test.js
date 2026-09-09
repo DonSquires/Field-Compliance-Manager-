@@ -10,8 +10,8 @@ const tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge/sr
 const capability = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge/src-tauri/capabilities/default.json'), 'utf8'));
 
 test('FCM Desktop product surface is versioned and focused on production workflows', () => {
-  assert.equal(packageJson.version, '0.1.47');
-  assert.equal(tauri.version, '0.1.47');
+  assert.equal(packageJson.version, '0.1.48');
+  assert.equal(tauri.version, '0.1.48');
   assert.match(source, /if \(!signedInAs\)/);
   assert.match(source, /Secure evidence workstation/);
   assert.match(source, /Only authorised users can inspect recordings/);
@@ -19,10 +19,13 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.doesNotMatch(source, /target="_blank"/);
   assert.match(source, /activeView === 'cctv-review'/);
   assert.match(source, /Copy review link/);
-  assert.match(source, /Process next recording/);
-  assert.match(source, /Process the next motion recording/);
+  assert.match(source, /Analyse SD card and process all clips/);
+  assert.match(source, /Process all SD recordings/);
   assert.match(source, /autoRemainingSeconds/);
   assert.match(source, /Elapsed/);
+  assert.match(source, /Clip/);
+  assert.match(source, /Queued/);
+  assert.match(source, /Needs retry/);
   assert.match(source, /Pause after step/);
   assert.match(source, /Local H\.265 cache/);
   assert.match(source, /const FCM_WEB_URL = 'https:\/\/fcmanager\.co\.nz'/);
