@@ -384,6 +384,7 @@ const OfficerShell: React.FC = () => {
           ? 'due'
           : 'ok';
   const welfareDisplay = WELFARE_STATUS_DISPLAY[currentWelfareStatus];
+  const welfareLabel = currentWelfareStatus === 'sos' ? 'SOS active' : currentWelfareStatus === 'man_down' ? 'Urgent alert' : currentWelfareStatus === 'overdue' ? 'Check-in overdue' : currentWelfareStatus === 'due' ? 'Check-in due' : 'Safety OK';
 
   // Get Bob context
   const bobContext = useMemo(() => ({
@@ -482,7 +483,7 @@ const OfficerShell: React.FC = () => {
         <div className="officer-shell-tools">
           {offeredCount > 0 && <span className="officer-offer-count" title={`${offeredCount} offered shifts`}>{offeredCount}</span>}
           <button type="button" className={`officer-safety-chip welfare-${currentWelfareStatus}`} onClick={() => void safety.checkIn()} disabled={safety.writeStatus === 'pending'} title="Check in now">
-            <span>{welfareDisplay.dot}</span><small>Safety</small>
+            <span>{welfareDisplay.dot}</span><small>{welfareLabel}</small>
           </button>
           <span className={`officer-connectivity-chip ${isOnline ? 'is-online' : 'is-offline'}`} role="status" title={isOnline ? 'Device is online' : 'Evidence is queued until connection returns'}>{isOnline ? 'Online' : 'Offline'}</span>
           <NotificationCenter onNavigate={navigateFromNotification} />

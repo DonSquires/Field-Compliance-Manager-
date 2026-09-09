@@ -1,4 +1,5 @@
 .officer-connectivity-chip{display:inline-flex;align-items:center;min-height:34px;padding:0 8px;border:1px solid #315969;border-radius:7px;font-size:9px;font-weight:850;text-transform:uppercase}.officer-connectivity-chip.is-online{color:#9ee0c2;background:#17342f}.officer-connectivity-chip.is-offline{border-color:#8a6720;color:#f3d68b;background:#2c210d}
+.officer-safety-chip small{max-width:86px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:560px){.officer-safety-chip small{max-width:62px}}
 .officer-shell-offline-banner{padding:10px 16px;border-bottom:1px solid #8a6720;color:#f3d68b;background:#2c210d;font-size:11px;font-weight:750}
 .officer-shell {
   display: flex;
