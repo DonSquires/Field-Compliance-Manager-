@@ -38,3 +38,7 @@ npm run runner
 The runner uses the fixed `human-qa` profile, a read-only source mount, no
 network access, a non-root container user, bounded CPU/memory/PID resources,
 and writes evidence to `BOB_ARTIFACT_DIR`.
+
+For an approved live deployment check, use `BOB_WORKER_PROFILE=human-qa-live`.
+That profile enables Docker bridge networking only for the explicit live run;
+fixture-backed `human-qa` remains network-isolated.
