@@ -59,6 +59,18 @@ function formatShiftTime(value: string): string {
   return new Date(value).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' });
 }
 
+function serviceTypeLabel(value: string): { label: string; detail: string } {
+  const labels: Record<string, { label: string; detail: string }> = {
+    freedom_camping: { label: 'Freedom Camping Patrol', detail: 'Vehicle scans, breaches, and evidence' },
+    static_guarding: { label: 'Site Guarding', detail: 'Site security and checkpoints' },
+    parking: { label: 'Parking Enforcement', detail: 'Vehicle compliance and enforcement' },
+    noise_control: { label: 'Noise Control', detail: 'Assessment and response' },
+    biosecurity_inspection: { label: 'Biosecurity Inspection', detail: 'Inspection evidence and notices' },
+    smoke_complaint_ooh: { label: 'Smoke Complaint', detail: 'Out-of-hours complaint response' },
+  };
+  return labels[value] ?? { label: value.replaceAll('_', ' '), detail: 'Field assignment and evidence' };
+}
+
 function useConnectionState() {
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
   useEffect(() => {
@@ -180,7 +192,8 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           <div className="officer-panel-heading">
             <div>
               <span className="officer-kicker">Current assignment</span>
-              <h2>{shiftLoading ? 'Checking roster' : shift ? shift.shift_type.replace('_', ' ') : 'Standby'}</h2>
+              <h2>{shiftLoading ? 'Checking roster' : shift ? serviceTypeLabel(shift.shift_type).label : 'Standby'}</h2>
+              {shift && <p className="officer-shift-service-detail">{serviceTypeLabel(shift.shift_type).detail}</p>}
             </div>
             <span className={`officer-shift-state state-${shift?.status ?? 'standby'}`}>
               {shiftLoading ? 'Loading' : shift?.status.replace('_', ' ') ?? 'No active shift'}
