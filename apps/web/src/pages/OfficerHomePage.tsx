@@ -199,7 +199,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
               </div>
               <div className="officer-progress-track"><span style={{ width: `${shiftProgress.percent}%` }} /></div>
               <button type="button" className="officer-primary-action" onClick={() => onNavigate(shift.shift_type === 'patrol' ? 'patrol' : shift.shift_type === 'static_guarding' ? 'site_guard' : 'dispatch')}>
-                <Navigation size={18} aria-hidden="true" /> Open assignment <ArrowRight size={17} aria-hidden="true" />
+                <Navigation size={18} aria-hidden="true" /> {shift.shift_type === 'patrol' ? 'Start patrol' : shift.shift_type === 'static_guarding' ? 'Start site guard' : 'Open dispatch'} <ArrowRight size={17} aria-hidden="true" />
               </button>
             </>
           ) : (
