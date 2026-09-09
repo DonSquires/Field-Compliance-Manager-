@@ -30,6 +30,8 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.match(source, /MAX_AUTO_CLIP_ATTEMPTS/);
   assert.match(source, /Recordings needing retry/);
   assert.match(source, /Last error/);
+  assert.match(source, /Registration retry/);
+  assert.match(source, /if \(!preserveCachedClip\)/);
   assert.match(source, /source_index_sha256/);
   assert.match(source, /source_record_number/);
   assert.match(source, /sourceIndexRecord/);

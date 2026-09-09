@@ -756,23 +756,34 @@ function App() {
         if (uploadError) throw uploadError;
       }
       setUploadStatus(file.type.startsWith('video/') ? 'Registering evidence and starting hybrid CCTV inference...' : 'Registering private evidence for Bob...');
-      const { data, error: registerError } = await supabase.functions.invoke('register-desktop-video-import', {
-        body: {
-          attachment_id: attachmentId,
-          storage_path: storagePath,
-          file_name: file.name,
-          file_type: file.type || 'video/mp4',
-          file_size_bytes: file.size,
-          desktop_review_batch: reviewBatch ?? null,
-        },
-      });
+      let data: { inference_job_id?: string } | null = null;
+      let registerError: unknown = null;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const response = await supabase.functions.invoke('register-desktop-video-import', {
+          body: {
+            attachment_id: attachmentId,
+            storage_path: storagePath,
+            file_name: file.name,
+            file_type: file.type || 'video/mp4',
+            file_size_bytes: file.size,
+            desktop_review_batch: reviewBatch ?? null,
+          },
+        });
+        data = response.data;
+        registerError = response.error;
+        if (!registerError) break;
+        if (attempt < 3) {
+          setUploadStatus(`Registration retry ${attempt + 1}/3 for ${file.name}...`);
+          await new Promise((resolve) => window.setTimeout(resolve, attempt * 1000));
+        }
+      }
       if (registerError) {
         // supabase-js's default FunctionsHttpError message is a generic "non-2xx status code";
         // the real reason is in the response body our own edge function returned.
         const context = (registerError as { context?: unknown }).context;
         if (context instanceof Response) {
           const body = await context.clone().json().catch(() => null);
-          throw new Error(body?.error || registerError.message);
+          throw new Error(body?.error || (registerError instanceof Error ? registerError.message : 'Desktop video registration failed.'));
         }
         throw registerError;
       }
@@ -785,8 +796,8 @@ function App() {
       setVideo(null);
       return true;
     } catch (cause) {
-      await supabase.storage.from('bob-uploads').remove([storagePath]);
-      setError(cause instanceof Error ? cause.message : 'Video upload did not complete.');
+      if (!preserveCachedClip) await supabase.storage.from('bob-uploads').remove([storagePath]);
+      setError(cause instanceof Error ? cause.message : 'Video upload or registration did not complete; the local cached evidence was preserved.');
       setUploadStatus(null);
       setUploadProgress(null);
       return false;
