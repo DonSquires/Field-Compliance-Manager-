@@ -55,4 +55,6 @@ test('vision watcher source contains a degraded-frame inference gate', () => {
   assert.match(source, /capture_endpoint_not_configured/);
   assert.match(source, /RUNPOD_CAPTURE_API_KEY/);
   assert.match(source, /RUNPOD_CAPTURE_API_URL/);
+  assert.match(source, /WORKER_CONCURRENCY/);
+  assert.match(source, /worker_concurrency/);
 });

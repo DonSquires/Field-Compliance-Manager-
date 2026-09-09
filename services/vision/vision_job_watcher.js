@@ -23,6 +23,7 @@ const EXTRACTOR_PATH = path.resolve(
   process.env.VISION_EXTRACTOR_PATH || path.join(__dirname, 'video_motion_extractor.py')
 );
 const POLL_INTERVAL_MS = Number(process.env.VISION_POLL_INTERVAL_MS || 5000);
+const WORKER_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VISION_WORKER_CONCURRENCY || 1)));
 const EXTRACTOR_TIMEOUT_MS = Number(process.env.VISION_EXTRACTOR_TIMEOUT_MS || 30 * 60 * 1000);
 const MAX_SUMMARY_BYTES = Number(process.env.VISION_MAX_SUMMARY_BYTES || 2 * 1024 * 1024);
 const MAX_CLASSIFICATION_FRAMES = Number(process.env.VISION_MAX_CLASSIFICATION_FRAMES || 120);
@@ -38,7 +39,6 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
-let processing = false;
 
 function log(event, fields = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
@@ -513,10 +513,8 @@ async function ensurePlaybackCopy(job, evidence, videoPath) {
 }
 
 async function processOne() {
-  if (processing) return;
   if (!INGESTION_URL || !WORKLOAD_SIGNING_SECRET) return;
   let currentJobId = null;
-  processing = true;
   try {
     const { error: recoveryError } = await supabase.rpc('recover_stale_cctv_inference_jobs');
     if (recoveryError) throw new Error(`stale job recovery failed: ${recoveryError.message}`);
@@ -574,16 +572,19 @@ async function processOne() {
     log('watcher_error', { error: error.message });
     if (currentJobId) await failJob(currentJobId, error.message);
   } finally {
-    processing = false;
   }
 }
 
 async function main() {
-  log('watcher_started', { poll_interval_ms: POLL_INTERVAL_MS, extractor: EXTRACTOR_PATH });
-  while (true) {
-    await processOne();
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-  }
+  log('watcher_started', { poll_interval_ms: POLL_INTERVAL_MS, worker_concurrency: WORKER_CONCURRENCY, extractor: EXTRACTOR_PATH });
+  const workerLoop = async (workerIndex) => {
+    while (true) {
+      log('worker_poll', { worker_index: workerIndex });
+      await processOne();
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+  };
+  await Promise.all(Array.from({ length: WORKER_CONCURRENCY }, (_, index) => workerLoop(index + 1)));
 }
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
