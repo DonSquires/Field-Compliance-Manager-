@@ -11,16 +11,22 @@ permissions:
 
 env:
   HAS_SIGNING_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+  WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
 
 jobs:
   build-windows-installer:
     runs-on: windows-latest
-    if: ${{ env.HAS_SIGNING_CERT == 'true' }}
     defaults:
       run:
         working-directory: apps/sd-card-bridge-v2
     steps:
       - uses: actions/checkout@v4
+      - name: Require Windows signing credentials
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)) {
+            throw 'V2 production installer publication is blocked: WINDOWS_CERTIFICATE is not configured.'
+          }
       - uses: actions/setup-node@v4
         with:
           node-version: 22
