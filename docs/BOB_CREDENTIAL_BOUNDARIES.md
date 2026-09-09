@@ -27,7 +27,7 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 
 | Credential | Where it may be used | Purpose | Must not be used for |
 |---|---|---|---|
-| `FIELD_COMPLIANCE_CODESPACE` | Codespaces terminal, explicitly approved Supabase CLI command | Migration status, migration repair, database push | Edge Function runtime, browser, Bob prompt, live data API header |
+| `FIELD_COMPLIANCE_CODESPACE` / `SUPABASE_ACCESS_TOKEN` | Codespaces terminal, explicitly approved Supabase CLI or one-off Management API seed command | Migration status, migration repair, database push, explicitly approved bounded seed SQL | Edge Function runtime, browser, Bob prompt, ordinary live data API header |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Functions/server-side diagnostics and explicitly approved Codespaces read checks | Bypassed-RLS server-side reads, governed service operations, Atlas checks | Browser/frontend, external web research, issue text, screenshots |
 | `SUPABASE_ANON_KEY` | Supabase client/Edge Function caller client | Establish caller-authenticated Supabase context | Privileged database access |
 | Caller `Authorization: Bearer <user JWT>` | Request forwarding from an authenticated Edge Function | Preserve the user's identity, role, tenant, and RLS context | Replacing service-role authorization for approved server operations |
@@ -59,6 +59,15 @@ mode=read-only
 result=blocked_duplicate_migration_version
 secret_value=never_recorded
 ```
+
+One-off management scripts must accept the neutral variable name
+`SUPABASE_ACCESS_TOKEN`; callers may map the Codespaces secret at invocation:
+
+```bash
+SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE" node scripts/seed-legacy-noise-dispatch.js
+```
+
+The script must never print the value or persist it in an artifact.
 
 ## Required checks before a Bob run
 

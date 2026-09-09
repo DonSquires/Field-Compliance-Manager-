@@ -2,7 +2,11 @@
  * Imports legacy Nelson noise calls as pending dispatch work. Each resolved
  * location is created by create_dispatch_intake_job, never inserted directly.
  *
- * Required: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, FIELD_COMPLIANCE_CODESPACE
+ * Required: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ACCESS_TOKEN
+ *
+ * SUPABASE_ACCESS_TOKEN is a short-lived, explicitly supplied Supabase
+ * management token for this one-off seed operation. It is never a browser,
+ * Edge Function, or user-login credential.
  */
 const { createHash } = require('node:crypto');
 
@@ -73,7 +77,7 @@ select * from public.create_dispatch_intake_job(
 commit;`;
   const response = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_ID}/database/query`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.FIELD_COMPLIANCE_CODESPACE}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${process.env.SUPABASE_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
   });
   if (!response.ok) throw new Error(await response.text());
@@ -116,14 +120,14 @@ async function createHistoricalAssessment(row, location, siteId) {
   where not exists (select 1 from public.noise_assessments where organization_id = '${PROVIDER_ID}' and client_request_id = '${request}');`;
   const response = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_ID}/database/query`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.FIELD_COMPLIANCE_CODESPACE}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${process.env.SUPABASE_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
   });
   if (!response.ok) throw new Error(await response.text());
 }
 
 async function main() {
-  for (const variable of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'FIELD_COMPLIANCE_CODESPACE']) {
+  for (const variable of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ACCESS_TOKEN']) {
     if (!process.env[variable]) throw new Error(`${variable} is required`);
   }
   const csvResponse = await fetch(`${process.env.SUPABASE_URL}/storage/v1/object/Logo/${LEGACY_FILE}`, {
