@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link2, Search, RefreshCw } from 'lucide-react';
+import { Car, CheckCircle2, Eye, FileSearch, Link2, MapPin, RefreshCw, Search, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './ObservationSearchPage.css';
 
 type Observation = {
   observation_id: string;
@@ -42,6 +43,7 @@ export default function ObservationSearchPage() {
   const [people, setPeople] = useState<Option[]>([]);
   const [linking, setLinking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const loadOptions = useCallback(async () => {
     if (!profile?.organizationId) return;
@@ -79,6 +81,8 @@ export default function ObservationSearchPage() {
 
   useEffect(() => { void loadOptions(); void runSearch(); }, [loadOptions, runSearch]);
 
+  const selected = results.find((row) => row.observation_id === selectedId) ?? results[0] ?? null;
+
   const linkObservation = async (observationId: string, values: Record<string, string>) => {
     if (!profile?.organizationId) return;
     setLinking(observationId);
@@ -99,40 +103,35 @@ export default function ObservationSearchPage() {
   };
 
   return (
-    <main className="page-shell" style={{ maxWidth: 1440, margin: '0 auto', padding: 28 }}>
-      <header className="page-header" style={{ display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'end', flexWrap: 'wrap' }}>
-        <div><span>Field intelligence</span><h1>Global observations</h1><p>Search linked observations across sites, zones, people, vehicles, POI, LOI, and incidents.</p></div>
+    <main className="observation-workspace">
+      <header className="observation-header">
+        <div><span>Field operations / Intelligence</span><h1>Observation search</h1><p>Find the evidence trail across places, people, vehicles, incidents, and field notes.</p></div>
         <button type="button" className="page-action" onClick={() => void runSearch()}><RefreshCw size={16} /> Refresh</button>
       </header>
-      <section style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 2fr) repeat(2, minmax(180px, 1fr)) auto', gap: 12, alignItems: 'end', margin: '24px 0' }}>
-        <label style={fieldStyle}><span>Wildcard search</span><div style={{ display: 'flex', gap: 8 }}><Search size={18} style={{ alignSelf: 'center', marginLeft: 10 }} /><input style={{ ...inputStyle, width: '100%' }} value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runSearch(); }} placeholder="plate, person, site, zone, incident, note" /></div></label>
-        <label style={fieldStyle}><span>Site</span><select style={inputStyle} value={siteId} onChange={(event) => setSiteId(event.target.value)}><option value="">All sites</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label style={fieldStyle}><span>Zone</span><select style={inputStyle} value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <button type="button" className="page-action" onClick={() => void runSearch()}>Search</button>
+      <section className="observation-search-bar" aria-label="Observation filters">
+        <label className="observation-search-input"><span>Search all observations</span><div><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runSearch(); }} placeholder="Plate, person, site, zone, incident, or note" /></div></label>
+        <label><span>Site</span><select value={siteId} onChange={(event) => setSiteId(event.target.value)}><option value="">All sites</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label><span>Zone</span><select value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <button type="button" className="observation-search-button" onClick={() => void runSearch()}>Search</button>
       </section>
       {error && <div className="page-error">{error}</div>}
-      <section style={{ display: 'grid', gap: 12 }} aria-label="Observation results">
-        {results.map((row) => <ObservationRow key={row.observation_id} row={row} sites={sites} zones={zones} vehicles={vehicles} people={people} linking={linking === row.observation_id} onLink={linkObservation} />)}
-        {!results.length && <div className="page-empty">No observations match this search.</div>}
+      <section className="observation-content" aria-label="Observation results">
+        <div className="observation-queue"><div className="observation-queue-header"><div><span>Review queue</span><h2>{results.length} observation{results.length === 1 ? '' : 's'}</h2></div><small>{search || siteId || zoneId ? 'Filtered results' : 'Most recent first'}</small></div>{results.map((row) => <ObservationRow key={row.observation_id} row={row} selected={row.observation_id === selected?.observation_id} onSelect={() => setSelectedId(row.observation_id)} />)}{!results.length && <div className="observation-empty"><FileSearch size={25} /><strong>No observations found</strong><span>Try a plate, place, person, incident, or note.</span></div>}</div>
+        <aside className="observation-detail" aria-label="Selected observation detail">{selected ? <ObservationDetail row={selected} sites={sites} zones={zones} vehicles={vehicles} people={people} linking={linking === selected.observation_id} onLink={linkObservation} /> : <div className="observation-detail-empty"><Eye size={28} /><strong>Select an observation</strong><span>Choose a result to inspect its links and compliance context.</span></div>}</aside>
       </section>
     </main>
   );
 }
 
-function ObservationRow({ row, sites, zones, vehicles, people, linking, onLink }: { row: Observation; sites: Option[]; zones: Option[]; vehicles: Option[]; people: Option[]; linking: boolean; onLink: (id: string, values: Record<string, string>) => Promise<void> }) {
+function ObservationRow({ row, selected, onSelect }: { row: Observation; selected: boolean; onSelect: () => void }) {
+  const title = row.plate_number || row.vehicle_label || row.person_label || 'Unidentified observation';
+  return <button type="button" className={`observation-row ${selected ? 'is-selected' : ''}`} onClick={onSelect}><span className="observation-row-icon">{row.plate_number || row.vehicle_label ? <Car size={17} /> : <UserRound size={17} />}</span><span className="observation-row-main"><strong>{title}</strong><small>{new Date(row.observed_at).toLocaleString('en-NZ')} · {row.site_name || row.zone_name || 'Unassigned place'}</small></span><span className={`observation-status observation-status-${row.compliance_status || 'unknown'}`}>{row.compliance_status || 'Unclassified'}</span></button>;
+}
+
+function ObservationDetail({ row, sites, zones, vehicles, people, linking, onLink }: { row: Observation; sites: Option[]; zones: Option[]; vehicles: Option[]; people: Option[]; linking: boolean; onLink: (id: string, values: Record<string, string>) => Promise<void> }) {
   const [vehicleId, setVehicleId] = useState(row.vehicle_id ?? '');
   const [personId, setPersonId] = useState(row.person_id ?? '');
   const [nextSiteId, setNextSiteId] = useState(row.site_id ?? '');
   const [nextZoneId, setNextZoneId] = useState(row.zone_id ?? '');
-  return <article style={{ border: '1px solid var(--border, #dbe2ea)', borderRadius: 8, padding: 18, background: 'var(--surface, #fff)' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><div><strong>{row.plate_number || row.vehicle_label || 'Observation'}</strong><div>{new Date(row.observed_at).toLocaleString('en-NZ')} · {row.site_name || 'No site'} · {row.zone_name || 'No zone'}</div></div><span>{row.compliance_status || 'unclassified'}{row.poi ? ' · POI' : ''}{row.loi ? ' · LOI' : ''}</span></div>
-    {row.person_label || row.vehicle_label || row.incident_label || row.officer_notes ? <p>{[row.person_label, row.vehicle_label, row.incident_label, row.officer_notes].filter(Boolean).join(' · ')}</p> : null}
-    <details><summary><Link2 size={15} /> Link records</summary><div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr)) auto', gap: 8, marginTop: 12, alignItems: 'end' }}>
-      <label style={fieldStyle}><span>Vehicle</span><select style={inputStyle} value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">None</option>{vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}</select></label>
-      <label style={fieldStyle}><span>Person</span><select style={inputStyle} value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">None</option>{people.map((item) => <option key={item.id} value={item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label>
-      <label style={fieldStyle}><span>Site</span><select style={inputStyle} value={nextSiteId} onChange={(event) => setNextSiteId(event.target.value)}><option value="">Keep current</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label style={fieldStyle}><span>Zone</span><select style={inputStyle} value={nextZoneId} onChange={(event) => setNextZoneId(event.target.value)}><option value="">Keep current</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <button type="button" className="page-action" disabled={linking} onClick={() => void onLink(row.observation_id, { vehicleId, personId, siteId: nextSiteId, zoneId: nextZoneId, incidentId: '' })}>{linking ? 'Saving' : 'Save links'}</button>
-    </div></details>
-  </article>;
+  return <div className="observation-detail-inner"><header><div><span>Observation record</span><h2>{row.plate_number || row.vehicle_label || row.person_label || 'Unidentified observation'}</h2><small>{new Date(row.observed_at).toLocaleString('en-NZ')}</small></div><span className={`observation-detail-status observation-status-${row.compliance_status || 'unknown'}`}>{row.compliance_status || 'Unclassified'}</span></header><div className="observation-context-grid"><div><span>Place</span><strong>{row.site_name || 'No site'}{row.zone_name ? ` · ${row.zone_name}` : ''}</strong></div><div><span>Flags</span><strong>{row.poi ? 'POI' : ''}{row.poi && row.loi ? ' · ' : ''}{row.loi ? 'LOI' : ''}{!row.poi && !row.loi ? 'None' : ''}</strong></div><div><span>Person</span><strong>{row.person_label || 'Unlinked'}</strong></div><div><span>Vehicle</span><strong>{row.vehicle_label || row.plate_number || 'Unlinked'}</strong></div></div>{row.incident_label || row.officer_notes ? <div className="observation-note"><strong>{row.incident_label ? 'Incident context' : 'Officer note'}</strong><span>{row.incident_label || row.officer_notes}</span></div> : null}<details className="observation-link-editor"><summary><Link2 size={15} /> Link records</summary><div className="observation-link-grid"><label style={fieldStyle}><span>Vehicle</span><select style={inputStyle} value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">None</option>{vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}</select></label><label style={fieldStyle}><span>Person</span><select style={inputStyle} value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">None</option>{people.map((item) => <option key={item.id} value={item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label><label style={fieldStyle}><span>Site</span><select style={inputStyle} value={nextSiteId} onChange={(event) => setNextSiteId(event.target.value)}><option value="">Keep current</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label style={fieldStyle}><span>Zone</span><select style={inputStyle} value={nextZoneId} onChange={(event) => setNextZoneId(event.target.value)}><option value="">Keep current</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className="observation-save-button" disabled={linking} onClick={() => void onLink(row.observation_id, { vehicleId, personId, siteId: nextSiteId, zoneId: nextZoneId, incidentId: '' })}>{linking ? 'Saving...' : 'Save links'}</button></div></details><div className="observation-governance"><CheckCircle2 size={16} /><span>Link changes are tenant-scoped and governed. Confirm place and identity context before using this record for compliance action.</span></div></div>;
 }
