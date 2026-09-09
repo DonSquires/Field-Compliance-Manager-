@@ -49,4 +49,8 @@ test('vision watcher source contains a degraded-frame inference gate', () => {
   assert.match(source, /frame\.visual_quality === 'degraded'/);
   assert.match(source, /visual_quality_gate/);
   assert.match(source, /human_review_required: true/);
+  assert.match(source, /RUNPOD_CAPTURE_API_URL/);
+  assert.match(source, /capture_recognition/);
+  assert.match(source, /deterministic_capture_v1/);
+  assert.match(source, /capture_endpoint_not_configured/);
 });

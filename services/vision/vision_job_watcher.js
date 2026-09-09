@@ -14,6 +14,8 @@ const INFERENCE_SERVICE_URL = (process.env.INFERENCE_SERVICE_URL || 'http://fcm-
 const INFERENCE_API_KEY = process.env.INFERENCE_API_KEY || '';
 const RUNPOD_API_URL = (process.env.RUNPOD_API_URL || 'https://api.runpod.ai/v2/katqqnmds1dphs').replace(/\/+$/, '');
 const RUNPOD_API_KEY = process.env.RUNPOD_API || process.env.RUNPOD_API_KEY || '';
+const RUNPOD_CAPTURE_API_URL = (process.env.RUNPOD_CAPTURE_API_URL || '').replace(/\/+$/, '');
+const RUNPOD_CAPTURE_API_KEY = process.env.RUNPOD_CAPTURE_API_KEY || RUNPOD_API_KEY;
 const VIDEO_ROOT = path.resolve(process.env.VISION_VIDEO_ROOT || '/opt/fcm/storage');
 const DERIVED_ROOT = path.resolve(process.env.VISION_DERIVED_ROOT || '/opt/fcm/derived');
 const VIDEO_CACHE_ROOT = path.resolve(process.env.VISION_VIDEO_CACHE_ROOT || path.join(DERIVED_ROOT, 'source-cache'));
@@ -332,6 +334,7 @@ async function classifyFrames(summary, job) {
         })
         : null;
       if (runpodResult) frame.runpod = runpodResult;
+      frame.capture_recognition = await runCaptureRecognition(frame, image, job);
 
       // RunPod is primary for vehicle and people work. The VPS is called only
       // when the batch missed that capability or the GPU request failed.
@@ -355,6 +358,7 @@ async function classifyFrames(summary, job) {
         face: frame.face,
         people: frame.people,
         animals: frame.animals,
+        capture_recognition: frame.capture_recognition,
         inference: frame.inference,
         runpod: frame.runpod,
       };
@@ -403,6 +407,37 @@ async function classifyWithRunpodBatch(batch) {
   } catch (error) {
     log('runpod_inference_unavailable', { error: error.message });
     return new Map();
+  }
+}
+
+async function runCaptureRecognition(frame, image, job) {
+  if (!RUNPOD_CAPTURE_API_URL || !RUNPOD_CAPTURE_API_KEY) {
+    return { state: 'unavailable', reason: 'capture_endpoint_not_configured', review_required: true };
+  }
+  try {
+    const response = await fetch(`${RUNPOD_CAPTURE_API_URL}/runsync`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${RUNPOD_CAPTURE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: {
+          action: 'capture_recognition',
+          source_frame_hash: frame.sha256_hash,
+          relative_timestamp_seconds: frame.relative_timestamp_seconds,
+          image_base64: image.toString('base64'),
+          crop: frame.alpr?.plate_bbox || frame.runpod?.vehicle?.detection?.bbox || null,
+          tasks: ['alpr', 'face_embedding', 'vehicle_attributes', 'animal_detection'],
+          enhancement_profile: 'deterministic_capture_v1',
+          source_job_id: job.id,
+        },
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!response.ok) return { state: 'unavailable', reason: `capture_endpoint_http_${response.status}`, review_required: true };
+    const payload = await response.json();
+    return { ...payload.output, state: payload.status === 'COMPLETED' ? 'candidate' : 'unavailable', review_required: true, authority: 'provisional' };
+  } catch (error) {
+    log('capture_recognition_unavailable', { job_id: job.id, frame_hash: frame.sha256_hash, error: error.message });
+    return { state: 'unavailable', reason: 'capture_endpoint_error', detail: error.message, review_required: true };
   }
 }
 
