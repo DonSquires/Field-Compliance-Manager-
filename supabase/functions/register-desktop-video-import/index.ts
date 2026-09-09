@@ -68,7 +68,7 @@ serve(async (request) => {
     const { data: conversation, error: conversationError } = await admin.from('bob_conversations').insert({
       organization_id: profile.organization_id,
       user_id: user.id,
-      module_key: 'cctv_review',
+      module_key: 'operations',
       title: `Desktop CCTV import: ${fileName.slice(0, 160)}`,
     }).select('id').single();
     if (conversationError || !conversation) throw new Error(`conversation_insert: ${conversationError?.message ?? 'Could not create import conversation'}`);
