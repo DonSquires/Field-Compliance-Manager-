@@ -6,6 +6,12 @@ const page = readFileSync(resolve(process.cwd(), 'src/pages/RosterHRPage.tsx'), 
 const credentialSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql'), 'utf8');
 
 describe('governed HR administration', () => {
+  it('matches live roster schema and branch context', () => {
+    expect(page).not.toContain('work_ready, role_code');
+    expect(page).toContain('operatingOrganizationId\n            ? supabase.rpc');
+    expect(page).toContain('role_code: null');
+  });
+
   it('groups the full Roster HR workspace without removing payroll access', () => {
     expect(page).toContain("type RosterTabGroup = 'workforce' | 'people' | 'rostering' | 'pay-assets'");
     expect(page).toContain("{ id: 'workforce', label: 'Workforce'");

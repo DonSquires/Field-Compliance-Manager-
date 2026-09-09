@@ -415,7 +415,7 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId),
           supabase
             .from('staff_profiles')
-            .select('id, user_id, employment_type, start_date, end_date, work_ready, role_code')
+            .select('id, user_id, employment_type, start_date, end_date, work_ready')
             .eq('organization_id', orgId),
           supabase
             .from('reference_codes')
@@ -435,8 +435,12 @@ const RosterHRPage: React.FC = () => {
             .select('id, name, shift_type, start_time, end_time, recurrence_type, required_staff_count, is_active')
             .eq('organization_id', orgId)
             .order('name', { ascending: true }),
-          supabase.rpc('get_branch_leave_queue', { p_operating_organization_id: operatingBranchId }),
-          supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId }),
+          operatingOrganizationId
+            ? supabase.rpc('get_branch_leave_queue', { p_operating_organization_id: operatingBranchId })
+            : Promise.resolve({ data: [], error: null }),
+          operatingOrganizationId
+            ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })
+            : Promise.resolve({ data: [], error: null }),
           supabase
             .from('dispatch_job_pay_lines')
             .select('id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code, rate_type, description, quantity, unit_rate, line_total, distance_km, distance_reason, created_at')
@@ -550,7 +554,7 @@ const RosterHRPage: React.FC = () => {
         start_date: staffProfileById.get(p.id)?.start_date ?? null,
         end_date: staffProfileById.get(p.id)?.end_date ?? null,
         work_ready: staffProfileById.get(p.id)?.work_ready ?? null,
-        role_code: staffProfileById.get(p.id)?.role_code ?? null,
+        role_code: null,
       }));
 
       const names: Record<string, string> = {};
