@@ -118,9 +118,9 @@ test('active shift records and closes a governed rest break', async ({ page }) =
   await signInAsOfficer(page, '/officer/schedule');
   await expect(page.getByRole('button', { name: 'Start rest break' })).toBeVisible();
   await page.getByRole('button', { name: 'Start rest break' }).click();
-  await expect(page.getByRole('status')).toContainText('Rest break started and recorded.');
+  await expect(page.getByRole('status').filter({ hasText: 'Rest break started and recorded.' })).toBeVisible();
   await page.getByRole('button', { name: 'End rest break' }).click();
-  await expect(page.getByRole('status')).toContainText('Break ended and duration recorded.');
+  await expect(page.getByRole('status').filter({ hasText: 'Break ended and duration recorded.' })).toBeVisible();
 });
 
 test('officer submits an open shift-swap request with a reason', async ({ page }) => {
@@ -132,7 +132,7 @@ test('officer submits an open shift-swap request with a reason', async ({ page }
   const dialog = page.getByRole('dialog', { name: 'Request shift swap?' });
   await dialog.getByLabel('Reason').fill('Approved family commitment prevents me working this assignment.');
   await dialog.getByRole('button', { name: 'Submit swap request' }).click();
-  await expect(page.getByRole('status')).toContainText('Open shift swap request submitted for roster review.');
+  await expect(page.getByRole('status').filter({ hasText: 'Open shift swap request submitted for roster review.' })).toBeVisible();
 });
 
 test('officer requests a direct swap with an eligible replacement officer', async ({ page }) => {
@@ -159,7 +159,7 @@ test('officer requests a direct swap with an eligible replacement officer', asyn
   await dialog.getByLabel('Replacement officer (optional)').selectOption('2f2f2f2f-2222-4222-8222-222222222222');
   await dialog.getByLabel('Reason').fill('Jordan agreed to cover this assignment.');
   await dialog.getByRole('button', { name: 'Submit swap request' }).click();
-  await expect(page.getByRole('status')).toContainText('Direct shift swap request submitted for roster review.');
+  await expect(page.getByRole('status').filter({ hasText: 'Direct shift swap request submitted for roster review.' })).toBeVisible();
 });
 
 test('officer starts an accepted shift with GPS attendance evidence', async ({ page, context }) => {
@@ -173,7 +173,7 @@ test('officer starts an accepted shift with GPS attendance evidence', async ({ p
   });
   await signInAsOfficer(page, '/officer/schedule');
   await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Start shift' }).click();
-  await expect(page.getByRole('status')).toContainText('Shift started at');
+  await expect(page.getByRole('status').filter({ hasText: 'Shift started at' })).toBeVisible();
 });
 
 test('officer sees and reads a roster change notification', async ({ page }) => {

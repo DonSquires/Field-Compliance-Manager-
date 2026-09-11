@@ -1,5 +1,7 @@
 -- Keep provider onboarding reads aligned with the invitation state shown in the Client Portfolio.
 
+DROP FUNCTION IF EXISTS public.get_crm_onboarding_workspace();
+
 CREATE OR REPLACE FUNCTION public.get_crm_onboarding_workspace()
 RETURNS TABLE(
   ledger_id uuid,

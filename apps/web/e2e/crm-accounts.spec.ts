@@ -21,7 +21,7 @@ test('CRM account context and governed quote creation are operational', async ({
   const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
   await client.click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
-  await workspace.getByRole('button', { name: /Places/ }).click();
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
   await expect(workspace.getByText('Civic Centre', { exact: true })).toBeVisible();
   await workspace.getByRole('button', { name: 'Create proposal' }).click();
   const dialog = page.getByRole('dialog', { name: /New quote for Civic Events Limited/ });
@@ -99,7 +99,7 @@ test('location house lookup exposes only shared physical setup and blocks duplic
   await signInAsAdmin(page, '/admin/crm');
   await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
   const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
-  await workspace.getByRole('button', { name: /Places/ }).click();
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
   await workspace.getByRole('button', { name: 'Find or add location' }).click();
   await workspace.getByLabel('Location name').fill('Nelson Civic Centre');
   await workspace.getByLabel('Street address').fill('1 Civic Square, Nelson');
@@ -141,7 +141,7 @@ test('administrator creates and edits organizations through the human account sp
   await expect(created.getByText('Harbour Arts Trust is now a prospect')).toBeVisible();
   await created.getByRole('button', { name: 'Continue to places' }).click();
   const workspace = page.getByRole('dialog', { name: 'Harbour Arts Trust' });
-  await workspace.getByRole('button', { name: /Places/ }).click();
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
   await expect(workspace.getByRole('button', { name: 'Find or add location' })).toBeVisible();
   await workspace.getByRole('button', { name: /Contacts/ }).click();
   await workspace.getByRole('button', { name: 'Add contact' }).click();

@@ -1,7 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
 
-test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
+test.beforeEach(async ({ page }) => {
+	await page.clock.setFixedTime(new Date('2026-08-31T09:30:00+12:00'));
+	await installSupabaseFixtures(page);
+	await page.route('**/rest/v1/rpc/get_operating_organization_contexts', async (route) => await route.fulfill({
+		contentType: 'application/json',
+		body: JSON.stringify([{ organization_id: '41414141-4141-4141-8141-414141414141', organization_name: 'Northern Branch', authority_basis: 'branch_authorisation', role_at_branch: 'admin', module_access: ['roster'], can_be_rostered: false, is_default: true }]),
+	}));
+});
 
 test('enterprise roster week board is operational and visually stable', async ({ page }) => {
  const errors=monitorBrowserErrors(page); await signInAsAdmin(page,'/admin/roster');

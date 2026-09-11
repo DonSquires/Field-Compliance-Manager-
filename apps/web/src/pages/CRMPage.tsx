@@ -265,7 +265,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
 
       const { data: ownOrg, error: ownErr } = await supabase
         .from('organizations')
-        .select('*')
+        .select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes')
         .eq('id', orgId)
         .single();
       if (ownErr) throw ownErr;
@@ -275,14 +275,15 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       const { data: directChildren, error: acctErr } = await supabase
         .from('organizations')
         .select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes')
-        .eq('parent_organization_id', orgId);
+        .eq('parent_organization_id', orgId)
+        .limit(200);
       if (acctErr) throw acctErr;
       const { data: portfolio, error: portfolioError } = await supabase.rpc('get_crm_provider_portfolio', { p_operating_provider_organization_id: orgId });
       if (portfolioError) throw portfolioError;
       const portfolioRows = (portfolio as ProviderPortfolioRow[]) ?? [];
       const portfolioIds = [...new Set(portfolioRows.map((row) => row.organization_id))];
       const { data: accounts, error: portfolioAccountsError } = portfolioIds.length
-        ? await supabase.from('organizations').select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes').in('id', portfolioIds)
+        ? await supabase.from('organizations').select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes').in('id', portfolioIds).limit(200)
         : { data: [], error: null };
       if (portfolioAccountsError) throw portfolioAccountsError;
 
@@ -294,17 +295,20 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             supabase
               .from('client_sites')
               .select('id,name,client_organization_id')
-              .in('client_organization_id', accountIds),
+              .in('client_organization_id', accountIds)
+              .limit(500),
             supabase
               .from('crm_contacts')
               .select('organization_id,first_name,last_name,is_primary')
               .in('organization_id', accountIds)
-              .eq('is_primary', true),
+              .eq('is_primary', true)
+              .limit(200),
             supabase
               .from('quotes')
               .select('client_org_id,status,created_at')
               .in('client_org_id', accountIds)
-              .order('created_at', { ascending: false }),
+              .order('created_at', { ascending: false })
+              .limit(500),
             supabase.rpc('get_crm_organization_readiness', { p_organization_ids: accountIds }),
             supabase.from('module_catalog').select('module_key,billing_period').eq('active', true).order('module_key'),
             supabase.from('rate_rules').select('id,organization_id,name,rate_type,amount,module_key').in('organization_id', providerOrgIds).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
@@ -378,7 +382,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         .from('service_agreements')
         .select('*, provider:provider_organization_id(id, name, organization_type)')
         .eq('client_organization_id', orgId)
-        .eq('agreement_type', 'financial');
+        .eq('agreement_type', 'financial')
+        .limit(100);
       if (subErr) throw subErr;
 
       // Contracted orgs: Layer-2 operational agreements, either direction
@@ -390,7 +395,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         .or(
           `client_organization_id.eq.${orgId},provider_organization_id.eq.${orgId}`,
         )
-        .eq('agreement_type', 'operational');
+        .eq('agreement_type', 'operational')
+        .limit(100);
       if (opErr) throw opErr;
       const { data: invoices, error: invoiceErr } = await supabase.from('invoices').select('id,invoice_number,invoice_date,due_date,status,total_amount,currency,client:client_organization_id(name)').eq('organization_id', orgId).order('due_date', { ascending: true }).limit(100);
       if (invoiceErr) throw invoiceErr;

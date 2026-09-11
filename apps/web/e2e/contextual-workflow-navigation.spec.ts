@@ -5,6 +5,10 @@ const WORK_UNIT = '20202020-2020-4020-8020-202020202020';
 const HANDOFF = '71717171-7171-4171-8171-717171717171';
 test.beforeEach(async ({ page }) => {
   await installSupabaseFixtures(page);
+  await page.route('**/rest/v1/rpc/get_operating_organization_contexts', async (route) => await route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([{ organization_id: '41414141-4141-4141-8141-414141414141', organization_name: 'Northern Branch', authority_basis: 'branch_authorisation', role_at_branch: 'admin', module_access: ['roster'], can_be_rostered: false, is_default: true }]),
+  }));
 });
 test('account workflow rail preserves context across operating workspaces', async ({ page }) => {
   const errors = monitorBrowserErrors(page);

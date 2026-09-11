@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installOfficerScheduleFixtures, installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin, signInAsOfficer } from './fixtures';
+import { installFreedomCampingFixtures, installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin, signInAsOfficer } from './fixtures';
 
 test('admin records a governed breach action', async ({ page }) => {
   const browserErrors=monitorBrowserErrors(page);await installSupabaseFixtures(page);await signInAsAdmin(page,'/admin/field-ops?area=breach-review');
@@ -11,7 +11,7 @@ test('admin records a governed breach action', async ({ page }) => {
 });
 
 test('officer breach notification opens the exact admin outcome', async ({ page }) => {
-  const browserErrors=monitorBrowserErrors(page);await installOfficerScheduleFixtures(page);await signInAsOfficer(page,'/officer/freedom_camping?breach=abababab-abab-4bab-8bab-abababababab');
+  const browserErrors=monitorBrowserErrors(page);await installFreedomCampingFixtures(page);await signInAsOfficer(page,'/officer/freedom_camping?breach=abababab-abab-4bab-8bab-abababababab');
   const outcome=page.locator('#officer-breach-abababab-abab-4bab-8bab-abababababab');
   await expect(outcome).toHaveClass(/is-context-focus/);
   await expect(outcome).toContainText('Admin outcome · actioned');

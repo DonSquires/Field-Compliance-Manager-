@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
+import { installFreedomCampingFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-31T20:00:00+12:00'));
-  await installOfficerScheduleFixtures(page);
+  await installFreedomCampingFixtures(page);
 });
 
 test('officer scan keeps rule verdict and Zone closure evidence distinct', async ({ page }) => {

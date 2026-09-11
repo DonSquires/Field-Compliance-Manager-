@@ -8,7 +8,7 @@ const read = (name: string) => {
   return readFileSync(root, 'utf8');
 };
 
-const swap = read('20260907003101_direct_shift_swap_notifications.sql');
+const swap = read('20260907001900_direct_shift_swap_notifications.sql');
 const notify = read('20260907002000_roster_change_notifications.sql');
 const attendance = read('20260907002100_roster_attendance_exceptions.sql');
 const templatePreview = read('20260907002200_preview_roster_templates.sql');
@@ -16,7 +16,7 @@ const batchPreview = read('20260907002300_preview_batch_publish.sql');
 const repeat = read('20260907002400_repeat_roster_slot_range.sql');
 const batchFailures = read('20260907002500_batch_publish_failure_audit.sql');
 const attendanceAck = read('20260907002600_acknowledge_roster_attendance_exception.sql');
-const skills = read('20260907002800_roster_skill_requirements.sql');
+const skills = read('20260907002801_roster_skill_requirements.sql');
 const skillCatalog = read('20260907002900_canonical_roster_skill_catalog.sql');
 const skillIds = read('20260907003000_canonical_work_unit_skill_ids.sql');
 const inductions = read('20260907003100_site_induction_requirements.sql');

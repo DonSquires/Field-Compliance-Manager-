@@ -4,6 +4,10 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
   await installSupabaseFixtures(page);
+  await page.route('**/rest/v1/rpc/get_operating_organization_contexts', async (route) => await route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([{ organization_id: '41414141-4141-4141-8141-414141414141', organization_name: 'Northern Branch', authority_basis: 'branch_authorisation', role_at_branch: 'admin', module_access: ['people_hr', 'access_control'], can_be_rostered: false, is_default: true }, { organization_id: '45454545-4545-4545-8545-454545454545', organization_name: 'Southern Branch', authority_basis: 'branch_authorisation', role_at_branch: 'admin', module_access: ['people_hr', 'access_control'], can_be_rostered: false, is_default: false }]),
+  }));
 });
 
 test('administrator manages identity and access preset', async ({ page }) => {

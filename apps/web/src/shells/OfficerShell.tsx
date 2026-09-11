@@ -186,8 +186,9 @@ const OfficerShell: React.FC = () => {
     if (!module) return true;
     if (module === 'modules') return true;
     if (CORE_OFFICER_MODULES.has(module)) return true;
-    return grantedModules.includes(module);
-  }, [grantedModules]);
+    return grantedModules.includes(module)
+      || (moduleStatus === 'configured' && enabledModules.has(module) && (profile?.moduleAccess ?? []).includes(module));
+  }, [enabledModules, grantedModules, moduleStatus, profile?.moduleAccess]);
 
   // Derive active module from URL
   const moduleFromUrl = useCallback((pathname: string): ActiveModule => {
@@ -201,6 +202,7 @@ const OfficerShell: React.FC = () => {
   // Determine current state machine state
   useEffect(() => {
     const module = moduleFromUrl(location.pathname);
+    if (module && moduleStatus === 'loading') return;
     if (module && !canAccessOfficerModule(module)) {
       navigate('/officer', { replace: true });
       setActiveModule(null);
@@ -219,7 +221,7 @@ const OfficerShell: React.FC = () => {
     } else {
       setOfficerState('home');
     }
-  }, [location.pathname, activeShift, grantedModules, canAccessOfficerModule, moduleFromUrl, navigate]);
+  }, [location.pathname, activeShift, grantedModules, moduleStatus, canAccessOfficerModule, moduleFromUrl, navigate]);
 
   // Direct module access requires both the officer's grant and the organisation entitlement.
   useEffect(() => {
