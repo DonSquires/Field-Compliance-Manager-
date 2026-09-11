@@ -88,6 +88,19 @@ interface FileImportBatch {
   created_at: string;
 }
 
+interface GeneratedOutputRow {
+  id: string;
+  document_id: string;
+  document_version_id: string;
+  output_format: string;
+  status: string;
+  sha256: string | null;
+  storage_bucket: string | null;
+  storage_path: string | null;
+  created_at: string;
+  generated_at: string | null;
+}
+
 type FileFilter = 'all' | 'quarantined' | 'tenant_reference' | 'tenant' | 'global_reference';
 
 const FILE_SPACES = [
@@ -206,19 +219,20 @@ const FileSystemPage: React.FC = () => {
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [reviewingBatch, setReviewingBatch] = useState(false);
+  const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutputRow[]>([]);
 
   const loadDocuments = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
     if (!organizationId) return;
     setLoading(true);
     setError(null);
-    const [{ data, error: loadError }, { data: intakeData, error: intakeError }, { data: batchData, error: batchError }] = await Promise.all([supabase
+    const [{ data, error: loadError }, { data: intakeData, error: intakeError }, { data: batchData, error: batchError }, { data: outputData, error: outputError }] = await Promise.all([supabase
       .from('documents')
       .select('id,attachment_id,storage_bucket,storage_object_ref,original_filename,mime_type,sha256,uploaded_by,source_channel,organization_id,current_scope,created_at,updated_at')
       .or(`organization_id.eq.${organizationId},organization_id.is.null`)
       .order('updated_at', { ascending: false })
-      .limit(250), supabase.from('bob_attachments').select('id,file_name,file_type,file_size_bytes,processing_state,created_at').eq('processing_state', 'pending').order('created_at', { ascending: false }).limit(50), supabase.from('file_import_batches').select('id,batch_name,source_file,parser,status,source_sha256,duplicate_of_batch_id,row_count,duplicate_count,unresolved_count,manifest_json,schema_json,created_at').order('created_at', { ascending: false }).limit(50)]);
-    if (loadError || intakeError) setError(loadError?.message ?? intakeError?.message ?? 'Files could not be loaded.');
+      .limit(250), supabase.from('bob_attachments').select('id,file_name,file_type,file_size_bytes,processing_state,created_at').eq('processing_state', 'pending').order('created_at', { ascending: false }).limit(50), supabase.from('file_import_batches').select('id,batch_name,source_file,parser,status,source_sha256,duplicate_of_batch_id,row_count,duplicate_count,unresolved_count,manifest_json,schema_json,created_at').order('created_at', { ascending: false }).limit(50), supabase.from('bob_generated_document_outputs').select('id,document_id,document_version_id,output_format,status,sha256,storage_bucket,storage_path,created_at,generated_at').eq('organization_id', organizationId).order('created_at', { ascending: false }).limit(50)]);
+    if (loadError || intakeError || outputError) setError(loadError?.message ?? intakeError?.message ?? outputError?.message ?? 'Files could not be loaded.');
     else {
       const rows = (data as DocumentRow[]) ?? [];
       setDocuments(rows);
@@ -227,6 +241,7 @@ const FileSystemPage: React.FC = () => {
       const batches = (batchData as FileImportBatch[]) ?? [];
       setImportBatches(batches);
       setSelectedBatchId((current) => current && batches.some((batch) => batch.id === current) ? current : batches[0]?.id ?? null);
+      setGeneratedOutputs((outputData as GeneratedOutputRow[]) ?? []);
       if (batchError) setNotice('Review batch history is unavailable until the file import migration is deployed.');
     }
     setLoading(false);
@@ -291,6 +306,16 @@ const FileSystemPage: React.FC = () => {
     if (signedError || !data?.signedUrl) setError(signedError?.message ?? 'A signed file link could not be created.');
     else window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
     setOpening(false);
+  };
+
+  const openGeneratedOutput = async (output: GeneratedOutputRow) => {
+    if (output.status !== 'ready' || !output.storage_bucket || !output.storage_path) {
+      setNotice('This generated output is not ready to open.');
+      return;
+    }
+    const { data, error } = await supabase.storage.from(output.storage_bucket).createSignedUrl(output.storage_path, 900);
+    if (error || !data?.signedUrl) setError(error?.message ?? 'A signed output link could not be created.');
+    else window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
   };
 
   const previewImportFile = async (file: File) => {
@@ -414,6 +439,7 @@ const FileSystemPage: React.FC = () => {
     </section>
     {intakeAttachments.length > 0 && <section className="file-system-intake" aria-label="Bob intake waiting registration"><div><span>Bob intake</span><h2>Files waiting registration</h2><p>These uploads are not yet canonical Files records. Registration extracts, hashes, classifies, and preserves upload provenance.</p></div><div>{intakeAttachments.map((attachment) => { const disposition = intakeDisposition(attachment); return <article key={attachment.id}><strong>{attachment.file_name}</strong><small>{attachment.file_type} · {Math.round(attachment.file_size_bytes / 1024)} KB · {new Date(attachment.created_at).toLocaleDateString('en-NZ')}</small>{disposition.allowed ? <button type="button" onClick={() => void registerAttachment(attachment)}>Register in Files</button> : <span className="file-system-quarantine">Quarantined: {disposition.reason}</span>}</article>; })}</div></section>}
     <section className="file-system-spaces" aria-label="File spaces">{FILE_SPACES.map((item) => <button type="button" key={item.key} className={space === item.key ? 'is-active' : ''} onClick={() => setSpace(item.key)}><FolderOpen size={16} /><span>{item.label}</span></button>)}</section>
+    {space === 'all' || space === 'evidence' ? <section className="file-system-batches" aria-label="Generated outputs"><div className="file-system-batches-heading"><div><span>Generated Outputs</span><h2>Approved document artifacts</h2></div><Download size={17} /></div>{generatedOutputs.length === 0 ? <p className="file-system-muted">No generated outputs are available for this organization.</p> : <div className="file-system-batch-grid">{generatedOutputs.map((output) => <article className="file-system-batch-detail" key={output.id}><div><strong>{output.output_format.toUpperCase()} output</strong><span>{output.status.replaceAll('_', ' ')} · {output.generated_at ? new Date(output.generated_at).toLocaleString('en-NZ') : 'Not generated'}</span><small>{output.sha256 ? `SHA-256 ${output.sha256}` : 'Checksum unavailable'}</small></div><button type="button" onClick={() => void openGeneratedOutput(output)} disabled={output.status !== 'ready'}>{output.status === 'ready' ? 'Open output' : 'Not ready'}</button></article>)}</div>}</section> : null}
     <div className="file-system-toolbar"><label><Search size={16} /><input type="search" placeholder="Search filenames, type, source, or hash" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label="File status" value={scope} onChange={(event) => setScope(event.target.value as FileFilter)}><option value="all">All statuses</option><option value="quarantined">Quarantined</option><option value="tenant_reference">Reference</option><option value="tenant">Tenant files</option><option value="global_reference">Global reference</option></select></div>
     <div className="file-system-layout"><section className="file-system-list" aria-label="Files"><div className="file-system-list-heading"><div><span>Permitted records</span><h2>{visibleDocuments.length} files</h2></div><small>{documents.length} loaded</small></div>{loading ? <div className="file-system-empty"><RefreshCw size={20} className="is-spinning" />Loading files</div> : visibleDocuments.length === 0 ? <div className="file-system-empty"><FileArchive size={22} />No files match this view</div> : <div className="file-system-records">{visibleDocuments.map((document) => { const Icon = fileIcon(document.mime_type); return <button type="button" key={document.id} className={selectedId === document.id ? 'is-selected' : ''} onClick={() => setSelectedId(document.id)}><span className="file-system-record-icon"><Icon size={17} /></span><span><strong>{document.original_filename}</strong><small>{spaceFor(document)} · {scopeLabel(document.current_scope)}</small></span><time dateTime={document.updated_at}>{new Date(document.updated_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}</time></button>; })}</div>}</section>
     <aside className="file-system-detail" aria-label="File details">{!selected ? <div className="file-system-empty"><FileText size={22} />Select a file to inspect</div> : <><div className="file-system-detail-heading"><div><span>{spaceFor(selected)}</span><h2>{selected.original_filename}</h2><small>{selected.mime_type} · {scopeLabel(selected.current_scope)}</small></div><button type="button" onClick={() => void openFile()} disabled={opening || !selected.storage_object_ref} title="Open source file"><Download size={17} />{opening ? 'Opening' : 'Open source'}</button></div><dl className="file-system-facts"><div><dt>Source</dt><dd>{selected.source_channel.replaceAll('_', ' ')}</dd></div><div><dt>Storage</dt><dd>{selected.storage_bucket}</dd></div><div><dt>Uploaded</dt><dd>{new Date(selected.created_at).toLocaleString('en-NZ')}</dd></div><div><dt>SHA-256</dt><dd>{selected.sha256 ?? 'Not recorded'}</dd></div></dl><section className="file-system-section"><div className="file-system-section-heading"><div><span>Versions</span><h3>{versions.length} extracted versions</h3></div>{versionsLoading && <RefreshCw size={15} className="is-spinning" />}</div>{versions.length === 0 ? <p className="file-system-muted">No extracted version is available yet. This source remains reviewable without treating it as authoritative.</p> : <div className="file-system-versions">{versions.map((version) => <article key={version.id}><strong>{version.version_label}</strong><span>{version.extraction_confidence === null ? 'Confidence unavailable' : `${Math.round(version.extraction_confidence * 100)}% extraction confidence`}{version.ocr_required ? ' · OCR required' : ''}</span><small>{version.extracted_text?.slice(0, 280) || 'No extracted text preview.'}</small></article>)}</div>}</section><section className="file-system-provenance"><Clock3 size={15} /><span>Promotion is deliberately separate from file storage. Bob can prepare a review, but a human must approve any CRM, HR, finance, evidence, or investigation change.</span></section></>}</aside></div>
