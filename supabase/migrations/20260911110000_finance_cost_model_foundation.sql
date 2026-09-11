@@ -132,7 +132,7 @@ BEGIN
 
   v_labour := v_hours * v_base * (1 + (v_oncost + v_leave) / 100);
   v_depreciation := (v_acquisition_cost + v_setup_cost - v_residual_value) / nullif(v_useful_life_months / 12, 0);
-  v_vehicle := v_hours * ((v_vehicle_fixed + v_depreciation) / nullif(v_vehicle_hours, 0)) + v_km * v_vehicle_km_rate;
+  v_vehicle := CASE WHEN v_vehicle_fixed + v_depreciation > 0 THEN v_hours * ((v_vehicle_fixed + v_depreciation) / nullif(v_vehicle_hours, 0)) ELSE 0 END + v_km * v_vehicle_km_rate;
   v_direct_cost := v_labour + v_vehicle + v_equipment + v_direct;
   v_overhead := v_direct_cost * v_overhead_pct / 100;
   v_true_cost := round(v_direct_cost + v_overhead, 2);
