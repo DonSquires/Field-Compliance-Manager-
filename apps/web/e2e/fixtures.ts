@@ -51,7 +51,7 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
 
 export const DESKTOP_PROMPT_KEY = `fcm:desktop-download-prompt-v2-dismissed:${ADMIN_ID}`;
 
-export async function installSupabaseFixtures(page: Page): Promise<void> {
+export async function installSupabaseFixtures(page: Page, options: { officerModules?: string[] } = {}): Promise<void> {
   await page.clock.install({ time: new Date('2026-08-29T12:00:00.000Z') });
   // Admin surfaces run as a returning user; the desktop companion prompt is a modal that would otherwise block every click.
   await page.addInitScript((key) => window.localStorage.setItem(key, '1'), DESKTOP_PROMPT_KEY);
@@ -94,7 +94,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
   const activationHandoffs: Array<Record<string, any>> = [{ handoff_id: '71717171-7171-4171-8171-717171717171', account_organization_id: '40404040-4040-4040-8040-404040404040', account_name: 'Civic Events Limited', agreement_id: '24242424-2424-4424-8424-242424242424', agreement_name: 'Civic Events Compliance Services', owner_user_id: ADMIN_ID, owner_name: 'Morgan Reed', handoff_status: 'open', version: 1, activated_at: '2026-08-31T08:00:00.000Z', completed_at: null, tasks: [{ task_id: '72727272-7272-4272-8272-727272727272', task_key: 'site_briefing', title: 'Confirm site access and safety briefing', destination: 'site-360', status: 'pending', completion_note: null, completed_at: null, completed_by_name: null }, { task_id: '73737373-7373-4373-8373-737373737373', task_key: 'first_roster_action', title: 'Publish the first operational roster action', destination: 'roster', status: 'pending', completion_note: null, completed_at: null, completed_by_name: null }, { task_id: '74747474-7474-4474-8474-747474747474', task_key: 'reporting_handoff', title: 'Confirm reporting delivery handoff', destination: 'reports', status: 'pending', completion_note: null, completed_at: null, completed_by_name: null }], sites: [{ site_id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', address: '1 Civic Square, Nelson', risk_level: 'medium', access_instructions: 'Controlled loading entrance after 18:00.', hs_notes: 'Night loading area requires high-visibility clothing.' }], work_units: [{ work_unit_id: '20202020-2020-4020-8020-202020202020', name: 'Civic Centre Static Post', service_type: 'static_guarding', active: true }], first_roster_at: '2026-08-31T12:00:00.000Z' }];
   const identityUsers = [
     { id: ADMIN_ID, display_name: 'Morgan Reed', email: user.email, phone: '021 555 0101', role: 'admin', organization_id: ORG_ID, employer_organization_id: ORG_ID, module_access: [], deactivated_at: null, updated_at: '2026-08-29T20:00:00.000Z' },
-    { id: OFFICER_ID, display_name: 'Ana Ngata', email: 'ana@fcm.test', phone: '021 555 0102', role: 'officer', organization_id: ORG_ID, module_access: ['patrol', 'freedom_camping'], deactivated_at: null, updated_at: '2026-08-29T20:00:00.000Z' },
+    { id: OFFICER_ID, display_name: 'Ana Ngata', email: 'ana@fcm.test', phone: '021 555 0102', role: 'officer', organization_id: ORG_ID, module_access: ['patrol', 'freedom_camping', 'biosecurity', 'parking', 'smoke_control'], deactivated_at: null, updated_at: '2026-08-29T20:00:00.000Z' },
     { id: SECOND_OFFICER_ID, display_name: 'Jordan Lee', email: 'jordan@fcm.test', phone: null, role: 'officer', organization_id: ORG_ID, module_access: [], deactivated_at: null, updated_at: '2026-08-29T20:00:00.000Z' },
   ];
   const accessPresets = [{ id: '53535353-5353-4353-8353-535353535353', key: 'operations_admin', name: 'Operations administrator', role: 'admin_officer', description: 'Operational administration', is_system: true }];
@@ -193,7 +193,7 @@ export async function installSupabaseFixtures(page: Page): Promise<void> {
     if (table === 'access_presets') { await route.fulfill(fulfillJson(accessPresets)); return; }
     if (table === 'preset_assignments') { await route.fulfill(fulfillJson(presetAssignments.filter((assignment) => assignment.status === 'active'))); return; }
     if (table === 'staff_area_grants') { await route.fulfill(fulfillJson(areaGrants)); return; }
-    if (table === 'organization_modules') { await route.fulfill(fulfillJson([{ id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: false }, { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'welfare', enabled: true }])); return; }
+    if (table === 'organization_modules') { await route.fulfill(fulfillJson([{ id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: false }, ...(options.officerModules ?? []).map((module_key, index) => ({ id: `abababab-abab-4bab-8bab-abababab${String(index + 10).padStart(2, '0')}`, module_key, enabled: true })), { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'welfare', enabled: true }])); return; }
     if (table === 'org_geofence_config' || table === 'notice_templates') { await route.fulfill(fulfillJson([])); return; }
     if (table === 'crm_account_activities') { await route.fulfill(fulfillJson(crmActivities)); return; }
     if (table === 'invoices') { await route.fulfill(fulfillJson(crmInvoices)); return; }
@@ -371,11 +371,23 @@ export async function installOfficerScheduleFixtures(page: Page, options: { free
     const resource = url.pathname.split('/').at(-1);
     const select = url.searchParams.get('select') ?? '';
     if (resource === 'organization_modules') {
-      await route.fulfill(fulfillJson([{ id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'freedom_camping', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab03', module_key: 'overnight_verification', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab04', module_key: 'noise_control', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab05', module_key: 'welfare', enabled: true }]));
+      await route.fulfill(fulfillJson([{ id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'freedom_camping', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab03', module_key: 'overnight_verification', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab04', module_key: 'noise_control', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab05', module_key: 'site_guard', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab06', module_key: 'biosecurity', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab07', module_key: 'parking', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab08', module_key: 'smoke_control', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab09', module_key: 'welfare', enabled: true }]));
       return;
     }
     if (resource === 'user_profiles') {
-      await route.fulfill(fulfillJson([{ id: OFFICER_ID, display_name: 'Ana Ngata', email: officerUser.email, role: 'officer', organization_id: ORG_ID, module_access: ['patrol', 'freedom_camping', 'overnight_verification', 'noise_control'] }]));
+      await route.fulfill(fulfillJson([{ id: OFFICER_ID, display_name: 'Ana Ngata', email: officerUser.email, role: 'officer', organization_id: ORG_ID, module_access: ['patrol', 'freedom_camping', 'overnight_verification', 'noise_control', 'site_guard', 'biosecurity', 'parking', 'smoke_control'] }]));
+      return;
+    }
+    if (resource === 'service_agreements') {
+      await route.fulfill(fulfillJson([{ id: '24242424-2424-4424-8424-242424242424', name: 'Civic Events Compliance Services', agreement_type: 'operational', invitation_status: 'accepted', provider_organization_id: ORG_ID, client_organization_id: '40404040-4040-4040-8040-404040404040', enabled_modules: ['static_guarding', 'patrol'] }]));
+      return;
+    }
+    if (resource === 'service_agreement_locations') {
+      await route.fulfill(fulfillJson([{ service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '42424242-4242-4242-8242-424242424242', zone_id: null, status: 'active' }]));
+      return;
+    }
+    if (resource === 'client_sites') {
+      await route.fulfill(fulfillJson([{ id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', address: '1 Civic Square, Nelson', site_type: 'commercial_premises', client_organization_id: '40404040-4040-4040-8040-404040404040', service_agreement_id: '24242424-2424-4424-8424-242424242424', active: true }]));
       return;
     }
     if (resource === 'staff_profiles') {

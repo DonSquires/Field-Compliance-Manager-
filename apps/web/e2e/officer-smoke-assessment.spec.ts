@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
+import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
 test('officer smoke assessment records valid source, location, action, and follow-up evidence', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
-  await installSupabaseFixtures(page);
+  await installOfficerScheduleFixtures(page);
   await page.route('**/rest/v1/service_agreement_locations**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '42424242-4242-4242-8242-424242424242', zone_id: null, status: 'active' }]) }));
   await page.route('**/rest/v1/client_sites**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', address: '1 Civic Square, Nelson', site_type: 'commercial_premises', client_organization_id: '40404040-4040-4040-8040-404040404040', service_agreement_id: '24242424-2424-4424-8424-242424242424', active: true }]) }));
   let submittedSmoke: Record<string, unknown> | null = null;
@@ -63,6 +63,6 @@ test('officer smoke assessment records valid source, location, action, and follo
   await page.getByRole('button', { name: 'Submit Assessment' }).click();
 
   await expect(page.getByText('Source: nuisance_burning')).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Smoke assessment confirmed');
+  await expect(page.getByRole('status').filter({ hasText: 'Smoke assessment confirmed' })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

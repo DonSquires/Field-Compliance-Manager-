@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
+import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
 test('officer records parking chalk through the verified-Zone scan workflow', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
-  await installSupabaseFixtures(page);
+  await installOfficerScheduleFixtures(page);
   await page.route('**/rest/v1/parking_chalk_records**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
   await page.route('**/rest/v1/location_zones**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '66666666-6666-4666-8666-666666666666', name: 'Civic Event Parking Zone' }]) }));
   await page.route('**/functions/v1/process-officer-scan', async (route) => {
@@ -21,13 +21,13 @@ test('officer records parking chalk through the verified-Zone scan workflow', as
   await page.getByLabel('Verified parking Zone').selectOption('66666666-6666-4666-8666-666666666666');
   await page.getByRole('button', { name: 'Chalk Vehicle' }).click();
 
-  await expect(page.getByRole('status')).toContainText('Chalk recorded for Civic Event Parking Zone: clear. Return policy: 60 minutes.');
+  await expect(page.getByRole('status').filter({ hasText: 'Chalk recorded for Civic Event Parking Zone: clear. Return policy: 60 minutes.' })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
 test('officer can resolve a parking address into scan coordinates', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
-  await installSupabaseFixtures(page);
+  await installOfficerScheduleFixtures(page);
   await page.route('**/rest/v1/parking_chalk_records**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
   await page.route('**/rest/v1/location_zones**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
   await page.route('**/functions/v1/linz-lookup', async (route) => {
@@ -50,6 +50,6 @@ test('officer can resolve a parking address into scan coordinates', async ({ pag
   await expect(page.getByText('101 Wakefield Street, Te Aro, Wellington 6011')).toBeVisible();
   await page.getByRole('button', { name: 'Chalk Vehicle' }).click();
 
-  await expect(page.getByRole('status')).toContainText('Chalk recorded for Resolved parking zone: clear. Return policy: 60 minutes.');
+  await expect(page.getByRole('status').filter({ hasText: 'Chalk recorded for Resolved parking zone: clear. Return policy: 60 minutes.' })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

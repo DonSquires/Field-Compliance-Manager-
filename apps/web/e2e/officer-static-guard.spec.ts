@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
+import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
 const staticPost = {
   shift: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', status: 'accepted', scheduled_start: '2026-08-30T08:00:00.000Z', scheduled_end: '2026-08-30T16:00:00.000Z', notes: 'Gate coverage' },
@@ -13,7 +13,7 @@ test('officer static guard confirms arrival only after a complete governed recei
   const browserErrors = monitorBrowserErrors(page);
   await page.context().grantPermissions(['geolocation']);
   await page.context().setGeolocation({ latitude: -41.274, longitude: 173.283 });
-  await installSupabaseFixtures(page);
+  await installOfficerScheduleFixtures(page);
   await page.route('**/rest/v1/rpc/get_officer_static_post', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(staticPost) }));
   await page.route('**/rest/v1/rpc/manage_officer_static_post', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}');
@@ -25,7 +25,7 @@ test('officer static guard confirms arrival only after a complete governed recei
   await signInAsOfficer(page, '/officer/site_guard');
   await expect(page.getByText('Civic Events Centre')).toBeVisible();
   await page.getByRole('button', { name: 'Confirm arrival' }).click();
-  await expect(page.getByRole('status')).toContainText('Arrival recorded');
-  await expect(page.getByRole('status')).toContainText('Receipt ARR-2048');
+  await expect(page.getByRole('status').filter({ hasText: 'Arrival recorded' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Receipt ARR-2048' })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

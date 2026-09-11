@@ -42,7 +42,7 @@ test('officer timesheet derives hours from completed work only', async ({ page }
   await expect(page.getByText(/Night patrol · completed · 480 minutes/)).toBeVisible();
   await page.getByLabel('Payroll adjustment hours').fill('0');
   await page.getByRole('button', { name: 'Submit derived hours for approval' }).click();
-  await expect(page.getByRole('status')).toContainText('8 hours from 1 work records');
+  await expect(page.getByRole('status').filter({ hasText: '8 hours from 1 work records' })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 
@@ -62,5 +62,5 @@ test('officer resubmits a rejected period after correction', async ({ page }) =>
   await page.getByLabel('Period start').fill('2026-08-17');
   await page.getByLabel('Period end').fill('2026-08-23');
   await page.getByRole('button', { name: 'Resubmit corrected timesheet' }).click();
-  await expect(page.getByRole('status')).toContainText('8 hours from 1 work records');
+  await expect(page.getByRole('status').filter({ hasText: '8 hours from 1 work records' })).toBeVisible();
 });

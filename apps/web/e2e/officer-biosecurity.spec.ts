@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
+import { installOfficerScheduleFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
 
 test('officer records a biosecurity assessment with source, protected-land, and referral evidence', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
-  await installSupabaseFixtures(page);
+  await installOfficerScheduleFixtures(page);
 
   let submittedBiosecurity: Record<string, unknown> | null = null;
 
@@ -59,6 +59,6 @@ test('officer records a biosecurity assessment with source, protected-land, and 
   await page.getByRole('button', { name: 'Submit Assessment' }).click();
 
   await expect(page.getByText('Wilding pine', { exact: true })).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Assessment confirmed');
+  await expect(page.getByRole('status').filter({ hasText: 'Assessment confirmed' })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
