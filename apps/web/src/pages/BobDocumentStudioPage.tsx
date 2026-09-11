@@ -23,6 +23,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'e
 type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string };
 type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
 type OutputReceipt = { id: string; status: string; output_format: string; sha256: string | null; storage_bucket: string | null; storage_path: string | null };
+const FILE_SPACES = ['Organisation', 'Contracts', 'Sites and Operations', 'HR and People', 'Finance', 'Evidence', 'Investigations', 'Bob Intake', 'Generated Outputs'];
 
 export default function BobDocumentStudioPage() {
   const navigate = useNavigate();
@@ -47,6 +48,8 @@ export default function BobDocumentStudioPage() {
   const [outputHistory, setOutputHistory] = useState<OutputReceipt[]>([]);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(false);
+  const [fileSpace, setFileSpace] = useState('Bob Intake');
+  const [fileSearch, setFileSearch] = useState('');
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -295,6 +298,8 @@ export default function BobDocumentStudioPage() {
     setNotice(`Resumed ${draft.status.replaceAll('_', ' ')} draft. Review its source and state before continuing.`);
   };
 
+  const visibleDrafts = drafts.filter((draft) => !fileSearch.trim() || draft.title.toLowerCase().includes(fileSearch.trim().toLowerCase()));
+
   return (
     <main className="bob-document-page">
       <header className="bob-document-topbar">
@@ -310,8 +315,15 @@ export default function BobDocumentStudioPage() {
       </header>
 
       <div className="bob-document-layout">
-        <aside className="bob-document-outline" aria-label="Document setup">
-          <div className="bob-document-section-heading"><span>Document</span><FilePlus2 size={15} /></div>
+        <aside className="bob-document-outline" aria-label="Document files and setup">
+          <div className="bob-document-section-heading"><span>Files</span><FilePlus2 size={15} /></div>
+          <label className="bob-file-search" htmlFor="bob-file-search"><Search size={13} /><input id="bob-file-search" aria-label="Search document files" placeholder="Search files" value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} /></label>
+          <div className="bob-file-spaces" aria-label="Document spaces">{FILE_SPACES.map((space) => <button type="button" key={space} className={fileSpace === space ? 'is-active' : ''} onClick={() => setFileSpace(space)}>{space}</button>)}</div>
+          <div className="bob-document-section-heading"><span>{fileSpace}</span><small>{visibleDrafts.length} files</small></div>
+          <div className="bob-document-drafts" aria-label="Document files">
+            {draftsLoading ? <p>Loading files…</p> : visibleDrafts.length === 0 ? <p>No files in this space.</p> : visibleDrafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.status.replaceAll('_', ' ')} · {new Date(draft.updatedAt).toLocaleDateString('en-NZ')}</small></button>)}
+          </div>
+          <div className="bob-document-section-heading"><span>Document setup</span></div>
           <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           <label htmlFor="bob-document-type">Type<select id="bob-document-type" aria-label="Document type" value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
             <option value="site_safety_plan">Site safety plan</option><option value="risk_assessment">Security risk assessment</option><option value="incident_report">Incident / near miss</option><option value="corrective_action">Corrective action review</option><option value="emergency_plan">Emergency response plan</option><option value="working_alone_plan">Working-alone plan</option><option value="training_record">Training / competency record</option><option value="customer_review">Customer service review</option><option value="report">Operational report</option><option value="letter">Controlled correspondence</option><option value="policy">Policy / SOP</option><option value="proposal">Proposal / RFQ</option><option value="evidence_package">Evidence package</option><option value="custom">Custom</option>
@@ -321,10 +333,6 @@ export default function BobDocumentStudioPage() {
           <button type="button" onClick={() => insertTemplate('<h1>Proposal</h1><p><strong>Decision requested</strong></p><p>Describe the decision and approval boundary.</p><h2>Evidence and assumptions</h2><p>List source-backed facts and open assumptions.</p><h2>Approval checklist</h2><ul><li>Human owner identified</li><li>Source evidence reviewed</li></ul>')}>Proposal structure</button>
           <button type="button" onClick={() => insertTemplate('<h1>Site safety plan</h1><p><strong>Site and activity</strong></p><p>Identify the agreement, place, work activity, affected people, and review owner.</p><h2>Hazards and controls</h2><p>Record each hazard, existing control, proposed control, residual risk, and evidence. Mark unknowns as [TO CONFIRM].</p><h2>Emergency and escalation</h2><p>State the emergency response, supervisor, contact path, and worker acknowledgement required.</p><h2>Review and approval</h2><p>Record reviewer, approval date, expiry/review date, and unresolved actions.</p>')}>Site safety structure</button>
           <button type="button" onClick={() => insertTemplate('<h1>Incident and corrective action</h1><p><strong>What happened</strong></p><p>Record the time, place, people, work activity, immediate actions, and evidence.</p><h2>Investigation</h2><p>Separate observed facts from provisional contributing factors. Do not state a root cause until reviewed.</p><h2>Actions</h2><ul><li>Owner and due date</li><li>Control change required</li><li>Effectiveness review</li></ul>')}>Incident structure</button>
-          <div className="bob-document-template-heading">Your drafts</div>
-          <div className="bob-document-drafts" aria-label="Your drafts">
-            {draftsLoading ? <p>Loading drafts…</p> : drafts.length === 0 ? <p>No saved drafts in this organization.</p> : drafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.status.replaceAll('_', ' ')} · {new Date(draft.updatedAt).toLocaleDateString('en-NZ')}</small></button>)}
-          </div>
           <div className="bob-document-brand-status" role="status"><strong>{organizationName}</strong>{logoUrl ? <img src={logoUrl} alt={`${organizationName} approved logo`} /> : <span>No approved organization logo is configured. The draft will not invent branding.</span>}<label className="bob-brand-upload"><Upload size={13} /> Upload brand asset<input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadBrandAsset(file); event.currentTarget.value = ''; }} disabled={brandBusy} /></label>{brandAssets.filter((asset) => asset.status === 'pending').map((asset) => <div className="bob-brand-pending" key={asset.id}><span>{asset.label} · pending approval</span><button type="button" onClick={() => void reviewBrandAsset(asset, 'approved')} disabled={brandBusy}><CheckCircle2 size={13} /> Approve</button></div>)}</div>
           <div className="bob-document-safety"><ShieldCheck size={15} /><span>Draft only. Bob cannot silently publish, sign, or promote this document.</span></div>
         </aside>
