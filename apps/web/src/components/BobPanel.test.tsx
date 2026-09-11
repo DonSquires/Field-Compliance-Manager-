@@ -13,10 +13,13 @@ const { mockFrom, mockInvoke, mockStorageFrom } = vi.hoisted(() => ({
 let messageHistory: Array<Record<string, unknown>> = [];
 let attachmentHistory: Array<Record<string, unknown>> = [];
 let conversationList: Array<Record<string, unknown>> = [];
+let auditHistory: Array<Record<string, unknown>> = [];
+let governedActionHistory: Array<Record<string, unknown>> = [];
+let profileRole = 'grand_master';
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
-    profile: { id: 'user-1', organizationId: 'org-1' },
+    profile: { id: 'user-1', organizationId: 'org-1', role: profileRole },
   }),
 }));
 
@@ -44,6 +47,9 @@ describe('BobPanel', () => {
     messageHistory = [];
     attachmentHistory = [];
     conversationList = [];
+    auditHistory = [];
+    governedActionHistory = [];
+    profileRole = 'grand_master';
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'bob_conversations') {
@@ -95,6 +101,24 @@ describe('BobPanel', () => {
             return { error: null };
           }),
         };
+      }
+
+      if (table === 'bob_event_log') {
+        const auditQuery = {
+          eq: () => auditQuery,
+          order: () => auditQuery,
+          limit: async () => ({ data: auditHistory, error: null }),
+        };
+        return { select: () => auditQuery };
+      }
+
+      if (table === 'bob_agentic_actions') {
+        const actionQuery = {
+          eq: () => actionQuery,
+          order: () => actionQuery,
+          limit: async () => ({ data: governedActionHistory, error: null }),
+        };
+        return { select: () => actionQuery };
       }
 
       return {
@@ -270,6 +294,17 @@ describe('BobPanel', () => {
     expect(screen.getByText('Using app data')).toBeTruthy();
   });
 
+  it('explains why an officer cannot attach a document for Bob extraction', async () => {
+    profileRole = 'officer';
+    render(<BobPanel open onClose={() => undefined} />);
+
+    const input = await screen.findByLabelText('Attach evidence files');
+    fireEvent.change(input, { target: { files: [new File(['evidence'], 'site-note.pdf', { type: 'application/pdf' })] } });
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Document and image evidence must be registered by an administrator');
+    expect(screen.queryByText('site-note.pdf')).toBeNull();
+  });
+
   it('separates assistant prose from evidence, proposal, and next-action state', async () => {
     messageHistory = [{
       id: 'message-1', role: 'assistant', content: 'I prepared the governed draft.', confidence: 0.91,
@@ -408,14 +443,40 @@ describe('BobPanel', () => {
     expect(screen.getByText('Bob recorded a failed or flagged operation for review.')).toBeTruthy();
   });
 
-  it('can expand from compact chat into the Bob workspace surface', async () => {
-    const { container } = render(<BobPanel open onClose={() => undefined} />);
+  it('shows durable conductor events in the audit inspector', async () => {
+    auditHistory = [{
+      id: 'event-1', turn_index: 3, step_index: 2, event_type: 'tool_completed', tool: 'repo_search', outcome: 'found', created_at: '2026-09-02T06:01:00.000Z',
+    }];
+    render(<BobPanel open onClose={() => undefined} />);
 
-    expect(await screen.findByLabelText('Open full workspace')).toBeTruthy();
-    fireEvent.click(screen.getByLabelText('Open full workspace'));
+    fireEvent.click(await screen.findByLabelText('Show context panel'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Audit' }));
+
+    expect(await screen.findByText('repo search')).toBeTruthy();
+    expect(screen.getByText(/Turn 3, step 2/)).toBeTruthy();
+  });
+
+  it('shows durable governed action status in the actions inspector', async () => {
+    governedActionHistory = [{
+      id: 'action-1', action_type: 'propose_roster_fill', status: 'pending', context_summary: 'Fill an unassigned overnight roster slot.', bob_reasoning: null, error_message: null, created_at: '2026-09-02T06:01:00.000Z',
+    }];
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByLabelText('Show context panel'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Actions' }));
+
+    expect(await screen.findByText('propose roster fill')).toBeTruthy();
+    expect(screen.getByText(/Fill an unassigned overnight roster slot/)).toBeTruthy();
+  });
+
+  it('opens as a full Bob workspace with a compact fallback', async () => {
+    const { container } = render(<BobPanel open onClose={() => undefined} />);
 
     expect(container.querySelector('.bob-panel')?.className).toContain('is-expanded');
     expect(screen.getByLabelText('Use compact panel')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Use compact panel'));
+    expect(container.querySelector('.bob-panel')?.className).not.toContain('is-expanded');
+    expect(screen.getByLabelText('Open full workspace')).toBeTruthy();
   });
 
   it('shows session history and a context panel in the expanded workspace', async () => {
@@ -427,8 +488,6 @@ describe('BobPanel', () => {
 
     render(<BobPanel open onClose={() => undefined} />);
 
-    fireEvent.click(await screen.findByLabelText('Open full workspace'));
-    fireEvent.click(screen.getByLabelText('Show sessions'));
     fireEvent.click(screen.getByLabelText('Show context panel'));
 
     expect(await screen.findByLabelText('Bob sessions')).toBeTruthy();
@@ -450,8 +509,6 @@ describe('BobPanel', () => {
     ];
 
     render(<BobPanel open onClose={() => undefined} />);
-    fireEvent.click(await screen.findByLabelText('Open full workspace'));
-    fireEvent.click(screen.getByLabelText('Show sessions'));
 
     fireEvent.change(await screen.findByLabelText('Search chats'), { target: { value: 'roster' } });
 
@@ -466,8 +523,6 @@ describe('BobPanel', () => {
     ];
 
     render(<BobPanel open onClose={() => undefined} />);
-    fireEvent.click(await screen.findByLabelText('Open full workspace'));
-    fireEvent.click(screen.getByLabelText('Show sessions'));
 
     const sessions = await screen.findByLabelText('Bob sessions');
     fireEvent.pointerDown(screen.getByLabelText('Resize sessions pane'), { clientX: 300 });
@@ -525,7 +580,7 @@ describe('BobPanel', () => {
   it('opens a full-page studio for documents, diagrams, and media without forcing side panes open', async () => {
     render(<BobPanel open onClose={() => undefined} />);
 
-    fireEvent.click(await screen.findByLabelText('Open full workspace'));
+    fireEvent.click(await screen.findByLabelText('Open document studio'));
 
     expect(await screen.findByLabelText('Bob studio')).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Documents/ })).toBeTruthy();
@@ -578,7 +633,7 @@ describe('BobPanel', () => {
     mockStorageFrom.mockReturnValue(storageApi);
 
     render(<BobPanel open onClose={() => undefined} />);
-    fireEvent.click(await screen.findByLabelText('Open full workspace'));
+    fireEvent.click(await screen.findByLabelText('Open document studio'));
     fireEvent.click(screen.getByRole('tab', { name: /Media/ }));
 
     const image = await screen.findByAltText('site-photo.jpg');

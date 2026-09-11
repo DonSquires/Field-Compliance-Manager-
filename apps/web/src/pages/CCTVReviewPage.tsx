@@ -23,6 +23,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { consolidateResultData } from '../lib/motionConsolidation';
 import { buildCCTVPrintableReport } from '../lib/cctvReport';
+import { filterUsableReportImages, type ReportEvidenceImage } from '../lib/cctvImageQuality';
 import type {
   ConsolidatedFaceEvent,
   ConsolidatedPersonEvent,
@@ -208,6 +209,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchJobs, setBatchJobs] = useState<CCTVJob[]>([]);
+  const [resultLoading, setResultLoading] = useState(false);
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -219,9 +221,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     try {
       let query = supabase
         .from('inference_jobs')
-        .select(
-          'id, evidence_item_id, domain, status, stage, error_message, attempt_count, progress_percent, progress_current, progress_total, progress_label, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)'
-        )
+        .select('id, evidence_item_id, domain, status, stage, error_message, attempt_count, progress_percent, progress_current, progress_total, progress_label, created_at')
         .eq('organization_id', profile.organizationId)
         .in('domain', [...CCTV_DOMAINS])
         .order('created_at', { ascending: false })
@@ -230,9 +230,17 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       else query = query.eq('status', filter);
       const { data, error: queryError } = await query;
       if (queryError) throw queryError;
-      const mappedJobs = ((data ?? []) as unknown as CCTVJob[]).map((job) => ({
+      const rows = (data ?? []) as Array<Omit<CCTVJob, 'evidence' | 'result'>>;
+      const evidenceIds = rows.map((job) => job.evidence_item_id).filter((id): id is string => Boolean(id));
+      const { data: evidenceRows, error: evidenceError } = evidenceIds.length
+        ? await supabase.from('evidence_items').select('id, storage_path, evidence_kind, metadata').in('id', evidenceIds)
+        : { data: [], error: null };
+      if (evidenceError) throw evidenceError;
+      const evidenceById = new Map((evidenceRows ?? []).map((evidence) => [evidence.id, evidence]));
+      const mappedJobs = rows.map((job) => ({
         ...job,
-        result: Array.isArray(job.result) ? job.result[0] ?? null : job.result,
+        evidence: job.evidence_item_id ? evidenceById.get(job.evidence_item_id) ?? null : null,
+        result: null,
       }));
       setJobs(mappedJobs);
       if (!selectedId && mappedJobs[0]?.id) setSelectedId(mappedJobs[0].id);
@@ -285,6 +293,27 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const reportReady = selectedBatchComplete && pendingObservationCount === 0;
 
   useEffect(() => {
+    let active = true;
+    const loadSelectedResult = async () => {
+      if (!selectedId) return;
+      setResultLoading(true);
+      const { data, error: resultError } = await supabase
+        .from('inference_results')
+        .select('status, result')
+        .eq('inference_job_id', selectedId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!active) return;
+      if (resultError) setIdentityError(`Inference detail could not be loaded: ${resultError.message}`);
+      else if (data) setJobs((current) => current.map((job) => job.id === selectedId ? { ...job, result: data as CCTVJob['result'] } : job));
+      setResultLoading(false);
+    };
+    void loadSelectedResult();
+    return () => { active = false; };
+  }, [selectedId]);
+
+  useEffect(() => {
     setReportReceipt(null);
     setBatchJobs([]);
     setExportReceipt(null);
@@ -317,17 +346,40 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     setBatchLoading(true);
     setError(null);
     try {
-      const { data, error: batchError } = await supabase
-        .from('inference_jobs')
-        .select('id, evidence_item_id, domain, status, stage, error_message, attempt_count, progress_percent, progress_current, progress_total, progress_label, created_at, evidence:evidence_item_id(storage_path, evidence_kind, metadata), result:inference_results(status, result)')
+      const { data: evidenceRows, error: evidenceError } = await supabase
+        .from('evidence_items')
+        .select('id, storage_path, evidence_kind, metadata')
         .eq('organization_id', profile.organizationId)
+        .contains('metadata', { desktop_review_batch: { batch_id: selectedBatch.batch_id } });
+      if (evidenceError) throw evidenceError;
+      const evidenceIds = (evidenceRows ?? []).map((evidence) => evidence.id);
+      if (evidenceIds.length === 0) {
+        setBatchJobs([]);
+        return;
+      }
+      const { data: jobRows, error: batchError } = await supabase
+        .from('inference_jobs')
+        .select('id, evidence_item_id, domain, status, stage, error_message, attempt_count, progress_percent, progress_current, progress_total, progress_label, created_at')
+        .eq('organization_id', profile.organizationId)
+        .in('evidence_item_id', evidenceIds)
         .in('domain', [...CCTV_DOMAINS])
-        .order('created_at', { ascending: false })
-        .limit(Math.max(100, selectedBatch.clip_total * 2));
+        .order('created_at', { ascending: false });
       if (batchError) throw batchError;
-      const mappedJobs = ((data ?? []) as unknown as CCTVJob[])
-        .map((job) => ({ ...job, result: Array.isArray(job.result) ? job.result[0] ?? null : job.result }))
-        .filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id);
+      const jobIds = (jobRows ?? []).map((job) => job.id);
+      const { data: resultRows, error: resultError } = jobIds.length
+        ? await supabase.from('inference_results').select('inference_job_id, status, result, created_at').in('inference_job_id', jobIds).order('created_at', { ascending: false })
+        : { data: [], error: null };
+      if (resultError) throw resultError;
+      const evidenceById = new Map((evidenceRows ?? []).map((evidence) => [evidence.id, evidence]));
+      const resultByJobId = new Map<string, CCTVJob['result']>();
+      for (const result of resultRows ?? []) {
+        if (result.inference_job_id && !resultByJobId.has(result.inference_job_id)) resultByJobId.set(result.inference_job_id, { status: result.status, result: result.result });
+      }
+      const mappedJobs = (jobRows ?? []).map((job) => ({
+        ...job,
+        evidence: job.evidence_item_id ? evidenceById.get(job.evidence_item_id) ?? null : null,
+        result: resultByJobId.get(job.id) ?? null,
+      }));
       setBatchJobs(mappedJobs);
     } catch (batchError) {
       setError(batchError instanceof Error ? batchError.message : 'The selected SD-card batch could not be loaded.');
@@ -800,6 +852,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       setDecisionMessage('A printable report requires an organization-scoped evidence item.');
       return;
     }
+    const reportWindow = window.open('', '_blank');
+    if (!reportWindow) {
+      setDecisionMessage('The printable report could not open. Allow pop-ups for this site and try again.');
+      return;
+    }
+    reportWindow.opener = null;
+    reportWindow.document.write('<!doctype html><html><body><p>Preparing governed CCTV report...</p></body></html>');
+    reportWindow.document.close();
     const batchConsolidated = selectedBatchJobs.map((job) => ({ job, result: consolidateResultData(job.result?.result) }));
     const observations = batchConsolidated.flatMap(({ result }) => [
       ...result.person_events.map((event) => ({
@@ -830,17 +890,37 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     const reportCounts = batchConsolidated.reduce((counts, { result }) => ({
       personCount: counts.personCount + result.summary_counts.face_events + result.summary_counts.person_events,
       vehicleCount: counts.vehicleCount + result.summary_counts.vehicle_events,
+      animalCount: counts.animalCount + (result.animal_events || []).length,
       frameCount: counts.frameCount + result.summary_counts.total_frames_parsed,
-    }), { personCount: 0, vehicleCount: 0, frameCount: 0 });
+    }), { personCount: 0, vehicleCount: 0, animalCount: 0, frameCount: 0 });
     const reportHasPendingReview = observations.some((observation) => observation.reviewState !== 'Approved identity' && observation.reviewState !== 'Confirmed');
     const reportStatus = reportHasPendingReview ? 'draft' : 'review_ready';
     const generatedAt = new Date().toLocaleString('en-NZ');
+    const place = evidencePlaceContext(selected.evidence?.metadata || null);
+    const observedTimes = observations.flatMap((observation) => [observation.startSeconds, observation.endSeconds]).filter((value): value is number => typeof value === 'number');
+    const firstObserved = observedTimes.length ? Math.min(...observedTimes) : null;
+    const lastObserved = observedTimes.length ? Math.max(...observedTimes) : null;
+    const assessment = {
+      what: `${reportCounts.personCount} person observation${reportCounts.personCount === 1 ? '' : 's'} and ${reportCounts.vehicleCount} vehicle observation${reportCounts.vehicleCount === 1 ? '' : 's'} were consolidated from ${reportCounts.frameCount} parsed frames.`,
+      when: firstObserved === null ? 'No observation time window was reported.' : `${firstObserved}s to ${lastObserved ?? firstObserved}s in the reviewed footage.`,
+      where: place,
+      why: 'Assess camera evidence for potential client safety, security, or compliance concerns without treating AI output as an enforcement or identity decision.',
+      how: 'Motion extraction and provisional person, face, vehicle, and plate analysis were consolidated before an explicit human review decision.',
+    };
+    const eventImages = batchConsolidated.flatMap(({ result }) => [
+      ...result.person_events.map((event) => ({ kind: 'person' as const, src: event.thumbnail, label: 'Person observation', timestampSeconds: event.first_seen_seconds, sha256Hash: event.best_frame_hash, reviewState: reviewEventStates[event.event_id]?.review_state || 'Review required' })),
+      ...result.face_events.map((event) => ({ kind: 'person' as const, src: event.thumbnail, label: event.subject_label || 'Person face observation', timestampSeconds: event.first_seen_seconds, sha256Hash: event.best_frame_hash, reviewState: reviewEventStates[event.event_id]?.review_state || 'Review required' })),
+      ...result.vehicle_events.map((event) => ({ kind: 'vehicle' as const, src: event.thumbnail, label: event.plate ? `Vehicle ${event.plate}` : 'Vehicle observation', timestampSeconds: event.first_seen_seconds, sha256Hash: event.best_frame_hash, reviewState: reviewEventStates[event.event_id]?.review_state || 'Review required' })),
+      ...(result.animal_events || []).map((event) => ({ kind: 'animal' as const, src: event.thumbnail, label: event.animal_type || 'Animal observation', timestampSeconds: event.first_seen_seconds, sha256Hash: event.best_frame_hash, reviewState: 'Review required' })),
+    ]).filter((image): image is ReportEvidenceImage => typeof image.src === 'string' && image.src.startsWith('data:image/') && typeof image.sha256Hash === 'string')
+      .filter((image, index, images) => images.findIndex((candidate) => candidate.sha256Hash === image.sha256Hash) === index);
+    const evidenceImages = await filterUsableReportImages(eventImages, 6);
     const reportPayload = {
       schema_version: 1,
       title: 'CCTV evidence report',
       report_status: reportStatus,
       generated_at: generatedAt,
-      place: evidencePlaceContext(selected.evidence?.metadata || null),
+      place,
       job_id: selected.id,
       evidence_id: selected.evidence_item_id,
       batch_id: selectedBatch?.batch_id || null,
@@ -849,7 +929,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       batch_complete: selectedBatchComplete,
       person_count: reportCounts.personCount,
       vehicle_count: reportCounts.vehicleCount,
+      animal_count: reportCounts.animalCount,
       frame_count: reportCounts.frameCount,
+      assessment,
+      evidence_images: evidenceImages.map(({ label, timestampSeconds, sha256Hash, reviewState }) => ({ label, timestamp_seconds: timestampSeconds, sha256_hash: sha256Hash, review_state: reviewState })),
       observations,
     };
     const { data: receiptData, error: receiptError } = await supabase.rpc('issue_cctv_report_receipt', {
@@ -861,6 +944,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     });
     const receipt = Array.isArray(receiptData) ? receiptData[0] : receiptData;
     if (receiptError || !receipt) {
+      reportWindow.close();
       setDecisionMessage(receiptError?.message || 'The CCTV report receipt could not be issued. The report was not opened.');
       return;
     }
@@ -877,14 +961,13 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       batchComplete: reportPayload.batch_complete,
       personCount: reportCounts.personCount,
       vehicleCount: reportCounts.vehicleCount,
+      animalCount: reportCounts.animalCount,
       frameCount: reportCounts.frameCount,
+      assessment,
+      evidenceImages,
       observations,
     });
-    const reportWindow = window.open('', '_blank', 'noopener,noreferrer');
-    if (!reportWindow) {
-      setDecisionMessage('The printable report could not open. Allow pop-ups for this site and try again.');
-      return;
-    }
+    reportWindow.document.open();
     reportWindow.document.write(report);
     reportWindow.document.close();
     reportWindow.focus();
@@ -1059,7 +1142,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 <button type="button" className="cctv-btn-jump" disabled={exportSaving} onClick={() => void createExportDraft()} title="Create an approval-gated export draft from accepted observations">
                   {exportSaving ? 'Creating export...' : 'Create export draft'}
                 </button>
-                <button type="button" className="cctv-btn-jump" onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
+                <button type="button" className="cctv-btn-jump" disabled={resultLoading} onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
                   <Printer size={13} /> Print draft report
                 </button>
                 <button type="button" className="cctv-btn-confirm" disabled={!reportReady} onClick={() => void printSelectedReport()} title={reportReady ? 'Print the final evidence report' : 'Resolve all observations and load the complete batch first'}>

@@ -32,11 +32,13 @@ YUNET_MODEL_PATH = Path(os.getenv("YUNET_MODEL_PATH", MODELS_DIR / "face_detecti
 SFACE_MODEL_PATH = Path(os.getenv("SFACE_MODEL_PATH", MODELS_DIR / "face_recognition_sface_2021dec.onnx"))
 VEHICLE_MODEL_PATH = Path(os.getenv("VEHICLE_MODEL_PATH", MODELS_DIR / "vehicle-attributes-recognition-barrier-0039.xml"))
 PERSON_MODEL_PATH = Path(os.getenv("PERSON_MODEL_PATH", MODELS_DIR / "person-detection-retail-0013.xml"))
+PERSON_REID_MODEL_PATH = Path(os.getenv("PERSON_REID_MODEL_PATH", MODELS_DIR / "person-reidentification-retail-0288.xml"))
 _face_detector: cv2.FaceDetectorYN | None = None
 _face_recognizer: cv2.FaceRecognizerSF | None = None
 _vehicle_model: Any = None
 _vehicle_compiled: Any = None
 _person_compiled: Any = None
+_person_reid_compiled: Any = None
 VEHICLE_COLOURS = ("white", "gray", "yellow", "red", "green", "blue", "black")
 VEHICLE_TYPES = ("car", "van", "truck", "bus")
 
@@ -193,6 +195,61 @@ def _person_runtime() -> Any:
     return _person_compiled
 
 
+def _person_reid_runtime() -> Any:
+    global _person_reid_compiled
+    if _person_reid_compiled is not None:
+        return _person_reid_compiled
+    if not PERSON_REID_MODEL_PATH.is_file() or not PERSON_REID_MODEL_PATH.with_suffix('.bin').is_file():
+        raise FileNotFoundError("person re-identification model is not staged")
+    core = Core()
+    _person_reid_compiled = core.compile_model(core.read_model(str(PERSON_REID_MODEL_PATH)), "CPU")
+    return _person_reid_compiled
+
+
+def _person_reid_embedding(crop: np.ndarray) -> list[float]:
+    runtime = _person_reid_runtime()
+    blob = cv2.dnn.blobFromImage(crop, 1.0, (128, 256), swapRB=False)
+    vector = np.asarray(runtime([blob])[runtime.outputs[0]], dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(vector))
+    if not np.isfinite(vector).all() or math.isclose(norm, 0.0):
+        raise RuntimeError("person appearance embedding is invalid")
+    return [round(float(value / norm), 7) for value in vector]
+
+
+def _visible_head_region(crop: np.ndarray) -> dict[str, Any]:
+    head = crop[:max(1, round(crop.shape[0] * 0.2)), :]
+    if head.shape[0] < 12 or head.shape[1] < 12:
+        return {"state": "insufficient_resolution", "colour": None, "shape": None, "review_required": True}
+    hsv = cv2.cvtColor(head, cv2.COLOR_BGR2HSV)
+    brightness = float(hsv[:, :, 2].mean())
+    saturation = float(hsv[:, :, 1].mean())
+    if brightness < 25 or brightness > 245:
+        return {"state": "insufficient_visual_information", "colour": None, "shape": None, "review_required": True}
+    hue = float(hsv[:, :, 0].mean())
+    if saturation < 30:
+        colour = "dark" if brightness < 85 else "light" if brightness > 165 else "mid-tone"
+    elif hue < 12 or hue >= 165:
+        colour = "red-toned"
+    elif hue < 35:
+        colour = "yellow-or-orange-toned"
+    elif hue < 85:
+        colour = "green-toned"
+    elif hue < 135:
+        colour = "blue-toned"
+    else:
+        colour = "purple-or-pink-toned"
+    edges = cv2.Canny(cv2.cvtColor(head, cv2.COLOR_BGR2GRAY), 50, 150)
+    edge_density = float(np.count_nonzero(edges) / edges.size)
+    shape = "high-texture-or-irregular" if edge_density > 0.18 else "compact" if edge_density < 0.06 else "moderate-outline"
+    return {
+        "state": "provisional_visible_head_region",
+        "colour": colour,
+        "shape": shape,
+        "could_include_hair_headwear_or_background": True,
+        "review_required": True,
+    }
+
+
 def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> dict[str, Any]:
     x0 = max(0, int(bbox['x']))
     y0 = max(0, int(bbox['y']))
@@ -205,11 +262,15 @@ def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> di
             "height_status": "camera_calibration_required",
             "review_required": True,
         }
-    resized = cv2.resize(crop, (16, 32), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
-    embedding = resized.reshape(-1)
-    norm = float(np.linalg.norm(embedding))
-    if norm > 0:
-        embedding = embedding / norm
+    try:
+        embedding = _person_reid_embedding(crop)
+        embedding_model = PERSON_REID_MODEL_PATH.name
+    except (FileNotFoundError, RuntimeError, cv2.error):
+        resized = cv2.resize(crop, (16, 32), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
+        fallback = resized.reshape(-1)
+        norm = float(np.linalg.norm(fallback))
+        embedding = [round(float(value / norm), 7) for value in fallback] if norm > 0 else []
+        embedding_model = "deterministic_colour_fallback"
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     midpoint = max(1, hsv.shape[0] // 2)
     upper = hsv[:midpoint]
@@ -240,8 +301,16 @@ def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> di
 
     return {
         "appearance_status": "visual_estimate_review_required",
-        "appearance_embedding": [round(float(value), 6) for value in embedding],
-        "appearance_embedding_dimension": int(embedding.size),
+        "appearance_embedding": embedding,
+        "appearance_embedding_dimension": len(embedding),
+        "appearance_embedding_model": embedding_model,
+        "body_proportions": {
+            "pixel_height": int(crop.shape[0]),
+            "pixel_width": int(crop.shape[1]),
+            "height_to_width_ratio": round(float(crop.shape[0] / max(1, crop.shape[1])), 3),
+            "physical_size_status": "camera_calibration_required",
+        },
+        "visible_head_region": _visible_head_region(crop),
         "upper_body_colour": dominant_colour(upper),
         "lower_body_colour": dominant_colour(lower),
         "height_status": "camera_calibration_required",
@@ -378,6 +447,7 @@ async def health() -> dict[str, str]:
         "face_models": "ready" if YUNET_MODEL_PATH.is_file() and SFACE_MODEL_PATH.is_file() else "not_staged",
         "vehicle_model": "ready" if VEHICLE_MODEL_PATH.is_file() and VEHICLE_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
         "person_model": "ready" if PERSON_MODEL_PATH.is_file() and PERSON_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
+        "person_reidentification_model": "ready" if PERSON_REID_MODEL_PATH.is_file() and PERSON_REID_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
     }
 
 
@@ -654,3 +724,29 @@ async def people(
         return _capability_unavailable("person_detection_model")
     except (RuntimeError, cv2.error) as error:
         raise HTTPException(status_code=503, detail=f"person detection unavailable: {error}") from error
+
+
+@app.post("/infer/person-signature")
+async def person_signature(
+    photo: Annotated[UploadFile, File()],
+    person_bbox: Annotated[str, Form()],
+    authorization: Annotated[str | None, Header()] = None,
+    x_inference_api_key: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    _authorize(authorization, x_inference_api_key)
+    image = await _read_image(photo)
+    try:
+        parsed = json.loads(person_bbox)
+        if not isinstance(parsed, dict):
+            raise ValueError
+        bbox = {key: int(parsed[key]) for key in ('x', 'y', 'width', 'height')}
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=422, detail="person_bbox must contain integer x, y, width, and height") from error
+    attributes = _person_appearance_attributes(image, bbox)
+    return JSONResponse({
+        "success": True,
+        "authority": "provisional_similarity_only",
+        "identity_resolution": "manual_review_required",
+        "attributes": attributes,
+        "prohibited_inferences": ["identity_truth", "weight", "health", "ethnicity", "age", "gender"],
+    })

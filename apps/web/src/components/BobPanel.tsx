@@ -86,6 +86,26 @@ interface BobSessionSummary {
   updated_at: string;
 }
 
+interface BobAuditEvent {
+  id: string;
+  turn_index: number;
+  step_index: number;
+  event_type: string;
+  tool: string | null;
+  outcome: string | null;
+  created_at: string;
+}
+
+interface BobGovernedAction {
+  id: string;
+  action_type: string;
+  status: 'pending' | 'approved' | 'rejected' | 'applied' | 'failed';
+  context_summary: string | null;
+  bob_reasoning: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
 type ContextTab = 'context' | 'files' | 'actions' | 'audit';
 type SessionFilter = 'all' | 'pinned' | 'archived';
 type SearchScope = 'chats' | 'files' | 'actions';
@@ -108,6 +128,8 @@ interface WorkState {
 }
 
 type ActivityPhase = 'idle' | 'preparing' | 'uploading' | 'waiting' | 'refreshing' | 'recording';
+
+const DOCUMENT_REGISTRATION_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 
 const CONTEXT_LABELS: Record<string, string> = {
   page: 'Workspace', crmTab: 'CRM view', rosterTab: 'Roster view', fieldOpsSubArea: 'Operations view',
@@ -139,6 +161,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [input, setInput] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PendingBobFile[]>([]);
   const [attachments, setAttachments] = useState<BobAttachmentRecord[]>([]);
+  const [auditEvents, setAuditEvents] = useState<BobAuditEvent[]>([]);
+  const [governedActions, setGovernedActions] = useState<BobGovernedAction[]>([]);
   const [sessions, setSessions] = useState<BobSessionSummary[]>([]);
   const [sessionSearch, setSessionSearch] = useState('');
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>('all');
@@ -148,7 +172,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [renameValue, setRenameValue] = useState('');
   // Compact mode is a conversation surface. Side panes open on demand as
   // drawers; users can expose both when they deliberately expand the workspace.
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1100);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [contextPanelWidth, setContextPanelWidth] = useState(320);
@@ -161,7 +185,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
+  const [studioOpen, setStudioOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -190,6 +215,31 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
     if (attachmentErr) throw attachmentErr;
     setAttachments((data as BobAttachmentRecord[]) ?? []);
+  }, []);
+
+  const loadAuditEvents = useCallback(async (convId: string) => {
+    const { data, error: auditError } = await supabase
+      .from('bob_event_log')
+      .select('id, turn_index, step_index, event_type, tool, outcome, created_at')
+      .eq('conversation_id', convId)
+      .order('turn_index', { ascending: false })
+      .order('step_index', { ascending: false })
+      .limit(100);
+
+    if (auditError) throw auditError;
+    setAuditEvents((data as BobAuditEvent[]) ?? []);
+  }, []);
+
+  const loadGovernedActions = useCallback(async (convId: string) => {
+    const { data, error: actionError } = await supabase
+      .from('bob_agentic_actions')
+      .select('id, action_type, status, context_summary, bob_reasoning, error_message, created_at')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (actionError) throw actionError;
+    setGovernedActions((data as BobGovernedAction[]) ?? []);
   }, []);
 
   const loadSessions = useCallback(async () => {
@@ -224,13 +274,15 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       if (historyErr) throw historyErr;
       setMessages((history as BobMessage[]) || []);
       await loadAttachments(convId);
+      await loadAuditEvents(convId);
+      await loadGovernedActions(convId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That Bob session could not be opened.');
     } finally {
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [loadAttachments]);
+  }, [loadAttachments, loadAuditEvents, loadGovernedActions]);
 
   const renameSession = useCallback(async (convId: string, title: string) => {
     const trimmed = title.trim();
@@ -352,6 +404,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       if (historyErr) throw historyErr;
       setMessages((history as BobMessage[]) || []);
       await loadAttachments(convId);
+      await loadAuditEvents(convId);
+      await loadGovernedActions(convId);
       await loadSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load Bob conversation');
@@ -359,7 +413,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [mode, profile?.organizationId, profile?.id, loadAttachments, loadSessions]);
+  }, [mode, profile?.organizationId, profile?.id, loadAttachments, loadAuditEvents, loadGovernedActions, loadSessions]);
 
   useEffect(() => {
     if (open) loadConversation();
@@ -406,6 +460,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setMessages([]);
       setPendingFiles([]);
       setAttachments([]);
+      setAuditEvents([]);
+      setGovernedActions([]);
       await loadSessions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'New Bob conversation could not be created.');
@@ -417,13 +473,16 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   const addFiles = (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
+    const canRegisterDocuments = DOCUMENT_REGISTRATION_ROLES.has(profile?.role ?? '');
     const rejected = files.filter(file => file.size <= 0 || file.size > MAX_BOB_UPLOAD_BYTES);
-    const accepted = files.filter(file => file.size > 0 && file.size <= MAX_BOB_UPLOAD_BYTES).map(file => ({
+    const blockedDocuments = files.filter(file => !file.type.startsWith('video/') && !canRegisterDocuments);
+    const accepted = files.filter(file => file.size > 0 && file.size <= MAX_BOB_UPLOAD_BYTES && (file.type.startsWith('video/') || canRegisterDocuments)).map(file => ({
       id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
       file,
       status: 'queued' as const,
     }));
     if (rejected.length) setError('One or more files are empty or larger than the 128 GB upload limit.');
+    else if (blockedDocuments.length) setError('Document and image evidence must be registered by an administrator before Bob can use it. Video intake remains available for your role.');
     setPendingFiles(current => [...current, ...accepted].slice(0, 8));
   };
 
@@ -511,7 +570,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: registerError.message } : item));
           throw registerError;
         }
-      } else if (['grand_master', 'master', 'admin', 'admin_officer'].includes(profile.role)) {
+      } else if (DOCUMENT_REGISTRATION_ROLES.has(profile.role)) {
         const { error: registerError } = await supabase.functions.invoke('bob-document-register', { body: { attachment_id: attachmentId } });
         if (registerError) {
           setPendingFiles(current => current.map(item => item.id === pending.id ? { ...item, status: 'failed', error: registerError.message } : item));
@@ -655,7 +714,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (history && history.length > 0) {
         setMessages(history as BobMessage[]);
-        await loadAttachments(conversationId);
+        await Promise.all([loadAttachments(conversationId), loadAuditEvents(conversationId), loadGovernedActions(conversationId)]);
         setPendingFiles([]);
       } else if (data?.reply) {
         // Fallback: function replied but history read didn't return rows yet
@@ -672,7 +731,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             metadata: {},
           },
         ]);
-        await loadAttachments(conversationId);
+        await Promise.all([loadAttachments(conversationId), loadAuditEvents(conversationId), loadGovernedActions(conversationId)]);
         setPendingFiles([]);
       }
     } catch (err) {
@@ -722,12 +781,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         <div className="bob-panel-header-actions">
           <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
           <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
+          <button type="button" className="bob-workspace-toggle" onClick={() => setStudioOpen(current => !current)} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>
           <button type="button" className="bob-workspace-toggle" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Studio'}</span></button>
           <button type="button" className="bob-close-button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><X size={16} /><span>Close</span></button>
         </div>
       </header>
 
-      <div className={`bob-workspace ${workspaceExpanded ? 'is-studio' : ''}`}>
+      <div className={`bob-workspace ${studioOpen ? 'is-studio' : ''}`}>
         {sidebarOpen && (
           <SessionSidebar
             sessions={sessions}
@@ -759,7 +819,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         {workspaceExpanded && sidebarOpen && <div className="bob-pane-divider is-left" role="separator" aria-orientation="vertical" aria-label="Resize sessions pane" onPointerDown={(event) => beginPaneResize('left', event)} />}
 
         <div className="bob-main-pane">
-          {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value]) => <span key={key}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
+          {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value], index) => <span key={`${key}-${index}`}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
 
           <div className={`bob-work-state state-${workState.tone}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
 
@@ -797,11 +857,11 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             )}
           </div>
 
-          {!workspaceExpanded && attachments.length > 0 && (
+          {attachments.length > 0 && (
             <div className="bob-attachment-strip" aria-label="Evidence processing summary">
               <Paperclip size={13} />
               <span>{attachments.length} source file{attachments.length === 1 ? '' : 's'} in this session</span>
-              <button type="button" onClick={() => setWorkspaceExpanded(true)}>Review in studio</button>
+              <button type="button" onClick={() => { setContextPanelOpen(true); setContextTab('files'); }}>Review files</button>
             </div>
           )}
 
@@ -871,7 +931,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
-        {workspaceExpanded && <BobStudio messages={messages} attachments={attachments} onPrompt={(prompt) => { setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
+        {workspaceExpanded && studioOpen && <BobStudio messages={messages} attachments={attachments} onPrompt={(prompt) => { setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
 
         {workspaceExpanded && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
         {contextPanelOpen && (
@@ -880,6 +940,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             onTab={setContextTab}
             messages={messages}
             attachments={attachments}
+            auditEvents={auditEvents}
+            governedActions={governedActions}
             contextEntries={contextEntries}
             onDismiss={() => setContextPanelOpen(false)}
             width={contextPanelWidth}
@@ -1103,6 +1165,8 @@ function ContextPanel(props: {
   onTab: (tab: ContextTab) => void;
   messages: BobMessage[];
   attachments: BobAttachmentRecord[];
+  auditEvents: BobAuditEvent[];
+  governedActions: BobGovernedAction[];
   contextEntries: Array<[string, unknown]>;
   onDismiss: () => void;
   width: number;
@@ -1137,7 +1201,7 @@ function ContextPanel(props: {
             <h4>Active context</h4>
             {props.contextEntries.length === 0 ? <p>No page context supplied.</p> : (
               <ul className="bob-context-entities">
-                {props.contextEntries.map(([key, value]) => <li key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></li>)}
+                {props.contextEntries.map(([key, value], index) => <li key={`${key}-${index}`}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></li>)}
               </ul>
             )}
             <h4>Conversation</h4>
@@ -1157,7 +1221,16 @@ function ContextPanel(props: {
         {props.tab === 'actions' && (
           <section>
             <h4>Governed actions</h4>
-            {proposals.length === 0 ? <p>No proposals prepared in this session.</p> : proposals.map(message => (
+            {props.governedActions.length > 0 ? props.governedActions.map(action => (
+              <article key={action.id} className={`bob-context-action state-${action.status}`}>
+                <ListChecks size={14} />
+                <div>
+                  <strong>{action.action_type.replaceAll('_', ' ')}</strong>
+                  <small>{action.status.replaceAll('_', ' ')} · {new Date(action.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+                  <p>{action.error_message || action.context_summary || action.bob_reasoning || 'No human-readable rationale was recorded for this action.'}</p>
+                </div>
+              </article>
+            )) : proposals.length === 0 ? <p>No proposals prepared in this session.</p> : proposals.map(message => (
               <article key={message.id} className="bob-context-action">
                 <ListChecks size={14} />
                 <div>
@@ -1173,7 +1246,19 @@ function ContextPanel(props: {
         {props.tab === 'audit' && (
           <section>
             <h4>Activity timeline</h4>
-            {assistantTurns.length === 0 ? <p>No Bob activity recorded yet.</p> : (
+            {props.auditEvents.length > 0 ? (
+              <ol className="bob-context-audit">
+                {props.auditEvents.map(event => (
+                  <li key={event.id}>
+                    <Clock3 size={12} />
+                    <div>
+                      <strong>{event.tool ? event.tool.replaceAll('_', ' ') : event.event_type.replaceAll('_', ' ')}</strong>
+                      <small>Turn {event.turn_index}, step {event.step_index} · {event.outcome?.replaceAll('_', ' ') ?? 'recorded'} · {new Date(event.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : assistantTurns.length === 0 ? <p>No Bob activity recorded yet.</p> : (
               <ol className="bob-context-audit">
                 {assistantTurns.map(message => {
                   const state = classifyMessageState(message);

@@ -18,6 +18,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
+    "@tiptap/extension-placeholder": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.37.0",
     "mermaid": "^11.17.2",

@@ -42,6 +42,42 @@ Bob must not:
 - fabricate missing facts or compliance records
 - treat the system as flat when it is connected end-to-end
 
+## NZ security good-practice build track
+
+The product must stand up to the operational expectations in the [NZSA Security Services Good Practice Guidelines](https://security.org.nz/wp-content/uploads/2023/04/NZSA-NZ-Security-Services-Good-Practice-Guidelines_April-2023.pdf), including its WorkSafe-endorsed health-and-safety guidance. This is a product-design and evidence requirement, not a claim that the software itself certifies legal compliance.
+
+The guideline requires a planned, factual, auditable management system covering risk, incident and emergency management, worker engagement, consultation and coordination, training, deployment, site safety, supervision, working alone, customer communication, record keeping, technology use, accountability, and continual improvement.
+
+Bob's document workspace must therefore support governed, source-linked drafts for:
+
+- site safety plans and site hazard registers
+- security risk assessments and control reviews
+- emergency response plans and drill records
+- incident, near-miss, investigation, root-cause, and corrective-action reports
+- worker consultation and health-and-safety communication records
+- training, competency, induction, deployment, and pre-start checklists
+- supervision, welfare, working-alone, and remote-work plans
+- customer service reviews, patrol/logbook reports, and handover briefs
+- audit, management-review, and continual-improvement reports
+- contract-transition and Part 6A employment documents
+
+Every generated document must preserve the organisation, branch, agreement, site, zone, responsible person, review date, source evidence, assumptions, unknowns, approval state, version, retention state, and audit receipt. Photos, logos, diagrams, and other media require provenance, tenant scope, approved usage, and an explicit relationship to the document or evidence record.
+
+Bob may classify, retrieve, compare, draft, and recommend. Bob must not silently publish an operational instruction, declare a risk controlled, close an incident, certify competency, or create a legal, employment, financial, enforcement, or safety conclusion. Consequential outputs stop at human review and use a governed command before promotion.
+
+### Good-practice acceptance gates
+
+Before release of a safety or compliance document workflow, the build must demonstrate:
+
+1. A role- and organisation-scoped authoring path with loading, empty, error, permission, stale, draft, approved, rejected, and superseded states.
+2. Source-linked fields and citations that identify the document/version and page, paragraph, cell, evidence item, or event where available.
+3. Human review with named actor, rationale, expected-state checks, approval timestamp, and immutable audit evidence.
+4. Retention, legal-hold, restricted-access, download-audit, and sealed-evidence behaviour where the document or media requires it.
+5. Responsive and accessible desktop/mobile workflows tested with real browser interaction.
+6. A truthful receipt showing what was created, what remained unknown, what was not applied, and the next responsible owner.
+
+The implementation must also account for the NZSA Part 6A vulnerable-worker guidance when generating contract-transition, workforce handover, or employment-related documents. It must never present a generated employment or legal document as final advice.
+
 ### Customer-facing logic
 
 The product is not just a task log. It exists to make defensible service delivery possible. If a council asks whether a complaint was attended, or a client disputes patrol coverage, or an enforcement action is challenged, the value is in the coherent record rather than memory.
@@ -177,9 +213,10 @@ Do not train or host a bespoke foundation model until measured workload, evaluat
 7. Add Product Analyst, UX/UI Designer, Frontend Engineer, and QA/Security modes.
 8. Persist artifacts, task evidence, and audit events.
 9. Add guarded approval transitions.
-10. Run a small test project through the complete workflow.
-11. Keep production deployment disabled until the workflow is proven.
+10. Build the NZSA-aligned operational safety and document-authoring slice with source-linked templates, branding/media provenance, review gates, retention, and audit receipts.
+11. Run a small test project through the complete workflow.
+12. Keep production deployment disabled until the workflow is proven.
 
 ## Definition of done
 
-A user can submit a small app change through Bob, receive an analysis and UI plan, generate code in a disposable worker, inspect tests and security results, review artifacts, and approve or reject the result. No production deployment occurs in phase one.
+A user can submit a small app change through Bob, receive an analysis and UI plan, generate code in a disposable worker, inspect tests and security results, review artifacts, and approve or reject the result. The platform can also produce a source-linked, organisation-scoped, reviewable safety/compliance document with approved branding and media provenance, without silently promoting it into an authoritative record. No production deployment occurs in phase one.

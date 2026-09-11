@@ -65,6 +65,18 @@ export interface ConsolidatedPersonEvent {
   attributes?: Record<string, unknown> | null;
 }
 
+export interface ConsolidatedAnimalEvent {
+  event_id: string;
+  event_type: 'animal';
+  animal_type?: string | null;
+  first_seen_seconds: number;
+  last_seen_seconds: number;
+  confidence: number;
+  best_frame_hash: string | null;
+  thumbnail?: string | null;
+  review_required: boolean;
+}
+
 export interface KeyframeItem {
   frame_index: number;
   timestamp_seconds: number;
@@ -76,6 +88,7 @@ export interface ConsolidatedResult {
   vehicle_events: ConsolidatedVehicleEvent[];
   person_events: ConsolidatedPersonEvent[];
   face_events: ConsolidatedFaceEvent[];
+  animal_events?: ConsolidatedAnimalEvent[];
   keyframes: KeyframeItem[];
   summary_counts: {
     vehicle_events: number;
@@ -166,6 +179,7 @@ export function consolidateResultData(
       vehicle_events: raw.vehicle_events || [],
       person_events: raw.person_events || [],
       face_events: raw.face_events || [],
+      animal_events: raw.animal_events || [],
       keyframes: raw.keyframes || [],
       summary_counts: raw.summary_counts || {
         vehicle_events: (raw.vehicle_events || []).length,
@@ -418,6 +432,7 @@ export function consolidateResultData(
     vehicle_events,
     person_events: (resultData?.person_events || []) as ConsolidatedPersonEvent[],
     face_events,
+    animal_events: [],
     keyframes,
     summary_counts: {
       vehicle_events: vehicle_events.length,

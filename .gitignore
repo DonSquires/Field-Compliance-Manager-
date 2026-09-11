@@ -9,6 +9,7 @@ __pycache__/
 *.py[cod]
 
 node_modules/
+.venv/
 apps/web/dist/
 apps/sd-card-bridge/dist/
 apps/web/tsconfig.tsbuildinfo
@@ -35,3 +36,5 @@ models/
 # Workspace-only credentials and local command output
 :USERPROFILE.sshrunpod_ed25519*
 output.txt
+.vercel
+.env*

@@ -68,4 +68,61 @@ describe('buildCCTVPrintableReport', () => {
 
     expect(report).toContain('PARTIAL: 1 clips loaded');
   });
+
+  it('renders a client assessment using What, When, Where, Why, and How', () => {
+    const report = buildCCTVPrintableReport({
+      title: 'CCTV evidence assessment',
+      reportStatus: 'review_ready',
+      generatedAt: '2026-09-09T12:00:00.000Z',
+      place: 'North gate',
+      jobId: 'job-1',
+      evidenceId: 'evidence-1',
+      personCount: 1,
+      vehicleCount: 0,
+      frameCount: 20,
+      assessment: {
+        what: 'One person observation was consolidated for review.',
+        when: '4s to 9s in the reviewed footage.',
+        where: 'North gate',
+        why: 'Assess potential safety, security, or compliance concerns for the client.',
+        how: 'Motion extraction and provisional detection followed by human review.',
+      },
+      observations: [],
+    });
+
+    expect(report).toContain('Client assessment');
+    for (const heading of ['What', 'When', 'Where', 'Why', 'How']) {
+      expect(report).toContain(`<dt>${heading}</dt>`);
+    }
+    expect(report).toContain('No breach or identity conclusion is inferred');
+  });
+
+  it('includes bounded evidence photos with provenance captions', () => {
+    const report = buildCCTVPrintableReport({
+      title: 'CCTV evidence assessment',
+      generatedAt: '2026-09-09T12:00:00.000Z',
+      place: 'North gate',
+      jobId: 'job-1',
+      evidenceId: 'evidence-1',
+      personCount: 1,
+      vehicleCount: 0,
+      frameCount: 20,
+      evidenceImages: [{
+        kind: 'person',
+        src: 'data:image/jpeg;base64,ZmFrZQ==',
+        label: 'Person observation',
+        timestampSeconds: 4.25,
+        sha256Hash: 'abc123',
+        reviewState: 'Confirmed',
+      }],
+      observations: [],
+    });
+
+    expect(report).toContain('Evidence photographs');
+    expect(report).toContain('data:image/jpeg;base64,ZmFrZQ==');
+    expect(report).toContain('4.25s');
+    expect(report).toContain('Frame hash abc123');
+    expect(report).toContain('Confirmed');
+    expect(report).toContain('Entity: person');
+  });
 });

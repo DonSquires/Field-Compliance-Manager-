@@ -202,13 +202,14 @@ async function consolidatePeople(frames, options = {}) {
       const center = { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
       let track = tracks.find((candidate) => timestamp - candidate.lastSeen <= maxGap && Math.hypot(center.x - candidate.center.x, center.y - candidate.center.y) < Math.max(bbox.width, bbox.height));
       if (!track) {
-        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, bestAttributes: detection.attributes || null, center };
+        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, bestAttributes: detection.attributes || null, center, gaitSamples: [] };
         tracks.push(track);
       }
       track.lastSeen = timestamp;
       track.frameCount += 1;
       track.confidence = Math.max(track.confidence, Number(detection.confidence) || 0);
       track.center = center;
+      track.gaitSamples.push({ timestamp, center, width: Number(bbox.width), height: Number(bbox.height) });
       if ((bbox.width * bbox.height) > (track.bestBbox.width * track.bestBbox.height)) {
         track.bestBbox = bbox;
         track.bestFrame = frame;
@@ -227,6 +228,7 @@ async function consolidatePeople(frames, options = {}) {
     best_frame_hash: track.bestFrame?.sha256_hash || null,
     best_bbox: track.bestBbox,
     attributes: track.bestAttributes,
+    gait_signature: buildGaitSignature(track.gaitSamples),
     thumbnail: await loadBase64Thumbnail(track.bestFrame?.file_path),
     review_required: true,
   })));
@@ -237,6 +239,38 @@ async function consolidatePeople(frames, options = {}) {
     excluded_degraded_frame_count: 0,
     degraded_frame_count: excludedQualityFrames,
   }));
+}
+
+function buildGaitSignature(samples) {
+  if (!Array.isArray(samples) || samples.length < 4) return { state: 'insufficient_track', review_required: true };
+  const ordered = [...samples].sort((left, right) => left.timestamp - right.timestamp);
+  const duration = ordered[ordered.length - 1].timestamp - ordered[0].timestamp;
+  if (duration < 0.8) return { state: 'insufficient_duration', review_required: true };
+  const normalizedSpeeds = [];
+  for (let index = 1; index < ordered.length; index += 1) {
+    const elapsed = ordered[index].timestamp - ordered[index - 1].timestamp;
+    if (elapsed <= 0) continue;
+    const distance = Math.hypot(ordered[index].center.x - ordered[index - 1].center.x, ordered[index].center.y - ordered[index - 1].center.y);
+    normalizedSpeeds.push(distance / Math.max(1, ordered[index].height) / elapsed);
+  }
+  const aspectRatios = ordered.map((sample) => sample.height / Math.max(1, sample.width));
+  const average = (values) => values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+  const deviation = (values) => {
+    const mean = average(values);
+    return Math.sqrt(average(values.map((value) => (value - mean) ** 2)));
+  };
+  return {
+    state: 'provisional_motion_signature',
+    sample_count: ordered.length,
+    duration_seconds: Number(duration.toFixed(2)),
+    normalized_speed_body_lengths_per_second: Number(average(normalizedSpeeds).toFixed(4)),
+    speed_variability: Number(deviation(normalizedSpeeds).toFixed(4)),
+    silhouette_ratio_mean: Number(average(aspectRatios).toFixed(4)),
+    silhouette_oscillation: Number(deviation(aspectRatios).toFixed(4)),
+    walking_style_label: null,
+    identity_resolution: 'manual_review_required',
+    review_required: true,
+  };
 }
 
 function isPlatish(plate, confidence) {
@@ -515,6 +549,7 @@ module.exports = {
   cosineSimilarity,
   consolidateFaces,
   consolidatePeople,
+  buildGaitSignature,
   consolidateVehicles,
   extractKeyframes,
   consolidateMotionSummary,

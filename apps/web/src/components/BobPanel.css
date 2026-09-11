@@ -16,12 +16,13 @@
 }
 
 .bob-panel.is-expanded {
-  inset: 18px;
+  inset: 0;
   width: auto;
   height: auto;
-  max-width: 1200px;
-  margin-left: auto;
-  border-radius: 8px;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 .bob-workspace {
@@ -1463,23 +1464,21 @@
 
 .bob-panel.is-expanded .bob-session-sidebar,
 .bob-panel.is-expanded .bob-context-panel {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 12;
-  width: min(360px, 88vw);
-  flex: none;
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  width: auto;
+  flex: 0 0 320px;
   border-right: 1px solid #29465a;
   background: #081624;
-  box-shadow: 20px 0 50px rgba(0, 0, 0, .38);
+  box-shadow: none;
 }
 
 .bob-panel.is-expanded .bob-context-panel {
-  right: 0;
-  left: auto;
+  flex-basis: 340px;
   border-right: 0;
   border-left: 1px solid #29465a;
-  box-shadow: -20px 0 50px rgba(0, 0, 0, .38);
+  box-shadow: none;
 }
 
 .bob-context {

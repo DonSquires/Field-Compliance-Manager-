@@ -85,6 +85,8 @@ const ModuleCatalogPage = React.lazy(() => import('../pages/ModuleCatalogPage'))
 const GrandMasterPlatformPage = React.lazy(() => import('../pages/GrandMasterPlatformPage'));
 const ProviderBillingPage = React.lazy(() => import('../pages/ProviderBillingPage'));
 const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlRoomPage'));
+const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
+const BobDocumentStudioPage = React.lazy(() => import('../pages/BobDocumentStudioPage'));
 const ReportsHubPage = React.lazy(() => import('../pages/ReportsHubPage'));
 const FileSystemPage = React.lazy(() => import('../pages/FileSystemPage'));
 const PatrolOversightPage = React.lazy(() => import('../pages/PatrolOversightPage'));
@@ -107,7 +109,7 @@ const CCTVVideoLibraryPage = React.lazy(() => import('../pages/CCTVVideoLibraryP
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
-  | 'hub' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -449,6 +451,10 @@ const AdminShell: React.FC = () => {
     switch (activePage) {
       case 'hub':
         return <AdminHubPage onNavigate={navigateFromHub} />;
+      case 'bob':
+        return <BobWorkspacePage />;
+      case 'document-studio':
+        return <BobDocumentStudioPage />;
       case 'files':
         return <FileSystemPage />;
       case 'relationships':
@@ -595,7 +601,7 @@ const AdminShell: React.FC = () => {
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>
-              <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
+              <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center">
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
               </button>
               <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
@@ -639,7 +645,7 @@ const AdminShell: React.FC = () => {
         <div className="admin-shell-tools">
           {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}</option>)}</select></label>}
           <NotificationCenter onNavigate={navigateFromNotification} />
-          <button type="button" className="admin-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
+          <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center">
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
           <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>

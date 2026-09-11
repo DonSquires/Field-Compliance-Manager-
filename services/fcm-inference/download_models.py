@@ -18,6 +18,8 @@ FILES = {
     'face_recognition_sface_2021dec.onnx': 'https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx',
     'person-detection-retail-0013.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/person-detection-retail-0013/FP16/person-detection-retail-0013.xml',
     'person-detection-retail-0013.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/person-detection-retail-0013/FP16/person-detection-retail-0013.bin',
+    'person-reidentification-retail-0288.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2022.3/models_bin/1/person-reidentification-retail-0288/FP16/person-reidentification-retail-0288.xml',
+    'person-reidentification-retail-0288.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2022.3/models_bin/1/person-reidentification-retail-0288/FP16/person-reidentification-retail-0288.bin',
     'vehicle-attributes-recognition-barrier-0039.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/vehicle-attributes-recognition-barrier-0039/FP32/vehicle-attributes-recognition-barrier-0039.xml',
     'vehicle-attributes-recognition-barrier-0039.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/vehicle-attributes-recognition-barrier-0039/FP32/vehicle-attributes-recognition-barrier-0039.bin',
 }

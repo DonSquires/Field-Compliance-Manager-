@@ -84,12 +84,13 @@ const OfficerHomePage = React.lazy(() => import('../pages/OfficerHomePage').then
 const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePage'));
 const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
 const OfficerStaticGuardPage = React.lazy(() => import('../pages/OfficerStaticGuardPage'));
+const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
   | 'site_guard' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
   | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
-  | 'vehicle_lookup' | 'credentials' | 'modules' | null;
+  | 'vehicle_lookup' | 'credentials' | 'bob' | 'modules' | null;
 
 type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 
@@ -118,7 +119,7 @@ const MODULE_METADATA: Record<string, { label: string; description: string; icon
   credentials: { label: 'Credentials', description: 'View capability and expiry', icon: BadgeCheck },
 };
 
-const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'credentials', 'map']);
+const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'credentials', 'map', 'bob']);
 
 const WELFARE_STATUS_DISPLAY: Record<WelfareStatus, { bg: string; dot: string; color: string }> = {
   ok: { bg: '#1A1A1A', dot: 'OK', color: '#4CAF50' },
@@ -402,6 +403,7 @@ const OfficerShell: React.FC = () => {
   // Render module portal
   const renderModuleContent = useCallback(() => {
     switch (activeModule) {
+      case 'bob': return <BobWorkspacePage returnPath="/officer" />;
       case 'schedule':
         return <OfficerSchedulePage />;
       case 'patrol':
@@ -487,7 +489,7 @@ const OfficerShell: React.FC = () => {
           </button>
           <span className={`officer-connectivity-chip ${isOnline ? 'is-online' : 'is-offline'}`} role="status" title={isOnline ? 'Device is online' : 'Evidence is queued until connection returns'}>{isOnline ? 'Online' : 'Offline'}</span>
           <NotificationCenter onNavigate={navigateFromNotification} />
-          <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-label={bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'} aria-expanded={bobOpen}>
+          <button type="button" className="officer-shell-icon" onClick={() => navigateToModule('bob')} title="Open Bob command center" aria-label="Open Bob command center">
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
           <button type="button" className="officer-profile-chip" onClick={() => { setAccountOpen(true); setAccountMessage(null); }} title="Account settings" aria-label="Account settings">

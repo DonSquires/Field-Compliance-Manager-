@@ -32,6 +32,7 @@
  *   { action: 'write_bob_chat', message: string }
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { resolveEffectiveRole } from '../_shared/auth.ts';
 import { BOB_CHAT_PATH as _BOB_CHAT_PATH, parseUnansweredEntries } from '../_shared/deterministic-logic.ts';
 import { splitSearchTerms, detectCompoundQuery, deriveSearchStatus, deriveTermStatus, computeReadWindow, computeLineWindow, deriveReadProgress } from './search-logic.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -130,7 +131,8 @@ serve(async (req)=>{
     }, 401);
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: profile } = await admin.from('user_profiles').select('id, role').eq('id', user.id).single();
-    if (!profile || !CAN_REPO.has(String(profile.role))) {
+    const effectiveRole = resolveEffectiveRole(user.email, String(profile?.role ?? 'guest'));
+    if (!CAN_REPO.has(effectiveRole)) {
       return json({
         error: 'Forbidden: admiral (grand_master) only'
       }, 403);

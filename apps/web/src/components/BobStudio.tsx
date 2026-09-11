@@ -172,7 +172,7 @@ export function BobStudio({
           <h2>Documents, diagrams, and media</h2>
           <p>Full-page space for evidence-backed drafts. Nothing here applies legal, commercial, HR, or operational changes without human review.</p>
         </div>
-        <button type="button" onClick={onAttach}><Paperclip size={15} /> Add source</button>
+        <div className="bob-studio-header-actions"><a className="bob-studio-editor-link" href="/admin/document-studio"><FileText size={15} /> Open document editor</a><button type="button" onClick={onAttach}><Paperclip size={15} /> Add source</button></div>
       </header>
 
       <div className="bob-studio-tabs" role="tablist" aria-label="Studio artifact type">

@@ -1,0 +1,237 @@
+import React, { useEffect, useState } from 'react';
+import { Bold, Check, FilePlus2, Heading2, Italic, List, ListOrdered, PanelRight, Save, Search, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { EditorContent, useEditor } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
+import './BobDocumentStudioPage.css';
+
+type ReferenceResult = {
+  catalog_entry_id: string;
+  title: string;
+  topic: string | null;
+  publisher: string | null;
+  jurisdiction: string | null;
+  document_type: string | null;
+  trust_level: string;
+  retrieval_handle: string;
+};
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'error';
+type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string };
+
+export default function BobDocumentStudioPage() {
+  const navigate = useNavigate();
+  const { profile } = useAuth();
+  const [title, setTitle] = useState('Untitled Bob document');
+  const [documentType, setDocumentType] = useState('report');
+  const [referenceQuery, setReferenceQuery] = useState('');
+  const [references, setReferences] = useState<ReferenceResult[]>([]);
+  const [selectedReferences, setSelectedReferences] = useState<ReferenceResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [draftIds, setDraftIds] = useState<{ documentId: string; versionId: string } | null>(null);
+  const [reviewReason, setReviewReason] = useState('Prepared for human review of source coverage, assumptions, and operational suitability.');
+  const [organizationName, setOrganizationName] = useState('Current organization');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Placeholder.configure({ placeholder: 'Start writing, or ask Bob to draft from the selected references…' }),
+    ],
+    content: '',
+    editorProps: { attributes: { 'aria-label': 'Editable document surface', 'aria-multiline': 'true' } },
+  });
+
+  useEffect(() => {
+    if (!profile?.organizationId) return;
+    let active = true;
+    void supabase.from('organizations').select('name,logo_url').eq('id', profile.organizationId).maybeSingle().then(({ data }) => {
+      if (!active || !data) return;
+      setOrganizationName(data.name || 'Current organization');
+      setLogoUrl(data.logo_url || null);
+    });
+    return () => { active = false; };
+  }, [profile?.organizationId]);
+
+  useEffect(() => {
+    if (!profile?.organizationId) return;
+    let active = true;
+    setDraftsLoading(true);
+    void supabase.from('documents')
+      .select('id,original_filename,updated_at,document_versions(id,extracted_text,metadata_json,created_at)')
+      .eq('organization_id', profile.organizationId)
+      .eq('source_channel', 'system_generated')
+      .order('updated_at', { ascending: false })
+      .limit(20)
+      .then(({ data }) => {
+        if (!active) return;
+        const rows = (data as Array<{ id: string; original_filename: string; updated_at: string; document_versions?: Array<{ id: string; extracted_text: string | null; metadata_json: Record<string, unknown>; created_at: string }> }> ?? []);
+        setDrafts(rows.flatMap((row) => {
+          const version = [...(row.document_versions ?? [])].sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+          if (!version) return [];
+          const metadata = version.metadata_json ?? {};
+          return [{
+            id: row.id,
+            title: String(metadata.title ?? row.original_filename.replace(/\.html$/i, '')),
+            updatedAt: row.updated_at,
+            versionId: version.id,
+            status: String(metadata.authoring_status ?? 'draft'),
+            html: String(metadata.authoring_html ?? `<p>${version.extracted_text ?? ''}</p>`),
+            text: version.extracted_text ?? '',
+            documentType: String(metadata.document_type ?? 'custom'),
+          }];
+        }));
+        setDraftsLoading(false);
+      });
+    return () => { active = false; };
+  }, [profile?.organizationId]);
+
+  const searchReferences = async () => {
+    if (!referenceQuery.trim()) return;
+    setSearching(true);
+    setNotice(null);
+    const { data, error } = await supabase.functions.invoke('bob-document-search', {
+      body: { query: referenceQuery.trim(), scope: 'both', limit: 12 },
+    });
+    setSearching(false);
+    if (error || !data?.success) {
+      setNotice(error?.message ?? data?.error ?? 'Reference search failed.');
+      return;
+    }
+    setReferences((data.results as ReferenceResult[]) ?? []);
+  };
+
+  const toggleReference = (reference: ReferenceResult) => {
+    setSelectedReferences((current) => current.some((item) => item.catalog_entry_id === reference.catalog_entry_id)
+      ? current.filter((item) => item.catalog_entry_id !== reference.catalog_entry_id)
+      : [...current, reference]);
+  };
+
+  const saveDraft = async () => {
+    if (!profile?.organizationId || !profile.id || !editor) return;
+    const authoredHtml = editor.getHTML().trim();
+    const authoredText = editor.getText().trim();
+    if (!authoredText) {
+      setNotice('Add some content before saving the draft.');
+      return;
+    }
+    setSaveState('saving');
+    setNotice(null);
+    const { data: draftResult, error: draftError } = await supabase.rpc('create_bob_document_draft', {
+      p_title: title.trim() || 'Untitled Bob document',
+      p_document_type: documentType,
+      p_authored_html: authoredHtml,
+      p_authored_text: authoredText,
+      p_reference_handles: selectedReferences.map((reference) => reference.retrieval_handle),
+      p_reference_metadata: selectedReferences.map(({ title: referenceTitle, publisher, jurisdiction, trust_level }) => ({ title: referenceTitle, publisher, jurisdiction, trust_level })),
+    });
+    if (draftError || !draftResult?.ok) {
+      setSaveState('error');
+      setNotice(draftError?.message ?? draftResult?.error ?? 'The document draft could not be saved.');
+      return;
+    }
+    setDraftIds({ documentId: draftResult.document_id, versionId: draftResult.document_version_id });
+    setSaveState('saved');
+    setNotice('Draft saved to the conversation-only document library. Human review is still required before promotion.');
+  };
+
+  const submitForReview = async () => {
+    if (!draftIds) return;
+    setSaveState('reviewing');
+    setNotice(null);
+    const { data, error } = await supabase.rpc('submit_bob_document_for_review', {
+      p_document_id: draftIds.documentId,
+      p_document_version_id: draftIds.versionId,
+      p_review_reason: reviewReason.trim(),
+    });
+    if (error || !data?.ok) {
+      setSaveState('error');
+      setNotice(error?.message ?? data?.error ?? 'The document could not be submitted for review.');
+      return;
+    }
+    setSaveState('needs_review');
+    setNotice('Submitted for human review. The document remains conversation-only until an approved promotion is completed.');
+  };
+
+  const insertTemplate = (template: string) => {
+    editor?.commands.setContent(template);
+    editor?.commands.focus('end');
+  };
+
+  const resumeDraft = (draft: DraftSummary) => {
+    setTitle(draft.title);
+    setDocumentType(draft.documentType);
+    setDraftIds({ documentId: draft.id, versionId: draft.versionId });
+    setSaveState(draft.status === 'needs_review' ? 'needs_review' : 'saved');
+    editor?.commands.setContent(draft.html);
+    editor?.commands.focus('end');
+    setNotice(`Resumed ${draft.status.replaceAll('_', ' ')} draft. Review its source and state before continuing.`);
+  };
+
+  return (
+    <main className="bob-document-page">
+      <header className="bob-document-topbar">
+        <div className="bob-document-brand"><span><Sparkles size={17} /></span><div><strong>Bob document studio</strong><small>Author, reference, review, promote</small></div></div>
+        <div className="bob-document-top-actions">
+          <span className={`bob-save-state is-${saveState}`} role="status">{saveState === 'saving' ? 'Saving…' : saveState === 'reviewing' ? 'Submitting…' : saveState === 'saved' ? 'Saved draft' : saveState === 'needs_review' ? 'Needs review' : 'Draft'}</span>
+          <button type="button" className="bob-document-secondary" onClick={() => navigate('/admin/bob')}><X size={15} /> Close</button>
+          <button type="button" className="bob-document-primary" onClick={() => void saveDraft()} disabled={saveState === 'saving'}><Save size={15} /> Save draft</button>
+          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()}>Submit for review</button>}
+        </div>
+      </header>
+
+      <div className="bob-document-layout">
+        <aside className="bob-document-outline" aria-label="Document setup">
+          <div className="bob-document-section-heading"><span>Document</span><FilePlus2 size={15} /></div>
+          <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+          <label htmlFor="bob-document-type">Type<select id="bob-document-type" aria-label="Document type" value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
+            <option value="site_safety_plan">Site safety plan</option><option value="risk_assessment">Security risk assessment</option><option value="incident_report">Incident / near miss</option><option value="corrective_action">Corrective action review</option><option value="emergency_plan">Emergency response plan</option><option value="working_alone_plan">Working-alone plan</option><option value="training_record">Training / competency record</option><option value="customer_review">Customer service review</option><option value="report">Operational report</option><option value="letter">Controlled correspondence</option><option value="policy">Policy / SOP</option><option value="proposal">Proposal / RFQ</option><option value="evidence_package">Evidence package</option><option value="custom">Custom</option>
+          </select></label>
+          <div className="bob-document-template-heading">Start with structure</div>
+          <button type="button" onClick={() => insertTemplate('<h1>Report title</h1><p><strong>Purpose</strong></p><p>Describe the decision this document supports.</p><h2>Findings</h2><p>Record evidence-backed findings and mark unknowns as [TO CONFIRM].</p><h2>Recommended next action</h2><p>State the safe next step and owner.</p>')}>Report structure</button>
+          <button type="button" onClick={() => insertTemplate('<h1>Proposal</h1><p><strong>Decision requested</strong></p><p>Describe the decision and approval boundary.</p><h2>Evidence and assumptions</h2><p>List source-backed facts and open assumptions.</p><h2>Approval checklist</h2><ul><li>Human owner identified</li><li>Source evidence reviewed</li></ul>')}>Proposal structure</button>
+          <button type="button" onClick={() => insertTemplate('<h1>Site safety plan</h1><p><strong>Site and activity</strong></p><p>Identify the agreement, place, work activity, affected people, and review owner.</p><h2>Hazards and controls</h2><p>Record each hazard, existing control, proposed control, residual risk, and evidence. Mark unknowns as [TO CONFIRM].</p><h2>Emergency and escalation</h2><p>State the emergency response, supervisor, contact path, and worker acknowledgement required.</p><h2>Review and approval</h2><p>Record reviewer, approval date, expiry/review date, and unresolved actions.</p>')}>Site safety structure</button>
+          <button type="button" onClick={() => insertTemplate('<h1>Incident and corrective action</h1><p><strong>What happened</strong></p><p>Record the time, place, people, work activity, immediate actions, and evidence.</p><h2>Investigation</h2><p>Separate observed facts from provisional contributing factors. Do not state a root cause until reviewed.</p><h2>Actions</h2><ul><li>Owner and due date</li><li>Control change required</li><li>Effectiveness review</li></ul>')}>Incident structure</button>
+          <div className="bob-document-template-heading">Your drafts</div>
+          <div className="bob-document-drafts" aria-label="Your drafts">
+            {draftsLoading ? <p>Loading drafts…</p> : drafts.length === 0 ? <p>No saved drafts in this organization.</p> : drafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.status.replaceAll('_', ' ')} · {new Date(draft.updatedAt).toLocaleDateString('en-NZ')}</small></button>)}
+          </div>
+          <div className="bob-document-brand-status" role="status"><strong>{organizationName}</strong>{logoUrl ? <img src={logoUrl} alt={`${organizationName} approved logo`} /> : <span>No approved organization logo is configured. The draft will not invent branding.</span>}</div>
+          <div className="bob-document-safety"><ShieldCheck size={15} /><span>Draft only. Bob cannot silently publish, sign, or promote this document.</span></div>
+        </aside>
+
+        <section className="bob-editor-shell" aria-label="Document editor">
+          <div className="bob-editor-toolbar" role="toolbar" aria-label="Formatting tools">
+            <button type="button" onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold" aria-label="Bold" aria-pressed={editor?.isActive('bold')}><Bold size={16} /></button>
+            <button type="button" onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic" aria-label="Italic" aria-pressed={editor?.isActive('italic')}><Italic size={16} /></button>
+            <span />
+            <button type="button" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} title="Heading" aria-label="Heading" aria-pressed={editor?.isActive('heading', { level: 2 })}><Heading2 size={16} /></button>
+            <button type="button" onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bulleted list" aria-label="Bulleted list" aria-pressed={editor?.isActive('bulletList')}><List size={16} /></button>
+            <button type="button" onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Numbered list" aria-label="Numbered list" aria-pressed={editor?.isActive('orderedList')}><ListOrdered size={16} /></button>
+            <span />
+            <button type="button" onClick={() => editor?.chain().focus().undo().run()} title="Undo" aria-label="Undo">↶</button>
+            <button type="button" onClick={() => editor?.chain().focus().redo().run()} title="Redo" aria-label="Redo">↷</button>
+          </div>
+          <div className="bob-editor-paper-wrap">
+            <div className="bob-editor-paper" role="textbox" aria-label="Document content" aria-multiline="true"><EditorContent editor={editor} /></div>
+          </div>
+          {notice && <p className="bob-document-notice" role={saveState === 'error' ? 'alert' : 'status'}>{notice}</p>}
+          {draftIds && saveState === 'saved' && <label className="bob-review-reason">Review reason<textarea value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} maxLength={1000} rows={2} /></label>}
+        </section>
+
+        <aside className="bob-reference-rail" aria-label="Reference material">
+          <div className="bob-reference-heading"><div><span>Reference material</span><strong>Approved sources</strong></div><PanelRight size={16} /></div>
+          <div className="bob-reference-search"><Search size={14} /><input value={referenceQuery} onChange={(event) => setReferenceQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void searchReferences(); }} placeholder="Search bylaws, policies, reports…" aria-label="Search reference material" /><button type="button" onClick={() => void searchReferences()} disabled={searching} aria-label="Search references"><Search size={14} /></button></div>
+          <div className="bob-reference-selected"><strong>Selected for this draft</strong>{selectedReferences.length === 0 ? <p>No references selected.</p> : selectedReferences.map((reference) => <button type="button" key={reference.catalog_entry_id} onClick={() => toggleReference(reference)}>{reference.title}<span>Remove</span></button>)}</div>
+          <div className="bob-reference-results">{references.length === 0 ? <p>{searching ? 'Searching approved sources…' : 'Search approved sources to ground the document.'}</p> : references.map((reference) => <button type="button" key={reference.catalog_entry_id} className={selectedReferences.some((item) => item.catalog_entry_id === reference.catalog_entry_id) ? 'is-selected' : ''} onClick={() => toggleReference(reference)}><strong>{reference.title}</strong><small>{[reference.document_type, reference.jurisdiction, reference.publisher].filter(Boolean).join(' · ') || 'Approved reference'}</small><em>{reference.trust_level}</em><Check size={14} /></button>)}</div>
+        </aside>
+      </div>
+    </main>
+  );
+}

@@ -51,8 +51,8 @@ describe('OfficerShell state routing', () => {
   });
 
   it('exposes stateful accessible semantics on persistent controls', () => {
-    expect(source).toContain('aria-expanded={bobOpen}');
-    expect(source).toContain("bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'");
+    expect(source).toContain('aria-label="Open Bob command center"');
+    expect(source).toContain("navigateToModule('bob')");
     expect(source).toContain("aria-current={activeModule === 'modules' ? 'page' : undefined}");
     expect(source).toContain("aria-current={activeModule === 'report' ? 'page' : undefined}");
   });
