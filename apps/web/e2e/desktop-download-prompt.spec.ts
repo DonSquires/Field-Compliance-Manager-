@@ -8,15 +8,15 @@ test('administrator is offered the desktop companion once and can dismiss it', a
   await page.addInitScript((key) => window.localStorage.removeItem(key), DESKTOP_PROMPT_KEY);
   await signInAsAdmin(page);
 
-  const prompt = page.getByRole('dialog', { name: 'Use local hardware with FCM' });
+  const prompt = page.getByRole('dialog', { name: 'Choose your evidence workstation' });
   await expect(prompt).toBeVisible();
-  await expect(prompt.getByRole('link', { name: 'Download desktop app' })).toBeVisible();
+  await expect(prompt.getByRole('link', { name: 'FCM Desktop V1' })).toBeVisible();
 
   await prompt.getByRole('button', { name: 'Not now' }).click();
   await expect(prompt).toBeHidden();
 
   // Dismissal is retained, so the modal never blocks the admin surface again.
   await page.reload();
-  await expect(page.getByRole('dialog', { name: 'Use local hardware with FCM' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Choose your evidence workstation' })).toBeHidden();
   expect(errors).toEqual([]);
 });

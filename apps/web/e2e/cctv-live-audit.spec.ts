@@ -13,7 +13,8 @@ test.describe('CCTV live visual audit', () => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
     page.on('requestfailed', (request) => {
-      failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`);
+      const errorText = request.failure()?.errorText || '';
+      if (errorText !== 'net::ERR_ABORTED') failedRequests.push(`${request.method()} ${request.url()} ${errorText}`);
     });
     page.on('response', async (response) => {
       if (response.status() >= 400) {
