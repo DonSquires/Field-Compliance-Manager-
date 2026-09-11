@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Clock3, Download, FileArchive, FileText, FolderOpen, Image, RefreshCw, Search, ShieldCheck, Video, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ImportSchemaPreview, parseCsvPreview, parseXlsxPreview, sha256Hex } from '../lib/importPreview';
 import { supabase } from '../lib/supabase';
@@ -184,6 +184,7 @@ function intakeDisposition(attachment: IntakeAttachment): { allowed: boolean; re
 const FileSystemPage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [intakeAttachments, setIntakeAttachments] = useState<IntakeAttachment[]>([]);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
@@ -254,6 +255,11 @@ const FileSystemPage: React.FC = () => {
   const selectedBatch = importBatches.find((batch) => batch.id === selectedBatchId) ?? null;
 
   const selected = documents.find((document) => document.id === selectedId) ?? null;
+
+  useEffect(() => {
+    const requestedDocumentId = searchParams.get('document');
+    if (requestedDocumentId && documents.some((document) => document.id === requestedDocumentId)) setSelectedId(requestedDocumentId);
+  }, [documents, searchParams]);
 
   useEffect(() => {
     let active = true;
