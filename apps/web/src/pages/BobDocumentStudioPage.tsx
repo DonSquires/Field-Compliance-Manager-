@@ -22,6 +22,7 @@ type ReferenceResult = {
 type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'error';
 type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string };
 type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
+type OutputReceipt = { id: string; status: string; output_format: string; sha256: string | null; storage_bucket: string | null; storage_path: string | null };
 
 export default function BobDocumentStudioPage() {
   const navigate = useNavigate();
@@ -41,6 +42,8 @@ export default function BobDocumentStudioPage() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [brandAssets, setBrandAssets] = useState<BrandAsset[]>([]);
   const [brandBusy, setBrandBusy] = useState(false);
+  const [outputReceipt, setOutputReceipt] = useState<OutputReceipt | null>(null);
+  const [outputBusy, setOutputBusy] = useState(false);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const editor = useEditor({
@@ -230,6 +233,34 @@ export default function BobDocumentStudioPage() {
     setNotice(decision === 'approved' ? 'Approved with a durable review receipt. Promotion remains a separate governed action.' : 'Rejected with a durable review receipt. Create a revision after addressing the reviewer reason.');
   };
 
+  const requestPrintOutput = async () => {
+    if (!draftIds || saveState !== 'saved') return;
+    setOutputBusy(true); setNotice(null);
+    const { data: receipt, error: requestError } = await supabase.rpc('request_bob_document_output', {
+      p_document_id: draftIds.documentId,
+      p_document_version_id: draftIds.versionId,
+      p_output_format: 'print',
+    });
+    if (requestError || !receipt?.id) {
+      setNotice(requestError?.message ?? 'Only an approved document can request a print output.');
+      setOutputBusy(false);
+      return;
+    }
+    setOutputReceipt(receipt as OutputReceipt);
+    const { data: generated, error: generationError } = await supabase.functions.invoke('generate-bob-document-output', { body: { output_id: receipt.id } });
+    if (generationError || !generated?.output) setNotice(generationError?.message ?? generated?.error ?? 'The print output could not be generated.');
+    else {
+      const ready = generated.output as OutputReceipt;
+      setOutputReceipt(ready);
+      if (!ready.storage_bucket || !ready.storage_path) setNotice('The output receipt is missing its private storage location. It was not opened.');
+      else {
+        const { data: signed, error: signedError } = await supabase.storage.from(ready.storage_bucket).createSignedUrl(ready.storage_path, 900);
+        if (signedError) setNotice(signedError.message); else if (signed?.signedUrl) window.open(signed.signedUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
+    setOutputBusy(false);
+  };
+
   const insertTemplate = (template: string) => {
     editor?.commands.setContent(template);
     editor?.commands.focus('end');
@@ -255,6 +286,7 @@ export default function BobDocumentStudioPage() {
           <button type="button" className="bob-document-primary" onClick={() => void saveDraft()} disabled={saveState === 'saving'}><Save size={15} /> Save draft</button>
           {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()}>Submit for review</button>}
           {draftIds && saveState === 'needs_review' && <><button type="button" className="bob-document-reject" onClick={() => void decideReview('rejected')}>Reject</button><button type="button" className="bob-document-review" onClick={() => void decideReview('approved')}>Approve</button></>}
+          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-output" onClick={() => void requestPrintOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? 'Open print output' : 'Generate print output'}</button>}
         </div>
       </header>
 
