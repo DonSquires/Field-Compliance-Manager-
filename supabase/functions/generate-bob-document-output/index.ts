@@ -6,6 +6,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
+const RENDERER_VERSION = 'fcm-pdf-lib-a4-v1';
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const hex = (bytes: Uint8Array) => Array.from(bytes).map((value) => value.toString(16).padStart(2, '0')).join('');
 const ALLOWED_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'strong', 'em', 's', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'br', 'hr', 'a']);
@@ -105,9 +106,9 @@ serve(async (req) => {
     const finalStoragePath = storagePath.replace(/\.html$/, `.${outputExtension}`);
     const { error: uploadError } = await admin.storage.from('bob-uploads').upload(finalStoragePath, new Blob([bytes], { type: 'application/pdf' }), { upsert: false, contentType: 'application/pdf' });
     if (uploadError) throw new Error(uploadError.message);
-    const { data: updated, error: updateError } = await admin.from('bob_generated_document_outputs').update({ status: 'ready', storage_bucket: 'bob-uploads', storage_path: finalStoragePath, sha256, generated_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', output.id).eq('status', 'requested').select('id,status,output_format,sha256,storage_bucket,storage_path').single();
+    const { data: updated, error: updateError } = await admin.from('bob_generated_document_outputs').update({ status: 'ready', storage_bucket: 'bob-uploads', storage_path: finalStoragePath, mime_type: 'application/pdf', renderer_version: RENDERER_VERSION, sha256, generated_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', output.id).eq('status', 'requested').select('id,status,output_format,mime_type,renderer_version,sha256,storage_bucket,storage_path').single();
     if (updateError || !updated) throw new Error(updateError?.message ?? 'Output state could not be updated');
-    await admin.from('audit_log').insert({ organization_id: output.organization_id, actor_user_id: user.id, action: 'bob_document_output_generated', target_table: 'bob_generated_document_outputs', target_id: output.id, metadata: { document_id: output.document_id, document_version_id: output.document_version_id, output_format: output.output_format, sha256 } });
+    await admin.from('audit_log').insert({ organization_id: output.organization_id, actor_user_id: user.id, action: 'bob_document_output_generated', target_table: 'bob_generated_document_outputs', target_id: output.id, metadata: { document_id: output.document_id, document_version_id: output.document_version_id, output_format: output.output_format, mime_type: 'application/pdf', renderer_version: RENDERER_VERSION, sha256 } });
     return json({ success: true, output: updated });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Document output generation failed' }, 500);
