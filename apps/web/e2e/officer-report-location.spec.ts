@@ -21,6 +21,6 @@ test('officer report resolves a GPS address and submits it as location evidence'
   await page.getByLabel('Title').fill('Unsafe access lighting');
   await page.getByLabel('Description').fill('Lighting at the north access failed during the patrol and reduced visibility.');
   await page.getByRole('button', { name: 'Submit report' }).click();
-  await expect(page.getByRole('status')).toContainText('Report confirmed');
+  await expect(page.getByRole('status').filter({ hasText: 'Report confirmed' })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
