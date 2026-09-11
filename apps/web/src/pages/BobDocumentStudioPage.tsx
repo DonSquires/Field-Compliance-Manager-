@@ -261,6 +261,13 @@ export default function BobDocumentStudioPage() {
     setOutputBusy(false);
   };
 
+  const openOutput = async () => {
+    if (!outputReceipt?.storage_bucket || !outputReceipt.storage_path) return;
+    const { data, error } = await supabase.storage.from(outputReceipt.storage_bucket).createSignedUrl(outputReceipt.storage_path, 900);
+    if (error) setNotice(error.message);
+    else if (data?.signedUrl) window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const insertTemplate = (template: string) => {
     editor?.commands.setContent(template);
     editor?.commands.focus('end');
@@ -286,7 +293,7 @@ export default function BobDocumentStudioPage() {
           <button type="button" className="bob-document-primary" onClick={() => void saveDraft()} disabled={saveState === 'saving'}><Save size={15} /> Save draft</button>
           {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()}>Submit for review</button>}
           {draftIds && saveState === 'needs_review' && <><button type="button" className="bob-document-reject" onClick={() => void decideReview('rejected')}>Reject</button><button type="button" className="bob-document-review" onClick={() => void decideReview('approved')}>Approve</button></>}
-          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-output" onClick={() => void requestPrintOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? 'Open print output' : 'Generate print output'}</button>}
+          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-output" onClick={() => outputReceipt?.status === 'ready' ? void openOutput() : void requestPrintOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? 'Open print output' : 'Generate print output'}</button>}
         </div>
       </header>
 
@@ -326,6 +333,7 @@ export default function BobDocumentStudioPage() {
             <div className="bob-editor-paper" role="textbox" aria-label="Document content" aria-multiline="true"><EditorContent editor={editor} /></div>
           </div>
           {notice && <p className="bob-document-notice" role={saveState === 'error' ? 'alert' : 'status'}>{notice}</p>}
+          {outputReceipt?.status === 'ready' && <p className="bob-output-receipt" role="status"><CheckCircle2 size={14} /><span>Print output ready · SHA-256 {outputReceipt.sha256?.slice(0, 16) ?? 'unavailable'}…</span><button type="button" onClick={() => void openOutput()}>Open again</button></p>}
           {draftIds && saveState === 'saved' && <label className="bob-review-reason">Review reason<textarea value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} maxLength={1000} rows={2} /></label>}
           {draftIds && saveState === 'needs_review' && <label className="bob-review-reason">Reviewer rationale<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} maxLength={1000} rows={2} /></label>}
         </section>
