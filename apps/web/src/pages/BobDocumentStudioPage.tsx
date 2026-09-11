@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bold, Check, FilePlus2, Heading2, Italic, List, ListOrdered, PanelRight, Save, Search, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Bold, Check, CheckCircle2, FilePlus2, Heading2, Italic, List, ListOrdered, PanelRight, Save, Search, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -21,6 +21,7 @@ type ReferenceResult = {
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'error';
 type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string };
+type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
 
 export default function BobDocumentStudioPage() {
   const navigate = useNavigate();
@@ -38,6 +39,8 @@ export default function BobDocumentStudioPage() {
   const [decisionReason, setDecisionReason] = useState('Reviewed source coverage, unresolved fields, and operational suitability.');
   const [organizationName, setOrganizationName] = useState('Current organization');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [brandAssets, setBrandAssets] = useState<BrandAsset[]>([]);
+  const [brandBusy, setBrandBusy] = useState(false);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const editor = useEditor({
@@ -52,13 +55,52 @@ export default function BobDocumentStudioPage() {
   useEffect(() => {
     if (!profile?.organizationId) return;
     let active = true;
-    void supabase.from('organizations').select('name,logo_url').eq('id', profile.organizationId).maybeSingle().then(({ data }) => {
-      if (!active || !data) return;
-      setOrganizationName(data.name || 'Current organization');
-      setLogoUrl(data.logo_url || null);
+    void Promise.all([
+      supabase.from('organizations').select('name,logo_url').eq('id', profile.organizationId).maybeSingle(),
+      supabase.from('organization_brand_assets').select('asset_url,storage_bucket,storage_path').eq('organization_id', profile.organizationId).eq('asset_kind', 'logo').eq('variant', 'default').eq('status', 'approved').order('updated_at', { ascending: false }).limit(1).maybeSingle(),
+    ]).then(([organizationResponse, assetResponse]) => {
+      if (!active) return;
+      if (organizationResponse.data) setOrganizationName(organizationResponse.data.name || 'Current organization');
+      const asset = assetResponse.data;
+      if (asset?.asset_url) setLogoUrl(asset.asset_url);
+      else if (asset?.storage_bucket && asset?.storage_path) {
+        void supabase.storage.from(asset.storage_bucket).createSignedUrl(asset.storage_path, 3600).then(({ data }) => { if (active) setLogoUrl(data?.signedUrl ?? null); });
+      } else if (organizationResponse.data?.logo_url) setLogoUrl(organizationResponse.data.logo_url);
     });
     return () => { active = false; };
   }, [profile?.organizationId]);
+
+  const loadBrandAssets = async () => {
+    if (!profile?.organizationId) return;
+    const { data } = await supabase.from('organization_brand_assets').select('id,label,asset_kind,variant,status,asset_url,storage_bucket,storage_path,alt_text').eq('organization_id', profile.organizationId).order('updated_at', { ascending: false });
+    setBrandAssets((data as BrandAsset[]) ?? []);
+  };
+
+  useEffect(() => { void loadBrandAssets(); }, [profile?.organizationId]);
+
+  const uploadBrandAsset = async (file: File) => {
+    if (!profile?.organizationId) return;
+    setBrandBusy(true); setNotice(null);
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `org/${profile.organizationId}/brand-assets/${crypto.randomUUID()}-${safeName}`;
+    const { error: uploadError } = await supabase.storage.from('bob-uploads').upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    if (uploadError) { setNotice(uploadError.message); setBrandBusy(false); return; }
+    const { error: registerError } = await supabase.rpc('register_organization_brand_asset', {
+      p_organization_id: profile.organizationId, p_asset_kind: 'logo', p_variant: 'default', p_label: file.name,
+      p_storage_bucket: 'bob-uploads', p_storage_path: storagePath, p_mime_type: file.type || null,
+      p_alt_text: `${organizationName} logo`, p_usage_scope: 'documents',
+    });
+    if (registerError) setNotice(registerError.message);
+    else setNotice('Brand asset uploaded and queued for administrator approval.');
+    await loadBrandAssets(); setBrandBusy(false);
+  };
+
+  const reviewBrandAsset = async (asset: BrandAsset, decision: 'approved' | 'revoked') => {
+    setBrandBusy(true); setNotice(null);
+    const { error } = await supabase.rpc('review_organization_brand_asset', { p_asset_id: asset.id, p_decision: decision, p_reason: decision === 'approved' ? 'Approved for organization document use.' : 'Revoked from organization document use.' });
+    if (error) setNotice(error.message); else setNotice(`Brand asset ${decision}.`);
+    await loadBrandAssets(); setBrandBusy(false);
+  };
 
   useEffect(() => {
     if (!profile?.organizationId) return;
@@ -226,7 +268,7 @@ export default function BobDocumentStudioPage() {
           <div className="bob-document-drafts" aria-label="Your drafts">
             {draftsLoading ? <p>Loading drafts…</p> : drafts.length === 0 ? <p>No saved drafts in this organization.</p> : drafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.status.replaceAll('_', ' ')} · {new Date(draft.updatedAt).toLocaleDateString('en-NZ')}</small></button>)}
           </div>
-          <div className="bob-document-brand-status" role="status"><strong>{organizationName}</strong>{logoUrl ? <img src={logoUrl} alt={`${organizationName} approved logo`} /> : <span>No approved organization logo is configured. The draft will not invent branding.</span>}</div>
+          <div className="bob-document-brand-status" role="status"><strong>{organizationName}</strong>{logoUrl ? <img src={logoUrl} alt={`${organizationName} approved logo`} /> : <span>No approved organization logo is configured. The draft will not invent branding.</span>}<label className="bob-brand-upload"><Upload size={13} /> Upload brand asset<input type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadBrandAsset(file); event.currentTarget.value = ''; }} disabled={brandBusy} /></label>{brandAssets.filter((asset) => asset.status === 'pending').map((asset) => <div className="bob-brand-pending" key={asset.id}><span>{asset.label} · pending approval</span><button type="button" onClick={() => void reviewBrandAsset(asset, 'approved')} disabled={brandBusy}><CheckCircle2 size={13} /> Approve</button></div>)}</div>
           <div className="bob-document-safety"><ShieldCheck size={15} /><span>Draft only. Bob cannot silently publish, sign, or promote this document.</span></div>
         </aside>
 
