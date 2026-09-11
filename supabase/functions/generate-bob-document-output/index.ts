@@ -7,6 +7,23 @@ const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const hex = (bytes: Uint8Array) => Array.from(bytes).map((value) => value.toString(16).padStart(2, '0')).join('');
+const ALLOWED_TAGS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'strong', 'em', 's', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'br', 'hr', 'a']);
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
+function sanitizeHtml(input: string) {
+  return input
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\/?(?:script|style|iframe|object|embed|form|input|button|textarea|select|link|meta|base)[^>]*>/gi, '')
+    .replace(/<([^>]+)>/g, (full, rawTag: string) => {
+      const closing = rawTag.trim().startsWith('/');
+      const match = rawTag.trim().match(/^\/?\s*([a-z0-9]+)([\s\S]*)$/i);
+      if (!match || !ALLOWED_TAGS.has(match[1].toLowerCase())) return '';
+      const tag = match[1].toLowerCase();
+      if (closing || tag !== 'a') return `<${closing ? '/' : ''}${tag}>`;
+      const href = match[2].match(/href\s*=\s*["']([^"']*)["']/i)?.[1] ?? '';
+      if (!href || /^(?:javascript|vbscript|data):/i.test(href.trim())) return '<a>';
+      return `<a href="${escapeHtml(href)}" rel="noreferrer noopener">`;
+    });
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -33,8 +50,9 @@ serve(async (req) => {
     const { data: version } = await admin.from('document_versions').select('id,metadata_json,extracted_text').eq('id', output.document_version_id).single();
     if (!version || String(version.metadata_json?.authoring_status ?? '') !== 'approved') return json({ error: 'Only approved document versions can be rendered' }, 422);
     const title = String(version.metadata_json?.title ?? 'FCM document');
-    const authoredHtml = String(version.metadata_json?.authoring_html ?? `<p>${String(version.extracted_text ?? '')}</p>`);
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title.replace(/[<>]/g, '')}</title><style>body{font-family:Arial,sans-serif;color:#172b2d;max-width:820px;margin:0 auto;padding:48px;line-height:1.6}header{border-bottom:2px solid #2f7d74;margin-bottom:30px}h1{color:#164b4a}h2{color:#276b65}footer{margin-top:48px;border-top:1px solid #ccd8d4;padding-top:12px;color:#607570;font-size:12px}</style></head><body><header><h1>${title.replace(/[<>]/g, '')}</h1><p>Approved FCM document output · Generated ${new Date().toISOString()}</p></header><main>${authoredHtml}</main><footer>Source and approval metadata remain available in the FCM document record. This output is not legal advice.</footer></body></html>`;
+    const authoredHtml = sanitizeHtml(String(version.metadata_json?.authoring_html ?? `<p>${escapeHtml(String(version.extracted_text ?? ''))}</p>`));
+    const safeTitle = escapeHtml(title);
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; font-src https:; script-src 'none'; object-src 'none'; base-uri 'none'"><title>${safeTitle}</title><style>body{font-family:Arial,sans-serif;color:#172b2d;max-width:820px;margin:0 auto;padding:48px;line-height:1.6}header{border-bottom:2px solid #2f7d74;margin-bottom:30px}h1{color:#164b4a}h2{color:#276b65}footer{margin-top:48px;border-top:1px solid #ccd8d4;padding-top:12px;color:#607570;font-size:12px}</style></head><body><header><h1>${safeTitle}</h1><p>Approved FCM document output · Generated ${new Date().toISOString()}</p></header><main>${authoredHtml}</main><footer>Source and approval metadata remain available in the FCM document record. This output is not legal advice.</footer></body></html>`;
     const bytes = new TextEncoder().encode(html);
     const digest = await crypto.subtle.digest('SHA-256', bytes);
     const sha256 = hex(new Uint8Array(digest));
