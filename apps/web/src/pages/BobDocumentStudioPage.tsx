@@ -50,6 +50,7 @@ export default function BobDocumentStudioPage() {
   const [draftsLoading, setDraftsLoading] = useState(false);
   const [fileSpace, setFileSpace] = useState('Bob Intake');
   const [fileSearch, setFileSearch] = useState('');
+  const [selectedFile, setSelectedFile] = useState<DraftSummary | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -291,8 +292,8 @@ export default function BobDocumentStudioPage() {
   };
 
   const resumeDraft = (draft: DraftSummary) => {
+    setSelectedFile(draft);
     if (!draft.authorable) {
-      navigate('/admin/files');
       return;
     }
     setTitle(draft.title);
@@ -338,8 +339,9 @@ export default function BobDocumentStudioPage() {
           <div className="bob-file-spaces" aria-label="Document spaces">{FILE_SPACES.map((space) => <button type="button" key={space} className={fileSpace === space ? 'is-active' : ''} onClick={() => setFileSpace(space)}>{space}</button>)}</div>
           <div className="bob-document-section-heading"><span>{fileSpace}</span><small>{visibleDrafts.length} files</small></div>
           <div className="bob-document-drafts" aria-label="Document files">
-            {draftsLoading ? <p>Loading files…</p> : visibleDrafts.length === 0 ? <p>No files in this space.</p> : visibleDrafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.authorable ? draft.status.replaceAll('_', ' ') : `${draft.currentScope.replaceAll('_', ' ')} · open in Files`}</small></button>)}
+            {draftsLoading ? <p>Loading files…</p> : visibleDrafts.length === 0 ? <p>No files in this space.</p> : visibleDrafts.map((draft) => <button type="button" key={draft.id} className={selectedFile?.id === draft.id ? 'is-selected' : ''} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.authorable ? draft.status.replaceAll('_', ' ') : `${draft.currentScope.replaceAll('_', ' ')} · inspect`}</small></button>)}
           </div>
+          {selectedFile && <section className="bob-file-inspector" aria-label="Selected file details"><strong>{selectedFile.title}</strong><dl><div><dt>State</dt><dd>{selectedFile.status.replaceAll('_', ' ')}</dd></div><div><dt>Scope</dt><dd>{selectedFile.currentScope.replaceAll('_', ' ')}</dd></div><div><dt>Source</dt><dd>{selectedFile.sourceChannel.replaceAll('_', ' ')}</dd></div></dl>{selectedFile.authorable ? <button type="button" onClick={() => resumeDraft(selectedFile)}>Resume draft</button> : <button type="button" onClick={() => navigate('/admin/files')}>Open in Files workspace</button>}</section>}
           <div className="bob-document-section-heading"><span>Document setup</span></div>
           <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           <label htmlFor="bob-document-type">Type<select id="bob-document-type" aria-label="Document type" value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
