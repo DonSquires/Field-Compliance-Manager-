@@ -27,6 +27,53 @@ An item is **proven** only when all three stages have evidence:
 
 Atlas is used to identify capability state and blast radius. Direct reads/writes/calls are evidence of flow; foreign-key adjacency alone is not.
 
+## Finance Boundary
+
+The current schema provides a governed commercial billing foundation:
+
+- `quotes` and `quote_lines`
+- `rate_rules`, commercial settings, and site financial configuration
+- `invoices`, `invoice_line_items`, and reusable invoice line templates
+- GST and total calculations
+- invoice lifecycle actions for send, paid, and void
+- audit entries and approval-gated finance reconciliation proposals
+
+It is not yet a complete accounting or finance system. The schema does not currently provide a dedicated payment/receipt ledger, allocations against invoices, credit notes, refunds, expenses, supplier bills, bank reconciliation, tax-period/GST return ledger, general ledger journals, or financial reporting controls. The UI must therefore describe invoice `paid` status as an operational record, not proof of reconciled settlement.
+
+For production assessment, mark finance as **partial** until those missing records, governed commands, permissions, audit events, and reconciliation reports are intentionally designed and tested. Do not add those entities merely to make the screen appear complete; trace the required finance job and source evidence first.
+
+## Quoting And True-Service Cost
+
+The next finance build should be a provider-only **Costing and P&L** workspace. It should feed quote preparation and service-cost review, while keeping client-visible prices and internal actual costs separately permissioned.
+
+### Cost categories
+
+- **Direct labour**: base wages, overtime, public-holiday and higher-duties premiums, employer KiwiSaver, ACC/workplace levies, payroll costs, annual-leave loading, sick leave, bereavement/special leave allowance, training/induction time, supervision, uniforms, PPE, and other employment benefits.
+- **Vehicle and travel**: fuel, registration, WOF/COF, insurance, finance/lease, depreciation, servicing, repairs, tyres, cleaning, tolls, parking, and GPS/telematics. Support both hourly standing cost and per-kilometre running cost.
+- **Equipment and evidence**: radios, body cameras, phones, software, data plans, batteries, storage, replacement, and evidence retention.
+- **Office and operations**: premises, utilities, communications, software subscriptions, finance/admin time, recruitment, legal/accounting, training facilities, and consumables.
+- **Corporate overhead**: management, HR, compliance, marketing, insurance, audit, technology, and other shared costs allocated by an explicit driver such as labour hours, headcount, revenue, vehicles, or service units.
+
+### Calculation boundary
+
+For each quote or service unit, calculate:
+
+`true service cost = loaded labour + vehicle/travel + equipment + direct operating cost + allocated overhead`
+
+`gross margin = client charge - true service cost`
+
+`gross margin % = gross margin / client charge * 100`
+
+The model must retain the rate-version and allocation assumptions used at quote time. Later actuals must not silently rewrite an accepted quote snapshot. Forecast, quoted, incurred, invoiced, collected, and reconciled amounts are separate states.
+
+### FCM implementation direction
+
+Use existing `staff_profiles`, `timesheets`, `leave_requests`, `dispatch_job_pay_lines`, `assets`, `asset_checks`, `cost_centres`, `roster_work_units`, `rate_rules`, `crm_commercial_settings`, `quote_lines`, and `invoice_line_items` as source or attribution edges. Add a governed cost-model layer only where the current schema has no durable home for assumptions, versioning, allocations, or actual transactions. The Costing workspace should support scenario inputs first, then approved versioning, then service-level and organization-level P&L reports.
+
+The first useful screen is not a generic accounting dashboard. It is a provider quote calculator showing staffing assumptions, loaded labour cost, vehicle cost, overhead allocation, proposed charge, margin, and unresolved cost inputs before a quote can be sent.
+
+The full enterprise design is recorded in [ENTERPRISE_COSTING_AND_PNL_DESIGN.md](ENTERPRISE_COSTING_AND_PNL_DESIGN.md).
+
 ## Current Evidence
 
 - Repository tests and web tests are the executable baseline.

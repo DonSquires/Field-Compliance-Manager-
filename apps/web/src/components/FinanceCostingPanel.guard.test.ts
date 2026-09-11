@@ -1,0 +1,20 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const panel = readFileSync(resolve(process.cwd(), 'src/components/FinanceCostingPanel.tsx'), 'utf8');
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260911110000_finance_cost_model_foundation.sql'), 'utf8');
+
+describe('finance costing panel', () => {
+  it('collects original cost facts and uses the governed server calculator', () => {
+    for (const label of ['Asset acquisition cost', 'Asset residual value', 'Asset useful life (months)', 'Vehicle running cost/km', 'Leave provision %']) expect(panel).toContain(label);
+    expect(panel).toContain("supabase.rpc('calculate_finance_quote_cost'");
+    expect(panel).toContain('Calculate true service cost');
+  });
+
+  it('exposes calculated cost and margin outputs', () => {
+    for (const output of ['True cost', 'Client charge', 'Gross margin', 'Annual depreciation']) expect(panel).toContain(output);
+    expect(migration).toContain("'depreciation_annual'");
+    expect(migration).toContain("'approval_required', true");
+  });
+});

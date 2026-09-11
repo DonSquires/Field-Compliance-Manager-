@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Plus, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import { FinanceCostingPanel } from '../components/FinanceCostingPanel';
 
 interface Schedule {
   id: string;
@@ -108,6 +109,7 @@ export default function FinanceBureauPage() {
 
   return <div className="page-container">
     <header className="page-header"><div><h1>Finance Bureau</h1><p className="subtitle">Provider-owned commercial schedules. Rate books remain in Rate Rules; accepted quotes preserve their own commercial snapshot.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /></button><button type="button" className="btn btn-primary" onClick={() => setShowScheduleForm((value) => !value)}><Plus size={16} />{showScheduleForm ? 'Cancel' : 'New discount schedule'}</button></div></header>
+    <FinanceCostingPanel />
     {error && <div className="alert alert-error" role="alert"><AlertTriangle size={16} />{error}</div>}
     {notice && <div className="alert alert-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
     {showScheduleForm && <form className="assessment-form" onSubmit={createSchedule}><div className="form-row"><label><span>Name</span><input required value={scheduleForm.name} onChange={(event) => setScheduleForm({ ...scheduleForm, name: event.target.value })} /></label><label><span>Effective from</span><input required type="date" value={scheduleForm.effectiveFrom} onChange={(event) => setScheduleForm({ ...scheduleForm, effectiveFrom: event.target.value })} /></label><label><span>Effective to</span><input type="date" value={scheduleForm.effectiveTo} onChange={(event) => setScheduleForm({ ...scheduleForm, effectiveTo: event.target.value })} /></label></div><label><span>Internal notes</span><textarea rows={3} value={scheduleForm.notes} onChange={(event) => setScheduleForm({ ...scheduleForm, notes: event.target.value })} /></label><button type="submit" className="btn btn-primary" disabled={saving || !scheduleForm.name.trim()}>{saving ? 'Creating' : 'Create draft schedule'}</button></form>}
