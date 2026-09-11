@@ -20,7 +20,7 @@ type ReferenceResult = {
 };
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'error';
-type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string };
+type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string; sourceChannel: string; currentScope: string; authorable: boolean };
 type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
 type OutputReceipt = { id: string; status: string; output_format: string; sha256: string | null; storage_bucket: string | null; storage_path: string | null };
 const FILE_SPACES = ['Organisation', 'Contracts', 'Sites and Operations', 'HR and People', 'Finance', 'Evidence', 'Investigations', 'Bob Intake', 'Generated Outputs'];
@@ -123,14 +123,13 @@ export default function BobDocumentStudioPage() {
     let active = true;
     setDraftsLoading(true);
     void supabase.from('documents')
-      .select('id,original_filename,updated_at,document_versions(id,extracted_text,metadata_json,created_at)')
-      .eq('organization_id', profile.organizationId)
-      .eq('source_channel', 'system_generated')
+      .select('id,original_filename,updated_at,source_channel,current_scope,document_versions(id,extracted_text,metadata_json,created_at)')
+      .or(`organization_id.eq.${profile.organizationId},organization_id.is.null`)
       .order('updated_at', { ascending: false })
       .limit(20)
       .then(({ data }) => {
         if (!active) return;
-        const rows = (data as Array<{ id: string; original_filename: string; updated_at: string; document_versions?: Array<{ id: string; extracted_text: string | null; metadata_json: Record<string, unknown>; created_at: string }> }> ?? []);
+        const rows = (data as Array<{ id: string; original_filename: string; updated_at: string; source_channel: string; current_scope: string; document_versions?: Array<{ id: string; extracted_text: string | null; metadata_json: Record<string, unknown>; created_at: string }> }> ?? []);
         setDrafts(rows.flatMap((row) => {
           const version = [...(row.document_versions ?? [])].sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
           if (!version) return [];
@@ -144,6 +143,9 @@ export default function BobDocumentStudioPage() {
             html: String(metadata.authoring_html ?? `<p>${version.extracted_text ?? ''}</p>`),
             text: version.extracted_text ?? '',
             documentType: String(metadata.document_type ?? 'custom'),
+            sourceChannel: row.source_channel,
+            currentScope: row.current_scope,
+            authorable: row.source_channel === 'system_generated' && Boolean(metadata.authoring_html),
           }];
         }));
         setDraftsLoading(false);
@@ -289,6 +291,10 @@ export default function BobDocumentStudioPage() {
   };
 
   const resumeDraft = (draft: DraftSummary) => {
+    if (!draft.authorable) {
+      navigate('/admin/files');
+      return;
+    }
     setTitle(draft.title);
     setDocumentType(draft.documentType);
     setDraftIds({ documentId: draft.id, versionId: draft.versionId });
@@ -298,7 +304,18 @@ export default function BobDocumentStudioPage() {
     setNotice(`Resumed ${draft.status.replaceAll('_', ' ')} draft. Review its source and state before continuing.`);
   };
 
-  const visibleDrafts = drafts.filter((draft) => !fileSearch.trim() || draft.title.toLowerCase().includes(fileSearch.trim().toLowerCase()));
+  const fileSpaceFor = (draft: DraftSummary) => {
+    const name = draft.title.toLowerCase();
+    if (draft.authorable && draft.sourceChannel === 'system_generated') return 'Generated Outputs';
+    if (draft.currentScope === 'quarantined') return 'Bob Intake';
+    if (/contract|agreement|terms|proposal|rfq/.test(name)) return 'Contracts';
+    if (/hr|employment|discip|credential|certificate/.test(name)) return 'HR and People';
+    if (/invoice|finance|cost|expense|pay/.test(name)) return 'Finance';
+    if (/cctv|evidence|incident|report|photo|video/.test(name)) return 'Evidence';
+    if (/site|patrol|assignment|attendance|safety/.test(name)) return 'Sites and Operations';
+    return 'Organisation';
+  };
+  const visibleDrafts = drafts.filter((draft) => fileSpaceFor(draft) === fileSpace && (!fileSearch.trim() || draft.title.toLowerCase().includes(fileSearch.trim().toLowerCase())));
 
   return (
     <main className="bob-document-page">
@@ -321,7 +338,7 @@ export default function BobDocumentStudioPage() {
           <div className="bob-file-spaces" aria-label="Document spaces">{FILE_SPACES.map((space) => <button type="button" key={space} className={fileSpace === space ? 'is-active' : ''} onClick={() => setFileSpace(space)}>{space}</button>)}</div>
           <div className="bob-document-section-heading"><span>{fileSpace}</span><small>{visibleDrafts.length} files</small></div>
           <div className="bob-document-drafts" aria-label="Document files">
-            {draftsLoading ? <p>Loading files…</p> : visibleDrafts.length === 0 ? <p>No files in this space.</p> : visibleDrafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.status.replaceAll('_', ' ')} · {new Date(draft.updatedAt).toLocaleDateString('en-NZ')}</small></button>)}
+            {draftsLoading ? <p>Loading files…</p> : visibleDrafts.length === 0 ? <p>No files in this space.</p> : visibleDrafts.map((draft) => <button type="button" key={draft.id} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.authorable ? draft.status.replaceAll('_', ' ') : `${draft.currentScope.replaceAll('_', ' ')} · open in Files`}</small></button>)}
           </div>
           <div className="bob-document-section-heading"><span>Document setup</span></div>
           <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
