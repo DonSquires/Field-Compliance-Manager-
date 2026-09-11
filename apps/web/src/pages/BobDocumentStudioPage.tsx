@@ -156,6 +156,12 @@ export default function BobDocumentStudioPage() {
       : [...current, reference]);
   };
 
+  const insertCitation = (reference: ReferenceResult) => {
+    const citation = `<p><em>Source: ${reference.title}${reference.publisher ? ` — ${reference.publisher}` : ''}${reference.jurisdiction ? ` (${reference.jurisdiction})` : ''}. Approved reference; verify the cited source before final approval.</em></p>`;
+    editor?.commands.insertContent(citation);
+    editor?.commands.focus('end');
+  };
+
   const saveDraft = async () => {
     if (!profile?.organizationId || !profile.id || !editor) return;
     const authoredHtml = editor.getHTML().trim();
@@ -295,7 +301,7 @@ export default function BobDocumentStudioPage() {
         <aside className="bob-reference-rail" aria-label="Reference material">
           <div className="bob-reference-heading"><div><span>Reference material</span><strong>Approved sources</strong></div><PanelRight size={16} /></div>
           <div className="bob-reference-search"><Search size={14} /><input value={referenceQuery} onChange={(event) => setReferenceQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void searchReferences(); }} placeholder="Search bylaws, policies, reports…" aria-label="Search reference material" /><button type="button" onClick={() => void searchReferences()} disabled={searching} aria-label="Search references"><Search size={14} /></button></div>
-          <div className="bob-reference-selected"><strong>Selected for this draft</strong>{selectedReferences.length === 0 ? <p>No references selected.</p> : selectedReferences.map((reference) => <button type="button" key={reference.catalog_entry_id} onClick={() => toggleReference(reference)}>{reference.title}<span>Remove</span></button>)}</div>
+          <div className="bob-reference-selected"><strong>Selected for this draft</strong><small>{selectedReferences.length} approved source{selectedReferences.length === 1 ? '' : 's'} attached to the saved version.</small>{selectedReferences.length === 0 ? <p>No references selected.</p> : selectedReferences.map((reference) => <div className="bob-reference-selected-item" key={reference.catalog_entry_id}><button type="button" onClick={() => toggleReference(reference)}>{reference.title}<span>Remove</span></button><button type="button" className="bob-reference-cite" onClick={() => insertCitation(reference)}>Insert citation</button></div>)}</div>
           <div className="bob-reference-results">{references.length === 0 ? <p>{searching ? 'Searching approved sources…' : 'Search approved sources to ground the document.'}</p> : references.map((reference) => <button type="button" key={reference.catalog_entry_id} className={selectedReferences.some((item) => item.catalog_entry_id === reference.catalog_entry_id) ? 'is-selected' : ''} onClick={() => toggleReference(reference)}><strong>{reference.title}</strong><small>{[reference.document_type, reference.jurisdiction, reference.publisher].filter(Boolean).join(' · ') || 'Approved reference'}</small><em>{reference.trust_level}</em><Check size={14} /></button>)}</div>
         </aside>
       </div>
