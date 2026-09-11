@@ -35,6 +35,7 @@ export default function BobDocumentStudioPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [draftIds, setDraftIds] = useState<{ documentId: string; versionId: string } | null>(null);
   const [reviewReason, setReviewReason] = useState('Prepared for human review of source coverage, assumptions, and operational suitability.');
+  const [decisionReason, setDecisionReason] = useState('Reviewed source coverage, unresolved fields, and operational suitability.');
   const [organizationName, setOrganizationName] = useState('Current organization');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
@@ -123,14 +124,17 @@ export default function BobDocumentStudioPage() {
     }
     setSaveState('saving');
     setNotice(null);
-    const { data: draftResult, error: draftError } = await supabase.rpc('create_bob_document_draft', {
+    const revisionPayload = {
       p_title: title.trim() || 'Untitled Bob document',
       p_document_type: documentType,
       p_authored_html: authoredHtml,
       p_authored_text: authoredText,
       p_reference_handles: selectedReferences.map((reference) => reference.retrieval_handle),
       p_reference_metadata: selectedReferences.map(({ title: referenceTitle, publisher, jurisdiction, trust_level }) => ({ title: referenceTitle, publisher, jurisdiction, trust_level })),
-    });
+    };
+    const { data: draftResult, error: draftError } = draftIds
+      ? await supabase.rpc('save_bob_document_revision', { ...revisionPayload, p_document_id: draftIds.documentId, p_supersedes_version_id: draftIds.versionId })
+      : await supabase.rpc('create_bob_document_draft', revisionPayload);
     if (draftError || !draftResult?.ok) {
       setSaveState('error');
       setNotice(draftError?.message ?? draftResult?.error ?? 'The document draft could not be saved.');
@@ -159,6 +163,25 @@ export default function BobDocumentStudioPage() {
     setNotice('Submitted for human review. The document remains conversation-only until an approved promotion is completed.');
   };
 
+  const decideReview = async (decision: 'approved' | 'rejected') => {
+    if (!draftIds) return;
+    setSaveState('reviewing');
+    setNotice(null);
+    const { data, error } = await supabase.rpc('review_bob_document_draft', {
+      p_document_id: draftIds.documentId,
+      p_document_version_id: draftIds.versionId,
+      p_decision: decision,
+      p_review_reason: decisionReason.trim(),
+    });
+    if (error || !data?.ok) {
+      setSaveState('error');
+      setNotice(error?.message ?? data?.error ?? 'The review decision could not be recorded.');
+      return;
+    }
+    setSaveState(decision === 'approved' ? 'saved' : 'error');
+    setNotice(decision === 'approved' ? 'Approved with a durable review receipt. Promotion remains a separate governed action.' : 'Rejected with a durable review receipt. Create a revision after addressing the reviewer reason.');
+  };
+
   const insertTemplate = (template: string) => {
     editor?.commands.setContent(template);
     editor?.commands.focus('end');
@@ -183,6 +206,7 @@ export default function BobDocumentStudioPage() {
           <button type="button" className="bob-document-secondary" onClick={() => navigate('/admin/bob')}><X size={15} /> Close</button>
           <button type="button" className="bob-document-primary" onClick={() => void saveDraft()} disabled={saveState === 'saving'}><Save size={15} /> Save draft</button>
           {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()}>Submit for review</button>}
+          {draftIds && saveState === 'needs_review' && <><button type="button" className="bob-document-reject" onClick={() => void decideReview('rejected')}>Reject</button><button type="button" className="bob-document-review" onClick={() => void decideReview('approved')}>Approve</button></>}
         </div>
       </header>
 
@@ -223,6 +247,7 @@ export default function BobDocumentStudioPage() {
           </div>
           {notice && <p className="bob-document-notice" role={saveState === 'error' ? 'alert' : 'status'}>{notice}</p>}
           {draftIds && saveState === 'saved' && <label className="bob-review-reason">Review reason<textarea value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} maxLength={1000} rows={2} /></label>}
+          {draftIds && saveState === 'needs_review' && <label className="bob-review-reason">Reviewer rationale<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} maxLength={1000} rows={2} /></label>}
         </section>
 
         <aside className="bob-reference-rail" aria-label="Reference material">
