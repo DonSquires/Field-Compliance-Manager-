@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -24,6 +25,9 @@ function sanitizeHtml(input: string) {
       return `<a href="${escapeHtml(href)}" rel="noreferrer noopener">`;
     });
 }
+function htmlToLines(input: string) {
+  return input.replace(/<\/(p|h1|h2|h3|li|blockquote|pre)>/gi, '\n').replace(/<li[^>]*>/gi, '• ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -45,21 +49,42 @@ serve(async (req) => {
     if (outputError || !output) return json({ error: 'Output request not found' }, 404);
     if (String(profile.role) !== 'grand_master' && output.organization_id !== profile.organization_id) return json({ error: 'Forbidden' }, 403);
     if (output.status !== 'requested') return json({ error: 'Output request is not in requested state' }, 409);
-    if (output.output_format !== 'print') return json({ error: 'PDF and DOCX renderers are not enabled yet; request print output.' }, 422);
+    if (!['pdf', 'print'].includes(output.output_format)) return json({ error: 'DOCX renderer is not enabled yet; request PDF or print output.' }, 422);
 
     const { data: version } = await admin.from('document_versions').select('id,metadata_json,extracted_text').eq('id', output.document_version_id).single();
     if (!version || String(version.metadata_json?.authoring_status ?? '') !== 'approved') return json({ error: 'Only approved document versions can be rendered' }, 422);
+    const { data: organization } = await admin.from('organizations').select('name').eq('id', output.organization_id).single();
+    const organizationName = String(organization?.name ?? 'Field Compliance Manager');
     const title = String(version.metadata_json?.title ?? 'FCM document');
     const authoredHtml = sanitizeHtml(String(version.metadata_json?.authoring_html ?? `<p>${escapeHtml(String(version.extracted_text ?? ''))}</p>`));
     const safeTitle = escapeHtml(title);
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; font-src https:; script-src 'none'; object-src 'none'; base-uri 'none'"><title>${safeTitle}</title><style>body{font-family:Arial,sans-serif;color:#172b2d;max-width:820px;margin:0 auto;padding:48px;line-height:1.6}header{border-bottom:2px solid #2f7d74;margin-bottom:30px}h1{color:#164b4a}h2{color:#276b65}footer{margin-top:48px;border-top:1px solid #ccd8d4;padding-top:12px;color:#607570;font-size:12px}</style></head><body><header><h1>${safeTitle}</h1><p>Approved FCM document output · Generated ${new Date().toISOString()}</p></header><main>${authoredHtml}</main><footer>Source and approval metadata remain available in the FCM document record. This output is not legal advice.</footer></body></html>`;
-    const bytes = new TextEncoder().encode(html);
+    const pdfDoc = await PDFDocument.create();
+    const normal = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const lines = htmlToLines(authoredHtml);
+    let page = pdfDoc.addPage([595, 842]);
+    let y = 780;
+    const drawText = (text: string, font = normal, size = 10) => {
+      if (y < 70) { page = pdfDoc.addPage([595, 842]); y = 780; }
+      page.drawText(text.slice(0, 120), { x: 54, y, size, font, color: rgb(0.09, 0.17, 0.18) }); y -= size + 7;
+    };
+    drawText(organizationName, bold, 15);
+    drawText(title, bold, 18);
+    drawText(`Approved FCM document output · Generated ${new Date().toISOString()}`, normal, 9);
+    page.drawLine({ start: { x: 54, y: y + 2 }, end: { x: 541, y: y + 2 }, thickness: 1.5, color: rgb(0.18, 0.49, 0.45) }); y -= 16;
+    for (const line of lines) drawText(line, normal, 10);
+    if (y < 90) { page = pdfDoc.addPage([595, 842]); y = 780; }
+    drawText('Source and approval metadata remain available in the FCM document record.', normal, 8);
+    drawText('This output is not legal advice.', normal, 8);
+    const bytes = await pdfDoc.save();
     const digest = await crypto.subtle.digest('SHA-256', bytes);
     const sha256 = hex(new Uint8Array(digest));
     const storagePath = `org/${output.organization_id}/generated/${output.document_id}/${output.id}.html`;
-    const { error: uploadError } = await admin.storage.from('bob-uploads').upload(storagePath, new Blob([bytes], { type: 'text/html' }), { upsert: false, contentType: 'text/html' });
+    const outputExtension = output.output_format === 'pdf' ? 'pdf' : 'print.pdf';
+    const finalStoragePath = storagePath.replace(/\.html$/, `.${outputExtension}`);
+    const { error: uploadError } = await admin.storage.from('bob-uploads').upload(finalStoragePath, new Blob([bytes], { type: 'application/pdf' }), { upsert: false, contentType: 'application/pdf' });
     if (uploadError) throw new Error(uploadError.message);
-    const { data: updated, error: updateError } = await admin.from('bob_generated_document_outputs').update({ status: 'ready', storage_bucket: 'bob-uploads', storage_path: storagePath, sha256, generated_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', output.id).eq('status', 'requested').select('id,status,output_format,sha256,storage_bucket,storage_path').single();
+    const { data: updated, error: updateError } = await admin.from('bob_generated_document_outputs').update({ status: 'ready', storage_bucket: 'bob-uploads', storage_path: finalStoragePath, sha256, generated_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', output.id).eq('status', 'requested').select('id,status,output_format,sha256,storage_bucket,storage_path').single();
     if (updateError || !updated) throw new Error(updateError?.message ?? 'Output state could not be updated');
     await admin.from('audit_log').insert({ organization_id: output.organization_id, actor_user_id: user.id, action: 'bob_document_output_generated', target_table: 'bob_generated_document_outputs', target_id: output.id, metadata: { document_id: output.document_id, document_version_id: output.document_version_id, output_format: output.output_format, sha256 } });
     return json({ success: true, output: updated });
