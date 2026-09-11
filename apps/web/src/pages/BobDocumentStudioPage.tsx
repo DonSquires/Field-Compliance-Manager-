@@ -44,6 +44,7 @@ export default function BobDocumentStudioPage() {
   const [brandBusy, setBrandBusy] = useState(false);
   const [outputReceipt, setOutputReceipt] = useState<OutputReceipt | null>(null);
   const [outputBusy, setOutputBusy] = useState(false);
+  const [outputHistory, setOutputHistory] = useState<OutputReceipt[]>([]);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const editor = useEditor({
@@ -72,6 +73,15 @@ export default function BobDocumentStudioPage() {
     });
     return () => { active = false; };
   }, [profile?.organizationId]);
+
+  useEffect(() => {
+    if (!profile?.organizationId || !draftIds) return;
+    let active = true;
+    void supabase.from('bob_generated_document_outputs').select('id,status,output_format,sha256,storage_bucket,storage_path').eq('organization_id', profile.organizationId).eq('document_id', draftIds.documentId).order('created_at', { ascending: false }).limit(20).then(({ data }) => {
+      if (active) setOutputHistory((data as OutputReceipt[]) ?? []);
+    });
+    return () => { active = false; };
+  }, [profile?.organizationId, draftIds]);
 
   const loadBrandAssets = async () => {
     if (!profile?.organizationId) return;
@@ -247,11 +257,13 @@ export default function BobDocumentStudioPage() {
       return;
     }
     setOutputReceipt(receipt as OutputReceipt);
+    setOutputHistory((current) => [receipt as OutputReceipt, ...current.filter((item) => item.id !== receipt.id)]);
     const { data: generated, error: generationError } = await supabase.functions.invoke('generate-bob-document-output', { body: { output_id: receipt.id } });
     if (generationError || !generated?.output) setNotice(generationError?.message ?? generated?.error ?? 'The print output could not be generated.');
     else {
       const ready = generated.output as OutputReceipt;
       setOutputReceipt(ready);
+      setOutputHistory((current) => [ready, ...current.filter((item) => item.id !== ready.id)]);
       if (!ready.storage_bucket || !ready.storage_path) setNotice('The output receipt is missing its private storage location. It was not opened.');
       else {
         const { data: signed, error: signedError } = await supabase.storage.from(ready.storage_bucket).createSignedUrl(ready.storage_path, 900);
@@ -334,6 +346,7 @@ export default function BobDocumentStudioPage() {
           </div>
           {notice && <p className="bob-document-notice" role={saveState === 'error' ? 'alert' : 'status'}>{notice}</p>}
           {outputReceipt?.status === 'ready' && <p className="bob-output-receipt" role="status"><CheckCircle2 size={14} /><span>Print output ready · SHA-256 {outputReceipt.sha256?.slice(0, 16) ?? 'unavailable'}…</span><button type="button" onClick={() => void openOutput()}>Open again</button></p>}
+          {outputHistory.length > 0 && <section className="bob-output-history" aria-label="Generated document outputs"><strong>Generated outputs</strong>{outputHistory.map((output) => <div key={output.id}><span>{output.output_format.toUpperCase()} · {output.status}</span><small>{output.sha256 ? `SHA-256 ${output.sha256.slice(0, 16)}…` : 'Checksum pending'}</small>{output.status === 'ready' && <button type="button" onClick={() => { setOutputReceipt(output); void openOutput(); }}>Open</button>}</div>)}</section>}
           {draftIds && saveState === 'saved' && <label className="bob-review-reason">Review reason<textarea value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} maxLength={1000} rows={2} /></label>}
           {draftIds && saveState === 'needs_review' && <label className="bob-review-reason">Reviewer rationale<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} maxLength={1000} rows={2} /></label>}
         </section>
