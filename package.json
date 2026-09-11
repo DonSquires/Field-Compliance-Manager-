@@ -10,6 +10,7 @@
     "bob:refresh-capability-map": "npm run atlas:refresh",
     "atlas:check": "npm run calibrate && node scripts/atlas-graph.js && npm run atlas:manifest",
     "sample:manifest": "node scripts/sample-data-manifest.js",
+    "verify:bob-document-pdf:live": "node scripts/verify-bob-document-pdf-live.js",
     "seed:aam-e2e": "node scripts/seed-aam-e2e.js",
     "pretest": "npm run calibrate"
   },

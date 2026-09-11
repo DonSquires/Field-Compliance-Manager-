@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AudioLines, CheckCircle2, ClipboardList, Copy, Download, FileText, GitBranch, Image as ImageIcon, Paperclip, Printer, Sparkles, Video } from 'lucide-react';
+import { AudioLines, CheckCircle2, ClipboardList, Copy, Download, FileText, GitBranch, Image as ImageIcon, Paperclip, Sparkles, Video } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { BobMarkdown } from './BobMarkdown';
 import { BobMermaidDiagram } from './BobMermaidDiagram';
@@ -195,7 +195,6 @@ export function BobStudio({
               <div>
                 <button type="button" onClick={() => void copyDocument()} disabled={!selectedDocument?.content}><Copy size={14} /> Copy</button>
                 <button type="button" onClick={downloadDocument} disabled={!selectedDocument?.content}><Download size={14} /> Download</button>
-                <button type="button" onClick={() => window.print()} disabled={!selectedDocument?.content}><Printer size={14} /> Print</button>
               </div>
             </header>
             {assistantMessages.length > 1 && <label className="bob-document-version"><span>Draft version</span><select value={selectedDocument?.id ?? ''} onChange={(event) => setSelectedMessageId(event.target.value)}>{assistantMessages.map((message) => <option key={message.id} value={message.id}>{new Date(message.created_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label>}

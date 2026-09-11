@@ -13,9 +13,16 @@ test('generated document worker uses a real PDF renderer and private artifact pa
   assert.match(source, /crypto\.subtle\.digest\('SHA-256'/);
 });
 
-test('generated PDF remains approval and format gated', () => {
+test('generated document worker supports governed DOCX output', () => {
+  assert.match(source, /fflate@0\.8\.2/);
+  assert.match(source, /buildDocxBytes/);
+  assert.match(source, /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/);
+  assert.match(source, /fcm-ooxml-docx-v1/);
+  assert.match(source, /zipSync/);
+});
+
+test('generated outputs remain approval and format gated', () => {
   assert.match(source, /authoring_status.*approved/);
   assert.match(source, /Only approved document versions can be rendered/);
-  assert.match(source, /!\['pdf', 'print'\]\.includes\(output\.output_format\)/);
-  assert.match(source, /DOCX renderer is not enabled yet/);
+  assert.match(source, /!\['pdf', 'print', 'docx'\]\.includes\(output\.output_format\)/);
 });

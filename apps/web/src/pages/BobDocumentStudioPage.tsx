@@ -20,9 +20,10 @@ type ReferenceResult = {
 };
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'error';
+type OutputFormat = 'print' | 'docx';
 type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string; sourceChannel: string; currentScope: string; authorable: boolean };
 type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
-type OutputReceipt = { id: string; status: string; output_format: string; sha256: string | null; storage_bucket: string | null; storage_path: string | null };
+type OutputReceipt = { id: string; status: string; output_format: OutputFormat | 'pdf'; sha256: string | null; storage_bucket: string | null; storage_path: string | null };
 const FILE_SPACES = ['Organisation', 'Contracts', 'Sites and Operations', 'HR and People', 'Finance', 'Evidence', 'Investigations', 'Bob Intake', 'Generated Outputs'];
 
 export default function BobDocumentStudioPage() {
@@ -43,6 +44,7 @@ export default function BobDocumentStudioPage() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [brandAssets, setBrandAssets] = useState<BrandAsset[]>([]);
   const [brandBusy, setBrandBusy] = useState(false);
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('print');
   const [outputReceipt, setOutputReceipt] = useState<OutputReceipt | null>(null);
   const [outputBusy, setOutputBusy] = useState(false);
   const [outputHistory, setOutputHistory] = useState<OutputReceipt[]>([]);
@@ -249,23 +251,25 @@ export default function BobDocumentStudioPage() {
     setNotice(decision === 'approved' ? 'Approved with a durable review receipt. Promotion remains a separate governed action.' : 'Rejected with a durable review receipt. Create a revision after addressing the reviewer reason.');
   };
 
-  const requestPrintOutput = async () => {
+  const outputLabel = (format: OutputReceipt['output_format']) => format === 'docx' ? 'DOCX' : 'Print PDF';
+
+  const requestDocumentOutput = async () => {
     if (!draftIds || saveState !== 'saved') return;
     setOutputBusy(true); setNotice(null);
     const { data: receipt, error: requestError } = await supabase.rpc('request_bob_document_output', {
       p_document_id: draftIds.documentId,
       p_document_version_id: draftIds.versionId,
-      p_output_format: 'print',
+      p_output_format: outputFormat,
     });
     if (requestError || !receipt?.id) {
-      setNotice(requestError?.message ?? 'Only an approved document can request a print output.');
+      setNotice(requestError?.message ?? `Only an approved document can request ${outputLabel(outputFormat).toLowerCase()} output.`);
       setOutputBusy(false);
       return;
     }
     setOutputReceipt(receipt as OutputReceipt);
     setOutputHistory((current) => [receipt as OutputReceipt, ...current.filter((item) => item.id !== receipt.id)]);
     const { data: generated, error: generationError } = await supabase.functions.invoke('generate-bob-document-output', { body: { output_id: receipt.id } });
-    if (generationError || !generated?.output) setNotice(generationError?.message ?? generated?.error ?? 'The print output could not be generated.');
+    if (generationError || !generated?.output) setNotice(generationError?.message ?? generated?.error ?? `${outputLabel(outputFormat)} output could not be generated.`);
     else {
       const ready = generated.output as OutputReceipt;
       setOutputReceipt(ready);
@@ -300,6 +304,7 @@ export default function BobDocumentStudioPage() {
     setDocumentType(draft.documentType);
     setDraftIds({ documentId: draft.id, versionId: draft.versionId });
     setSaveState(draft.status === 'needs_review' ? 'needs_review' : 'saved');
+    setOutputReceipt(null);
     editor?.commands.setContent(draft.html);
     editor?.commands.focus('end');
     setNotice(`Resumed ${draft.status.replaceAll('_', ' ')} draft. Review its source and state before continuing.`);
@@ -328,7 +333,8 @@ export default function BobDocumentStudioPage() {
           <button type="button" className="bob-document-primary" onClick={() => void saveDraft()} disabled={saveState === 'saving'}><Save size={15} /> Save draft</button>
           {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()}>Submit for review</button>}
           {draftIds && saveState === 'needs_review' && <><button type="button" className="bob-document-reject" onClick={() => void decideReview('rejected')}>Reject</button><button type="button" className="bob-document-review" onClick={() => void decideReview('approved')}>Approve</button></>}
-          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-output" onClick={() => outputReceipt?.status === 'ready' ? void openOutput() : void requestPrintOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? 'Open print output' : 'Generate print output'}</button>}
+          {draftIds && saveState === 'saved' && <label className="bob-output-format">Output<select value={outputFormat} onChange={(event) => { setOutputFormat(event.target.value as OutputFormat); setOutputReceipt(null); }}><option value="print">Print PDF</option><option value="docx">DOCX</option></select></label>}
+          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-output" onClick={() => outputReceipt?.status === 'ready' ? void openOutput() : void requestDocumentOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? `Open ${outputLabel(outputReceipt.output_format)}` : `Generate ${outputLabel(outputFormat)}`}</button>}
         </div>
       </header>
 
@@ -372,8 +378,8 @@ export default function BobDocumentStudioPage() {
             <div className="bob-editor-paper" role="textbox" aria-label="Document content" aria-multiline="true"><EditorContent editor={editor} /></div>
           </div>
           {notice && <p className="bob-document-notice" role={saveState === 'error' ? 'alert' : 'status'}>{notice}</p>}
-          {outputReceipt?.status === 'ready' && <p className="bob-output-receipt" role="status"><CheckCircle2 size={14} /><span>Print output ready · SHA-256 {outputReceipt.sha256?.slice(0, 16) ?? 'unavailable'}…</span><button type="button" onClick={() => void openOutput()}>Open again</button></p>}
-          {outputHistory.length > 0 && <section className="bob-output-history" aria-label="Generated document outputs"><strong>Generated outputs</strong>{outputHistory.map((output) => <div key={output.id}><span>{output.output_format.toUpperCase()} · {output.status}</span><small>{output.sha256 ? `SHA-256 ${output.sha256.slice(0, 16)}…` : 'Checksum pending'}</small>{output.status === 'ready' && <button type="button" onClick={() => { setOutputReceipt(output); void openOutput(); }}>Open</button>}</div>)}</section>}
+          {outputReceipt?.status === 'ready' && <p className="bob-output-receipt" role="status"><CheckCircle2 size={14} /><span>{outputLabel(outputReceipt.output_format)} ready · SHA-256 {outputReceipt.sha256?.slice(0, 16) ?? 'unavailable'}…</span><button type="button" onClick={() => void openOutput()}>Open again</button></p>}
+          {outputHistory.length > 0 && <section className="bob-output-history" aria-label="Generated document outputs"><strong>Generated outputs</strong>{outputHistory.map((output) => <div key={output.id}><span>{outputLabel(output.output_format)} · {output.status}</span><small>{output.sha256 ? `SHA-256 ${output.sha256.slice(0, 16)}…` : 'Checksum pending'}</small>{output.status === 'ready' && <button type="button" onClick={() => { setOutputReceipt(output); void openOutput(); }}>Open</button>}</div>)}</section>}
           {draftIds && saveState === 'saved' && <label className="bob-review-reason">Review reason<textarea value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} maxLength={1000} rows={2} /></label>}
           {draftIds && saveState === 'needs_review' && <label className="bob-review-reason">Reviewer rationale<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} maxLength={1000} rows={2} /></label>}
         </section>

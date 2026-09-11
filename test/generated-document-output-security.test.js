@@ -15,6 +15,5 @@ test('generated document outputs sanitize active content before PDF rendering', 
 test('generated document output remains approval-gated', () => {
   assert.match(source, /authoring_status.*approved/);
   assert.match(source, /Only approved document versions can be rendered/);
-  assert.match(source, /!\['pdf', 'print'\]\.includes\(output\.output_format\)/);
-  assert.match(source, /DOCX renderer is not enabled yet/);
+  assert.match(source, /!\['pdf', 'print', 'docx'\]\.includes\(output\.output_format\)/);
 });
