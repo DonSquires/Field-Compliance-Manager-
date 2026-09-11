@@ -55,6 +55,7 @@ serve(async (req) => {
     if (!version || String(version.metadata_json?.authoring_status ?? '') !== 'approved') return json({ error: 'Only approved document versions can be rendered' }, 422);
     const { data: organization } = await admin.from('organizations').select('name').eq('id', output.organization_id).single();
     const organizationName = String(organization?.name ?? 'Field Compliance Manager');
+    const { data: brandAsset } = await admin.from('organization_brand_assets').select('asset_url,storage_bucket,storage_path,mime_type').eq('organization_id', output.organization_id).eq('asset_kind', 'logo').eq('variant', 'default').eq('status', 'approved').order('updated_at', { ascending: false }).limit(1).maybeSingle();
     const title = String(version.metadata_json?.title ?? 'FCM document');
     const authoredHtml = sanitizeHtml(String(version.metadata_json?.authoring_html ?? `<p>${escapeHtml(String(version.extracted_text ?? ''))}</p>`));
     const safeTitle = escapeHtml(title);
@@ -64,6 +65,26 @@ serve(async (req) => {
     const lines = htmlToLines(authoredHtml);
     let page = pdfDoc.addPage([595, 842]);
     let y = 780;
+    if (brandAsset) {
+      try {
+        let logoBytes: Uint8Array | null = null;
+        if (brandAsset.storage_bucket && brandAsset.storage_path) {
+          const logo = await admin.storage.from(brandAsset.storage_bucket).download(brandAsset.storage_path);
+          if (!logo.error && logo.data) logoBytes = new Uint8Array(await logo.data.arrayBuffer());
+        } else if (brandAsset.asset_url?.startsWith('https://')) {
+          const logoResponse = await fetch(brandAsset.asset_url);
+          if (logoResponse.ok) logoBytes = new Uint8Array(await logoResponse.arrayBuffer());
+        }
+        if (logoBytes) {
+          const image = String(brandAsset.mime_type ?? '').includes('png') ? await pdfDoc.embedPng(logoBytes) : await pdfDoc.embedJpg(logoBytes);
+          const scale = Math.min(120 / image.width, 45 / image.height);
+          page.drawImage(image, { x: 54, y: y - image.height * scale, width: image.width * scale, height: image.height * scale });
+          y -= image.height * scale + 12;
+        }
+      } catch (_logoError) {
+        // A missing or unsupported logo must degrade to text branding, not fail the document output.
+      }
+    }
     const drawText = (text: string, font = normal, size = 10) => {
       if (y < 70) { page = pdfDoc.addPage([595, 842]); y = 780; }
       page.drawText(text.slice(0, 120), { x: 54, y, size, font, color: rgb(0.09, 0.17, 0.18) }); y -= size + 7;
