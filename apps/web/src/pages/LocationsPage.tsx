@@ -291,6 +291,14 @@ const LocationsPage: React.FC = () => {
                         >
                           Open site
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={() => navigate(`/admin/document-studio?sourceType=site&sourceId=${encodeURIComponent(site.id)}`)}
+                          title="Draft a site safety plan with Bob"
+                        >
+                          Bob: Draft safety plan
+                        </button>
                       </div>
                     </div>
                   ))}

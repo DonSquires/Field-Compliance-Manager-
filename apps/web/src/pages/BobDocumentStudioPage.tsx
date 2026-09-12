@@ -107,13 +107,13 @@ export default function BobDocumentStudioPage() {
     const loadSourceContext = async () => {
       try {
         if (sourceType === 'site') {
-          const { data: site } = await supabase.from('locations').select('id,name,address,zone_id').eq('id', sourceId).maybeSingle();
+          const { data: site } = await supabase.from('client_sites').select('id,name,address,site_type,site_brief,hs_notes,access_instructions').eq('id', sourceId).maybeSingle();
           if (active && site) {
             setSourceContext({
               type: 'site',
               id: site.id,
               label: `${site.name}${site.address ? ` (${site.address})` : ''}`,
-              prompt: `Draft a site safety plan for ${site.name}. Include the hazards, controls, emergency procedures, and approval checklist based on the site details and attached reference materials.`,
+              prompt: `Draft a site safety plan for ${site.name}. Site type: ${site.site_type || '[TO CONFIRM]'}. Existing brief: ${site.site_brief || '[TO CONFIRM]'}. Health and safety notes: ${site.hs_notes || '[TO CONFIRM]'}. Access instructions: ${site.access_instructions || '[TO CONFIRM]'}. Include hazards, controls, emergency procedures, and an approval checklist based on these details and attached reference materials.`,
             });
             setDocumentType('site_safety_plan');
             setTitle(`Site Safety Plan - ${site.name}`);
