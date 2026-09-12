@@ -131,6 +131,14 @@ Each batch must capture before/during/after evidence, source filename/hash, brow
 
 Shift-spine requirement: Finance service costs must preserve optional active/accepted `shift_id` attribution. The same shift identity drives officer-on-duty state, patrol sessions, dispatch/response jobs, field reports, welfare controls, timesheet labour posting, and finance cost attribution. A finance row without its available shift attribution is incomplete evidence, not a separate finance truth.
 
+Live shift-aware finance control E2E: completed on 2026-09-12 through the Finance Money UI.
+
+- Before: created an internal draft P&L period and open tax period through governed RPC controls.
+- During: selected an active officer shift, recorded 8 labour hours at NZD 42 with explicit shift attribution, prepared the tax period, and closed the P&L period.
+- After: visible receipts confirmed service cost recording, tax preparation at NZD 0.00 with no IRD submission, and P&L snapshot/close.
+- Browser/alert errors: 0.
+- Bank and IRD linking: untouched.
+
 ## Next implementation
 
 Add a role-gated, tenant-scoped generic intake control to the File System UI. It should upload to private Bob storage, register provenance, classify/quarantine, expose extraction/review state, and require a visible human approval action before promotion. The control must support one file at a time initially so Playwright and human reviewers can trace each file without hiding partial failures.
