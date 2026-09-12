@@ -29,12 +29,27 @@ serve(async (request) => {
     const { data: { user }, error: authError } = await caller.auth.getUser();
     if (authError || !user) return json({ error: 'Unauthorized' }, 401);
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: profile } = await admin.from('user_profiles').select('id,email,role,organization_id').eq('id', user.id).single();
-    if (!profile || profile.email !== OWNER_EMAIL || profile.role !== 'grand_master') return json({ error: 'Owner grandmaster test identity required' }, 403);
+    const { data: profile } = await admin.from('user_profiles').select('id,role,organization_id').eq('id', user.id).single();
+    if (!profile || user.email !== OWNER_EMAIL || profile.role !== 'grand_master') return json({ error: 'Owner grandmaster test identity required' }, 403);
     const body = await request.json().catch(() => ({}));
     if (body.marker !== MARKER) return json({ error: `marker must equal ${MARKER}` }, 422);
-    const action = body.action === 'cleanup' ? 'cleanup' : 'seed';
+    const action = body.action === 'cleanup_all' ? 'cleanup_all' : body.action === 'cleanup' ? 'cleanup' : 'seed';
     const recordId = typeof body.record_id === 'string' ? body.record_id : null;
+    if (action === 'cleanup_all') {
+      const { data: alerts } = await admin.from('breach_alerts').select('id').eq('organization_id', profile.organization_id).ilike('notes', `%${MARKER}%`);
+      let removed = 0;
+      for (const alert of alerts ?? []) {
+        const { data: observation } = await admin.from('breach_alerts').select('observation_id').eq('id', alert.id).maybeSingle();
+        await admin.from('breach_alerts').delete().eq('id', alert.id);
+        if (observation?.observation_id) {
+          const { data: item } = await admin.from('observations').select('photo_url').eq('id', observation.observation_id).maybeSingle();
+          await admin.from('observations').delete().eq('id', observation.observation_id);
+          if (item?.photo_url) await admin.storage.from('bob-uploads').remove([item.photo_url]);
+        }
+        removed += 1;
+      }
+      return json({ ok: true, action, removed });
+    }
     if (action === 'cleanup') {
       if (!recordId) return json({ error: 'record_id is required for cleanup' }, 422);
       const { data: alert } = await admin.from('breach_alerts').select('id,observation_id,notes').eq('id', recordId).eq('organization_id', profile.organization_id).maybeSingle();
@@ -49,9 +64,13 @@ serve(async (request) => {
       return json({ ok: true, action, record_id: recordId });
     }
     const requestedZoneId = String(body.zone_id ?? '').trim();
-    const zoneQuery = admin.from('location_zones').select('id,organization_id,name').eq('organization_id', profile.organization_id).eq('is_active', true).order('name').limit(1);
-    const { data: zones } = requestedZoneId ? await zoneQuery.eq('id', requestedZoneId) : await zoneQuery;
-    const zone = zones?.[0] ?? null;
+    const { data: geography, error: geographyError } = await caller.rpc('get_crm_operational_geography');
+    if (geographyError) return json({ error: `Operational geography could not be authorised: ${geographyError.message}` }, 403);
+    const visibleZones = ((geography as { zones?: Array<{ id: string; name: string; is_active: boolean }> } | null)?.zones ?? []).filter((item) => item.is_active);
+    const zoneId = requestedZoneId || visibleZones[0]?.id;
+    const zoneSummary = visibleZones.find((item) => item.id === zoneId);
+    const { data: zone } = zoneId ? await admin.from('location_zones').select('id,organization_id,name').eq('id', zoneId).maybeSingle() : { data: null };
+    if (!zoneSummary || !zone) return json({ error: 'No active zone is available through an operational relationship' }, 404);
     if (!zone) return json({ error: 'Zone is not available in the owner organisation' }, 404);
     const suffix = Date.now().toString(36).toUpperCase();
     const plate = `SYN${suffix.slice(-4)}`;

@@ -149,7 +149,7 @@ async function seedSyntheticBreach(page: Page): Promise<{ recordId: string }> {
   return { recordId: body.record_id };
 }
 
-async function cleanupSyntheticBreach(page: Page, recordId: string): Promise<void> {
+async function cleanupSyntheticBreach(page: Page, recordId: string, action: 'cleanup' | 'cleanup_all' = 'cleanup'): Promise<void> {
   let supabaseUrl = '';
   let anonKey = '';
   page.on('request', (request) => {
@@ -158,6 +158,8 @@ async function cleanupSyntheticBreach(page: Page, recordId: string): Promise<voi
       supabaseUrl = new URL(request.url()).origin;
     }
   });
+  await page.goto(`${LIVE_URL}/admin/files`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
   const auth = await page.evaluate(() => {
     for (const key of Object.keys(localStorage)) {
       if (!key.startsWith('sb-')) continue;
@@ -170,9 +172,13 @@ async function cleanupSyntheticBreach(page: Page, recordId: string): Promise<voi
     return null;
   });
   if (!auth || !supabaseUrl || !anonKey) throw new Error('Authenticated Supabase configuration was unavailable for synthetic breach cleanup.');
-  const response = await page.request.post(`${supabaseUrl}/functions/v1/seed-synthetic-breach`, { headers: { apikey: anonKey, Authorization: `Bearer ${auth.accessToken}`, 'Content-Type': 'application/json' }, data: { marker: 'FCM-SYNTHETIC-AGENTIC', action: 'cleanup', record_id: recordId } });
+  const response = await page.request.post(`${supabaseUrl}/functions/v1/seed-synthetic-breach`, { headers: { apikey: anonKey, Authorization: `Bearer ${auth.accessToken}`, 'Content-Type': 'application/json' }, data: { marker: 'FCM-SYNTHETIC-AGENTIC', action, record_id: action === 'cleanup' ? recordId : undefined } });
   const result = { ok: response.ok(), body: await response.json() };
   if (!result.ok) throw new Error(result.body.error ?? 'Synthetic breach cleanup failed');
+}
+
+async function cleanupAllSyntheticBreaches(page: Page): Promise<void> {
+  await cleanupSyntheticBreach(page, '', 'cleanup_all');
 }
 
 const surfaces = [
@@ -240,6 +246,7 @@ test.describe('production document workflow visual audit', () => {
   test('actioned breach opens an enforcement-scoped Bob draft', async ({ page }) => {
     const evidence = monitor(page);
     await signIn(page);
+    await cleanupAllSyntheticBreaches(page);
     const synthetic = await seedSyntheticBreach(page);
     try {
       await page.goto(`${LIVE_URL}/admin/field-ops?area=breach-review`, { waitUntil: 'domcontentloaded' });
