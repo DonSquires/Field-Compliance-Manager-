@@ -30,4 +30,11 @@ describe('finance owner guide', () => {
     expect(guide).toContain('Bob is checking your finance records');
     expect(guide).toContain('finance-owner-error');
   });
+
+  it('offers a six-area NZ finance readiness check without calling it compliance', () => {
+    expect(guide).toContain("supabase.rpc('assess_bob_nz_finance_readiness')");
+    expect(guide).toContain('How ready are we for NZ finance?');
+    expect(guide).toContain('not a legal compliance certificate');
+    expect(guide).toContain('readiness.overall_score');
+  });
 });
