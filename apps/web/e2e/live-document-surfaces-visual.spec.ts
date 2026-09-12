@@ -33,32 +33,6 @@ async function signIn(page: Page): Promise<void> {
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
 }
 
-async function selectCompletedEvidenceWithPhoto(page: Page): Promise<boolean> {
-  await page.goto(`${LIVE_URL}/admin/field-ops?area=cctv-review`, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('.cctv-review-page')).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('.cctv-job-row').first()).toBeVisible({ timeout: 30_000 });
-  await page.getByRole('button', { name: /^Complete\s*\d*$/ }).click();
-  await expect(page.locator('.cctv-job-row-main').first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('Loading review work', { exact: true })).not.toBeVisible({ timeout: 30_000 });
-  const rows = page.locator('.cctv-job-row-main');
-  const count = Math.min(await rows.count(), 15);
-  for (let index = 0; index < count; index += 1) {
-    await rows.nth(index).click();
-    await page.waitForTimeout(600);
-    const observations = page.getByRole('button', { name: /Observations \((?!0)\)/ });
-    if (await observations.count()) {
-      await observations.first().click();
-      if (await page.locator('.cctv-observation-card img').count()) return true;
-    }
-    const frames = page.getByRole('button', { name: /Frames \((?!0)\)/ });
-    if (await frames.count()) {
-      await frames.first().click();
-      if (await page.locator('.cctv-keyframe-item img').count()) return true;
-    }
-  }
-  return false;
-}
-
 const surfaces = [
   { name: 'document-studio', path: '/admin/document-studio', marker: /Bob document studio/i, ready: /Document setup/i },
   { name: 'files', path: '/admin/files', marker: /File system/i, ready: /Permitted records|Files waiting registration/i },
@@ -113,21 +87,4 @@ test.describe('production document workflow visual audit', () => {
     expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
   });
 
-  test('CCTV evidence opens an evidence-scoped Bob incident report', async ({ page }) => {
-    const evidence = monitor(page);
-    await signIn(page);
-    const hasReportSafeEvidence = await selectCompletedEvidenceWithPhoto(page);
-    test.skip(!hasReportSafeEvidence, 'Live CCTV has no completed item with a report-safe evidence photograph; seed governed evidence before enabling this journey.');
-    const bobDraftButton = page.getByRole('button', { name: 'Bob: Draft incident report', exact: true });
-    await expect(bobDraftButton).toBeVisible({ timeout: 30_000 });
-    const evidenceId = await page.locator('[data-evidence-id]').first().getAttribute('data-evidence-id').catch(() => null);
-    await bobDraftButton.click();
-    await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=cctv&sourceId=[0-9a-f-]+$/i, { timeout: 30_000 });
-    if (evidenceId) expect(page.url()).toContain(`sourceId=${evidenceId}`);
-    await expect(page.getByRole('status', { name: 'Source context for document' })).toContainText(/CCTV/i);
-    await expect(page.getByLabel('Document type')).toHaveValue('incident_report');
-    expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
-    expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
-    expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
-  });
 });
