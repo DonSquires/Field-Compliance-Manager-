@@ -117,6 +117,64 @@ async function seedSyntheticCctv(page: Page): Promise<{ fileName: string; storag
   return { fileName, storagePath };
 }
 
+async function seedSyntheticBreach(page: Page): Promise<{ recordId: string }> {
+  let supabaseUrl = '';
+  let anonKey = '';
+  page.on('request', (request) => {
+    if (!anonKey && request.url().includes('/rest/v1/')) {
+      anonKey = request.headers().apikey ?? '';
+      supabaseUrl = new URL(request.url()).origin;
+    }
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
+  const auth = await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith('sb-')) continue;
+      try {
+        const value = JSON.parse(localStorage.getItem(key) ?? 'null');
+        const session = value?.currentSession ?? value;
+        if (session?.access_token) return { accessToken: session.access_token };
+      } catch { /* Ignore unrelated local storage entries. */ }
+    }
+    return null;
+  });
+  if (!auth || !supabaseUrl || !anonKey) throw new Error('Live Supabase client configuration was not observable for synthetic breach seeding.');
+  const response = await page.request.post(`${supabaseUrl}/functions/v1/seed-synthetic-breach`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${auth.accessToken}`, 'Content-Type': 'application/json' },
+    data: { marker: 'FCM-SYNTHETIC-AGENTIC', action: 'seed' },
+  });
+  const body = await response.json();
+  if (!response.ok() || !body.record_id) throw new Error(body.error ?? `Synthetic breach seed failed (${response.status()})`);
+  return { recordId: body.record_id };
+}
+
+async function cleanupSyntheticBreach(page: Page, recordId: string): Promise<void> {
+  let supabaseUrl = '';
+  let anonKey = '';
+  page.on('request', (request) => {
+    if (!anonKey && request.url().includes('/rest/v1/')) {
+      anonKey = request.headers().apikey ?? '';
+      supabaseUrl = new URL(request.url()).origin;
+    }
+  });
+  const auth = await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith('sb-')) continue;
+      try {
+        const value = JSON.parse(localStorage.getItem(key) ?? 'null');
+        const session = value?.currentSession ?? value;
+        if (session?.access_token) return { accessToken: session.access_token };
+      } catch { /* Ignore unrelated local storage entries. */ }
+    }
+    return null;
+  });
+  if (!auth || !supabaseUrl || !anonKey) throw new Error('Authenticated Supabase configuration was unavailable for synthetic breach cleanup.');
+  const response = await page.request.post(`${supabaseUrl}/functions/v1/seed-synthetic-breach`, { headers: { apikey: anonKey, Authorization: `Bearer ${auth.accessToken}`, 'Content-Type': 'application/json' }, data: { marker: 'FCM-SYNTHETIC-AGENTIC', action: 'cleanup', record_id: recordId } });
+  const result = { ok: response.ok(), body: await response.json() };
+  if (!result.ok) throw new Error(result.body.error ?? 'Synthetic breach cleanup failed');
+}
+
 const surfaces = [
   { name: 'document-studio', path: '/admin/document-studio', marker: /Bob document studio/i, ready: /Document setup/i },
   { name: 'files', path: '/admin/files', marker: /File system/i, ready: /Permitted records|Files waiting registration/i },
@@ -182,21 +240,23 @@ test.describe('production document workflow visual audit', () => {
   test('actioned breach opens an enforcement-scoped Bob draft', async ({ page }) => {
     const evidence = monitor(page);
     await signIn(page);
-    await page.goto(`${LIVE_URL}/admin/field-ops?area=breach-review`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText(/Compliance Breach Review/i)).toBeVisible({ timeout: 30_000 });
-    await page.getByRole('button', { name: 'Actioned', exact: true }).click();
-    let draftButton = page.getByRole('button', { name: '✨ Bob: Draft document', exact: true }).first();
-    if (!(await draftButton.isVisible().catch(() => false))) {
-      test.skip(true, 'No actioned breach test data is available in the live organisation; seed an observation through the governed pipeline before enabling this journey.');
+    const synthetic = await seedSyntheticBreach(page);
+    try {
+      await page.goto(`${LIVE_URL}/admin/field-ops?area=breach-review`, { waitUntil: 'domcontentloaded' });
+      await expect(page.getByText(/Compliance Breach Review/i)).toBeVisible({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'Actioned', exact: true }).click();
+      const draftButton = page.getByRole('button', { name: '✨ Bob: Draft document', exact: true }).first();
+      await expect(draftButton).toBeVisible({ timeout: 30_000 });
+      await draftButton.click();
+      await expect(page).toHaveURL(new RegExp(`/admin/document-studio\\?sourceType=(notice|breach)&sourceId=${synthetic.recordId}&auto=1$`, 'i'), { timeout: 30_000 });
+      await expect(page.getByLabel('Document type')).toHaveValue(/letter|incident_report/);
+      await expect(page.getByText('Needs review', { exact: true })).toBeVisible({ timeout: 30_000 });
+      expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
+      expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
+      expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
+    } finally {
+      await cleanupSyntheticBreach(page, synthetic.recordId);
     }
-    await expect(draftButton).toBeVisible({ timeout: 30_000 });
-    await draftButton.click();
-    await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=(notice|breach)&sourceId=[0-9a-f-]+&auto=1$/i, { timeout: 30_000 });
-    await expect(page.getByLabel('Document type')).toHaveValue(/letter|incident_report/);
-    await expect(page.getByText('Needs review', { exact: true })).toBeVisible({ timeout: 30_000 });
-    expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
-    expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
-    expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
   });
 
   test('synthetic CCTV evidence opens an evidence-scoped Bob incident report', async ({ page }) => {
