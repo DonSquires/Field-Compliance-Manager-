@@ -3,8 +3,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 const LIVE_URL = process.env.HUMAN_TEST_BASE_URL || 'https://www.fcmanager.co.nz';
 const ADMIN_EMAIL = process.env.PM_ADMIN_EMAIL || process.env.GRANDMASTER_TEST_EMAIL || '';
 const ADMIN_PASSWORD = process.env.PM_ADMIN_PASSWORD || process.env.GRANDMASTER_TEST_PASSWORD || '';
-const OFFICER_EMAIL = process.env.PM_OFFICER_EMAIL || '';
-const OFFICER_PASSWORD = process.env.PM_OFFICER_PASSWORD || '';
+const OFFICER_EMAIL = process.env.PM_OFFICER_EMAIL || 'synthetic.officer.test@fcmanager.test';
+const OFFICER_PASSWORD = process.env.PM_OFFICER_PASSWORD || 'Run2thesun??';
 const liveReady = Boolean(ADMIN_EMAIL && ADMIN_PASSWORD && OFFICER_EMAIL && OFFICER_PASSWORD && ADMIN_EMAIL !== OFFICER_EMAIL);
 
 type Evidence = { phase: string; state: string; url: string; screenshot: string };
@@ -17,7 +17,7 @@ async function signIn(page: Page, email: string, password: string, path: string)
     await page.locator('input[type="password"]').first().fill(password);
     await page.getByRole('button', { name: /sign.?in|login/i }).first().click();
   }
-  await page.locator('nav').first().waitFor({ state: 'visible', timeout: 30_000 });
+  await page.locator('nav, header, .admin-shell, .officer-shell-bar').first().waitFor({ state: 'visible', timeout: 30_000 });
   const dismiss = page.getByRole('button', { name: 'Not now', exact: true });
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
 }
