@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Binoculars,
+  BriefcaseBusiness,
   Car,
   ClipboardCheck,
   FileWarning,
@@ -13,6 +14,7 @@ import {
   RefreshCw,
   Route,
   ShieldAlert,
+  ShieldCheck,
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -58,6 +60,101 @@ export interface QueueItem {
   navigate: string;
 }
 
+const COMMAND_CENTRE_GROUPS = [
+  {
+    key: 'clients',
+    label: 'Clients & CRM',
+    description: 'Client accounts, sites, contacts and agreements',
+    accent: 'blue',
+    icon: BriefcaseBusiness,
+    statLabel: 'active clients',
+    stat: null,
+    links: [
+      ['CRM Hub', 'crm'], ['Client Sites', 'site-360'], ['Organisations', 'relationships'],
+      ['Contacts', 'users'], ['Contracts', 'onboarding'],
+    ],
+    openLabel: 'Open Clients & CRM',
+    open: 'crm',
+  },
+  {
+    key: 'services',
+    label: 'Services & Dispatch',
+    description: 'Dispatch jobs, patrol services and call signs',
+    accent: 'green',
+    icon: Radio,
+    statLabel: 'active jobs',
+    stat: 'activeDispatch',
+    links: [
+      ['Dispatch', 'dispatch'], ['Jobs List', 'dispatch'], ['Monitor', 'field-ops'],
+      ['Job Map', 'live-map'], ['Ops Map', 'live-map'], ['Site Guard', 'access-control'],
+      ['Access Control', 'access-control'], ['Noise Control', 'noise-control'], ['Parking', 'parking'], ['EMS', 'field-ops'],
+    ],
+    openLabel: 'Open Services & Dispatch',
+    open: 'field-ops',
+  },
+  {
+    key: 'rostering',
+    label: 'Rostering & Workforce',
+    description: 'Shifts, timesheets, open shifts and call signs',
+    accent: 'purple',
+    icon: Users,
+    statLabel: "today's shifts",
+    stat: 'onDuty',
+    links: [
+      ['Roster Planner', 'roster'], ['Timesheets', 'people-hr'], ['Open Shifts', 'roster'],
+      ['Availability', 'roster'], ['Patrol Schedule', 'roster'], ['Patrol KPIs', 'reports'],
+    ],
+    openLabel: 'Open Rostering & Workforce',
+    open: 'roster',
+  },
+  {
+    key: 'people',
+    label: 'Staff & People',
+    description: 'User management, officer welfare and live tracking',
+    accent: 'orange',
+    icon: Users,
+    statLabel: 'on patrol now',
+    stat: 'onDuty',
+    links: [
+      ['Users', 'users'], ['Welfare', 'welfare-alerts'], ['Live Tracking', 'live-map'],
+      ['Skills', 'people-hr'], ['Person Records', 'people-hr'], ['ID Check', 'users'],
+    ],
+    openLabel: 'Open Staff & People',
+    open: 'people-hr',
+  },
+  {
+    key: 'pricing',
+    label: 'Pricing & Invoicing',
+    description: 'Per-client service rates, contracts and invoices',
+    accent: 'amber',
+    icon: BriefcaseBusiness,
+    statLabel: 'active contracts',
+    stat: null,
+    links: [
+      ['Assets', 'finance-costing'], ['Service Rates', 'rate-rules'], ['Invoices', 'finance-money'],
+      ['Contracts', 'crm'], ['Timesheets', 'people-hr'],
+    ],
+    openLabel: 'Open Pricing & Invoicing',
+    open: 'finance-bureau',
+  },
+  {
+    key: 'compliance',
+    label: 'Compliance & Enforcement',
+    description: 'Breaches, infringements, notices and disputes',
+    accent: 'red',
+    icon: ShieldCheck,
+    statLabel: 'open alerts',
+    stat: 'breaches',
+    links: [
+      ['Compliance', 'reports'], ['Breaches', 'breach-review'], ['Command', 'field-ops'],
+      ['Infringements', 'breach-review'], ['Disputes', 'approvals'], ['Notices', 'reports'],
+      ['NTV', 'vehicle-search'], ['NZSCV', 'vehicle-search'], ['Spatial', 'sites'],
+    ],
+    openLabel: 'Open Compliance & Enforcement',
+    open: 'reports',
+  },
+] as const;
+
 const EMPTY_METRICS: Metrics = {
   onDuty: { value: null, error: null },
   activeDispatch: { value: null, error: null },
@@ -70,6 +167,11 @@ function metricFrom(response: { count: number | null; error: { message: string }
   return response.error
     ? { value: null, error: response.error.message }
     : { value: response.count ?? 0, error: null };
+}
+
+function displayMetric(metric: MetricState): number | string {
+  const unavailable = metric.value === null;
+  return unavailable ? 'Unavailable' : metric.value ?? 0;
 }
 
 function relativeTime(value: string): string {
@@ -281,9 +383,42 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
 
       <StatusStrip tone={overviewTone}>{overviewMessage}</StatusStrip>
 
+      <section className="admin-command-centre" aria-labelledby="command-centre-heading">
+        <div className="admin-command-centre-heading">
+          <div>
+            <span>Service provider portal</span>
+            <h2 id="command-centre-heading">Command Centre</h2>
+          </div>
+          <small>All organisations</small>
+        </div>
+        <div className="admin-domain-grid">
+          {COMMAND_CENTRE_GROUPS.map((group) => {
+            const Icon = group.icon;
+            const metric = group.stat ? metrics[group.stat] : null;
+            return (
+              <section key={group.key} className={`admin-domain-card admin-domain-card--${group.accent}`}>
+                <header>
+                  <span className="admin-domain-icon"><Icon size={18} aria-hidden="true" /></span>
+                  <div><h3>{group.label}</h3><p>{group.description}</p></div>
+                  <span className="admin-domain-stat"><strong>{metric?.value ?? '—'}</strong><small>{group.statLabel}</small></span>
+                </header>
+                <div className="admin-domain-links">
+                  {group.links.map(([label, destination]) => (
+                    <button key={`${group.key}-${label}`} type="button" onClick={() => onNavigate?.(destination)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" className="admin-domain-open" onClick={() => onNavigate?.(group.open)}>{group.openLabel}<ArrowRight size={14} aria-hidden="true" /></button>
+              </section>
+            );
+          })}
+        </div>
+      </section>
+
       <section className="admin-metric-grid" aria-label="Current operations metrics">
-        <MetricCard icon={Users} label="On duty now" value={metrics.onDuty.value ?? 'Unavailable'} unavailable={metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
-        <MetricCard icon={Radio} label="Active dispatch" value={metrics.activeDispatch.value ?? 'Unavailable'} unavailable={metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
+        <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty)} unavailable={metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
+        <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch)} unavailable={metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
         <SafetyGate
           status={moduleStatus}
           isEnabled={welfareEnabled}
@@ -291,10 +426,10 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           safetyRelevant
           renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}
         >
-          <MetricCard icon={HeartPulse} label="Welfare alerts" value={metrics.welfare.value ?? 'Unavailable'} unavailable={metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+          <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare)} unavailable={metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
         </SafetyGate>
-        <MetricCard icon={ShieldAlert} label="Open breaches" value={metrics.breaches.value ?? 'Unavailable'} unavailable={metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
-        <MetricCard icon={Binoculars} label="Observations today" value={metrics.observations.value ?? 'Unavailable'} unavailable={metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
+        <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches)} unavailable={metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
+        <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations)} unavailable={metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
       </section>
 
       {queueWarnings.length > 0 && (
