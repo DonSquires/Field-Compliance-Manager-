@@ -26,6 +26,14 @@ test('owner can walk finance from simple home to final review boundary', async (
   await expect(page.getByText('Money left after costs')).toBeVisible();
   await page.goBack();
 
+  await page.getByRole('button', { name: /Work out what a job should cost/ }).click();
+  await expect(page.getByRole('heading', { name: 'What should this job cost?' })).toBeVisible();
+  await page.goBack();
+
+  await page.getByRole('button', { name: /Manage prices and discounts/ }).click();
+  await expect(page.getByRole('heading', { name: 'Pricing and discounts' })).toBeVisible();
+  await page.goBack();
+
   await page.getByRole('button', { name: /Connect ANZ or IRD/ }).click();
   await expect(page.getByRole('heading', { name: 'Connect your finance accounts' })).toBeVisible();
   await expect(page.getByText('We never ask for online-banking passwords')).toBeVisible();
