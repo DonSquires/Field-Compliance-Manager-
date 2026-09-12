@@ -106,6 +106,10 @@ describe('organisation file system', () => {
     expect(page).toContain('Malformed rows');
     expect(page).toContain('Unresolved values');
     expect(page).toContain('activeImportPreview.unresolved_count');
+    expect(page).toContain('Human mapping review');
+    expect(page).toContain("supabase.from('file_import_mapping_reviews')");
+    expect(page).toContain("supabase.rpc('review_file_import_mapping'");
+    expect(page).toContain('No canonical records are changed here');
   });
 
   it('is registered as a first-class admin page', () => {

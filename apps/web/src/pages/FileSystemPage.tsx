@@ -88,6 +88,14 @@ interface FileImportBatch {
   created_at: string;
 }
 
+interface FileImportMappingReview {
+  source_column: string;
+  target_entity: string | null;
+  target_field: string | null;
+  decision: 'proposed' | 'confirmed' | 'rejected';
+  review_reason: string | null;
+}
+
 interface GeneratedOutputRow {
   id: string;
   document_id: string;
@@ -259,6 +267,9 @@ const FileSystemPage: React.FC = () => {
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [reviewingBatch, setReviewingBatch] = useState(false);
+  const [mappingReviews, setMappingReviews] = useState<FileImportMappingReview[]>([]);
+  const [mappingDrafts, setMappingDrafts] = useState<Record<string, { targetEntity: string; targetField: string; decision: FileImportMappingReview['decision']; reason: string }>>({});
+  const [savingMapping, setSavingMapping] = useState<string | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutputRow[]>([]);
   const [noticeArtifacts, setNoticeArtifacts] = useState<NoticeArtifactRow[]>([]);
@@ -328,7 +339,25 @@ const FileSystemPage: React.FC = () => {
     await loadDocuments();
   };
 
+  const selectedBatch = importBatches.find((batch) => batch.id === selectedBatchId) ?? null;
+  const selectedMappingSources = selectedBatch ? Array.from(new Set([...(selectedBatch.schema_json.mappings ?? []).map((mapping) => mapping.source), ...(selectedBatch.schema_json.headers ?? [])])) : [];
+
   useEffect(() => { void loadDocuments(); }, [loadDocuments]);
+
+  useEffect(() => {
+    let active = true;
+    const loadMappings = async () => {
+      if (!selectedBatch) { setMappingReviews([]); setMappingDrafts({}); return; }
+      const { data, error: mappingError } = await supabase.from('file_import_mapping_reviews').select('source_column,target_entity,target_field,decision,review_reason').eq('batch_id', selectedBatch.id).order('source_column');
+      if (!active) return;
+      if (mappingError) { setError(mappingError.message); return; }
+      const reviews = (data as FileImportMappingReview[]) ?? [];
+      setMappingReviews(reviews);
+      setMappingDrafts(Object.fromEntries(reviews.map((review) => [review.source_column, { targetEntity: review.target_entity ?? '', targetField: review.target_field ?? '', decision: review.decision, reason: review.review_reason ?? '' }])));
+    };
+    void loadMappings();
+    return () => { active = false; };
+  }, [selectedBatch]);
 
   const visibleDocuments = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -341,7 +370,6 @@ const FileSystemPage: React.FC = () => {
   }, [documents, scope, search, space]);
 
   const visibleBatches = useMemo(() => batchStatus === 'all' ? importBatches : importBatches.filter((batch) => batch.status === batchStatus), [batchStatus, importBatches]);
-  const selectedBatch = importBatches.find((batch) => batch.id === selectedBatchId) ?? null;
   const visibleOutputs = useMemo(() => generatedOutputs.filter((output) => {
     const matchesStatus = outputStatus === 'all' || output.status === outputStatus;
     const matchesFormat = outputFormat === 'all' || output.output_format === outputFormat;
@@ -467,6 +495,16 @@ const FileSystemPage: React.FC = () => {
     setReviewingBatch(false);
   };
 
+  const saveMappingReview = async (sourceColumn: string) => {
+    if (!selectedBatch) return;
+    const draft = mappingDrafts[sourceColumn] ?? { targetEntity: '', targetField: '', decision: 'proposed' as const, reason: '' };
+    setSavingMapping(sourceColumn); setPreviewError(null);
+    const { data, error: mappingError } = await supabase.rpc('review_file_import_mapping', { p_batch_id: selectedBatch.id, p_source_column: sourceColumn, p_target_entity: draft.targetEntity, p_target_field: draft.targetField, p_decision: draft.decision, p_review_reason: draft.reason });
+    if (mappingError) setPreviewError(mappingError.message);
+    else { setMappingReviews((current) => [...current.filter((review) => review.source_column !== sourceColumn), data as FileImportMappingReview].sort((left, right) => left.source_column.localeCompare(right.source_column))); setNotice(`Mapping review recorded for ${sourceColumn}. No canonical records were changed.`); }
+    setSavingMapping(null);
+  };
+
   return <div className="file-system-page">
     <header className="file-system-header"><div><span>Organisation workspace / Files</span><h1>File system</h1><p>Find source documents, inspect provenance, and review extracted versions before anything becomes an authoritative record.</p></div><div className="file-system-header-actions"><label className="file-system-human-upload"><Upload size={17} />{uploadingFile ? 'Uploading...' : 'Upload source file'}<input type="file" disabled={uploadingFile} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadHumanIntakeFile(file); event.currentTarget.value = ''; }} /></label><button type="button" onClick={() => navigate('/admin/approvals')}><ShieldCheck size={17} />Review promotions</button><button type="button" onClick={() => void loadDocuments()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></div></header>
     {error && <div className="file-system-message is-error" role="alert"><span>{error}</span><button type="button" title="Dismiss" onClick={() => setError(null)}><X size={16} /></button></div>}
@@ -524,7 +562,7 @@ const FileSystemPage: React.FC = () => {
     <section className="file-system-batches" aria-label="Import batch history">
       <div className="file-system-batches-heading"><div><span>Review history</span><h2>Import batches</h2></div><select aria-label="Import batch status" value={batchStatus} onChange={(event) => setBatchStatus(event.target.value as typeof batchStatus)}><option value="all">All statuses</option><option value="preview">Preview</option><option value="needs_review">Needs review</option><option value="approved">Approved</option><option value="applied">Applied</option><option value="rejected">Rejected</option><option value="failed">Failed</option></select></div>
       {visibleBatches.length === 0 ? <p className="file-system-muted">No persisted review batches match this status.</p> : <div className="file-system-batch-grid">{visibleBatches.map((batch) => <button type="button" key={batch.id} className={selectedBatchId === batch.id ? 'is-selected' : ''} onClick={() => setSelectedBatchId(batch.id)}><strong>{batch.source_file}</strong><span>{batch.status.replaceAll('_', ' ')} · {batch.row_count.toLocaleString()} rows</span><small>{batch.duplicate_of_batch_id ? 'Duplicate source linked' : 'Original source'} · {batch.duplicate_count} row duplicates · {batch.unresolved_count} unresolved</small></button>)}</div>}
-      {selectedBatch && <article className="file-system-batch-detail"><div><strong>{selectedBatch.batch_name}</strong><span>{selectedBatch.parser} · {selectedBatch.status.replaceAll('_', ' ')}</span><small>{selectedBatch.source_sha256 ? `SHA-256 ${selectedBatch.source_sha256}` : 'Source hash unavailable'}</small>{selectedBatch.duplicate_of_batch_id && <small>Duplicate of batch {selectedBatch.duplicate_of_batch_id.slice(0, 8)}</small>}{selectedBatch.review_reason && <small>Reason: {selectedBatch.review_reason}</small>}</div><div><span>Mappings</span>{(selectedBatch.schema_json.mappings ?? []).map((mapping) => <small key={`${mapping.source}-${mapping.target}`}>{mapping.source} to {mapping.target} ({mapping.confidence})</small>)}</div><div><span>Warnings</span>{(selectedBatch.schema_json.warnings ?? []).map((warning) => <small key={warning}>{warning}</small>)}</div>{selectedBatch.schema_json.headers && selectedBatch.schema_json.sample_rows && <div className="file-system-batch-sample"><span>Sample rows</span>{selectedBatch.schema_json.sample_rows.map((row, rowIndex) => <small key={`batch-sample-${rowIndex}`}>{row.join(' · ')}</small>)}</div>}{(selectedBatch.status === 'preview' || selectedBatch.status === 'needs_review') && <div className="file-system-batch-review"><label htmlFor="batch-review-reason">Review reason</label><textarea id="batch-review-reason" rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Explain the review decision" /><div><button type="button" onClick={() => void reviewBatch('approved')} disabled={reviewingBatch}>Approve batch</button><button type="button" onClick={() => void reviewBatch('rejected')} disabled={reviewingBatch}>Reject batch</button></div></div>}</article>}
+      {selectedBatch && <article className="file-system-batch-detail"><div><strong>{selectedBatch.batch_name}</strong><span>{selectedBatch.parser} · {selectedBatch.status.replaceAll('_', ' ')}</span><small>{selectedBatch.source_sha256 ? `SHA-256 ${selectedBatch.source_sha256}` : 'Source hash unavailable'}</small>{selectedBatch.duplicate_of_batch_id && <small>Duplicate of batch {selectedBatch.duplicate_of_batch_id.slice(0, 8)}</small>}{selectedBatch.review_reason && <small>Reason: {selectedBatch.review_reason}</small>}</div><div><span>Mappings</span>{(selectedBatch.schema_json.mappings ?? []).map((mapping) => <small key={`${mapping.source}-${mapping.target}`}>{mapping.source} to {mapping.target} ({mapping.confidence})</small>)}</div><div><span>Warnings</span>{(selectedBatch.schema_json.warnings ?? []).map((warning) => <small key={warning}>{warning}</small>)}</div>{selectedBatch.schema_json.headers && selectedBatch.schema_json.sample_rows && <div className="file-system-batch-sample"><span>Sample rows</span>{selectedBatch.schema_json.sample_rows.map((row, rowIndex) => <small key={`batch-sample-${rowIndex}`}>{row.join(' · ')}</small>)}</div>}<section className="file-system-mapping-review" aria-label="Human mapping review"><div><span>Human mapping review</span><strong>Bob proposes; you confirm the target.</strong><small>These decisions are stored as review evidence only. No canonical records are changed here.</small></div>{selectedMappingSources.length === 0 ? <p className="file-system-muted">No source columns were captured for this batch.</p> : selectedMappingSources.map((sourceColumn) => { const existing = mappingReviews.find((review) => review.source_column === sourceColumn); const draft = mappingDrafts[sourceColumn] ?? { targetEntity: existing?.target_entity ?? '', targetField: existing?.target_field ?? '', decision: existing?.decision ?? 'proposed', reason: existing?.review_reason ?? '' }; return <div className="file-system-mapping-row" key={sourceColumn}><strong>{sourceColumn}</strong><label><span>Target entity</span><input value={draft.targetEntity} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, targetEntity: event.target.value } }))} placeholder="Bob/schema candidate" /></label><label><span>Target field</span><input value={draft.targetField} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, targetField: event.target.value } }))} placeholder="Canonical field" /></label><label><span>Decision</span><select value={draft.decision} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, decision: event.target.value as FileImportMappingReview['decision'] } }))}><option value="proposed">Proposed</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option></select></label><label><span>Reason</span><input value={draft.reason} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, reason: event.target.value } }))} placeholder="Evidence or unresolved reason" /></label><button type="button" onClick={() => void saveMappingReview(sourceColumn)} disabled={savingMapping === sourceColumn}>{savingMapping === sourceColumn ? 'Saving' : 'Record mapping review'}</button></div>; })}</section>{(selectedBatch.status === 'preview' || selectedBatch.status === 'needs_review') && <div className="file-system-batch-review"><label htmlFor="batch-review-reason">Review reason</label><textarea id="batch-review-reason" rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Explain the review decision" /><div><button type="button" onClick={() => void reviewBatch('approved')} disabled={reviewingBatch}>Approve batch</button><button type="button" onClick={() => void reviewBatch('rejected')} disabled={reviewingBatch}>Reject batch</button></div></div>}</article>}
     </section>
     {intakeAttachments.length > 0 && <section className="file-system-intake" aria-label="Bob intake waiting registration"><div><span>Bob intake</span><h2>Files waiting registration</h2><p>These uploads are not yet canonical Files records. Registration extracts, hashes, classifies, and preserves upload provenance.</p></div><div>{intakeAttachments.map((attachment) => { const disposition = intakeDisposition(attachment); return <article key={attachment.id}><strong>{attachment.file_name}</strong><small>{attachment.file_type} · {Math.round(attachment.file_size_bytes / 1024)} KB · {new Date(attachment.created_at).toLocaleDateString('en-NZ')}</small>{disposition.allowed ? <button type="button" onClick={() => void registerAttachment(attachment)}>Register in Files</button> : <span className="file-system-quarantine">Quarantined: {disposition.reason}</span>}</article>; })}</div></section>}
     <section className="file-system-spaces" aria-label="File spaces">{FILE_SPACES.map((item) => <button type="button" key={item.key} className={space === item.key ? 'is-active' : ''} onClick={() => setSpace(item.key)}><FolderOpen size={16} /><span>{item.label}</span></button>)}</section>
