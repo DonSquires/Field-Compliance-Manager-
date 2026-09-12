@@ -160,7 +160,8 @@ export class HumanTestSession {
       if (!headings.length) issues.push('no visible heading establishes the page hierarchy');
       if (headings.filter((heading) => (heading.textContent ?? '').trim()).length > 1 && !document.querySelector('h1')) issues.push('page has headings but no h1-level page title');
       const unnamedControls = [...document.querySelectorAll('button,a,input,textarea,select')].filter(visible).filter((element) => {
-        const label = element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || element.getAttribute('placeholder') || '';
+        const associatedLabel = element.closest('label') ?? [...document.querySelectorAll('label')].find((labelElement) => labelElement.htmlFor === (element as HTMLInputElement).id);
+        const label = element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || element.getAttribute('placeholder') || associatedLabel?.textContent || '';
         return !label.trim();
       }).length;
       if (unnamedControls) issues.push(`${unnamedControls} visible interactive control(s) have no accessible name`);
