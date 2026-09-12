@@ -8,7 +8,8 @@ describe('Akahu ANZ authorization start', () => {
   it('fails closed without server configuration and never accepts credentials', () => {
     expect(edgeFunction).toContain("Deno.env.get('AKAHU_APP_ID')");
     expect(edgeFunction).toContain("Deno.env.get('AKAHU_REDIRECT_URI')");
-    expect(edgeFunction).toContain('Akahu provider is not configured yet');
+    expect(edgeFunction).toContain("/^app_token_[a-z0-9]+$/i.test(akahuAppId)");
+    expect(edgeFunction).toContain('Akahu App ID Token or redirect URI is not configured correctly');
     expect(edgeFunction).not.toContain('password');
     expect(edgeFunction).not.toContain('client_secret');
   });

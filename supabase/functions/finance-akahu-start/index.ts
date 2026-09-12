@@ -6,7 +6,7 @@ const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const akahuAppId = Deno.env.get('AKAHU_APP_ID') ?? '';
 const akahuRedirectUri = Deno.env.get('AKAHU_REDIRECT_URI') ?? '';
-const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey' };
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 
 const json = (body: Record<string, unknown>, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 const hash = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -14,7 +14,7 @@ const hash = async (value: string) => Array.from(new Uint8Array(await crypto.sub
 serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
-  if (!akahuAppId || !akahuRedirectUri) return json({ error: 'Akahu provider is not configured yet' }, 503);
+  if (!/^app_token_[a-z0-9]+$/i.test(akahuAppId) || !akahuRedirectUri) return json({ error: 'Akahu App ID Token or redirect URI is not configured correctly' }, 503);
 
   const authHeader = request.headers.get('Authorization');
   if (!authHeader) return json({ error: 'Authentication required' }, 401);
