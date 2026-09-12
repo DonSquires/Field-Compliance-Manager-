@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './FinanceConnectionWizard.css';
 import './FinanceConnectionWizardStates.css';
+import './FinanceConnectionPersonalTest.css';
 
 type Provider = 'ird' | 'bank';
 type BankAccount = { id: string; account_name: string; account_number: string; bank_name: string | null };
@@ -27,6 +28,7 @@ export function FinanceConnectionWizard() {
   const [gstBasis, setGstBasis] = useState('payments');
   const [gstFrequency, setGstFrequency] = useState('two_monthly');
   const [taxAgentName, setTaxAgentName] = useState('');
+  const [personalCheck, setPersonalCheck] = useState<{ account_count?: number; verified?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -76,6 +78,15 @@ export function FinanceConnectionWizard() {
     setSaving(false);
   };
 
+  const runPersonalAkahuCheck = async () => {
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: checkError } = await supabase.functions.invoke('finance-akahu-personal-check', { body: {} });
+    if (checkError) setError(checkError.message);
+    else if (data?.error) setError(data.error);
+    else { setPersonalCheck(data); setNotice(`Personal Akahu test verified ${data.account_count ?? 0} account(s). No transactions were imported.`); }
+    setSaving(false);
+  };
+
   const connectedLabel = (connection: Connection) => connection.provider_type === 'ird' && connection.status === 'awaiting_authorisation' ? 'Provider setup required' : connection.status === 'connected' ? 'Connected' : connection.status === 'awaiting_authorisation' ? 'Waiting for authorisation' : connection.status;
   if (loading) return <section className="finance-connection-wizard" aria-busy="true"><p>Loading connection setup...</p></section>;
 
@@ -90,5 +101,6 @@ export function FinanceConnectionWizard() {
     {step === 2 && provider === 'ird' && <div className="finance-connection-form"><h3>Review before saving IRD details</h3><div className="finance-connection-summary"><strong>IRD number ending {irdNumber.replace(/\D/g, '').slice(-4)}</strong><span>{gstRegistered ? `GST registered · ${gstFrequency.replace('_', ' ')}` : 'GST not marked as registered'}</span><span>{taxAgentName ? `Review with ${taxAgentName}` : 'Accountant/provider review still required'}</span></div><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void requestConnection()}>{saving ? 'Saving...' : 'Save IRD details'} <ArrowRight size={15} /></button></div>}
     {step === 2 && provider === 'bank' && <div className="finance-connection-form"><h3>Confirm before Bob prepares it</h3><label className="finance-connection-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I understand this will request access only for the selected finance data, and I will complete authorisation with the provider.</span></label><div className="finance-connection-summary"><strong>ANZ bank account</strong><span>Secure provider authorisation window</span><span>Balances, transactions, and payment matching</span></div><button type="button" className="btn btn-primary" disabled={!consent || saving} onClick={() => void requestConnection()}>{saving ? 'Preparing...' : 'Prepare secure connection'} <ArrowRight size={15} /></button></div>}
     {connections.length > 0 && <div className="finance-connection-existing"><strong>Existing setup</strong>{connections.slice(0, 4).map((connection, index) => <div key={`${connection.provider_type}-${connection.bank_account_id ?? index}`}><span>{connection.provider_type === 'ird' ? 'IRD' : 'Bank account'}</span><b>{connectedLabel(connection)}</b></div>)}</div>}
+    {profile?.role === 'grand_master' && <div className="finance-connection-personal-test"><div><strong>Grandmaster personal test</strong><small>Tests the Personal App only. It does not connect customer accounts or import transactions.</small></div><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => void runPersonalAkahuCheck()}>{saving ? 'Checking...' : 'Test personal Akahu'}</button>{personalCheck?.verified && <span>Verified {personalCheck.account_count ?? 0} account(s)</span>}</div>}
   </section>;
 }
