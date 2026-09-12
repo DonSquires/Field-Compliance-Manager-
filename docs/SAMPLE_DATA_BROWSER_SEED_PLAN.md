@@ -149,6 +149,8 @@ Patrol source-domain correction and current gap:
 
 Dr Bob and human approval evidence: live desktop human walkthrough passed on 2026-09-12 with 0 browser errors and 78 UX findings. Patrol batch review exposed no direct approval action while unresolved/malformed import values remain; no ambiguous patrol records were approved.
 
+Bob planner evidence: `bob-plan-import` read-only planning against `May Patrols.csv` parsed 1,431 rows but selected no target, returned `confident=false`, no model choice, and no mappings. This matches the Atlas/schema finding that generic import cannot safely choose among `client_sites`, `location_zones`, `patrol_routes`, `shift_stops`, `patrols`, and historical outcome records. A specialized patrol mapper with human client/site/zone resolution is required before any apply step.
+
 ## Next implementation
 
 Add a role-gated, tenant-scoped generic intake control to the File System UI. It should upload to private Bob storage, register provenance, classify/quarantine, expose extraction/review state, and require a visible human approval action before promotion. The control must support one file at a time initially so Playwright and human reviewers can trace each file without hiding partial failures.
