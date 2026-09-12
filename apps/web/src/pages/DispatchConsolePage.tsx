@@ -130,56 +130,33 @@ const ShiftCard: React.FC<{
   shift: ActiveShift;
   selected: boolean;
   onClick: () => void;
-}> = ({ shift, selected, onClick }) => (
-  <button
-    onClick={onClick}
-    style={{
-      width: '100%',
-      padding: '12px',
-      backgroundColor: selected ? 'var(--color-bg-tertiary)' : 'var(--color-bg-secondary)',
-      border: selected ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-      borderRadius: '4px',
-      cursor: 'pointer',
-      textAlign: 'left',
-      transition: 'all 0.2s ease',
-    }}
-    onMouseEnter={(e) => {
-      if (!selected) e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)';
-    }}
-    onMouseLeave={(e) => {
-      if (!selected) e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)';
-    }}
-  >
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-        {shift.officerName}
+}> = ({ shift, selected, onClick }) => {
+  const badge = shiftHealthBadge(shift.shiftHealth);
+
+  return (
+    <button
+      type="button"
+      className={`dispatch-shift-card ${selected ? 'is-selected' : ''}`}
+      onClick={onClick}
+    >
+      <div className="dispatch-shift-card__header">
+        <div className="dispatch-shift-card__officer">{shift.officerName}</div>
+        <div
+          className={`dispatch-shift-card__badge dispatch-shift-card__badge--${badge.tone}`}
+          aria-label={badge.label}
+        >
+          {badge.label.toUpperCase()}
+        </div>
       </div>
-      {(() => {
-        const badge = shiftHealthBadge(shift.shiftHealth);
-        return (
-          <div
-            style={{
-              fontSize: '11px',
-              fontWeight: 600,
-              color: badge.tone === 'healthy' ? '#4CAF50' : badge.tone === 'degraded' ? '#FF9800' : '#EF5350',
-              padding: '2px 6px',
-              backgroundColor: badge.tone === 'healthy' ? '#1B5E20' : badge.tone === 'degraded' ? '#1A1200' : '#3A0000',
-              borderRadius: '3px',
-            }}
-          >
-            {badge.label.toUpperCase()}
-          </div>
-        );
-      })()}
-    </div>
-    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
-      {shift.patrolRouteName && `Route: ${shift.patrolRouteName}`}
-    </div>
-    <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-      {shift.completedStops}/{shift.totalStops} stops
-    </div>
-  </button>
-);
+      <div className="dispatch-shift-card__route">
+        {shift.patrolRouteName && `Route: ${shift.patrolRouteName}`}
+      </div>
+      <div className="dispatch-shift-card__detail">
+        {shift.completedStops}/{shift.totalStops} stops
+      </div>
+    </button>
+  );
+};
 
 // Component: Stop Card
 const StopCard: React.FC<{ stop: ShiftStop; selected?: boolean; onSelect?: () => void }> = ({ stop, selected, onSelect }) => (
@@ -188,41 +165,17 @@ const StopCard: React.FC<{ stop: ShiftStop; selected?: boolean; onSelect?: () =>
     tabIndex={0}
     onClick={onSelect}
     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelect?.(); }}
-    style={{
-      padding: '12px',
-      backgroundColor: 'var(--color-bg-secondary)',
-      border: selected ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-      borderRadius: '4px',
-      marginBottom: '8px',
-    }}
+    className={`dispatch-stop-card ${selected ? 'is-selected' : ''}`}
   >
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '8px',
-      }}
-    >
-      <div style={{ fontSize: '13px', fontWeight: 600 }}>#{stop.sequence}</div>
-      <div
-        style={{
-          fontSize: '11px',
-          fontWeight: 600,
-          color: stop.status === 'completed' ? '#4CAF50' : stop.status === 'on_scene' ? '#3B82F6' : stop.status === 'en_route' ? '#FF9800' : '#666',
-          padding: '2px 6px',
-          backgroundColor: stop.status === 'completed' ? '#1B5E20' : stop.status === 'on_scene' ? '#0D1F3C' : stop.status === 'en_route' ? '#231A00' : '#2A2A2A',
-          borderRadius: '3px',
-        }}
-      >
+    <div className="dispatch-stop-card__header">
+      <div className="dispatch-stop-card__sequence">#{stop.sequence}</div>
+      <div className={`dispatch-stop-card__status dispatch-stop-card__status--${stop.status}`}>
         {shiftStopStatusLabel(stop.status).toUpperCase()}
       </div>
     </div>
-    <div style={{ fontSize: '12px', color: 'var(--color-text-primary)' }}>
-      {stop.siteName}
-    </div>
+    <div className="dispatch-stop-card__site">{stop.siteName}</div>
     {stop.arrival && (
-      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+      <div className="dispatch-stop-card__meta">
         Arrived: {new Date(stop.arrival).toLocaleTimeString()}
       </div>
     )}
@@ -679,95 +632,82 @@ const DispatchConsolePage: React.FC = () => {
   // Mobile: Shift + Stops + Jobs tabs
   if (isMobile) {
     return (
-      <ShellLayout shell="admin" className="dispatch-console-shell">
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '12px', paddingBottom: '12px' }}>
-        {/* Tab Bar */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '8px',
-            padding: '12px',
-            backgroundColor: 'var(--color-bg-secondary)',
-            borderRadius: '4px',
-          }}
-        >
-          {(['shifts', 'stops', 'jobs'] as MobileTab[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setMobileTab(tab)}
-              style={{
-                padding: '8px',
-                backgroundColor: mobileTab === tab ? 'var(--color-primary)' : 'transparent',
-                color: mobileTab === tab ? 'white' : 'var(--color-text-secondary)',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontWeight: 500,
-                fontSize: '12px',
-              }}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div style={{ flex: 1, overflowY: 'auto', paddingLeft: '12px', paddingRight: '12px' }}>
-          {mobileTab === 'shifts' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <ShellLayout
+        shell="admin"
+        className="dispatch-console-shell"
+        pageHeader={
+          <header className="dispatch-console-page-header">
+            <div>
+              <span className="dispatch-console-eyebrow">Operations</span>
+              <h1>Dispatch console</h1>
+            </div>
+            <span className="dispatch-console-page-meta">{jobs.length} active jobs</span>
+          </header>
+        }
+        statusStrip={
+          <div className="dispatch-console-status-strip">
+            <span>{error ? 'Attention needed' : loading ? 'Refreshing live callout data' : 'Operations steady'}</span>
+            <span>{activeShifts.length} shifts · {shiftStops.length} stops</span>
+          </div>
+        }
+      >
+        <div className="dispatch-console-mobile-stack">
+          <div className="dispatch-console-mobile-tabs" role="tablist" aria-label="Dispatch console sections">
+            {(['shifts', 'stops', 'jobs'] as MobileTab[]).map((tab) => (
               <button
-                onClick={() => setShowNewJob(!showNewJob)}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  backgroundColor: 'var(--color-primary)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                }}
+                key={tab}
+                type="button"
+                className={`dispatch-console-mobile-tab ${mobileTab === tab ? 'is-active' : ''}`}
+                onClick={() => setMobileTab(tab)}
               >
-                + New Job
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
-              {loading ? (
-                <div>Loading shifts...</div>
-              ) : (
-                activeShifts.map((shift) => (
-                  <ShiftCard
-                    key={shift.id}
-                    shift={shift}
-                    selected={selectedShiftId === shift.id}
-                    onClick={() => handleSelectShift(shift.id)}
-                  />
-                ))
-              )}
-            </div>
-          )}
+            ))}
+          </div>
 
-          {mobileTab === 'stops' && (
-            <div>
-              {stopsLoading ? (
-                <div>Loading stops...</div>
-              ) : shiftStops.length === 0 ? (
-                <div style={{ color: 'var(--color-text-secondary)' }}>Select a shift to view stops</div>
-              ) : (
-                shiftStops.map((stop) => <StopCard key={stop.id} stop={stop} />)
-              )}
-            </div>
-          )}
+          <div className="dispatch-console-mobile-pane">
+            {mobileTab === 'shifts' && (
+              <div className="dispatch-console-list dispatch-console-list--stacked">
+                <button type="button" className="dispatch-console-primary-button" onClick={() => setShowNewJob(!showNewJob)}>
+                  + New Job
+                </button>
+                {loading ? (
+                  <div className="dispatch-console-empty-state">Loading shifts...</div>
+                ) : (
+                  activeShifts.map((shift) => (
+                    <ShiftCard
+                      key={shift.id}
+                      shift={shift}
+                      selected={selectedShiftId === shift.id}
+                      onClick={() => handleSelectShift(shift.id)}
+                    />
+                  ))
+                )}
+              </div>
+            )}
 
-          {mobileTab === 'jobs' && (
-            <div>
-              {jobs.length === 0 ? (
-                <div style={{ color: 'var(--color-text-secondary)' }}>No active jobs</div>
-              ) : (
-                jobs.map((job) => <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />)
-              )}
-            </div>
-          )}
-        </div>
+            {mobileTab === 'stops' && (
+              <div className="dispatch-console-list dispatch-console-list--stacked">
+                {stopsLoading ? (
+                  <div className="dispatch-console-empty-state">Loading stops...</div>
+                ) : shiftStops.length === 0 ? (
+                  <div className="dispatch-console-empty-state">Select a shift to view stops</div>
+                ) : (
+                  shiftStops.map((stop) => <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => setSelectedStopId(stop.id)} />)
+                )}
+              </div>
+            )}
+
+            {mobileTab === 'jobs' && (
+              <div className="dispatch-console-list dispatch-console-list--stacked">
+                {jobs.length === 0 ? (
+                  <div className="dispatch-console-empty-state">No active jobs</div>
+                ) : (
+                  jobs.map((job) => <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />)
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </ShellLayout>
     );
@@ -775,390 +715,207 @@ const DispatchConsolePage: React.FC = () => {
 
   // Desktop: Three-column layout
   return (
-    <ShellLayout shell="admin" className="dispatch-console-shell">
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', height: '100%' }}>
-      {/* Column 1: Shifts */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-          overflowY: 'auto',
-          paddingRight: '12px',
-        }}
-      >
-        <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          Active Shifts ({activeShifts.length})
+    <ShellLayout
+      shell="admin"
+      className="dispatch-console-shell"
+      pageHeader={
+        <header className="dispatch-console-page-header">
+          <div>
+            <span className="dispatch-console-eyebrow">Operations</span>
+            <h1>Dispatch console</h1>
+          </div>
+          <div className="dispatch-console-page-meta">
+            <span>{activeShifts.length} live shifts</span>
+            <span>{jobs.length} open jobs</span>
+          </div>
+        </header>
+      }
+      statusStrip={
+        <div className="dispatch-console-status-strip">
+          <span>{error ? 'Action needed on active dispatch work' : 'No critical dispatch issues reported'}</span>
+          <span>{shiftStops.length} stop checkpoints tracked</span>
         </div>
-        {error && (
-          <div
-            style={{
-              padding: '12px',
-              backgroundColor: '#3A0000',
-              color: '#EF5350',
-              borderRadius: '4px',
-              fontSize: '12px',
-            }}
-          >
-            {error}
+      }
+    >
+      <div className="dispatch-console-board">
+        <div className="dispatch-console-column">
+          <div className="dispatch-console-column-header">
+            <span>Active Shifts</span>
+            <strong>({activeShifts.length})</strong>
           </div>
-        )}
-        <button
-          onClick={() => setShowNewJob(!showNewJob)}
-          style={{
-            padding: '12px',
-            backgroundColor: 'var(--color-primary)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 600,
-          }}
-        >
-          + New Job
-        </button>
-        {loading ? (
-          <div style={{ color: 'var(--color-text-secondary)' }}>Loading shifts...</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {activeShifts.map((shift) => (
-              <ShiftCard
-                key={shift.id}
-                shift={shift}
-                selected={selectedShiftId === shift.id}
-                onClick={() => handleSelectShift(shift.id)}
-              />
-            ))}
-          </div>
-        )}
-        {selectedShiftId && <div className="dispatch-operator-actions"><strong>Selected shift</strong><div><button type="button" onClick={() => void operatorAction('shift', 'amend')} disabled={operatorBusy}>Amend shift</button><button type="button" onClick={() => void operatorAction('shift', 'escalate')} disabled={operatorBusy}>Escalate attendance</button><button type="button" onClick={() => void operatorAction('shift', 'cancel')} disabled={operatorBusy}>Cancel shift</button></div></div>}
-      </div>
-
-      {/* Column 2: Stops */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-          overflowY: 'auto',
-          paddingRight: '12px',
-        }}
-      >
-        <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          Shift Stops ({shiftStops.length})
-        </div>
-        {stopsLoading ? (
-          <div style={{ color: 'var(--color-text-secondary)' }}>Loading stops...</div>
-        ) : selectedShiftId === null ? (
-          <div style={{ color: 'var(--color-text-secondary)' }}>Select a shift to view stops</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {shiftStops.map((stop) => (
-              <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => setSelectedStopId(stop.id)} />
-            ))}
-          </div>
-        )}
-        {selectedStopId && <div className="dispatch-operator-actions"><strong>Selected stop</strong><div><button type="button" onClick={() => void operatorAction('stop', 'reorder')} disabled={operatorBusy}>Change position</button><button type="button" onClick={() => void operatorAction('stop', 'skip')} disabled={operatorBusy}>Skip stop</button><button type="button" onClick={() => void operatorAction('stop', 'cancel')} disabled={operatorBusy}>Cancel stop</button></div></div>}
-      </div>
-
-      {/* Column 3: Jobs + Form */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-          overflowY: 'auto',
-        }}
-      >
-        <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          Active Jobs ({jobs.length})
+          {error && <div className="dispatch-console-error-box">{error}</div>}
+          <button type="button" className="dispatch-console-primary-button" onClick={() => setShowNewJob(!showNewJob)}>
+            + New Job
+          </button>
+          {loading ? (
+            <div className="dispatch-console-empty-state">Loading shifts...</div>
+          ) : (
+            <div className="dispatch-console-list">
+              {activeShifts.map((shift) => (
+                <ShiftCard
+                  key={shift.id}
+                  shift={shift}
+                  selected={selectedShiftId === shift.id}
+                  onClick={() => handleSelectShift(shift.id)}
+                />
+              ))}
+            </div>
+          )}
+          {selectedShiftId && <div className="dispatch-operator-actions"><strong>Selected shift</strong><div><button type="button" onClick={() => void operatorAction('shift', 'amend')} disabled={operatorBusy}>Amend shift</button><button type="button" onClick={() => void operatorAction('shift', 'escalate')} disabled={operatorBusy}>Escalate attendance</button><button type="button" onClick={() => void operatorAction('shift', 'cancel')} disabled={operatorBusy}>Cancel shift</button></div></div>}
         </div>
 
-        {showNewJob && (
-          <div
-            style={{
-              padding: '12px',
-              backgroundColor: 'var(--color-bg-secondary)',
-              border: '2px solid var(--color-primary)',
-              borderRadius: '4px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-            }}
-          >
-            <div style={{ fontWeight: 600, fontSize: '13px' }}>Create New Job</div>
+        <div className="dispatch-console-column">
+          <div className="dispatch-console-column-header">
+            <span>Shift Stops</span>
+            <strong>({shiftStops.length})</strong>
+          </div>
+          {stopsLoading ? (
+            <div className="dispatch-console-empty-state">Loading stops...</div>
+          ) : selectedShiftId === null ? (
+            <div className="dispatch-console-empty-state">Select a shift to view stops</div>
+          ) : (
+            <div className="dispatch-console-list">
+              {shiftStops.map((stop) => (
+                <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => setSelectedStopId(stop.id)} />
+              ))}
+            </div>
+          )}
+          {selectedStopId && <div className="dispatch-operator-actions"><strong>Selected stop</strong><div><button type="button" onClick={() => void operatorAction('stop', 'reorder')} disabled={operatorBusy}>Change position</button><button type="button" onClick={() => void operatorAction('stop', 'skip')} disabled={operatorBusy}>Skip stop</button><button type="button" onClick={() => void operatorAction('stop', 'cancel')} disabled={operatorBusy}>Cancel stop</button></div></div>}
+        </div>
 
-            <div style={{ padding: '8px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', fontSize: '11px' }}>
-              <div style={{ color: 'var(--color-text-secondary)', marginBottom: '3px' }}>Service agreement</div>
-              <strong>{selectedAgreement?.name ?? 'No agreement selected'}</strong>
-              <div style={{ color: 'var(--color-text-secondary)', marginTop: '3px' }}>
-                Client: {selectedAgreement?.client_name ?? selectedAgreement?.client_organization_id ?? 'Unavailable'}
+        <div className="dispatch-console-column">
+          <div className="dispatch-console-column-header">
+            <span>Active Jobs</span>
+            <strong>({jobs.length})</strong>
+          </div>
+
+          {showNewJob && (
+            <div className="dispatch-console-form-panel">
+              <div className="dispatch-console-form-title">Create New Job</div>
+
+              <div className="dispatch-console-agreement-card">
+                <div className="dispatch-console-form-label">Service agreement</div>
+                <strong>{selectedAgreement?.name ?? 'No agreement selected'}</strong>
+                <div className="dispatch-console-form-note">
+                  Client: {selectedAgreement?.client_name ?? selectedAgreement?.client_organization_id ?? 'Unavailable'}
+                </div>
               </div>
-            </div>
 
-            {/* Job Type */}
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                Job Type
-              </label>
-              <select
-                value={formJobType}
-                onChange={(e) => setFormJobType(e.target.value as JobType)}
-                style={{
-                  width: '100%',
-                  padding: '6px',
-                  marginTop: '4px',
-                  backgroundColor: 'var(--color-bg-primary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '3px',
-                  color: 'var(--color-text-primary)',
-                  fontSize: '12px',
-                }}
-              >
-                {JOB_TYPES.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div className="dispatch-console-form-field">
+                <label className="dispatch-console-form-label">Job Type</label>
+                <select value={formJobType} onChange={(e) => setFormJobType(e.target.value as JobType)}>
+                  {JOB_TYPES.map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+              </div>
 
-            {/* Priority */}
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                Priority
-              </label>
-              <select
-                value={formPriority}
-                onChange={(e) => setFormPriority(e.target.value as JobPriority)}
-                style={{
-                  width: '100%',
-                  padding: '6px',
-                  marginTop: '4px',
-                  backgroundColor: 'var(--color-bg-primary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '3px',
-                  color: 'var(--color-text-primary)',
-                  fontSize: '12px',
-                }}
-              >
-                {PRIORITIES.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div className="dispatch-console-form-field">
+                <label className="dispatch-console-form-label">Priority</label>
+                <select value={formPriority} onChange={(e) => setFormPriority(e.target.value as JobPriority)}>
+                  {PRIORITIES.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
 
-            {formJobType === 'alarm_response' && (
-              <>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                    Intake channel
-                  </label>
-                  <select
-                    value={formAlarmIntakeChannel}
-                    onChange={(e) => setFormAlarmIntakeChannel(e.target.value as AlarmIntakeChannel)}
-                    style={{ width: '100%', padding: '6px', marginTop: '4px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px' }}
-                  >
-                    <option value="phone">Phone call</option>
-                    <option value="email">Email</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                    Alarm received at
-                  </label>
-                  <input
-                    type="datetime-local"
-                    value={formAlarmReceivedAt}
-                    onChange={(e) => setFormAlarmReceivedAt(e.target.value)}
-                    style={{ width: '100%', padding: '6px', marginTop: '4px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </>
-            )}
+              {formJobType === 'alarm_response' && (
+                <>
+                  <div className="dispatch-console-form-field">
+                    <label className="dispatch-console-form-label">Intake channel</label>
+                    <select value={formAlarmIntakeChannel} onChange={(e) => setFormAlarmIntakeChannel(e.target.value as AlarmIntakeChannel)}>
+                      <option value="phone">Phone call</option>
+                      <option value="email">Email</option>
+                    </select>
+                  </div>
+                  <div className="dispatch-console-form-field">
+                    <label className="dispatch-console-form-label">Alarm received at</label>
+                    <input type="datetime-local" value={formAlarmReceivedAt} onChange={(e) => setFormAlarmReceivedAt(e.target.value)} />
+                  </div>
+                </>
+              )}
 
-            {/* Site */}
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                Site
-              </label>
-              <select
-                value={formSiteId}
-                disabled={isNewIncidentLocation}
-                onChange={(e) => handleSelectSite(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px',
-                  marginTop: '4px',
-                  backgroundColor: 'var(--color-bg-primary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '3px',
-                  color: 'var(--color-text-primary)',
-                  fontSize: '12px',
-                }}
-              >
-                <option value="">Select a site...</option>
-                {sites.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              {!relationshipLoading && sites.length === 0 && (
-                <div style={{ marginTop: '4px', color: '#FF9800', fontSize: '10px' }}>
-                  No active sites are linked to the selected agreement.
+              <div className="dispatch-console-form-field">
+                <label className="dispatch-console-form-label">Site</label>
+                <select value={formSiteId} disabled={isNewIncidentLocation} onChange={(e) => handleSelectSite(e.target.value)}>
+                  <option value="">Select a site...</option>
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                {!relationshipLoading && sites.length === 0 && (
+                  <div className="dispatch-console-inline-warning">No active sites are linked to the selected agreement.</div>
+                )}
+                <label className="dispatch-console-check-row">
+                  <input type="checkbox" checked={isNewIncidentLocation} onChange={(event) => { setIsNewIncidentLocation(event.target.checked); setFormSiteId(''); setResolvedLocation(null); }} />
+                  Create location from this dispatch
+                </label>
+                {isNewIncidentLocation && (
+                  <div className="dispatch-console-address-row">
+                    <input value={formLocationAddress} onChange={(event) => { setFormLocationAddress(event.target.value); setResolvedLocation(null); }} placeholder="Incident address" />
+                    <button type="button" onClick={resolveIncidentLocation} disabled={!formLocationAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
+                  </div>
+                )}
+                {isNewIncidentLocation && resolvedLocation && <div className="dispatch-console-inline-success">Resolved: {resolvedLocation.label}</div>}
+              </div>
+
+              <div className="dispatch-console-form-field">
+                <label className="dispatch-console-form-label">Dispatch Resource</label>
+                <select value={formResourceId} onChange={(e) => assignResource(e.target.value)}>
+                  <option value="">Leave in unassigned queue</option>
+                  {assignableResources.map((resource) => (
+                    <option key={resource.id} value={resource.id}>
+                      {resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}
+                    </option>
+                  ))}
+                </select>
+                {formResourceId && !formShiftId && <div className="dispatch-console-inline-error">No active matching shift is available for this resource.</div>}
+              </div>
+
+              <div className="dispatch-console-form-field">
+                <label className="dispatch-console-form-label">SLA Minutes</label>
+                <input type="number" value={formSlaMinutes} onChange={(e) => setFormSlaMinutes(parseInt(e.target.value))} />
+              </div>
+
+              <div className="dispatch-console-form-field">
+                <label className="dispatch-console-form-label">Briefing Notes</label>
+                <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} />
+              </div>
+
+              {resolvedRate && (
+                <div className="dispatch-console-rate-banner">
+                  Billing rule matched: ${resolvedRate.amount.toFixed(2)} · {resolvedRate.rateType.replace(/_/g, ' ')}
                 </div>
               )}
-              <label style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '8px', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                <input type="checkbox" checked={isNewIncidentLocation} onChange={(event) => { setIsNewIncidentLocation(event.target.checked); setFormSiteId(''); setResolvedLocation(null); }} />
-                Create location from this dispatch
-              </label>
-              {isNewIncidentLocation && (
-                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                  <input value={formLocationAddress} onChange={(event) => { setFormLocationAddress(event.target.value); setResolvedLocation(null); }} placeholder="Incident address" style={{ flex: 1, minWidth: 0, padding: '6px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px' }} />
-                  <button type="button" onClick={resolveIncidentLocation} disabled={!formLocationAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
+              {isUnrateable && (
+                <div className="dispatch-console-rate-warning">
+                  No applicable billing rule found. The job can be created, but billing requires review.
                 </div>
               )}
-              {isNewIncidentLocation && resolvedLocation && <div style={{ marginTop: '4px', color: '#72D6A2', fontSize: '10px' }}>Resolved: {resolvedLocation.label}</div>}
-            </div>
 
-            {/* SLA Minutes */}
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                Dispatch Resource
-              </label>
-              <select
-                value={formResourceId}
-                onChange={(e) => assignResource(e.target.value)}
-                style={{ width: '100%', padding: '6px', marginTop: '4px', backgroundColor: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', borderRadius: '3px', color: 'var(--color-text-primary)', fontSize: '12px' }}
-              >
-                <option value="">Leave in unassigned queue</option>
-                {assignableResources.map((resource) => (
-                  <option key={resource.id} value={resource.id}>
-                    {resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}
-                  </option>
-                ))}
-              </select>
-              {formResourceId && !formShiftId && <div style={{ marginTop: '4px', color: '#EF5350', fontSize: '10px' }}>No active matching shift is available for this resource.</div>}
-            </div>
-
-            {/* SLA Minutes */}
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                SLA Minutes
-              </label>
-              <input
-                type="number"
-                value={formSlaMinutes}
-                onChange={(e) => setFormSlaMinutes(parseInt(e.target.value))}
-                style={{
-                  width: '100%',
-                  padding: '6px',
-                  marginTop: '4px',
-                  backgroundColor: 'var(--color-bg-primary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '3px',
-                  color: 'var(--color-text-primary)',
-                  fontSize: '12px',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                Briefing Notes
-              </label>
-              <textarea
-                value={formNotes}
-                onChange={(e) => setFormNotes(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px',
-                  marginTop: '4px',
-                  backgroundColor: 'var(--color-bg-primary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '3px',
-                  color: 'var(--color-text-primary)',
-                  fontSize: '12px',
-                  fontFamily: 'inherit',
-                  minHeight: '60px',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            {/* Rate Warning */}
-            {resolvedRate && (
-              <div style={{ padding: '6px', backgroundColor: '#0F2A14', color: '#72D6A2', borderRadius: '3px', fontSize: '11px' }}>
-                Billing rule matched: ${resolvedRate.amount.toFixed(2)} · {resolvedRate.rateType.replace(/_/g, ' ')}
+              <div className="dispatch-console-form-actions">
+                <button
+                  type="button"
+                  className="dispatch-console-primary-button"
+                  onClick={handleCreateJob}
+                  disabled={saving || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
+                >
+                  Create
+                </button>
+                <button type="button" className="dispatch-console-secondary-button" onClick={() => setShowNewJob(false)}>
+                  Cancel
+                </button>
               </div>
-            )}
-            {isUnrateable && (
-              <div
-                style={{
-                  padding: '6px',
-                  backgroundColor: '#3A0000',
-                  color: '#EF5350',
-                  borderRadius: '3px',
-                  fontSize: '11px',
-                }}
-              >
-                No applicable billing rule found. The job can be created, but billing requires review.
-              </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button
-                onClick={handleCreateJob}
-                disabled={saving || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
-                style={{
-                  flex: 1,
-                  padding: '8px',
-                  backgroundColor: 'var(--color-primary)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '3px',
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                  fontWeight: 600,
-                  fontSize: '12px',
-                  opacity: saving ? 0.6 : 1,
-                }}
-              >
-                Create
-              </button>
-              <button
-                onClick={() => setShowNewJob(false)}
-                style={{
-                  flex: 1,
-                  padding: '8px',
-                  backgroundColor: 'transparent',
-                  color: 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  fontSize: '12px',
-                }}
-              >
-                Cancel
-              </button>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Jobs List */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="dispatch-console-list">
             {jobs.map((job) => (
               <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />
-          ))}
+            ))}
+          </div>
+          {selectedJobId && <div className="dispatch-operator-actions"><strong>Selected job</strong><div><button type="button" onClick={() => void operatorAction('job', 'amend')} disabled={operatorBusy}>Amend details</button><button type="button" onClick={() => void operatorAction('job', 'reassign')} disabled={operatorBusy}>Reassign</button><button type="button" onClick={() => void operatorAction('job', 'escalate')} disabled={operatorBusy}>Escalate</button><button type="button" onClick={() => void operatorAction('job', 'cancel')} disabled={operatorBusy}>Cancel job</button></div></div>}
         </div>
-        {selectedJobId && <div className="dispatch-operator-actions"><strong>Selected job</strong><div><button type="button" onClick={() => void operatorAction('job', 'amend')} disabled={operatorBusy}>Amend details</button><button type="button" onClick={() => void operatorAction('job', 'reassign')} disabled={operatorBusy}>Reassign</button><button type="button" onClick={() => void operatorAction('job', 'escalate')} disabled={operatorBusy}>Escalate</button><button type="button" onClick={() => void operatorAction('job', 'cancel')} disabled={operatorBusy}>Cancel job</button></div></div>}
-      </div>
       </div>
     </ShellLayout>
   );
