@@ -92,7 +92,8 @@ Finance E2E internal writes: completed through the live browser workflow on 2026
 Follow-up findings from the same E2E run:
 
 - Creating a billing rate rule was blocked by the server with `Active authorized operating branch finance administrator required`; no rule was written.
-- The costing receipt returned `$0.00` true cost/client charge despite populated labour and direct-cost fields while returning depreciation; downstream calculation inputs need tracing.
+- The costing receipt returned `$0.00` true cost/client charge despite populated labour and direct-cost fields while returning depreciation. Root cause confirmed: depreciation was allocated through `vehicle_productive_hours = 0`, producing PostgreSQL null propagation. The RPC now fails clearly with `Vehicle productive hours are required to allocate asset depreciation`.
+- Live remediation verified: invalid zero-allocation input displayed the explicit error; valid `vehicle_productive_hours = 2080` returned `$580.26` true cost, `$773.68` client charge, 25% margin, and `$2,400` annual depreciation.
 - The Finance money summary loaded without errors but did not visibly show the new draft invoice numbers, so downstream display remains unverified.
 
 Finance proposal preparation: both approved PDFs were sent through the visible `Prepare finance proposal` action on 2026-09-12.
