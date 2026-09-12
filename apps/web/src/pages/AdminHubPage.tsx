@@ -47,6 +47,12 @@ interface Metrics {
   observations: MetricState;
 }
 
+interface TrendPoint {
+  label: string;
+  jobs: number;
+  completed: number;
+}
+
 export type QueueKind = 'welfare' | 'dispatch' | 'breach' | 'report' | 'video';
 
 export interface QueueItem {
@@ -69,6 +75,7 @@ const COMMAND_CENTRE_GROUPS = [
     icon: BriefcaseBusiness,
     statLabel: 'active clients',
     stat: null,
+    allowedRoles: ['admin', 'master', 'grand_master'],
     links: [
       ['CRM Hub', 'crm'], ['Client Sites', 'site-360'], ['Organisations', 'relationships'],
       ['Contacts', 'users'], ['Contracts', 'onboarding'],
@@ -84,6 +91,7 @@ const COMMAND_CENTRE_GROUPS = [
     icon: Radio,
     statLabel: 'active jobs',
     stat: 'activeDispatch',
+    allowedRoles: ['admin', 'master', 'grand_master', 'officer'],
     links: [
       ['Dispatch', 'dispatch'], ['Jobs List', 'dispatch'], ['Monitor', 'field-ops'],
       ['Job Map', 'live-map'], ['Ops Map', 'live-map'], ['Site Guard', 'access-control'],
@@ -100,6 +108,7 @@ const COMMAND_CENTRE_GROUPS = [
     icon: Users,
     statLabel: "today's shifts",
     stat: 'onDuty',
+    allowedRoles: ['admin', 'master', 'grand_master', 'officer'],
     links: [
       ['Roster Planner', 'roster'], ['Timesheets', 'people-hr'], ['Open Shifts', 'roster'],
       ['Availability', 'roster'], ['Patrol Schedule', 'roster'], ['Patrol KPIs', 'reports'],
@@ -115,6 +124,7 @@ const COMMAND_CENTRE_GROUPS = [
     icon: Users,
     statLabel: 'on patrol now',
     stat: 'onDuty',
+    allowedRoles: ['admin', 'master', 'grand_master'],
     links: [
       ['Users', 'users'], ['Welfare', 'welfare-alerts'], ['Live Tracking', 'live-map'],
       ['Skills', 'people-hr'], ['Person Records', 'people-hr'], ['ID Check', 'users'],
@@ -130,6 +140,7 @@ const COMMAND_CENTRE_GROUPS = [
     icon: BriefcaseBusiness,
     statLabel: 'active contracts',
     stat: null,
+    allowedRoles: ['admin', 'master', 'grand_master'],
     links: [
       ['Assets', 'finance-costing'], ['Service Rates', 'rate-rules'], ['Invoices', 'finance-money'],
       ['Contracts', 'crm'], ['Timesheets', 'people-hr'],
@@ -145,6 +156,7 @@ const COMMAND_CENTRE_GROUPS = [
     icon: ShieldCheck,
     statLabel: 'open alerts',
     stat: 'breaches',
+    allowedRoles: ['admin', 'master', 'grand_master', 'officer'],
     links: [
       ['Compliance', 'reports'], ['Breaches', 'breach-review'], ['Command', 'field-ops'],
       ['Infringements', 'breach-review'], ['Disputes', 'approvals'], ['Notices', 'reports'],
@@ -192,6 +204,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const [loading, setLoading] = useState(true);
   const [queueWarnings, setQueueWarnings] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [trend, setTrend] = useState<TrendPoint[]>([]);
 
   const loadDashboard = useCallback(async () => {
     if (!profile?.organizationId) return;
@@ -202,9 +215,10 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     const now = new Date();
     const nowIso = now.toISOString();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const trendStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
 
     try {
-      const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, welfareRows, dispatchRows, breachRows, reportRows, videoRows] = await Promise.all([
+      const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, dispatchTrend, welfareRows, dispatchRows, breachRows, reportRows, videoRows] = await Promise.all([
         supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
         supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
         welfareEnabled
@@ -212,6 +226,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           : Promise.resolve({ count: 0, error: null }),
         supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']),
         supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('observed_at', todayStart),
+        supabase.from('dispatch_jobs').select('created_at,status').eq('organization_id', organizationId).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000),
         welfareEnabled
           ? supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
           : Promise.resolve({ data: [], error: null }),
@@ -228,6 +243,25 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         breaches: metricFrom(breachCount),
         observations: metricFrom(observationCount),
       });
+      if (dispatchTrend.error) {
+        setTrend([]);
+      } else {
+        const trendByDay = new globalThis.Map<string, TrendPoint>();
+        for (let offset = 0; offset < 7; offset += 1) {
+          const day = new Date(trendStart);
+          day.setDate(trendStart.getDate() + offset);
+          const key = day.toISOString().slice(0, 10);
+          trendByDay.set(key, { label: day.toLocaleDateString('en-NZ', { weekday: 'short' }), jobs: 0, completed: 0 });
+        }
+        for (const job of dispatchTrend.data ?? []) {
+          const point = trendByDay.get(String(job.created_at).slice(0, 10));
+          if (point) {
+            point.jobs += 1;
+            if (job.status === 'completed') point.completed += 1;
+          }
+        }
+        setTrend([...trendByDay.values()]);
+      }
 
       const warnings: Array<[string, { message: string } | null | undefined]> = [];
       const items: QueueItem[] = [];
@@ -362,6 +396,8 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     : attentionCount > 0
       ? `${attentionCount} active items need attention across safety, dispatch, and compliance.`
       : 'Operations are clear across safety, dispatch, and compliance.';
+  const maxTrendJobs = Math.max(1, ...trend.map((point) => point.jobs));
+  const visibleCommandGroups = COMMAND_CENTRE_GROUPS.filter((group) => group.allowedRoles.some((role) => role === profile?.role));
 
   return (
     <ShellLayout shell="admin" className="admin-shell-surface">
@@ -383,6 +419,29 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
 
       <StatusStrip tone={overviewTone}>{overviewMessage}</StatusStrip>
 
+      <section className="admin-dashboard" aria-labelledby="dashboard-heading">
+        <div className="admin-dashboard-heading">
+          <div><span>Operational intelligence</span><h2 id="dashboard-heading">Dashboard</h2></div>
+          <small>Live totals and the last seven days</small>
+        </div>
+        <section className="admin-metric-grid" aria-label="Current operations metrics">
+          <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty)} unavailable={metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
+          <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch)} unavailable={metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
+          <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches)} unavailable={metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
+          <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations)} unavailable={metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
+          <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}>
+            <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare)} unavailable={metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+          </SafetyGate>
+        </section>
+        <section className="admin-trend-panel" aria-labelledby="dispatch-trend-heading">
+          <div className="admin-section-heading"><div><span>Work volume</span><h2 id="dispatch-trend-heading">Dispatch jobs</h2></div><small>Created versus completed</small></div>
+          <div className="admin-trend-chart" role="img" aria-label="Seven day dispatch jobs trend">
+            {trend.map((point) => <div className="admin-trend-column" key={point.label}><div className="admin-trend-bars"><span style={{ height: `${(point.jobs / maxTrendJobs) * 100}%` }} title={`${point.jobs} jobs`} /><span className="is-completed" style={{ height: `${(point.completed / maxTrendJobs) * 100}%` }} title={`${point.completed} completed`} /></div><small>{point.label}</small></div>)}
+          </div>
+          <div className="admin-trend-legend"><span><i /> Jobs created</span><span><i className="is-completed" /> Completed</span></div>
+        </section>
+      </section>
+
       <section className="admin-command-centre" aria-labelledby="command-centre-heading">
         <div className="admin-command-centre-heading">
           <div>
@@ -392,7 +451,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           <small>All organisations</small>
         </div>
         <div className="admin-domain-grid">
-          {COMMAND_CENTRE_GROUPS.map((group) => {
+          {visibleCommandGroups.map((group) => {
             const Icon = group.icon;
             const metric = group.stat ? metrics[group.stat] : null;
             return (
@@ -414,22 +473,6 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             );
           })}
         </div>
-      </section>
-
-      <section className="admin-metric-grid" aria-label="Current operations metrics">
-        <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty)} unavailable={metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
-        <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch)} unavailable={metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
-        <SafetyGate
-          status={moduleStatus}
-          isEnabled={welfareEnabled}
-          moduleLabel="Welfare monitoring"
-          safetyRelevant
-          renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}
-        >
-          <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare)} unavailable={metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
-        </SafetyGate>
-        <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches)} unavailable={metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
-        <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations)} unavailable={metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
       </section>
 
       {queueWarnings.length > 0 && (
