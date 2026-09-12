@@ -283,16 +283,6 @@ const AdminShell: React.FC = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [showDesktopDownload, setShowDesktopDownload] = useState(false);
-  const desktopDownloadPromptUser = React.useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!profile?.id || isMobile) return;
-    if (desktopDownloadPromptUser.current === profile.id) return;
-    desktopDownloadPromptUser.current = profile.id;
-    const promptKey = `fcm:desktop-download-prompt-v2-dismissed:${profile.id}`;
-    setShowDesktopDownload(!window.localStorage.getItem(promptKey));
-  }, [isMobile, profile?.id]);
-
   const dismissDesktopDownload = () => {
     if (profile?.id) window.localStorage.setItem(`fcm:desktop-download-prompt-v2-dismissed:${profile.id}`, '1');
     setShowDesktopDownload(false);
