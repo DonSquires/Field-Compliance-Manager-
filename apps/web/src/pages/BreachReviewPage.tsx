@@ -77,7 +77,7 @@ const BreachReviewPage: React.FC = () => {
       let query = supabase
         .from('breach_alerts')
         .select(
-          'id, plate_number, breach_type, status, nights_count, limit_value, notes, created_at, action_type, actioned_at, zone:zone_id(name), observation:observation_id(observed_at, is_scv, photo_url)'
+          'id, plate_number, breach_type, status, nights_count, limit_value, notes, created_at, action_type, actioned_at, zone:location_zones!breach_alerts_zone_id_fkey(name), observation:observations!breach_alerts_observation_id_fkey(observed_at, is_scv, photo_url)'
         )
         .eq('organization_id', orgId);
 
