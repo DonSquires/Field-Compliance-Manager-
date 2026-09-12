@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/pages/ObservationSearchPage.tsx'), 'utf8');
+const searchMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260908120000_observation_links_and_global_search.sql'), 'utf8');
 
 describe('Observation Search canonical entity contract', () => {
   it('exposes every governed search_observations filter', () => {
@@ -22,5 +23,12 @@ describe('Observation Search canonical entity contract', () => {
     for (const field of ['location_name', 'incident_label', 'poi', 'loi', 'vehicle_label', 'person_label']) {
       expect(source).toContain(`${field}:`);
     }
+  });
+
+  it('preserves PostgreSQL wildcard patterns entered by investigators', () => {
+    expect(source).toContain('Use % as a wildcard anywhere');
+    expect(searchMigration).toContain("ILIKE '%' || trim(p_search) || '%'");
+    expect(searchMigration).not.toContain('replace(p_search');
+    expect(searchMigration).not.toContain('regexp_replace(p_search');
   });
 });
