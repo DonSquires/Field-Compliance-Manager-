@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bold, Check, CheckCircle2, FilePlus2, Heading2, Italic, List, ListOrdered, PanelRight, Save, Search, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
+import { AlertTriangle, Bold, Check, CheckCircle2, FilePlus2, Heading2, Italic, List, ListOrdered, PanelRight, Save, Search, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -390,6 +390,18 @@ export default function BobDocumentStudioPage() {
     setNotice(`Resumed ${draft.status.replaceAll('_', ' ')} draft. Review its source and state before continuing.`);
   };
 
+  const unconfirmedMatches = (editor?.getText().match(/\[TO CONFIRM\]/g) || []).length;
+
+  const jumpToNextUnconfirmed = () => {
+    if (!editor) return;
+    const text = editor.getText();
+    const target = '[TO CONFIRM]';
+    const index = text.indexOf(target);
+    if (index >= 0) {
+      editor.chain().focus().setTextSelection({ from: index + 1, to: index + target.length + 1 }).run();
+    }
+  };
+
   const fileSpaceFor = (draft: DraftSummary) => {
     const name = draft.title.toLowerCase();
     if (draft.authorable && draft.sourceChannel === 'system_generated') return 'Generated Outputs';
@@ -409,6 +421,7 @@ export default function BobDocumentStudioPage() {
         <div className="bob-document-brand"><span><Sparkles size={17} /></span><div><strong>Bob document studio</strong><small>Author, reference, review, promote</small></div></div>
         <div className="bob-document-top-actions">
           <span className={`bob-save-state is-${saveState}`} role="status">{saveState === 'saving' ? 'Saving…' : saveState === 'reviewing' ? 'Submitting…' : saveState === 'saved' ? 'Saved draft' : saveState === 'needs_review' ? 'Needs review' : 'Draft'}</span>
+          {unconfirmedMatches > 0 && <span className="bob-unconfirmed-badge" role="status"><AlertTriangle size={13} /><span>{unconfirmedMatches} unconfirmed</span><button type="button" onClick={jumpToNextUnconfirmed}>Find next</button></span>}
           <button type="button" className="bob-document-secondary" onClick={() => navigate('/admin/bob')}><X size={15} /> Close</button>
           <button type="button" className="bob-document-primary" onClick={() => void saveDraft()} disabled={saveState === 'saving'}><Save size={15} /> Save draft</button>
           {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()}>Submit for review</button>}

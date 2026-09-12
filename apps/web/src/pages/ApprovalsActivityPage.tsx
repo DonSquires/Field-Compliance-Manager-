@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, ListChecks, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
 import { formatGovernedPayload } from '../lib/governedPayload';
 import { useAuth } from '../context/AuthContext';
@@ -76,6 +77,7 @@ interface DocumentReviewRow {
   review_reason: string | null;
   authored_by: string | null;
   updated_at: string;
+  unconfirmed_count?: number;
 }
 
 interface PromotionProposalRow {
@@ -116,6 +118,7 @@ const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
 ];
 
 const ApprovalsActivityPage: React.FC = () => {
+  const navigate = useNavigate();
   const { operatingOrganizationId, profile } = useAuth();
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [plans, setPlans] = useState<JobPlanRow[]>([]);
@@ -194,7 +197,9 @@ const ApprovalsActivityPage: React.FC = () => {
         const version = [...(document.document_versions ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
         const metadata = version?.metadata_json ?? {};
         if (!version || metadata.authoring_status !== 'needs_review') return [];
-        return [{ document_id: document.id, version_id: version.id, file_name: document.original_filename, title: String(metadata.title ?? document.original_filename), document_type: String(metadata.document_type ?? 'custom'), review_reason: typeof metadata.review_reason === 'string' ? metadata.review_reason : null, authored_by: typeof metadata.authored_by === 'string' ? metadata.authored_by : null, updated_at: document.updated_at }];
+        const text = `${version.extracted_text ?? ''} ${String(metadata.authoring_html ?? '')}`;
+        const unconfirmedCount = (text.match(/\[TO CONFIRM\]/g) || []).length;
+        return [{ document_id: document.id, version_id: version.id, file_name: document.original_filename, title: String(metadata.title ?? document.original_filename), document_type: String(metadata.document_type ?? 'custom'), review_reason: typeof metadata.review_reason === 'string' ? metadata.review_reason : null, authored_by: typeof metadata.authored_by === 'string' ? metadata.authored_by : null, updated_at: document.updated_at, unconfirmed_count: unconfirmedCount }];
       }));
       setDocumentPromotions(documentRows.flatMap((document) => {
         const version = [...(document.document_versions ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
@@ -516,7 +521,7 @@ const ApprovalsActivityPage: React.FC = () => {
         <div><History size={18} /><span>Loaded activity</span><strong>{rows.length}</strong></div>
       </section>
 
-      {documentReviews.length > 0 && <section className="approvals-queue" aria-label="Bob document review queue"><div className="approvals-panel-heading"><div><span>Bob authoring</span><h2>Documents needing review</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{documentReviews.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.title}</strong><small>{formatActionType(document.document_type)} · {formatAge(document.updated_at)}</small></div><p>{document.review_reason ?? 'The author requested human review of this document.'}</p><small>Source file: {document.file_name} · Conversation-only until approved</small><div className="approvals-actions"><button type="button" className="is-reject" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('rejected'); setReasoning(''); }}>Reject document</button><button type="button" className="is-approve" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('approved'); setReasoning(''); }}>Review document</button></div></article>)}</div></section>}
+      {documentReviews.length > 0 && <section className="approvals-queue" aria-label="Bob document review queue"><div className="approvals-panel-heading"><div><span>Bob authoring</span><h2>Documents needing review</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{documentReviews.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.title}</strong><small>{formatActionType(document.document_type)} · {formatAge(document.updated_at)}</small></div><p>{document.review_reason ?? 'The author requested human review of this document.'}</p><small>Source file: {document.file_name} · Conversation-only until approved{document.unconfirmed_count ? ` · ⚠️ ${document.unconfirmed_count} unconfirmed field${document.unconfirmed_count === 1 ? '' : 's'}` : ''}</small><div className="approvals-actions"><button type="button" className="is-secondary" onClick={() => navigate(`/admin/document-studio?document=${encodeURIComponent(document.document_id)}`)}>Open in Studio</button><button type="button" className="is-reject" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('rejected'); setReasoning(''); }}>Reject document</button><button type="button" className="is-approve" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('approved'); setReasoning(''); }}>Review document</button></div></article>)}</div></section>}
 
       {plans.length > 0 && <section className="approvals-queue" aria-label="Governed job plans"><div className="approvals-panel-heading"><div><span>Whole-plan approval</span><h2>Job plans awaiting review</h2></div><ListChecks size={18} /></div><div className="approvals-list">{plans.map((plan) => { const steps = planSteps[plan.id] ?? []; return <article className={`status-${plan.status}`} key={plan.id}><div><strong>{plan.goal}</strong><small>{steps.length} ordered step{steps.length === 1 ? '' : 's'} · {formatAge(plan.created_at)}</small></div><p>{plan.reasoning ?? 'No plan reasoning was recorded.'}</p><small>{steps.map((step) => `${step.sequence + 1}. ${formatActionType(step.action_type)} (${step.status})`).join(' · ')}</small>{plan.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openPlanDecision(plan, 'reject')}><XCircle size={17} /> Reject plan</button><button type="button" className="is-approve" onClick={() => openPlanDecision(plan, 'approve')}><CheckCircle2 size={17} /> Review plan</button></div>}</article>; })}</div></section>}
 
