@@ -6,9 +6,6 @@ const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: Record<string, unknown>, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
-const normalize = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const parseLine = (line: string) => { const cells: string[] = []; let current = ''; let quoted = false; for (let i = 0; i < line.length; i += 1) { const char = line[i]; const next = line[i + 1]; if (char === '"' && quoted && next === '"') { current += '"'; i += 1; continue; } if (char === '"') { quoted = !quoted; continue; } if (char === ',' && !quoted) { cells.push(current.trim()); current = ''; continue; } current += char; } cells.push(current.trim()); return cells; };
-const parseCsv = (text: string) => { const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((line) => line.trim()); const headerIndex = lines.findIndex((line) => parseLine(line).length > 3); if (headerIndex < 0) return { headers: [], rows: [] as Record<string, string>[] }; const headers = parseLine(lines[headerIndex]); const rows = lines.slice(headerIndex + 1).map((line) => { const cells = parseLine(line); return Object.fromEntries(headers.map((header, index) => [header.trim(), cells[index] ?? ''])); }).filter((row) => Object.values(row).some((value) => String(value).trim())); return { headers, rows }; };
 
 serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -31,15 +28,12 @@ serve(async (request) => {
     csv = await data.text();
   }
   if (!csv.trim()) return json({ error: 'csv_text or attachment_id is required' }, 400);
-  const parsed = parseCsv(csv);
-  const rows = parsed.rows;
-  const clientNames = [...new Set(rows.map((row) => row['Client Name']).filter(Boolean))];
-  const clientRefs = [...new Set(rows.map((row) => row['Client ID']).filter(Boolean))];
-  const despatchZones = [...new Set(rows.map((row) => row['Despatch Zone']).filter(Boolean))];
-  const { data: sites } = await admin.from('client_sites').select('id,name,address,external_ref,internal_client_ref,client_organization_id,service_agreement_id').eq('organization_id', profile.organization_id).limit(1000);
-  const { data: agreements } = await admin.from('service_agreements').select('id,name,client_organization_id').eq('provider_organization_id', profile.organization_id).eq('invitation_status', 'accepted').limit(500);
-  const siteRows = sites ?? [];
-  const matchSite = (name: string, ref: string) => siteRows.find((site) => site.external_ref === ref || site.internal_client_ref === ref || normalize(site.name) === normalize(name) || normalize(site.address) === normalize(name));
-  const matches = clientNames.map((name) => { const ref = rows.find((row) => row['Client Name'] === name)?.['Client ID'] ?? ''; const site = matchSite(name, ref); return { source_name: name, source_ref: ref, candidate_site_id: site?.id ?? null, candidate_site_name: site?.name ?? null, match_kind: site ? (site.external_ref === ref || site.internal_client_ref === ref ? 'external_ref' : 'name_or_address') : 'unresolved' }; });
-  return json({ planned: true, writes: [], organization_id: profile.organization_id, row_count: rows.length, client_name_count: clientNames.length, client_ref_count: clientRefs.length, despatch_zone_count: despatchZones.length, matches, unresolved_count: matches.filter((match) => !match.candidate_site_id).length, notes: ['Read-only patrol mapping plan. No sites, zones, routes, shifts, patrols, attendance, travel, or wages were written.', 'Patrol outcome rows require an approved site/agreement/shift attribution before promotion.'] });
+  const schema = await admin.rpc('bob_inspect_schema', { table_names: null });
+  if (schema.error) return json({ error: `Live schema inspection failed: ${schema.error.message}` }, 500);
+  const atlasTerms = ['patrol', 'site', 'zone', 'shift', 'dispatch', 'timesheet', 'finance'];
+  const { data: capabilities } = await admin.from('bob_capability_map').select('entity_type,entity_name,present,wired,exercised,notes').eq('retirement_status', 'live').or(atlasTerms.map((term) => `entity_name.ilike.*${term}*`).join(',')) .limit(250);
+  const { data: edges } = await admin.from('bob_app_map_edges').select('source_type,source_name,target_type,target_name,edge_kind,evidence_class').eq('retirement_status', 'live').or(atlasTerms.map((term) => `source_name.ilike.*${term}*,target_name.ilike.*${term}*`).join(',')) .limit(500);
+  const plannerResponse = await fetch(`${url}/functions/v1/bob-plan-import`, { method: 'POST', headers: { Authorization: authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ file_name: body.file_name ?? 'patrol-source.csv', document_text: csv, organization_id: profile.organization_id, max_candidates: body.max_candidates ?? 6, sample_size: body.sample_size ?? 25 }) });
+  const plan = await plannerResponse.json().catch(() => ({}));
+  return json({ planned: true, writes: [], organization_id: profile.organization_id, schema_tables: (schema.data?.tables ?? []).filter((table: { table: string }) => atlasTerms.some((term) => table.table.toLowerCase().includes(term))).map((table: { table: string; columns: unknown[] }) => ({ table: table.table, column_count: table.columns?.length ?? 0 })), atlas: { capabilities: capabilities ?? [], edges: edges ?? [] }, generic_plan: plan, notes: ['Read-only Atlas/schema-backed patrol planning. No sites, zones, routes, shifts, patrols, attendance, travel, or wages were written.', 'Human approval is required before any proposed mapping can reach bob-upsert-generic or a governed patrol promotion command.'] });
 });
