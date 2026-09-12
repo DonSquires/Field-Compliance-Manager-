@@ -59,6 +59,13 @@ Finance spreadsheet classification approval: `April 2026 Noise billing.xlsx` was
 - Browser/alert errors: 0
 - Promotion: not performed
 
+OCR/parser finding: local Poppler and Tesseract verification on 2026-09-12 found embedded text in both finance PDFs that the live registration currently marked `OCR required`:
+
+- `FIRST Security Guard Services Limited - HR Pay Costing.pdf`: 2 pages, embedded pay-costing text present.
+- `Expense Reimbursement 22.08.22.pdf`: 1 page, embedded expense-form text present.
+
+Diagnosis: the deployed `bob-extract-document` PDF parser is failing to recognise these text streams. This is a confirmed extraction defect. The PDFs remain unapproved and unpromoted until the parser is fixed and the files are re-registered through the browser.
+
 ## Confirmed browser-seeding gap
 
 The File System page previously provided CSV/XLSX preview, but no general human-visible upload/register control for the corpus. A one-file role-gated intake control is now implemented locally and reuses private `bob-uploads`, `bob_attachments`, and `bob-document-register`. It must be deployed before the production browser seed can start. Bob Document Studio still exposes brand-asset upload separately.
