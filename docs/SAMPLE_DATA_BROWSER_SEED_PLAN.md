@@ -129,6 +129,8 @@ The File System page previously provided CSV/XLSX preview, but no general human-
 
 Each batch must capture before/during/after evidence, source filename/hash, browser route, visible action, approval receipt, created record IDs, skipped/quarantined files, and any failed network/API request.
 
+Shift-spine requirement: Finance service costs must preserve optional active/accepted `shift_id` attribution. The same shift identity drives officer-on-duty state, patrol sessions, dispatch/response jobs, field reports, welfare controls, timesheet labour posting, and finance cost attribution. A finance row without its available shift attribution is incomplete evidence, not a separate finance truth.
+
 ## Next implementation
 
 Add a role-gated, tenant-scoped generic intake control to the File System UI. It should upload to private Bob storage, register provenance, classify/quarantine, expose extraction/review state, and require a visible human approval action before promotion. The control must support one file at a time initially so Playwright and human reviewers can trace each file without hiding partial failures.
