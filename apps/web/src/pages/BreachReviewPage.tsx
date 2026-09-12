@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -52,6 +53,7 @@ const ACTION_OPTIONS: { type: ActionType; label: string; btnClass: string }[] = 
 ];
 
 const BreachReviewPage: React.FC = () => {
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const [alerts, setAlerts] = useState<BreachAlert[]>([]);
   const [statusFilter, setStatusFilter] = useState<'open' | 'acknowledged' | 'actioned' | 'dismissed' | 'resolved' | 'exempt_homeless' | 'all'>('open');
@@ -173,7 +175,13 @@ const BreachReviewPage: React.FC = () => {
       window.open(draftUrl, '_blank', 'noopener,noreferrer');
       window.setTimeout(() => URL.revokeObjectURL(draftUrl), 60_000);
     }
+
     setGeneratingNoticeId(null);
+  };
+
+  const draftBobDocument = (alert: BreachAlert) => {
+    const sourceType = alert.action_type === 'written_warning' || alert.action_type === 'notice_to_vacate' || alert.action_type === 'infringement' ? 'notice' : 'breach';
+    navigate(`/admin/document-studio?sourceType=${sourceType}&sourceId=${alert.id}`);
   };
 
   const filteredAlerts = useMemo(() => {
@@ -431,6 +439,9 @@ const BreachReviewPage: React.FC = () => {
                       {(['written_warning', 'notice_to_vacate', 'infringement'] as string[]).includes(alert.action_type ?? '') && <button className="btn btn-sm btn-primary" onClick={() => void generateNoticeDraft(alert)} disabled={generatingNoticeId === alert.id}>
                         {generatingNoticeId === alert.id ? 'Generating draft...' : 'Generate notice draft'}
                       </button>}
+                      <button className="btn btn-sm btn-primary" onClick={() => void draftBobDocument(alert)} title="Draft a formal notice letter or incident report with Bob">
+                        ✨ Bob: Draft document
+                      </button>
                     </div>
                   </div>
                 )}
