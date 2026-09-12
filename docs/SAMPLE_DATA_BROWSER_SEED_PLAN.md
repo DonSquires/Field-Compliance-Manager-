@@ -138,6 +138,7 @@ Live shift-aware finance control E2E: completed on 2026-09-12 through the Financ
 - After: visible receipts confirmed service cost recording, tax preparation at NZD 0.00 with no IRD submission, and P&L snapshot/close.
 - Browser/alert errors: 0.
 - Bank and IRD linking: untouched.
+- E2E exception: an initial labour cost attempt was recorded before the shift selector persisted; the follow-up implementation now disables labour recording until an available shift is selected. The corrected shift-attributed labour receipt is the accepted evidence path.
 
 ## Next implementation
 
