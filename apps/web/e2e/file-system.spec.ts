@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }) => {
   await installSupabaseFixtures(page);
 });
 
-test('administrator searches, reviews, and opens a source document', async ({ page }) => {
+test('administrator searches, reviews, and opens a source document', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/files');
   await expect(page.getByRole('heading', { name: 'File system' })).toBeVisible();
@@ -29,5 +29,6 @@ test('administrator searches, reviews, and opens a source document', async ({ pa
   });
   await page.getByRole('button', { name: 'Open source' }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __openedFile?: string }).__openedFile)).toContain('signed/sample-document.pdf');
+  await page.screenshot({ path: testInfo.outputPath('files-registry.png'), fullPage: true });
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

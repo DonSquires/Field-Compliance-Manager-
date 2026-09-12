@@ -26,6 +26,29 @@
   .geography-page .site-selector,
   .zone-detail-page .site-selector {
     width: 100%;
+    min-width: 0;
+  }
+
+  .geography-page .site-card,
+  .zone-detail-page .site-card {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .geography-page .site-card h3,
+  .zone-detail-page .site-card h3 {
+    display: block;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .geography-page .site-card .site-address,
+  .zone-detail-page .site-card .site-address {
+    display: block;
+    max-width: 100%;
+    white-space: normal;
   }
 
   .geography-page .assessment-details,

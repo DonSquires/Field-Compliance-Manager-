@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await installSupabaseFixtures(page);
 });
 
-test('enterprise document studio exposes governed families and honest brand readiness', async ({ page }) => {
+test('enterprise document studio exposes governed families and honest brand readiness', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/document-studio');
 
@@ -27,5 +27,6 @@ test('enterprise document studio exposes governed families and honest brand read
   await expect(page.getByPlaceholder('Search bylaws, policies, reports…')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('document-studio-structure.png'), fullPage: true });
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
