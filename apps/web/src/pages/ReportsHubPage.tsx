@@ -72,6 +72,7 @@ const ReportsHubPage: React.FC = () => {
   const [consolidatedReporting, setConsolidatedReporting] = useState<ConsolidatedReportingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [generatingRollup, setGeneratingRollup] = useState(false);
   const [sendingPackId, setSendingPackId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -151,6 +152,25 @@ const ReportsHubPage: React.FC = () => {
     setSendingPackId(null);
   };
 
+  const generateDailyRollup = async () => {
+    setGeneratingRollup(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('generate-daily-operational-rollup');
+      if (invokeError || !data?.ok) {
+        setError(invokeError?.message ?? data?.error ?? 'Daily operational rollup draft could not be generated.');
+      } else {
+        setNotice(`Daily operational rollup draft generated ("${data.draft.title}"). It has been submitted for human review in Approvals.`);
+        await loadReports();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Daily rollup generation failed.');
+    } finally {
+      setGeneratingRollup(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="page-container">
@@ -197,6 +217,7 @@ const ReportsHubPage: React.FC = () => {
           />
         </div>
         <button type="button" className="btn btn-primary" onClick={() => void generateReportPacks()} disabled={generating}>{generating ? 'Generating...' : 'Generate report packs'}</button>
+        <button type="button" className="btn btn-secondary" onClick={() => void generateDailyRollup()} disabled={generatingRollup}>{generatingRollup ? 'Generating rollup...' : 'Generate daily rollup'}</button>
       </div>
 
       <div className="kpi-grid">

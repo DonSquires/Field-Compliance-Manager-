@@ -20,6 +20,12 @@ describe('governed monthly report pack generation', () => {
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.update\(/);
   });
 
+  it('triggers 24-hour operational rollups through the daily rollup edge function', () => {
+    expect(page).toContain("supabase.functions.invoke('generate-daily-operational-rollup')");
+    expect(page).toContain('Generate daily rollup');
+    expect(page).toContain('Daily operational rollup draft generated');
+  });
+
   it('does not mutate report packs directly from the browser', () => {
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.(insert|update|upsert)\(/);
   });
