@@ -40,6 +40,21 @@ CREATE TABLE IF NOT EXISTS public.invoice_adjustments (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.bank_accounts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  account_name text NOT NULL,
+  account_number text NOT NULL,
+  account_type text NOT NULL CHECK (account_type IN ('business','operating','investment','loan')),
+  bank_name text,
+  currency_code text NOT NULL DEFAULT 'NZD' CHECK (length(currency_code) = 3),
+  opening_balance numeric(14,2) NOT NULL DEFAULT 0,
+  is_active boolean NOT NULL DEFAULT true,
+  created_by uuid REFERENCES public.user_profiles(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (organization_id, account_number)
+);
+
 CREATE TABLE IF NOT EXISTS public.payment_receipts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
@@ -58,27 +73,11 @@ CREATE TABLE IF NOT EXISTS public.payment_receipts (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS public.bank_accounts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-  account_name text NOT NULL,
-  account_number text NOT NULL,
-  account_type text NOT NULL CHECK (account_type IN ('business','operating','investment','loan')),
-  bank_name text,
-  currency_code text NOT NULL DEFAULT 'NZD' CHECK (length(currency_code) = 3),
-  opening_balance numeric(14,2) NOT NULL DEFAULT 0,
-  is_active boolean NOT NULL DEFAULT true,
-  created_by uuid REFERENCES public.user_profiles(id) ON DELETE RESTRICT,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (organization_id, account_number)
-);
-
 ALTER TABLE public.invoice_line_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invoice_adjustments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bank_accounts ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY invoice_line_items_select ON public.invoice_line_items FOR SELECT TO authenticated USING (public.org_access_allowed(organization_id));
 CREATE POLICY invoice_adjustments_select ON public.invoice_adjustments FOR SELECT TO authenticated USING (public.org_access_allowed(organization_id));
 CREATE POLICY payment_receipts_select ON public.payment_receipts FOR SELECT TO authenticated USING (public.org_access_allowed(organization_id));
 CREATE POLICY bank_accounts_select ON public.bank_accounts FOR SELECT TO authenticated USING (public.org_access_allowed(organization_id));
@@ -181,8 +180,13 @@ BEGIN
 
   SELECT * INTO v_snapshot FROM public.finance_pl_snapshots WHERE pl_period_id = p_pl_period_id;
   IF NOT FOUND THEN 
-    SELECT 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0 INTO 
-      v_labour, v_vehicle, v_materials, v_equipment, v_overhead, v_depreciation, v_total_cost, 0;
+    v_labour := 0;
+    v_vehicle := 0;
+    v_materials := 0;
+    v_equipment := 0;
+    v_overhead := 0;
+    v_depreciation := 0;
+    v_total_cost := 0;
   ELSE
     v_labour := v_snapshot.total_labour;
     v_vehicle := v_snapshot.total_vehicle;
