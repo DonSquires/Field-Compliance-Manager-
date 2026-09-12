@@ -82,6 +82,14 @@ test.describe('production document workflow visual audit', () => {
     await expect(page.getByRole('status', { name: 'Source context for document' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('status', { name: 'Source context for document' })).toContainText(/SITE/i);
     await expect(page.getByLabel('Document type')).toHaveValue('site_safety_plan');
+    await expect(page.getByText('Bob prepared this draft from source context and submitted it for human review.', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await page.goto(`${LIVE_URL}/admin/approvals`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Approvals and activity' })).toBeVisible({ timeout: 30_000 });
+    const documentQueue = page.getByRole('region', { name: 'Bob document review queue' });
+    await expect(documentQueue).toBeVisible({ timeout: 30_000 });
+    await expect(documentQueue.getByText('Site Safety Plan', { exact: false }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(documentQueue.getByText(/Conversation-only until approved/i).first()).toBeVisible({ timeout: 30_000 });
+    await expect(documentQueue.getByRole('button', { name: 'Review document' }).first()).toBeVisible();
     expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
     expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
     expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);

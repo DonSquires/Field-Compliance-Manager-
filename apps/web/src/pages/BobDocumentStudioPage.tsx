@@ -165,7 +165,7 @@ export default function BobDocumentStudioPage() {
       const draft = data?.draft;
       if (error || !draft?.document_id || !draft?.document_version_id) {
         setSaveState('error');
-        setNotice(error?.message ?? data?.error ?? 'The agentic draft could not be prepared.');
+        setNotice(data?.error ?? error?.message ?? 'The agentic draft could not be prepared.');
         return;
       }
       setTitle(draft.title);

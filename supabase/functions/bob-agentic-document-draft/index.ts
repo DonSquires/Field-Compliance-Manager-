@@ -47,8 +47,12 @@ serve(async (request) => {
     let facts = '';
     let referenceMetadata: Array<Record<string, unknown>> = [];
     if (sourceType === 'site') {
-      const { data: site } = await admin.from('client_sites').select('id,organization_id,name,address,site_type,site_brief,hs_notes,access_instructions').eq('id', sourceId).eq('organization_id', profile.organization_id).maybeSingle();
-      if (!site) return json({ error: 'Site context not found in your organisation' }, 404);
+      const { data: geography, error: geographyError } = await caller.rpc('get_crm_operational_geography');
+      if (geographyError) return json({ error: `Site context could not be authorised: ${geographyError.message}` }, 403);
+      const authorizedSite = ((geography as { sites?: Array<{ id: string }> } | null)?.sites ?? []).find((site) => site.id === sourceId);
+      if (!authorizedSite) return json({ error: 'Site context is not available through an active operational relationship' }, 404);
+      const { data: site } = await admin.from('client_sites').select('id,organization_id,client_organization_id,name,address,site_type,site_brief,hs_notes,access_instructions').eq('id', authorizedSite.id).maybeSingle();
+      if (!site) return json({ error: 'Authorized site context could not be loaded' }, 404);
       title = `Site Safety Plan - ${site.name}`;
       documentType = 'site_safety_plan';
       heading = 'Site safety plan';
