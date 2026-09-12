@@ -15,12 +15,12 @@ describe('Finance operations dashboard', () => {
   });
 
   it('exposes P&L, GST, budget, and reconciliation signals with safe states', () => {
-    expect(component).toContain('Current P&amp;L period');
-    expect(component).toContain('GST filing');
-    expect(component).toContain('Budget attention');
-    expect(component).toContain('Reconciliation queue');
+    expect(component).toContain('What is happening with my money?');
+    expect(component).toContain('Money left after costs');
+    expect(component).toContain('Tax money to plan for');
+    expect(component).toContain('Payments to sort');
     expect(component).toContain('Finance dashboard unavailable');
-    expect(component).toContain('No P&L period configured');
+    expect(component).toContain('No money check configured');
   });
 
   it('is integrated into the existing Finance Bureau page', () => {
