@@ -26,7 +26,7 @@ serve(async (request) => {
   const accountsResponse = await fetch(`${apiBase}/accounts`, { headers });
   if (!meResponse.ok || !accountsResponse.ok) {
     await admin.rpc('record_akahu_personal_check', { p_actor_user_id: user.id, p_app_reference: 'akahu-personal', p_account_count: 0, p_account_summary: [], p_status: 'failed', p_error_category: 'Akahu personal API rejected the test request' });
-    return json({ error: 'Akahu personal test could not verify the configured account' }, 502);
+    return json({ error: 'Akahu Personal App authorisation was rejected. Regenerate the Personal User Access Token and confirm it belongs to this App ID Token.', personal_test_only: true });
   }
   const accountsPayload = await accountsResponse.json();
   const accounts = accountsPayload.items ?? accountsPayload.data ?? [];
