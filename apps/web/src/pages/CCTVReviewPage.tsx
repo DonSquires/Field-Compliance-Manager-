@@ -851,7 +851,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
 
   const draftBobDocument = () => {
     if (!selected?.evidence_item_id) return;
-    navigate(`/admin/document-studio?sourceType=cctv&sourceId=${selected.evidence_item_id}`);
+    navigate(`/admin/document-studio?sourceType=cctv&sourceId=${selected.evidence_item_id}&auto=1`);
   };
 
   const printSelectedReport = async () => {

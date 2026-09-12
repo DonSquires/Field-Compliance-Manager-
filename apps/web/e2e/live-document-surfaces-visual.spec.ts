@@ -78,7 +78,7 @@ test.describe('production document workflow visual audit', () => {
     await expect(page.getByText(/All Locations/i)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('button', { name: 'Bob: Draft safety plan' }).first()).toBeVisible({ timeout: 30_000 });
     await page.getByRole('button', { name: 'Bob: Draft safety plan' }).first().click();
-    await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=site&sourceId=[0-9a-f-]+$/i, { timeout: 30_000 });
+    await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=site&sourceId=[0-9a-f-]+&auto=1$/i, { timeout: 30_000 });
     await expect(page.getByRole('status', { name: 'Source context for document' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('status', { name: 'Source context for document' })).toContainText(/SITE/i);
     await expect(page.getByLabel('Document type')).toHaveValue('site_safety_plan');

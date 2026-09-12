@@ -181,7 +181,7 @@ const BreachReviewPage: React.FC = () => {
 
   const draftBobDocument = (alert: BreachAlert) => {
     const sourceType = alert.action_type === 'written_warning' || alert.action_type === 'notice_to_vacate' || alert.action_type === 'infringement' ? 'notice' : 'breach';
-    navigate(`/admin/document-studio?sourceType=${sourceType}&sourceId=${alert.id}`);
+    navigate(`/admin/document-studio?sourceType=${sourceType}&sourceId=${alert.id}&auto=1`);
   };
 
   const filteredAlerts = useMemo(() => {

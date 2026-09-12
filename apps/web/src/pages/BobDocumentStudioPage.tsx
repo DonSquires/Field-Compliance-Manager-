@@ -33,6 +33,7 @@ export default function BobDocumentStudioPage() {
   const [title, setTitle] = useState('Untitled Bob document');
   const [documentType, setDocumentType] = useState('report');
   const [sourceContext, setSourceContext] = useState<{ type: string; id: string; label: string; prompt: string } | null>(null);
+  const [autoDraftStarted, setAutoDraftStarted] = useState(false);
   const [referenceQuery, setReferenceQuery] = useState('');
   const [references, setReferences] = useState<ReferenceResult[]>([]);
   const [selectedReferences, setSelectedReferences] = useState<ReferenceResult[]>([]);
@@ -152,6 +153,29 @@ export default function BobDocumentStudioPage() {
     void loadSourceContext();
     return () => { active = false; };
   }, [searchParams, profile?.organizationId]);
+
+  useEffect(() => {
+    if (autoDraftStarted || searchParams.get('auto') !== '1' || !profile?.organizationId || !editor) return;
+    const sourceType = searchParams.get('sourceType');
+    const sourceId = searchParams.get('sourceId');
+    if (!sourceType || !sourceId) return;
+    setAutoDraftStarted(true);
+    setSaveState('saving');
+    void supabase.functions.invoke('bob-agentic-document-draft', { body: { sourceType, sourceId } }).then(({ data, error }) => {
+      const draft = data?.draft;
+      if (error || !draft?.document_id || !draft?.document_version_id) {
+        setSaveState('error');
+        setNotice(error?.message ?? data?.error ?? 'The agentic draft could not be prepared.');
+        return;
+      }
+      setTitle(draft.title);
+      setDocumentType(draft.document_type);
+      editor.commands.setContent(draft.authored_html);
+      setDraftIds({ documentId: draft.document_id, versionId: draft.document_version_id });
+      setSaveState('needs_review');
+      setNotice('Bob prepared this draft from source context and submitted it for human review.');
+    });
+  }, [autoDraftStarted, editor, profile?.organizationId, searchParams]);
 
   const uploadBrandAsset = async (file: File) => {
     if (!profile?.organizationId) return;
