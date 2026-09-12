@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
+import { ShellLayout } from '../layouts/ShellLayout';
 import './OfficerFieldReportPage.css';
 
 type ReportType = 'incident' | 'maintenance' | 'health_safety';
@@ -110,7 +111,8 @@ const OfficerFieldReportPage: React.FC = () => {
     setSubmitting(false);
   };
 
-  return <div className="officer-report-page">
+  return <ShellLayout shell="officer" className="officer-report-shell">
+    <div className="officer-report-page">
     <header className="officer-report-header"><div><span>Field evidence</span><h1>Field report</h1><p>{investigationId ? 'Investigation follow-up report. This submission will be linked to the investigation.' : 'Submit operational, maintenance, or health and safety concerns.'}</p></div><button type="button" onClick={() => void loadData()} disabled={loading} title="Refresh reports" aria-label="Refresh field reports"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
     {error && <div className="officer-report-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss" aria-label="Dismiss error"><X size={16} /></button></div>}
     {receipt && <div className="officer-report-message is-success" role="status"><CheckCircle2 size={17} /><span>Report confirmed · receipt {receipt.id.slice(0, 8)} · {receipt.shiftId ? `linked to ${receipt.shiftLabel ?? `shift ${receipt.shiftId.slice(0, 8)}`}` : 'not linked to a shift'} · {new Date(receipt.receivedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span><button type="button" onClick={() => setReceipt(null)} title="Dismiss" aria-label="Dismiss receipt"><X size={16} /></button></div>}
@@ -130,6 +132,7 @@ const OfficerFieldReportPage: React.FC = () => {
       </form>
       <aside className="officer-report-history"><div className="officer-report-panel-heading"><div><span>My records</span><h2>Recent reports</h2></div><strong>{reports.length}</strong></div>{loading ? <div className="officer-report-empty"><RefreshCw size={19} className="is-spinning" />Loading reports</div> : reports.length === 0 ? <div className="officer-report-empty"><FileText size={22} />No reports submitted yet</div> : <div className="officer-report-list">{reports.map((report) => <article id={`officer-report-${report.id}`} className={`severity-${report.severity} ${report.id===requestedReportId?'is-context-focus':''}`} key={report.id}><div><strong>{report.title}</strong><span>{report.status}</span></div><p>{report.description}</p>{report.review_notes&&<section className="officer-report-review"><strong>Supervisor review</strong><span>{report.review_notes}</span><small>{report.reviewed_at?new Date(report.reviewed_at).toLocaleString('en-NZ'):'Review time unavailable'}</small></section>}<small><MapPin size={12} />{report.location_name || 'Location not named'} · {new Date(report.reported_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></article>)}</div>}</aside>
     </div>
-  </div>;
+    </div>
+  </ShellLayout>;
 };
 export default OfficerFieldReportPage;
