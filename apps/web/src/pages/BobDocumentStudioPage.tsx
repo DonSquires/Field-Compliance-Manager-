@@ -170,7 +170,7 @@ export default function BobDocumentStudioPage() {
       }
       setTitle(draft.title);
       setDocumentType(draft.document_type);
-      editor.commands.setContent(draft.authored_html);
+      editor?.commands?.setContent(draft.authored_html);
       setDraftIds({ documentId: draft.document_id, versionId: draft.document_version_id });
       setSaveState('needs_review');
       setNotice('Bob prepared this draft from source context and submitted it for human review.');
@@ -259,8 +259,8 @@ export default function BobDocumentStudioPage() {
 
   const insertCitation = (reference: ReferenceResult) => {
     const citation = `<p><em>Source: ${reference.title}${reference.publisher ? ` — ${reference.publisher}` : ''}${reference.jurisdiction ? ` (${reference.jurisdiction})` : ''}. Approved reference; verify the cited source before final approval.</em></p>`;
-    editor?.commands.insertContent(citation);
-    editor?.commands.focus('end');
+    editor?.commands?.insertContent(citation);
+    editor?.commands?.focus('end');
   };
 
   const saveDraft = async () => {
