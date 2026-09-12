@@ -28,7 +28,7 @@ export function FinanceConnectionWizard() {
     if (!profile?.organizationId) return;
     setLoading(true);
     const [accountResponse, connectionResponse] = await Promise.all([
-      supabase.from('bank_accounts').select('id,account_name,account_number,bank_name').eq('organization_id', profile.organizationId).eq('is_active', true).order('account_name'),
+      supabase.from('bank_accounts').select('id,account_name,account_number,bank_name').eq('organization_id', profile.organizationId).eq('is_active', true).ilike('bank_name', '%ANZ%').order('account_name'),
       supabase.from('finance_external_connection_requests').select('provider_type,connection_mode,status,bank_account_id,setup_summary').eq('organization_id', profile.organizationId).order('created_at', { ascending: false }),
     ]);
     if (accountResponse.error || connectionResponse.error) setError(accountResponse.error?.message ?? connectionResponse.error?.message ?? 'Connection setup could not be loaded.');
@@ -48,13 +48,9 @@ export function FinanceConnectionWizard() {
 
   const requestConnection = async () => {
     setSaving(true); setNotice(null); setError(null);
-    const { error: requestError } = await supabase.rpc('request_finance_external_connection', {
-      p_provider_type: provider,
-      p_connection_mode: method,
-      p_requested_scopes: provider === 'ird' ? ['gst_status', 'filing_status', 'submission_receipts'] : ['account_transactions', 'balances', 'payment_matches'],
-      p_bank_account_id: provider === 'bank' ? bankAccountId : null,
-      p_consent_confirmed: consent,
-    });
+    const { error: requestError } = provider === 'bank'
+      ? await supabase.rpc('request_anz_bank_connection', { p_bank_account_id: bankAccountId, p_connection_mode: method, p_requested_scopes: ['account_transactions', 'balances', 'payment_matches'], p_consent_confirmed: consent })
+      : await supabase.rpc('request_finance_external_connection', { p_provider_type: provider, p_connection_mode: method, p_requested_scopes: ['gst_status', 'filing_status', 'submission_receipts'], p_bank_account_id: null, p_consent_confirmed: consent });
     if (requestError) setError(requestError.message);
     else { setNotice('Bob prepared the connection request. The next step opens with the approved provider; no password or token was stored here.'); setStep(0); setConsent(false); await load(); }
     setSaving(false);
@@ -69,8 +65,8 @@ export function FinanceConnectionWizard() {
     {error && <p className="finance-connection-error" role="alert"><CircleAlert size={14} />{error}</p>}
     {notice && <p className="finance-connection-notice" role="status"><CheckCircle2 size={14} />{notice}</p>}
     <div className="finance-connection-steps" aria-label="Connection setup progress">{steps.map((label, index) => <span className={index <= step ? 'is-active' : ''} key={label}><b>{index + 1}</b>{label}</span>)}</div>
-    {step === 0 && <div className="finance-connection-options"><button type="button" className={provider === 'ird' ? 'is-selected' : ''} onClick={() => changeProvider('ird')}><Landmark size={18} /><strong>IRD</strong><small>GST and filing receipts</small></button><button type="button" className={provider === 'bank' ? 'is-selected' : ''} onClick={() => changeProvider('bank')}><Banknote size={18} /><strong>Bank account</strong><small>Balances and payment matching</small></button></div>}
-    {step === 1 && <div className="finance-connection-form"><h3>Safe connection method</h3><p>{provider === 'ird' ? 'IRD access will use an approved authorisation window. Bob will not see or store your login.' : 'Bank access will use an approved banking provider. Bob will not see or store your login.'}</p>{provider === 'bank' && <label><span>Account to connect</span><select value={bankAccountId} onChange={(event) => setBankAccountId(event.target.value)}><option value="">Select an account</option>{bankAccounts.map((account) => <option key={account.id} value={account.id}>{account.account_name} {account.account_number.slice(-4) ? `ending ${account.account_number.slice(-4)}` : ''}</option>)}</select></label>}<button type="button" className="btn btn-primary" disabled={provider === 'bank' && !bankAccountId} onClick={() => setStep(2)}>Continue <ArrowRight size={15} /></button></div>}
+    {step === 0 && <div className="finance-connection-options"><button type="button" className={provider === 'ird' ? 'is-selected' : ''} onClick={() => changeProvider('ird')}><Landmark size={18} /><strong>IRD</strong><small>GST and filing receipts</small></button><button type="button" className={provider === 'bank' ? 'is-selected' : ''} onClick={() => changeProvider('bank')}><Banknote size={18} /><strong>ANZ bank account</strong><small>Balances and payment matching</small></button></div>}
+    {step === 1 && <div className="finance-connection-form"><h3>Safe connection method</h3><p>{provider === 'ird' ? 'IRD access will use an approved authorisation window. Bob will not see or store your login.' : 'ANZ access will use an approved ANZ/Open Banking provider. Bob will not see or store your login.'}</p>{provider === 'bank' && <label><span>ANZ account to connect</span><select value={bankAccountId} onChange={(event) => setBankAccountId(event.target.value)}><option value="">Select an ANZ account</option>{bankAccounts.map((account) => <option key={account.id} value={account.id}>{account.account_name} {account.account_number.slice(-4) ? `ending ${account.account_number.slice(-4)}` : ''}</option>)}</select></label>}<button type="button" className="btn btn-primary" disabled={provider === 'bank' && !bankAccountId} onClick={() => setStep(2)}>Continue <ArrowRight size={15} /></button></div>}
     {step === 2 && <div className="finance-connection-form"><h3>Confirm before Bob prepares it</h3><label className="finance-connection-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I understand this will request access only for the selected finance data, and I will complete authorisation with the provider.</span></label><div className="finance-connection-summary"><strong>{provider === 'ird' ? 'IRD' : 'Bank account'}</strong><span>{method === 'oauth' ? 'Secure authorisation window' : 'Approved provider connection'}</span><span>{provider === 'ird' ? 'GST status, filing status, and submission receipts' : 'Balances, transactions, and payment matching'}</span></div><button type="button" className="btn btn-primary" disabled={!consent || saving} onClick={() => void requestConnection()}>{saving ? 'Preparing...' : 'Prepare secure connection'} <ArrowRight size={15} /></button></div>}
     {connections.length > 0 && <div className="finance-connection-existing"><strong>Existing setup</strong>{connections.slice(0, 4).map((connection, index) => <div key={`${connection.provider_type}-${connection.bank_account_id ?? index}`}><span>{connection.provider_type === 'ird' ? 'IRD' : 'Bank account'}</span><b>{connectedLabel(connection)}</b></div>)}</div>}
   </section>;
