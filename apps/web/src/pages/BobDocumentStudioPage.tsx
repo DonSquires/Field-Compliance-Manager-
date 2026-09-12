@@ -145,6 +145,18 @@ export default function BobDocumentStudioPage() {
             setDocumentType(sourceType === 'notice' ? 'letter' : 'incident_report');
             setTitle(`${sourceType === 'notice' ? 'Notice Letter' : 'Breach Incident Report'} - ${alert.breach_type || 'Breach Alert'}`);
           }
+        } else if (sourceType === 'debrief') {
+          const { data: debrief } = await supabase.from('shift_debriefs').select('id,summary,safety_incident_reported,equipment_issue_reported,follow_up_required,follow_up_notes,submitted_at').eq('id', sourceId).maybeSingle();
+          if (active && debrief) {
+            setSourceContext({
+              type: 'debrief',
+              id: debrief.id,
+              label: `Shift Debrief (${debrief.submitted_at ? debrief.submitted_at.slice(0, 10) : 'Handover'})`,
+              prompt: `Draft a handover report from the shift debrief. Summary: ${debrief.summary || '[TO CONFIRM]'}. Safety incident: ${debrief.safety_incident_reported ? 'Yes' : 'No'}. Equipment issue: ${debrief.equipment_issue_reported ? 'Yes' : 'No'}. Follow-up notes: ${debrief.follow_up_notes || '[TO CONFIRM]'}. Separate observed facts from assumptions and list required follow-up actions with owners and deadlines.`,
+            });
+            setDocumentType(debrief.safety_incident_reported ? 'incident_report' : debrief.equipment_issue_reported || debrief.follow_up_required ? 'corrective_action' : 'report');
+            setTitle(`Shift Debrief Report - ${debrief.submitted_at ? debrief.submitted_at.slice(0, 10) : 'Handover'}`);
+          }
         }
       } catch (err) {
         console.error('Failed to load source context:', err);

@@ -34,7 +34,7 @@ serve(async (request) => {
     const body = await request.json().catch(() => ({}));
     const sourceType = String(body.sourceType ?? '').trim().toLowerCase();
     const sourceId = String(body.sourceId ?? '').trim();
-    if (!['site', 'cctv', 'breach', 'notice'].includes(sourceType) || !sourceId) return json({ error: 'sourceType and sourceId are required' }, 422);
+    if (!['site', 'cctv', 'breach', 'notice', 'debrief'].includes(sourceType) || !sourceId) return json({ error: 'sourceType and sourceId are required' }, 422);
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: profile, error: profileError } = await admin.from('user_profiles').select('organization_id,role').eq('id', user.id).single();
@@ -66,6 +66,14 @@ serve(async (request) => {
       heading = 'CCTV incident report';
       facts = sourceText({ ...evidence, metadata: JSON.stringify(evidence.metadata ?? {}) }, ['evidence_kind', 'captured_at', 'storage_path', 'metadata']);
       referenceMetadata = [{ source_type: 'evidence_item', source_id: evidence.id, title: 'CCTV evidence' }];
+    } else if (sourceType === 'debrief') {
+      const { data: debrief } = await admin.from('shift_debriefs').select('id,organization_id,summary,safety_incident_reported,equipment_issue_reported,follow_up_required,follow_up_notes,submitted_at').eq('id', sourceId).eq('organization_id', profile.organization_id).maybeSingle();
+      if (!debrief) return json({ error: 'Shift debrief context not found in your organisation' }, 404);
+      title = `Shift Debrief Report - ${debrief.submitted_at ? debrief.submitted_at.slice(0, 10) : 'Handover'}`;
+      documentType = debrief.safety_incident_reported ? 'incident_report' : debrief.equipment_issue_reported || debrief.follow_up_required ? 'corrective_action' : 'report';
+      heading = 'Shift debrief handover report';
+      facts = sourceText(debrief, ['summary', 'safety_incident_reported', 'equipment_issue_reported', 'follow_up_required', 'follow_up_notes', 'submitted_at']);
+      referenceMetadata = [{ source_type: 'shift_debrief', source_id: debrief.id, title: 'Shift debrief' }];
     } else {
       const { data: alert } = await admin.from('breach_alerts').select('id,organization_id,breach_type,created_at,notes,zone_id,action_type,status').eq('id', sourceId).eq('organization_id', profile.organization_id).maybeSingle();
       if (!alert) return json({ error: 'Breach context not found in your organisation' }, 404);
