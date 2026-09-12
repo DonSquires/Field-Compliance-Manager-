@@ -33,6 +33,15 @@ describe('organisation file system', () => {
     expect(page).toContain('openGeneratedOutput');
   });
 
+  it('surfaces enforcement notices separately from Bob-generated outputs', () => {
+    expect(page).toContain("from('notices_to_vacate')");
+    expect(page).toContain("from('infringement_notices')");
+    expect(page).toContain("from('notice-artifacts')");
+    expect(page).toContain('Enforcement notice artifacts');
+    expect(page).toContain('openNoticeArtifact');
+    expect(page).toContain('eq(\'organization_id\', organizationId)');
+  });
+
   it('loads Bob classification provenance without promoting records automatically', () => {
     expect(page).toContain('document_classifications');
     expect(page).toContain('classifier_source');
