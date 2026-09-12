@@ -72,6 +72,15 @@ Remediation evidence:
 - `Expense Reimbursement 22.08.22.pdf`: extracted preview, 70% Bob confidence, restricted review state.
 - Browser errors during both re-registrations: 0.
 
+Finance PDF classification approvals: both corrected PDFs were reviewed through the live Approvals dialogs on 2026-09-12.
+
+- Privacy class: restricted
+- PII: confirmed
+- Financial data: confirmed
+- Visible receipts: two classification reviews recorded
+- Browser/alert errors: 0
+- Finance proposal promotion: not performed
+
 ## Confirmed browser-seeding gap
 
 The File System page previously provided CSV/XLSX preview, but no general human-visible upload/register control for the corpus. A one-file role-gated intake control is now implemented locally and reuses private `bob-uploads`, `bob_attachments`, and `bob-document-register`. It must be deployed before the production browser seed can start. Bob Document Studio still exposes brand-asset upload separately.
