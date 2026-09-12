@@ -33,6 +33,8 @@ describe('finance external connection wizard', () => {
     expect(component).toContain('window.location.assign(authData.authorization_url)');
     expect(component).toContain('ANZ bank account');
     expect(component).toContain('approved provider');
+    expect(component).toContain('Set up organisation IRD details');
+    expect(component).toContain('save_finance_tax_identity');
     expect(page).toContain('<FinanceConnectionWizard />');
   });
 });
