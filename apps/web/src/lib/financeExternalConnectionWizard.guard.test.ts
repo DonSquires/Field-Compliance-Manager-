@@ -29,6 +29,8 @@ describe('finance external connection wizard', () => {
     expect(component).toContain('We never ask for online-banking passwords, IRD passwords, MFA codes, or access tokens');
     expect(component).toContain("supabase.rpc('request_finance_external_connection'");
     expect(component).toContain("supabase.rpc('request_anz_bank_connection'");
+    expect(component).toContain("supabase.functions.invoke('finance-akahu-start'");
+    expect(component).toContain('window.location.assign(authData.authorization_url)');
     expect(component).toContain('ANZ bank account');
     expect(component).toContain('approved provider');
     expect(page).toContain('<FinanceConnectionWizard />');

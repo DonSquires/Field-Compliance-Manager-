@@ -48,11 +48,15 @@ export function FinanceConnectionWizard() {
 
   const requestConnection = async () => {
     setSaving(true); setNotice(null); setError(null);
-    const { error: requestError } = provider === 'bank'
+    const { data: requestData, error: requestError } = provider === 'bank'
       ? await supabase.rpc('request_anz_bank_connection', { p_bank_account_id: bankAccountId, p_connection_mode: method, p_requested_scopes: ['account_transactions', 'balances', 'payment_matches'], p_consent_confirmed: consent })
       : await supabase.rpc('request_finance_external_connection', { p_provider_type: provider, p_connection_mode: method, p_requested_scopes: ['gst_status', 'filing_status', 'submission_receipts'], p_bank_account_id: null, p_consent_confirmed: consent });
     if (requestError) setError(requestError.message);
-    else { setNotice('Bob prepared the connection request. The next step opens with the approved provider; no password or token was stored here.'); setStep(0); setConsent(false); await load(); }
+    else if (provider === 'bank' && requestData?.id) {
+      const { data: authData, error: authError } = await supabase.functions.invoke('finance-akahu-start', { body: { request_id: requestData.id } });
+      if (authError || !authData?.authorization_url) setError(authError?.message ?? authData?.error ?? 'ANZ authorisation is not configured yet.');
+      else window.location.assign(authData.authorization_url);
+    } else { setNotice('Bob prepared the connection request. The next step opens with the approved provider; no password or token was stored here.'); setStep(0); setConsent(false); await load(); }
     setSaving(false);
   };
 
