@@ -153,6 +153,8 @@ Bob planner evidence: `bob-plan-import` read-only planning against `May Patrols.
 
 Specialized patrol mapper evidence: `bob-plan-patrol-import` ran read-only through an authenticated browser session. It parsed 1,456 rows, found 27 unique client names, 27 client references, and 3 despatch zones, but all 27 site references were unresolved against the current canonical site set. It returned zero writes and correctly required approved site/agreement/shift attribution before promotion.
 
+Bob architecture correction: the patrol wrapper now supplies Atlas capability/edge context and delegates schema inspection and mapping to the generic `bob-plan-import` tool. A duplicate full-schema inspection timed out once; the bounded composition was corrected without adding hard-coded patrol targets. The verified planner now returns HTTP 200, 250 Atlas capabilities, 500 Atlas edges, generic plan success, no target/confidence for ambiguous patrol data, and zero writes.
+
 ## Next implementation
 
 Add a role-gated, tenant-scoped generic intake control to the File System UI. It should upload to private Bob storage, register provenance, classify/quarantine, expose extraction/review state, and require a visible human approval action before promotion. The control must support one file at a time initially so Playwright and human reviewers can trace each file without hiding partial failures.

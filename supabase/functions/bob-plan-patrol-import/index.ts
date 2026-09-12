@@ -28,12 +28,10 @@ serve(async (request) => {
     csv = await data.text();
   }
   if (!csv.trim()) return json({ error: 'csv_text or attachment_id is required' }, 400);
-  const schema = await admin.rpc('bob_inspect_schema', { table_names: null });
-  if (schema.error) return json({ error: `Live schema inspection failed: ${schema.error.message}` }, 500);
   const atlasTerms = ['patrol', 'site', 'zone', 'shift', 'dispatch', 'timesheet', 'finance'];
-  const { data: capabilities } = await admin.from('bob_capability_map').select('entity_type,entity_name,present,wired,exercised,notes').eq('retirement_status', 'live').or(atlasTerms.map((term) => `entity_name.ilike.*${term}*`).join(',')) .limit(250);
+  const { data: capabilities } = await admin.from('bob_capability_map').select('entity_type,entity_name,present,wired,exercised,notes').eq('retirement_status', 'live').or(atlasTerms.map((term) => `entity_name.ilike.*${term}*`).join(',')).limit(250);
   const { data: edges } = await admin.from('bob_app_map_edges').select('source_type,source_name,target_type,target_name,edge_kind,evidence_class').eq('retirement_status', 'live').or(atlasTerms.map((term) => `source_name.ilike.*${term}*,target_name.ilike.*${term}*`).join(',')) .limit(500);
   const plannerResponse = await fetch(`${url}/functions/v1/bob-plan-import`, { method: 'POST', headers: { Authorization: authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ file_name: body.file_name ?? 'patrol-source.csv', document_text: csv, organization_id: profile.organization_id, max_candidates: body.max_candidates ?? 6, sample_size: body.sample_size ?? 25 }) });
   const plan = await plannerResponse.json().catch(() => ({}));
-  return json({ planned: true, writes: [], organization_id: profile.organization_id, schema_tables: (schema.data?.tables ?? []).filter((table: { table: string }) => atlasTerms.some((term) => table.table.toLowerCase().includes(term))).map((table: { table: string; columns: unknown[] }) => ({ table: table.table, column_count: table.columns?.length ?? 0 })), atlas: { capabilities: capabilities ?? [], edges: edges ?? [] }, generic_plan: plan, notes: ['Read-only Atlas/schema-backed patrol planning. No sites, zones, routes, shifts, patrols, attendance, travel, or wages were written.', 'Human approval is required before any proposed mapping can reach bob-upsert-generic or a governed patrol promotion command.'] });
+  return json({ planned: true, writes: [], organization_id: profile.organization_id, atlas: { capabilities: capabilities ?? [], edges: edges ?? [] }, generic_plan: plan, notes: ['Read-only Atlas-backed patrol planning delegated to the generic schema-driven Bob planner. No sites, zones, routes, shifts, patrols, attendance, travel, or wages were written.', 'Human approval is required before any proposed mapping can reach bob-upsert-generic or a governed patrol promotion command.'] });
 });
