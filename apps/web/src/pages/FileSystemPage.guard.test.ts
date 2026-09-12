@@ -19,6 +19,20 @@ describe('organisation file system', () => {
     expect(page).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
   });
 
+  it('surfaces generated document outputs as a first-class governed registry', () => {
+    expect(page).toContain("from('bob_generated_document_outputs')");
+    expect(page).toContain('Generated outputs');
+    expect(page).toContain('Generated output status');
+    expect(page).toContain('Generated output format');
+    expect(page).toContain('renderer_version');
+    expect(page).toContain('mime_type');
+    expect(page).toContain('approved_at');
+    expect(page).toContain('SHA-256');
+    expect(page).toContain('documents(original_filename,source_channel,current_scope)');
+    expect(page).toContain('document_versions(version_label,metadata_json)');
+    expect(page).toContain('openGeneratedOutput');
+  });
+
   it('loads Bob classification provenance without promoting records automatically', () => {
     expect(page).toContain('document_classifications');
     expect(page).toContain('classifier_source');

@@ -94,14 +94,23 @@ interface GeneratedOutputRow {
   document_version_id: string;
   output_format: string;
   status: string;
+  mime_type: string | null;
+  renderer_version: string | null;
   sha256: string | null;
   storage_bucket: string | null;
   storage_path: string | null;
+  requested_by: string;
+  approved_by: string | null;
+  approved_at: string | null;
   created_at: string;
   generated_at: string | null;
+  documents?: { original_filename: string; source_channel: string; current_scope: string } | Array<{ original_filename: string; source_channel: string; current_scope: string }> | null;
+  document_versions?: { version_label: string; metadata_json: Record<string, unknown> } | Array<{ version_label: string; metadata_json: Record<string, unknown> }> | null;
 }
 
 type FileFilter = 'all' | 'quarantined' | 'tenant_reference' | 'tenant' | 'global_reference';
+type OutputStatusFilter = 'all' | 'requested' | 'generating' | 'ready' | 'failed' | 'revoked';
+type OutputFormatFilter = 'all' | 'pdf' | 'print' | 'docx';
 
 const FILE_SPACES = [
   { key: 'all', label: 'All files' },
@@ -112,6 +121,7 @@ const FILE_SPACES = [
   { key: 'finance', label: 'Finance' },
   { key: 'evidence', label: 'Evidence' },
   { key: 'bob', label: 'Bob intake' },
+  { key: 'generated', label: 'Generated outputs' },
 ] as const;
 
 const SAMPLE_MANIFEST_PREVIEW: ManifestPreview = {
@@ -184,6 +194,25 @@ function scopeLabel(scope: DocumentRow['current_scope']): string {
   return scope.replaceAll('_', ' ');
 }
 
+function outputLabel(format: string): string {
+  if (format === 'docx') return 'DOCX';
+  if (format === 'print') return 'Print PDF';
+  return format.toUpperCase();
+}
+
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function outputTitle(output: GeneratedOutputRow): string {
+  const version = relationOne(output.document_versions);
+  const document = relationOne(output.documents);
+  const metadataTitle = version?.metadata_json?.title;
+  if (typeof metadataTitle === 'string' && metadataTitle.trim()) return metadataTitle;
+  return document?.original_filename ?? `${outputLabel(output.output_format)} output`;
+}
+
 function intakeDisposition(attachment: IntakeAttachment): { allowed: boolean; reason?: string } {
   const fileName = attachment.file_name.toLowerCase();
   const extension = fileName.includes('.') ? `.${fileName.split('.').pop()}` : '';
@@ -220,6 +249,8 @@ const FileSystemPage: React.FC = () => {
   const [reviewReason, setReviewReason] = useState('');
   const [reviewingBatch, setReviewingBatch] = useState(false);
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutputRow[]>([]);
+  const [outputStatus, setOutputStatus] = useState<OutputStatusFilter>('all');
+  const [outputFormat, setOutputFormat] = useState<OutputFormatFilter>('all');
 
   const loadDocuments = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
@@ -231,7 +262,7 @@ const FileSystemPage: React.FC = () => {
       .select('id,attachment_id,storage_bucket,storage_object_ref,original_filename,mime_type,sha256,uploaded_by,source_channel,organization_id,current_scope,created_at,updated_at')
       .or(`organization_id.eq.${organizationId},organization_id.is.null`)
       .order('updated_at', { ascending: false })
-      .limit(250), supabase.from('bob_attachments').select('id,file_name,file_type,file_size_bytes,processing_state,created_at').eq('processing_state', 'pending').order('created_at', { ascending: false }).limit(50), supabase.from('file_import_batches').select('id,batch_name,source_file,parser,status,source_sha256,duplicate_of_batch_id,row_count,duplicate_count,unresolved_count,manifest_json,schema_json,created_at').order('created_at', { ascending: false }).limit(50), supabase.from('bob_generated_document_outputs').select('id,document_id,document_version_id,output_format,status,sha256,storage_bucket,storage_path,created_at,generated_at').eq('organization_id', organizationId).order('created_at', { ascending: false }).limit(50)]);
+      .limit(250), supabase.from('bob_attachments').select('id,file_name,file_type,file_size_bytes,processing_state,created_at').eq('processing_state', 'pending').order('created_at', { ascending: false }).limit(50), supabase.from('file_import_batches').select('id,batch_name,source_file,parser,status,source_sha256,duplicate_of_batch_id,row_count,duplicate_count,unresolved_count,manifest_json,schema_json,created_at').order('created_at', { ascending: false }).limit(50), supabase.from('bob_generated_document_outputs').select('id,document_id,document_version_id,output_format,status,mime_type,renderer_version,sha256,storage_bucket,storage_path,requested_by,approved_by,approved_at,created_at,generated_at,documents(original_filename,source_channel,current_scope),document_versions(version_label,metadata_json)').eq('organization_id', organizationId).order('created_at', { ascending: false }).limit(100)]);
     if (loadError || intakeError || outputError) setError(loadError?.message ?? intakeError?.message ?? outputError?.message ?? 'Files could not be loaded.');
     else {
       const rows = (data as DocumentRow[]) ?? [];
@@ -268,6 +299,14 @@ const FileSystemPage: React.FC = () => {
 
   const visibleBatches = useMemo(() => batchStatus === 'all' ? importBatches : importBatches.filter((batch) => batch.status === batchStatus), [batchStatus, importBatches]);
   const selectedBatch = importBatches.find((batch) => batch.id === selectedBatchId) ?? null;
+  const visibleOutputs = useMemo(() => generatedOutputs.filter((output) => {
+    const matchesStatus = outputStatus === 'all' || output.status === outputStatus;
+    const matchesFormat = outputFormat === 'all' || output.output_format === outputFormat;
+    const term = search.trim().toLowerCase();
+    const document = relationOne(output.documents);
+    const matchesSearch = !term || [outputTitle(output), output.output_format, output.status, output.mime_type, output.renderer_version, output.sha256, document?.source_channel].some((value) => value?.toLowerCase().includes(term));
+    return matchesStatus && matchesFormat && matchesSearch;
+  }), [generatedOutputs, outputFormat, outputStatus, search]);
 
   const selected = documents.find((document) => document.id === selectedId) ?? null;
 
@@ -439,7 +478,7 @@ const FileSystemPage: React.FC = () => {
     </section>
     {intakeAttachments.length > 0 && <section className="file-system-intake" aria-label="Bob intake waiting registration"><div><span>Bob intake</span><h2>Files waiting registration</h2><p>These uploads are not yet canonical Files records. Registration extracts, hashes, classifies, and preserves upload provenance.</p></div><div>{intakeAttachments.map((attachment) => { const disposition = intakeDisposition(attachment); return <article key={attachment.id}><strong>{attachment.file_name}</strong><small>{attachment.file_type} · {Math.round(attachment.file_size_bytes / 1024)} KB · {new Date(attachment.created_at).toLocaleDateString('en-NZ')}</small>{disposition.allowed ? <button type="button" onClick={() => void registerAttachment(attachment)}>Register in Files</button> : <span className="file-system-quarantine">Quarantined: {disposition.reason}</span>}</article>; })}</div></section>}
     <section className="file-system-spaces" aria-label="File spaces">{FILE_SPACES.map((item) => <button type="button" key={item.key} className={space === item.key ? 'is-active' : ''} onClick={() => setSpace(item.key)}><FolderOpen size={16} /><span>{item.label}</span></button>)}</section>
-    {space === 'all' || space === 'evidence' ? <section className="file-system-batches" aria-label="Generated outputs"><div className="file-system-batches-heading"><div><span>Generated Outputs</span><h2>Approved document artifacts</h2></div><Download size={17} /></div>{generatedOutputs.length === 0 ? <p className="file-system-muted">No generated outputs are available for this organization.</p> : <div className="file-system-batch-grid">{generatedOutputs.map((output) => <article className="file-system-batch-detail" key={output.id}><div><strong>{output.output_format.toUpperCase()} output</strong><span>{output.status.replaceAll('_', ' ')} · {output.generated_at ? new Date(output.generated_at).toLocaleString('en-NZ') : 'Not generated'}</span><small>{output.sha256 ? `SHA-256 ${output.sha256}` : 'Checksum unavailable'}</small></div><button type="button" onClick={() => void openGeneratedOutput(output)} disabled={output.status !== 'ready'}>{output.status === 'ready' ? 'Open output' : 'Not ready'}</button></article>)}</div>}</section> : null}
+    {space === 'all' || space === 'generated' ? <section className="file-system-batches file-system-generated-registry" aria-label="Generated outputs"><div className="file-system-batches-heading"><div><span>Generated Outputs</span><h2>Approved document artifacts</h2></div><div className="file-system-output-filters"><select aria-label="Generated output status" value={outputStatus} onChange={(event) => setOutputStatus(event.target.value as OutputStatusFilter)}><option value="all">All statuses</option><option value="requested">Requested</option><option value="generating">Generating</option><option value="ready">Ready</option><option value="failed">Failed</option><option value="revoked">Revoked</option></select><select aria-label="Generated output format" value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as OutputFormatFilter)}><option value="all">All formats</option><option value="print">Print PDF</option><option value="pdf">PDF</option><option value="docx">DOCX</option></select><Download size={17} /></div></div>{visibleOutputs.length === 0 ? <p className="file-system-muted">No generated outputs match this view.</p> : <div className="file-system-output-grid">{visibleOutputs.map((output) => { const version = relationOne(output.document_versions); return <article className={`file-system-output-card is-${output.status}`} key={output.id}><div><span>{outputLabel(output.output_format)} · {output.status.replaceAll('_', ' ')}</span><strong>{outputTitle(output)}</strong><small>{version?.version_label ?? 'Version unavailable'} · {output.generated_at ? new Date(output.generated_at).toLocaleString('en-NZ') : 'Not generated'}</small></div><dl><div><dt>MIME</dt><dd>{output.mime_type ?? 'Pending'}</dd></div><div><dt>Renderer</dt><dd>{output.renderer_version ?? 'Pending'}</dd></div><div><dt>Approved</dt><dd>{output.approved_at ? new Date(output.approved_at).toLocaleString('en-NZ') : 'Pending'}</dd></div><div><dt>SHA-256</dt><dd>{output.sha256 ?? 'Checksum pending'}</dd></div></dl><button type="button" onClick={() => void openGeneratedOutput(output)} disabled={output.status !== 'ready'}>{output.status === 'ready' ? 'Open output' : 'Not ready'}</button></article>; })}</div>}</section> : null}
     <div className="file-system-toolbar"><label><Search size={16} /><input type="search" placeholder="Search filenames, type, source, or hash" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label="File status" value={scope} onChange={(event) => setScope(event.target.value as FileFilter)}><option value="all">All statuses</option><option value="quarantined">Quarantined</option><option value="tenant_reference">Reference</option><option value="tenant">Tenant files</option><option value="global_reference">Global reference</option></select></div>
     <div className="file-system-layout"><section className="file-system-list" aria-label="Files"><div className="file-system-list-heading"><div><span>Permitted records</span><h2>{visibleDocuments.length} files</h2></div><small>{documents.length} loaded</small></div>{loading ? <div className="file-system-empty"><RefreshCw size={20} className="is-spinning" />Loading files</div> : visibleDocuments.length === 0 ? <div className="file-system-empty"><FileArchive size={22} />No files match this view</div> : <div className="file-system-records">{visibleDocuments.map((document) => { const Icon = fileIcon(document.mime_type); return <button type="button" key={document.id} className={selectedId === document.id ? 'is-selected' : ''} onClick={() => setSelectedId(document.id)}><span className="file-system-record-icon"><Icon size={17} /></span><span><strong>{document.original_filename}</strong><small>{spaceFor(document)} · {scopeLabel(document.current_scope)}</small></span><time dateTime={document.updated_at}>{new Date(document.updated_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}</time></button>; })}</div>}</section>
     <aside className="file-system-detail" aria-label="File details">{!selected ? <div className="file-system-empty"><FileText size={22} />Select a file to inspect</div> : <><div className="file-system-detail-heading"><div><span>{spaceFor(selected)}</span><h2>{selected.original_filename}</h2><small>{selected.mime_type} · {scopeLabel(selected.current_scope)}</small></div><button type="button" onClick={() => void openFile()} disabled={opening || !selected.storage_object_ref} title="Open source file"><Download size={17} />{opening ? 'Opening' : 'Open source'}</button></div><dl className="file-system-facts"><div><dt>Source</dt><dd>{selected.source_channel.replaceAll('_', ' ')}</dd></div><div><dt>Storage</dt><dd>{selected.storage_bucket}</dd></div><div><dt>Uploaded</dt><dd>{new Date(selected.created_at).toLocaleString('en-NZ')}</dd></div><div><dt>SHA-256</dt><dd>{selected.sha256 ?? 'Not recorded'}</dd></div></dl><section className="file-system-section"><div className="file-system-section-heading"><div><span>Versions</span><h3>{versions.length} extracted versions</h3></div>{versionsLoading && <RefreshCw size={15} className="is-spinning" />}</div>{versions.length === 0 ? <p className="file-system-muted">No extracted version is available yet. This source remains reviewable without treating it as authoritative.</p> : <div className="file-system-versions">{versions.map((version) => <article key={version.id}><strong>{version.version_label}</strong><span>{version.extraction_confidence === null ? 'Confidence unavailable' : `${Math.round(version.extraction_confidence * 100)}% extraction confidence`}{version.ocr_required ? ' · OCR required' : ''}</span><small>{version.extracted_text?.slice(0, 280) || 'No extracted text preview.'}</small></article>)}</div>}</section><section className="file-system-provenance"><Clock3 size={15} /><span>Promotion is deliberately separate from file storage. Bob can prepare a review, but a human must approve any CRM, HR, finance, evidence, or investigation change.</span></section></>}</aside></div>
