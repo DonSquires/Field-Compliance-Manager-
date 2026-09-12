@@ -81,6 +81,15 @@ Finance PDF classification approvals: both corrected PDFs were reviewed through 
 - Browser/alert errors: 0
 - Finance proposal promotion: not performed
 
+Agreement and operations browser batch: three sources uploaded and registered with no browser errors.
+
+- `First Security Service Agreement- Department of Conservation - Te Papa Atawhai.pdf`: extracted preview, restricted classification, PII/financial/legal markers confirmed.
+- `Assignment Instruction Patrol - Queenstown Central.docx`: direct WordprocessingML extraction remediation deployed; extracted preview, 50% Bob confidence, tenant-sensitive classification recorded.
+- `The Warehouse Security Officer Handout Dec 2020.pdf`: extracted preview, internal non-sensitive classification recorded.
+- Classification receipts: 3
+- Browser/alert errors: 0
+- CRM/site brief promotion: not performed
+
 Finance E2E internal writes: completed through the live browser workflow on 2026-09-12, excluding all bank and IRD linking.
 
 - Approved the Expense Reimbursement finance proposal and created draft invoice `E2E-EXP-20260912-01` with subtotal `$181.12`, GST `$17.64`, total `$198.76`.

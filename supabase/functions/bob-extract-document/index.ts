@@ -55,10 +55,10 @@ async function extractDocx(bytes) {
     const documentXml = zip.file('word/document.xml');
     if (!documentXml) return '';
     const xml = await documentXml.async('text');
-    const document = new DOMParser().parseFromString(xml, 'application/xml');
-    if (!document) return '';
-    const textNodes = Array.from(document.getElementsByTagNameNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 't'));
-    return textNodes.map((node)=>node.textContent ?? '').join(' ').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT_CHARS);
+    const textNodes = [...xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map((match) => match[1]);
+    const structuredText = textNodes.join(' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+    if (structuredText) return structuredText.slice(0, MAX_TEXT_CHARS);
+    return xml.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT_CHARS);
   } catch  {
     return '';
   }
