@@ -16,6 +16,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import * as XLSX from 'https://esm.sh/xlsx@0.18.5';
 import JSZip from 'https://esm.sh/jszip@3.10.1';
+import { extractText as extractPdfTextContent, getDocumentProxy } from 'https://esm.sh/unpdf@0.12.1?target=deno';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -62,16 +63,15 @@ async function extractDocx(bytes) {
     return '';
   }
 }
-function extractPdfText(bytes) {
-  const raw = new TextDecoder('latin1').decode(bytes);
-  const chunks = [];
-  const regex = /\(((?:\\.|[^\\()])*)\)\s*Tj|\[((?:[^\][]|\\.)*)\]\s*TJ/g;
-  let m;
-  while((m = regex.exec(raw)) !== null){
-    const seg = (m[1] ?? m[2] ?? '').replace(/\\\(/g, '(').replace(/\\\)/g, ')').replace(/\\\\/g, '\\').replace(/\)\s*-?\d+\s*\(/g, '').replace(/[^\x20-\x7E]/g, ' ');
-    if (seg.trim()) chunks.push(seg);
+async function extractPdfText(bytes) {
+  try {
+    const document = await getDocumentProxy(bytes);
+    const result = await extractPdfTextContent(document, { mergePages: true });
+    return String(result.text ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT_CHARS);
+  } catch (error) {
+    console.error('[bob-extract-document] PDF text extraction failed:', error);
+    return '';
   }
-  return chunks.join(' ').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT_CHARS);
 }
 function extractXlsx(bytes) {
   const wb = XLSX.read(bytes, {
@@ -194,7 +194,7 @@ serve(async (req)=>{
       text = tableText;
     } else if (ext === 'pdf') {
       kind = 'pdf';
-      text = extractPdfText(bytes);
+      text = await extractPdfText(bytes);
     } else if (ext === 'docx') {
       kind = 'docx';
       text = await extractDocx(bytes);

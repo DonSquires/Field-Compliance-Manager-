@@ -310,6 +310,10 @@ serve(async (req)=>{
       if (verErr || !version) throw new Error(`document_versions insert failed: ${verErr?.message}`);
       versionId = version.id;
     }
+    if (versionId && extractedText.trim()) {
+      const { error: refreshVersionError } = await admin.from('document_versions').update({ extracted_text: extractedText, extraction_confidence: extractionConfidence, ocr_required: ocrRequired, metadata_json: { registered_by: user.id, classifier_model_version: CLASSIFIER_MODEL_VERSION, refreshed_at: new Date().toISOString() } }).eq('id', versionId);
+      if (refreshVersionError) throw new Error(`document_versions refresh failed: ${refreshVersionError.message}`);
+    }
     // 6) Classify only when needed: new doc, or existing classification is
     //    missing / low-confidence / stale. Global-reference hits are trusted and
     //    skipped unless their metadata/classification is incomplete.
