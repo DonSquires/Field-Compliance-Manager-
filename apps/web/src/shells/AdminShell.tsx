@@ -385,13 +385,6 @@ const AdminShell: React.FC = () => {
     navigate(`/admin/field-ops?area=${area}`);
   }, [navigate]);
 
-  const openObservationSearch = useCallback((search: string) => {
-    setBobOpen(false);
-    setFieldOpsSubArea('observation-search');
-    setActivePage('field-ops');
-    navigate(`/admin/field-ops?area=observation-search&search=${encodeURIComponent(search)}`);
-  }, [navigate]);
-
   const navigateFromHub = useCallback((destination: string) => {
     if (destination.startsWith('dispatch?')) {
       setFieldOpsSubArea('dispatch');
@@ -645,7 +638,6 @@ const AdminShell: React.FC = () => {
         <BobPanel
           open={bobOpen}
           onClose={() => setBobOpen(false)}
-          onOpenObservationSearch={openObservationSearch}
           context={bobContext}
         />
         {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop releases</span><h2 id="desktop-download-title">Choose your evidence workstation</h2><p>V1 is the stable production bridge. V2 is an unsigned development prototype for clone-first acquisition research.</p></div><div className="desktop-download-options"><a href={DESKTOP_V1_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V1</strong><small>Stable SD-card bridge · current production workflow</small></span><Download size={16} aria-hidden="true" /></a><a href={DESKTOP_V2_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V2</strong><small>Unsigned development build · SmartScreen warning possible</small></span><Download size={16} aria-hidden="true" /></a></div><div className="desktop-download-actions"><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
@@ -730,7 +722,6 @@ const AdminShell: React.FC = () => {
       <BobPanel
         open={bobOpen}
         onClose={() => setBobOpen(false)}
-        onOpenObservationSearch={openObservationSearch}
         context={bobContext}
       />
 
