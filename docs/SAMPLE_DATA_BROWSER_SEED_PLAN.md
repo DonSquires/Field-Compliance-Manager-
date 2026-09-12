@@ -64,7 +64,13 @@ OCR/parser finding: local Poppler and Tesseract verification on 2026-09-12 found
 - `FIRST Security Guard Services Limited - HR Pay Costing.pdf`: 2 pages, embedded pay-costing text present.
 - `Expense Reimbursement 22.08.22.pdf`: 1 page, embedded expense-form text present.
 
-Diagnosis: the deployed `bob-extract-document` PDF parser is failing to recognise these text streams. This is a confirmed extraction defect. The PDFs remain unapproved and unpromoted until the parser is fixed and the files are re-registered through the browser.
+Diagnosis: the deployed `bob-extract-document` PDF parser was failing to recognise these text streams. The parser was fixed with Deno-compatible `unpdf`, the deduplicated version refresh was corrected, and both files were re-registered through the browser. They now show extracted source previews and restricted finance review states. They remain unapproved and unpromoted until the finance reviewer completes the visible approval workflow.
+
+Remediation evidence:
+
+- `FIRST Security Guard Services Limited - HR Pay Costing.pdf`: extracted preview, 70% Bob confidence, restricted review state.
+- `Expense Reimbursement 22.08.22.pdf`: extracted preview, 70% Bob confidence, restricted review state.
+- Browser errors during both re-registrations: 0.
 
 ## Confirmed browser-seeding gap
 
