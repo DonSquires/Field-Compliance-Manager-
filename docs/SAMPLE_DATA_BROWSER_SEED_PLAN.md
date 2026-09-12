@@ -147,6 +147,8 @@ Patrol source-domain correction and current gap:
 - `May Patrols.csv` is staged as review batch `2e1c2b52`: 1,432 rows, 182 unresolved values, 2 malformed rows, no canonical records changed.
 - The current visible importer has no governed apply path from patrol CSV mappings into `client_sites`/`location_zones`/`patrol_routes`/`shift_stops`/`patrols`. Do not approve this batch as if it seeded patrol sites or shifts. The next implementation is a Bob proposal/apply path with human mapping for client/site/zone references and explicit shift/patrol attribution.
 
+Dr Bob and human approval evidence: live desktop human walkthrough passed on 2026-09-12 with 0 browser errors and 78 UX findings. Patrol batch review exposed no direct approval action while unresolved/malformed import values remain; no ambiguous patrol records were approved.
+
 ## Next implementation
 
 Add a role-gated, tenant-scoped generic intake control to the File System UI. It should upload to private Bob storage, register provenance, classify/quarantine, expose extraction/review state, and require a visible human approval action before promotion. The control must support one file at a time initially so Playwright and human reviewers can trace each file without hiding partial failures.
