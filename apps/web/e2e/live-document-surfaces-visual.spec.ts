@@ -179,6 +179,26 @@ test.describe('production document workflow visual audit', () => {
     expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
   });
 
+  test('actioned breach opens an enforcement-scoped Bob draft', async ({ page }) => {
+    const evidence = monitor(page);
+    await signIn(page);
+    await page.goto(`${LIVE_URL}/admin/field-ops?area=breach-review`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(/Compliance Breach Review/i)).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Actioned', exact: true }).click();
+    let draftButton = page.getByRole('button', { name: '✨ Bob: Draft document', exact: true }).first();
+    if (!(await draftButton.isVisible().catch(() => false))) {
+      test.skip(true, 'No actioned breach test data is available in the live organisation; seed an observation through the governed pipeline before enabling this journey.');
+    }
+    await expect(draftButton).toBeVisible({ timeout: 30_000 });
+    await draftButton.click();
+    await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=(notice|breach)&sourceId=[0-9a-f-]+&auto=1$/i, { timeout: 30_000 });
+    await expect(page.getByLabel('Document type')).toHaveValue(/letter|incident_report/);
+    await expect(page.getByText('Needs review', { exact: true })).toBeVisible({ timeout: 30_000 });
+    expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
+    expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
+    expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
+  });
+
   test('synthetic CCTV evidence opens an evidence-scoped Bob incident report', async ({ page }) => {
     const evidence = monitor(page);
     await signIn(page);
