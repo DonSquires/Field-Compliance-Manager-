@@ -9,6 +9,7 @@ type Snapshot = { total_revenue: number; total_cost: number; gross_profit: numbe
 type TaxPeriod = { period_end: string; filing_due_date: string; status: string; net_tax_due: number };
 type Variance = { status: 'on_track' | 'watch' | 'over_budget' | 'no_budget'; variance_amount: number; variance_pct: number | null };
 type Receipt = { payment_amount: number; reconciliation_status: 'pending' | 'matched' | 'unmatched' | 'disputed' };
+type ExternalTransaction = { id: string; amount: number; description: string | null; reconciliation_status: 'unmatched' | 'matched' | 'review' | 'excluded' };
 
 const money = (value: number | null | undefined) => new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD', maximumFractionDigits: 0 }).format(Number(value ?? 0));
 const date = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`)) : 'Not set';
@@ -20,6 +21,7 @@ export function FinanceOperationsDashboard() {
   const [taxPeriod, setTaxPeriod] = useState<TaxPeriod | null>(null);
   const [variances, setVariances] = useState<Variance[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [externalTransactions, setExternalTransactions] = useState<ExternalTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,14 +29,15 @@ export function FinanceOperationsDashboard() {
     if (!profile?.organizationId) return;
     setLoading(true);
     setError(null);
-    const [periodResponse, snapshotResponse, taxResponse, varianceResponse, receiptResponse] = await Promise.all([
+    const [periodResponse, snapshotResponse, taxResponse, varianceResponse, receiptResponse, transactionResponse] = await Promise.all([
       supabase.from('finance_pl_periods').select('id,name,period_start,period_end,status').eq('organization_id', profile.organizationId).order('period_end', { ascending: false }).limit(1),
       supabase.from('finance_pl_snapshots').select('total_revenue,total_cost,gross_profit,gross_margin_pct,cost_line_count').eq('organization_id', profile.organizationId).order('snapshot_at', { ascending: false }).limit(1),
       supabase.from('finance_tax_periods').select('period_end,filing_due_date,status,net_tax_due').eq('organization_id', profile.organizationId).order('filing_due_date', { ascending: true }).limit(1),
       supabase.from('finance_budget_variances').select('status,variance_amount,variance_pct').eq('organization_id', profile.organizationId).order('calculated_at', { ascending: false }).limit(50),
       supabase.from('payment_receipts').select('payment_amount,reconciliation_status').eq('organization_id', profile.organizationId).order('created_at', { ascending: false }).limit(100),
+      supabase.from('finance_external_bank_transactions').select('id,amount,description,reconciliation_status').eq('organization_id', profile.organizationId).order('transaction_date', { ascending: false }).limit(100),
     ]);
-    const failed = [periodResponse, snapshotResponse, taxResponse, varianceResponse, receiptResponse].find((response) => response.error);
+    const failed = [periodResponse, snapshotResponse, taxResponse, varianceResponse, receiptResponse, transactionResponse].find((response) => response.error);
     if (failed?.error) {
       setError(failed.error.message);
     } else {
@@ -43,6 +46,7 @@ export function FinanceOperationsDashboard() {
       setTaxPeriod((taxResponse.data?.[0] as TaxPeriod | undefined) ?? null);
       setVariances((varianceResponse.data as Variance[]) ?? []);
       setReceipts((receiptResponse.data as Receipt[]) ?? []);
+      setExternalTransactions((transactionResponse.data as ExternalTransaction[]) ?? []);
     }
     setLoading(false);
   }, [profile?.organizationId]);
@@ -52,6 +56,7 @@ export function FinanceOperationsDashboard() {
   const overBudget = variances.filter((variance) => variance.status === 'over_budget' || variance.status === 'no_budget');
   const watchBudget = variances.filter((variance) => variance.status === 'watch');
   const unmatchedReceipts = receipts.filter((receipt) => receipt.reconciliation_status !== 'matched');
+  const unmatchedTransactions = externalTransactions.filter((transaction) => transaction.reconciliation_status === 'unmatched' || transaction.reconciliation_status === 'review');
   const collected = receipts.reduce((sum, receipt) => sum + Number(receipt.payment_amount || 0), 0);
 
   if (loading) return <section className="finance-ops-dashboard" aria-busy="true"><div className="loading-state"><div className="spinner" /><p>Loading finance operations</p></div></section>;
@@ -63,12 +68,12 @@ export function FinanceOperationsDashboard() {
       <article><span><BarChart3 size={14} />Money left after costs</span><strong>{snapshot ? money(snapshot.gross_profit) : 'Not ready'}</strong><small>{snapshot ? `${snapshot.gross_margin_pct ?? 0}% of sales left` : 'Bob needs a closed period'}</small></article>
       <article><span><CircleDollarSign size={14} />Money earned</span><strong>{money(snapshot?.total_revenue)}</strong><small>{snapshot ? `${snapshot.cost_line_count} costs checked` : 'No activity checked yet'}</small></article>
       <article className={overBudget.length ? 'is-warning' : ''}><span><ShieldAlert size={14} />Needs attention</span><strong>{overBudget.length}</strong><small>{watchBudget.length} other items to watch</small></article>
-      <article><span><CheckCircle2 size={14} />Customer payments</span><strong>{money(collected)}</strong><small>{unmatchedReceipts.length} need matching</small></article>
+      <article><span><CheckCircle2 size={14} />Customer payments</span><strong>{money(collected)}</strong><small>{unmatchedTransactions.length || unmatchedReceipts.length} need matching</small></article>
     </div>
     <div className="finance-ops-grid">
       <div className="finance-ops-panel"><div className="finance-ops-panel-heading"><div><h3>Current money check</h3><p>{period?.name ?? 'No money check configured'}</p></div><span className={`finance-ops-status status-${period?.status ?? 'empty'}`}>{period?.status ?? 'empty'}</span></div>{period ? <dl><div><dt>Dates checked</dt><dd>{date(period.period_start)} to {date(period.period_end)}</dd></div><div><dt>Left after costs</dt><dd>{money(snapshot?.gross_profit)}</dd></div></dl> : <div className="finance-ops-empty">Bob needs a period to start checking your numbers.</div>}</div>
       <div className="finance-ops-panel"><div className="finance-ops-panel-heading"><div><h3>Tax money to plan for</h3><p>{taxPeriod ? `Bob says it is due ${date(taxPeriod.filing_due_date)}` : 'No tax check configured'}</p></div><span className={`finance-ops-status status-${taxPeriod?.status ?? 'empty'}`}>{taxPeriod?.status ?? 'empty'}</span></div>{taxPeriod ? <dl><div><dt>Dates covered</dt><dd>Until {date(taxPeriod.period_end)}</dd></div><div><dt>Set aside</dt><dd>{money(taxPeriod.net_tax_due)}</dd></div></dl> : <div className="finance-ops-empty">Bob can prepare a tax checklist once a tax period is open.</div>}</div>
-      <div className="finance-ops-panel"><div className="finance-ops-panel-heading"><div><h3>Payments to sort</h3><p>Bob found receipts needing a match</p></div><Clock3 size={18} /></div>{unmatchedReceipts.length ? <ul className="finance-ops-list">{unmatchedReceipts.slice(0, 4).map((receipt, index) => <li key={`${receipt.reconciliation_status}-${index}`}><span>{money(receipt.payment_amount)}</span><strong>{receipt.reconciliation_status}</strong></li>)}</ul> : <div className="finance-ops-empty is-good"><CheckCircle2 size={16} />Nothing needs sorting</div>}</div>
+      <div className="finance-ops-panel"><div className="finance-ops-panel-heading"><div><h3>Payments to sort</h3><p>Bob found bank activity needing a match</p></div><Clock3 size={18} /></div>{unmatchedTransactions.length ? <ul className="finance-ops-list">{unmatchedTransactions.slice(0, 4).map((transaction) => <li key={transaction.id}><span>{money(transaction.amount)}{transaction.description ? ` · ${transaction.description}` : ''}</span><strong>{transaction.reconciliation_status}</strong></li>)}</ul> : unmatchedReceipts.length ? <ul className="finance-ops-list">{unmatchedReceipts.slice(0, 4).map((receipt, index) => <li key={`${receipt.reconciliation_status}-${index}`}><span>{money(receipt.payment_amount)}</span><strong>{receipt.reconciliation_status}</strong></li>)}</ul> : <div className="finance-ops-empty is-good"><CheckCircle2 size={16} />Nothing needs sorting</div>}</div>
     </div>
   </section>;
 }
