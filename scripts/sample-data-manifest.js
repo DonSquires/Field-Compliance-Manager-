@@ -11,6 +11,7 @@ const ignoredDirectories = new Set(['.git', '.hg', '.svn', 'dist', 'node_modules
 function classify(fileName) {
   const lower = fileName.toLowerCase();
   const extension = path.extname(lower);
+  if (fileName === 'HPLJM278-M281_Fax_Port') return { ingestion_class: 'exclude', quarantine_reason: 'Empty placeholder listed as excluded in the sample-data capability matrix' };
   if (quarantineExtensions.has(extension) || quarantineNames.some((pattern) => pattern.test(fileName))) return { ingestion_class: 'quarantine', quarantine_reason: 'Executable, partial download, shortcut, database, or diagnostic artifact' };
   if (sourceExtensions.has(extension)) return { ingestion_class: 'quarantine', quarantine_reason: 'Source code, repository, configuration, or engineering artifact' };
   if (['.7z', '.rar', '.tar', '.zip'].includes(extension)) return { ingestion_class: 'archive_review', quarantine_reason: null };

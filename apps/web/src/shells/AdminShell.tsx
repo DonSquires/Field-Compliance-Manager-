@@ -20,7 +20,9 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
+  BarChart3,
   Bot,
+    Calculator,
   Building2,
   ChevronLeft,
   ChevronRight,
@@ -33,6 +35,7 @@ import {
   FlaskConical,
   Grid3X3,
   KeyRound,
+  Landmark,
   LogOut,
   MapPin,
   Menu,
@@ -42,6 +45,7 @@ import {
   Route,
   Search,
   Settings,
+    Tags,
   Shield,
   Users,
   X,
@@ -72,6 +76,9 @@ const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsP
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
 const RateRulesPage = React.lazy(() => import('../pages/RateRulesPage'));
 const FinanceBureauPage = React.lazy(() => import('../pages/FinanceBureauPage'));
+const FinanceConnectionsPage = React.lazy(() => import('../pages/FinanceConnectionsPage'));
+const FinanceMoneyPage = React.lazy(() => import('../pages/FinanceMoneyPage'));
+const FinanceCostingPage = React.lazy(() => import('../pages/FinanceCostingPage'));
 const RosterTargetsPage = React.lazy(() => import('../pages/RosterTargetsPage'));
 const UserManagementPage = React.lazy(() => import('../pages/UserManagementPage'));
 const SiteBoundaryReviewPage = React.lazy(() => import('../pages/SiteBoundaryReviewPage'));
@@ -109,7 +116,7 @@ const CCTVVideoLibraryPage = React.lazy(() => import('../pages/CCTVVideoLibraryP
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
-  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
@@ -124,7 +131,7 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
-  'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'sites',
+  'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites',
 ]);
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
@@ -173,7 +180,11 @@ const NAVIGATION_MAP = {
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
     { id: 'onboarding', label: 'New Account Setup', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Activation Checklists', icon: ClipboardCheck },
-    { id: 'finance-bureau', label: 'Pricing, Discounts & Tenders', icon: DollarSign },
+    { id: 'finance-bureau', label: 'Finance home', icon: DollarSign },
+    { id: 'finance-money', label: 'Money check', icon: BarChart3 },
+    { id: 'finance-connections', label: 'Connect ANZ & IRD', icon: Landmark },
+    { id: 'finance-costing', label: 'Job costing', icon: Calculator },
+    { id: 'finance-pricing', label: 'Pricing & discounts', icon: Tags },
     { id: 'rate-rules', label: 'Pay & Billing Rate Rules', icon: DollarSign },
   ],
   'Workforce & Operations': [
@@ -537,7 +548,15 @@ const AdminShell: React.FC = () => {
       case 'rate-rules':
         return <RateRulesPage />;
       case 'finance-bureau':
-        return <FinanceBureauPage onOpenBob={() => setBobOpen(true)} />;
+        return <FinanceBureauPage onOpenBob={() => setBobOpen(true)} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+      case 'finance-connections':
+        return <FinanceConnectionsPage onBack={() => navigateToPage('finance-bureau')} />;
+      case 'finance-money':
+        return <FinanceMoneyPage onBack={() => navigateToPage('finance-bureau')} />;
+      case 'finance-costing':
+        return <FinanceCostingPage onBack={() => navigateToPage('finance-bureau')} />;
+      case 'finance-pricing':
+        return <FinanceBureauPage view="pricing" onOpenBob={() => setBobOpen(true)} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'people-hr':
         return <RosterHRPage />;
       case 'roster-targets':

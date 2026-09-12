@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const component = readFileSync(resolve(process.cwd(), 'src/components/FinanceOperationsDashboard.tsx'), 'utf8');
 const page = readFileSync(resolve(process.cwd(), 'src/pages/FinanceBureauPage.tsx'), 'utf8');
+const moneyPage = readFileSync(resolve(process.cwd(), 'src/pages/FinanceMoneyPage.tsx'), 'utf8');
 
 describe('Finance operations dashboard', () => {
   it('reads the finance control surfaces through tenant-scoped Supabase queries', () => {
@@ -24,7 +25,7 @@ describe('Finance operations dashboard', () => {
   });
 
   it('is integrated into the existing Finance Bureau page', () => {
-    expect(page).toContain("import { FinanceOperationsDashboard } from '../components/FinanceOperationsDashboard';");
-    expect(page).toContain('<FinanceOperationsDashboard />');
+    expect(moneyPage).toContain("import { FinanceOperationsDashboard } from '../components/FinanceOperationsDashboard';");
+    expect(moneyPage).toContain('<FinanceOperationsDashboard />');
   });
 });

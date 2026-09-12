@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260912135000_finance_external_connection_wizard.sql'), 'utf8');
 const anzMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260912137000_anz_bank_connection_adapter.sql'), 'utf8');
 const component = readFileSync(resolve(process.cwd(), 'src/components/FinanceConnectionWizard.tsx'), 'utf8');
-const page = readFileSync(resolve(process.cwd(), 'src/pages/FinanceBureauPage.tsx'), 'utf8');
+const page = readFileSync(resolve(process.cwd(), 'src/pages/FinanceConnectionsPage.tsx'), 'utf8');
 
 describe('finance external connection wizard', () => {
   it('supports governed IRD and bank connection requests without storing credentials', () => {

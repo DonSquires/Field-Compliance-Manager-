@@ -18,7 +18,7 @@ describe('AdminShell access and routing boundaries', () => {
 
   it('aligns CRM management pages with server administrator roles', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
-    expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'sites'");
+    expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
     expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
     expect(source).toContain('items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role))');
   });
@@ -69,7 +69,9 @@ describe('AdminShell access and routing boundaries', () => {
   it('keeps specialist routes visible until their container pages exist locally', () => {
     expect(source).toContain("'Clients & Commercial': [");
     expect(source).toContain("{ id: 'crm', label: 'Client Portfolios'");
-    expect(source).toContain("{ id: 'finance-bureau', label: 'Pricing, Discounts & Tenders'");
+    expect(source).toContain("{ id: 'finance-bureau', label: 'Finance home'");
+    expect(source).toContain("{ id: 'finance-connections', label: 'Connect ANZ & IRD'");
+    expect(source).toContain("{ id: 'finance-money', label: 'Money check'");
     expect(source).toContain("'Workforce & Operations': [");
     expect(source).toContain("{ id: 'roster', label: 'Schedules & Rosters'");
     expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");

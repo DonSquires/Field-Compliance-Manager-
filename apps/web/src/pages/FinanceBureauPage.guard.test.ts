@@ -19,7 +19,7 @@ describe('Finance Bureau', () => {
     expect(page).toContain('Provider-owned commercial schedules');
     expect(page).toContain('Rate books remain in Rate Rules');
     expect(shell).toContain("'finance-bureau'");
-    expect(shell).toContain('Pricing, Discounts & Tenders');
-    expect(shell).toContain('<FinanceBureauPage onOpenBob={() => setBobOpen(true)} />');
+    expect(shell).toContain('Finance home');
+    expect(shell).toContain("<FinanceBureauPage onOpenBob={() => setBobOpen(true)} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />");
   });
 });
