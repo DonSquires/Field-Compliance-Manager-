@@ -140,6 +140,13 @@ Live shift-aware finance control E2E: completed on 2026-09-12 through the Financ
 - Bank and IRD linking: untouched.
 - E2E exception: an initial labour cost attempt was recorded before the shift selector persisted; the follow-up implementation now disables labour recording until an available shift is selected. The corrected shift-attributed labour receipt is the accepted evidence path.
 
+Patrol source-domain correction and current gap:
+
+- Deputy location/sites/patrol-zones data is workforce/static-job and roster input, not patrol-route schedule data.
+- Patrol history/outcomes use separate sources such as `May Patrols.csv`, `NCC Partol reports June 26.csv`, and `Nelson Patrol Historical data.csv`.
+- `May Patrols.csv` is staged as review batch `2e1c2b52`: 1,432 rows, 182 unresolved values, 2 malformed rows, no canonical records changed.
+- The current visible importer has no governed apply path from patrol CSV mappings into `client_sites`/`location_zones`/`patrol_routes`/`shift_stops`/`patrols`. Do not approve this batch as if it seeded patrol sites or shifts. The next implementation is a Bob proposal/apply path with human mapping for client/site/zone references and explicit shift/patrol attribution.
+
 ## Next implementation
 
 Add a role-gated, tenant-scoped generic intake control to the File System UI. It should upload to private Bob storage, register provenance, classify/quarantine, expose extraction/review state, and require a visible human approval action before promotion. The control must support one file at a time initially so Playwright and human reviewers can trace each file without hiding partial failures.
