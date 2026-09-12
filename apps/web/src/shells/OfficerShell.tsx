@@ -56,6 +56,7 @@ import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
+import { HelpInstructions } from '../components/HelpInstructions';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import {
   buildOfficerBreadcrumb,
@@ -491,6 +492,7 @@ const OfficerShell: React.FC = () => {
           </button>
           <span className={`officer-connectivity-chip ${isOnline ? 'is-online' : 'is-offline'}`} role="status" title={isOnline ? 'Device is online' : 'Evidence is queued until connection returns'}>{isOnline ? 'Online' : 'Offline'}</span>
           <NotificationCenter onNavigate={navigateFromNotification} />
+          <HelpInstructions context={activeModule ?? officerState} role={profile?.role} />
           <button type="button" className="officer-shell-icon" onClick={() => navigateToModule('bob')} title="Open Bob command center" aria-label="Open Bob command center">
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>

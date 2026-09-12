@@ -17,6 +17,7 @@ import {
 } from '../lib/officerScan';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
 import { supabase } from '../lib/supabase';
+import { HelpInstructions } from '../components/HelpInstructions';
 import './ScanShell.css';
 
 interface ScanResult {
@@ -252,7 +253,7 @@ export function ScanShell() {
           />
           <div><strong>Field Compliance Manager</strong><small>Standalone scan station</small></div>
         </div>
-        <div className="scan-shell-user"><span>{profile.displayName}</span><button type="button" onClick={() => void handleSignOut()} title="Sign out"><LogOut size={18} /><span className="sr-only">Sign out</span></button></div>
+        <div className="scan-shell-user"><span>{profile.displayName}</span><HelpInstructions context="field scan" role={profile.role} /><button type="button" onClick={() => void handleSignOut()} title="Sign out"><LogOut size={18} /><span className="sr-only">Sign out</span></button></div>
       </header>
 
       <main className="scan-shell-content">

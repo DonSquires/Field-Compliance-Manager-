@@ -59,6 +59,7 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
 import { WorkflowRail } from '../components/WorkflowRail';
 import { OperatingSpineRibbon } from '../components/OperatingSpineRibbon';
+import { HelpInstructions } from '../components/HelpInstructions';
 import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
 import './AdminShell.css';
 
@@ -616,6 +617,7 @@ const AdminShell: React.FC = () => {
             <div className="admin-shell-tools">
               {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'corporate_oversight' ? ' (corporate)' : ''}</option>)}</select></label>}
               <NotificationCenter onNavigate={navigateFromNotification} />
+              <HelpInstructions context={activePage} role={profile?.role} />
               <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
               <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
@@ -664,6 +666,7 @@ const AdminShell: React.FC = () => {
         <div className="admin-shell-tools">
           {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}</option>)}</select></label>}
           <NotificationCenter onNavigate={navigateFromNotification} />
+          <HelpInstructions context={activePage} role={profile?.role} />
           <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>

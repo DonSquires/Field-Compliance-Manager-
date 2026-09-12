@@ -8,6 +8,7 @@ import { NotificationCenter, type NotificationRecord } from '../components/Notif
 import { ClientPortalPage as ClientPortalContent } from '../pages/ClientPortalPage';
 import { getClientPortalPages, isClientPortalPage, type ClientPortalPage } from '../lib/clientPortalAccess';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
+import { HelpInstructions } from '../components/HelpInstructions';
 import './ClientShell.css';
 
 const NAVIGATION: Array<{ id: ClientPortalPage; label: string; icon: LucideIcon }> = [
@@ -114,6 +115,7 @@ export function ClientShell() {
           <button type="button" className="client-mobile-menu" onClick={() => setMobileOpen(true)} title="Open navigation"><Menu size={20} /><span className="sr-only">Open navigation</span></button>
           <div><strong>{agreement?.client_name ?? 'Client portal'}</strong><small>{agreement?.provider_name ? `Service by ${agreement.provider_name}` : 'Service relationship loading'}</small></div>
           <NotificationCenter onNavigate={navigateFromNotification} />
+          <HelpInstructions context={`client ${activePage}`} role={profile.role} />
           <span className="client-role-badge">{profile.role.replace('client_', '')}</span>
         </header>
         <main className="client-shell-content" data-app-content>

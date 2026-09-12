@@ -49,3 +49,14 @@ test('owner can run readiness check without submitting to IRD or bank', async ({
   await expect(page.getByText('not a legal compliance certificate')).toBeVisible();
   await expect(page.getByText('Human approval stays with you.')).toBeVisible();
 });
+
+test('global help explains the current workflow and can collapse its steps', async ({ page }) => {
+  await signInAsAdmin(page, '/admin/finance-bureau');
+  await page.getByRole('button', { name: /Open instructions for Using Finance/ }).click();
+  await expect(page.locator('[role="dialog"]')).toContainText('How to use it');
+  await expect(page.getByText('Start at Finance home')).toBeVisible();
+  await page.getByRole('button', { name: 'How to use it' }).click();
+  await expect(page.getByText('Start at Finance home')).toBeHidden();
+  await page.getByRole('button', { name: 'Close instructions' }).click();
+  await expect(page.getByRole('button', { name: /Open instructions for Using Finance/ })).toBeVisible();
+});
