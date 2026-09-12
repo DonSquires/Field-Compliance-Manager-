@@ -52,7 +52,7 @@
   border-radius: 4px;
   color: #dffbf4;
   background: #173b32;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -80,7 +80,7 @@
 .onboarding-history small,
 .onboarding-history time {
   color: #8fa4ae;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .onboarding-history article {

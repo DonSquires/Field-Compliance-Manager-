@@ -7,8 +7,8 @@
 
 .fc-breach-outcome { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--color-border, #334155); border-radius: 6px; background: var(--color-bg-secondary, #0f172a); }
 .fc-breach-outcome > div { display: flex; justify-content: space-between; gap: 10px; }
-.fc-breach-outcome span, .fc-breach-outcome small { color: var(--color-text-secondary, #94a3b8); font-size: 10px; }
-.fc-breach-outcome p { margin: 0; font-size: 11px; }
+.fc-breach-outcome span, .fc-breach-outcome small { color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.fc-breach-outcome p { margin: 0; font-size: 12px; }
 .fc-breach-outcome.is-context-focus { border-color: var(--color-success, #22c55e); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success, #22c55e) 28%, transparent); }
 
 .page-header h1 {
@@ -33,7 +33,7 @@
 .eyebrow {
   margin: 0 0 5px;
   color: var(--color-primary, #1d4ed8);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -229,7 +229,7 @@
 }
 
 .kpi-unit {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-secondary, #94a3b8);
 }
 
@@ -284,7 +284,7 @@
   display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   background: var(--color-bg-primary, #020617);
   border: 1px solid var(--color-border, #334155);
@@ -652,7 +652,7 @@
 }
 
 .spec-label {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   color: var(--color-text-secondary, #94a3b8);
   letter-spacing: 0.5px;
@@ -731,7 +731,7 @@
 
 .fc-eyebrow {
   color: #7dd3c7;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -744,7 +744,7 @@
   align-items: center;
   gap: 6px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -964,7 +964,7 @@
 
 .fc-field small {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -1153,7 +1153,7 @@
 
 .fc-metrics dt {
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -1238,7 +1238,7 @@
 .fc-recent-row time,
 .fc-empty {
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .fc-recent-row div span {
@@ -1336,7 +1336,7 @@
 
 .officer-kicker {
   color: #7dd3c7;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -1353,7 +1353,7 @@
   padding: 0 9px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1478,7 +1478,7 @@
 
 .officer-progress-row span {
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .officer-progress-row strong {
@@ -1591,7 +1591,7 @@
   border-radius: 6px;
   color: #fecaca;
   background: #351a1a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .officer-checkin {
@@ -1673,7 +1673,7 @@
 .officer-quick-action small {
   overflow: hidden;
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1765,7 +1765,7 @@
 .officer-open-detail span {
   overflow: hidden;
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1776,7 +1776,7 @@
   border: 1px solid #34495d;
   border-radius: 4px;
   color: #aabdd0;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   text-align: center;
   text-transform: uppercase;

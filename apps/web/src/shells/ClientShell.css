@@ -79,7 +79,7 @@
 .client-shell-topbar small {
   overflow: hidden;
   color: #7f96a5;
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -142,14 +142,14 @@
 
 .client-shell-agreement span {
   color: #6f8798;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
 }
 
 .client-shell-agreement strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -196,7 +196,7 @@
   border-radius: 999px;
   color: #9eb2c1;
   background: #101d29;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 850;
   text-transform: uppercase;
 }

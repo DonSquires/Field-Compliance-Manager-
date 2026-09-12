@@ -71,7 +71,7 @@
 .officer-shell-brand small {
   overflow: hidden;
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
@@ -116,7 +116,7 @@
 .officer-profile-chip {
   max-width: 120px;
   color: #aabed1;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -129,17 +129,17 @@
 .officer-account-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(2, 8, 13, .82); }
 .officer-account-dialog { width: min(100%, 420px); padding: 18px; border: 1px solid #3a5062; border-radius: 8px; color: #e7eef4; background: #0b1723; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
 .officer-account-dialog header { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid #263b4c; }
-.officer-account-dialog header span { color: #7dd3c7; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.officer-account-dialog header span { color: #7dd3c7; font-size: 12px; font-weight: 800; text-transform: uppercase; }
 .officer-account-dialog h2 { margin: 3px 0; font-size: 19px; }
-.officer-account-dialog header p { margin: 0; color: #a9bac7; font-size: 11px; overflow-wrap: anywhere; }
+.officer-account-dialog header p { margin: 0; color: #a9bac7; font-size: 12px; overflow-wrap: anywhere; }
 .officer-account-dialog header button { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #3a5062; border-radius: 5px; color: #c4d1db; background: #11202d; cursor: pointer; }
-.officer-account-role { margin: 14px 0; color: #9eb3c4; font-size: 11px; text-transform: capitalize; }
+.officer-account-role { margin: 14px 0; color: #9eb3c4; font-size: 12px; text-transform: capitalize; }
 .officer-account-dialog form { display: grid; gap: 10px; }
-.officer-account-dialog label { display: grid; gap: 6px; color: #b8c7d1; font-size: 10px; font-weight: 800; }
+.officer-account-dialog label { display: grid; gap: 6px; color: #b8c7d1; font-size: 12px; font-weight: 800; }
 .officer-account-dialog input { width: 100%; padding: 10px; border: 1px solid #3a5367; border-radius: 5px; color: #eef5f8; background: #07111b; font: inherit; }
 .officer-account-dialog form button, .officer-account-signout { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; border: 1px solid #276044; border-radius: 6px; color: #eafff2; background: #276044; cursor: pointer; font-weight: 800; }
 .officer-account-dialog button:disabled { opacity: .5; cursor: not-allowed; }
-.officer-account-message { margin: 12px 0 0; color: #a7e8df; font-size: 11px; }
+.officer-account-message { margin: 12px 0 0; color: #a7e8df; font-size: 12px; }
 .officer-account-signout { width: 100%; margin-top: 14px; border-color: #884141; color: #ffd6d6; background: #4a2529; }
 
 .officer-safety-chip {
@@ -151,13 +151,13 @@
 }
 
 .officer-safety-chip span {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
 }
 
 .officer-safety-chip small {
   color: inherit;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .officer-safety-chip.welfare-due {
@@ -182,7 +182,7 @@
   border-radius: 50%;
   color: #201800;
   background: #ffd166;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
 }
 
@@ -251,7 +251,7 @@
   color: #b6c7d8;
   background: #0f1a29;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -288,7 +288,7 @@
 
 .officer-module-directory header span {
   color: #7dd3c7;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 850;
   text-transform: uppercase;
 }
@@ -350,7 +350,7 @@
   display: block;
   margin-top: 3px;
   color: #91a6b4;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.3;
 }
 

@@ -33,7 +33,7 @@
 
 .client-kicker {
   color: #89d8c7;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 850;
   text-transform: uppercase;
 }
@@ -86,7 +86,7 @@
 
 .client-agreement-band span {
   color: #718898;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -157,7 +157,7 @@
 
 .client-status-count span {
   color: #8196a5;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .client-status-count.tone-success strong { color: #72d6a2; }
@@ -236,7 +236,7 @@
 .client-observation-list strong,
 .client-report-row strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
@@ -247,14 +247,14 @@
 .client-report-row small {
   overflow: hidden;
   color: #7d92a1;
-  font-size: 9px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .client-location-grid em {
   color: #83c9b9;
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
   text-transform: uppercase;
 }
@@ -267,7 +267,7 @@
 
 .client-observation-list time {
   color: #7d92a1;
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -306,7 +306,7 @@
   gap: 8px;
   margin-bottom: 13px;
   padding: 10px 12px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .client-page-state {
@@ -325,7 +325,7 @@
 }
 
 .client-page-state strong { color: #e7eff2; font-size: 15px; }
-.client-page-state span { max-width: 520px; font-size: 11px; line-height: 1.5; }
+.client-page-state span { max-width: 520px; font-size: 12px; line-height: 1.5; }
 .client-page-state button { margin-top: 6px; padding: 8px 12px; border: 1px solid #3a645c; border-radius: 6px; color: #b9eee2; background: #102a28; cursor: pointer; }
 .client-page-state.is-error { border-color: #824040; }
 .client-scan-state > svg { color: #89d8c7; }

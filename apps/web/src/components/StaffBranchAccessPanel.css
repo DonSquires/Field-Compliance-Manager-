@@ -2,29 +2,29 @@
 .staff-branch-access > header, .staff-branch-access > header > div, .staff-branch-access-actions, .staff-branch-access-form footer { display: flex; align-items: center; gap: 8px; }
 .staff-branch-access > header { justify-content: space-between; }
 .staff-branch-access header strong, .staff-branch-access-form h3 { font-size: 13px; }
-.staff-branch-access header span, .staff-branch-access-list span, .staff-branch-access-list small { color: #8398a7; font-size: 9px; }
-.staff-branch-access > header button, .staff-branch-access-actions button, .staff-branch-access-add, .staff-branch-access-form footer button { min-height: 28px; border: 1px solid #385165; border-radius: 5px; color: #bed0d9; background: #11212e; font-size: 10px; cursor: pointer; }
+.staff-branch-access header span, .staff-branch-access-list span, .staff-branch-access-list small { color: #8398a7; font-size: 12px; }
+.staff-branch-access > header button, .staff-branch-access-actions button, .staff-branch-access-add, .staff-branch-access-form footer button { min-height: 28px; border: 1px solid #385165; border-radius: 5px; color: #bed0d9; background: #11212e; font-size: 12px; cursor: pointer; }
 .staff-branch-access > header button { display: grid; place-items: center; width: 28px; padding: 0; }
 .staff-branch-access-list { display: grid; gap: 5px; }
 .staff-branch-access-list article { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px; border: 1px solid #294151; border-radius: 5px; background: #0d1c28; }
 .staff-branch-access-list article > div:first-child { display: grid; gap: 2px; min-width: 0; }
-.staff-branch-access-list article strong { font-size: 11px; }
+.staff-branch-access-list article strong { font-size: 12px; }
 .staff-branch-access-actions { flex-wrap: wrap; justify-content: flex-end; }
 .staff-branch-access-actions button, .staff-branch-access-add, .staff-branch-access-form footer button { padding: 0 8px; }
 .staff-branch-access-add { display: inline-flex; align-items: center; justify-content: center; width: fit-content; gap: 5px; color: #8fe0d2; border-color: #37736c; }
 .staff-branch-access-form { display: grid; gap: 9px; padding: 12px; border: 1px solid #3a5c6c; border-radius: 6px; background: #0b1823; }
 .staff-branch-access-form h3 { margin: 0; }
 .staff-branch-access-form label { display: grid; gap: 4px; }
-.staff-branch-access-form label > span, .staff-branch-access-form legend { color: #aabdc8; font-size: 9px; font-weight: 800; }
-.staff-branch-access-form input, .staff-branch-access-form select, .staff-branch-access-form textarea { box-sizing: border-box; width: 100%; border: 1px solid #385165; border-radius: 4px; color: #e7eef3; background: #07121b; font: inherit; font-size: 11px; }
+.staff-branch-access-form label > span, .staff-branch-access-form legend { color: #aabdc8; font-size: 12px; font-weight: 800; }
+.staff-branch-access-form input, .staff-branch-access-form select, .staff-branch-access-form textarea { box-sizing: border-box; width: 100%; border: 1px solid #385165; border-radius: 4px; color: #e7eef3; background: #07121b; font: inherit; font-size: 12px; }
 .staff-branch-access-form input, .staff-branch-access-form select { min-height: 32px; padding: 0 7px; }
 .staff-branch-access-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; }
 .staff-branch-access-form fieldset { margin: 0; padding: 8px; border: 1px solid #2f4757; border-radius: 4px; }
 .staff-branch-access-modules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 6px; }
 .staff-branch-access-modules label, .staff-branch-access-roster { display: flex !important; align-items: center; gap: 5px; }
 .staff-branch-access-modules input, .staff-branch-access-roster input { width: auto !important; min-height: auto !important; }
-.staff-branch-access-roster span { color: #d1dce2; font-size: 10px; }
+.staff-branch-access-roster span { color: #d1dce2; font-size: 12px; }
 .staff-branch-access-form footer { justify-content: flex-end; }
 .staff-branch-access-form footer button:last-child { color: #06211f; border-color: #7dd3c7; background: #7dd3c7; }
-.staff-branch-access-error { margin: 0; color: #ffc6c6; font-size: 10px; }
+.staff-branch-access-error { margin: 0; color: #ffc6c6; font-size: 12px; }
 @media (max-width: 640px) { .staff-branch-access-grid, .staff-branch-access-modules { grid-template-columns: 1fr; } .staff-branch-access-list article { align-items: flex-start; flex-direction: column; } .staff-branch-access-actions { justify-content: flex-start; } }

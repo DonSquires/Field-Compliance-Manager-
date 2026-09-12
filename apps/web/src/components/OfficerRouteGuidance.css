@@ -1,6 +1,6 @@
 .officer-route-guidance { display: grid; gap: 10px; margin: 18px 0; padding: 14px; border: 1px solid #277481; border-radius: 8px; background: #0b2028; }
 .officer-route-guidance header { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
-.officer-route-guidance header span { color: #7dd3c7; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.officer-route-guidance header span { color: #7dd3c7; font-size: 12px; font-weight: 700; text-transform: uppercase; }
 .officer-route-guidance h2 { margin: 3px 0; color: #eef6f7; font-size: 17px; }
 .officer-route-guidance p { margin: 0; color: #a7b7c1; font-size: 12px; }
 .officer-route-guidance button { display: inline-flex; gap: 6px; align-items: center; min-height: 38px; border: 1px solid #3996a5; border-radius: 5px; background: #14c8d4; color: #04211e; padding: 0 10px; font-size: 12px; font-weight: 800; }

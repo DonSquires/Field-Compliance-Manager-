@@ -1,4 +1,4 @@
-.admin-command-group{display:grid;gap:6px;margin-top:12px}.admin-command-group>span{color:#67e4e8;font-size:9px;font-weight:850;text-transform:uppercase}
+.admin-command-group{display:grid;gap:6px;margin-top:12px}.admin-command-group>span{color:#67e4e8;font-size: 12px;font-weight:850;text-transform:uppercase}
 .admin-overview {
   width: 100%;
   max-width: 1320px;
@@ -17,7 +17,7 @@
 .admin-overview-header > div:first-child > span,
 .admin-section-heading > div > span {
   color: #67e4e8;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 850;
   text-transform: uppercase;
 }
@@ -42,7 +42,7 @@
 
 .admin-refresh-block time {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .admin-refresh-block button {
@@ -57,7 +57,7 @@
   color: #04151c;
   background: #14c8d4;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -120,7 +120,7 @@
 .admin-metric > span:not(.admin-metric-icon) {
   overflow: hidden;
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -177,9 +177,9 @@
 .admin-data-warning span {
   overflow-wrap: anywhere;
   color: #d9bd74;
-  font-size: 10px;
+  font-size: 12px;
 }
-.admin-data-warning small{color:#b99d5e;font-size:10px;line-height:1.4}
+.admin-data-warning small{color:#b99d5e;font-size: 12px;line-height:1.4}
 
 .admin-overview-layout {
   display: grid;
@@ -216,7 +216,7 @@
   border-radius: 999px;
   color: #67e4e8;
   background: #0b2f3c;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .admin-queue-list {
@@ -278,7 +278,7 @@
 .admin-queue-row time {
   overflow: hidden;
   color: var(--color-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -291,7 +291,7 @@
   border-radius: 999px;
   color: #b9ced7;
   background: #102632;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -319,7 +319,7 @@
 
 .admin-queue-empty span {
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .admin-command-panel {
@@ -369,13 +369,13 @@
 }
 
 .admin-command-link strong {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .admin-command-link small {
   overflow: hidden;
   color: var(--color-text-secondary);
-  font-size: 9px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

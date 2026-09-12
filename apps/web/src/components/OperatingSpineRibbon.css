@@ -13,7 +13,7 @@
 .operating-spine-title {
   flex: 0 0 auto;
   color: #7192a2;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -79,14 +79,14 @@
 }
 
 .operating-spine button strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
 }
 
 .operating-spine button small {
   max-width: 110px;
   color: #7f9dab;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 @media (max-width: 760px) {
