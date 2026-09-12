@@ -7,6 +7,7 @@ const locationsSource = readFileSync(resolve(process.cwd(), 'src/pages/Locations
 const breachSource = readFileSync(resolve(process.cwd(), 'src/pages/BreachReviewPage.tsx'), 'utf8');
 const cctvSource = readFileSync(resolve(process.cwd(), 'src/pages/CCTVReviewPage.tsx'), 'utf8');
 const adminShellSource = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
+const agenticFunctionSource = readFileSync(resolve(process.cwd(), '../../supabase/functions/bob-agentic-document-draft/index.ts'), 'utf8');
 
 describe('context-driven document drafting', () => {
   it('supports canonical site, CCTV, notice, and breach source types', () => {
@@ -29,5 +30,15 @@ describe('context-driven document drafting', () => {
   it('marks unknown source fields for human confirmation', () => {
     expect(studioSource).toContain('[TO CONFIRM]');
     expect(studioSource).toContain('approval checklist');
+  });
+
+  it('keeps agentic drafting scoped and human-approved', () => {
+    expect(studioSource).toContain("searchParams.get('auto') !== '1'");
+    expect(studioSource).toContain("functions.invoke('bob-agentic-document-draft'");
+    expect(agenticFunctionSource).toContain("['site', 'cctv', 'breach', 'notice']");
+    expect(agenticFunctionSource).toContain("eq('organization_id', profile.organization_id)");
+    expect(agenticFunctionSource).toContain("submit_bob_document_for_review");
+    expect(agenticFunctionSource).not.toContain('request_bob_document_output');
+    expect(agenticFunctionSource).not.toContain('review_bob_document_draft');
   });
 });
