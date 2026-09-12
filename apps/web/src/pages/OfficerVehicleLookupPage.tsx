@@ -114,7 +114,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
           .limit(10),
         supabase
           .from('breach_alerts')
-          .select('id, breach_type, status, nights_count, notes, created_at, zone:zone_id(name)')
+          .select('id, breach_type, status, nights_count, notes, created_at, zone:location_zones!breach_alerts_zone_id_fkey(name)')
           .ilike('plate_number', cleanPlate)
           .order('created_at', { ascending: false })
           .limit(10),
