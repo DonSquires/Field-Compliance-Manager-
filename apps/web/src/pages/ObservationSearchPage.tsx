@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './ObservationSearchPage.css';
+import './ObservationSearchFilters.css';
 
 type Observation = {
   observation_id: string;
@@ -18,6 +19,7 @@ type Observation = {
   zone_id: string | null;
   zone_name: string | null;
   location_id: string | null;
+  location_name: string | null;
   incident_id: string | null;
   incident_label: string | null;
   poi: boolean;
@@ -26,7 +28,8 @@ type Observation = {
   officer_notes: string | null;
 };
 
-type Option = { id: string; name?: string | null; display_name?: string | null; plate_number?: string | null };
+type Option = { id: string; name?: string | null; display_name?: string | null; plate_number?: string | null; incident_type?: string | null; description?: string | null };
+type FlagFilter = '' | 'true' | 'false';
 
 const fieldStyle: React.CSSProperties = { display: 'grid', gap: 6 };
 const inputStyle: React.CSSProperties = { minHeight: 40, padding: '0 12px', border: '1px solid var(--border, #cbd5e1)', borderRadius: 6, background: 'var(--surface, #fff)' };
@@ -36,27 +39,39 @@ export default function ObservationSearchPage() {
   const [search, setSearch] = useState('');
   const [siteId, setSiteId] = useState('');
   const [zoneId, setZoneId] = useState('');
+  const [locationId, setLocationId] = useState('');
+  const [vehicleId, setVehicleId] = useState('');
+  const [personId, setPersonId] = useState('');
+  const [incidentId, setIncidentId] = useState('');
+  const [poi, setPoi] = useState<FlagFilter>('');
+  const [loi, setLoi] = useState<FlagFilter>('');
   const [results, setResults] = useState<Observation[]>([]);
   const [sites, setSites] = useState<Option[]>([]);
   const [zones, setZones] = useState<Option[]>([]);
   const [vehicles, setVehicles] = useState<Option[]>([]);
   const [people, setPeople] = useState<Option[]>([]);
+  const [locations, setLocations] = useState<Option[]>([]);
+  const [incidents, setIncidents] = useState<Option[]>([]);
   const [linking, setLinking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const loadOptions = useCallback(async () => {
     if (!profile?.organizationId) return;
-    const [siteResult, zoneResult, vehicleResult, peopleResult] = await Promise.all([
+    const [siteResult, zoneResult, vehicleResult, peopleResult, locationResult, incidentResult] = await Promise.all([
       supabase.from('client_sites').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
       supabase.from('location_zones').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
       supabase.from('canonical_vehicles').select('id, plate_number, make, model').order('plate_number').limit(200),
       supabase.from('person_records').select('id, display_name').eq('organization_id', profile.organizationId).order('display_name').limit(200),
+      supabase.from('locations').select('id, name, address').eq('organization_id', profile.organizationId).order('name').limit(200),
+      supabase.from('incidents').select('id, incident_type, description').eq('organization_id', profile.organizationId).order('created_at', { ascending: false }).limit(200),
     ]);
     setSites((siteResult.data ?? []) as Option[]);
     setZones((zoneResult.data ?? []) as Option[]);
     setVehicles((vehicleResult.data ?? []) as Option[]);
     setPeople((peopleResult.data ?? []) as Option[]);
+    setLocations((locationResult.data ?? []) as Option[]);
+    setIncidents((incidentResult.data ?? []) as Option[]);
   }, [profile?.organizationId]);
 
   const runSearch = useCallback(async () => {
@@ -67,17 +82,17 @@ export default function ObservationSearchPage() {
       p_search: search.trim() || null,
       p_site_id: siteId || null,
       p_zone_id: zoneId || null,
-      p_location_id: null,
-      p_vehicle_id: null,
-      p_person_id: null,
-      p_incident_id: null,
-      p_poi: null,
-      p_loi: null,
+      p_location_id: locationId || null,
+      p_vehicle_id: vehicleId || null,
+      p_person_id: personId || null,
+      p_incident_id: incidentId || null,
+      p_poi: poi === '' ? null : poi === 'true',
+      p_loi: loi === '' ? null : loi === 'true',
       p_limit: 100,
     });
     if (searchError) setError(searchError.message);
     else setResults((data ?? []) as Observation[]);
-  }, [profile?.organizationId, search, siteId, zoneId]);
+  }, [profile?.organizationId, search, siteId, zoneId, locationId, vehicleId, personId, incidentId, poi, loi]);
 
   useEffect(() => { void loadOptions(); void runSearch(); }, [loadOptions, runSearch]);
 
@@ -112,6 +127,12 @@ export default function ObservationSearchPage() {
         <label className="observation-search-input"><span>Search all observations</span><div><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runSearch(); }} placeholder="Plate, person, site, zone, incident, or note" /></div></label>
         <label><span>Site</span><select value={siteId} onChange={(event) => setSiteId(event.target.value)}><option value="">All sites</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label><span>Zone</span><select value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label><span>Location house</span><select value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">All locations</option>{locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label><span>Canonical vehicle</span><select value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">All vehicles</option>{vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}</select></label>
+        <label><span>Canonical person</span><select value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">All people</option>{people.map((item) => <option key={item.id} value={item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label>
+        <label><span>Incident</span><select value={incidentId} onChange={(event) => setIncidentId(event.target.value)}><option value="">All incidents</option>{incidents.map((item) => <option key={item.id} value={item.id}>{[item.incident_type, item.description].filter(Boolean).join(': ') || item.name || 'Incident'}</option>)}</select></label>
+        <label><span>POI / VOI</span><select value={poi} onChange={(event) => setPoi(event.target.value as FlagFilter)}><option value="">Any POI / VOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
+        <label><span>LOI</span><select value={loi} onChange={(event) => setLoi(event.target.value as FlagFilter)}><option value="">Any LOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
         <button type="button" className="observation-search-button" onClick={() => void runSearch()}>Search</button>
       </section>
       {error && <div className="page-error">{error}</div>}
