@@ -33,6 +33,13 @@ Production human walkthrough: `HUMAN_TEST_LIVE=true` against `https://www.fcmana
 - 107 UX findings, primarily text below 12px and unnamed interactive controls
 - Finance navigation and Core ANZ/IRD connection screens were reachable
 
+First live browser intake batch: `107 Gorge Road - Service Agreement.pdf` uploaded through the File System chooser on 2026-09-12 after deployment `95ca384`.
+
+- Visible receipt: registered for review
+- Browser console errors: 0
+- Failed Supabase responses: 0
+- Promotion: not performed; the source remains in the review boundary
+
 ## Confirmed browser-seeding gap
 
 The File System page previously provided CSV/XLSX preview, but no general human-visible upload/register control for the corpus. A one-file role-gated intake control is now implemented locally and reuses private `bob-uploads`, `bob_attachments`, and `bob-document-register`. It must be deployed before the production browser seed can start. Bob Document Studio still exposes brand-asset upload separately.
