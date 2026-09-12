@@ -18,10 +18,14 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { SafetyGate } from '../components/SafetyGate';
+import { MetricCard } from '../components/MetricCard/MetricCard';
+import { QueueCard } from '../components/QueueCard/QueueCard';
+import { StatusStrip, type StatusTone } from '../components/StatusStrip/StatusStrip';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
+import { ShellLayout } from '../layouts/ShellLayout';
 import './AdminHubPage.css';
 
 interface AdminHubPageProps {
@@ -41,9 +45,9 @@ interface Metrics {
   observations: MetricState;
 }
 
-type QueueKind = 'welfare' | 'dispatch' | 'breach' | 'report' | 'video';
+export type QueueKind = 'welfare' | 'dispatch' | 'breach' | 'report' | 'video';
 
-interface QueueItem {
+export interface QueueItem {
   id: string;
   kind: QueueKind;
   title: string;
@@ -250,9 +254,16 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const attentionMetrics = [metrics.welfare.value, metrics.breaches.value, metrics.activeDispatch.value];
   const attentionCount = attentionMetrics.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const attentionUnavailable = attentionMetrics.some((value) => value === null);
+  const overviewTone: StatusTone = attentionUnavailable ? 'watch' : attentionCount > 0 ? 'action' : 'normal';
+  const overviewMessage = attentionUnavailable
+    ? 'Some operational counts are unavailable. Review metric status before relying on the queue.'
+    : attentionCount > 0
+      ? `${attentionCount} active items need attention across safety, dispatch, and compliance.`
+      : 'Operations are clear across safety, dispatch, and compliance.';
 
   return (
-    <div className="admin-overview">
+    <ShellLayout shell="admin" className="admin-shell-surface">
+      <div className="admin-overview">
       <header className="admin-overview-header">
         <div>
           <span>Operations control</span>
@@ -268,20 +279,22 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         </div>
       </header>
 
+      <StatusStrip tone={overviewTone}>{overviewMessage}</StatusStrip>
+
       <section className="admin-metric-grid" aria-label="Current operations metrics">
-        <Metric icon={Users} label="On duty now" metric={metrics.onDuty} tone="blue" onClick={() => onNavigate?.('roster')} />
-        <Metric icon={Radio} label="Active dispatch" metric={metrics.activeDispatch} tone="teal" onClick={() => onNavigate?.('dispatch')} />
+        <MetricCard icon={Users} label="On duty now" value={metrics.onDuty.value ?? 'Unavailable'} unavailable={metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
+        <MetricCard icon={Radio} label="Active dispatch" value={metrics.activeDispatch.value ?? 'Unavailable'} unavailable={metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
         <SafetyGate
           status={moduleStatus}
           isEnabled={welfareEnabled}
           moduleLabel="Welfare monitoring"
           safetyRelevant
-          renderUnavailable={(message) => <Metric icon={HeartPulse} label="Welfare alerts" metric={{ value: null, error: message.description }} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}
+          renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}
         >
-          <Metric icon={HeartPulse} label="Welfare alerts" metric={metrics.welfare} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+          <MetricCard icon={HeartPulse} label="Welfare alerts" value={metrics.welfare.value ?? 'Unavailable'} unavailable={metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
         </SafetyGate>
-        <Metric icon={ShieldAlert} label="Open breaches" metric={metrics.breaches} tone="amber" onClick={() => onNavigate?.('breach-review')} />
-        <Metric icon={Binoculars} label="Observations today" metric={metrics.observations} tone="green" onClick={() => onNavigate?.('reports')} />
+        <MetricCard icon={ShieldAlert} label="Open breaches" value={metrics.breaches.value ?? 'Unavailable'} unavailable={metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
+        <MetricCard icon={Binoculars} label="Observations today" value={metrics.observations.value ?? 'Unavailable'} unavailable={metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
       </section>
 
       {queueWarnings.length > 0 && (
@@ -302,7 +315,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             <div className="admin-queue-empty"><ClipboardCheck size={24} aria-hidden="true" /><strong>Queue clear</strong><span>No active items require review.</span></div>
           ) : (
             <div className="admin-queue-list">
-              {queue.map((item, index) => <QueueRow key={`${item.kind}-${item.id}`} item={item} isNext={index === 0} onOpen={() => onNavigate?.(item.navigate)} />)}
+              {queue.map((item, index) => <QueueCard key={`${item.kind}-${item.id}`} item={item} isNext={index === 0} onOpen={() => onNavigate?.(item.navigate)} />)}
             </div>
           )}
         </section>
@@ -321,34 +334,10 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           </div>
         </aside>
       </div>
-    </div>
+      </div>
+    </ShellLayout>
   );
 };
-
-function Metric({ icon: Icon, label, metric, tone, onClick }: { icon: LucideIcon; label: string; metric: MetricState; tone: string; onClick: () => void }) {
-  const unavailable = metric.value === null;
-  return (
-    <button type="button" className={`admin-metric tone-${tone} ${unavailable ? 'is-unavailable' : ''}`} onClick={onClick} title={metric.error ?? undefined}>
-      <span className="admin-metric-icon"><Icon size={19} aria-hidden="true" /></span>
-      <span>{label}</span>
-      <strong>{unavailable ? 'Unavailable' : metric.value}</strong>
-      <ArrowRight size={16} aria-hidden="true" />
-    </button>
-  );
-}
-
-function QueueRow({ item, isNext, onOpen }: { item: QueueItem; isNext: boolean; onOpen: () => void }) {
-  const Icon = item.kind === 'welfare' ? HeartPulse : item.kind === 'dispatch' ? Radio : item.kind === 'breach' ? ShieldAlert : item.kind === 'video' ? Binoculars : FileWarning;
-  return (
-    <button type="button" className={`admin-queue-row kind-${item.kind} ${isNext ? 'is-next' : ''}`} onClick={onOpen}>
-      <span className="admin-queue-icon"><Icon size={18} aria-hidden="true" /></span>
-      <div><strong>{item.title}</strong><span>{isNext ? 'Next action · ' : ''}{item.detail}</span></div>
-      <span className="admin-queue-status">{item.status.replace(/_/g, ' ')}</span>
-      <time dateTime={item.occurredAt}>{relativeTime(item.occurredAt)}</time>
-      <ArrowRight size={16} aria-hidden="true" />
-    </button>
-  );
-}
 
 function CommandLink({ icon: Icon, label, detail, onClick }: { icon: LucideIcon; label: string; detail: string; onClick: () => void }) {
   return (

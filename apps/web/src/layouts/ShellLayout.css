@@ -1,0 +1,57 @@
+.shell-layout {
+  --shell-touch-target: var(--touch-target-admin);
+  --shell-spacing: var(--space-md);
+  --shell-text-size: 14px;
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--shell-text-size);
+}
+
+.shell-layout--officer {
+  --shell-touch-target: var(--touch-target-officer);
+  --shell-spacing: var(--space-lg);
+  --shell-text-size: 16px;
+}
+
+.shell-layout__topbar,
+.shell-layout__filter-ribbon,
+.shell-layout__page-header,
+.shell-layout__status-strip,
+.shell-layout__primary-action {
+  flex: 0 0 auto;
+  padding: var(--shell-spacing);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.shell-layout__filter-ribbon,
+.shell-layout__status-strip {
+  background: var(--color-bg-secondary);
+}
+
+.shell-layout__primary-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.shell-layout__content {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.shell-layout button,
+.shell-layout input,
+.shell-layout select,
+.shell-layout textarea {
+  min-height: var(--shell-touch-target);
+}
+
+@media (max-width: 768px) {
+  .shell-layout__filter-ribbon,
+  .shell-layout__status-strip {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

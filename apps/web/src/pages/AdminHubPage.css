@@ -66,6 +66,59 @@
   cursor: wait;
 }
 
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 11px 13px;
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.status-strip--normal {
+  border-left-color: var(--color-success);
+}
+
+.status-strip--normal svg {
+  color: var(--color-success);
+}
+
+.status-strip--watch {
+  border-left-color: var(--color-warning);
+  color: #ffe39a;
+  background: var(--color-warning-bg);
+}
+
+.status-strip--watch svg {
+  color: var(--color-warning);
+}
+
+.status-strip--action {
+  border-left-color: var(--color-warning);
+  color: #ffe0b0;
+  background: #2c2111;
+}
+
+.status-strip--action svg {
+  color: var(--color-warning);
+}
+
+.status-strip--critical {
+  border-left-color: var(--color-danger);
+  color: #ffd1d1;
+  background: var(--color-danger-bg);
+}
+
+.status-strip--critical svg {
+  color: var(--color-danger);
+}
+
 .admin-metric-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

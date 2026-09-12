@@ -10,6 +10,7 @@ import { App } from './App';
 import './styles/tokens.css';
 import './styles/global.css';
 import './styles/theme.css';
+import './styles/themes.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

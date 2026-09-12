@@ -17,6 +17,7 @@ import {
 import { supabase } from "../lib/supabase";
 import { readWorkflowContext, type NavigateWithContext, type WorkflowContext } from "../lib/workflowNavigation";
 import { CrmOrganizationDialog } from "../components/CrmOrganizationDialog";
+import { ShellLayout } from "../layouts/ShellLayout";
 import "./AccountOnboardingPage.css";
 import "./AccountOnboardingUnavailable.css";
 import "./AccountOnboardingOwnership.css";
@@ -199,7 +200,8 @@ export default function AccountOnboardingPage({
   ].filter((item) => item.status === "blocked");
   if (loadError)
     return (
-      <div className="onboarding-page">
+      <ShellLayout shell="admin" className="onboarding-shell">
+        <div className="onboarding-page">
         <header>
           <div>
             <span>Account operations</span>
@@ -229,10 +231,12 @@ export default function AccountOnboardingPage({
             {loading ? "Retrying" : "Retry"}
           </button>
         </section>
-      </div>
+        </div>
+      </ShellLayout>
     );
   return (
-    <div className="onboarding-page">
+    <ShellLayout shell="admin" className="onboarding-shell">
+      <div className="onboarding-page">
       <header>
         <div>
           <span>Account operations</span>
@@ -519,7 +523,8 @@ export default function AccountOnboardingPage({
           </section>
         </div>
       )}
-    </div>
+      </div>
+    </ShellLayout>
   );
 }
 function Evidence({
