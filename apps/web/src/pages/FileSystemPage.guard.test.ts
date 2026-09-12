@@ -65,6 +65,9 @@ describe('organisation file system', () => {
     expect(page).toContain('Upload source file');
     expect(page).toContain("supabase.storage.from('bob-uploads').upload");
     expect(page).toContain("supabase.from('bob_attachments').insert");
+    expect(page).toContain(".eq('module_key', 'operations')");
+    expect(page).toContain("title: 'Bob Operations'");
+    expect(page).not.toContain('conversation_id: null');
     expect(page).toContain("supabase.functions.invoke('bob-document-register'");
     expect(page).toContain('uploaded through the human intake path');
   });

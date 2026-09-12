@@ -311,7 +311,15 @@ const FileSystemPage: React.FC = () => {
     const storagePath = `org/${organizationId}/bob/files/${attachmentId}-${safeName}`;
     const { error: uploadError } = await supabase.storage.from('bob-uploads').upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
     if (uploadError) { setError(`Source upload failed: ${uploadError.message}`); setUploadingFile(false); return; }
-    const { error: metadataError } = await supabase.from('bob_attachments').insert({ id: attachmentId, organization_id: organizationId, conversation_id: null, uploaded_by: profile.id, file_name: file.name, file_type: file.type || 'application/octet-stream', file_size_bytes: file.size, storage_bucket: 'bob-uploads', storage_path: storagePath, purpose: file.type.startsWith('video/') ? 'video_intake' : file.type.startsWith('image/') ? 'photo_intake' : 'document_intake', processing_state: 'pending' });
+    const { data: existingConversation, error: conversationLookupError } = await supabase.from('bob_conversations').select('id').eq('organization_id', organizationId).eq('user_id', profile.id).eq('module_key', 'operations').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    if (conversationLookupError) { await supabase.storage.from('bob-uploads').remove([storagePath]); setError(`Source conversation could not be loaded: ${conversationLookupError.message}`); setUploadingFile(false); return; }
+    let conversationId = existingConversation?.id ?? null;
+    if (!conversationId) {
+      const { data: createdConversation, error: conversationCreateError } = await supabase.from('bob_conversations').insert({ organization_id: organizationId, user_id: profile.id, module_key: 'operations', title: 'Bob Operations' }).select('id').single();
+      if (conversationCreateError) { await supabase.storage.from('bob-uploads').remove([storagePath]); setError(`Source conversation could not be created: ${conversationCreateError.message}`); setUploadingFile(false); return; }
+      conversationId = createdConversation.id;
+    }
+    const { error: metadataError } = await supabase.from('bob_attachments').insert({ id: attachmentId, organization_id: organizationId, conversation_id: conversationId, uploaded_by: profile.id, file_name: file.name, file_type: file.type || 'application/octet-stream', file_size_bytes: file.size, storage_bucket: 'bob-uploads', storage_path: storagePath, purpose: file.type.startsWith('video/') ? 'video_intake' : file.type.startsWith('image/') ? 'photo_intake' : 'document_intake', processing_state: 'pending' });
     if (metadataError) { await supabase.storage.from('bob-uploads').remove([storagePath]); setError(`Source registration failed: ${metadataError.message}`); setUploadingFile(false); return; }
     const { error: registerError } = await supabase.functions.invoke('bob-document-register', { body: { attachment_id: attachmentId } });
     if (registerError) setError(`Source registration failed: ${registerError.message}`);
