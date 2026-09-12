@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { BriefcaseBusiness, Radio, ShieldCheck, Users } from 'lucide-react';
+import { BriefcaseBusiness, Radio, Search, ShieldCheck, Users } from 'lucide-react';
 
 export interface CommandCentreGroup {
   key: string;
@@ -51,5 +51,11 @@ export const ADMIN_COMMAND_CENTRE_GROUPS: readonly CommandCentreGroup[] = [
     allowedRoles: ['admin', 'master', 'grand_master', 'officer'],
     links: [['Compliance', 'reports'], ['Breaches', 'breach-review'], ['Command', 'field-ops'], ['Infringements', 'breach-review'], ['Disputes', 'approvals'], ['Notices', 'reports'], ['NTV', 'vehicle-search'], ['NZSCV', 'vehicle-search'], ['Spatial', 'sites']],
     openLabel: 'Open Compliance & Enforcement', open: 'reports',
+  },
+  {
+    key: 'evidence', label: 'Evidence & Investigations', description: 'Search observations, review evidence and manage investigations', accent: 'blue', icon: Search, statLabel: 'open investigations', stat: null,
+    allowedRoles: ['admin', 'master', 'grand_master', 'officer'],
+    links: [['Observation Search', 'observation-search'], ['Investigation Review', 'investigations'], ['Field Reports', 'field-reports'], ['Officer Timeline', 'officer-activity'], ['Evidence Files', 'files'], ['Vehicle History', 'vehicle-search']],
+    openLabel: 'Open Evidence & Investigations', open: 'investigations',
   },
 ];
