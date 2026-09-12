@@ -120,16 +120,16 @@ export default function BobDocumentStudioPage() {
             setTitle(`Site Safety Plan - ${site.name}`);
           }
         } else if (sourceType === 'cctv') {
-          const { data: evidence } = await supabase.from('evidence_items').select('id,title,description,created_at').eq('id', sourceId).maybeSingle();
+          const { data: evidence } = await supabase.from('evidence_items').select('id,evidence_kind,storage_path,captured_at,metadata').eq('id', sourceId).maybeSingle();
           if (active && evidence) {
             setSourceContext({
               type: 'cctv',
               id: evidence.id,
-              label: evidence.title || 'CCTV Evidence',
-              prompt: `Draft an incident report from the CCTV evidence review. Include what was observed, when, where, who was involved, and recommended next actions based on the evidence details and attached reference materials.`,
+              label: `CCTV ${evidence.evidence_kind || 'Evidence'}`,
+              prompt: `Draft an incident report from the CCTV evidence review. Evidence captured: ${evidence.captured_at || '[TO CONFIRM]'}. Storage reference: ${evidence.storage_path || '[TO CONFIRM]'}. Metadata: ${JSON.stringify(evidence.metadata || {})}. Include what was observed, when, where, who was involved, and recommended next actions based on the evidence details and attached reference materials.`,
             });
             setDocumentType('incident_report');
-            setTitle(`Incident Report - ${evidence.title || 'CCTV Evidence'}`);
+            setTitle(`Incident Report - CCTV ${evidence.evidence_kind || 'Evidence'}`);
           }
         } else if (sourceType === 'notice' || sourceType === 'breach') {
           const { data: alert } = await supabase.from('breach_alerts').select('id,zone_id,observed_at,breach_type').eq('id', sourceId).maybeSingle();

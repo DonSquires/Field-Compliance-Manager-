@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
 
 const LIVE_URL = 'https://www.fcmanager.co.nz';
 const email = process.env.GRANDMASTER_TEST_EMAIL || '';
@@ -31,6 +32,89 @@ async function signIn(page: Page): Promise<void> {
   await expect(page.locator('nav').first()).toBeVisible({ timeout: 30_000 });
   const dismiss = page.getByRole('button', { name: /not now/i }).first();
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
+}
+
+async function createSyntheticWebm(page: Page): Promise<string> {
+  return page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 180;
+    const context = canvas.getContext('2d');
+    if (!context || typeof MediaRecorder === 'undefined') throw new Error('Synthetic video recording is unavailable in this browser.');
+    const stream = canvas.captureStream(10);
+    const chunks: BlobPart[] = [];
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    const stopped = new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
+    recorder.start();
+    for (let frame = 0; frame < 10; frame += 1) {
+      context.fillStyle = '#123b35';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = '#c7f1df';
+      context.font = '20px sans-serif';
+      context.fillText('FCM SYNTHETIC CCTV TEST', 28, 82);
+      context.font = '12px sans-serif';
+      context.fillText(`Frame ${frame + 1}`, 28, 112);
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    recorder.stop();
+    await stopped;
+    stream.getTracks().forEach((track) => track.stop());
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    return btoa(binary);
+  });
+}
+
+async function seedSyntheticCctv(page: Page): Promise<{ fileName: string; storagePath: string }> {
+  let supabaseUrl = '';
+  let anonKey = '';
+  page.on('request', (request) => {
+    if (!anonKey && request.url().includes('/rest/v1/')) {
+      anonKey = request.headers().apikey ?? '';
+      supabaseUrl = new URL(request.url()).origin;
+    }
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(500);
+  const auth = await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith('sb-')) continue;
+      try {
+        const value = JSON.parse(localStorage.getItem(key) ?? 'null');
+        const session = value?.currentSession ?? value;
+        if (session?.access_token && session?.user?.id) return { accessToken: session.access_token, refreshToken: session.refresh_token, userId: session.user.id };
+      } catch { /* Ignore unrelated local storage entries. */ }
+    }
+    return null;
+  });
+  if (!auth || !supabaseUrl || !anonKey) throw new Error('Live Supabase client configuration was not observable for synthetic CCTV seeding.');
+  const client = createClient(supabaseUrl, anonKey);
+  const { error: sessionError } = await client.auth.setSession({ access_token: auth.accessToken, refresh_token: auth.refreshToken });
+  if (sessionError) throw sessionError;
+  const fileName = `FCM-SYNTHETIC-AGENTIC-${Date.now()}.webm`;
+  const attachmentId = crypto.randomUUID();
+  const storagePath = `desktop/${auth.userId}/${attachmentId}-${fileName}`;
+  const bytes = Buffer.from(await createSyntheticWebm(page), 'base64');
+  const { error: uploadError } = await client.storage.from('bob-uploads').upload(storagePath, bytes, { contentType: 'video/webm', upsert: false });
+  if (uploadError) throw uploadError;
+  const { error: registerError } = await client.functions.invoke('register-desktop-video-import', {
+    body: {
+      attachment_id: attachmentId,
+      storage_path: storagePath,
+      file_name: fileName,
+      file_type: 'video/webm',
+      file_size_bytes: bytes.length,
+      desktop_review_batch: { batch_id: `FCM-SYNTHETIC-${Date.now()}`, clip_index: 1, clip_total: 1, channel: 1, start_time: '00:00:00', end_time: '00:00:01', fragment_count: 1, source_bytes: bytes.length, cache_sha256: 'synthetic-test' },
+    },
+  });
+  if (registerError) {
+    await client.storage.from('bob-uploads').remove([storagePath]);
+    throw registerError;
+  }
+  return { fileName, storagePath };
 }
 
 const surfaces = [
@@ -91,6 +175,26 @@ test.describe('production document workflow visual audit', () => {
     await expect(documentQueue.getByText(/Conversation-only until approved/i).first()).toBeVisible({ timeout: 30_000 });
     await expect(documentQueue.getByRole('button', { name: 'Review document' }).first()).toBeVisible();
     expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
+    expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
+    expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
+  });
+
+  test('synthetic CCTV evidence opens an evidence-scoped Bob incident report', async ({ page }) => {
+    const evidence = monitor(page);
+    await signIn(page);
+    const synthetic = await seedSyntheticCctv(page);
+    await page.goto(`${LIVE_URL}/admin/field-ops?area=cctv-review`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.cctv-review-page')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Desktop batch FCM-SYNT/i).first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('button', { name: 'Bob: Draft incident report', exact: true })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Bob: Draft incident report', exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=cctv&sourceId=[0-9a-f-]+&auto=1$/i, { timeout: 30_000 });
+    await expect(page.getByLabel('Document type')).toHaveValue('incident_report');
+    await expect(page.getByRole('textbox', { name: 'Document content' })).toContainText('FCM-SYNTHETIC-AGENTIC');
+    await expect(page.getByText('Needs review', { exact: true })).toBeVisible();
+    expect(page.url()).toContain('sourceType=cctv');
+    expect(synthetic.fileName).toContain('FCM-SYNTHETIC-AGENTIC');
+    expect(evidence.consoleErrors.filter((message) => !message.includes('Failed to load resource: the server responded with a status of 400')), evidence.consoleErrors.join('\n')).toEqual([]);
     expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
     expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
   });
