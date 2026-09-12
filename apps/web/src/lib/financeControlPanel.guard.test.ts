@@ -14,6 +14,8 @@ describe('Finance control centre', () => {
     expect(component).toContain('p_shift_id: selectedShiftId || null');
     expect(component).toContain("['accepted', 'in_progress']");
     expect(component).toContain("supabase.rpc('record_finance_service_cost'");
+    expect(component).toContain("supabase.rpc('create_finance_pl_period'");
+    expect(component).toContain("supabase.rpc('create_finance_tax_period'");
     expect(component).toContain("supabase.rpc('prepare_finance_tax_period'");
     expect(component).toContain("supabase.rpc('close_finance_pl_period'");
   });
