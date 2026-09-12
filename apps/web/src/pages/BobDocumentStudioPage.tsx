@@ -3,7 +3,7 @@ import { Bold, Check, CheckCircle2, FilePlus2, Heading2, Italic, List, ListOrder
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './BobDocumentStudioPage.css';
@@ -28,9 +28,11 @@ const FILE_SPACES = ['Organisation', 'Contracts', 'Sites and Operations', 'HR an
 
 export default function BobDocumentStudioPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const [title, setTitle] = useState('Untitled Bob document');
   const [documentType, setDocumentType] = useState('report');
+  const [sourceContext, setSourceContext] = useState<{ type: string; id: string; label: string; prompt: string } | null>(null);
   const [referenceQuery, setReferenceQuery] = useState('');
   const [references, setReferences] = useState<ReferenceResult[]>([]);
   const [selectedReferences, setSelectedReferences] = useState<ReferenceResult[]>([]);
@@ -96,6 +98,58 @@ export default function BobDocumentStudioPage() {
   };
 
   useEffect(() => { void loadBrandAssets(); }, [profile?.organizationId]);
+
+  useEffect(() => {
+    const sourceType = searchParams.get('sourceType');
+    const sourceId = searchParams.get('sourceId');
+    if (!sourceType || !sourceId || !profile?.organizationId) return;
+    let active = true;
+    const loadSourceContext = async () => {
+      try {
+        if (sourceType === 'site') {
+          const { data: site } = await supabase.from('locations').select('id,name,address,zone_id').eq('id', sourceId).maybeSingle();
+          if (active && site) {
+            setSourceContext({
+              type: 'site',
+              id: site.id,
+              label: `${site.name}${site.address ? ` (${site.address})` : ''}`,
+              prompt: `Draft a site safety plan for ${site.name}. Include the hazards, controls, emergency procedures, and approval checklist based on the site details and attached reference materials.`,
+            });
+            setDocumentType('site_safety_plan');
+            setTitle(`Site Safety Plan - ${site.name}`);
+          }
+        } else if (sourceType === 'cctv') {
+          const { data: evidence } = await supabase.from('evidence_items').select('id,title,description,created_at').eq('id', sourceId).maybeSingle();
+          if (active && evidence) {
+            setSourceContext({
+              type: 'cctv',
+              id: evidence.id,
+              label: evidence.title || 'CCTV Evidence',
+              prompt: `Draft an incident report from the CCTV evidence review. Include what was observed, when, where, who was involved, and recommended next actions based on the evidence details and attached reference materials.`,
+            });
+            setDocumentType('incident_report');
+            setTitle(`Incident Report - ${evidence.title || 'CCTV Evidence'}`);
+          }
+        } else if (sourceType === 'notice') {
+          const { data: alert } = await supabase.from('breach_alerts').select('id,zone_id,observed_at,breach_type').eq('id', sourceId).maybeSingle();
+          if (active && alert) {
+            setSourceContext({
+              type: 'notice',
+              id: alert.id,
+              label: `Breach Alert ${alert.breach_type || 'Notice'}`,
+              prompt: `Draft a formal notice letter regarding the breach alert. Include the breach details, relevant policy/bylaw section, required actions, and response deadline based on the alert information and attached reference materials.`,
+            });
+            setDocumentType('letter');
+            setTitle(`Notice Letter - ${alert.breach_type || 'Breach Alert'}`);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load source context:', err);
+      }
+    };
+    void loadSourceContext();
+    return () => { active = false; };
+  }, [searchParams, profile?.organizationId]);
 
   const uploadBrandAsset = async (file: File) => {
     if (!profile?.organizationId) return;
@@ -349,6 +403,7 @@ export default function BobDocumentStudioPage() {
           </div>
           {selectedFile && <section className="bob-file-inspector" aria-label="Selected file details"><strong>{selectedFile.title}</strong><dl><div><dt>State</dt><dd>{selectedFile.status.replaceAll('_', ' ')}</dd></div><div><dt>Scope</dt><dd>{selectedFile.currentScope.replaceAll('_', ' ')}</dd></div><div><dt>Source</dt><dd>{selectedFile.sourceChannel.replaceAll('_', ' ')}</dd></div></dl>{selectedFile.authorable ? <button type="button" onClick={() => resumeDraft(selectedFile)}>Resume draft</button> : <button type="button" onClick={() => navigate(`/admin/files?document=${encodeURIComponent(selectedFile.id)}`)}>Open in Files workspace</button>}</section>}
           <div className="bob-document-section-heading"><span>Document setup</span></div>
+          {sourceContext && <div className="bob-source-context" role="status" aria-label="Source context for document"><span className="bob-source-type">{sourceContext.type.replace('_', ' ').toUpperCase()}</span><strong>{sourceContext.label}</strong><p className="bob-source-prompt">{sourceContext.prompt}</p></div>}
           <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           <label htmlFor="bob-document-type">Type<select id="bob-document-type" aria-label="Document type" value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
             <option value="site_safety_plan">Site safety plan</option><option value="risk_assessment">Security risk assessment</option><option value="incident_report">Incident / near miss</option><option value="corrective_action">Corrective action review</option><option value="emergency_plan">Emergency response plan</option><option value="working_alone_plan">Working-alone plan</option><option value="training_record">Training / competency record</option><option value="customer_review">Customer service review</option><option value="report">Operational report</option><option value="letter">Controlled correspondence</option><option value="policy">Policy / SOP</option><option value="proposal">Proposal / RFQ</option><option value="evidence_package">Evidence package</option><option value="custom">Custom</option>
