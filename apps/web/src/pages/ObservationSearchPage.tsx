@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './ObservationSearchPage.css';
 import './ObservationSearchFilters.css';
+import './ObservationSearchTheme.css';
 
 type Observation = {
   observation_id: string;

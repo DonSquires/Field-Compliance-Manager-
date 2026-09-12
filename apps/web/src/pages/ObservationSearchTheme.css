@@ -1,0 +1,143 @@
+.observation-workspace {
+  max-width: 1500px;
+  min-height: 100%;
+  padding: 28px 26px 48px;
+  color: #e7edf6;
+  background: #0a1226;
+}
+
+.observation-header {
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.observation-header > div > span,
+.observation-queue-header span,
+.observation-detail-inner header span {
+  color: #ff5960;
+}
+
+.observation-header h1 {
+  color: #f4f7fb;
+  font-size: 28px;
+}
+
+.observation-header p,
+.observation-queue-header small,
+.observation-detail-inner header small {
+  color: #9aa8bf;
+}
+
+.observation-search-bar,
+.observation-queue,
+.observation-detail {
+  border-color: #2d3a58;
+  background: #101a31;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .14);
+}
+
+.observation-search-bar {
+  gap: 10px;
+}
+
+.observation-search-bar label {
+  color: #aab7cc;
+}
+
+.observation-search-bar input,
+.observation-search-bar select {
+  border-color: #3b4861;
+  color: #edf2f9;
+  background: #0b1325;
+}
+
+.observation-search-bar input:focus,
+.observation-search-bar select:focus {
+  outline: 2px solid #3388ff;
+  outline-offset: 1px;
+}
+
+.observation-search-bar label > div svg {
+  color: #5c9dff;
+}
+
+.observation-search-input small {
+  color: #8291aa;
+}
+
+.observation-search-button,
+.observation-save-button {
+  background: #e52e38;
+}
+
+.observation-search-button:hover,
+.observation-save-button:hover {
+  background: #ff4650;
+}
+
+.observation-queue-header {
+  border-bottom-color: #2d3a58;
+}
+
+.observation-row {
+  color: #e7edf6;
+  background: #101a31;
+  border-bottom-color: #26344f;
+}
+
+.observation-row:hover,
+.observation-row.is-selected {
+  background: #172542;
+}
+
+.observation-row.is-selected {
+  box-shadow: inset 3px 0 #f5222b;
+}
+
+.observation-row-main strong,
+.observation-detail-inner h2,
+.observation-context-grid strong,
+.observation-note strong,
+.observation-detail-empty strong,
+.observation-empty strong {
+  color: #f4f7fb;
+}
+
+.observation-row-main small,
+.observation-context-grid span,
+.observation-note span,
+.observation-detail-empty,
+.observation-empty {
+  color: #9aa8bf;
+}
+
+.observation-row-icon {
+  color: #5c9dff;
+  background: #172d54;
+}
+
+.observation-detail-inner > header {
+  border-bottom-color: #2d3a58;
+}
+
+.observation-context-grid > div,
+.observation-note,
+.observation-link-editor {
+  border-color: #354463;
+  background: #0d172c;
+}
+
+.observation-link-editor summary {
+  color: #d7e1ef;
+}
+
+.observation-link-editor select {
+  border-color: #3b4861 !important;
+  color: #edf2f9 !important;
+  background: #0b1325 !important;
+}
+
+.observation-empty,
+.observation-detail-empty {
+  background: #101a31;
+}
