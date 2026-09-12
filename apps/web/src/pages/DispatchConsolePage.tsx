@@ -30,6 +30,7 @@ import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { resolveAddressCandidates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
+import { ShellLayout } from '../layouts/ShellLayout';
 import './DispatchConsolePage.css';
 
 // Type definitions
@@ -678,7 +679,8 @@ const DispatchConsolePage: React.FC = () => {
   // Mobile: Shift + Stops + Jobs tabs
   if (isMobile) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '12px', paddingBottom: '12px' }}>
+      <ShellLayout shell="admin" className="dispatch-console-shell">
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '12px', paddingBottom: '12px' }}>
         {/* Tab Bar */}
         <div
           style={{
@@ -766,13 +768,15 @@ const DispatchConsolePage: React.FC = () => {
             </div>
           )}
         </div>
-      </div>
+        </div>
+      </ShellLayout>
     );
   }
 
   // Desktop: Three-column layout
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', height: '100%' }}>
+    <ShellLayout shell="admin" className="dispatch-console-shell">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', height: '100%' }}>
       {/* Column 1: Shifts */}
       <div
         style={{
@@ -1155,7 +1159,8 @@ const DispatchConsolePage: React.FC = () => {
         </div>
         {selectedJobId && <div className="dispatch-operator-actions"><strong>Selected job</strong><div><button type="button" onClick={() => void operatorAction('job', 'amend')} disabled={operatorBusy}>Amend details</button><button type="button" onClick={() => void operatorAction('job', 'reassign')} disabled={operatorBusy}>Reassign</button><button type="button" onClick={() => void operatorAction('job', 'escalate')} disabled={operatorBusy}>Escalate</button><button type="button" onClick={() => void operatorAction('job', 'cancel')} disabled={operatorBusy}>Cancel job</button></div></div>}
       </div>
-    </div>
+      </div>
+    </ShellLayout>
   );
 };
 
