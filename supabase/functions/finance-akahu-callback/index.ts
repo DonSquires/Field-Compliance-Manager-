@@ -3,9 +3,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-const appId = Deno.env.get('AKAHU_APP_ID') ?? '';
-const appSecret = Deno.env.get('AKAHU_APP_SECRET') ?? '';
-const redirectUri = Deno.env.get('AKAHU_REDIRECT_URI') ?? '';
+const appId = (Deno.env.get('AKAHU_APP_ID') ?? '').trim();
+const appSecret = (Deno.env.get('AKAHU_APP_SECRET') ?? '').trim();
+const redirectUri = (Deno.env.get('AKAHU_REDIRECT_URI') ?? '').trim();
 const apiBase = 'https://api.akahu.io/v1';
 const hash = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 const html = (title: string, message: string, status = 200) => new Response(`<html><head><title>${title}</title></head><body><h1>${title}</h1><p>${message}</p><p>You can close this window and return to Finance.</p></body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });

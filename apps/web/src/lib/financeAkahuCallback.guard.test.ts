@@ -14,7 +14,9 @@ describe('Akahu ANZ callback and import', () => {
   });
 
   it('validates short-lived state and keeps the access token ephemeral', () => {
-    expect(callback).toContain("Deno.env.get('AKAHU_APP_SECRET')");
+    expect(callback).toContain("(Deno.env.get('AKAHU_APP_ID') ?? '').trim()");
+    expect(callback).toContain("(Deno.env.get('AKAHU_APP_SECRET') ?? '').trim()");
+    expect(callback).toContain("(Deno.env.get('AKAHU_REDIRECT_URI') ?? '').trim()");
     expect(callback).toContain('oauth_state_hash');
     expect(callback).toContain('oauth_state_expires_at');
     expect(callback).toContain('new Date(requestRow.oauth_state_expires_at).getTime() < Date.now()');

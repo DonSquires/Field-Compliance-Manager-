@@ -11,6 +11,8 @@ describe('Grandmaster Personal Akahu test', () => {
     expect(migration).toContain("role = 'grand_master'");
     expect(migration).toContain('finance_akahu_personal_checks');
     expect(edge).toContain("Deno.env.get('AKAHU_PERSONAL_USER_TOKEN')");
+    expect(edge).toContain("Deno.env.get('AKAHU_PERSONAL_USER_TOKEN') ?? '').trim()");
+    expect(edge).toContain("Deno.env.get('AKAHU_APP_ID') ?? '').trim()");
     expect(edge).toContain('id_suffix');
     expect(edge).toContain('transactions_imported: false');
     expect(edge).not.toContain('finance_external_bank_transactions');

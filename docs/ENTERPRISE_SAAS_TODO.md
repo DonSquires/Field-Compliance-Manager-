@@ -62,6 +62,25 @@ Goal: make Bob a governed enterprise copilot that can assess, propose, and prepa
 
 Goal: ensure completed field work can produce accurate, auditable billing and workforce pay outcomes using governed rate rules.
 
+### Akahu Provider Deployment Follow-up
+
+- [ ] Add Supabase function secrets `AKAHU_APPLY_API_KEY`, `AKAHU_APP_ID`, `AKAHU_APP_SECRET`, and `AKAHU_REDIRECT_URI` through the approved secret-management path. Do not place values in the repository, browser configuration, logs, or issue text.
+- [ ] Confirm Akahu Apply access is enabled for the FCM provider organisation and register the exact `finance-akahu-callback` redirect URI for the Full App.
+- [x] Deploy Apply migrations `20260912145000` through `20260912148000` to Supabase project `dotczcyyzgabmtmnglqj`.
+- [x] Deploy Apply functions for organisation verification, application creation, sharing requests, report processing, transaction review, and controlled promotion.
+- [x] Deploy the Core Akahu start, callback, and Personal App diagnostic functions. Provider calls remain fail-closed until secrets are configured.
+- [ ] Run the redacted production walkthrough: create/reuse tenant case -> issue sharing link -> submit ANZ/PDF data -> create/poll report -> review selected transactions -> promote approved rows to reconciliation review.
+- [ ] Record the live evidence packet: tenant/role, timestamps, function responses without secrets, report status, audit receipts, reconciliation destination, and human reviewer outcome.
+
+### Browser-Driven Sample Data Seeding Follow-up
+
+- [x] Add a role-gated, tenant-scoped generic intake control to the File System UI so Playwright and human reviewers can upload one supported source at a time through visible controls.
+- [ ] Route each browser upload through private storage, provenance registration, classification/quarantine, extraction state, and a visible approval action before promotion.
+- [ ] Seed in dependency order: organisation/client portfolio -> agreements/places/sites/zones -> staff/credentials/rosters/dispatch -> finance -> evidence/media -> reports/outputs -> observations last.
+- [ ] Trace every batch before/during/after with source hash, browser route, visible action, approval receipt, created IDs, skipped files, and failed requests.
+- [ ] Keep the 2,196 quarantined files, six archive-review files, 158 unclassified files, and two excluded placeholders out of business records until separately reviewed.
+- [ ] Fix or track the 107 live human-walkthrough findings before treating the browser seed as production-ready; the baseline passed with zero browser errors but found unnamed controls and sub-12px text.
+
 ### Resolve the Current Evidence Gap First
 
 - [ ] Locate or recover the code referenced by Atlas for `rateEngine.ts`, `invoicePipeline.ts`, `resolvePayLines()`, and `computeTravelDistanceKm()`. Blocked in this repository: neither source nor an alternate filename exists in the working tree or reachable Git history; recover it from the source repository or re-specify the engine before implementation.

@@ -4,8 +4,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-const akahuAppId = Deno.env.get('AKAHU_APP_ID') ?? '';
-const akahuRedirectUri = Deno.env.get('AKAHU_REDIRECT_URI') ?? '';
+const akahuAppId = (Deno.env.get('AKAHU_APP_ID') ?? '').trim();
+const akahuRedirectUri = (Deno.env.get('AKAHU_REDIRECT_URI') ?? '').trim();
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 
 const json = (body: Record<string, unknown>, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

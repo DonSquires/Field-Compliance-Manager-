@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Clock3, Download, FileArchive, FileText, FolderOpen, Image, RefreshCw, Search, ShieldCheck, Video, X } from 'lucide-react';
+import { Clock3, Download, FileArchive, FileText, FolderOpen, Image, RefreshCw, Search, ShieldCheck, Upload, Video, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ImportSchemaPreview, parseCsvPreview, parseXlsxPreview, sha256Hex } from '../lib/importPreview';
@@ -259,6 +259,7 @@ const FileSystemPage: React.FC = () => {
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState('');
   const [reviewingBatch, setReviewingBatch] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutputRow[]>([]);
   const [noticeArtifacts, setNoticeArtifacts] = useState<NoticeArtifactRow[]>([]);
   const [outputStatus, setOutputStatus] = useState<OutputStatusFilter>('all');
@@ -299,6 +300,24 @@ const FileSystemPage: React.FC = () => {
     const { error: registerError } = await supabase.functions.invoke('bob-document-register', { body: { attachment_id: attachment.id } });
     if (registerError) setError(registerError.message);
     else { setNotice(`${attachment.file_name} registered into the Files workspace.`); await loadDocuments(); }
+  };
+
+  const uploadHumanIntakeFile = async (file: File) => {
+    const organizationId = operatingOrganizationId ?? profile?.organizationId;
+    if (!organizationId || !profile) { setError('An active organisation is required before uploading a source file.'); return; }
+    setUploadingFile(true); setError(null); setNotice(null);
+    const attachmentId = crypto.randomUUID();
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-180);
+    const storagePath = `org/${organizationId}/bob/files/${attachmentId}-${safeName}`;
+    const { error: uploadError } = await supabase.storage.from('bob-uploads').upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    if (uploadError) { setError(`Source upload failed: ${uploadError.message}`); setUploadingFile(false); return; }
+    const { error: metadataError } = await supabase.from('bob_attachments').insert({ id: attachmentId, organization_id: organizationId, conversation_id: null, uploaded_by: profile.id, file_name: file.name, file_type: file.type || 'application/octet-stream', file_size_bytes: file.size, storage_bucket: 'bob-uploads', storage_path: storagePath, purpose: file.type.startsWith('video/') ? 'video_intake' : file.type.startsWith('image/') ? 'photo_intake' : 'document_intake', processing_state: 'pending' });
+    if (metadataError) { await supabase.storage.from('bob-uploads').remove([storagePath]); setError(`Source registration failed: ${metadataError.message}`); setUploadingFile(false); return; }
+    const { error: registerError } = await supabase.functions.invoke('bob-document-register', { body: { attachment_id: attachmentId } });
+    if (registerError) setError(`Source registration failed: ${registerError.message}`);
+    else setNotice(`${file.name} uploaded through the human intake path and registered for review.`);
+    setUploadingFile(false);
+    await loadDocuments();
   };
 
   useEffect(() => { void loadDocuments(); }, [loadDocuments]);
@@ -441,7 +460,7 @@ const FileSystemPage: React.FC = () => {
   };
 
   return <div className="file-system-page">
-    <header className="file-system-header"><div><span>Organisation workspace / Files</span><h1>File system</h1><p>Find source documents, inspect provenance, and review extracted versions before anything becomes an authoritative record.</p></div><div className="file-system-header-actions"><button type="button" onClick={() => navigate('/admin/approvals')}><ShieldCheck size={17} />Review promotions</button><button type="button" onClick={() => void loadDocuments()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></div></header>
+    <header className="file-system-header"><div><span>Organisation workspace / Files</span><h1>File system</h1><p>Find source documents, inspect provenance, and review extracted versions before anything becomes an authoritative record.</p></div><div className="file-system-header-actions"><label className="file-system-human-upload"><Upload size={17} />{uploadingFile ? 'Uploading...' : 'Upload source file'}<input type="file" disabled={uploadingFile} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadHumanIntakeFile(file); event.currentTarget.value = ''; }} /></label><button type="button" onClick={() => navigate('/admin/approvals')}><ShieldCheck size={17} />Review promotions</button><button type="button" onClick={() => void loadDocuments()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></div></header>
     {error && <div className="file-system-message is-error" role="alert"><span>{error}</span><button type="button" title="Dismiss" onClick={() => setError(null)}><X size={16} /></button></div>}
     {notice && <div className="file-system-message is-success" role="status"><ShieldCheck size={16} /><span>{notice}</span><button type="button" title="Dismiss" onClick={() => setNotice(null)}><X size={16} /></button></div>}
     <section className="file-system-intake" aria-label="Manifest-based import preview">

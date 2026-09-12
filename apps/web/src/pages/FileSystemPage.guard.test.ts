@@ -61,6 +61,14 @@ describe('organisation file system', () => {
     expect(page).not.toMatch(/from\('(documents|document_versions)'\)[\s\S]{0,240}\.(insert|update|upsert|delete)\(/);
   });
 
+  it('provides a visible one-file browser intake path through private storage and registration', () => {
+    expect(page).toContain('Upload source file');
+    expect(page).toContain("supabase.storage.from('bob-uploads').upload");
+    expect(page).toContain("supabase.from('bob_attachments').insert");
+    expect(page).toContain("supabase.functions.invoke('bob-document-register'");
+    expect(page).toContain('uploaded through the human intake path');
+  });
+
   it('quarantines unsafe, partial, and unknown intake artifacts before registration', () => {
     expect(page).toContain('Unsupported or unsafe artifact');
     expect(page).toContain('Office lock file');
