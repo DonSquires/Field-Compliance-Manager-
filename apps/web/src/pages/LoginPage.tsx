@@ -108,7 +108,17 @@ const LoginPage: React.FC = () => {
                 <div>
                   {mode === 'update_password' ? <KeyRound size={17} aria-hidden="true" /> : <LockKeyhole size={17} aria-hidden="true" />}
                   <input id="login-password" type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'update_password' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
-                  <button type="button" className="login-visibility" onClick={() => setShowPassword((visible) => !visible)} aria-label="Toggle entry visibility">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}<span className="sr-only">Toggle entry visibility</span></button>
+                  <button
+                    type="button"
+                    className="login-visibility"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                    <span className="sr-only">{showPassword ? 'Hide password' : 'Show password'}</span>
+                  </button>
                 </div>
               </div>
             )}
