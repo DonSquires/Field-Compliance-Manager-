@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './FinanceHome.css';
 import { FinanceOwnerGuide } from '../components/FinanceOwnerGuide';
+import { FinanceCard } from '../components/FinanceCard';
 
 interface Schedule { id: string; name: string; status: 'draft' | 'active' | 'retired'; effective_from: string; effective_to: string | null; version: number; }
 interface DiscountRule { id: string; schedule_id: string; module_key: string | null; discount_kind: 'percentage' | 'fixed_amount'; discount_value: number; minimum_subtotal: number | null; priority: number; }
@@ -17,10 +18,10 @@ function FinanceHomeCards({ onOpenBob, onNavigate }: { onOpenBob?: () => void; o
     <header className="page-header"><div><p className="finance-owner-eyebrow">Finance, made simple</p><h1>What would you like to do?</h1><p className="subtitle">Bob checks the records and prepares the work. You review the important decisions.</p></div></header>
     <FinanceOwnerGuide onOpenBob={onOpenBob} />
     <section className="finance-task-grid" aria-label="Finance tasks">
-      <button type="button" className="finance-task-card is-primary" onClick={() => onNavigate?.('finance-money')}><strong>See how the business is doing</strong><span>Money earned, money left after costs, tax to plan for, and payments to sort.</span><b>Open money check</b></button>
-      <button type="button" className="finance-task-card" onClick={() => onNavigate?.('finance-connections')}><strong>Connect ANZ or IRD</strong><span>Bob prepares the secure connection. Your login stays with the provider.</span><b>Open connections</b></button>
-      <button type="button" className="finance-task-card" onClick={() => onNavigate?.('finance-costing')}><strong>Work out what a job should cost</strong><span>Use source facts to understand labour, vehicles, equipment, and margin.</span><b>Open costing</b></button>
-      <button type="button" className="finance-task-card" onClick={() => onNavigate?.('finance-pricing')}><strong>Manage prices and discounts</strong><span>Keep rate books and discount schedules in their own controlled workspace.</span><b>Open pricing</b></button>
+      <FinanceCard eyebrow="Daily overview" title="See how the business is doing" description="Money earned, money left after costs, tax to plan for, and payments to sort." action="Open money check" tone="primary" onClick={() => onNavigate?.('finance-money')} />
+      <FinanceCard eyebrow="Connections" title="Connect ANZ or IRD" description="Bob prepares the secure connection. Your login stays with the provider." action="Open connections" tone="neutral" onClick={() => onNavigate?.('finance-connections')} />
+      <FinanceCard eyebrow="Before quoting" title="Work out what a job should cost" description="Use source facts to understand labour, vehicles, equipment, and margin." action="Open costing" tone="attention" onClick={() => onNavigate?.('finance-costing')} />
+      <FinanceCard eyebrow="Commercial control" title="Manage prices and discounts" description="Keep rate books and discount schedules in their own controlled workspace." action="Open pricing" tone="good" onClick={() => onNavigate?.('finance-pricing')} />
     </section>
     <div className="finance-home-note"><strong>Not sure?</strong><span>Ask Bob "what needs my attention?" and he will start with the records, not accounting jargon.</span><button type="button" className="btn btn-secondary" onClick={onOpenBob}>Ask Bob</button></div>
   </div>;
