@@ -149,6 +149,10 @@ Patrol source-domain correction and current gap:
 
 Dr Bob and human approval evidence: live desktop human walkthrough passed on 2026-09-12 with 0 browser errors and 78 UX findings. Patrol batch review exposed no direct approval action while unresolved/malformed import values remain; no ambiguous patrol records were approved.
 
+Human reviewer decision: `May Patrols.csv` was explicitly rejected through the visible File System review control. Receipt: `Batch rejected. No canonical records were changed.` Reason recorded: 182 unresolved references and 2 malformed rows remain; Deputy/static roster data must stay separate from patrol outcomes, and client/site/zone/agreement/shift mapping requires specialized Bob Atlas/schema review before any write.
+
+Latest Dr Bob live run after the human-test edits: 2 browser journeys passed, 0 errors, 8 UX findings.
+
 Bob planner evidence: `bob-plan-import` read-only planning against `May Patrols.csv` parsed 1,431 rows but selected no target, returned `confident=false`, no model choice, and no mappings. This matches the Atlas/schema finding that generic import cannot safely choose among `client_sites`, `location_zones`, `patrol_routes`, `shift_stops`, `patrols`, and historical outcome records. A specialized patrol mapper with human client/site/zone resolution is required before any apply step.
 
 Specialized patrol mapper evidence: `bob-plan-patrol-import` ran read-only through an authenticated browser session. It parsed 1,456 rows, found 27 unique client names, 27 client references, and 3 despatch zones, but all 27 site references were unresolved against the current canonical site set. It returned zero writes and correctly required approved site/agreement/shift attribution before promotion.
