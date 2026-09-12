@@ -81,6 +81,27 @@ Finance PDF classification approvals: both corrected PDFs were reviewed through 
 - Browser/alert errors: 0
 - Finance proposal promotion: not performed
 
+Finance E2E internal writes: completed through the live browser workflow on 2026-09-12, excluding all bank and IRD linking.
+
+- Approved the Expense Reimbursement finance proposal and created draft invoice `E2E-EXP-20260912-01` with subtotal `$181.12`, GST `$17.64`, total `$198.76`.
+- Approved the HR Pay Costing finance proposal and created draft invoice `E2E-PAY-20260912-01` with subtotal `$4,000`, GST `$600`, total `$4,600`.
+- Ran the visible costing/depreciation calculation with labour, asset, equipment, overhead, and margin inputs; annual depreciation receipt returned `$2,400`.
+- Bank and IRD linking controls were not opened or submitted.
+- Browser errors and alerts during successful invoice writes: 0.
+
+Follow-up findings from the same E2E run:
+
+- Creating a billing rate rule was blocked by the server with `Active authorized operating branch finance administrator required`; no rule was written.
+- The costing receipt returned `$0.00` true cost/client charge despite populated labour and direct-cost fields while returning depreciation; downstream calculation inputs need tracing.
+- The Finance money summary loaded without errors but did not visibly show the new draft invoice numbers, so downstream display remains unverified.
+
+Finance proposal preparation: both approved PDFs were sent through the visible `Prepare finance proposal` action on 2026-09-12.
+
+- Visible receipts: two files ready for human Finance Reconciliation review
+- Browser/alert errors: 0
+- Canonical finance writes: not performed
+- Next reviewer action: inspect proposal fields and approve/reject through the finance reconciliation workflow
+
 ## Confirmed browser-seeding gap
 
 The File System page previously provided CSV/XLSX preview, but no general human-visible upload/register control for the corpus. A one-file role-gated intake control is now implemented locally and reuses private `bob-uploads`, `bob_attachments`, and `bob-document-register`. It must be deployed before the production browser seed can start. Bob Document Studio still exposes brand-asset upload separately.
