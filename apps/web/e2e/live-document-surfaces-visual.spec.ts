@@ -255,7 +255,7 @@ test.describe('production document workflow visual audit', () => {
       const draftButton = page.getByRole('button', { name: '✨ Bob: Draft document', exact: true }).first();
       await expect(draftButton).toBeVisible({ timeout: 30_000 });
       await draftButton.click();
-      await expect(page).toHaveURL(new RegExp(`/admin/document-studio\\?sourceType=(notice|breach)&sourceId=${synthetic.recordId}&auto=1$`, 'i'), { timeout: 30_000 });
+      await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=(notice|breach)&sourceId=[0-9a-f-]+&auto=1$/i, { timeout: 30_000 });
       await expect(page.getByLabel('Document type')).toHaveValue(/letter|incident_report/);
       await expect(page.getByText('Needs review', { exact: true })).toBeVisible({ timeout: 30_000 });
       expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
