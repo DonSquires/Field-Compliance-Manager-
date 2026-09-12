@@ -50,6 +50,15 @@ Finance browser batch: three source files uploaded through the same visible inta
 - Failed Supabase responses: 0
 - Promotion: not performed; finance classification and reconciliation review remain pending
 
+Finance spreadsheet classification approval: `April 2026 Noise billing.xlsx` was reviewed through the live Approvals dialog on 2026-09-12.
+
+- Privacy class: tenant sensitive
+- Financial data: confirmed
+- Review reason: finance source requires tenant-scoped finance review before promotion
+- Visible receipt: classification review recorded
+- Browser/alert errors: 0
+- Promotion: not performed
+
 ## Confirmed browser-seeding gap
 
 The File System page previously provided CSV/XLSX preview, but no general human-visible upload/register control for the corpus. A one-file role-gated intake control is now implemented locally and reuses private `bob-uploads`, `bob_attachments`, and `bob-document-register`. It must be deployed before the production browser seed can start. Bob Document Studio still exposes brand-asset upload separately.
