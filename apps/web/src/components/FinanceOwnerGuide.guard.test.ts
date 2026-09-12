@@ -23,4 +23,11 @@ describe('finance owner guide', () => {
     expect(page).toContain('<FinanceOwnerGuide onOpenBob={onOpenBob} />');
     expect(shell).toContain("<FinanceBureauPage onOpenBob={() => setBobOpen(true)} />");
   });
+
+  it('starts Bob from a live read-only owner brief', () => {
+    expect(guide).toContain("supabase.rpc('get_finance_owner_brief')");
+    expect(guide).toContain("Bob's quick check");
+    expect(guide).toContain('Bob is checking your finance records');
+    expect(guide).toContain('finance-owner-error');
+  });
 });
