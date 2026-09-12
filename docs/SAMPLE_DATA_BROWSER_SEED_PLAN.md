@@ -40,6 +40,16 @@ First live browser intake batch: `107 Gorge Road - Service Agreement.pdf` upload
 - Failed Supabase responses: 0
 - Promotion: not performed; the source remains in the review boundary
 
+Finance browser batch: three source files uploaded through the same visible intake on 2026-09-12.
+
+- `FIRST Security Guard Services Limited - HR Pay Costing.pdf`
+- `Expense Reimbursement 22.08.22.pdf`
+- `April 2026 Noise billing.xlsx`
+- Receipts: 3 registrations
+- Browser console errors: 0
+- Failed Supabase responses: 0
+- Promotion: not performed; finance classification and reconciliation review remain pending
+
 ## Confirmed browser-seeding gap
 
 The File System page previously provided CSV/XLSX preview, but no general human-visible upload/register control for the corpus. A one-file role-gated intake control is now implemented locally and reuses private `bob-uploads`, `bob_attachments`, and `bob-document-register`. It must be deployed before the production browser seed can start. Bob Document Studio still exposes brand-asset upload separately.
