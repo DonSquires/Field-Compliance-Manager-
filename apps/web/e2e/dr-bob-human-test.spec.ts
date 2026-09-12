@@ -37,7 +37,7 @@ async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0]
 
   await session.step('type credentials manually', async () => {
     await emailField.fill(email);
-    await page.getByLabel('Password').fill(password);
+    await page.getByRole('textbox', { name: 'Password', exact: true }).fill(password);
   });
   await session.step('press the sign-in button manually', async () => {
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -92,7 +92,7 @@ test.describe("Dr. Bob's human browser test", () => {
       if (await loginField.isVisible({ timeout: 1500 }).catch(() => false)) {
         if (!officerEmail || !password) throw new Error('Human test needs credentials for the officer entry point.');
         await loginField.fill(officerEmail);
-        await page.getByLabel('Password').fill(password);
+        await page.getByRole('textbox', { name: 'Password', exact: true }).fill(password);
         await page.getByRole('button', { name: 'Sign in', exact: true }).click();
         await page.waitForTimeout(1200);
       }

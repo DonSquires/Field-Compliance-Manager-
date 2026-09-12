@@ -107,7 +107,7 @@ const LoginPage: React.FC = () => {
                 <label htmlFor="login-password">{mode === 'update_password' ? 'New password' : 'Password'}</label>
                 <div>
                   {mode === 'update_password' ? <KeyRound size={17} aria-hidden="true" /> : <LockKeyhole size={17} aria-hidden="true" />}
-                  <input id="login-password" type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'update_password' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <input id="login-password" aria-label={mode === 'update_password' ? 'New password' : 'Password'} type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'update_password' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
                   <button
                     type="button"
                     className="login-visibility"
@@ -126,7 +126,7 @@ const LoginPage: React.FC = () => {
             {mode === 'update_password' && (
               <div className="login-field">
                 <label htmlFor="login-confirm-password">Confirm new password</label>
-                <div><KeyRound size={17} aria-hidden="true" /><input id="login-confirm-password" type={showPassword ? 'text' : 'password'} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></div>
+                <div><KeyRound size={17} aria-hidden="true" /><input id="login-confirm-password" aria-label="Confirm new password" type={showPassword ? 'text' : 'password'} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></div>
               </div>
             )}
 
