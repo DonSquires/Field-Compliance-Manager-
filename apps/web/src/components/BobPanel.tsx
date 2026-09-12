@@ -44,6 +44,7 @@ interface BobMessage {
 interface BobPanelProps {
   open: boolean;
   onClose: () => void;
+  onOpenObservationSearch?: (search: string) => void;
   context?: Record<string, unknown>;
   mode?: 'operations' | 'builder';
 }
@@ -129,6 +130,14 @@ interface WorkState {
 
 type ActivityPhase = 'idle' | 'preparing' | 'uploading' | 'waiting' | 'refreshing' | 'recording';
 
+function observationSearchHandoff(content: string): { display: string; search: string | null } {
+  const match = content.match(/\[OPEN_OBSERVATION_SEARCH:([^\]]+)\]/i);
+  return {
+    display: content.replace(/\s*\[OPEN_OBSERVATION_SEARCH:[^\]]+\]\s*/i, '\n').trim(),
+    search: match?.[1]?.trim() || null,
+  };
+}
+
 const DOCUMENT_REGISTRATION_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 
 const CONTEXT_LABELS: Record<string, string> = {
@@ -154,7 +163,7 @@ function formatContextEntry(key: string, value: string): [string, string] {
   return [label, readable];
 }
 
-export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations' }) => {
+export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, onOpenObservationSearch, context, mode = 'operations' }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BobMessage[]>([]);
@@ -672,7 +681,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    const message = input.trim() || voiceTranscript.trim();
+    const message = input.trim() || voiceTranscript.trim() || (pendingFiles.some((file) => file.file.type.startsWith('image/'))
+      ? 'Inspect the attached image as evidence. If it contains a vehicle or person, use perceive_media and then search_observations for canonical matches. Only open the observation search when the search target is sufficiently confident.'
+      : '');
     if ((!message && pendingFiles.length === 0) || !conversationId) return;
 
     const optimisticId = `optimistic-${Date.now()}`;
@@ -713,10 +724,15 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       if (historyErr) throw historyErr;
 
       if (history && history.length > 0) {
-        setMessages(history as BobMessage[]);
+        const rawHistory = history as BobMessage[];
+        const latestAssistant = [...history].reverse().find((item) => item.role === 'assistant');
+        const handoff = latestAssistant ? observationSearchHandoff(latestAssistant.content) : null;
+        setMessages(rawHistory.map((item) => item.role === 'assistant' ? { ...item, content: observationSearchHandoff(item.content).display } : item));
+        if (handoff?.search && onOpenObservationSearch) onOpenObservationSearch(handoff.search);
         await Promise.all([loadAttachments(conversationId), loadAuditEvents(conversationId), loadGovernedActions(conversationId)]);
         setPendingFiles([]);
       } else if (data?.reply) {
+        const replyHandoff = observationSearchHandoff(String(data.reply));
         // Fallback: function replied but history read didn't return rows yet
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== optimisticId),
@@ -724,13 +740,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           {
             id: `reply-${Date.now()}`,
             role: 'assistant',
-            content: String(data.reply),
+            content: replyHandoff.display,
             confidence: null,
             flagged: false,
             created_at: new Date().toISOString(),
             metadata: {},
           },
         ]);
+        if (replyHandoff.search && onOpenObservationSearch) onOpenObservationSearch(replyHandoff.search);
         await Promise.all([loadAttachments(conversationId), loadAuditEvents(conversationId), loadGovernedActions(conversationId)]);
         setPendingFiles([]);
       }

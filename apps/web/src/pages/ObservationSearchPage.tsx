@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Car, CheckCircle2, Eye, FileSearch, Link2, MapPin, RefreshCw, Search, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './ObservationSearchPage.css';
@@ -36,7 +37,8 @@ const inputStyle: React.CSSProperties = { minHeight: 40, padding: '0 12px', bord
 
 export default function ObservationSearchPage() {
   const { profile } = useAuth();
-  const [search, setSearch] = useState('');
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [siteId, setSiteId] = useState('');
   const [zoneId, setZoneId] = useState('');
   const [locationId, setLocationId] = useState('');
@@ -96,6 +98,11 @@ export default function ObservationSearchPage() {
 
   useEffect(() => { void loadOptions(); void runSearch(); }, [loadOptions, runSearch]);
 
+  useEffect(() => {
+    const routedSearch = searchParams.get('search') ?? '';
+    if (routedSearch !== search) setSearch(routedSearch);
+  }, [searchParams, search]);
+
   const selected = results.find((row) => row.observation_id === selectedId) ?? results[0] ?? null;
 
   const linkObservation = async (observationId: string, values: Record<string, string>) => {
@@ -124,7 +131,7 @@ export default function ObservationSearchPage() {
         <button type="button" className="page-action" onClick={() => void runSearch()}><RefreshCw size={16} /> Refresh</button>
       </header>
       <section className="observation-search-bar" aria-label="Observation filters">
-        <label className="observation-search-input"><span>Search all observations</span><div><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runSearch(); }} placeholder="Plate, person, site, zone, incident, or note" /></div></label>
+        <label className="observation-search-input"><span>Search all observations</span><div><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runSearch(); }} placeholder="Plate, person, site, zone, incident, or note" /></div><small>Use % as a wildcard anywhere: %squires, squires%, or %squ%s%</small></label>
         <label><span>Site</span><select value={siteId} onChange={(event) => setSiteId(event.target.value)}><option value="">All sites</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label><span>Zone</span><select value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label><span>Location house</span><select value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">All locations</option>{locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
