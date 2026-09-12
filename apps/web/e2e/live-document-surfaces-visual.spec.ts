@@ -70,4 +70,20 @@ test.describe('production document workflow visual audit', () => {
       expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
     });
   }
+
+  test('locations opens a site-scoped Bob safety-plan draft', async ({ page }) => {
+    const evidence = monitor(page);
+    await signIn(page);
+    await page.goto(`${LIVE_URL}/admin/locations`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText(/All Locations/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: 'Bob: Draft safety plan' }).first()).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Bob: Draft safety plan' }).first().click();
+    await expect(page).toHaveURL(/\/admin\/document-studio\?sourceType=site&sourceId=[0-9a-f-]+$/i, { timeout: 30_000 });
+    await expect(page.getByRole('status', { name: 'Source context for document' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('status', { name: 'Source context for document' })).toContainText(/SITE/i);
+    await expect(page.getByLabel('Document type')).toHaveValue('site_safety_plan');
+    expect(evidence.consoleErrors, evidence.consoleErrors.join('\n')).toEqual([]);
+    expect(evidence.requestErrors, evidence.requestErrors.join('\n')).toEqual([]);
+    expect(evidence.httpErrors, evidence.httpErrors.join('\n')).toEqual([]);
+  });
 });
