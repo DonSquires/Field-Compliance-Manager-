@@ -43,7 +43,7 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('aria-expanded={mobileMenuOpen}');
     expect(source).toContain('aria-expanded={bobOpen}');
     expect(source).toContain("label={item.label}");
-    expect(source).toContain('aria-label="Notifications"');
+    expect(source).toContain('<NotificationCenter onNavigate={navigateFromNotification} />');
     expect(source).toContain('aria-label="Open Bob command center"');
     expect(source).not.toContain("label={sidebarCollapsed ? '' : item.label}");
   });
@@ -74,9 +74,10 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("{ id: 'finance-bureau', label: 'Finance home'");
     expect(source).toContain("{ id: 'finance-connections', label: 'Connect ANZ & IRD'");
     expect(source).toContain("{ id: 'finance-money', label: 'Money check'");
-    expect(source).toContain("'Workforce & Operations': [");
+    expect(source).toContain("'Field Operations': [");
     expect(source).toContain("{ id: 'roster', label: 'Schedules & Rosters'");
     expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");
+    expect(source).toContain("'Reports & Analytics': [");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
     expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
     expect(source).toContain("{ id: 'onboarding', label: 'New Account Setup'");

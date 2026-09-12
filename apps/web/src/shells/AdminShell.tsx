@@ -173,9 +173,15 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
 };
 
 const NAVIGATION_MAP = {
-  'Start Here': [
+  'Mission Control': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
-    { id: 'files', label: 'File System', icon: FolderOpen },
+    { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
+  ],
+  'Field Operations': [
+    { id: 'field-ops', label: 'Field Operations', icon: Radio },
+    { id: 'roster', label: 'Schedules & Rosters', icon: Users },
+    { id: 'people-hr', label: 'People, Pay & HR', icon: Users },
+    { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
   ],
   'Clients & Commercial': [
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
@@ -188,14 +194,14 @@ const NAVIGATION_MAP = {
     { id: 'finance-pricing', label: 'Pricing & discounts', icon: Tags },
     { id: 'rate-rules', label: 'Pay & Billing Rate Rules', icon: DollarSign },
   ],
-  'Workforce & Operations': [
-    { id: 'roster', label: 'Schedules & Rosters', icon: Users },
-    { id: 'people-hr', label: 'People, Pay & HR', icon: Users },
-    { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
-    { id: 'field-ops', label: 'Field Operations', icon: Radio },
+  'Reports & Analytics': [
     { id: 'reports', label: 'Reports', icon: FileBarChart },
   ],
-  'Organization Setup': [
+  'Intelligence & Records': [
+    { id: 'files', label: 'File System', icon: FolderOpen },
+    { id: 'investigations', label: 'Investigations', icon: Search },
+  ],
+  'Platform & Settings': [
     { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
     { id: 'locations', label: 'Location Houses', icon: MapPin },
     { id: 'zones', label: 'Zone Facets', icon: MapPin },
@@ -203,13 +209,8 @@ const NAVIGATION_MAP = {
     { id: 'users', label: 'People & Access', icon: Users },
     { id: 'access-control', label: 'Access Rules', icon: KeyRound },
     { id: 'org-setup', label: 'Organization Settings', icon: Settings },
-    { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
-  ],
-  'Engineering': [
     { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
     { id: 'test-data', label: 'Test Data', icon: Package },
-  ],
-  'Platform Owner': [
     { id: 'platform', label: 'Platform Overview', icon: Shield },
     { id: 'builder', label: 'Builder', icon: Bot },
     { id: 'platform-catalog', label: 'Module Pricing', icon: Package },
