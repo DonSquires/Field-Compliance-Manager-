@@ -34,11 +34,11 @@ async function signIn(page: Page): Promise<void> {
 }
 
 const surfaces = [
-  { name: 'document-studio', path: '/admin/document-studio', marker: /Bob document studio/i },
-  { name: 'files', path: '/admin/files', marker: /File system/i },
-  { name: 'locations', path: '/admin/locations', marker: /Locations/i },
-  { name: 'breach-review', path: '/admin/field-ops?area=breach-review', marker: /Breach Review|Compliance Breach/i },
-  { name: 'cctv-review', path: '/admin/field-ops?area=cctv-review', marker: /CCTV/i },
+  { name: 'document-studio', path: '/admin/document-studio', marker: /Bob document studio/i, ready: /Document setup/i },
+  { name: 'files', path: '/admin/files', marker: /File system/i, ready: /Permitted records|Files waiting registration/i },
+  { name: 'locations', path: '/admin/locations', marker: /Locations/i, ready: /All Locations/i },
+  { name: 'breach-review', path: '/admin/field-ops?area=breach-review', marker: /Breach Review|Compliance Breach/i, ready: /No breach records|Select Enforcement Action|Breach alert/i },
+  { name: 'cctv-review', path: '/admin/field-ops?area=cctv-review', marker: /CCTV/i, ready: /Recent camera work|Select evidence/i },
 ] as const;
 
 test.describe('production document workflow visual audit', () => {
@@ -51,6 +51,7 @@ test.describe('production document workflow visual audit', () => {
       await signIn(page);
       await page.goto(`${LIVE_URL}${surface.path}`, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('body')).toContainText(surface.marker, { timeout: 30_000 });
+      await expect(page.locator('body')).toContainText(surface.ready, { timeout: 30_000 });
       const dismiss = page.getByRole('button', { name: 'Not now', exact: true });
       if (await dismiss.isVisible({ timeout: 2_000 }).catch(() => false)) await dismiss.click();
       await expect(page.getByText(/Module configuration.*loading/i).first()).not.toBeVisible({ timeout: 10_000 });
