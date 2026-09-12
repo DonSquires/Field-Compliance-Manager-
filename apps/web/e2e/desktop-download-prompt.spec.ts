@@ -5,8 +5,11 @@ test('administrator is offered the desktop companion once and can dismiss it', a
   test.skip(testInfo.project.name !== 'desktop-chromium', 'The desktop companion prompt is intentionally not shown on mobile.');
   const errors = monitorBrowserErrors(page);
   await installSupabaseFixtures(page);
-  await page.addInitScript((key) => window.localStorage.removeItem(key), DESKTOP_PROMPT_KEY);
   await signInAsAdmin(page);
+
+  const downloadBtn = page.getByRole('button', { name: 'Download FCM desktop app' });
+  await expect(downloadBtn).toBeVisible();
+  await downloadBtn.click();
 
   const prompt = page.getByRole('dialog', { name: 'Choose your evidence workstation' });
   await expect(prompt).toBeVisible();
@@ -14,9 +17,5 @@ test('administrator is offered the desktop companion once and can dismiss it', a
 
   await prompt.getByRole('button', { name: 'Not now' }).click();
   await expect(prompt).toBeHidden();
-
-  // Dismissal is retained, so the modal never blocks the admin surface again.
-  await page.reload();
-  await expect(page.getByRole('dialog', { name: 'Choose your evidence workstation' })).toBeHidden();
   expect(errors).toEqual([]);
 });

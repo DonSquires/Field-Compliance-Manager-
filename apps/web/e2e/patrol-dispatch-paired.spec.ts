@@ -62,48 +62,51 @@ test.describe('paired patrol and dispatch acceptance', () => {
   });
 
   test('officer patrol exercises session, checkpoint, completion, and receipt states', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
     await installOfficerScheduleFixtures(page);
     const browserErrors = monitorBrowserErrors(page);
     await page.route('**/rest/v1/shifts**', async (route) => {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'patrol-shift-0001', service_type: 'patrol', scheduled_start: '2026-08-30T08:00:00.000Z', scheduled_end: '2026-08-30T16:00:00.000Z', status: 'published', zone_id: 'zone-0001', patrol_route_id: null, zone: { name: 'North District Patrol' }, route: null }]) });
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'patrol-shift-0001', service_type: 'patrol', scheduled_start: '2026-08-30T08:00:00.000Z', scheduled_end: '2026-08-30T16:00:00.000Z', status: 'published', zone_id: 'zone-0001', patrol_route_id: 'route-0001', zone: { name: 'North District Patrol' }, route: { name: 'North District Patrol', route_code: 'NDP-01' } }]) });
     });
     await page.route('**/rest/v1/patrols**', async (route) => {
       const request = route.request();
       if (request.method() === 'POST') {
-        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify([{ id: 'patrol-session-0001', status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z' }]) });
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'patrol-session-0001', status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z' }) });
         return;
       }
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([]) });
+      const isSingle = request.headers()['accept']?.includes('vnd.pgrst.object+json');
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(isSingle ? null : []) });
+    });
+    await page.route('**/rest/v1/patrol_route_checkpoints**', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'checkpoint-0001', name: 'North loading entrance', description: 'Verify gate and alarm panel.', qr_code_data: 'FCM-NORTH-001', gps_lat: -41.274, gps_lng: 173.283, geofence_radius_meters: 50, sequence_order: 1 }]) });
     });
     await page.route('**/rest/v1/patrol_checkpoints**', async (route) => {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'checkpoint-0001', name: 'North loading entrance', description: 'Verify gate and alarm panel.', qr_code: 'FCM-NORTH-001', gps_lat: -41.274, gps_lng: 173.283, radius_meters: 50, active: true }]) });
     });
     await page.route('**/rest/v1/patrol_checkpoint_visits**', async (route) => {
       if (route.request().method() === 'POST') {
-        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify([{ id: 'visit-0001', checkpoint_id: 'checkpoint-0001', visited_at: '2026-08-30T09:35:00.000Z', scan_method: 'manual', notes: 'Gate secure; alarm panel normal.' }]) });
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'visit-0001', checkpoint_id: 'checkpoint-0001', visited_at: '2026-08-30T09:35:00.000Z', scan_method: 'manual', notes: 'Gate secure; alarm panel normal.' }) });
         return;
       }
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify([]) });
     });
 
     await signInAsOfficer(page, '/officer/patrol');
-    const patrolLauncher = page.getByRole('button', { name: /Patrol.*Route and checkpoints/i }).first();
-    if (await patrolLauncher.isVisible().catch(() => false)) await patrolLauncher.click();
-    await expect(page.getByRole('heading', { name: 'Field Patrol & Checkpoints' })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole('heading', { name: 'Field Patrol & Checkpoints' })).toBeVisible();
-    const shift = page.getByRole('button', { name: /North District Patrol|PATROL/i }).first();
+    const patrolPage = page.locator('.patrol-page');
+    await expect(patrolPage.getByRole('heading', { name: 'Field Patrol & Checkpoints' })).toBeVisible({ timeout: 30_000 });
+    const shift = patrolPage.getByRole('button', { name: /North District Patrol|PATROL/i }).first();
     await expect(shift).toBeVisible();
     await shift.click();
-    await expect(page.getByRole('button', { name: 'Start Patrol Session' })).toBeVisible();
-    await page.getByRole('button', { name: 'Start Patrol Session' }).click();
-    await expect(page.getByText('Route Checkpoints (1)', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Record Visit' }).click();
-    await page.getByPlaceholder(/Site secure/).fill('Gate secure; alarm panel normal.');
-    await page.getByRole('button', { name: '✓ Confirm & Record Visit' }).click();
-    await expect(page.getByText(/Visited/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Complete Patrol Session' })).toBeVisible();
-    await page.getByRole('button', { name: 'Complete Patrol Session' }).click();
-    await expect(page.getByText('Patrol Completed', { exact: true })).toBeVisible();
+    await expect(patrolPage.getByRole('button', { name: /Start Patrol Session/ })).toBeVisible();
+    await patrolPage.getByRole('button', { name: /Start Patrol Session/ }).click();
+    await expect(patrolPage.getByText('Route Checkpoints (1)', { exact: true })).toBeVisible();
+    await patrolPage.getByRole('button', { name: 'Record Visit' }).click();
+    await patrolPage.getByPlaceholder(/Site secure/).fill('Gate secure; alarm panel normal.');
+    await patrolPage.getByRole('button', { name: '✓ Confirm & Record Visit' }).click();
+    await expect(patrolPage.getByText(/Visited/)).toBeVisible();
+    await expect(patrolPage.getByRole('button', { name: 'Complete Patrol Session' })).toBeVisible();
+    await patrolPage.getByRole('button', { name: 'Complete Patrol Session' }).click();
+    await expect(patrolPage.getByText('Patrol Completed', { exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(browserErrors, browserErrors.join('\n')).toEqual([]);
   });

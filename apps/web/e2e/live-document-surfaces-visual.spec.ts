@@ -189,8 +189,10 @@ const surfaces = [
   { name: 'cctv-review', path: '/admin/field-ops?area=cctv-review', marker: /CCTV/i, ready: /Recent camera work|Select evidence/i },
 ] as const;
 
+const liveEnabled = process.env.LIVE_TEST === 'true' || process.env.HUMAN_TEST_LIVE === 'true' || Boolean(process.env.CI_LIVE);
+
 test.describe('production document workflow visual audit', () => {
-  test.skip(!email || !password, 'Requires live test credentials in GRANDMASTER_TEST_EMAIL and GRANDMASTER_TEST_PASSWORD.');
+  test.skip(!liveEnabled || !email || !password, 'Requires LIVE_TEST=true and live test credentials in GRANDMASTER_TEST_EMAIL and GRANDMASTER_TEST_PASSWORD.');
   test.setTimeout(90_000);
 
   for (const surface of surfaces) {

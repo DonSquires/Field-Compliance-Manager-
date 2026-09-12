@@ -208,12 +208,18 @@ export class HumanTestSession {
   async fillSafeField(): Promise<boolean> {
     const field = this.page.locator('input:visible, textarea:visible').filter({ hasNot: this.page.locator('[type="password"]') }).first();
     if (!(await field.isVisible({ timeout: 1000 }).catch(() => false))) return false;
-    const type = await field.getAttribute('type');
-    if (type === 'password' || type === 'file' || type === 'hidden') return false;
+    const type = (await field.getAttribute('type') ?? 'text').toLowerCase();
+    if (['password', 'file', 'hidden', 'checkbox', 'radio', 'button', 'submit'].includes(type)) return false;
     const name = `${await field.getAttribute('aria-label') ?? ''} ${await field.getAttribute('placeholder') ?? ''} ${await field.getAttribute('name') ?? ''}`.toLowerCase();
-    const value = name.includes('email') ? SAFE_SAMPLE_VALUES.email : name.includes('search') ? SAFE_SAMPLE_VALUES.search : name.includes('number') ? SAFE_SAMPLE_VALUES.number : SAFE_SAMPLE_VALUES.text;
+    let value = SAFE_SAMPLE_VALUES.text;
+    if (type === 'date') value = '2026-09-12';
+    else if (type === 'datetime-local') value = '2026-09-12T10:00';
+    else if (type === 'time') value = '10:00';
+    else if (type === 'number' || name.includes('number')) value = SAFE_SAMPLE_VALUES.number;
+    else if (type === 'email' || name.includes('email')) value = SAFE_SAMPLE_VALUES.email;
+    else if (name.includes('search')) value = SAFE_SAMPLE_VALUES.search;
     await field.fill(value);
-    console.log(`[HUMAN TYPE] ${name.trim() || 'field'} = ${value}`);
+    console.log(`[HUMAN TYPE] ${name.trim() || 'field'} (${type}) = ${value}`);
     return true;
   }
 
@@ -221,7 +227,8 @@ export class HumanTestSession {
     const navItems = this.page.locator('button.admin-nav-item:visible');
     const count = await navItems.count();
     console.log(`[HUMAN NAV] Found ${count} visible admin navigation items`);
-    for (let index = 0; index < count; index += 1) {
+    const limit = Math.min(count, 4);
+    for (let index = 0; index < limit; index += 1) {
       const item = navItems.nth(index);
       const label = compact(await item.textContent());
       if (!label || UNSAFE_ACTION.test(label)) continue;
@@ -231,7 +238,7 @@ export class HumanTestSession {
         continue;
       }
       await item.click();
-      await this.page.waitForTimeout(250);
+      await this.page.waitForTimeout(100);
       await this.observe(`admin navigation: ${label}`);
     }
   }

@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures } from './fixtures';
+import { installOfficerScheduleFixtures, installSupabaseFixtures, signInAsAdmin, signInAsOfficer } from './fixtures';
 import { HumanTestSession } from './human-test-runner';
 
 const liveMode = process.env.HUMAN_TEST_LIVE === 'true';
 const liveBaseUrl = process.env.HUMAN_TEST_BASE_URL || 'https://www.fcmanager.co.nz';
-const email = process.env.GRANDMASTER_TEST_EMAIL || '';
-const password = process.env.GRANDMASTER_TEST_PASSWORD || '';
+const email = liveMode ? (process.env.GRANDMASTER_TEST_EMAIL || '') : 'admin@fcm.test';
+const officerEmail = liveMode ? (process.env.GRANDMASTER_TEST_EMAIL || '') : 'ana@fcm.test';
+const password = liveMode ? (process.env.GRANDMASTER_TEST_PASSWORD || '') : 'playwright-password';
 
 async function openTarget(page: Parameters<typeof installSupabaseFixtures>[0], path: string) {
   await page.goto(liveMode ? `${liveBaseUrl}${path}` : path);
@@ -14,6 +15,12 @@ async function openTarget(page: Parameters<typeof installSupabaseFixtures>[0], p
 }
 
 async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0], session: HumanTestSession) {
+  if (!liveMode) {
+    await signInAsAdmin(page, '/admin');
+    await session.observe('authenticated application shell');
+    await dismissDesktopPrompt(page, session);
+    return;
+  }
   await openTarget(page, '/admin');
   await session.observe('login or existing session');
 
@@ -53,8 +60,10 @@ async function dismissDesktopPrompt(page: Parameters<typeof installSupabaseFixtu
 test.describe("Dr. Bob's human browser test", () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(120_000);
-    page.setDefaultTimeout(7000);
-    if (!liveMode) await installSupabaseFixtures(page);
+    if (!liveMode) {
+      await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
+      await installSupabaseFixtures(page);
+    }
   });
 
   test('walks the rendered admin experience like a person', async ({ page }, testInfo) => {
@@ -70,21 +79,27 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('walks the field portal separately when a human chooses it', async ({ page }, testInfo) => {
+    if (!liveMode) await installOfficerScheduleFixtures(page);
     const session = new HumanTestSession(page, testInfo);
-    await openTarget(page, '/officer');
-    await session.observe('officer entry point');
+    if (!liveMode) {
+      await signInAsOfficer(page, '/officer/schedule');
+      await session.observe('field portal after authentication');
+    } else {
+      await openTarget(page, '/officer');
+      await session.observe('officer entry point');
 
-    const loginField = page.getByLabel('Email address');
-    if (await loginField.isVisible({ timeout: 1500 }).catch(() => false)) {
-      if (!email || !password) throw new Error('Human test needs credentials for the officer entry point.');
-      await loginField.fill(email);
-      await page.getByLabel('Password').fill(password);
-      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-      await page.waitForTimeout(1200);
+      const loginField = page.getByLabel('Email address');
+      if (await loginField.isVisible({ timeout: 1500 }).catch(() => false)) {
+        if (!officerEmail || !password) throw new Error('Human test needs credentials for the officer entry point.');
+        await loginField.fill(officerEmail);
+        await page.getByLabel('Password').fill(password);
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await page.waitForTimeout(1200);
+      }
+
+      await dismissDesktopPrompt(page, session);
+      await session.observe('field portal after authentication');
     }
-
-    await dismissDesktopPrompt(page, session);
-    await session.observe('field portal after authentication');
     const safeModule = page.locator('button, a').filter({ hasText: /schedule|dispatch|map|report|patrol/i }).first();
     if (await safeModule.isVisible({ timeout: 1500 }).catch(() => false)) {
       await safeModule.click();
