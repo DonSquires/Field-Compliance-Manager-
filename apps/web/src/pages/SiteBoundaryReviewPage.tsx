@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AlertTriangle, CheckCircle2, Clock3, ExternalLink, History, MapPin, RefreshCw, Ruler, Search, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { ShellLayout } from '../layouts/ShellLayout';
 import './SiteBoundaryReviewPage.css';
 import './SiteBoundaryVisualReview.css';
 
@@ -143,7 +144,8 @@ const SiteBoundaryReviewPage = () => {
     return !normalizedQuery || `${site.site_name} ${site.account_name} ${site.address ?? ''}`.toLowerCase().includes(normalizedQuery);
   });
 
-  return <div className="boundary-page">
+  return <ShellLayout shell="admin" className="boundary-shell">
+    <div className="boundary-page">
     <header className="boundary-heading"><div><span>Site operations</span><h1>Boundary review</h1><p>Establish geofence evidence and track review provenance across managed accounts.</p></div><button type="button" onClick={() => void loadQueue()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} />Refresh</button></header>
     {error && <div className="boundary-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span></div>}
     {notice && <div className="boundary-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span></div>}
@@ -168,7 +170,8 @@ const SiteBoundaryReviewPage = () => {
         <section className="boundary-history"><div className="boundary-panel-heading"><div><History size={18} /><span><strong>Boundary history</strong><small>{history.length} recorded {history.length === 1 ? 'event' : 'events'}</small></span></div></div>{history.length ? <div>{history.map((event) => <article key={event.id}><span className={`boundary-history-icon is-${event.verification_state}`}>{event.verification_state === 'verified' ? <CheckCircle2 size={16} /> : <Clock3 size={16} />}</span><div><strong>{event.change_reason}</strong><span>{event.boundary_source ?? 'No source recorded'} · {event.changed_via.replaceAll('_', ' ')}</span></div><time dateTime={event.created_at}>v{event.version} · {new Date(event.created_at).toLocaleString('en-NZ')}</time></article>)}</div> : <div className="boundary-empty">No boundary events have been recorded for this site.</div>}</section>
       </> : <div className="boundary-empty boundary-empty-main"><MapPin size={22} />Select a site to inspect its boundary evidence.</div>}</main>
     </div>
-  </div>;
+    </div>
+  </ShellLayout>;
 };
 
 export default SiteBoundaryReviewPage;
