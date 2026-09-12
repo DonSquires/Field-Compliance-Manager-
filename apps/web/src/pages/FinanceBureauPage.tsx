@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import { FinanceCostingPanel } from '../components/FinanceCostingPanel';
 import { FinanceOperationsDashboard } from '../components/FinanceOperationsDashboard';
+import { FinanceOwnerGuide } from '../components/FinanceOwnerGuide';
 
 interface Schedule {
   id: string;
@@ -27,7 +28,7 @@ interface DiscountRule {
 
 interface ModuleCatalogRow { module_key: string; }
 
-export default function FinanceBureauPage() {
+export default function FinanceBureauPage({ onOpenBob }: { onOpenBob?: () => void }) {
   const { profile } = useAuth();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [rules, setRules] = useState<DiscountRule[]>([]);
@@ -110,6 +111,7 @@ export default function FinanceBureauPage() {
 
   return <div className="page-container">
     <header className="page-header"><div><h1>Finance Bureau</h1><p className="subtitle">Provider-owned commercial schedules. Rate books remain in Rate Rules; accepted quotes preserve their own commercial snapshot.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /></button><button type="button" className="btn btn-primary" onClick={() => setShowScheduleForm((value) => !value)}><Plus size={16} />{showScheduleForm ? 'Cancel' : 'New discount schedule'}</button></div></header>
+    <FinanceOwnerGuide onOpenBob={onOpenBob} />
     <FinanceOperationsDashboard />
     <FinanceCostingPanel />
     {error && <div className="alert alert-error" role="alert"><AlertTriangle size={16} />{error}</div>}

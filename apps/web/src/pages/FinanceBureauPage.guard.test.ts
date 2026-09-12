@@ -20,6 +20,6 @@ describe('Finance Bureau', () => {
     expect(page).toContain('Rate books remain in Rate Rules');
     expect(shell).toContain("'finance-bureau'");
     expect(shell).toContain('Pricing, Discounts & Tenders');
-    expect(shell).toContain('<FinanceBureauPage />');
+    expect(shell).toContain('<FinanceBureauPage onOpenBob={() => setBobOpen(true)} />');
   });
 });

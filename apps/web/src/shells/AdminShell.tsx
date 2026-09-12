@@ -537,7 +537,7 @@ const AdminShell: React.FC = () => {
       case 'rate-rules':
         return <RateRulesPage />;
       case 'finance-bureau':
-        return <FinanceBureauPage />;
+        return <FinanceBureauPage onOpenBob={() => setBobOpen(true)} />;
       case 'people-hr':
         return <RosterHRPage />;
       case 'roster-targets':
@@ -545,7 +545,7 @@ const AdminShell: React.FC = () => {
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateFromHub, navigateToFieldOps]);
+  }, [activePage, fieldOpsSubArea, navigateFromHub, navigateToFieldOps, setBobOpen]);
 
   if (!isMobile) {
     return (
