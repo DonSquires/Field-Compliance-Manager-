@@ -846,7 +846,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   ];
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
-  if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'perceive_media', 'confirm_import');
+  if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import');
   if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
@@ -1404,6 +1404,7 @@ function computeEgressForbiddenSet(caps, meta) {
   const allowed = new Set(caps.allowedTools);
   const envelopeName = {
     plan_import: 'ingest_document',
+    plan_patrol_import: 'ingest_document',
     perceive_media: 'perceive_media',
     promote_action: 'promote_action'
   };
@@ -3202,6 +3203,22 @@ async function execPlanImport(authHeader, orgId, att, text, sheetNames = [], sel
       sheet_names: docSheetNames.length ? docSheetNames : null,
       selected_sheet: docSelectedSheet
     }
+  };
+}
+async function execPlanPatrolImport(authHeader, orgId, toolArgs = {}) {
+  const result = await callFn('bob-plan-patrol-import', authHeader, {
+    ...toolArgs,
+    organization_id: orgId,
+  });
+  if (!result.ok) return {
+    reply: `I could not complete the Atlas-backed patrol import plan (${result.data?.error ?? result.status}). Nothing was written.`,
+    meta: { tool: 'plan_patrol_import', outcome: 'planner_failed' }
+  };
+  const plan = result.data ?? {};
+  const generic = plan.generic_plan ?? {};
+  return {
+    reply: `I prepared a read-only patrol import plan. Rows: ${generic.row_count ?? plan.row_count ?? 'unknown'}. Bob target confidence: ${generic.confident === true ? 'confident' : 'needs human mapping'}. No sites, routes, shifts, patrols, attendance, travel, or wages were written.`,
+    meta: { tool: 'plan_patrol_import', outcome: 'dry_run', plan }
   };
 }
 async function execPerceive(authHeader, att, text) {
@@ -7754,6 +7771,8 @@ serve(async (req)=>{
       switch(tool){
         case 'plan_import':
           return execPlanImport(authHeader, orgId, att, attText, attSheetNames, attSelectedSheet);
+        case 'plan_patrol_import':
+          return execPlanPatrolImport(authHeader, orgId, toolArgs);
         case 'perceive_media':
           return execPerceive(authHeader, att, attText);
         case 'schema_inspect':

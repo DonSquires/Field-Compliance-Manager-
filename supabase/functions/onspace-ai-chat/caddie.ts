@@ -94,6 +94,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only; writes nothing; always propose + confirm',
     effect_class: 'internal_observation'
   },
+  plan_patrol_import: {
+    purpose: 'Read-only field-operations import planning. Adds Atlas capability/edge context and delegates live-schema mapping to the generic Bob planner for patrol, roster, static-job, attendance, travel, and wage-shaped sources. It never creates sites, routes, shifts, patrols, attendance, or finance rows.',
+    governance: 'read-only; Atlas/schema-backed; human mapping and approval required before any promotion',
+    effect_class: 'internal_observation'
+  },
   web_research: {
     purpose: 'Research legislation/standards online when the user explicitly asks.',
     governance: 'human-invoked; PII redacted',
@@ -585,6 +590,7 @@ const TOOL_REGISTRY = {
     propose_corporate_profile: 'bob-propose-corporate-profile',
     propose_client_root_org: 'bob-propose-client-root-org',
     plan_import: 'bob-plan-import',
+    plan_patrol_import: 'bob-plan-patrol-import',
     perceive_media: 'bob-perceive-image',
     web_research: 'bob-web-research',
     resolve_geofence: 'bob-resolve-geofence',

@@ -149,9 +149,8 @@ function fingerprint(headers) {
 }
 async function loadColumns(admin, table) {
   const { data, error } = await admin.rpc('bob_inspect_schema', {
-    table_names: [
-      table
-    ]
+    table_names: [table],
+    include_fks: false
   });
   if (error) throw new Error(`schema inspect failed: ${error.message}`);
   const tables = data?.tables ?? [];
