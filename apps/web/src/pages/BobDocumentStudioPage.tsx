@@ -130,17 +130,19 @@ export default function BobDocumentStudioPage() {
             setDocumentType('incident_report');
             setTitle(`Incident Report - ${evidence.title || 'CCTV Evidence'}`);
           }
-        } else if (sourceType === 'notice') {
+        } else if (sourceType === 'notice' || sourceType === 'breach') {
           const { data: alert } = await supabase.from('breach_alerts').select('id,zone_id,observed_at,breach_type').eq('id', sourceId).maybeSingle();
           if (active && alert) {
             setSourceContext({
-              type: 'notice',
+              type: sourceType,
               id: alert.id,
               label: `Breach Alert ${alert.breach_type || 'Notice'}`,
-              prompt: `Draft a formal notice letter regarding the breach alert. Include the breach details, relevant policy/bylaw section, required actions, and response deadline based on the alert information and attached reference materials.`,
+              prompt: sourceType === 'notice'
+                ? `Draft a formal notice letter regarding the breach alert. Include the breach details, relevant policy/bylaw section, required actions, and response deadline based on the alert information and attached reference materials.`
+                : `Draft an incident report from the breach alert. Separate observed facts from assumptions, include the location and timing, document immediate actions, and list recommended follow-up actions. Mark unknowns as [TO CONFIRM].`,
             });
-            setDocumentType('letter');
-            setTitle(`Notice Letter - ${alert.breach_type || 'Breach Alert'}`);
+            setDocumentType(sourceType === 'notice' ? 'letter' : 'incident_report');
+            setTitle(`${sourceType === 'notice' ? 'Notice Letter' : 'Breach Incident Report'} - ${alert.breach_type || 'Breach Alert'}`);
           }
         }
       } catch (err) {
