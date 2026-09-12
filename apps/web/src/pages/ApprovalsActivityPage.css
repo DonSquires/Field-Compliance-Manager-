@@ -64,6 +64,71 @@
   background: #0a1522;
 }
 
+.approvals-live-summary,
+.approvals-change-summary {
+  margin-top: 12px;
+  padding: 12px 13px;
+  border: 1px solid #2d4054;
+  border-radius: 6px;
+  background: #0b1a2a;
+}
+
+.approvals-live-summary-header,
+.approvals-change-summary > span {
+  color: #7dd3c7;
+  font-size: 9px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.approvals-live-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.approvals-live-summary-header strong {
+  color: #dfeaf3;
+  font-size: 10px;
+}
+
+.approvals-live-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.approvals-live-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 8px 9px;
+  border: 1px solid #2b3d50;
+  border-radius: 5px;
+  background: #0d1e2d;
+}
+
+.approvals-live-grid > div span,
+.approvals-change-summary ul,
+.approvals-change-summary li {
+  color: #8fa7b9;
+  font-size: 9px;
+}
+
+.approvals-live-grid > div strong,
+.approvals-change-summary li strong {
+  color: #eaf5fb;
+  font-size: 10px;
+}
+
+.approvals-change-summary ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
 .approvals-summary > div {
   display: grid;
   grid-template-columns: auto 1fr auto;

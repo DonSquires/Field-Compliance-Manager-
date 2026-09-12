@@ -62,13 +62,13 @@
 }
 
 .login-brand strong {
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .login-brand small,
 .login-footer {
   color: #78918f;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .login-rule {
@@ -79,21 +79,21 @@
 
 .login-kicker {
   color: #89d8c7;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 850;
   text-transform: uppercase;
 }
 
 .login-heading h1 {
   margin: 4px 0 0;
-  font-size: 24px;
+  font-size: 30px;
   letter-spacing: 0;
 }
 
 .login-heading p {
   margin: 6px 0 0;
   color: #8ba09e;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -110,7 +110,7 @@
 
 .login-field > span {
   color: #b8cac7;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -140,7 +140,7 @@
   outline: 0;
   color: #edf4f2;
   background: transparent;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .login-field input::placeholder {
@@ -167,7 +167,7 @@
   color: #8fdacc;
   background: transparent;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .login-submit {
@@ -182,7 +182,7 @@
   color: #06211f;
   background: #82d8c8;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 850;
 }
 
@@ -207,7 +207,7 @@
   color: #93b8b2;
   background: transparent;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .login-error {
@@ -216,7 +216,7 @@
   border-radius: 6px;
   color: #ffc5c5;
   background: #31191c;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.45;
 }
 

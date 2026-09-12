@@ -279,7 +279,7 @@ export default function AccountOnboardingPage({
         <div className="onboarding-message is-success" role="status">
           <CheckCircle2 size={16} />
           <span>{notice}</span>
-          {handoffReady && <button type="button" onClick={() => onNavigate("handoffs", activatedContext ?? {})}>Open activation handoff</button>}
+          {handoffReady && <button type="button" onClick={() => onNavigate('handoffs', activatedContext ?? {})} aria-label="Open activation handoff details">Open activation handoff</button>}
         </div>
       )}
       <section className="onboarding-summary">
@@ -333,7 +333,7 @@ export default function AccountOnboardingPage({
           ) : (
             <div className="onboarding-empty">
               No incomplete onboarding accounts.
-              <button type="button" className="is-new-account" onClick={() => setShowCreateAccount(true)}>
+              <button type="button" className="is-new-account" onClick={() => setShowCreateAccount(true)} aria-label="Create new subscriber account">
                 <Plus size={14} />
                 Set up a new subscriber
               </button>
@@ -384,6 +384,7 @@ export default function AccountOnboardingPage({
                   <span>Target live date</span>
                   <input
                     type="date"
+                    aria-label="Target live date"
                     value={targetDate}
                     onChange={(event) => setTargetDate(event.target.value)}
                   />

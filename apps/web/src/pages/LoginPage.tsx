@@ -103,21 +103,21 @@ const LoginPage: React.FC = () => {
             )}
 
             {mode !== 'request_reset' && (
-              <label className="login-field">
-                <span>{mode === 'update_password' ? 'New password' : 'Password'}</span>
+              <div className="login-field">
+                <label htmlFor="login-password">{mode === 'update_password' ? 'New password' : 'Password'}</label>
                 <div>
                   {mode === 'update_password' ? <KeyRound size={17} aria-hidden="true" /> : <LockKeyhole size={17} aria-hidden="true" />}
-                  <input type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'update_password' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
-                  <button type="button" className="login-visibility" onClick={() => setShowPassword((visible) => !visible)} title={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}<span className="sr-only">{showPassword ? 'Hide password' : 'Show password'}</span></button>
+                  <input id="login-password" type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'update_password' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <button type="button" className="login-visibility" onClick={() => setShowPassword((visible) => !visible)} aria-label="Toggle entry visibility">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}<span className="sr-only">Toggle entry visibility</span></button>
                 </div>
-              </label>
+              </div>
             )}
 
             {mode === 'update_password' && (
-              <label className="login-field">
-                <span>Confirm new password</span>
-                <div><KeyRound size={17} aria-hidden="true" /><input type={showPassword ? 'text' : 'password'} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></div>
-              </label>
+              <div className="login-field">
+                <label htmlFor="login-confirm-password">Confirm new password</label>
+                <div><KeyRound size={17} aria-hidden="true" /><input id="login-confirm-password" type={showPassword ? 'text' : 'password'} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></div>
+              </div>
             )}
 
             {mode === 'sign_in' && <button type="button" className="login-text-action" onClick={() => changeMode('request_reset')}>Forgot password?</button>}

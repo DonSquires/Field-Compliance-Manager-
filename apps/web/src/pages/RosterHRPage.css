@@ -4,7 +4,7 @@
 .hr-review-dialog header span{color:#76cfc1;font-size:9px;font-weight:850;text-transform:uppercase}
 .hr-review-dialog h2{margin:4px 0 0;font-size:20px;line-height:1.2}
 .hr-review-dialog header button{display:grid;place-items:center;width:32px;height:32px;flex:0 0 32px;border:1px solid #3a5062;border-radius:5px;color:#b9c6d0;background:#122231;cursor:pointer}
-.hr-review-dialog>p{margin:14px 0;padding:10px;border-left:3px solid #4c8f84;color:#a9bac6;background:#101f2c;font-size:11px;line-height:1.5}
+.hr-review-dialog>p{margin:14px 0;padding:10px;border-left:3px solid #4c8f84;color:#a9bac6;background:#101f2c;font-size:12px;line-height:1.5}
 .hr-review-dialog>label{display:grid;gap:6px;color:#b9c7d1;font-size:10px;font-weight:800}
 .hr-review-dialog textarea{width:100%;min-height:100px;resize:vertical;padding:10px;border:1px solid #3a5367;border-radius:5px;color:#eef5f8;background:#07111b;font:inherit;line-height:1.4}
 .hr-review-dialog textarea:focus{outline:2px solid #65b8aa;outline-offset:1px}

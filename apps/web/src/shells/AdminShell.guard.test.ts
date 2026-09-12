@@ -43,6 +43,8 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('aria-expanded={mobileMenuOpen}');
     expect(source).toContain('aria-expanded={bobOpen}');
     expect(source).toContain("label={item.label}");
+    expect(source).toContain('aria-label="Notifications"');
+    expect(source).toContain('aria-label="Open Bob command center"');
     expect(source).not.toContain("label={sidebarCollapsed ? '' : item.label}");
   });
 

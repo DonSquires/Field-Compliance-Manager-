@@ -563,26 +563,39 @@ const ApprovalsActivityPage: React.FC = () => {
               <div className="approvals-panel-heading"><div><span>Action review</span><h2>{formatActionType(selected.action_type)}</h2></div><span className={`approvals-status status-${selected.status}`}>{selected.status}</span></div>
               <p className="approvals-context">{selected.context_summary ?? 'No context summary was provided for this action.'}</p>
 
-              <dl className="approvals-facts">
-                <div><dt>Organisation</dt><dd>{selected.org_name ?? 'Unavailable'}</dd></div>
-                <div><dt>Target</dt><dd>{selected.context_table ?? 'Not specified'}</dd></div>
-                <div><dt>Triggered by</dt><dd>{selected.triggered_by_name ?? selected.user_name ?? 'Unknown'}</dd></div>
-                <div><dt>Created</dt><dd>{new Date(selected.created_at).toLocaleString('en-NZ')}</dd></div>
-                <div><dt>Confidence signal</dt><dd>{selected.confidence_score == null ? 'Not supplied' : `${Math.round(selected.confidence_score * 100)}%`}</dd></div>
-                <div><dt>Decision owner</dt><dd>{selected.assigned_approver_id ? selected.assigned_approver_name ?? 'Assigned approver unavailable' : 'Role and organisation scope'}</dd></div>
-                <div><dt>Your authority</dt><dd>{selected.can_decide ? 'Can decide' : 'View only'}</dd></div>
-              </dl>
+              <section className="approvals-live-summary" aria-label="Live evidence and action summary">
+                <div className="approvals-live-summary-header">
+                  <span>Live evidence</span>
+                  <strong>{selected.org_name ?? 'Organisation unavailable'}</strong>
+                </div>
+                <div className="approvals-live-grid">
+                  <div><span>Target</span><strong>{selected.context_table ?? 'Not specified'}</strong></div>
+                  <div><span>Triggered by</span><strong>{selected.triggered_by_name ?? selected.user_name ?? 'Unknown'}</strong></div>
+                  <div><span>Created</span><strong>{new Date(selected.created_at).toLocaleString('en-NZ')}</strong></div>
+                  <div><span>Confidence</span><strong>{selected.confidence_score == null ? 'Not supplied' : `${Math.round(selected.confidence_score * 100)}%`}</strong></div>
+                </div>
+              </section>
 
-              <section className="approvals-reasoning"><span>Proposal reasoning</span><p>{selected.bob_reasoning ?? 'No reasoning was recorded with this proposal.'}</p></section>
+              <section className="approvals-change-summary">
+                <span>What this will change</span>
+                <ul>
+                  <li><strong>Organisation:</strong> {selected.org_name ?? 'Unavailable'}</li>
+                  <li><strong>Target record:</strong> {selected.context_table ?? 'Not specified'}</li>
+                  <li><strong>Decision owner:</strong> {selected.assigned_approver_id ? selected.assigned_approver_name ?? 'Assigned approver unavailable' : 'Role and organisation scope'}</li>
+                  <li><strong>Your authority:</strong> {selected.can_decide ? 'Can decide' : 'View only'}</li>
+                </ul>
+              </section>
+
+              <section className="approvals-reasoning"><span>Review action</span><p>{selected.bob_reasoning ?? 'No reasoning was recorded with this proposal.'}</p></section>
               {selected.action_type === 'create_patrol_route_assignment' ? <HumanPatrolAssignmentSummary payload={selectedPayload(selected)} labels={payloadLabels} /> : <details className="approvals-payload"><summary>Proposal details</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>}
-              <details className="approvals-payload"><summary>Technical details</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the human-amended payload.</small>}</details>
+              <details className="approvals-payload"><summary>Edit before apply</summary><pre>{formatGovernedPayload(selected.amended_payload ?? selected.proposed_payload)}</pre>{selected.amended_payload && <small>Showing the editable live payload before application.</small>}</details>
 
               {selected.rejection_reason && <div className="approvals-outcome is-rejected"><XCircle size={17} /><div><strong>Rejection reason</strong><span>{selected.rejection_reason}</span></div></div>}
               {selected.error_message && <div className="approvals-outcome is-failed"><AlertTriangle size={17} /><div><strong>Application error</strong><span>{selected.error_message}</span></div></div>}
               {selected.result_record_id && <div className="approvals-outcome is-applied"><CheckCircle2 size={17} /><div><strong>Applied result</strong><span>{selected.result_table ?? 'record'} · {selected.result_record_id}</span></div></div>}
 
               {selected.status === 'pending' && (
-                selected.can_decide ? <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openDecision('reject')}><XCircle size={17} /> Reject</button><button type="button" className="is-approve" onClick={() => openDecision('approve')}><CheckCircle2 size={17} /> Review approval</button></div> : <div className="approvals-no-authority"><ShieldCheck size={17} /> {selected.assigned_approver_name ? `${selected.assigned_approver_name} owns this decision. Your current scope is view only.` : 'This decision is routed by role and organisation scope. Your current scope is view only.'}</div>
+                selected.can_decide ? <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openDecision('reject')}><XCircle size={17} /> Reject action</button><button type="button" className="is-approve" onClick={() => openDecision('approve')}><CheckCircle2 size={17} /> Approve action</button></div> : <div className="approvals-no-authority"><ShieldCheck size={17} /> {selected.assigned_approver_name ? `${selected.assigned_approver_name} owns this decision. Your current scope is view only.` : 'This decision is routed by role and organisation scope. Your current scope is view only.'}</div>
               )}
             </>
           )}

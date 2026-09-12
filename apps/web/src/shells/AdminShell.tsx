@@ -612,7 +612,7 @@ const AdminShell: React.FC = () => {
               <NotificationCenter onNavigate={navigateFromNotification} />
               <HelpInstructions context={activePage} role={profile?.role} />
               <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
-              <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')}>
+              <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')} aria-label="Open vehicle search">
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>
               <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
@@ -664,7 +664,7 @@ const AdminShell: React.FC = () => {
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
           <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
-          <button type="button" className="admin-shell-icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} title={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileMenuOpen}>
+          <button type="button" className="admin-shell-icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} title={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-label={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileMenuOpen}>
             {mobileMenuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
             <span className="sr-only">{mobileMenuOpen ? 'Close navigation' : 'Open navigation'}</span>
           </button>

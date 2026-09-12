@@ -97,4 +97,13 @@ describe('governed approvals workbench', () => {
     expect(source).toContain('Apply approved site brief');
     expect(source).toContain('Apply approved investigation link');
   });
+
+  it('simplifies the approval review into a single clear human-review summary with live evidence and direct actions', () => {
+    expect(source).toContain('Live evidence');
+    expect(source).toContain('What this will change');
+    expect(source).toContain('Review action');
+    expect(source).toContain('Approve action');
+    expect(source).toContain('Reject action');
+    expect(source).toContain('Edit before apply');
+  });
 });

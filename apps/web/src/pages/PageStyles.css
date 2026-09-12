@@ -1,4 +1,4 @@
-.officer-shift-service-detail{margin:3px 0 0;color:#91a6b4;font-size:11px}
+.officer-shift-service-detail{margin:3px 0 0;color:#91a6b4;font-size:12px}
 .page-container {
   padding: 24px;
   max-width: 1400px;
@@ -401,7 +401,7 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-success, #22c55e) 28%, transparent);
 }
 
-.noise-officer-review{display:grid;gap:4px;margin-top:9px;padding:9px;border:1px solid var(--color-success,#22c55e);border-radius:5px;background:var(--color-bg-hover,#1a2942)}.noise-officer-review strong{text-transform:capitalize}.noise-officer-review span,.noise-officer-review small{font-size:10px}.noise-officer-review small{color:var(--color-text-secondary,#94a3b8)}
+.noise-officer-review{display:grid;gap:4px;margin-top:9px;padding:9px;border:1px solid var(--color-success,#22c55e);border-radius:5px;background:var(--color-bg-hover,#1a2942)}.noise-officer-review strong{text-transform:capitalize}.noise-officer-review span,.noise-officer-review small{font-size:12px}.noise-officer-review small{color:var(--color-text-secondary,#94a3b8)}
 
 .reports-table tr.is-context-focus { outline: 2px solid var(--color-success, #22c55e); outline-offset: -2px; background: var(--color-bg-hover, #1a2942); }
 .timesheet-review-note { display: block; margin-top: 5px; max-width: 32rem; color: var(--color-text-secondary, #94a3b8); white-space: normal; }
