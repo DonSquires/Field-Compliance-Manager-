@@ -39,6 +39,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
     if (link === 'credential-expiry' || notification.category === 'credential_expiry') return { kind: 'admin_hr_credential', credentialId };
     if (notification.category === 'report_ready') return { kind: 'admin_page', page: 'reports' };
     if (notification.category === 'schema_change_request' || notification.category === 'bob_self_memory') return { kind: 'admin_page', page: 'approvals' };
+    if (notification.category === 'document_review' || link === 'approvals' || link === 'document-studio') return { kind: 'admin_page', page: link === 'document-studio' ? 'document-studio' : 'approvals' };
     return null;
   }
 

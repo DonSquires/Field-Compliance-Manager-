@@ -11,6 +11,8 @@ describe('notification navigation', () => {
     expect(resolveNotificationDestination('admin', notification({ category: 'welfare', link_page: 'WelfareAlertsPage' }))).toEqual({ kind: 'admin_field_ops', area: 'welfare-alerts' });
     expect(resolveNotificationDestination('admin', notification({ category: 'schema_change_request' }))).toEqual({ kind: 'admin_page', page: 'approvals' });
     expect(resolveNotificationDestination('admin', notification({ category: 'credential_expiry', link_payload: { credential_id: 'credential-1' } }))).toEqual({ kind: 'admin_hr_credential', credentialId: 'credential-1' });
+    expect(resolveNotificationDestination('admin', notification({ category: 'document_review', link_page: 'approvals' }))).toEqual({ kind: 'admin_page', page: 'approvals' });
+    expect(resolveNotificationDestination('admin', notification({ category: 'document_review', link_page: 'document-studio' }))).toEqual({ kind: 'admin_page', page: 'document-studio' });
   });
 
   it('maps officer open work to home and client reports to reports', () => {
