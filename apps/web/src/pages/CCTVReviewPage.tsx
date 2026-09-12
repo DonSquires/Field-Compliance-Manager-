@@ -20,6 +20,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { consolidateResultData } from '../lib/motionConsolidation';
 import { buildCCTVPrintableReport } from '../lib/cctvReport';
@@ -177,6 +178,7 @@ function desktopReviewBatch(metadata: Record<string, unknown> | null): DesktopRe
 }
 
 export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 'all', libraryMode = false }) => {
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<CCTVJob[]>([]);
   const [filter, setFilter] = useState<ReviewFilter>(initialFilter);
@@ -847,6 +849,11 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     }
   };
 
+  const draftBobDocument = () => {
+    if (!selected?.evidence_item_id) return;
+    navigate(`/admin/document-studio?sourceType=cctv&sourceId=${selected.evidence_item_id}`);
+  };
+
   const printSelectedReport = async () => {
     if (!selected || !selected.evidence_item_id || !profile?.organizationId) {
       setDecisionMessage('A printable report requires an organization-scoped evidence item.');
@@ -1144,6 +1151,9 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 </button>
                 <button type="button" className="cctv-btn-jump" disabled={resultLoading} onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
                   <Printer size={13} /> Print draft report
+                </button>
+                <button type="button" className="cctv-btn-jump" disabled={!selected?.evidence_item_id} onClick={draftBobDocument} title="Draft an incident report with Bob from this CCTV evidence">
+                  Bob: Draft incident report
                 </button>
                 <button type="button" className="cctv-btn-confirm" disabled={!reportReady} onClick={() => void printSelectedReport()} title={reportReady ? 'Print the final evidence report' : 'Resolve all observations and load the complete batch first'}>
                   <Printer size={13} /> Final report
