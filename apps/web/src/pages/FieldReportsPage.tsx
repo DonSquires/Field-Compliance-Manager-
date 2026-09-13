@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileText, FolderPlus, RefreshCw, Search, ShieldCheck, UserRound, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import './FieldReportsPage.css';
 
@@ -22,12 +23,14 @@ interface FieldReport {
   reviewed_at: string | null;
   review_notes: string | null;
   reported_at: string;
+  zone_id: string | null;
 }
 
 type StatusFilter = 'all' | 'submitted' | 'reviewed' | 'closed';
 
 const FieldReportsPage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const navigate = useNavigate();
   const [reports, setReports] = useState<FieldReport[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -52,11 +55,14 @@ const FieldReportsPage: React.FC = () => {
     }
     setLoading(true);
     setError(null);
-    const { data, error: reportError } = await supabase
+    let query = supabase
       .from('officer_field_reports')
-      .select('id, officer_id, report_type, severity, status, title, description, location_name, address, immediate_action, follow_up_required, follow_up_notes, reviewed_by, reviewed_at, review_notes, reported_at')
-      .eq('organization_id', organizationId)
-      .order('reported_at', { ascending: false });
+      .select('id, officer_id, report_type, severity, status, title, description, location_name, address, immediate_action, follow_up_required, follow_up_notes, reviewed_by, reviewed_at, review_notes, reported_at, zone_id')
+      .eq('organization_id', organizationId);
+    if (selectedAgreementZones.length > 0) {
+      query = query.in('zone_id', selectedAgreementZones.map((zone) => zone.id));
+    }
+    const { data, error: reportError } = await query.order('reported_at', { ascending: false });
     if (reportError) {
       setError(reportError.message);
       setLoading(false);
@@ -72,7 +78,7 @@ const FieldReportsPage: React.FC = () => {
       else setNames(Object.fromEntries((users ?? []).map((user: { id: string; display_name: string | null; email: string | null }) => [user.id, user.display_name || user.email || user.id])));
     }
     setLoading(false);
-  }, [operatingOrganizationId, profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId, selectedAgreementZones]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 
