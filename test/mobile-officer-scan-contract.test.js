@@ -5,11 +5,19 @@ const test = require('node:test');
 
 const source = readFileSync(resolve(__dirname, '../apps/mobile/src/lib/officerScan.ts'), 'utf8');
 const screen = readFileSync(resolve(__dirname, '../apps/mobile/src/components/OfficerScanScreen.tsx'), 'utf8');
+const edgeFunction = readFileSync(resolve(__dirname, '../supabase/functions/process-officer-scan/index.ts'), 'utf8');
 
 test('mobile scan submits evidence only through the governed scan edge function', () => {
   assert.match(source, /functions\.invoke<OfficerScanResult>\('process-officer-scan'/);
   assert.doesNotMatch(source, /\.from\('observations'\)\.insert/);
   assert.doesNotMatch(source, /\.from\('parking_chalk_records'\)\.insert/);
+});
+
+test('governed scan preserves the manual plate fallback contract', () => {
+  assert.match(edgeFunction, /plate_number: manualPlateNumberInput/);
+  assert.match(edgeFunction, /manualPlateNumberInput\.toUpperCase\(\)/);
+  assert.match(edgeFunction, /const plateSource = manualPlateNumber \? 'manual' : 'alpr'/);
+  assert.match(edgeFunction, /if \(imageBase64 && !manualPlateNumber\)/);
 });
 
 test('mobile scan queue preserves capture time and retry provenance', () => {
