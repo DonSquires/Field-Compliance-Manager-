@@ -34,6 +34,12 @@ test('mobile scanner exposes the manual plate fallback', () => {
   assert.match(screen, /normalizedPlate/);
 });
 
+test('mobile scan accepts the shared success receipt for parking responses', () => {
+  assert.match(source, /success\?: boolean/);
+  assert.match(source, /if \(!data\?\.success\)/);
+  assert.doesNotMatch(source, /if \(!data\?\.observation_id\)/);
+});
+
 test('mobile scan queue preserves capture time and retry provenance', () => {
   assert.match(source, /captured_at: string/);
   assert.match(source, /offline_queued: true/);

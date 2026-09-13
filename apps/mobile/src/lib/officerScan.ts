@@ -22,7 +22,8 @@ export type OfficerScanPayload = {
 };
 
 export type OfficerScanResult = {
-  observation_id: string;
+  success?: boolean;
+  observation_id?: string;
   plate_number: string;
   compliance_status: 'compliant' | 'at_risk' | 'breach' | 'breach_exempt' | 'unknown';
   compliance_reason: string | null;
@@ -74,7 +75,7 @@ export async function submitOfficerScan(payload: OfficerScanPayload): Promise<Of
   if (!supabase) throw new Error('Mobile client configuration is unavailable.');
   const { data, error } = await supabase.functions.invoke<OfficerScanResult>('process-officer-scan', { body: payload });
   if (error) throw error;
-  if (!data?.observation_id) throw new Error('The scan completed without an observation receipt.');
+  if (!data?.success) throw new Error('The scan completed without a success receipt.');
   return data;
 }
 
