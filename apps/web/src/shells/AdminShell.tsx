@@ -90,6 +90,7 @@ const LocationsPage = React.lazy(() => import('../pages/LocationsPage'));
 const AccessControlPage = React.lazy(() => import('../pages/AccessControlPage'));
 const OrganizationSetupPage = React.lazy(() => import('../pages/OrganizationSetupPage'));
 const ModuleCatalogPage = React.lazy(() => import('../pages/ModuleCatalogPage'));
+const ModuleSubscriptionsPage = React.lazy(() => import('../pages/ModuleSubscriptionsPage'));
 const GrandMasterPlatformPage = React.lazy(() => import('../pages/GrandMasterPlatformPage'));
 const ProviderBillingPage = React.lazy(() => import('../pages/ProviderBillingPage'));
 const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlRoomPage'));
@@ -118,7 +119,7 @@ const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearc
 
 type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
-  | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup'
+  | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'builder';
 
@@ -209,6 +210,7 @@ const NAVIGATION_MAP = {
     { id: 'users', label: 'People & Access', icon: Users },
     { id: 'access-control', label: 'Access Rules', icon: KeyRound },
     { id: 'org-setup', label: 'Organization Settings', icon: Settings },
+    { id: 'module-subscriptions', label: 'Modules & Subscriptions', icon: Package },
     { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
     { id: 'test-data', label: 'Test Data', icon: Package },
     { id: 'platform', label: 'Platform Overview', icon: Shield },
@@ -522,6 +524,8 @@ const AdminShell: React.FC = () => {
         return <ZoneDetailPage />;
       case 'org-setup':
         return <OrganizationSetupPage />;
+      case 'module-subscriptions':
+        return <ModuleSubscriptionsPage />;
       case 'users':
         return <UserManagementPage />;
       case 'access-control':
