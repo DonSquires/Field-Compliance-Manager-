@@ -338,13 +338,13 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
           resolveAddressForCoordinates(coordinates.lat, coordinates.lng),
         ]);
         if (requestId !== locationRequestRef.current) return;
+        setCurrentAddress(address?.label ?? null);
         if (resolutionError) throw resolutionError;
         const row = Array.isArray(data) ? data[0] : data;
         const zoneId = row?.matched_zone_id ?? null;
         const siteId = row?.site_id ?? null;
         const matchedAgreementZone = zoneId && selectedAgreementZones.some((zone) => zone.id === zoneId);
         const matchedAgreementSite = siteId && selectedAgreementSites.some((site) => site.id === siteId);
-        setCurrentAddress(address?.label ?? null);
         setGeofenceResolution({ resolutionStatus: row?.resolution_status ?? 'outside_all_geofences', siteId, zoneId });
         if (matchedAgreementZone) {
           setSelectedZoneId(zoneId);
