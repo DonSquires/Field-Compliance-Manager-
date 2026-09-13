@@ -5,6 +5,7 @@ import * as Location from 'expo-location';
 import { supabase } from './supabase';
 
 const QUEUE_KEY = 'fcm-mobile-officer-scan-queue-v1';
+const MAX_UPLOAD_ATTEMPTS = 5;
 
 export type ScanModuleKey = 'freedom_camping' | 'parking_enforcement';
 
@@ -99,18 +100,22 @@ export async function removeQueuedOfficerScan(id: string): Promise<void> {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue.filter((item) => item.id !== id)));
 }
 
-export async function syncQueuedOfficerScans(): Promise<{ synced: number; pending: number }> {
+export async function syncQueuedOfficerScans(): Promise<{ synced: number; pending: number; dropped: number }> {
   const queue = await listQueuedOfficerScans();
   const pending: QueuedOfficerScan[] = [];
   let synced = 0;
+  let dropped = 0;
   for (const item of queue) {
     try {
       await submitOfficerScan({ ...item.payload, synced_at: new Date().toISOString() });
       synced += 1;
     } catch {
-      pending.push({ ...item, attempts: item.attempts + 1 });
+      const attempts = item.attempts + 1;
+      // Drop rather than retry forever so a permanently-rejected scan cannot grow the queue unbounded.
+      if (attempts >= MAX_UPLOAD_ATTEMPTS) dropped += 1;
+      else pending.push({ ...item, attempts });
     }
   }
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(pending));
-  return { synced, pending: pending.length };
+  return { synced, pending: pending.length, dropped };
 }

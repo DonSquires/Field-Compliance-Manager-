@@ -93,12 +93,11 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     try {
       const status = await syncQueuedOfficerScans();
       await refreshQueue();
-      Alert.alert(
-        'Queue sync',
-        status.pending
-          ? `${status.synced} scan${status.synced === 1 ? '' : 's'} sent. ${status.pending} still waiting for a connection.`
-          : `${status.synced} scan${status.synced === 1 ? '' : 's'} sent. Your queue is clear.`,
-      );
+      const parts = [`${status.synced} scan${status.synced === 1 ? '' : 's'} sent.`];
+      if (status.pending) parts.push(`${status.pending} still waiting for a connection.`);
+      if (status.dropped) parts.push(`${status.dropped} scan${status.dropped === 1 ? '' : 's'} could not be delivered after repeated attempts and ${status.dropped === 1 ? 'was' : 'were'} removed from the queue.`);
+      if (!status.pending && !status.dropped) parts.push('Your queue is clear.');
+      Alert.alert('Queue sync', parts.join(' '));
     } finally { setWorking(false); }
   };
 
