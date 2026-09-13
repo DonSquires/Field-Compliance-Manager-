@@ -68,6 +68,7 @@ export function CrmCapabilityShareInvites({ agreementId }: { agreementId: string
       </div>
     )}
     <article>
+      <span className="agreement-site-icon"><Send size={17} aria-hidden="true" /></span>
       <div>
         <strong>Share a capability</strong>
         <span>The client's own acceptance enables only the chosen capability, nothing else.</span>
