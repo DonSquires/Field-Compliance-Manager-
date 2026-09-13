@@ -33,6 +33,7 @@ describe('live officer safety layer', () => {
 
   it('clears loading state when organization scope is unavailable', () => {
     expect(source).toContain('if (!orgId) {');
+    expect(source).toContain("setError('Organisation access could not be confirmed. Live positions are unavailable.');");
     expect(source).toContain('setLoading(false);');
   });
 });

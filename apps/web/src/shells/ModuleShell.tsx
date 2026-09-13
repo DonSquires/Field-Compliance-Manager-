@@ -52,6 +52,8 @@ export function ModuleShell() {
   const { profile } = useAuth();
   const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
   const { status, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
+  const moduleDefinition = SPECIALTY_MODULES.find((module) => module.key === moduleKey || module.integratedKey === moduleKey);
+  const canonicalKey = moduleDefinition?.key ?? (moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey);
   const moduleContext = useActiveModuleContext(canonicalKey || null);
   const { shift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const safety = useOfficerSafety({
@@ -63,8 +65,6 @@ export function ModuleShell() {
   const [bobOpen, setBobOpen] = useState(false);
   const adminView = ['grand_master', 'master', 'admin'].includes(profile?.role ?? '')
     || (profile?.role === 'admin_officer' && typeof sessionStorage !== 'undefined' && sessionStorage.getItem('fcm.admin_officer.portal') === 'admin');
-  const moduleDefinition = SPECIALTY_MODULES.find((module) => module.key === moduleKey || module.integratedKey === moduleKey);
-  const canonicalKey = moduleDefinition?.key ?? (moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey);
   const label = moduleDefinition?.label;
   const allowed = status !== 'loading'
     && Boolean(moduleDefinition)

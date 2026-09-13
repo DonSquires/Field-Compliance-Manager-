@@ -141,6 +141,7 @@ const OfficerShell: React.FC = () => {
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
+  const [activeModule, setActiveModule] = useState<ActiveModule>(null);
   const moduleContext = useActiveModuleContext(activeModule ?? null);
 
   const getGps = useCallback(async () => {
@@ -161,7 +162,6 @@ const OfficerShell: React.FC = () => {
     getGps,
   });
 
-  const [activeModule, setActiveModule] = useState<ActiveModule>(null);
   const [officerState, setOfficerState] = useState<OfficerState>('home');
   const [offeredCount, setOfferedCount] = useState(0);
   const [bobOpen, setBobOpen] = useState(false);

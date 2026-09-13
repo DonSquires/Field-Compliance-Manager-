@@ -86,7 +86,7 @@ const OfficerParkingPage: React.FC = () => {
           .order('chalked_at', { ascending: false }),
         activeZoneIds && activeZoneIds.length > 0
           ? supabase.from('location_zones').select('id, name, address').in('id', activeZoneIds).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name')
-          : supabase.from('location_zones').select('id, name, address').eq('organization_id', profile.organizationId ?? '').eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
+          : supabase.from('location_zones').select('id, name, address').eq('organization_id', profile.organizationId).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
       ]);
 
       if (err) throw err;

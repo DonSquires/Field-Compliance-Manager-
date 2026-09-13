@@ -65,6 +65,8 @@ const LiveMapPage: React.FC = () => {
   const loadPositions = useCallback(async () => {
     const orgId = profile?.organizationId;
     if (!orgId) {
+      setPositions([]);
+      setError('Organisation access could not be confirmed. Live positions are unavailable.');
       setLoading(false);
       return;
     }
