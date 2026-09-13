@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
 const page = readFileSync(resolve(process.cwd(), 'src/pages/ModuleSubscriptionsPage.tsx'), 'utf8');
-const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260913120000_self_serve_module_subscription.sql'), 'utf8');
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260913120200_self_serve_module_subscription.sql'), 'utf8');
 
 describe('self-serve module subscription contract', () => {
   it('wires the subscriptions page into AdminShell navigation and routing', () => {
