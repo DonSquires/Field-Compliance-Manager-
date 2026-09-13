@@ -41,7 +41,13 @@ const OfficerTimesheetPage: React.FC = () => {
   // ATLAS READS: timesheets
   useEffect(() => {
     const load = async () => {
-      if (!profile?.id) return;
+      if (!profile?.id || !profile.organizationId) {
+        setTimesheets([]);
+        setWorkEntries([]);
+        setError('Organisation access could not be confirmed. Timesheets are unavailable.');
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);
