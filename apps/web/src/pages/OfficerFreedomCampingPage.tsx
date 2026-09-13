@@ -90,6 +90,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [zoneId, setZoneId] = useState('');
+  const [plateNumber, setPlateNumber] = useState('');
   const [imageBase64, setImageBase64] = useState<string>();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string>();
   const [capturedAt, setCapturedAt] = useState<string>();
@@ -263,6 +264,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   }, [imagePreviewUrl]);
 
   const payload = useMemo(() => buildOfficerScanPayload({
+    plateNumber,
     imageBase64,
     latitude: location.latitude,
     longitude: location.longitude,
@@ -395,6 +397,13 @@ const OfficerFreedomCampingPage: React.FC = () => {
           )}
 
           <div className="fc-field-grid">
+            <label className="fc-field">
+              <span>Plate <small>manual fallback</small></span>
+              <div className="fc-select-wrap">
+                <Search size={17} aria-hidden="true" />
+                <input value={plateNumber} onChange={(event) => setPlateNumber(event.target.value)} placeholder="Use if ALPR cannot read" autoCapitalize="characters" spellCheck={false} />
+              </div>
+            </label>
             <label className="fc-field">
               <span>Zone <small>{location.status === 'ready' ? 'auto-detected when blank' : 'required without GPS'}</small></span>
               <div className="fc-select-wrap">

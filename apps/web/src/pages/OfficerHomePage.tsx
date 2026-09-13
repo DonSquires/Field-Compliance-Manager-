@@ -38,7 +38,7 @@ interface OpenShift {
   site_name: string | null;
 }
 
-type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'map' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'credentials' | 'leave' | 'timesheet';
+type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control' | 'map' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'credentials' | 'leave' | 'timesheet';
 
 interface OfficerHomePageProps {
   shift: ActiveShift | null;
@@ -69,6 +69,20 @@ function serviceTypeLabel(value: string): { label: string; detail: string } {
     smoke_complaint_ooh: { label: 'Smoke Complaint', detail: 'Out-of-hours complaint response' },
   };
   return labels[value] ?? { label: value.replaceAll('_', ' '), detail: 'Field assignment and evidence' };
+}
+
+function shiftLaunch(value: string): { destination: HomeDestination; label: string } {
+  const normalized = value.toLowerCase();
+  if (normalized === 'patrol') return { destination: 'patrol', label: 'Start patrol' };
+  if (normalized === 'static' || normalized === 'static_guarding' || normalized === 'site_guard') {
+    return { destination: 'site_guard', label: 'Start site guard' };
+  }
+  if (normalized === 'freedom_camping') return { destination: 'freedom_camping', label: 'Open freedom camping' };
+  if (normalized === 'parking' || normalized === 'parking_enforcement') return { destination: 'parking', label: 'Open parking' };
+  if (normalized === 'noise_control') return { destination: 'noise_control', label: 'Open noise control' };
+  if (normalized === 'biosecurity' || normalized === 'biosecurity_inspection') return { destination: 'biosecurity', label: 'Open biosecurity' };
+  if (normalized === 'smoke_control' || normalized === 'smoke_complaint_ooh') return { destination: 'smoke_control', label: 'Open smoke control' };
+  return { destination: 'dispatch', label: 'Open dispatch' };
 }
 
 function useConnectionState() {
@@ -154,6 +168,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
   const online = useConnectionState();
   const { openShifts, loading: openShiftsLoading, error: openShiftsError, notice, claimingId, claim, reload } = useOpenShifts(profile?.organizationId);
   const firstName = profile?.displayName?.split(' ')[0] || 'Officer';
+  const activeShiftLaunch = shift ? shiftLaunch(shift.shift_type) : null;
 
   const shiftProgress = useMemo(() => {
     const total = shift?.stops.length ?? 0;
@@ -178,6 +193,19 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           {online ? 'Online' : 'Offline'}
         </div>
       </header>
+
+      <section className="officer-brief" aria-labelledby="officer-brief-heading">
+        <div className="officer-brief-heading">
+          <div><span className="officer-kicker">At a glance</span><h2 id="officer-brief-heading">Operational brief</h2></div>
+          <span className="officer-brief-time">Live field state</span>
+        </div>
+        <div className="officer-brief-grid">
+          <BriefSignal label="Assignment" value={shift ? serviceTypeLabel(shift.shift_type).label : 'Standby'} detail={shift ? shift.status.replace('_', ' ') : 'No active roster'} tone={shift ? 'active' : 'quiet'} />
+          <BriefSignal label="Route" value={shift ? `${shiftProgress.completed}/${shiftProgress.total} stops` : 'No route'} detail={shift ? `${shiftProgress.percent}% complete` : 'Open your schedule'} tone={shift ? 'active' : 'quiet'} />
+          <BriefSignal label="Safety" value={safetyLabel} detail={safety.activeAlert ? 'Action required' : 'Check-in state confirmed'} tone={safety.activeAlert ? 'alert' : 'active'} />
+          <BriefSignal label="Evidence" value={online ? 'Connected' : 'Queued locally'} detail={online ? 'Ready to submit evidence' : 'Will sync when online'} tone={online ? 'active' : 'warning'} />
+        </div>
+      </section>
 
       {shiftError && (
         <div className="officer-notice is-error" role="alert">
@@ -211,8 +239,8 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
                 <span>{shiftProgress.percent}%</span>
               </div>
               <div className="officer-progress-track"><span style={{ width: `${shiftProgress.percent}%` }} /></div>
-              <button type="button" className="officer-primary-action" onClick={() => onNavigate(shift.shift_type === 'patrol' ? 'patrol' : shift.shift_type === 'static_guarding' ? 'site_guard' : 'dispatch')}>
-                <Navigation size={18} aria-hidden="true" /> {shift.shift_type === 'patrol' ? 'Start patrol' : shift.shift_type === 'static_guarding' ? 'Start site guard' : 'Open dispatch'} <ArrowRight size={17} aria-hidden="true" />
+              <button type="button" className="officer-primary-action" onClick={() => activeShiftLaunch && onNavigate(activeShiftLaunch.destination)}>
+                <Navigation size={18} aria-hidden="true" /> {activeShiftLaunch?.label ?? 'Open assignment'} <ArrowRight size={17} aria-hidden="true" />
               </button>
             </>
           ) : (
@@ -302,5 +330,15 @@ function QuickAction({ icon, label, detail, onClick }: { icon: React.ReactNode; 
       <div><strong>{label}</strong><small>{detail}</small></div>
       <ArrowRight size={16} aria-hidden="true" />
     </button>
+  );
+}
+
+function BriefSignal({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: 'active' | 'quiet' | 'warning' | 'alert' }) {
+  return (
+    <div className={`officer-brief-signal tone-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
   );
 }

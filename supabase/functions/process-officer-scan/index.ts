@@ -727,7 +727,8 @@ serve(async (req)=>{
     const officerId = profile.id;
     // Step 2: Parse input
     const body = await req.json();
-    const { image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
+    const { plate_number: manualPlateNumberInput, image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
+    const manualPlateNumber = typeof manualPlateNumberInput === 'string' ? manualPlateNumberInput.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) : '';
     if (!['freedom_camping', 'parking_enforcement'].includes(moduleKey)) return json({
       error: 'Unsupported scan module'
     }, 400);
@@ -766,11 +767,12 @@ serve(async (req)=>{
     if (capturedDate.getTime() > Date.now() + 5 * 60 * 1000) return json({
       error: 'captured_at cannot be in the future'
     }, 400);
-    // Steps 3 & 4: ALPR + full inference in parallel (same photo, two calls)
+    // Steps 3 & 4: ALPR + full inference in parallel (same photo, two calls).
+    // An officer-entered plate is the governed fallback when ALPR cannot read the image.
     let alprResult = null;
     let inferResult = null;
     let alprUsed = false;
-    if (imageBase64) {
+    if (imageBase64 && !manualPlateNumber) {
       [alprResult, inferResult] = await Promise.all([
         runAlpr(imageBase64),
         runInference(imageBase64)
@@ -783,13 +785,13 @@ serve(async (req)=>{
       }
       alprUsed = alprResult !== null;
     }
-    const plateNumber = (alprResult?.plate ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const plateNumber = manualPlateNumber || (alprResult?.plate ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!plateNumber) return json({
       error: 'A plate could not be confirmed from the photo. Capture a clearer image and try again.'
     }, 400);
-    const plateConfidence = alprResult?.confidence ?? null;
-    const plateSource = 'alpr';
-    const alprProvider = alprResult?.provider ?? null;
+    const plateConfidence = manualPlateNumber ? null : alprResult?.confidence ?? null;
+    const plateSource = manualPlateNumber ? 'manual' : 'alpr';
+    const alprProvider = manualPlateNumber ? null : alprResult?.provider ?? null;
     console.log(`[scan] plate=${plateNumber} source=${plateSource} org=${orgId}`);
     // Step 5: Geofence resolution from GPS via resolve_operational_context().
     // It preserves direct-org resolution and adds accepted contracted places.

@@ -1334,6 +1334,73 @@
   font-size: 13px;
 }
 
+.officer-brief {
+  margin-bottom: 16px;
+  padding: 15px;
+  border: 1px solid #263b4d;
+  border-radius: 8px;
+  background: #0b1725;
+}
+
+.officer-brief-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.officer-brief-heading h2 {
+  margin: 3px 0 0;
+  font-size: 16px;
+}
+
+.officer-brief-time {
+  color: #7691a8;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.officer-brief-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.officer-brief-signal {
+  display: grid;
+  min-height: 82px;
+  gap: 4px;
+  padding: 11px 12px;
+  border-left: 3px solid #52718c;
+  background: #0e1d2d;
+}
+
+.officer-brief-signal > span,
+.officer-brief-signal small {
+  color: #91a8ba;
+  font-size: 11px;
+}
+
+.officer-brief-signal strong {
+  overflow: hidden;
+  color: #eff7fb;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.officer-brief-signal small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.officer-brief-signal.tone-active { border-left-color: #57cc99; }
+.officer-brief-signal.tone-warning { border-left-color: #e2b24d; }
+.officer-brief-signal.tone-alert { border-left-color: #ef6c6c; background: #211419; }
+
 .officer-kicker {
   color: #7dd3c7;
   font-size: 12px;
@@ -1817,6 +1884,10 @@
     grid-template-columns: 1fr;
   }
 
+  .officer-brief-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .officer-shift-panel,
   .officer-safety-panel {
     min-height: 0;
@@ -1880,6 +1951,10 @@
 }
 
 @media (max-width: 460px) {
+  .officer-brief-grid {
+    grid-template-columns: 1fr;
+  }
+
   .officer-action-grid {
     grid-template-columns: 1fr;
   }

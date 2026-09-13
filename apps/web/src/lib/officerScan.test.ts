@@ -30,6 +30,13 @@ describe('officer scan contract', () => {
     expect(canSubmitOfficerScan(payload)).toBe(true);
   });
 
+  it('normalizes the manual plate fallback while preserving photo evidence', () => {
+    const payload = buildOfficerScanPayload({ plateNumber: ' ab-123 ', imageBase64: 'encoded-image', zoneId: 'zone-1' });
+    expect(payload.plate_number).toBe('AB123');
+    expect(payload.image_base64).toBe('encoded-image');
+    expect(canSubmitOfficerScan(payload)).toBe(true);
+  });
+
   it('requires evidence and either GPS or a selected zone', () => {
     expect(canSubmitOfficerScan(buildOfficerScanPayload({}))).toBe(false);
     expect(canSubmitOfficerScan(buildOfficerScanPayload({ imageBase64: 'encoded-image' }))).toBe(false);
