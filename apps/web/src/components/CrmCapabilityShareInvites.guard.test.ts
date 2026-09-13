@@ -15,4 +15,10 @@ describe('client capability share UI wiring', () => {
     expect(invites).toContain("supabase.functions.invoke('send-capability-share-invite'");
     expect(invites).not.toMatch(/\.from\('onboarding_invites'\)\.insert/);
   });
+
+  it('shows a success receipt distinguishing emailed delivery from manual link sharing', () => {
+    expect(invites).toContain('Delivered by email to');
+    expect(invites).toContain('Copy link');
+    expect(invites).toContain('navigator.clipboard.writeText');
+  });
 });

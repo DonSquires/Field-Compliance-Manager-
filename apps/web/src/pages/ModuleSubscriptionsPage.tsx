@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Lock } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { PLATFORM_MODULE_MANIFEST } from '../config/platformModuleManifest';
@@ -20,6 +20,15 @@ interface SubscriptionRow {
   status: string;
 }
 
+// Mirrors AdminShell's PAGE_PLATFORM_MODULE so the disable-confirmation can
+// name the real admin areas that disappear, not a vague warning.
+const MODULE_GATED_AREAS: Record<string, string[]> = {
+  crm: ['CRM', 'Relationships', 'Onboarding', 'Activation Handoffs'],
+  rostering: ['Roster Operations', 'Roster Targets'],
+  hr: ['People & HR'],
+  finance: ['Finance Bureau', 'Finance Connections', 'Finance Money', 'Finance Costing', 'Finance Pricing', 'Pay & Billing Rate Rules'],
+};
+
 const ModuleSubscriptionsPage: React.FC = () => {
   const { profile } = useAuth();
   const [enabled, setEnabled] = useState<Set<string>>(new Set());
@@ -27,6 +36,8 @@ const ModuleSubscriptionsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [confirmDisableKey, setConfirmDisableKey] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const orgId = profile?.organizationId;
@@ -56,14 +67,28 @@ const ModuleSubscriptionsPage: React.FC = () => {
     if (!orgId) return;
     setSavingKey(moduleKey);
     setError(null);
+    setNotice(null);
+    const module = PLATFORM_MODULE_MANIFEST.find((item) => item.key === moduleKey);
     const { error: toggleError } = await supabase.rpc('set_organization_module_subscription', {
       p_organization_id: orgId,
       p_module_key: moduleKey,
       p_enabled: nextEnabled,
     });
     if (toggleError) setError(toggleError.message);
-    else await load();
+    else {
+      setNotice(nextEnabled ? `${module?.label ?? moduleKey} enabled. It now appears in your admin navigation.` : `${module?.label ?? moduleKey} disabled. Its admin pages are no longer reachable for this organisation.`);
+      await load();
+    }
     setSavingKey(null);
+    setConfirmDisableKey(null);
+  };
+
+  const requestToggle = (moduleKey: string, nextEnabled: boolean) => {
+    if (!nextEnabled && MODULE_GATED_AREAS[moduleKey]?.length) {
+      setConfirmDisableKey(moduleKey);
+      return;
+    }
+    void toggle(moduleKey, nextEnabled);
   };
 
   if (loading) {
@@ -77,6 +102,7 @@ const ModuleSubscriptionsPage: React.FC = () => {
         <p className="subtitle">Subscribe to only the modules your organisation needs. Each module is a standalone app you can enable independently.</p>
       </header>
       {error && <div className="alert alert-error" role="alert"><button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">×</button>{error}</div>}
+      {notice && <div className="alert alert-success" role="status"><button className="alert-close" onClick={() => setNotice(null)} aria-label="Close notice">×</button>{notice}</div>}
       <div className="reports-table-wrapper">
         <table className="reports-table">
           <thead><tr><th>Module</th><th>Description</th><th>Subscription</th><th>Enabled</th></tr></thead>
@@ -86,17 +112,24 @@ const ModuleSubscriptionsPage: React.FC = () => {
               const missing = module.dependsOn.filter((dep) => !enabled.has(dep));
               const blocked = !isEnabled && missing.length > 0;
               const Icon = module.icon;
+              const confirming = confirmDisableKey === module.key;
               return (
                 <tr key={module.key}>
                   <td><Icon size={16} aria-hidden="true" /> {module.label}</td>
                   <td>{module.description}</td>
                   <td>{subscriptions[module.key] ? <span className={`status-badge status-${subscriptions[module.key]}`}>{subscriptions[module.key]}</span> : <span className="status-badge status-inactive">not subscribed</span>}</td>
                   <td>
-                    {blocked ? (
+                    {confirming ? (
+                      <div role="alertdialog" aria-label={`Confirm disabling ${module.label}`}>
+                        <p><AlertTriangle size={14} aria-hidden="true" /> Disabling {module.label} will immediately remove access to: {MODULE_GATED_AREAS[module.key]?.join(', ')}.</p>
+                        <button type="button" disabled={savingKey === module.key} onClick={() => void toggle(module.key, false)}>{savingKey === module.key ? 'Disabling…' : 'Confirm disable'}</button>
+                        <button type="button" disabled={savingKey === module.key} onClick={() => setConfirmDisableKey(null)}>Cancel</button>
+                      </div>
+                    ) : blocked ? (
                       <span title={`Requires ${missing.join(', ')} to be enabled first`}><Lock size={14} aria-hidden="true" /> Requires {missing.join(', ')}</span>
                     ) : (
                       <label className="agreement-check">
-                        <input type="checkbox" checked={isEnabled} disabled={savingKey === module.key} onChange={(event) => void toggle(module.key, event.target.checked)} />
+                        <input type="checkbox" checked={isEnabled} disabled={savingKey === module.key} onChange={(event) => requestToggle(module.key, event.target.checked)} />
                         <span>{isEnabled ? <><CheckCircle2 size={14} aria-hidden="true" /> Enabled</> : 'Disabled'}</span>
                       </label>
                     )}
