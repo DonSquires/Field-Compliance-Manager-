@@ -74,7 +74,12 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
 
   // ATLAS READS: dispatch_jobs (via shifts assigned to this officer)
   const loadJobs = useCallback(async () => {
-    if (!profile?.id || !profile?.organizationId) return;
+    if (!profile?.id || !profile?.organizationId) {
+      setJobs([]);
+      setError('Organisation access could not be confirmed. Dispatch jobs are unavailable.');
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);

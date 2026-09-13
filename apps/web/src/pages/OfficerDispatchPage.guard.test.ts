@@ -6,6 +6,12 @@ const source = readFileSync(resolve(process.cwd(), 'src/pages/OfficerDispatchPag
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901000000_dispatch_completion_continuity.sql'), 'utf8');
 
 describe('officer dispatch lifecycle boundary', () => {
+  it('fails closed when officer organisation context is unavailable', () => {
+    expect(source).toContain("if (!profile?.id || !profile?.organizationId) {");
+    expect(source).toContain("setError('Organisation access could not be confirmed. Dispatch jobs are unavailable.');");
+    expect(source).toContain('setLoading(false);');
+  });
+
   it('uses the server-owned race-checked transition RPC', () => {
     expect(source).toContain("rpc('advance_dispatch_job_status'");
     expect(source).toContain('p_expected_status: job.status');
