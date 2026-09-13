@@ -85,7 +85,7 @@ export const SHARED_MODULE_PROFILES = [
   {
     key: 'parking_enforcement',
     label: 'Parking Enforcement',
-    profile: Z('parking', 'parking_enforcement', 'zone_compliance_matrix', {
+    profile: Z('parking', 'parking_enforcement', 'parking_module_config + location_zones.parking_*', {
       kind: 'alpr',
       key: 'vehicle'
     }, true, true, [
