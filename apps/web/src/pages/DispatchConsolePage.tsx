@@ -285,6 +285,7 @@ const DispatchConsolePage: React.FC = () => {
   // service agreement so contract/location access has one canonical owner.
   const loadPhaseA = useCallback(async () => {
     if (!operatingBranchId) {
+      setError('Operating branch access could not be confirmed. Dispatch operations are unavailable.');
       setLoading(false);
       return;
     }

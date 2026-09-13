@@ -13,7 +13,7 @@ describe('dispatch agreement and creation boundary', () => {
 
   it('loads the exact requested job for overview deep links even outside the selected branch queue', () => {
     expect(source).toContain("get('job')");
-    expect(source).toContain(".eq('id', requestedJobId).maybeSingle()");
+    expect(source).toContain(".eq('id', requestedJobId).eq('organization_id', operatingBranchId).maybeSingle()");
     expect(source).toContain('selectedJobRes.data');
   });
 
@@ -63,6 +63,7 @@ describe('dispatch agreement and creation boundary', () => {
 
   it('clears loading state when branch scope is unavailable', () => {
     expect(source).toContain('if (!operatingBranchId) {');
+    expect(source).toContain("setError('Operating branch access could not be confirmed. Dispatch operations are unavailable.');");
     expect(source).toContain('setLoading(false);');
   });
 
