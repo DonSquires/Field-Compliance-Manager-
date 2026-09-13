@@ -15,6 +15,7 @@ describe('standalone module shell contract', () => {
     expect(shell).toContain("case 'biosecurity'");
     expect(shell).toContain('ParkingOversightPage');
     expect(shell).toContain('adminView');
+    expect(shell).toContain("sessionStorage.getItem('fcm.admin_officer.portal') === 'admin'");
     expect(shell).toContain('useEnabledModules');
     expect(shell).toContain('BobPanel');
     expect(shell).toContain("status !== 'loading'");

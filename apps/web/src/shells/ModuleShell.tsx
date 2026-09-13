@@ -59,7 +59,8 @@ export function ModuleShell() {
     getGps,
   });
   const [bobOpen, setBobOpen] = useState(false);
-  const adminView = ['grand_master', 'master', 'admin', 'admin_officer'].includes(profile?.role ?? '');
+  const adminView = ['grand_master', 'master', 'admin'].includes(profile?.role ?? '')
+    || (profile?.role === 'admin_officer' && typeof sessionStorage !== 'undefined' && sessionStorage.getItem('fcm.admin_officer.portal') === 'admin');
   const canonicalKey = moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey;
   const moduleDefinition = SPECIALTY_MODULE_BY_KEY[canonicalKey as SpecialtyModuleKey];
   const label = moduleDefinition?.label;
