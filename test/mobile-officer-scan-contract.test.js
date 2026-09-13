@@ -49,6 +49,10 @@ test('mobile scan clears active evidence after queueing or success', () => {
   assert.match(screen, /await queueOfficerScan\(payload\);\s*setPhotoUri\(null\);/);
 });
 
+test('mobile module changes clear evidence context', () => {
+  assert.match(screen, /setModuleKey\(key\); setPhotoUri\(null\); setPlateNumber\(''\); setResult\(null\)/);
+});
+
 test('mobile scan queue preserves capture time and retry provenance', () => {
   assert.match(source, /captured_at: string/);
   assert.match(source, /offline_queued: true/);
