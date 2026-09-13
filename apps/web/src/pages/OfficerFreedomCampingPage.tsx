@@ -25,6 +25,8 @@ import {
   isNetworkFailure,
   listQueuedOfficerScans,
   markQueuedOfficerScanAttempt,
+  MAX_UPLOAD_ATTEMPTS,
+  shouldDropQueuedOfficerScan,
   OfficerScanResult,
   queueOfficerScan,
   removeQueuedOfficerScan,
@@ -225,20 +227,29 @@ const OfficerFreedomCampingPage: React.FC = () => {
     try {
       const queuedScans = await listQueuedOfficerScans();
       let synced = 0;
+      let dropped = 0;
       for (const scan of queuedScans) {
         const { error } = await supabase.functions.invoke('process-officer-scan', {
           body: { ...scan.body, synced_at: new Date().toISOString() },
         });
         if (error) {
-          await markQueuedOfficerScanAttempt(scan);
+          if (shouldDropQueuedOfficerScan(scan)) {
+            await removeQueuedOfficerScan(scan.id);
+            dropped += 1;
+          } else {
+            await markQueuedOfficerScanAttempt(scan);
+          }
           continue;
         }
         await removeQueuedOfficerScan(scan.id);
         synced += 1;
       }
       await refreshQueueCount();
-      if (synced > 0) {
-        setQueueMessage(`${synced} queued scan${synced === 1 ? '' : 's'} synced.`);
+      if (synced > 0 || dropped > 0) {
+        const messages = [];
+        if (synced > 0) messages.push(`${synced} queued scan${synced === 1 ? '' : 's'} synced`);
+        if (dropped > 0) messages.push(`${dropped} scan${dropped === 1 ? '' : 's'} removed after ${MAX_UPLOAD_ATTEMPTS} failed attempts`);
+        setQueueMessage(`${messages.join('. ')}.`);
         await loadHistory();
       }
     } catch (error) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildOfficerScanPayload, canSubmitOfficerScan, isNetworkFailure, normalizePlate } from './officerScan';
+import { buildOfficerScanPayload, canSubmitOfficerScan, isNetworkFailure, normalizePlate, shouldDropQueuedOfficerScan } from './officerScan';
 
 describe('officer scan contract', () => {
   it('normalizes a manual plate and builds the edge-function payload', () => {
@@ -63,5 +63,11 @@ describe('officer scan contract', () => {
     expect(isNetworkFailure(functionsFetchError)).toBe(true);
     expect(isNetworkFailure(new Error('plate_number is required'))).toBe(false);
     vi.unstubAllGlobals();
+  });
+
+  it('bounds offline queue retries at five attempts', () => {
+    const scan = { id: 'scan-1', capturedAt: '2026-08-30T04:30:00.000Z', attempts: 4, body: buildOfficerScanPayload({ imageBase64: 'encoded-image', zoneId: 'zone-1' }) };
+    expect(shouldDropQueuedOfficerScan(scan)).toBe(true);
+    expect(shouldDropQueuedOfficerScan({ ...scan, attempts: 3 })).toBe(false);
   });
 });

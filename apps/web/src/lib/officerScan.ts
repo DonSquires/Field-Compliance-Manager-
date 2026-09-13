@@ -56,6 +56,7 @@ export interface QueuedOfficerScan {
 const DB_NAME = 'fcm-field-operations';
 const DB_VERSION = 1;
 const SCAN_STORE = 'officer-scan-queue';
+export const MAX_UPLOAD_ATTEMPTS = 5;
 
 export function normalizePlate(value: string): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
@@ -181,4 +182,8 @@ export async function removeQueuedOfficerScan(id: string): Promise<void> {
 
 export async function markQueuedOfficerScanAttempt(scan: QueuedOfficerScan): Promise<void> {
   await runStoreRequest('readwrite', (store) => store.put({ ...scan, attempts: scan.attempts + 1 }));
+}
+
+export function shouldDropQueuedOfficerScan(scan: QueuedOfficerScan): boolean {
+  return scan.attempts + 1 >= MAX_UPLOAD_ATTEMPTS;
 }
