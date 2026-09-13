@@ -226,6 +226,7 @@ const DispatchConsolePage: React.FC = () => {
   const {
     selectedAgreement,
     selectedAgreementSites,
+    selectedAgreementZones,
     loading: relationshipLoading,
     error: relationshipError,
   } = useServiceRelationships();
@@ -290,24 +291,37 @@ const DispatchConsolePage: React.FC = () => {
 
     try {
       setLoading(true);
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
       const [shiftsRes, jobsRes, resourcesRes, selectedJobRes] = await Promise.all([
-        supabase
-          .from('shifts')
-          .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
-          .eq('organization_id', operatingBranchId)
-          .in('status', ['published', 'accepted', 'in_progress']),
-        supabase
-          .from('dispatch_jobs')
-          .select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)')
-          .eq('organization_id', operatingBranchId)
-          .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase
+              .from('shifts')
+              .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
+              .in('zone_id', activeZoneIds)
+              .in('status', ['published', 'accepted', 'in_progress'])
+          : supabase
+              .from('shifts')
+              .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
+              .eq('organization_id', operatingBranchId)
+              .in('status', ['published', 'accepted', 'in_progress']),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase
+              .from('dispatch_jobs')
+              .select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)')
+              .in('zone_id', activeZoneIds)
+              .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[])
+          : supabase
+              .from('dispatch_jobs')
+              .select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)')
+              .eq('organization_id', operatingBranchId)
+              .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]),
         supabase
           .from('dispatch_resources')
           .select('id, name, callsign, status, assigned_officer_id')
           .eq('organization_id', operatingBranchId),
         requestedJobId
-          ? supabase.from('dispatch_jobs').select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)').eq('id', requestedJobId).maybeSingle()
+          ? supabase.from('dispatch_jobs').select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)').eq('id', requestedJobId).eq('organization_id', operatingBranchId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
       ]);
 
@@ -379,7 +393,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [operatingBranchId, requestedJobId]);
+  }, [operatingBranchId, requestedJobId, selectedAgreementZones]);
 
   useEffect(() => {
     if (!requestedJobId) return;

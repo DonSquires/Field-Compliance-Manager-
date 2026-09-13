@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Crosshair, MapPin, Phone, RefreshCw, ShieldAlert, ShieldCheck, Siren, UserCheck, X } from 'lucide-react';
 import { schemaWelfareAlertStatus, type WelfareAlertStatus } from '../lib/welfareAlertStatus';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { SafetyGate } from '../components/SafetyGate';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
@@ -55,6 +56,7 @@ const FILTERS: Array<{ id: AlertFilter; label: string }> = [
 
 const WelfareAlertsPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [alerts, setAlerts] = useState<WelfareAlert[]>([]);
@@ -75,10 +77,14 @@ const WelfareAlertsPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: queryError } = await supabase
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+      const alertQuery = supabase
         .from('welfare_alerts')
-        .select('id, officer_user_id, status, alert_type, escalation_level, escalated_at, acknowledged_by, acknowledged_at, acknowledgement_notes, resolved_by, resolved_at, resolution_notes, triggered_at, gps_lat, gps_lng, gps_accuracy, officer_phone, notes')
-        .eq('organization_id', profile.organizationId)
+        .select('id, officer_user_id, status, alert_type, escalation_level, escalated_at, acknowledged_by, acknowledged_at, acknowledgement_notes, resolved_by, resolved_at, resolution_notes, triggered_at, gps_lat, gps_lng, gps_accuracy, officer_phone, notes');
+      const scopedAlertQuery = activeZoneIds && activeZoneIds.length > 0
+        ? alertQuery.in('zone_id', activeZoneIds)
+        : alertQuery.eq('organization_id', profile.organizationId);
+      const { data, error: queryError } = await scopedAlertQuery
         .order('escalation_level', { ascending: false })
         .order('triggered_at', { ascending: false })
         .limit(150);
@@ -91,7 +97,7 @@ const WelfareAlertsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, welfareEnabled]);
+  }, [profile?.organizationId, selectedAgreementZones, welfareEnabled]);
 
   useEffect(() => { void loadAlerts(); }, [loadAlerts]);
 

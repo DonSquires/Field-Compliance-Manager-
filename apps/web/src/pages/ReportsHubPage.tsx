@@ -10,6 +10,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -62,6 +64,8 @@ interface MonthlyReportPack {
 
 const ReportsHubPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreement, selectedAgreementZones } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('report');
   const [metrics, setMetrics] = useState<ReportMetrics>({
     totalBreaches: 0,
     totalObservations: 0,
@@ -95,29 +99,56 @@ const ReportsHubPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
-        supabase
-          .from('breach_alerts')
-          .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
-          .eq('organization_id', profile.organizationId)
-          .gte('created_at', dateRange.start)
-          .lte('created_at', dateRange.end)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('observations')
-          .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
-          .eq('organization_id', profile.organizationId)
-          .gte('observed_at', dateRange.start)
-          .lte('observed_at', dateRange.end)
-          .order('observed_at', { ascending: false }),
-        supabase
-          .from('monthly_report_packs')
-          .select('id, template_code, period_start, period_end, status, generated_at, sent_at, pdf_path, pdf_sha256, agreement:service_agreement_id(name)')
-          .eq('organization_id', profile.organizationId)
-          .gte('period_start', dateRange.start)
-          .lte('period_end', dateRange.end)
-          .order('period_end', { ascending: false }),
-        supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase
+              .from('breach_alerts')
+              .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
+              .in('zone_id', activeZoneIds)
+              .gte('created_at', dateRange.start)
+              .lte('created_at', dateRange.end)
+              .order('created_at', { ascending: false })
+          : supabase
+              .from('breach_alerts')
+              .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
+              .eq('organization_id', profile.organizationId)
+              .gte('created_at', dateRange.start)
+              .lte('created_at', dateRange.end)
+              .order('created_at', { ascending: false }),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase
+              .from('observations')
+              .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
+              .in('zone_id', activeZoneIds)
+              .gte('observed_at', dateRange.start)
+              .lte('observed_at', dateRange.end)
+              .order('observed_at', { ascending: false })
+          : supabase
+              .from('observations')
+              .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
+              .eq('organization_id', profile.organizationId)
+              .gte('observed_at', dateRange.start)
+              .lte('observed_at', dateRange.end)
+              .order('observed_at', { ascending: false }),
+        selectedAgreement?.id
+          ? supabase
+              .from('monthly_report_packs')
+              .select('id, template_code, period_start, period_end, status, generated_at, sent_at, pdf_path, pdf_sha256, agreement:service_agreement_id(name)')
+              .eq('service_agreement_id', selectedAgreement.id)
+              .gte('period_start', dateRange.start)
+              .lte('period_end', dateRange.end)
+              .order('period_end', { ascending: false })
+          : supabase
+              .from('monthly_report_packs')
+              .select('id, template_code, period_start, period_end, status, generated_at, sent_at, pdf_path, pdf_sha256, agreement:service_agreement_id(name)')
+              .eq('organization_id', profile.organizationId)
+              .gte('period_start', dateRange.start)
+              .lte('period_end', dateRange.end)
+              .order('period_end', { ascending: false }),
+        selectedAgreement?.id
+          ? supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_service_agreement_id: selectedAgreement.id, p_from: dateRange.start, p_to: dateRange.end })
+          : supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
       ]);
 
       const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error;
@@ -134,7 +165,7 @@ const ReportsHubPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, dateRange.end, dateRange.start]);
+  }, [profile?.organizationId, selectedAgreement?.id, selectedAgreementZones, dateRange.end, dateRange.start]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 

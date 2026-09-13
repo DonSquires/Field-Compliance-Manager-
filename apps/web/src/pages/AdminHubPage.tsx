@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { SafetyGate } from '../components/SafetyGate';
 import { MetricCard } from '../components/MetricCard/MetricCard';
 import { QueueCard } from '../components/QueueCard/QueueCard';
@@ -95,6 +96,7 @@ function relativeTime(value: string): string {
 
 const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
@@ -119,6 +121,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     setQueueWarnings([]);
 
     const organizationId = profile.organizationId;
+    const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
     const now = new Date();
     const nowIso = now.toISOString();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -126,20 +129,40 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
 
     try {
       const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, dispatchTrend, welfareRows, dispatchRows, breachRows, reportRows, videoRows] = await Promise.all([
-        supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
-        supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('shifts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress'])
+          : supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES)
+          : supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
         welfareEnabled
-          ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
+          ? activeZoneIds && activeZoneIds.length > 0
+            ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ['pending', 'acknowledged'])
+            : supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
           : Promise.resolve({ count: 0, error: null }),
-        supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']),
-        supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('observed_at', todayStart),
-        supabase.from('dispatch_jobs').select('created_at,status').eq('organization_id', organizationId).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned'])
+          : supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('observations').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).gte('observed_at', todayStart)
+          : supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('observed_at', todayStart),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('dispatch_jobs').select('created_at,status').in('zone_id', activeZoneIds).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000)
+          : supabase.from('dispatch_jobs').select('created_at,status').eq('organization_id', organizationId).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000),
         welfareEnabled
-          ? supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
+          ? activeZoneIds && activeZoneIds.length > 0
+            ? supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').in('zone_id', activeZoneIds).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
+            : supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
           : Promise.resolve({ data: [], error: null }),
-        supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6),
-        supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
-        supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6)
+          : supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6)
+          : supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6)
+          : supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
         supabase.from('inference_jobs').select('id, evidence_item_id, domain, status, created_at').eq('organization_id', organizationId).in('domain', ['video_motion', 'vehicle', 'face']).in('status', ['queued', 'processing', 'manual_review_required']).order('created_at', { ascending: false }).limit(6),
       ]);
 
@@ -266,7 +289,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, welfareEnabled]);
+  }, [profile?.organizationId, selectedAgreementZones, welfareEnabled]);
 
   useEffect(() => {
     void loadDashboard();
