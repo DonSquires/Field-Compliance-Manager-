@@ -158,7 +158,7 @@ const BreachReviewPage: React.FC = () => {
     if (!profile?.displayName || !alert.action_type) return;
     setGeneratingNoticeId(alert.id);
     setError(null);
-    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string }>('generate-notice', {
+    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string; pdf_url?: string }>('generate-notice', {
       body: {
         notice_type: alert.action_type,
         breach_alert_id: alert.id,
@@ -171,9 +171,15 @@ const BreachReviewPage: React.FC = () => {
     if (invokeError || !data?.html) {
       setError(invokeError?.message ?? 'The notice draft was not generated. Refresh and try again.');
     } else {
-      const draftUrl = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
-      window.open(draftUrl, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(draftUrl), 60_000);
+      if (data.pdf_url) {
+        const { data: signed, error: signedError } = await supabase.storage.from('notice-artifacts').createSignedUrl(data.pdf_url, 900);
+        if (signedError || !signed?.signedUrl) setError(signedError?.message ?? 'The notice PDF could not be opened.');
+        else window.open(signed.signedUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        const draftUrl = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
+        window.open(draftUrl, '_blank', 'noopener,noreferrer');
+        window.setTimeout(() => URL.revokeObjectURL(draftUrl), 60_000);
+      }
     }
 
     setGeneratingNoticeId(null);

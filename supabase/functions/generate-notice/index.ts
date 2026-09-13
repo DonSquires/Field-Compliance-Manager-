@@ -6,14 +6,14 @@
  *   - notice_to_vacate  — Notice to Vacate (FCA 2011 s.32)
  *   - infringement      — Infringement Notice (FCA 2011 s.20, $200)
  *
- * Returns HTML suitable for browser print / PDF save.
+ * Returns HTML suitable for browser preview plus a stored PDF artifact.
  * Stores a record in the correct notice table:
  *   - notice_to_vacate  → notices_to_vacate
  *   - infringement       → infringement_notices
  *   - written_warning    → breach_alerts update only (no separate table)
  *
- * Stores the generated HTML in Supabase Storage bucket `notice-artifacts`
- * and returns the storage path. True PDF generation is a future enhancement.
+ * Stores the generated HTML and PDF in Supabase Storage bucket `notice-artifacts`
+ * and returns the PDF storage path.
  *
  * Uses the org's active notice_templates row for template rendering when
  * available; falls back to hardcoded HTML if no template exists.
@@ -27,18 +27,49 @@
  *   authorized_by      — Name of authorising supervisor
  *
  * Output:
- *   { ok: true, html: string, notice_id: string, pdf_url: string }
+ *   { ok: true, html: string, notice_id: string, pdf_url: string, html_storage_path: string }
  *
  * Legal boundary:
  *   This function only generates a draft HTML document.
  *   No notice is formally issued until the admin prints and signs.
  *   The breach_alert action_type is updated to reflect the draft.
- */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+*/ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
+const PDF_RENDERER_VERSION = 'fcm-notice-pdf-lib-a4-v1';
+
+function htmlToLines(html) {
+  return html.replace(/<br\s*\/?><\/p>/gi, '\n').replace(/<\/(p|div|h1|h2|h3|li|tr|footer)>/gi, '\n').replace(/<li[^>]*>/gi, '- ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+
+async function buildNoticePdfBytes(html, title, noticeNumber) {
+  const pdf = await PDFDocument.create();
+  const normal = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const lines = htmlToLines(html);
+  let page = pdf.addPage([595, 842]);
+  let y = 780;
+  const drawLine = (text, font = normal, size = 10) => {
+    if (y < 64) {
+      page = pdf.addPage([595, 842]);
+      y = 780;
+    }
+    page.drawText(text.slice(0, 115), { x: 54, y, size, font, color: rgb(0.08, 0.08, 0.08) });
+    y -= size + 6;
+  };
+  drawLine(title, bold, 17);
+  drawLine(`Notice number: ${noticeNumber}`, normal, 9);
+  drawLine(`Generated ${new Date().toISOString()}`, normal, 9);
+  page.drawLine({ start: { x: 54, y: y + 2 }, end: { x: 541, y: y + 2 }, thickness: 1.5, color: rgb(0.18, 0.18, 0.18) });
+  y -= 14;
+  for (const line of lines) drawLine(line);
+  drawLine('This PDF is a generated notice artifact. The notice remains subject to the recorded signature and issue workflow.', normal, 8);
+  return pdf.save();
+}
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: corsHeaders
@@ -224,24 +255,25 @@ serve(async (req)=>{
       noticeId = infRecord?.id ?? null;
     }
     // written_warning: no separate notice table — breach_alerts update only
-    // Bug E fix: store generated HTML in Supabase Storage bucket notice-artifacts.
-    // True PDF generation (Puppeteer) is a future enhancement — for now store HTML.
+    // Store both the source HTML and a real PDF artifact. The HTML remains useful
+    // for browser preview, while pdf_url points to the stable printable artifact.
     let pdfUrl = null;
     const storageId = noticeId ?? alert.id;
-    const storagePath = `org/${alert.organization_id}/notices/${storageId}.html`;
-    const htmlBlob = new Blob([
-      html
-    ], {
-      type: 'text/html'
-    });
-    const { error: uploadErr } = await supabase.storage.from('notice-artifacts').upload(storagePath, htmlBlob, {
+    const htmlPath = `org/${alert.organization_id}/notices/${storageId}.html`;
+    const pdfPath = `org/${alert.organization_id}/notices/${storageId}.pdf`;
+    const pdfBytes = await buildNoticePdfBytes(html, `${orgName} — ${noticeData.noticeType.replace(/_/g, ' ')}`, noticeNumber);
+    const { error: htmlUploadErr } = await supabase.storage.from('notice-artifacts').upload(htmlPath, new Blob([html], { type: 'text/html' }), {
       contentType: 'text/html',
       upsert: true
     });
-    if (uploadErr) {
-      console.error('Storage upload error:', uploadErr.message);
+    const { error: pdfUploadErr } = await supabase.storage.from('notice-artifacts').upload(pdfPath, new Blob([pdfBytes], { type: 'application/pdf' }), {
+      contentType: 'application/pdf',
+      upsert: true
+    });
+    if (htmlUploadErr || pdfUploadErr) {
+      console.error('Notice artifact upload error:', htmlUploadErr?.message ?? pdfUploadErr?.message);
     } else {
-      pdfUrl = storagePath;
+      pdfUrl = pdfPath;
       // Update the notice row with the storage path
       if (notice_type === 'notice_to_vacate' && noticeId) {
         await supabase.from('notices_to_vacate').update({
@@ -264,7 +296,9 @@ serve(async (req)=>{
       ok: true,
       html,
       notice_id: noticeId,
-      pdf_url: pdfUrl
+      pdf_url: pdfUrl,
+      html_storage_path: htmlPath,
+      pdf_renderer_version: PDF_RENDERER_VERSION
     }), {
       headers: {
         ...corsHeaders,

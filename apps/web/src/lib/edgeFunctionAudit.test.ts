@@ -26,6 +26,10 @@ const processOfficerScanSource = readFileSync(
   resolve(process.cwd(), '../../supabase/functions/process-officer-scan/index.ts'),
   'utf8',
 );
+const generateNoticeSource = readFileSync(
+  resolve(process.cwd(), '../../supabase/functions/generate-notice/index.ts'),
+  'utf8',
+);
 const photoEvidenceFunctionSources = [
   processOfficerScanSource,
   readFileSync(resolve(process.cwd(), '../../supabase/functions/capture-environmental-evidence/index.ts'), 'utf8'),
@@ -138,6 +142,15 @@ describe('Edge Function Schema Audit', () => {
       });
 
       expect(schemaStatuses).toContain(updateStatus);
+    });
+
+    it('generate-notice stores a real PDF artifact and preserves HTML preview', () => {
+      expect(generateNoticeSource).toContain("pdf-lib@1.17.1");
+      expect(generateNoticeSource).toContain("type: 'application/pdf'");
+      expect(generateNoticeSource).toContain('buildNoticePdfBytes');
+      expect(generateNoticeSource).toContain('html_storage_path');
+      expect(generateNoticeSource).toContain('.pdf`');
+      expect(generateNoticeSource).not.toContain('True PDF generation (Puppeteer) is a future enhancement');
     });
 
     it('parking breach alerts leave observation_id null without an observations record', () => {
