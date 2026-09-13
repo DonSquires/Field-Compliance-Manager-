@@ -57,6 +57,30 @@ For environmental and compliance modules (`biosecurity`, `noise_control`, `smoke
 
 ## 3. Detailed Module Specifications Summary
 
+### 3.0 Standalone Module Application Contract
+
+Every specialty module is an independently addressable application surface
+inside the main FCM build. The standalone entry point is `/modules/<module_key>`
+and is backed by the shared `ModuleShell`; the integrated field entry remains
+available through the officer portal. These are two views of the same governed
+module, not two separate data systems.
+
+Each standalone module must provide:
+
+- Its own workflow page, module identity, loading state, and entitlement gate.
+- Shared authentication, organization scope, welfare/SOS safety, GPS context,
+	Bob context, audit, evidence, and Conductor-governed writes.
+- A canonical module key and standalone path in the frontend specialty-module
+	manifest, plus an explicit integrated alias where legacy routes differ.
+- No direct writes to another specialty module's tables or client-side
+	interpretation of another module's rules.
+- A return path to the integrated field portal and an entitlement-aware switcher
+	only for modules enabled for the current organization.
+
+The standalone boundary is an application boundary, not a tenancy boundary:
+Atlas, Oracle, Caddie, Conductor, identity, agreements, places, shifts,
+evidence, notifications, and audit remain shared platform systems.
+
 ### A. Freedom Camping (`freedom_camping`)
 - **Modes:** Standalone Mode (minimal `/scan` interface for scan operators) vs. Integrated Mode (full shifts, credentials, welfare, dispatch).
 - **Overnight Verification:** Requires evening scan (pre-midnight) + morning scan (post-midnight) at same site/zone $\rightarrow$ `vehicle_overnight_sessions`.
