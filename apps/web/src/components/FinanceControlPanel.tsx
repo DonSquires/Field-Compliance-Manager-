@@ -29,12 +29,19 @@ export function FinanceControlPanel() {
   const [taxStart, setTaxStart] = useState('2026-09-01');
   const [taxEnd, setTaxEnd] = useState('2026-09-30');
   const [taxDue, setTaxDue] = useState('2026-10-28');
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setError('Organisation access could not be confirmed. Finance controls are unavailable.');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
     const [periodResponse, taxResponse, agreementResponse, shiftResponse] = await Promise.all([
       supabase.from('finance_pl_periods').select('id,name,status').eq('organization_id', profile.organizationId).in('status', ['draft', 'locked']).order('period_end', { ascending: false }),
       supabase.from('finance_tax_periods').select('id,period_start,period_end,status,net_tax_due').eq('organization_id', profile.organizationId).in('status', ['open', 'prepared']).order('period_end', { ascending: false }),
@@ -50,6 +57,7 @@ export function FinanceControlPanel() {
       setPeriods(nextPeriods); setTaxPeriods(nextTaxPeriods); setAgreements(nextAgreements); setShifts(nextShifts);
       setPeriodId((current) => current || nextPeriods[0]?.id || ''); setTaxPeriodId((current) => current || nextTaxPeriods[0]?.id || ''); setAgreementId((current) => current || nextAgreements[0]?.id || '');
     }
+    setLoading(false);
   }, [profile?.organizationId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -88,6 +96,9 @@ export function FinanceControlPanel() {
   };
 
   const labourNeedsShift = costType === 'labour' && shifts.length > 0 && !selectedShiftId;
+
+  if (loading) return <section className="finance-control-panel" aria-busy="true"><header><LockKeyhole size={18} /><div><p>Governed internal controls</p><h2 id="finance-control-heading">Finance control centre</h2><span>Record costs, prepare tax figures, and close a P&L period. No bank or IRD connection is used here.</span></div></header><p className="finance-control-message is-loading">Loading finance controls...</p></section>;
+  if (error && !profile?.organizationId) return <section className="finance-control-panel" aria-labelledby="finance-control-heading"><header><LockKeyhole size={18} /><div><p>Governed internal controls</p><h2 id="finance-control-heading">Finance control centre</h2><span>Record costs, prepare tax figures, and close a P&L period. No bank or IRD connection is used here.</span></div></header><p className="finance-control-message is-error" role="alert"><CircleAlert size={14} />{error}</p></section>;
 
   return <section className="finance-control-panel" aria-labelledby="finance-control-heading">
     <header><LockKeyhole size={18} /><div><p>Governed internal controls</p><h2 id="finance-control-heading">Finance control centre</h2><span>Record costs, prepare tax figures, and close a P&L period. No bank or IRD connection is used here.</span></div></header>

@@ -15,6 +15,7 @@ const financeRoles = new Set(['grand_master', 'master', 'admin', 'admin_officer'
 
 export function FinanceApplyWorkspace() {
   const { profile } = useAuth();
+  const [loading, setLoading] = useState(false);
   const [reference, setReference] = useState(`finance-review:${new Date().toISOString().slice(0, 7)}`);
   const [application, setApplication] = useState<ApplyApplication | null>(null);
   const [sharingRequest, setSharingRequest] = useState<ApplySharingRequest | null>(null);
@@ -32,8 +33,24 @@ export function FinanceApplyWorkspace() {
   const canManage = Boolean(profile?.organizationId && financeRoles.has(profile.role));
 
   useEffect(() => {
-    if (!profile?.organizationId || !canManage) return;
-    void supabase.from('finance_external_connection_requests').select('id,bank_account_id,status,provider_name').eq('organization_id', profile.organizationId).eq('provider_type', 'bank').not('bank_account_id', 'is', null).in('status', ['connected', 'needs_review']).order('updated_at', { ascending: false }).then(({ data }) => setBankDestinations((data as BankDestination[]) ?? []));
+    if (!profile?.organizationId) {
+      setError('Organisation access could not be confirmed. Finance Apply is unavailable.');
+      setLoading(false);
+      return;
+    }
+    if (!canManage) {
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    void (async () => {
+      const { data, error: queryError } = await supabase.from('finance_external_connection_requests').select('id,bank_account_id,status,provider_name').eq('organization_id', profile.organizationId).eq('provider_type', 'bank').not('bank_account_id', 'is', null).in('status', ['connected', 'needs_review']).order('updated_at', { ascending: false });
+      if (queryError) setError(queryError.message);
+      else setBankDestinations((data as BankDestination[]) ?? []);
+      setLoading(false);
+    })();
   }, [canManage, profile?.organizationId]);
 
   const createApplication = async () => {
@@ -104,7 +121,9 @@ export function FinanceApplyWorkspace() {
     setSaving(false);
   };
 
+  if (!profile?.organizationId) return <section className="finance-apply-workspace" aria-labelledby="finance-apply-heading"><header><FileText size={18} /><div><p className="finance-apply-eyebrow">Statement collection</p><h2 id="finance-apply-heading">Akahu Apply</h2><p>{error ?? 'Organisation access could not be confirmed. Finance Apply is unavailable.'}</p></div></header></section>;
   if (!canManage) return <section className="finance-apply-workspace" aria-labelledby="finance-apply-heading"><header><FileText size={18} /><div><p className="finance-apply-eyebrow">Statement collection</p><h2 id="finance-apply-heading">Akahu Apply</h2><p>Finance administrator access is required to prepare an Apply case.</p></div></header></section>;
+  if (loading) return <section className="finance-apply-workspace" aria-busy="true"><header><FileText size={18} /><div><p className="finance-apply-eyebrow">Statement collection</p><h2 id="finance-apply-heading">Akahu Apply case</h2><p>Loading Apply finance workspace...</p></div></header></section>;
 
   return <section className="finance-apply-workspace" aria-labelledby="finance-apply-heading">
     <header><FileText size={18} /><div><p className="finance-apply-eyebrow">Statement collection</p><h2 id="finance-apply-heading">Akahu Apply case</h2><p>Collect bank statements or open-banking data in a separate provider window for review. FCM never asks for bank credentials.</p></div></header>
