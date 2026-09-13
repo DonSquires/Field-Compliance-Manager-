@@ -10,6 +10,19 @@
   margin: 0 0 12px;
 }
 
+.place-context-banner.is-resolved {
+  border-color: #7bb9a6;
+  background: #eefaf5;
+  color: #184b3d;
+}
+
+.place-context-banner.is-locating,
+.place-context-banner.is-idle {
+  border-color: #aab8c5;
+  background: #f4f7fa;
+  color: #304454;
+}
+
 .place-context-banner > svg {
   flex: 0 0 auto;
   margin-top: 2px;
