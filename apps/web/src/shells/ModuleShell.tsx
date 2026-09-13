@@ -16,6 +16,10 @@ const OfficerNoiseControlPage = React.lazy(() => import('../pages/OfficerNoiseCo
 const OfficerBiosecurityPage = React.lazy(() => import('../pages/OfficerBiosecurityPage'));
 const SmokeControlPage = React.lazy(() => import('../pages/modules/SmokeControlPage'));
 const OfficerStaticGuardPage = React.lazy(() => import('../pages/OfficerStaticGuardPage'));
+const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
+const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightPage'));
+const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
+const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
 
 function getGps() {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return Promise.resolve(null);
@@ -28,12 +32,12 @@ function getGps() {
   });
 }
 
-function renderModule(moduleKey: string) {
+function renderModule(moduleKey: string, adminView: boolean) {
   switch (moduleKey) {
-    case 'freedom_camping': return <OfficerFreedomCampingPage />;
-    case 'parking_enforcement': return <OfficerParkingPage />;
-    case 'noise_control': return <OfficerNoiseControlPage />;
-    case 'biosecurity': return <OfficerBiosecurityPage />;
+    case 'freedom_camping': return adminView ? <BreachReviewPage /> : <OfficerFreedomCampingPage />;
+    case 'parking_enforcement': return adminView ? <ParkingOversightPage /> : <OfficerParkingPage />;
+    case 'noise_control': return adminView ? <NoiseControlOversightPage /> : <OfficerNoiseControlPage />;
+    case 'biosecurity': return adminView ? <BiosecurityOversightPage /> : <OfficerBiosecurityPage />;
     case 'smoke_complaints':
     case 'smoke_control': return <SmokeControlPage />;
     case 'static_guarding': return <OfficerStaticGuardPage />;
@@ -55,6 +59,7 @@ export function ModuleShell() {
     getGps,
   });
   const [bobOpen, setBobOpen] = useState(false);
+  const adminView = ['grand_master', 'master', 'admin', 'admin_officer'].includes(profile?.role ?? '');
   const canonicalKey = moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey;
   const moduleDefinition = SPECIALTY_MODULE_BY_KEY[canonicalKey as SpecialtyModuleKey];
   const label = moduleDefinition?.label;
@@ -96,7 +101,7 @@ export function ModuleShell() {
       </header>
       <main className="module-shell-content">
         <React.Suspense fallback={<div className="module-shell-loading">Loading module...</div>}>
-          {renderModule(moduleKey)}
+          {renderModule(canonicalKey, adminView)}
         </React.Suspense>
       </main>
       <BobPanel open={bobOpen} onClose={() => setBobOpen(false)} context={bobContext} />

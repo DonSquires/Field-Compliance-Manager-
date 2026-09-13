@@ -95,7 +95,8 @@ export function RoleRouter() {
   }
 
   const path = location.pathname;
-  const standaloneModulePath = (role === 'officer' || (role === 'admin_officer' && portalChoice === 'field')) && path.startsWith('/modules/');
+  const standaloneModulePath = ['officer', 'grand_master', 'master', 'admin', 'admin_officer'].includes(role)
+    && path.startsWith('/modules/');
   if (!standaloneModulePath && !isWithinRolePrefix(path, expectedPrefix)) {
     return <Navigate to={expectedPrefix} replace />;
   }

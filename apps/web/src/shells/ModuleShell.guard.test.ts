@@ -13,6 +13,8 @@ describe('standalone module shell contract', () => {
     expect(shell).toContain("case 'parking_enforcement'");
     expect(shell).toContain("case 'noise_control'");
     expect(shell).toContain("case 'biosecurity'");
+    expect(shell).toContain('ParkingOversightPage');
+    expect(shell).toContain('adminView');
     expect(shell).toContain('useEnabledModules');
     expect(shell).toContain('BobPanel');
     expect(shell).toContain("status !== 'loading'");
