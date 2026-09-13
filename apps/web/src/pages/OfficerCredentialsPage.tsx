@@ -35,7 +35,12 @@ const OfficerCredentialsPage: React.FC = () => {
   // ATLAS READS: staff_credentials
   useEffect(() => {
     const load = async () => {
-      if (!profile?.id) return;
+      if (!profile?.id || !profile.organizationId) {
+        setCredentials([]);
+        setError('Organisation access could not be confirmed. Credentials are unavailable.');
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);
