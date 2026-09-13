@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 const page = readFileSync(resolve(process.cwd(), 'src/pages/OfficerLeavePage.tsx'), 'utf8');
 
 describe('officer leave submission', () => {
+  it('fails closed when officer organisation context is unavailable', () => {
+    expect(page).toContain("if (!profile?.id || !profile.organizationId) {");
+    expect(page).toContain("setError('Organisation access could not be confirmed. Leave requests are unavailable.');");
+    expect(page).toContain('setLoading(false);');
+  });
+
   it('uses a stable retry identity and self-owned RPC', () => {
     expect(page).toContain('eventIdRef.current');
     expect(page).toContain("supabase.rpc('submit_officer_leave_request'");

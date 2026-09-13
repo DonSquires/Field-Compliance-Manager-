@@ -37,7 +37,12 @@ const OfficerLeavePage: React.FC = () => {
 
   // ATLAS READS: leave_requests
   const loadRequests = useCallback(async () => {
-    if (!profile?.id) return;
+    if (!profile?.id || !profile.organizationId) {
+      setRequests([]);
+      setError('Organisation access could not be confirmed. Leave requests are unavailable.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
