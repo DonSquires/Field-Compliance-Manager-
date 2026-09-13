@@ -42,6 +42,9 @@ const ModuleSubscriptionsPage: React.FC = () => {
   const load = useCallback(async () => {
     const orgId = profile?.organizationId;
     if (!orgId) {
+      setEnabled(new Set());
+      setSubscriptions({});
+      setError('Organisation access could not be confirmed. Module subscriptions are unavailable.');
       setLoading(false);
       return;
     }

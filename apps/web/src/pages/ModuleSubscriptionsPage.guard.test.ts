@@ -17,6 +17,12 @@ describe('self-serve module subscription contract', () => {
     expect(page).not.toMatch(/\.from\('organization_modules'\)\.(insert|update|upsert)/);
   });
 
+  it('fails closed when organization scope is unavailable', () => {
+    expect(page).toContain('if (!orgId) {');
+    expect(page).toContain("setError('Organisation access could not be confirmed. Module subscriptions are unavailable.');");
+    expect(page).toContain('setLoading(false);');
+  });
+
   it('the RPC authorizes by org admin only, independent of organization_type', () => {
     expect(migration).toContain('is_admin_for_org(p_organization_id)');
     expect(migration).not.toContain("organization_type='branch'");
