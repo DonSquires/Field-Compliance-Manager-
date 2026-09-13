@@ -18,6 +18,7 @@ import {
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
 import { supabase } from '../lib/supabase';
 import { HelpInstructions } from '../components/HelpInstructions';
+import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import './ScanShell.css';
 
 interface ScanResult {
@@ -257,6 +258,7 @@ export function ScanShell() {
       </header>
 
       <main className="scan-shell-content">
+        <PlaceContextBanner />
         {entitlementLoading || relationships.loading ? (
           <div className="scan-shell-state"><RefreshCw size={22} className="is-spinning" /> Verifying standalone scan access</div>
         ) : entitlementError || relationships.error ? (

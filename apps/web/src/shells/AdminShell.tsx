@@ -60,6 +60,7 @@ import { BobPanel } from '../components/BobPanel';
 import { WorkflowRail } from '../components/WorkflowRail';
 import { OperatingSpineRibbon } from '../components/OperatingSpineRibbon';
 import { HelpInstructions } from '../components/HelpInstructions';
+import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
 import './AdminShell.css';
 
@@ -641,6 +642,7 @@ const AdminShell: React.FC = () => {
           </header>
 
           <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
+            <PlaceContextBanner />
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
             {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
             <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />
@@ -709,6 +711,7 @@ const AdminShell: React.FC = () => {
       )}
 
       <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
+        <PlaceContextBanner />
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
         {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
         <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />

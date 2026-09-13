@@ -54,6 +54,7 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { HelpInstructions } from '../components/HelpInstructions';
+import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import {
@@ -508,6 +509,7 @@ const OfficerShell: React.FC = () => {
       </header>
 
       <main data-app-content className="officer-shell-content">
+        <PlaceContextBanner />
         {safety.writeStatus === 'error' && safety.lastError && (
           <div role="alert" className="officer-shell-safety-error">
             Safety action not confirmed: {safety.lastError}

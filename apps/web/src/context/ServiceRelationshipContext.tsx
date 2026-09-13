@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
+import { resolveAddressForCoordinates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 
 export interface ServiceAgreementContextRow {
@@ -59,6 +60,11 @@ interface ServiceRelationshipContextValue {
   selectedAgreementZones: ServiceLocationZone[];
   loading: boolean;
   error: string | null;
+  locationStatus: 'idle' | 'locating' | 'resolved' | 'outside_geofence' | 'unavailable';
+  currentCoordinates: { lat: number; lng: number } | null;
+  currentAddress: string | null;
+  geofenceResolution: { resolutionStatus: string; siteId: string | null; zoneId: string | null } | null;
+  locationError: string | null;
   refetch: () => Promise<void>;
   selectAgreement: (agreementId: string | null) => void;
   selectSite: (siteId: string | null) => void;
@@ -79,6 +85,11 @@ const ServiceRelationshipContext = createContext<ServiceRelationshipContextValue
   selectedAgreementZones: [],
   loading: true,
   error: null,
+  locationStatus: 'idle',
+  currentCoordinates: null,
+  currentAddress: null,
+  geofenceResolution: null,
+  locationError: null,
   refetch: async () => undefined,
   selectAgreement: () => undefined,
   selectSite: () => undefined,
@@ -96,6 +107,12 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [locationStatus, setLocationStatus] = useState<ServiceRelationshipContextValue['locationStatus']>('idle');
+  const [currentCoordinates, setCurrentCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const [currentAddress, setCurrentAddress] = useState<string | null>(null);
+  const [geofenceResolution, setGeofenceResolution] = useState<ServiceRelationshipContextValue['geofenceResolution']>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const locationRequestRef = useRef(0);
 
   const refetch = useCallback(async () => {
     if (!profile?.organizationId) {
@@ -285,6 +302,76 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     [zones, selectedAgreementZoneIds]
   );
 
+  useEffect(() => {
+    const organizationId = profile?.organizationId;
+    if (!organizationId) {
+      setLocationStatus('idle');
+      setCurrentCoordinates(null);
+      setCurrentAddress(null);
+      setGeofenceResolution(null);
+      setLocationError(null);
+      return undefined;
+    }
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationStatus('unavailable');
+      setLocationError('This device does not provide location services.');
+      return undefined;
+    }
+
+    setLocationStatus('locating');
+    const watchId = navigator.geolocation.watchPosition(async (position) => {
+      const requestId = locationRequestRef.current + 1;
+      locationRequestRef.current = requestId;
+      const coordinates = { lat: position.coords.latitude, lng: position.coords.longitude };
+      setCurrentCoordinates(coordinates);
+      setLocationStatus('locating');
+      setLocationError(null);
+
+      try {
+        const [{ data, error: resolutionError }, address] = await Promise.all([
+          supabase.rpc('resolve_context_authorized', {
+            p_lat: coordinates.lat,
+            p_lng: coordinates.lng,
+            p_org_id: organizationId,
+            p_module_key: null,
+          }),
+          resolveAddressForCoordinates(coordinates.lat, coordinates.lng),
+        ]);
+        if (requestId !== locationRequestRef.current) return;
+        if (resolutionError) throw resolutionError;
+        const row = Array.isArray(data) ? data[0] : data;
+        const zoneId = row?.matched_zone_id ?? null;
+        const siteId = row?.site_id ?? null;
+        const matchedAgreementZone = zoneId && selectedAgreementZones.some((zone) => zone.id === zoneId);
+        const matchedAgreementSite = siteId && selectedAgreementSites.some((site) => site.id === siteId);
+        setCurrentAddress(address?.label ?? null);
+        setGeofenceResolution({ resolutionStatus: row?.resolution_status ?? 'outside_all_geofences', siteId, zoneId });
+        if (matchedAgreementZone) {
+          setSelectedZoneId(zoneId);
+          setSelectedSiteId(null);
+          setLocationStatus('resolved');
+        } else if (matchedAgreementSite) {
+          setSelectedSiteId(siteId);
+          setSelectedZoneId(null);
+          setLocationStatus('resolved');
+        } else {
+          setSelectedSiteId(null);
+          setSelectedZoneId(null);
+          setLocationStatus('outside_geofence');
+        }
+      } catch (locationLoadError) {
+        if (requestId !== locationRequestRef.current) return;
+        setLocationStatus('unavailable');
+        setLocationError(locationLoadError instanceof Error ? locationLoadError.message : 'Geofence location could not be resolved.');
+      }
+    }, (positionError) => {
+      setLocationStatus('unavailable');
+      setLocationError(positionError.message || 'Location permission was not granted.');
+    }, { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 });
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [profile?.organizationId, selectedAgreementSites, selectedAgreementZones]);
+
   const value = useMemo<ServiceRelationshipContextValue>(() => ({
     agreements,
     sites,
@@ -299,6 +386,11 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     selectedAgreementZones,
     loading,
     error,
+    locationStatus,
+    currentCoordinates,
+    currentAddress,
+    geofenceResolution,
+    locationError,
     refetch,
     selectAgreement: (agreementId) => {
       setSelectedAgreementId(agreementId);
@@ -316,7 +408,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       setSelectedZoneId(zoneId);
       if (zoneId) setSelectedSiteId(null);
     },
-  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, error, refetch]);
+  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, error, locationStatus, currentCoordinates, currentAddress, geofenceResolution, locationError, refetch]);
 
   return <ServiceRelationshipContext.Provider value={value}>{children}</ServiceRelationshipContext.Provider>;
 }

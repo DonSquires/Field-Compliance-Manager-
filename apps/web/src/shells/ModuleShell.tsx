@@ -8,6 +8,7 @@ import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
+import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import './ModuleShell.css';
 
@@ -109,6 +110,7 @@ export function ModuleShell() {
         </div>
       </header>
       <main className="module-shell-content">
+        <PlaceContextBanner />
         <React.Suspense fallback={<div className="module-shell-loading">Loading module...</div>}>
           {renderModule(canonicalKey, adminView)}
         </React.Suspense>

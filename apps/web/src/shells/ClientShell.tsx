@@ -9,6 +9,7 @@ import { ClientPortalPage as ClientPortalContent } from '../pages/ClientPortalPa
 import { getClientPortalPages, isClientPortalPage, type ClientPortalPage } from '../lib/clientPortalAccess';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import { HelpInstructions } from '../components/HelpInstructions';
+import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import './ClientShell.css';
 
 const NAVIGATION: Array<{ id: ClientPortalPage; label: string; icon: LucideIcon }> = [
@@ -121,6 +122,7 @@ export function ClientShell() {
           <span className="client-role-badge">{profile.role.replace('client_', '')}</span>
         </header>
         <main className="client-shell-content" data-app-content>
+          <PlaceContextBanner />
           <ClientPortalContent page={activePage} />
         </main>
       </div>

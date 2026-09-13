@@ -1,0 +1,32 @@
+.place-context-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border: 1px solid #d7a24a;
+  border-radius: 6px;
+  background: #fff8e8;
+  color: #4b3514;
+  margin: 0 0 12px;
+}
+
+.place-context-banner > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.place-context-banner div {
+  display: grid;
+  gap: 3px;
+}
+
+.place-context-banner span,
+.place-context-banner small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.place-context-banner small {
+  color: #6b521f;
+}
