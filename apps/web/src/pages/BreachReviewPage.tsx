@@ -72,6 +72,8 @@ const BreachReviewPage: React.FC = () => {
   const loadAlerts = useCallback(async () => {
     const orgId = profile?.organizationId;
     if (!orgId) {
+      setAlerts([]);
+      setError('Organisation access could not be confirmed. Breach review is unavailable.');
       setLoading(false);
       return;
     }

@@ -41,6 +41,7 @@ describe('governed breach outcome return', () => {
 
   it('clears loading state when organization scope is unavailable', () => {
     expect(page).toContain('if (!orgId) {');
+    expect(page).toContain("setError('Organisation access could not be confirmed. Breach review is unavailable.');");
     expect(page).toContain('setLoading(false);');
   });
 });
