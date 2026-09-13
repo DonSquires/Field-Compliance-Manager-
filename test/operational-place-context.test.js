@@ -10,6 +10,8 @@ const sources = {
   admin: fs.readFileSync(path.join(root, 'AdminHubPage.tsx'), 'utf8'),
   breachReview: fs.readFileSync(path.join(root, 'BreachReviewPage.tsx'), 'utf8'),
   parkingOversight: fs.readFileSync(path.join(root, 'ParkingOversightPage.tsx'), 'utf8'),
+  noiseOversight: fs.readFileSync(path.join(root, 'NoiseControlOversightPage.tsx'), 'utf8'),
+  biosecurityOversight: fs.readFileSync(path.join(root, 'BiosecurityOversightPage.tsx'), 'utf8'),
 };
 
 test('dispatch console resolves agreement zones before organization fallback', () => {
@@ -41,4 +43,16 @@ test('parking oversight resolves agreement zones before organization fallback', 
   assert.match(sources.parkingOversight, /useServiceRelationships/);
   assert.match(sources.parkingOversight, /selectedAgreementZones/);
   assert.match(sources.parkingOversight, /query\.in\('zone_id'/);
+});
+
+test('noise oversight resolves agreement sites before organization fallback', () => {
+  assert.match(sources.noiseOversight, /useServiceRelationships/);
+  assert.match(sources.noiseOversight, /selectedAgreementSites/);
+  assert.match(sources.noiseOversight, /query\.in\('site_id'/);
+});
+
+test('biosecurity oversight resolves agreement sites before organization fallback', () => {
+  assert.match(sources.biosecurityOversight, /useServiceRelationships/);
+  assert.match(sources.biosecurityOversight, /selectedAgreementSites/);
+  assert.match(sources.biosecurityOversight, /query\.in\('site_id'/);
 });

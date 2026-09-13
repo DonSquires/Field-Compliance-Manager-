@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './NoiseControlOversightPage.css';
@@ -29,6 +30,7 @@ type ReviewAction = 'acknowledge' | 'require_follow_up' | 'close';
 
 const NoiseControlOversightPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementSites } = useServiceRelationships();
   const [assessments, setAssessments] = useState<NoiseAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,10 +52,14 @@ const NoiseControlOversightPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const { data, error: err } = await supabase
+        let query = supabase
           .from('noise_assessments')
           .select('id, officer_name, decibel_reading, noise_source, prior_notice_count, action_taken, assessed_at, review_status, reviewed_at, review_notes, follow_up_required')
-          .eq('organization_id', orgId)
+          .eq('organization_id', orgId);
+        if (selectedAgreementSites.length > 0) {
+          query = query.in('site_id', selectedAgreementSites.map((site) => site.id));
+        }
+        const { data, error: err } = await query
           .order('assessed_at', { ascending: false })
           .limit(100);
 
@@ -64,7 +70,7 @@ const NoiseControlOversightPage: React.FC = () => {
       } finally {
         setLoading(false);
       }
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, selectedAgreementSites]);
 
   useEffect(() => { void load(); }, [load]);
 

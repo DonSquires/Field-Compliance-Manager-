@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -29,6 +30,7 @@ interface BiosecurityAssessment {
 
 const BiosecurityOversightPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementSites } = useServiceRelationships();
   const [assessments, setAssessments] = useState<BiosecurityAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,10 +49,14 @@ const BiosecurityOversightPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const { data, error: err } = await supabase
+        let query = supabase
           .from('biosecurity_assessments')
           .select('id, officer_name, species_name, density_estimate, action_taken, status, mpi_referral_number, assessed_at, location_name, protected_land_address, photo_url, evidence_state, review_state, review_notes')
-          .eq('organization_id', orgId)
+          .eq('organization_id', orgId);
+        if (selectedAgreementSites.length > 0) {
+          query = query.in('site_id', selectedAgreementSites.map((site) => site.id));
+        }
+        const { data, error: err } = await query
           .order('assessed_at', { ascending: false })
           .limit(100);
 
@@ -64,7 +70,7 @@ const BiosecurityOversightPage: React.FC = () => {
     };
 
     load();
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, selectedAgreementSites]);
 
   const reviewAssessment = async (assessment: BiosecurityAssessment, action: 'triage' | 'require_review' | 'close') => {
     if (!reviewNotes.trim()) {
