@@ -11,8 +11,8 @@ describe('client capability share UI wiring', () => {
     expect(dialog).toContain('CrmCapabilityShareInvites');
   });
 
-  it('sends scoped invites via the governed RPC, not a direct table write', () => {
-    expect(invites).toContain("supabase.rpc('invite_client_capability_share'");
+  it('sends scoped invites via the governed edge function, not a direct table write', () => {
+    expect(invites).toContain("supabase.functions.invoke('send-capability-share-invite'");
     expect(invites).not.toMatch(/\.from\('onboarding_invites'\)\.insert/);
   });
 });

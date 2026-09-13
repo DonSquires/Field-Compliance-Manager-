@@ -21,15 +21,18 @@ export function CrmCapabilityShareInvites({ agreementId }: { agreementId: string
 
   const send = async () => {
     setSending(true); setError(null); setSent(null);
-    const { data, error: inviteError } = await supabase.rpc('invite_client_capability_share', {
-      p_service_agreement_id: agreementId,
-      p_capability: capability,
-      p_email: email.trim(),
+    const { data, error: inviteError } = await supabase.functions.invoke('send-capability-share-invite', {
+      body: { service_agreement_id: agreementId, capability, email: email.trim() },
     });
-    if (inviteError || !data) setError(inviteError?.message ?? 'The invite could not be created.');
+    if (inviteError || !data?.invite) setError(inviteError?.message ?? data?.error ?? 'The invite could not be created.');
     else {
-      const invite = data as { token_hash: string; email: string; expires_at: string };
-      setSent({ capability, email: invite.email, token: invite.token_hash, expiresAt: invite.expires_at });
+      const invite = data.invite as { email: string; expires_at: string };
+      setSent({
+        capability,
+        email: invite.email,
+        token: data.email_sent ? '' : (data.accept_url as string),
+        expiresAt: invite.expires_at,
+      });
       setEmail('');
     }
     setSending(false);
@@ -38,7 +41,7 @@ export function CrmCapabilityShareInvites({ agreementId }: { agreementId: string
   return <section className="agreement-reporting" aria-label="Client capability sharing">
     <div className="agreement-section-heading"><div><h3>Client sharing</h3><p>Invite the client to see reporting or finance without accepting the whole operational agreement. The client accepts the invite independently to unlock only that capability.</p></div></div>
     {error && <div className="agreement-setup-message is-error" role="alert">{error}</div>}
-    {sent && <div className="agreement-setup-message is-success" role="status"><CheckCircle2 size={15} />Invite sent to {sent.email} for {sent.capability}. Share this link out-of-band: <code>{sent.token}</code> (expires {new Date(sent.expiresAt).toLocaleDateString('en-NZ')}).</div>}
+    {sent && <div className="agreement-setup-message is-success" role="status"><CheckCircle2 size={15} />{sent.token ? <>Invite created for {sent.email} ({sent.capability}). Email delivery is not configured — share this link manually: <code>{sent.token}</code></> : <>Invite emailed to {sent.email} for {sent.capability}.</>} (expires {new Date(sent.expiresAt).toLocaleDateString('en-NZ')}).</div>}
     <article>
       <div>
         <strong>Share a capability</strong>
