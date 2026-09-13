@@ -8,6 +8,7 @@ const projection = fs.readFileSync(path.resolve(__dirname, '../supabase/migratio
 const contextContract = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913137000_event_context_snapshot_contract.sql'), 'utf8');
 const contextHardening = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913137100_harden_event_context_snapshot_rpc.sql'), 'utf8');
 const governedWriter = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913139000_create_governed_location_event.sql'), 'utf8');
+const observationWriter = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913140000_observation_event_context_dual_write.sql'), 'utf8');
 
 test('location event writes enforce checkpoint parent consistency and Site XOR Zone', () => {
   assert.match(migration, /NEW\.client_site_id IS NOT NULL AND NEW\.zone_id IS NOT NULL/);
@@ -44,4 +45,12 @@ test('future event writers use the canonical event plus context transaction', ()
   assert.match(governedWriter, /INSERT INTO public\.location_events/);
   assert.match(governedWriter, /create_event_context_snapshot/);
   assert.match(governedWriter, /Location event organization access denied/);
+});
+
+test('observations dual-write canonically in one database transaction', () => {
+  assert.match(observationWriter, /AFTER INSERT ON public\.observations/);
+  assert.match(observationWriter, /INSERT INTO public\.location_events/);
+  assert.match(observationWriter, /INSERT INTO public\.event_context_snapshots/);
+  assert.match(observationWriter, /no_site_or_zone/);
+  assert.match(observationWriter, /DO NOTHING/);
 });
