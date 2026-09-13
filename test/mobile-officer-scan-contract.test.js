@@ -53,6 +53,11 @@ test('mobile module changes clear evidence context', () => {
   assert.match(screen, /setModuleKey\(key\); setPhotoUri\(null\); setPlateNumber\(''\); setResult\(null\)/);
 });
 
+test('mobile sign out attempts device token cleanup before ending the session', () => {
+  assert.match(screen, /await unregisterOfficerDeviceToken\(\)\.catch/);
+  assert.match(screen, /onPress=\{\(\) => void signOut\(\)\}/);
+});
+
 test('mobile scan queue preserves capture time and retry provenance', () => {
   assert.match(source, /captured_at: string/);
   assert.match(source, /offline_queued: true/);

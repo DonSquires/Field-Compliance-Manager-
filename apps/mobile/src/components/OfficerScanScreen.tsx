@@ -118,8 +118,13 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     await refreshQueue();
   };
 
+  const signOut = async () => {
+    await unregisterOfficerDeviceToken().catch(() => false);
+    onSignOut();
+  };
+
   return <SafeAreaView style={styles.screen}><ScrollView contentContainerStyle={styles.content}>
-    <View style={styles.header}><View><Text style={styles.eyebrow}>Field operations</Text><Text style={styles.title}>Officer console</Text></View><Pressable onPress={onSignOut} style={styles.secondary}><Text style={styles.secondaryText}>Sign out</Text></Pressable></View>
+    <View style={styles.header}><View><Text style={styles.eyebrow}>Field operations</Text><Text style={styles.title}>Officer console</Text></View><Pressable onPress={() => void signOut()} style={styles.secondary}><Text style={styles.secondaryText}>Sign out</Text></Pressable></View>
     <OfficerSafetyBar officerId={officerId} organizationId={organizationId} shiftId={shiftId} />
     <NotificationInbox organizationId={organizationId} userId={officerId} />
     <CollapsibleSection title="Shift &amp; dispatch" defaultOpen>
