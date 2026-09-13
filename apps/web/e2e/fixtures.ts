@@ -506,7 +506,7 @@ export async function installFreedomCampingFixtures(page: Page): Promise<void> {
 export async function signInAsAdmin(page: Page, destination = '/admin/field-ops?area=landing'): Promise<void> {
   await page.goto(destination);
   await page.getByLabel('Email address').fill(user.email);
-  await page.getByLabel('Password').fill('playwright-password');
+  await page.getByRole('textbox', { name: 'Password' }).fill('playwright-password');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden();
 }
