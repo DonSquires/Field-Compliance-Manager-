@@ -738,10 +738,17 @@ serve(async (req)=>{
       return json(response);
     };
     if (clientRequestId) {
-      const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_status, response').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
+      const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_status, response, created_at').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
       if (receiptLookupError) return json({ error: 'Scan request receipt could not be checked' }, 503);
       if (existingReceipt?.command_status === 'completed' && existingReceipt.response?.success === true) return json(existingReceipt.response);
-      if (existingReceipt) return json({ error: 'This scan request is already being processed', request_id: clientRequestId }, 409);
+      if (existingReceipt) {
+        const receiptAgeMs = Date.now() - new Date(existingReceipt.created_at).getTime();
+        if (existingReceipt.command_status !== 'processing' || !Number.isFinite(receiptAgeMs) || receiptAgeMs < 15 * 60 * 1000) {
+          return json({ error: 'This scan request is already being processed', request_id: clientRequestId }, 409);
+        }
+        const { error: staleReceiptError } = await supabase.from('officer_command_requests').delete().eq('request_id', clientRequestId).eq('actor_user_id', officerId);
+        if (staleReceiptError) return json({ error: 'Stale scan request receipt could not be recovered' }, 503);
+      }
       const { error: receiptInsertError } = await supabase.from('officer_command_requests').insert({
         request_id: clientRequestId,
         organization_id: orgId,
