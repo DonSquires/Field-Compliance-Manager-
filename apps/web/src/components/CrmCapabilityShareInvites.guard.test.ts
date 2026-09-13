@@ -21,4 +21,16 @@ describe('client capability share UI wiring', () => {
     expect(invites).toContain('Copy link');
     expect(invites).toContain('navigator.clipboard.writeText');
   });
+
+  it('keeps its message and heading styles in the stylesheet it imports', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/components/CrmAgreementReportingPanel.css'), 'utf8');
+    expect(invites).toContain("import './CrmAgreementReportingPanel.css';");
+    expect(invites).toContain('className="agreement-section-heading"');
+    expect(invites).toContain('className="agreement-setup-message is-error"');
+    expect(invites).toContain('className="agreement-setup-message is-success"');
+    expect(css).toContain('.agreement-section-heading');
+    expect(css).toContain('.agreement-setup-message');
+    expect(css).toContain('.agreement-setup-message.is-error');
+    expect(css).toContain('.agreement-setup-message.is-success');
+  });
 });
