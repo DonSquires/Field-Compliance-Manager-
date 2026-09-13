@@ -37,5 +37,8 @@ describe('governed noise review return', () => {
   it('clears loading state when organization scope is unavailable', () => {
     expect(admin).toContain('if (!orgId) {');
     expect(admin).toContain('setLoading(false);');
+    expect(officer).toContain("if (!profile?.id || !profile?.organizationId) {");
+    expect(officer).toContain("setError('Organisation access could not be confirmed. Noise assessments are unavailable.');");
+    expect(officer).toContain('setLoading(false);');
   });
 });

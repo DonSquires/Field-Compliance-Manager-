@@ -56,7 +56,12 @@ const OfficerNoiseControlPage: React.FC = () => {
 
   // ATLAS READS: noise_assessments
   const loadAssessments = useCallback(async () => {
-    if (!profile?.id) return;
+    if (!profile?.id || !profile?.organizationId) {
+      setAssessments([]);
+      setError('Organisation access could not be confirmed. Noise assessments are unavailable.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
