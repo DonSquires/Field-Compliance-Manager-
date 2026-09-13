@@ -4,7 +4,7 @@ import { CheckCircle2, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import LoginPage from './LoginPage';
-import './PublicDisputePage.css';
+import './AcceptCapabilityShareInvitePage.css';
 
 export default function AcceptCapabilityShareInvitePage() {
   const { token = '' } = useParams<{ token: string }>();
@@ -30,15 +30,15 @@ export default function AcceptCapabilityShareInvitePage() {
   if (!hasSession) return <LoginPage />;
 
   return (
-    <div className="dispute-page">
-      <div className="dispute-card">
+    <div className="accept-capability-share">
+      <div className="accept-capability-share-card">
         <h1>Accept shared access</h1>
         {status === 'accepted' ? (
-          <p role="status"><CheckCircle2 size={18} /> Access accepted{agreementName ? ` for ${agreementName}` : ''}. You can now view the shared information in your client portal.</p>
+          <div className="alert alert-success" role="status"><CheckCircle2 size={18} aria-hidden="true" /> Access accepted{agreementName ? ` for ${agreementName}` : ''}. You can now view the shared information in your client portal.</div>
         ) : (
           <>
             <p>A provider has invited you to view a specific shared capability (reporting or finance) without accepting a full operational agreement.</p>
-            {error && <p role="alert"><ShieldAlert size={18} /> {error}</p>}
+            {error && <div className="alert alert-error" role="alert"><ShieldAlert size={18} aria-hidden="true" /> {error}</div>}
             <button type="button" disabled={status === 'accepting' || !token} onClick={() => void accept()}>
               {status === 'accepting' ? 'Accepting…' : 'Accept shared access'}
             </button>

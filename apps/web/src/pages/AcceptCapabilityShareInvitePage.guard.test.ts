@@ -14,4 +14,10 @@ describe('capability share invite acceptance route', () => {
     expect(page).toContain('if (!hasSession) return <LoginPage />;');
     expect(page).toContain("supabase.rpc('accept_client_capability_share', { p_token: token }");
   });
+
+  it('imports a dedicated stylesheet with classes that actually exist, not a borrowed unmatched one', () => {
+    expect(page).toContain("import './AcceptCapabilityShareInvitePage.css';");
+    expect(page).toContain('className="accept-capability-share"');
+    expect(page).not.toContain('className="dispute-page"');
+  });
 });
