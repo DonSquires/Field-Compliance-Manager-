@@ -218,6 +218,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
 
   const loadJobs = useCallback(async () => {
     if (!profile?.organizationId) {
+      setJobs([]);
+      setError('Organisation access could not be confirmed. CCTV review is unavailable.');
       setLoading(false);
       return;
     }

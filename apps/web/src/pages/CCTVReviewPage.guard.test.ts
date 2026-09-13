@@ -28,6 +28,7 @@ describe('CCTV inference review', () => {
 
   it('clears loading state when organization scope is unavailable', () => {
     expect(source).toContain('if (!profile?.organizationId) {');
+    expect(source).toContain("setError('Organisation access could not be confirmed. CCTV review is unavailable.');");
     expect(source).toContain('setLoading(false);');
   });
 });
