@@ -46,6 +46,8 @@ that inventories every visible control and follows each safe button from a
 fresh route state. It writes Playwright screenshots, traces, HTML reports, and
 the command results into the job artifact directory. Write/destructive controls
 are recorded and skipped unless a governed test explicitly permits them.
+Set `BOB_WORKER_TIMEOUT_MS=3600000` for this profile; the full control walk is
+deliberately long and produces one observation artifact per visited control.
 
 For an approved live deployment check, use `BOB_WORKER_PROFILE=human-qa-live`.
 That profile enables Docker bridge networking only for the explicit live run;
