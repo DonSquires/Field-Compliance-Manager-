@@ -6,6 +6,12 @@ const page = readFileSync(resolve(process.cwd(), 'src/pages/ReportsHubPage.tsx')
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901001000_govern_report_pack_generation.sql'), 'utf8');
 
 describe('governed monthly report pack generation', () => {
+  it('fails closed when organisation context is unavailable', () => {
+    expect(page).toContain("if (!profile?.organizationId) {");
+    expect(page).toContain("setError('Organisation access could not be confirmed. Reports are unavailable.');");
+    expect(page).toContain('setLoading(false);');
+  });
+
   it('generates through the governed RPC and shows the resulting pack queue', () => {
     expect(page).toContain("rpc('generate_due_report_packs'");
     expect(page).toContain("from('monthly_report_packs')");

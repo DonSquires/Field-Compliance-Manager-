@@ -85,7 +85,11 @@ const ReportsHubPage: React.FC = () => {
 
   // ATLAS READS: breach_alerts, observations, monthly_report_packs
   const loadReports = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setError('Organisation access could not be confirmed. Reports are unavailable.');
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
