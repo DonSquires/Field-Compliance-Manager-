@@ -124,6 +124,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260913154000_global_canonical_identity_spine.sql',
   'supabase/migrations/20260913154100_backfill_canonical_place_projection_links.sql',
   'supabase/migrations/20260913154200_backfill_canonical_person_projection_links.sql',
+  'supabase/migrations/20260913154300_converge_operational_records_on_canonical_identity.sql',
   'supabase/migrations/20260905005900_govern_operating_branch_configuration.sql',
   'supabase/migrations/20260908100000_review_document_classification.sql',
   'supabase/migrations/20260908102000_document_promotion_proposals.sql',
