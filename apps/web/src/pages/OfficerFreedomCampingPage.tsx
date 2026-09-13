@@ -276,6 +276,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(undefined);
     setImageBase64(undefined);
+    setPlateNumber('');
     setCapturedAt(undefined);
     setSubmitError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -287,6 +288,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setPreparingImage(true);
     setSubmitError(null);
     setResult(null);
+    setPlateNumber('');
     try {
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
       setImagePreviewUrl(URL.createObjectURL(file));
