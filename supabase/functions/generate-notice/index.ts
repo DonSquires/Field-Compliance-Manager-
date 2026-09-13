@@ -93,6 +93,7 @@ serve(async (req)=>{
     });
     const body = await req.json();
     const { notice_type, breach_alert_id, officer_name, location_name, additional_notes, authorized_by, infringement_fee } = body;
+    const module_key = body.module_key ?? 'freedom_camping';
     if (!notice_type || !breach_alert_id) {
       return new Response(JSON.stringify({
         error: 'notice_type and breach_alert_id are required'
@@ -115,11 +116,21 @@ serve(async (req)=>{
         headers: corsHeaders
       });
     }
+    const { data: profile } = await supabase.from('user_profiles').select('role, organization_id').eq('id', user.id).single();
+    if (!profile || !['grand_master', 'master', 'admin', 'admin_officer', 'officer'].includes(String(profile.role))) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: corsHeaders });
+    }
+    if (String(profile.role) !== 'grand_master' && profile.organization_id !== alert.organization_id) {
+      return new Response(JSON.stringify({ error: 'Forbidden: breach alert belongs to another organization' }), { status: 403, headers: corsHeaders });
+    }
     // Load org details
     const { data: org } = await supabase.from('organizations').select('name, contact_email, contact_phone').eq('id', alert.organization_id).single();
     // Bug D fix: load the org's active notice_templates row for this notice type
     // instead of the non-existent crm_jurisdiction_configs table.
-    const { data: template } = await supabase.from('notice_templates').select('*').eq('organization_id', alert.organization_id).eq('notice_type', notice_type).eq('is_active', true).order('version', {
+    // module_key scoping: a single org can hold one active template per
+    // (module_key, notice_type) so freedom_camping and parking_enforcement
+    // (etc) never collide on shared wording.
+    const { data: template } = await supabase.from('notice_templates').select('*').eq('organization_id', alert.organization_id).eq('module_key', module_key).eq('notice_type', notice_type).eq('is_active', true).order('version', {
       ascending: false
     }).limit(1).maybeSingle();
     // Build notice data from template (if available) or hardcoded defaults
@@ -148,30 +159,16 @@ serve(async (req)=>{
     const objectionsAddress = template?.objections_address ?? '';
     const bylawRef = template?.bylaw_reference ?? template?.authorising_act ?? 'Freedom Camping Act 2011';
     const authorisingSection = template?.authorising_section ?? (notice_type === 'infringement' ? 's.20' : notice_type === 'notice_to_vacate' ? 's.32' : '');
-    // Bug B fix: use atomic sequential counter for infringement notice numbers
-    // instead of Math.random(). Uses select-then-update on infringement_notice_counters.
+    // Reserve infringement numbers atomically and scope counters by module.
     let noticeNumber = '';
     if (notice_type === 'infringement') {
-      const { data: counter } = await supabase.from('infringement_notice_counters').select('last_number, prefix').eq('organization_id', alert.organization_id).maybeSingle();
-      let seqNum;
-      if (counter) {
-        seqNum = counter.last_number + 1;
-        await supabase.from('infringement_notice_counters').update({
-          last_number: seqNum,
-          updated_at: new Date().toISOString()
-        }).eq('organization_id', alert.organization_id);
-        const prefix = counter.prefix ?? 'INF';
-        noticeNumber = `${prefix}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(seqNum).padStart(4, '0')}`;
-      } else {
-        // No counter row yet — create one
-        seqNum = 1;
-        await supabase.from('infringement_notice_counters').insert({
-          organization_id: alert.organization_id,
-          last_number: 1,
-          prefix: 'INF'
-        });
-        noticeNumber = `INF-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-0001`;
-      }
+      const { data: reservedNumber, error: numberError } = await supabase.rpc('reserve_infringement_notice_number', {
+        p_organization_id: alert.organization_id,
+        p_module_key: module_key,
+        p_prefix: 'INF',
+      });
+      if (numberError || !reservedNumber) return new Response(JSON.stringify({ error: numberError?.message ?? 'Notice number could not be reserved' }), { status: 409, headers: corsHeaders });
+      noticeNumber = reservedNumber;
     } else {
       // Non-infringement notices don't need sequential numbers
       noticeNumber = `${notice_type === 'notice_to_vacate' ? 'NTV' : 'WW'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${alert.id.slice(0, 6).toUpperCase()}`;
@@ -298,7 +295,24 @@ serve(async (req)=>{
       notice_id: noticeId,
       pdf_url: pdfUrl,
       html_storage_path: htmlPath,
-      pdf_renderer_version: PDF_RENDERER_VERSION
+      pdf_renderer_version: PDF_RENDERER_VERSION,
+      // Structured fields for narrow receipt-printer rendering (thermalReceipt.ts
+      // on the client) — avoids parsing the HTML shell to recover plate/amount/etc.
+      receipt: {
+        orgName,
+        noticeType: notice_type,
+        noticeNumber,
+        issuedAtIso: new Date().toISOString(),
+        subjectLabel: 'Plate',
+        subjectValue: plate,
+        locationLabel: zoneName,
+        officerName: noticeData.officerName,
+        legalBasis: [bylawRef, authorisingSection].filter(Boolean).join(' '),
+        fineAmount: notice_type === 'infringement' ? fineAmount : null,
+        dueDateIso: notice_type === 'notice_to_vacate' ? vacateBy.toISOString() : null,
+        notes: additional_notes ?? null,
+        footerText: template?.footer_text ?? null
+      }
     }), {
       headers: {
         ...corsHeaders,

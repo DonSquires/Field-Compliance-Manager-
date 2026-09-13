@@ -8,6 +8,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { NoticePrintActions } from '../components/NoticePrintActions';
+import type { NoticeReceiptData } from '../lib/thermalReceipt';
 import './PageStyles.css';
 
 interface ChalkRecord {
@@ -38,6 +40,8 @@ const ParkingOversightPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ParkingFilter>('all');
+  const [issuingId, setIssuingId] = useState<string | null>(null);
+  const [noticeReceipts, setNoticeReceipts] = useState<Record<string, NoticeReceiptData>>({});
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
@@ -66,6 +70,40 @@ const ParkingOversightPage: React.FC = () => {
   useEffect(() => {
     loadRecords();
   }, [loadRecords]);
+
+  const issueInfringement = async (record: ChalkRecord) => {
+    const legislativeText = window.prompt('Legislative basis for this infringement (e.g. bylaw clause or Land Transport Act reference):');
+    if (!legislativeText?.trim()) return;
+    const feeInput = window.prompt('Infringement amount in NZD:');
+    const infringementFee = feeInput ? Number(feeInput) : null;
+    if (infringementFee == null || Number.isNaN(infringementFee) || infringementFee <= 0) {
+      setError('A valid infringement amount is required.');
+      return;
+    }
+    setIssuingId(record.id);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string; pdf_url?: string; receipt?: NoticeReceiptData; error?: string }>('generate-parking-notice', {
+      body: {
+        chalk_record_id: record.id,
+        officer_name: profile?.displayName,
+        authorized_by: profile?.displayName,
+        legislative_text: legislativeText.trim(),
+        infringement_fee: infringementFee,
+      },
+    });
+    if (invokeError || !data?.html) {
+      setError(data?.error ?? invokeError?.message ?? 'The infringement notice could not be generated.');
+    } else {
+      if (data.receipt) setNoticeReceipts((current) => ({ ...current, [record.id]: data.receipt as NoticeReceiptData }));
+      if (data.pdf_url) {
+        const { data: signed, error: signedError } = await supabase.storage.from('notice-artifacts').createSignedUrl(data.pdf_url, 900);
+        if (signedError || !signed?.signedUrl) setError(signedError?.message ?? 'The notice PDF could not be opened.');
+        else window.open(signed.signedUrl, '_blank', 'noopener,noreferrer');
+      }
+      await loadRecords();
+    }
+    setIssuingId(null);
+  };
 
   const overdueCount = records.filter((record) => record.status === 'active' && new Date(record.return_by).getTime() < Date.now()).length;
   const reviewCount = records.filter((record) => record.status === 'active' && (record.movement_detected === null || record.bob_classification === 'review_required' || record.rego_status === 'expired' || record.wof_status === 'expired' || record.cof_status === 'expired')).length;
@@ -117,12 +155,13 @@ const ParkingOversightPage: React.FC = () => {
               <th>Return By</th>
               <th>Status</th>
               <th>Evidence</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {visibleRecords.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center">
+                <td colSpan={8} className="text-center">
                   No records
                 </td>
               </tr>
@@ -136,6 +175,10 @@ const ParkingOversightPage: React.FC = () => {
                   <td>{new Date(r.return_by).toLocaleString()}</td>
                   <td><span className={`status-badge status-${r.status}`}>{r.status}</span>{r.status === 'active' && new Date(r.return_by).getTime() < Date.now() && <small> · overdue</small>}</td>
                   <td><strong>{r.movement_detected === true ? 'Moved' : r.movement_detected === false ? 'Stationary' : 'Movement unconfirmed'}</strong><small>{r.bob_classification || 'No Bob classification'}{r.bob_confidence != null ? ` · ${Math.round(r.bob_confidence * 100)}%` : ''}</small><small>{r.effective_time_limit_minutes ? `${r.effective_time_limit_minutes} min limit` : 'Time limit unavailable'} · Rego {r.rego_status || 'unknown'} · WOF {r.wof_status || 'unknown'} · CoF {r.cof_status || 'unknown'}</small></td>
+                  <td>
+                    {!r.infringement_number && <button type="button" className="btn btn-sm btn-primary" disabled={issuingId === r.id} onClick={() => void issueInfringement(r)}>{issuingId === r.id ? 'Issuing…' : 'Issue infringement'}</button>}
+                    {noticeReceipts[r.id] && <NoticePrintActions receipt={noticeReceipts[r.id]} />}
+                  </td>
                 </tr>
               ))
             )}

@@ -1,6 +1,7 @@
 create table "public"."notice_templates" (
   "id"                       uuid                     not null default gen_random_uuid(),
   "organization_id"          uuid                     not null,
+  "module_key"               text                     not null default 'freedom_camping'::text,
   "notice_type"              text                     not null,
   "version"                  integer                  not null default 1,
   "is_active"                boolean                  not null default true,
@@ -26,7 +27,9 @@ create table "public"."notice_templates" (
   "updated_at"               timestamp with time zone not null default now(),
   constraint "notice_templates_notice_type_check"
     check ((notice_type = ANY (ARRAY['written_warning'::text, 'notice_to_vacate'::text, 'infringement'::text, 'end'::text, 'seizure'::text]))),
-  constraint "notice_templates_organization_id_notice_type_version_key" unique (organization_id, notice_type, version),
+  constraint "notice_templates_module_key_check"
+    check ((module_key = ANY (ARRAY['freedom_camping'::text, 'parking_enforcement'::text, 'noise_control'::text, 'smoke_complaints'::text, 'biosecurity'::text]))),
+  constraint "notice_templates_org_module_type_version_key" unique (organization_id, module_key, notice_type, version),
   constraint "notice_templates_pkey" primary key (id),
   constraint "notice_templates_organization_id_fkey" foreign key (organization_id) references public.organizations(id) on delete cascade,
   constraint "notice_templates_created_by_fkey" foreign key (created_by) references public.user_profiles(id)
@@ -35,7 +38,7 @@ create table "public"."notice_templates" (
 alter table "public"."notice_templates"
   enable row level security;
 
-create index idx_notice_templates_org_type_active on public.notice_templates using btree (organization_id, notice_type, is_active);
+create index idx_notice_templates_org_module_type_active on public.notice_templates using btree (organization_id, module_key, notice_type, is_active);
 
 create policy "bob_full_read" on "public"."notice_templates"
   for select

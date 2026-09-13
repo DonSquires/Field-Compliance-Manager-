@@ -12,6 +12,8 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { NoticePrintActions } from '../components/NoticePrintActions';
+import type { NoticeReceiptData } from '../lib/thermalReceipt';
 import './PageStyles.css';
 
 type ActionType =
@@ -64,6 +66,7 @@ const BreachReviewPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [generatingNoticeId, setGeneratingNoticeId] = useState<string | null>(null);
+  const [noticeReceipts, setNoticeReceipts] = useState<Record<string, NoticeReceiptData>>({});
 
   // ATLAS READS: breach_alerts, location_zones, observations
   const loadAlerts = useCallback(async () => {
@@ -158,7 +161,7 @@ const BreachReviewPage: React.FC = () => {
     if (!profile?.displayName || !alert.action_type) return;
     setGeneratingNoticeId(alert.id);
     setError(null);
-    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string; pdf_url?: string }>('generate-notice', {
+    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string; pdf_url?: string; receipt?: NoticeReceiptData }>('generate-notice', {
       body: {
         notice_type: alert.action_type,
         breach_alert_id: alert.id,
@@ -171,6 +174,7 @@ const BreachReviewPage: React.FC = () => {
     if (invokeError || !data?.html) {
       setError(invokeError?.message ?? 'The notice draft was not generated. Refresh and try again.');
     } else {
+      if (data.receipt) setNoticeReceipts((current) => ({ ...current, [alert.id]: data.receipt as NoticeReceiptData }));
       if (data.pdf_url) {
         const { data: signed, error: signedError } = await supabase.storage.from('notice-artifacts').createSignedUrl(data.pdf_url, 900);
         if (signedError || !signed?.signedUrl) setError(signedError?.message ?? 'The notice PDF could not be opened.');
@@ -449,6 +453,7 @@ const BreachReviewPage: React.FC = () => {
                         ✨ Bob: Draft document
                       </button>
                     </div>
+                    {noticeReceipts[alert.id] && <NoticePrintActions receipt={noticeReceipts[alert.id]} />}
                   </div>
                 )}
               </div>

@@ -14,7 +14,7 @@ describe('governed breach outcome return', () => {
   });
 
   it('generates supported notice drafts through the authenticated edge function', () => {
-    expect(page).toContain("functions.invoke<{ html?: string; pdf_url?: string }>('generate-notice'");
+    expect(page).toContain("functions.invoke<{ html?: string; pdf_url?: string; receipt?: NoticeReceiptData }>('generate-notice'");
     expect(page).toContain('breach_alert_id: alert.id');
     expect(page).toContain("['written_warning', 'notice_to_vacate', 'infringement']");
     expect(page).toContain("storage.from('notice-artifacts').createSignedUrl(data.pdf_url, 900)");
