@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, FileBarChart } from 'lucide-react';
+import { CheckCircle2, FileBarChart, Receipt } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import './CrmAgreementReportingPanel.css';
 
@@ -12,6 +12,7 @@ interface ReportingAgreement {
   invitation_status: string;
   client_portal_reports_enabled: boolean;
   monthly_report_template_code: string | null;
+  client_portal_finance_enabled: boolean;
 }
 
 interface ReportTemplate {
@@ -38,11 +39,14 @@ export function CrmAgreementReportingPanel({
   const [newTemplateCode, setNewTemplateCode] = useState('');
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateModule, setNewTemplateModule] = useState<string>(REPORT_MODULE_KEYS[0]);
+  const [financeEnabled, setFinanceEnabled] = useState(agreement.client_portal_finance_enabled);
+  const [savingFinance, setSavingFinance] = useState(false);
 
   useEffect(() => {
     setEnabled(agreement.client_portal_reports_enabled);
     setTemplateCode(agreement.monthly_report_template_code ?? '');
-  }, [agreement.client_portal_reports_enabled, agreement.monthly_report_template_code]);
+    setFinanceEnabled(agreement.client_portal_finance_enabled);
+  }, [agreement.client_portal_reports_enabled, agreement.monthly_report_template_code, agreement.client_portal_finance_enabled]);
 
   const save = async () => {
     setSaving(true); setError(null); setNotice(null);
@@ -79,6 +83,21 @@ export function CrmAgreementReportingPanel({
     setCreatingTemplate(false);
   };
 
+  const saveFinance = async () => {
+    setSavingFinance(true); setError(null); setNotice(null);
+    const { error: actionError } = await supabase.rpc('manage_crm_agreement_finance', {
+      p_agreement_id: agreement.id,
+      p_expected_invitation_status: agreement.invitation_status,
+      p_client_portal_finance_enabled: financeEnabled,
+    });
+    if (actionError) setError(actionError.message);
+    else {
+      setNotice(financeEnabled ? 'Client billing visibility enabled.' : 'Client billing visibility disabled for this agreement.');
+      await onSaved();
+    }
+    setSavingFinance(false);
+  };
+
   return <section className="agreement-reporting" aria-label="Reporting delivery">
     <div className="agreement-section-heading"><div><h3>Reporting delivery</h3><p>Decide whether this contract sends monthly client reports. Activation requires either a valid provider template or an explicit off setting.</p></div></div>
     {error && <div className="agreement-setup-message is-error" role="alert">{error}</div>}
@@ -103,5 +122,15 @@ export function CrmAgreementReportingPanel({
         <button type="button" disabled={creatingTemplate || !newTemplateCode.trim() || !newTemplateName.trim()} onClick={() => void createTemplate()}>{creatingTemplate ? 'Saving' : 'Save template'}</button>
       </div>
     </details>
+    <article>
+      <span className="agreement-site-icon"><Receipt size={17} /></span>
+      <div>
+        <strong>Client billing visibility</strong>
+        <span>{financeEnabled ? 'Enabled for the client portal' : 'Disabled by contract'}</span>
+        <small>Lets client portal users see invoices issued against this agreement.</small>
+      </div>
+      <label className="agreement-check"><input type="checkbox" checked={financeEnabled} onChange={(event) => setFinanceEnabled(event.target.checked)} /><span>Invoices</span></label>
+      <button type="button" disabled={savingFinance} onClick={() => void saveFinance()}>{savingFinance ? 'Saving' : 'Save billing visibility'}</button>
+    </article>
   </section>;
 }

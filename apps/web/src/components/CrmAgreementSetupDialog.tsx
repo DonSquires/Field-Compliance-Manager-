@@ -25,7 +25,7 @@ interface AgreementModule {
 }
 
 interface AgreementSetup {
-  agreement: { id: string; name: string; invitation_status: string; enabled_modules: string[]; client_portal_reports_enabled: boolean; monthly_report_template_code: string | null };
+  agreement: { id: string; name: string; invitation_status: string; enabled_modules: string[]; client_portal_reports_enabled: boolean; monthly_report_template_code: string | null; client_portal_finance_enabled: boolean };
   sites: AgreementSite[];
   zones: AgreementZone[];
   modules: AgreementModule[];

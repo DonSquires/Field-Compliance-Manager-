@@ -44,11 +44,24 @@ interface MonthlyReportPack {
   delivery_error: string | null;
 }
 
+interface ClientInvoice {
+  id: string;
+  invoice_number: string;
+  status: string;
+  total_amount: number | null;
+  currency: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  sent_at: string | null;
+  paid_at: string | null;
+}
+
 export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
   const { profile } = useAuth();
   const relationships = useServiceRelationships();
   const [observations, setObservations] = useState<ClientObservation[]>([]);
   const [reports, setReports] = useState<MonthlyReportPack[]>([]);
+  const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [recordsError, setRecordsError] = useState<string | null>(null);
 
@@ -56,12 +69,14 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
   const allowedPages = useMemo(() => getClientPortalPages(agreement ? {
     mode: agreement.client_portal_access_mode as 'transparency_only' | 'full_modules' | 'scan_only' | null,
     reportsEnabled: agreement.client_portal_reports_enabled,
+    financeEnabled: agreement.client_portal_finance_enabled,
   } : null), [agreement]);
 
   const loadRecords = useCallback(async () => {
     if (!profile?.organizationId || !agreement) {
       setObservations([]);
       setReports([]);
+      setInvoices([]);
       return;
     }
 
@@ -97,15 +112,27 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
             .limit(24)
         : Promise.resolve({ data: [], error: null });
 
-      const [observationResponse, reportResponse] = await Promise.all([observationPromise, reportPromise]);
+      const invoicePromise = allowedPages.has('finance')
+        ? supabase
+            .from('invoices')
+            .select('id, invoice_number, status, total_amount, currency, invoice_date, due_date, sent_at, paid_at')
+            .eq('service_agreement_id', agreement.id)
+            .order('invoice_date', { ascending: false })
+            .limit(24)
+        : Promise.resolve({ data: [], error: null });
+
+      const [observationResponse, reportResponse, invoiceResponse] = await Promise.all([observationPromise, reportPromise, invoicePromise]);
       if (observationResponse.error) throw observationResponse.error;
       if (reportResponse.error) throw reportResponse.error;
+      if (invoiceResponse.error) throw invoiceResponse.error;
       setObservations((observationResponse.data as ClientObservation[]) ?? []);
       setReports((reportResponse.data as MonthlyReportPack[]) ?? []);
+      setInvoices((invoiceResponse.data as ClientInvoice[]) ?? []);
     } catch (error) {
       setRecordsError(error instanceof Error ? error.message : 'Client records could not be loaded.');
       setObservations([]);
       setReports([]);
+      setInvoices([]);
     } finally {
       setLoadingRecords(false);
     }
@@ -263,6 +290,14 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
         </section>
       )}
 
+      {page === 'finance' && (
+        <section className="client-list-section">
+          {loadingRecords ? <div className="client-compact-state">Loading invoices</div> : invoices.length === 0 ? <div className="client-compact-state">No invoices are available for this agreement.</div> : (
+            <div className="client-report-list">{invoices.map((invoice) => <InvoiceRow invoice={invoice} key={invoice.id} />)}</div>
+          )}
+        </section>
+      )}
+
       {page === 'scan' && (
         <div className="client-page-state client-scan-state">
           <ScanLine size={28} aria-hidden="true" />
@@ -275,7 +310,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
 }
 
 function pageTitle(page: ClientPortalPage): string {
-  return { overview: 'Service overview', sites: 'Sites and zones', observations: 'Field observations', reports: 'Monthly reports', scan: 'Scan access' }[page];
+  return { overview: 'Service overview', sites: 'Sites and zones', observations: 'Field observations', reports: 'Monthly reports', finance: 'Invoices', scan: 'Scan access' }[page];
 }
 
 function pageDescription(page: ClientPortalPage): string {
@@ -284,6 +319,7 @@ function pageDescription(page: ClientPortalPage): string {
     sites: 'Locations included in the selected service agreement.',
     observations: 'Field evidence shared with your organisation.',
     reports: 'Generated reporting periods and delivery status.',
+    finance: 'Invoices issued against this service agreement.',
     scan: 'Standalone scan access for this service agreement.',
   }[page];
 }
@@ -328,4 +364,17 @@ function ReportRow({ report }: { report: MonthlyReportPack }) {
 
 function locationName(observation: ClientObservation, sites: Array<{ id: string; name: string }>, zones: Array<{ id: string; name: string }>): string {
   return sites.find((site) => site.id === observation.site_id)?.name ?? zones.find((zone) => zone.id === observation.zone_id)?.name ?? 'Location not named';
+}
+
+function InvoiceRow({ invoice }: { invoice: ClientInvoice }) {
+  const amount = invoice.total_amount == null ? '—' : `${invoice.currency ?? 'NZD'} ${Number(invoice.total_amount).toFixed(2)}`;
+  return (
+    <article className="client-report-row">
+      <span><CalendarRange size={19} /></span>
+      <div><strong>{invoice.invoice_number}</strong><small>{invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('en-NZ') : 'Date not set'}</small></div>
+      <div><strong>{amount}</strong><small>{invoice.due_date ? `Due ${new Date(invoice.due_date).toLocaleDateString('en-NZ')}` : 'No due date'}</small></div>
+      <div><strong>{invoice.status}</strong><small>{invoice.paid_at ? `Paid ${new Date(invoice.paid_at).toLocaleDateString('en-NZ')}` : invoice.sent_at ? `Sent ${new Date(invoice.sent_at).toLocaleDateString('en-NZ')}` : 'Not sent'}</small></div>
+      {invoice.status === 'paid' ? <CheckCircle2 size={18} className="is-success" /> : <AlertTriangle size={18} className={invoice.status === 'overdue' ? 'is-danger' : ''} />}
+    </article>
+  );
 }
