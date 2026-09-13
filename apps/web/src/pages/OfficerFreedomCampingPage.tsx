@@ -112,7 +112,14 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
-    if (!profile?.id || !profile.organizationId) return;
+    if (!profile?.id || !profile.organizationId) {
+      setObservations([]);
+      setZones([]);
+      setBreaches([]);
+      setHistoryError('Organisation access could not be confirmed. Recent scans are unavailable.');
+      setLoadingHistory(false);
+      return;
+    }
     try {
       setLoadingHistory(true);
       setHistoryError(null);

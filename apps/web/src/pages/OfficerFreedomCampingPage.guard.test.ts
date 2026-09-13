@@ -6,6 +6,12 @@ const source = readFileSync(resolve(process.cwd(), 'src/pages/OfficerFreedomCamp
 const scanFunction = readFileSync(resolve(process.cwd(), '../../supabase/functions/process-officer-scan/index.ts'), 'utf8');
 
 describe('Officer Freedom Camping interaction boundary', () => {
+  it('fails closed when officer organisation context is unavailable', () => {
+    expect(source).toContain("if (!profile?.id || !profile.organizationId) {");
+    expect(source).toContain("setHistoryError('Organisation access could not be confirmed. Recent scans are unavailable.');");
+    expect(source).toContain('setLoadingHistory(false);');
+  });
+
   it('routes new observations through the complete scan edge function', () => {
     expect(source).toContain("functions.invoke<OfficerScanResult>('process-officer-scan'");
     expect(source).not.toContain("rpc('calculate_vehicle_compliance'");
