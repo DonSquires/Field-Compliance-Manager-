@@ -115,7 +115,8 @@ export class HumanTestSession {
   async observe(label: string): Promise<void> {
     this.currentStep = label;
     const bodyText = compact(await this.page.locator('body').textContent(), 500);
-    const heading = compact(await this.page.locator('h1, h2, [role="heading"]').first().textContent());
+    const headingLocator = this.page.locator('h1, h2, [role="heading"]').first();
+    const heading = compact(await headingLocator.textContent({ timeout: 1000 }).catch(() => null));
     const buttons = await this.visibleLabels('button');
     const links = await this.visibleLabels('a');
     const fields = await this.page.locator('input:visible, textarea:visible, select:visible').count();
