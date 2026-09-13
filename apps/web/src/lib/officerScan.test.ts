@@ -70,4 +70,9 @@ describe('officer scan contract', () => {
     expect(shouldDropQueuedOfficerScan(scan)).toBe(true);
     expect(shouldDropQueuedOfficerScan({ ...scan, attempts: 3 })).toBe(false);
   });
+
+  it('classifies terminal server errors as non-network failures', () => {
+    expect(isNetworkFailure(new Error('plate_number is required'))).toBe(false);
+    expect(isNetworkFailure(new TypeError('Failed to fetch'))).toBe(true);
+  });
 });

@@ -61,3 +61,7 @@ test('mobile scan queue clearly distinguishes empty, pending, and synced states'
   assert.match(screen, /Your queue is clear/);
   assert.match(screen, /disabled=\{working \|\| queued === 0\}/);
 });
+
+test('mobile queue drops terminal server failures instead of retrying them', () => {
+  assert.match(source, /catch \(error\) \{\s*if \(!isNetworkFailure\(error\)\)/);
+});

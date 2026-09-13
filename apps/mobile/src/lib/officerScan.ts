@@ -111,7 +111,11 @@ export async function syncQueuedOfficerScans(): Promise<{ synced: number; pendin
     try {
       await submitOfficerScan({ ...item.payload, synced_at: new Date().toISOString() });
       synced += 1;
-    } catch {
+    } catch (error) {
+      if (!isNetworkFailure(error)) {
+        dropped += 1;
+        continue;
+      }
       const attempts = item.attempts + 1;
       // Drop rather than retry forever so a permanently-rejected scan cannot grow the queue unbounded.
       if (attempts >= MAX_UPLOAD_ATTEMPTS) dropped += 1;

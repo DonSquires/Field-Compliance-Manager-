@@ -233,7 +233,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
           body: { ...scan.body, synced_at: new Date().toISOString() },
         });
         if (error) {
-          if (shouldDropQueuedOfficerScan(scan)) {
+          if (!isNetworkFailure(error) || shouldDropQueuedOfficerScan(scan)) {
             await removeQueuedOfficerScan(scan.id);
             dropped += 1;
           } else {
