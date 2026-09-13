@@ -7,7 +7,7 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
-import { SPECIALTY_MODULE_BY_KEY, type SpecialtyModuleKey } from '../config/specialtyModules';
+import { SPECIALTY_MODULES, SPECIALTY_MODULE_BY_KEY, type SpecialtyModuleKey } from '../config/specialtyModules';
 import './ModuleShell.css';
 
 const OfficerFreedomCampingPage = React.lazy(() => import('../pages/OfficerFreedomCampingPage'));
@@ -59,6 +59,7 @@ export function ModuleShell() {
   const moduleDefinition = SPECIALTY_MODULE_BY_KEY[canonicalKey as SpecialtyModuleKey];
   const label = moduleDefinition?.label;
   const allowed = status !== 'loading' && Boolean(moduleDefinition) && isModuleEnabled(canonicalKey);
+  const availableModules = SPECIALTY_MODULES.filter((module) => isModuleEnabled(module.key));
 
   useEffect(() => {
     if (status !== 'loading' && !allowed) navigate('/officer', { replace: true });
@@ -87,6 +88,7 @@ export function ModuleShell() {
         </button>
         <div className="module-shell-title"><span>Standalone module</span><strong>{label}</strong></div>
         <div className="module-shell-actions">
+          {availableModules.length > 1 && <label className="module-shell-switch"><span className="sr-only">Switch module</span><select value={moduleDefinition?.key ?? ''} onChange={(event) => navigate(`/modules/${event.target.value}`)} aria-label="Switch standalone module">{availableModules.map((module) => <option key={module.key} value={module.key}>{module.label}</option>)}</select></label>}
           <span className={`module-shell-safety ${safety.activeAlert ? 'is-alert' : ''}`}><ShieldCheck size={16} aria-hidden="true" />{safety.activeAlert ? 'Alert' : 'Safety'}</span>
           <button type="button" className="module-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob assistant" aria-label="Open Bob assistant"><Bot size={18} aria-hidden="true" /></button>
           <button type="button" className="module-shell-sos" onClick={() => void safety.triggerSOS()} disabled={safety.writeStatus === 'pending' || safety.activeAlert?.kind === 'sos'} title="Trigger SOS" aria-label="Trigger SOS"><Siren size={17} aria-hidden="true" /></button>

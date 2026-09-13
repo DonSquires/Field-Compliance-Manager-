@@ -18,6 +18,7 @@ describe('standalone module shell contract', () => {
     expect(shell).toContain("status !== 'loading'");
     expect(manifest).toContain('standalonePath');
     expect(manifest).toContain("key: 'freedom_camping'");
+    expect(shell).toContain('Switch standalone module');
   });
 
   it('exposes module URLs without bypassing role routing', () => {

@@ -6,6 +6,7 @@
 .module-shell-title span { color: #7dd3c7; font-size: 10px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
 .module-shell-title strong { color: #eff7fb; font-size: 15px; }
 .module-shell-actions { display: flex; align-items: center; justify-self: end; gap: 7px; }
+.module-shell-switch select { min-height: 32px; max-width: 150px; padding: 0 8px; border: 1px solid #315969; border-radius: 6px; color: #bcebcf; background: #10292a; font: inherit; font-size: 11px; font-weight: 800; }
 .module-shell-safety { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 8px; border: 1px solid #275f49; border-radius: 6px; color: #82d9b1; background: #0b281f; font-size: 11px; font-weight: 800; }
 .module-shell-safety.is-alert { border-color: #8f2e2e; color: #ff8d8d; background: #351a1a; }
 .module-shell-icon, .module-shell-sos { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; }
@@ -13,4 +14,4 @@
 .module-shell-sos:disabled { opacity: .5; cursor: not-allowed; }
 .module-shell-content { min-height: calc(100vh - 58px); }
 .module-shell-loading { display: grid; place-items: center; min-height: 50vh; color: var(--color-text-secondary); font-size: 13px; }
-@media (max-width: 620px) { .module-shell-header { grid-template-columns: auto 1fr auto; padding: 0 10px; } .module-shell-back span { display: none; } .module-shell-title { justify-items: start; } .module-shell-safety { display: none; } }
+@media (max-width: 620px) { .module-shell-header { grid-template-columns: auto 1fr auto; padding: 0 10px; } .module-shell-back span { display: none; } .module-shell-title { justify-items: start; } .module-shell-safety { display: none; } .module-shell-switch select { max-width: 112px; } }
