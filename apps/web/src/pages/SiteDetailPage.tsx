@@ -89,7 +89,13 @@ const SiteDetailPage: React.FC = () => {
   useEffect(() => {
     const loadSites = async () => {
       const orgId = profile?.organizationId;
-      if (!orgId) return;
+      if (!orgId) {
+        setSites([]);
+        setSelectedSite(null);
+        setError('Organisation access could not be confirmed. Site data is unavailable.');
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);
