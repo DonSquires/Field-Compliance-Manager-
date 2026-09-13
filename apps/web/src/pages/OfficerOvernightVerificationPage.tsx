@@ -33,7 +33,12 @@ const OfficerOvernightVerificationPage: React.FC = () => {
   // ATLAS READS: vehicle_overnight_sessions
   const load = useCallback(async () => {
       const orgId = profile?.organizationId;
-      if (!orgId) return;
+      if (!orgId) {
+        setSessions([]);
+        setError('Organisation access could not be confirmed. Overnight verification is unavailable.');
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);
