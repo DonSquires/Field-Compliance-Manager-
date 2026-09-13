@@ -514,7 +514,7 @@ export async function signInAsAdmin(page: Page, destination = '/admin/field-ops?
 export async function signInAsOfficer(page: Page, destination = '/officer/schedule'): Promise<void> {
   await page.goto(destination);
   await page.getByLabel('Email address').fill(officerUser.email);
-  await page.getByLabel('Password').fill('playwright-password');
+  await page.getByRole('textbox', { name: 'Password' }).fill('playwright-password');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden();
 }
