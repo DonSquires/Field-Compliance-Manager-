@@ -35,4 +35,10 @@ describe('officer debrief workspace', () => {
     expect(page).toContain('Admin follow-up');
     expect(page).toContain('officer-debrief-${debrief.id}');
   });
+  it('automatically prepares a Bob review draft from a newly submitted debrief', () => {
+    expect(page).toContain("supabase.functions.invoke('bob-agentic-document-draft'");
+    expect(page).toContain("sourceType: 'debrief'");
+    expect(page).toContain('sourceId: receipt.id');
+    expect(page).toContain('Debrief review draft created');
+  });
 });

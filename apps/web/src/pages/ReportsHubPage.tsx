@@ -55,6 +55,8 @@ interface MonthlyReportPack {
   status: string;
   generated_at: string | null;
   sent_at: string | null;
+  pdf_path: string | null;
+  pdf_sha256: string | null;
   agreement: Array<{ name: string }> | null;
 }
 
@@ -106,7 +108,7 @@ const ReportsHubPage: React.FC = () => {
           .order('observed_at', { ascending: false }),
         supabase
           .from('monthly_report_packs')
-          .select('id, template_code, period_start, period_end, status, generated_at, sent_at, agreement:service_agreement_id(name)')
+          .select('id, template_code, period_start, period_end, status, generated_at, sent_at, pdf_path, pdf_sha256, agreement:service_agreement_id(name)')
           .eq('organization_id', profile.organizationId)
           .gte('period_start', dateRange.start)
           .lte('period_end', dateRange.end)
@@ -149,6 +151,16 @@ const ReportsHubPage: React.FC = () => {
     const { error: sendError } = await supabase.functions.invoke('send-report-pack', { body: { pack_id: pack.id } });
     if (sendError) setError(sendError.message);
     else { setNotice(`Report pack for ${pack.period_start} to ${pack.period_end} sent to the client contact.`); await loadReports(); }
+    setSendingPackId(null);
+  };
+
+  const generateReportPackPdf = async (pack: MonthlyReportPack) => {
+    setSendingPackId(pack.id);
+    setError(null);
+    setNotice(null);
+    const { error: renderError } = await supabase.functions.invoke('generate-report-pack-pdf', { body: { pack_id: pack.id } });
+    if (renderError) setError(renderError.message);
+    else { setNotice(`PDF report pack for ${pack.period_start} to ${pack.period_end} is ready.`); await loadReports(); }
     setSendingPackId(null);
   };
 
@@ -244,9 +256,9 @@ const ReportsHubPage: React.FC = () => {
         <h2>Monthly Report Packs ({reportPacks.length})</h2>
         <div className="reports-table-wrapper">
           <table className="reports-table">
-            <thead><tr><th>Agreement</th><th>Period</th><th>Template</th><th>Status</th><th>Generated</th><th>Delivery</th></tr></thead>
+            <thead><tr><th>Agreement</th><th>Period</th><th>Template</th><th>Status</th><th>Generated</th><th>PDF</th><th>Delivery</th></tr></thead>
             <tbody>
-              {reportPacks.length === 0 ? <tr><td colSpan={6} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => <tr key={pack.id}><td>{pack.agreement?.[0]?.name ?? 'Service agreement'}</td><td>{pack.period_start} to {pack.period_end}</td><td>{pack.template_code}</td><td><span className={`status-badge status-${pack.status}`}>{pack.status}</span></td><td>{pack.generated_at ? new Date(pack.generated_at).toLocaleString() : '-'}</td><td>{pack.status === 'sent' ? (pack.sent_at ? `Sent ${new Date(pack.sent_at).toLocaleString()}` : 'Sent') : <button type="button" className="btn btn-sm btn-primary" onClick={() => void sendReportPack(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Sending...' : 'Send to client'}</button>}</td></tr>)}
+              {reportPacks.length === 0 ? <tr><td colSpan={7} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => <tr key={pack.id}><td>{pack.agreement?.[0]?.name ?? 'Service agreement'}</td><td>{pack.period_start} to {pack.period_end}</td><td>{pack.template_code}</td><td><span className={`status-badge status-${pack.status}`}>{pack.status}</span></td><td>{pack.generated_at ? new Date(pack.generated_at).toLocaleString() : '-'}</td><td>{pack.pdf_path ? 'Ready' : <button type="button" className="btn btn-sm btn-secondary" onClick={() => void generateReportPackPdf(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Rendering...' : 'Generate PDF'}</button>}</td><td>{pack.status === 'sent' ? (pack.sent_at ? `Sent ${new Date(pack.sent_at).toLocaleString()}` : 'Sent') : <button type="button" className="btn btn-sm btn-primary" onClick={() => void sendReportPack(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Sending...' : 'Send to client'}</button>}</td></tr>)}
             </tbody>
           </table>
         </div>

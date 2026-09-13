@@ -74,11 +74,23 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
       p_follow_up_required: followUp,
       p_follow_up_notes: followUp ? followUpNotes.trim() : null,
     });
-    if (submitError || !(data as Array<{ id: string }> | null)?.[0]) {
+    const receipt = (data as Array<{ id: string }> | null)?.[0];
+    if (submitError || !receipt) {
       setError(submitError?.message ?? 'Debrief receipt was not confirmed. Your entries remain available for retry.');
     } else {
       setCompletionShift(selectedShift?.status === 'in_progress' ? selectedShift : null);
-      setNotice(selectedShift?.status === 'in_progress' ? 'Debrief recorded. Complete the shift when all field work is finished.' : 'Debrief submitted with an auditable server receipt.');
+      try {
+        const { data: draftData, error: draftError } = await supabase.functions.invoke('bob-agentic-document-draft', {
+          body: { sourceType: 'debrief', sourceId: receipt.id },
+        });
+        if (draftError || !draftData?.ok) {
+          setNotice('Debrief submitted with an auditable server receipt. Bob review draft creation was skipped because the draft service was unavailable.');
+        } else {
+          setNotice(`Debrief review draft created: ${draftData.draft.title}. It has been submitted for human review.`);
+        }
+      } catch (draftError) {
+        setNotice('Debrief submitted with an auditable server receipt. Bob review draft creation was skipped because the draft service was unavailable.');
+      }
       setSummary(''); setSafetyIncident(false); setEquipmentIssue(false); setFollowUp(false); setFollowUpNotes('');
       eventIdRef.current = crypto.randomUUID();
       await loadDebriefData();
