@@ -80,8 +80,15 @@ begin
 
   v_matrix_total := coalesce(p_volume_score, 0) + coalesce(p_time_score, 1) + coalesce(p_tone_score, 0);
 
-  -- Fetch excessive threshold from org config if present
-  select n.excessive_threshold into v_threshold from public.noise_module_config n where n.organization_id = v_org_id;
+  -- Resolve the authoritative current/effective organization matrix row.
+  select n.excessive_threshold into v_threshold
+  from public.noise_module_config n
+  where n.organization_id = v_org_id
+    and n.is_current
+    and n.effective_from <= current_date
+    and (n.effective_to is null or n.effective_to >= current_date)
+  order by n.effective_from desc, n.version desc
+  limit 1;
   if v_threshold is null then v_threshold := 5; end if;
 
   v_excessive := (v_matrix_total >= v_threshold);
