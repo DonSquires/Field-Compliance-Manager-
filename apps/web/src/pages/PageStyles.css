@@ -621,6 +621,15 @@
   background: #dc2626;
 }
 
+.agreement-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--color-text-primary, #e2e8f0);
+  font-size: 13px;
+}
+
 .btn-sm {
   padding: 6px 10px;
   font-size: 12px;
