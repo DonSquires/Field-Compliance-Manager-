@@ -9,8 +9,9 @@ describe('supervisor welfare response workbench', () => {
   it('fails closed for welfare reads, subscriptions, and response controls until entitlement is confirmed', () => {
     expect(source).toContain("isModuleEnabled('welfare', { safetyRelevant: true })");
     expect(source).toContain('<SafetyGate');
-    expect(source).toContain('!profile?.organizationId || !welfareEnabled');
-    expect(source).toContain('if (!profile?.organizationId || !welfareEnabled) return;');
+    expect(source).toContain('!profile?.organizationId');
+    expect(source).toContain('if (!welfareEnabled)');
+    expect(source).toContain("setError('Organisation access could not be confirmed. Welfare alerts are unavailable.');");
   });
 
   it('loads tenant-scoped alerts and subscribes with the same tenant filter', () => {

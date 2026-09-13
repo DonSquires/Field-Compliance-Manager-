@@ -70,7 +70,13 @@ const WelfareAlertsPage: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const loadAlerts = useCallback(async () => {
-    if (!profile?.organizationId || !welfareEnabled) {
+    if (!profile?.organizationId) {
+      setAlerts([]);
+      setError('Organisation access could not be confirmed. Welfare alerts are unavailable.');
+      setLoading(false);
+      return;
+    }
+    if (!welfareEnabled) {
       setLoading(false);
       return;
     }
