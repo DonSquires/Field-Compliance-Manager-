@@ -7,7 +7,7 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
-import { SPECIALTY_MODULES, SPECIALTY_MODULE_BY_KEY, type SpecialtyModuleKey } from '../config/specialtyModules';
+import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import './ModuleShell.css';
 
 const OfficerFreedomCampingPage = React.lazy(() => import('../pages/OfficerFreedomCampingPage'));
@@ -61,8 +61,8 @@ export function ModuleShell() {
   const [bobOpen, setBobOpen] = useState(false);
   const adminView = ['grand_master', 'master', 'admin'].includes(profile?.role ?? '')
     || (profile?.role === 'admin_officer' && typeof sessionStorage !== 'undefined' && sessionStorage.getItem('fcm.admin_officer.portal') === 'admin');
-  const canonicalKey = moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey;
-  const moduleDefinition = SPECIALTY_MODULE_BY_KEY[canonicalKey as SpecialtyModuleKey];
+  const moduleDefinition = SPECIALTY_MODULES.find((module) => module.key === moduleKey || module.integratedKey === moduleKey);
+  const canonicalKey = moduleDefinition?.key ?? (moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey);
   const label = moduleDefinition?.label;
   const allowed = status !== 'loading' && Boolean(moduleDefinition) && isModuleEnabled(canonicalKey);
   const availableModules = SPECIALTY_MODULES.filter((module) => isModuleEnabled(module.key));
