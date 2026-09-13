@@ -200,7 +200,7 @@ const LiveMapPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, welfareEnabled]);
+  }, [profile?.organizationId, selectedAgreementZones, welfareEnabled]);
 
   useEffect(() => {
     void loadPositions();

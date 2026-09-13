@@ -79,10 +79,16 @@ const OfficerParkingPage: React.FC = () => {
 
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const [{ data, error: err }, { data: zoneData, error: zoneError }] = await Promise.all([
-        supabase
-        .from('parking_chalk_records')
-        .select('id, plate, chalked_at, return_by, status, location_name, notes')
-        .eq('officer_id', profile.id)
+        (activeZoneIds && activeZoneIds.length > 0
+          ? supabase
+              .from('parking_chalk_records')
+              .select('id, plate, chalked_at, return_by, status, location_name, notes')
+              .eq('officer_id', profile.id)
+              .in('zone_id', activeZoneIds)
+          : supabase
+              .from('parking_chalk_records')
+              .select('id, plate, chalked_at, return_by, status, location_name, notes')
+              .eq('officer_id', profile.id))
           .order('chalked_at', { ascending: false }),
         activeZoneIds && activeZoneIds.length > 0
           ? supabase.from('location_zones').select('id, name, address').in('id', activeZoneIds).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name')
