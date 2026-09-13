@@ -25,7 +25,7 @@ export type OfficerScanResult = {
   success?: boolean;
   observation_id?: string;
   plate_number: string;
-  compliance_status: 'compliant' | 'at_risk' | 'breach' | 'breach_exempt' | 'unknown';
+  compliance_status: 'compliant' | 'at_risk' | 'breach' | 'breach_exempt' | 'non_compliant' | 'unknown';
   compliance_reason: string | null;
   zone_name: string | null;
   breach_alert_id: string | null;

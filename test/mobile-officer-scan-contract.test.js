@@ -40,6 +40,10 @@ test('mobile scan accepts the shared success receipt for parking responses', () 
   assert.doesNotMatch(source, /if \(!data\?\.observation_id\)/);
 });
 
+test('mobile scan response type includes the parking non-compliant verdict', () => {
+  assert.match(source, /'non_compliant'/);
+});
+
 test('mobile scan clears active evidence after queueing or success', () => {
   assert.match(screen, /setPhotoUri\(null\);\s*setPlateNumber\(''\);/);
   assert.match(screen, /await queueOfficerScan\(payload\);\s*setPhotoUri\(null\);/);
