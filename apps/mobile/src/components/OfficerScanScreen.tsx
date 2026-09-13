@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   type OfficerScanPayload,
   type OfficerScanResult,
@@ -39,6 +39,7 @@ type Props = { onSignOut: () => void; officerId: string; organizationId: string 
 export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftId, shiftStatus }: Props) {
   const [moduleKey, setModuleKey] = useState<ScanModuleKey>('freedom_camping');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [plateNumber, setPlateNumber] = useState('');
   const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const [queued, setQueued] = useState(0);
   const [queueItems, setQueueItems] = useState<Awaited<ReturnType<typeof listQueuedOfficerScans>>>([]);
@@ -53,7 +54,14 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
   }, []);
 
   const setPhoto = async (source: () => Promise<string | null>) => {
-    try { const uri = await source(); if (uri) { setPhotoUri(uri); setResult(null); } } catch (error) { Alert.alert('Evidence unavailable', userFacingError(error, 'Vehicle evidence could not be captured.')); }
+    try {
+      const uri = await source();
+      if (uri) {
+        setPhotoUri(uri);
+        setPlateNumber('');
+        setResult(null);
+      }
+    } catch (error) { Alert.alert('Evidence unavailable', userFacingError(error, 'Vehicle evidence could not be captured.')); }
   };
 
   const locate = async () => {
@@ -69,7 +77,8 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     setWorking(true);
     setResult(null);
     try {
-      const payload: OfficerScanPayload = { image_base64: await imageUriToBase64(photoUri), gps_lat: coordinates.lat, gps_lng: coordinates.lng, module_key: moduleKey, captured_at: new Date().toISOString(), client_request_id: crypto.randomUUID() };
+      const normalizedPlate = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+      const payload: OfficerScanPayload = { ...(normalizedPlate ? { plate_number: normalizedPlate } : {}), image_base64: await imageUriToBase64(photoUri), gps_lat: coordinates.lat, gps_lng: coordinates.lng, module_key: moduleKey, captured_at: new Date().toISOString(), client_request_id: crypto.randomUUID() };
       try {
         setResult(await submitOfficerScan(payload));
         setPhotoUri(null);
@@ -122,6 +131,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     <CollapsibleSection title="Vehicle scan" defaultOpen>
       <View style={styles.moduleRow}>{(['freedom_camping', 'parking_enforcement'] as ScanModuleKey[]).map((key) => <Pressable key={key} onPress={() => { setModuleKey(key); setResult(null); }} style={[styles.module, moduleKey === key && styles.moduleActive]}><Text style={styles.moduleText}>{key === 'freedom_camping' ? 'Freedom camping' : 'Parking'}</Text></Pressable>)}</View>
       <View style={styles.photoPanel}>{photoUri ? <Image source={{ uri: photoUri }} style={styles.photo} /> : <Text style={styles.photoEmpty}>Capture a clear rear vehicle image with the plate visible.</Text>}<View style={styles.actionRow}><Pressable onPress={() => void setPhoto(captureVehiclePhoto)} style={styles.primary}><Text style={styles.primaryText}>Open camera</Text></Pressable><Pressable onPress={() => void setPhoto(chooseVehiclePhoto)} style={styles.secondary}><Text style={styles.secondaryText}>Choose photo</Text></Pressable></View></View>
+      <View style={{ gap: 8 }}><Text style={styles.label}>Plate · manual fallback</Text><TextInput value={plateNumber} onChangeText={setPlateNumber} placeholder="Use if ALPR cannot read" placeholderTextColor="#718197" autoCapitalize="characters" autoCorrect={false} style={{ minHeight: 46, borderWidth: 1, borderColor: '#30485b', borderRadius: 6, paddingHorizontal: 12, color: '#eef6f7', backgroundColor: '#0b1926' }} /></View>
       <View style={styles.location}><Text style={styles.label}>Location</Text><Text style={styles.detail}>{coordinates ? `${coordinates.lat.toFixed(5)}, ${coordinates.lng.toFixed(5)}` : 'No location captured'}</Text><Pressable onPress={() => void locate()} style={styles.secondary}><Text style={styles.secondaryText}>{coordinates ? 'Refresh GPS' : 'Capture GPS'}</Text></Pressable></View>
       <Pressable disabled={!photoUri || !coordinates || working} onPress={() => void submit()} style={[styles.submit, (!photoUri || !coordinates || working) && styles.disabled]}>{working ? <ActivityIndicator color="#04211e" /> : <Text style={styles.submitText}>Process scan</Text>}</Pressable>
       <View style={styles.queuePanel}><Pressable disabled={working || queued === 0} onPress={() => void sync()} style={[styles.queue, (working || queued === 0) && styles.disabled]}><Text style={styles.queueText}>{queued ? `Sync ${queued} queued scan${queued === 1 ? '' : 's'}` : 'No scans waiting to sync'}</Text></Pressable>{queued > 0 && <Pressable onPress={() => setShowQueue((current) => !current)} style={styles.queue}><Text style={styles.queueText}>{showQueue ? 'Hide queued scans' : 'Review queued scans'}</Text></Pressable>}{showQueue && <View style={styles.queueList}>{queueItems.map((item) => <View key={item.id} style={styles.queueItem}><View><Text style={styles.queueItemTitle}>{item.payload.module_key.replaceAll('_', ' ')}</Text><Text style={styles.detail}>Captured {new Date(item.payload.captured_at).toLocaleString('en-NZ')} · {item.attempts} retry attempt{item.attempts === 1 ? '' : 's'}</Text></View><Pressable onPress={() => void discardQueuedScan(item.id)} style={styles.discard}><Text style={styles.discardText}>Discard</Text></Pressable></View>)}</View>}</View>

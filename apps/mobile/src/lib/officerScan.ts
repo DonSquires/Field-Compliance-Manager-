@@ -10,6 +10,7 @@ const MAX_UPLOAD_ATTEMPTS = 5;
 export type ScanModuleKey = 'freedom_camping' | 'parking_enforcement';
 
 export type OfficerScanPayload = {
+  plate_number?: string;
   image_base64: string;
   gps_lat: number | null;
   gps_lng: number | null;

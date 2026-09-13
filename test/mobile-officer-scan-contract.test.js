@@ -28,6 +28,12 @@ test('governed scan retries use a durable request receipt', () => {
   assert.match(edgeFunction, /existingReceipt\.response\?\.success === true/);
 });
 
+test('mobile scanner exposes the manual plate fallback', () => {
+  assert.match(source, /plate_number\?: string/);
+  assert.match(screen, /manual fallback/);
+  assert.match(screen, /normalizedPlate/);
+});
+
 test('mobile scan queue preserves capture time and retry provenance', () => {
   assert.match(source, /captured_at: string/);
   assert.match(source, /offline_queued: true/);
