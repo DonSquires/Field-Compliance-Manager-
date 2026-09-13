@@ -7,6 +7,12 @@ const home = readFileSync(resolve(process.cwd(), 'src/pages/OfficerHomePage.tsx'
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx'), 'utf8');
 
 describe('officer schedule workspace', () => {
+  it('fails closed when officer organisation context is unavailable', () => {
+    expect(page).toContain("if (!profile?.id || !profile.organizationId) {");
+    expect(page).toContain("setError('Organisation access could not be confirmed. Schedule data is unavailable.');");
+    expect(page).toContain('setLoading(false);');
+  });
+
   it('replaces the schedule placeholder with an interactive page', () => {
     expect(shell).toContain('return <OfficerSchedulePage />');
     expect(shell).not.toContain('return <ComingSoonPage title="Schedule" />');

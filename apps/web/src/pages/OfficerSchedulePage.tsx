@@ -82,7 +82,15 @@ const OfficerSchedulePage: React.FC = () => {
   const [cancelSwapReason, setCancelSwapReason] = useState('');
 
   const loadSchedule = useCallback(async () => {
-    if (!profile?.id || !profile.organizationId) return;
+    if (!profile?.id || !profile.organizationId) {
+      setAssigned([]);
+      setSlots([]);
+      setWorkUnits([]);
+      setCoverage([]);
+      setError('Organisation access could not be confirmed. Schedule data is unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const [shiftResponse, coverageResponse, staffResponse, officerResponse, swapResponse] = await Promise.all([
