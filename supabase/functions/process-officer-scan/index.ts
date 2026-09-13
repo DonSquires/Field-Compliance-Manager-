@@ -772,12 +772,12 @@ serve(async (req)=>{
     let alprResult = null;
     let inferResult = null;
     let alprUsed = false;
-    if (imageBase64 && !manualPlateNumber) {
+    if (imageBase64) {
       [alprResult, inferResult] = await Promise.all([
-        runAlpr(imageBase64),
+        manualPlateNumber ? Promise.resolve(null) : runAlpr(imageBase64),
         runInference(imageBase64)
       ]);
-      if (!alprResult?.plate || alprResult.confidence < MIN_ALPR_CONFIDENCE) {
+      if (!manualPlateNumber && (!alprResult?.plate || alprResult.confidence < MIN_ALPR_CONFIDENCE)) {
         const fallbackResult = await runPlateRecognizerAlpr(imageBase64);
         if (fallbackResult?.plate && fallbackResult.confidence >= MIN_ALPR_CONFIDENCE) {
           alprResult = fallbackResult;

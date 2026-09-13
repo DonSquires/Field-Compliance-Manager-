@@ -17,7 +17,8 @@ test('governed scan preserves the manual plate fallback contract', () => {
   assert.match(edgeFunction, /plate_number: manualPlateNumberInput/);
   assert.match(edgeFunction, /manualPlateNumberInput\.toUpperCase\(\)/);
   assert.match(edgeFunction, /const plateSource = manualPlateNumber \? 'manual' : 'alpr'/);
-  assert.match(edgeFunction, /if \(imageBase64 && !manualPlateNumber\)/);
+  assert.match(edgeFunction, /manualPlateNumber \? Promise\.resolve\(null\) : runAlpr\(imageBase64\)/);
+  assert.match(edgeFunction, /runInference\(imageBase64\)/);
 });
 
 test('mobile scan queue preserves capture time and retry provenance', () => {
