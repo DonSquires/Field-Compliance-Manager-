@@ -62,7 +62,10 @@ function formatShiftTime(value: string): string {
 function serviceTypeLabel(value: string): { label: string; detail: string } {
   const labels: Record<string, { label: string; detail: string }> = {
     freedom_camping: { label: 'Freedom Camping Patrol', detail: 'Vehicle scans, breaches, and evidence' },
+    static: { label: 'Site Guarding', detail: 'Site security and checkpoints' },
     static_guarding: { label: 'Site Guarding', detail: 'Site security and checkpoints' },
+    mobile: { label: 'Mobile Compliance Patrol', detail: 'Field assignments and evidence' },
+    rostered: { label: 'Rostered Field Work', detail: 'Assignment and evidence' },
     parking: { label: 'Parking Enforcement', detail: 'Vehicle compliance and enforcement' },
     noise_control: { label: 'Noise Control', detail: 'Assessment and response' },
     biosecurity_inspection: { label: 'Biosecurity Inspection', detail: 'Inspection evidence and notices' },
