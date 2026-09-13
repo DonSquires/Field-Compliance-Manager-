@@ -12,6 +12,7 @@
     "sample:manifest": "node scripts/sample-data-manifest.js",
     "verify:bob-document-pdf:live": "node scripts/verify-bob-document-pdf-live.js",
     "seed:aam-e2e": "node scripts/seed-aam-e2e.js",
+    "check:migrations": "node scripts/check-migration-versions.js",
     "pretest": "npm run calibrate"
   },
   "dependencies": {
