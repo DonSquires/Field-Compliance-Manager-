@@ -10,6 +10,7 @@
  */
 
 import React, { useState } from 'react';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -67,6 +68,7 @@ interface VehicleBreach {
 }
 
 const OfficerVehicleLookupPage: React.FC = () => {
+  const { selectedAgreementZones } = useServiceRelationships();
   const [plate, setPlate] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [scv, setScv] = useState<ScvRecord | null>(null);
@@ -91,6 +93,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
       setFlags([]);
       setObservations([]);
       setBreaches([]);
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
       // ATLAS READS: canonical_vehicles, canonical_scv, observations, breach_alerts
       const [vehRes, scvRes, obsRes, breachRes] = await Promise.all([
@@ -106,18 +109,34 @@ const OfficerVehicleLookupPage: React.FC = () => {
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
-        supabase
+        (activeZoneIds && activeZoneIds.length > 0
+          ? supabase
+              .from('observations')
+              .select('id, observed_at, is_compliant, compliance_reason, nights_this_zone, zone:zone_id(name)')
+              .ilike('plate_number', cleanPlate)
+              .in('zone_id', activeZoneIds)
+              .order('observed_at', { ascending: false })
+              .limit(10)
+          : supabase
           .from('observations')
           .select('id, observed_at, is_compliant, compliance_reason, nights_this_zone, zone:zone_id(name)')
           .ilike('plate_number', cleanPlate)
           .order('observed_at', { ascending: false })
-          .limit(10),
-        supabase
+          .limit(10)),
+        (activeZoneIds && activeZoneIds.length > 0
+          ? supabase
+              .from('breach_alerts')
+              .select('id, breach_type, status, nights_count, notes, created_at, zone:location_zones!breach_alerts_zone_id_fkey(name)')
+              .ilike('plate_number', cleanPlate)
+              .in('zone_id', activeZoneIds)
+              .order('created_at', { ascending: false })
+              .limit(10)
+          : supabase
           .from('breach_alerts')
           .select('id, breach_type, status, nights_count, notes, created_at, zone:location_zones!breach_alerts_zone_id_fkey(name)')
           .ilike('plate_number', cleanPlate)
           .order('created_at', { ascending: false })
-          .limit(10),
+          .limit(10)),
       ]);
 
       const queryError = vehRes.error ?? scvRes.error ?? obsRes.error ?? breachRes.error;

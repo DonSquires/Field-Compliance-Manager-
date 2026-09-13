@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '../apps/web/src/pages');
 const dispatch = fs.readFileSync(path.join(root, 'OfficerDispatchPage.tsx'), 'utf8');
 const map = fs.readFileSync(path.join(root, 'OfficerMapPage.tsx'), 'utf8');
 const overnight = fs.readFileSync(path.join(root, 'OfficerOvernightVerificationPage.tsx'), 'utf8');
+const vehicleLookup = fs.readFileSync(path.join(root, 'OfficerVehicleLookupPage.tsx'), 'utf8');
 
 test('OfficerDispatchPage resolves active agreement zones before loading jobs', () => {
   assert.match(dispatch, /selectedAgreementZones/);
@@ -27,4 +28,11 @@ test('OfficerOvernightVerificationPage resolves active agreement zones before lo
   assert.match(overnight, /scopedSessionQuery/);
   assert.match(overnight, /in\('zone_id', activeZoneIds\)/);
   assert.match(overnight, /eq\('organization_id', orgId\)/);
+});
+
+test('OfficerVehicleLookupPage resolves active agreement zones before loading history', () => {
+  assert.match(vehicleLookup, /selectedAgreementZones/);
+  assert.match(vehicleLookup, /in\('zone_id', activeZoneIds\)/);
+  assert.match(vehicleLookup, /from\('observations'\)/);
+  assert.match(vehicleLookup, /from\('breach_alerts'\)/);
 });
