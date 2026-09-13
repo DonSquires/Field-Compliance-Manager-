@@ -81,7 +81,14 @@ const LocationsPage: React.FC = () => {
   useEffect(() => {
     const loadLocations = async () => {
       const orgId = profile?.organizationId;
-      if (!orgId) return;
+      if (!orgId) {
+        setLocations([]);
+        setSites([]);
+        setZones([]);
+        setError('Organisation access could not be confirmed. Operational geography is unavailable.');
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);
