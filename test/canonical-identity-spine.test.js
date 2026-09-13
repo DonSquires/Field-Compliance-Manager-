@@ -16,6 +16,14 @@ test('canonical identity spine keeps global identity separate from organization 
   assert.match(migration, /Global SCV registry identity/);
 });
 
+test('global vehicle and SCV registries retain source provenance without org ownership', () => {
+  const vehicleLinks = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913154400_global_vehicle_scv_source_links.sql'), 'utf8');
+  assert.match(vehicleLinks, /canonical_vehicle_links/);
+  assert.match(vehicleLinks, /canonical_scv_links/);
+  assert.match(vehicleLinks, /source_system text NOT NULL/);
+  assert.doesNotMatch(vehicleLinks, /organization_id uuid NOT NULL/);
+});
+
 test('operational records retain place and organization context while linking global identities', () => {
   assert.match(migration, /ALTER TABLE public\.observations[\s\S]*canonical_place_id/);
   assert.match(migration, /ALTER TABLE public\.observations[\s\S]*canonical_person_id/);
