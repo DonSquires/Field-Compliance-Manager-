@@ -854,7 +854,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     navigate(`/admin/document-studio?sourceType=cctv&sourceId=${selected.evidence_item_id}&auto=1`);
   };
 
-  const printSelectedReport = async () => {
+  const printSelectedReport = async (requestedStatus: 'draft' | 'review_ready' = 'draft') => {
     if (!selected || !selected.evidence_item_id || !profile?.organizationId) {
       setDecisionMessage('A printable report requires an organization-scoped evidence item.');
       return;
@@ -901,7 +901,13 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       frameCount: counts.frameCount + result.summary_counts.total_frames_parsed,
     }), { personCount: 0, vehicleCount: 0, animalCount: 0, frameCount: 0 });
     const reportHasPendingReview = observations.some((observation) => observation.reviewState !== 'Approved identity' && observation.reviewState !== 'Confirmed');
-    const reportStatus = reportHasPendingReview ? 'draft' : 'review_ready';
+    const canIssueFinalReport = selectedBatchComplete && !reportHasPendingReview;
+    if (requestedStatus === 'review_ready' && !canIssueFinalReport) {
+      reportWindow.close();
+      setDecisionMessage('The final report requires a complete batch and an explicit review decision for every observation.');
+      return;
+    }
+    const reportStatus = requestedStatus === 'review_ready' ? 'review_ready' : 'draft';
     const generatedAt = new Date().toLocaleString('en-NZ');
     const place = evidencePlaceContext(selected.evidence?.metadata || null);
     const observedTimes = observations.flatMap((observation) => [observation.startSeconds, observation.endSeconds]).filter((value): value is number => typeof value === 'number');
@@ -1155,7 +1161,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 <button type="button" className="cctv-btn-jump" disabled={!selected?.evidence_item_id} onClick={draftBobDocument} title="Draft an incident report with Bob from this CCTV evidence">
                   Bob: Draft incident report
                 </button>
-                <button type="button" className="cctv-btn-confirm" disabled={!reportReady} onClick={() => void printSelectedReport()} title={reportReady ? 'Print the final evidence report' : 'Resolve all observations and load the complete batch first'}>
+                <button type="button" className="cctv-btn-confirm" disabled={!reportReady} onClick={() => void printSelectedReport('review_ready')} title={reportReady ? 'Print the final evidence report' : 'Resolve all observations and load the complete batch first'}>
                   <Printer size={13} /> Final report
                 </button>
                 {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (

@@ -29,6 +29,8 @@ describe('buildCCTVPrintableReport', () => {
     expect(report).toContain('&lt;Unknown person&gt;');
     expect(report).toContain('Draft report');
     expect(report).toContain('job-1');
+    expect(report).toContain('@page{size:A4;margin:16mm}');
+    expect(report).toContain('thead{display:table-header-group}');
   });
 
   it('labels unresolved observations as a draft report', () => {
