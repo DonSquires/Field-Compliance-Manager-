@@ -194,7 +194,13 @@ const PatrolPage: React.FC = () => {
   // ATLAS READS: shifts (today's shifts for this officer)
   useEffect(() => {
     const loadShifts = async () => {
-      if (!profile?.id) return;
+      if (!profile?.id || !profile.organizationId) {
+        setShifts([]);
+        setSession(null);
+        setError('Organisation access could not be confirmed. Patrol data is unavailable.');
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);
