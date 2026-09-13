@@ -37,7 +37,13 @@ const OfficerFieldReportPage: React.FC = () => {
   const capturedAtRef = useRef(new Date().toISOString());
 
   const loadData = useCallback(async () => {
-    if (!profile?.id || !profile.organizationId) return;
+    if (!profile?.id || !profile.organizationId) {
+      setReports([]);
+      setShifts([]);
+      setError('Organisation access could not be confirmed. Field reports are unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true); setError(null);
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const [reportResponse, shiftResponse] = await Promise.all([

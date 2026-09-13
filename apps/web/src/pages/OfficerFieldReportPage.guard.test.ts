@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/pages/OfficerFieldReportPage.tsx'), 'utf8');
 
 describe('officer field report capture UI', () => {
+  it('fails closed when officer organisation context is unavailable', () => {
+    expect(source).toContain("if (!profile?.id || !profile.organizationId) {");
+    expect(source).toContain("setError('Organisation access could not be confirmed. Field reports are unavailable.');");
+    expect(source).toContain('setLoading(false);');
+  });
+
   it('uses only the governed capture RPC for submission', () => {
     expect(source).toContain("supabase.rpc('submit_officer_field_report'");
     expect(source).not.toContain(".from('officer_field_reports').insert");
