@@ -39,6 +39,14 @@ The runner uses the fixed `human-qa` profile, a read-only source mount, no
 network access, a non-root container user, bounded CPU/memory/PID resources,
 and writes evidence to `BOB_ARTIFACT_DIR`.
 
+For the exhaustive page acceptance pass, set `BOB_WORKER_PROFILE=full-page-audit`
+before running the same approved job. This profile runs root contracts, CSS
+selector contracts, frontend typecheck/tests/build, and the Dr. Bob human suite
+that inventories every visible control and follows each safe button from a
+fresh route state. It writes Playwright screenshots, traces, HTML reports, and
+the command results into the job artifact directory. Write/destructive controls
+are recorded and skipped unless a governed test explicitly permits them.
+
 For an approved live deployment check, use `BOB_WORKER_PROFILE=human-qa-live`.
 That profile enables Docker bridge networking only for the explicit live run;
 fixture-backed `human-qa` remains network-isolated.
