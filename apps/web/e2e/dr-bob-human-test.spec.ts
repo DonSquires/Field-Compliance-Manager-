@@ -153,4 +153,21 @@ test.describe("Dr. Bob's human browser test", () => {
     }
     await session.finish();
   });
+
+  test('follows every safe button across every page route', async ({ page }, testInfo) => {
+    test.setTimeout(900_000);
+    const session = new HumanTestSession(page, testInfo);
+    await installSupabaseFixtures(page);
+    await signInAsAdmin(page, '/admin');
+    const adminRoutes = [
+      '/admin/hub', '/admin/approvals', '/admin/field-ops', '/admin/reports', '/admin/files',
+      '/admin/investigations', '/admin/sites', '/admin/locations', '/admin/zones', '/admin/users',
+      '/admin/access-control', '/admin/org-setup', '/admin/module-subscriptions', '/admin/relationships',
+      '/admin/onboarding', '/admin/handoffs', '/admin/finance-bureau', '/admin/finance-connections',
+      '/admin/finance-money', '/admin/finance-costing', '/admin/finance-pricing', '/admin/rate-rules',
+      '/admin/roster', '/admin/people-hr', '/admin/roster-targets', '/admin/bob', '/admin/document-studio',
+    ];
+    for (const route of adminRoutes) await session.walkEveryVisibleButton(route);
+    await session.finish();
+  });
 });

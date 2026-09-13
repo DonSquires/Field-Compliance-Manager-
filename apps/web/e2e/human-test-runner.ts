@@ -43,6 +43,7 @@ function compact(value: string | null | undefined, max = 180): string {
 export class HumanTestSession {
   readonly findings: HumanFinding[] = [];
   readonly steps: HumanStep[] = [];
+  private readonly auditedButtonLabels = new Set<string>();
   private currentStep = 'session';
   private readonly consoleErrors: string[] = [];
   private readonly failedRequests: string[] = [];
@@ -258,6 +259,47 @@ export class HumanTestSession {
       await this.observe(`tab: ${label}`);
     }
     await this.fillSafeField();
+  }
+
+  async walkEveryVisibleButton(route: string): Promise<void> {
+    await this.page.goto(route);
+    await this.page.waitForLoadState('domcontentloaded');
+    await this.page.waitForTimeout(250);
+    const buttons = await this.page.locator('button:visible').evaluateAll((elements) => elements.map((element, index) => ({
+      index,
+      label: (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '').replace(/\s+/g, ' ').trim(),
+      disabled: (element as HTMLButtonElement).disabled,
+    })));
+    console.log(`[HUMAN BUTTON AUDIT] ${route}: ${buttons.length} visible buttons`);
+    for (const button of buttons) {
+      await this.page.goto(route);
+      await this.page.waitForLoadState('domcontentloaded');
+      await this.page.waitForTimeout(150);
+      const candidates = this.page.locator('button:visible');
+      const candidate = candidates.nth(button.index);
+      const currentLabel = (await candidate.textContent().catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
+      const label = button.label || currentLabel || `button-${button.index}`;
+      if (!label || UNSAFE_ACTION.test(label)) {
+        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label || '(unnamed)'}: write/destructive action requires governed evidence`);
+        continue;
+      }
+      if (this.auditedButtonLabels.has(label)) {
+        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: equivalent semantic button already followed`);
+        continue;
+      }
+      if (await candidate.isDisabled().catch(() => true)) {
+        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: disabled state verified`);
+        continue;
+      }
+      this.auditedButtonLabels.add(label);
+      await this.step(`button ${route} #${button.index}: ${label}`, async () => {
+        await candidate.click();
+        await this.page.waitForTimeout(250);
+        await this.observe(`after button ${route} #${button.index}: ${label}`);
+      });
+    }
+    await this.page.goto(route);
+    await this.page.waitForLoadState('domcontentloaded');
   }
 
   async capture(label: string): Promise<void> {
