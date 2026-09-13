@@ -40,5 +40,5 @@ test('DOCX extraction reads OOXML from the ZIP container', () => {
   assert.match(source, /jszip@3\.10\.1/);
   assert.match(source, /JSZip\.loadAsync\(bytes\)/);
   assert.match(source, /word\/document\.xml/);
-  assert.match(source, /<w:t(?:\\\\s\[^\>]\*)?>/);
+    assert.match(source, /xml\.matchAll\(\/<w:t/);
 });
