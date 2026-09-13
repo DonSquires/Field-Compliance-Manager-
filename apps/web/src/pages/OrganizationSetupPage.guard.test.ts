@@ -24,4 +24,10 @@ describe('governed organization profile setup', () => {
     expect(source).toContain('p_org_id: orgId');
     expect(source).toContain('resolvedGeofenceDefaults');
   });
+
+  it('clears loading state when no operating organization is available', () => {
+    expect(source).toContain('if (!orgId) {');
+    expect(source).toContain('setLoading(false);');
+    expect(source).toContain('setError(null);');
+  });
 });

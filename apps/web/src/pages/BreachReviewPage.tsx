@@ -71,7 +71,10 @@ const BreachReviewPage: React.FC = () => {
   // ATLAS READS: breach_alerts, location_zones, observations
   const loadAlerts = useCallback(async () => {
     const orgId = profile?.organizationId;
-    if (!orgId) return;
+    if (!orgId) {
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);

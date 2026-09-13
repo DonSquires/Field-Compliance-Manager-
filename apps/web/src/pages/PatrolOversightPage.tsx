@@ -35,7 +35,10 @@ const PatrolOversightPage: React.FC = () => {
 
   const loadEvidence = useCallback(async () => {
     const organizationId = profile?.organizationId;
-    if (!organizationId) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

@@ -17,6 +17,7 @@
 .welfare-message { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; min-height: 40px; margin-top: 12px; padding: 7px 8px 7px 11px; border: 1px solid #35614d; border-radius: 6px; color: #bcebd2; background: #0d291f; font-size: 12px; }
 .welfare-message.is-error { color: #ffc6c6; border-color: #844141; background: #31191c; }
 .welfare-message button, .welfare-dialog .welfare-panel-heading > button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid #324758; border-radius: 5px; color: inherit; background: transparent; cursor: pointer; }
+.welfare-message .welfare-retry { display: inline-flex; width: auto; min-height: 28px; padding: 0 9px; font-size: 12px; font-weight: 800; }
 
 .welfare-filters { display: flex; gap: 4px; width: fit-content; max-width: 100%; margin-top: 14px; overflow-x: auto; padding: 4px; border: 1px solid #2b3d50; border-radius: 7px; background: #0a1522; }
 .welfare-filters button { min-height: 31px; padding: 0 11px; border: 1px solid transparent; border-radius: 5px; color: #8297a7; background: transparent; cursor: pointer; font-size: 12px; font-weight: 750; white-space: nowrap; }

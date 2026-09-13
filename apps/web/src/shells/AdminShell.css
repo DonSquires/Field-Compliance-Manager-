@@ -390,6 +390,18 @@
   cursor: pointer;
 }
 
+.admin-desktop-download {
+  color: #7ee7ea;
+  border-color: #1a6370;
+  background: #0f2a35;
+}
+
+.admin-desktop-download:hover {
+  color: #dffefe;
+  border-color: #67e4e8;
+  background: #113b47;
+}
+
 .admin-profile-chip {
   display: flex;
   align-items: center;

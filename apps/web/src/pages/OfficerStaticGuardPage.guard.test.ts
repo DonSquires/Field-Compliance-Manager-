@@ -14,7 +14,8 @@ describe('officer static guarding post', () => {
   it('routes static assignments to a dedicated post workspace', () => {
     expect(shell).toContain("case 'site_guard':");
     expect(shell).toContain('return <OfficerStaticGuardPage />');
-    expect(home).toContain("shift.shift_type === 'static_guarding' ? 'site_guard'");
+    expect(home).toContain("normalized === 'static_guarding'");
+    expect(home).toContain("return { destination: 'site_guard'");
     expect(shell).not.toMatch(/case 'site_guard':[\s\S]{0,120}<OfficerDispatchPage/);
   });
 

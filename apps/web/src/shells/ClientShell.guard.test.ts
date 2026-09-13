@@ -29,9 +29,18 @@ describe('ClientShell agreement boundary', () => {
     expect(pageSource).toContain(".eq('service_agreement_id', agreement.id)");
   });
 
-  it('does not fabricate client incident or finance surfaces', () => {
+  it('keeps client finance behind the canonical agreement capability boundary', () => {
     expect(shellSource).not.toContain("id: 'incidents'");
-    expect(shellSource).not.toContain("id: 'finance'");
+    expect(shellSource).toContain("id: 'finance'");
+    expect(shellSource).toContain('allowedPages.has(item.id)');
+    expect(pageSource).toContain(".from('invoices')");
     expect(pageSource).not.toContain("from('officer_field_reports')");
+  });
+
+  it('starts agreement-scoped records in a loading state to avoid empty-state flicker', () => {
+    expect(pageSource).toContain('useState(true)');
+    expect(pageSource).toContain('setLoadingRecords(false);');
+    expect(pageSource).toContain('Loading invoices');
+    expect(pageSource).toContain('Loading report packs');
   });
 });

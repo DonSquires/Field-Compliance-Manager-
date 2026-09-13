@@ -62,7 +62,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
   const [observations, setObservations] = useState<ClientObservation[]>([]);
   const [reports, setReports] = useState<MonthlyReportPack[]>([]);
   const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
-  const [loadingRecords, setLoadingRecords] = useState(false);
+  const [loadingRecords, setLoadingRecords] = useState(true);
   const [recordsError, setRecordsError] = useState<string | null>(null);
 
   const agreement = relationships.selectedAgreement;
@@ -77,6 +77,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
       setObservations([]);
       setReports([]);
       setInvoices([]);
+      setLoadingRecords(false);
       return;
     }
 

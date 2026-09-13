@@ -41,7 +41,10 @@ const ModuleSubscriptionsPage: React.FC = () => {
 
   const load = useCallback(async () => {
     const orgId = profile?.organizationId;
-    if (!orgId) return;
+    if (!orgId) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -101,7 +104,16 @@ const ModuleSubscriptionsPage: React.FC = () => {
         <h1>Modules & Subscriptions</h1>
         <p className="subtitle">Subscribe to only the modules your organisation needs. Each module is a standalone app you can enable independently.</p>
       </header>
-      {error && <div className="alert alert-error" role="alert"><button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">×</button>{error}</div>}
+      {!profile?.organizationId ? (
+        <section className="module-access-state" role="status">
+          <Lock size={22} aria-hidden="true" />
+          <h2>Organisation context unavailable</h2>
+          <p>Module subscriptions cannot be changed until your organisation access is confirmed.</p>
+          <button type="button" className="btn-secondary" onClick={() => window.location.reload()}>Reload access</button>
+        </section>
+      ) : (
+        <>
+      {error && <div className="alert alert-error" role="alert"><span>{error}</span><button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>Retry</button><button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">×</button></div>}
       {notice && <div className="alert alert-success" role="status"><button className="alert-close" onClick={() => setNotice(null)} aria-label="Close notice">×</button>{notice}</div>}
       <div className="reports-table-wrapper">
         <table className="reports-table">
@@ -140,6 +152,8 @@ const ModuleSubscriptionsPage: React.FC = () => {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </div>
   );
 };

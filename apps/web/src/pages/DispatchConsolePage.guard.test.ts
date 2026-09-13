@@ -61,6 +61,11 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain("resource.status === 'available'");
   });
 
+  it('clears loading state when branch scope is unavailable', () => {
+    expect(source).toContain('if (!operatingBranchId) {');
+    expect(source).toContain('setLoading(false);');
+  });
+
   it('resolves billing against real agreement client, site, and job dimensions', () => {
     expect(source).toContain('resolveDispatchBillingRule');
     expect(source).toContain('selectedAgreement.client_organization_id');

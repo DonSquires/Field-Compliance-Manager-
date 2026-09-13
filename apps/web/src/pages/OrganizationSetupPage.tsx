@@ -82,7 +82,11 @@ const OrganizationSetupPage: React.FC = () => {
   // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config
   const loadAll = useCallback(async () => {
     const orgId = operatingOrganizationId ?? profile?.organizationId;
-    if (!orgId) return;
+    if (!orgId) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
 
     try {
       setLoading(true);

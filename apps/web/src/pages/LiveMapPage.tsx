@@ -60,7 +60,10 @@ const LiveMapPage: React.FC = () => {
 
   const loadPositions = useCallback(async () => {
     const orgId = profile?.organizationId;
-    if (!orgId) return;
+    if (!orgId) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);

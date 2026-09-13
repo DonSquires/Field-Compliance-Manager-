@@ -29,7 +29,10 @@ const OfficerMapPage: React.FC = () => {
   // ATLAS READS: officer_gps_log, user_profiles
   const load = useCallback(async () => {
       const orgId = profile?.organizationId;
-      if (!orgId) return;
+      if (!orgId) {
+        setLoading(false);
+        return;
+      }
 
       try {
         setLoading(true);

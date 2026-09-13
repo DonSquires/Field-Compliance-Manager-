@@ -46,7 +46,10 @@ const ParkingOversightPage: React.FC = () => {
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
     const orgId = profile?.organizationId;
-    if (!orgId) return;
+    if (!orgId) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);

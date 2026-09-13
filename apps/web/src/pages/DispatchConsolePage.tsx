@@ -283,7 +283,10 @@ const DispatchConsolePage: React.FC = () => {
   // Load Phase A: Active shifts, jobs, resources. Sites come from the selected
   // service agreement so contract/location access has one canonical owner.
   const loadPhaseA = useCallback(async () => {
-    if (!operatingBranchId) return;
+    if (!operatingBranchId) {
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);

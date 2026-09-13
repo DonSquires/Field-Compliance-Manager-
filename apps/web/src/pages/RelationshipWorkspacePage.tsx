@@ -58,7 +58,11 @@ const RelationshipWorkspacePage: React.FC<{ onNavigate?: NavigateWithContext }> 
   }, [relationships, requestedContext.accountId, requestedContext.agreementId]);
 
   const loadRelationships = useCallback(async () => {
-    if (!operatingBranchId) return;
+    if (!operatingBranchId) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
 
     try {
       setLoading(true);

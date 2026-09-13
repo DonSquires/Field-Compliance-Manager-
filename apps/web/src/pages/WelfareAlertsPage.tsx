@@ -20,17 +20,16 @@ interface WelfareAlert {
   escalated_at: string | null;
   acknowledged_at: string | null;
   acknowledgement_notes: string | null;
+  acknowledged_by: string | null;
   resolved_at: string | null;
   resolution_notes: string | null;
+  resolved_by: string | null;
   triggered_at: string;
   gps_lat: number | null;
   gps_lng: number | null;
   gps_accuracy: number | null;
   officer_phone: string | null;
   notes: string | null;
-  officer: { id: string; display_name: string | null; phone: string | null } | null;
-  acknowledger: { id: string; display_name: string | null } | null;
-  resolver: { id: string; display_name: string | null } | null;
 }
 
 const ALERT_LABEL: Record<AlertType, string> = {
@@ -78,7 +77,7 @@ const WelfareAlertsPage: React.FC = () => {
     try {
       const { data, error: queryError } = await supabase
         .from('welfare_alerts')
-        .select('id, officer_user_id, status, alert_type, escalation_level, escalated_at, acknowledged_at, acknowledgement_notes, resolved_at, resolution_notes, triggered_at, gps_lat, gps_lng, gps_accuracy, officer_phone, notes, officer:officer_user_id(id, display_name, phone), acknowledger:acknowledged_by(id, display_name), resolver:resolved_by(id, display_name)')
+        .select('id, officer_user_id, status, alert_type, escalation_level, escalated_at, acknowledged_by, acknowledged_at, acknowledgement_notes, resolved_by, resolved_at, resolution_notes, triggered_at, gps_lat, gps_lng, gps_accuracy, officer_phone, notes')
         .eq('organization_id', profile.organizationId)
         .order('escalation_level', { ascending: false })
         .order('triggered_at', { ascending: false })
@@ -172,7 +171,7 @@ const WelfareAlertsPage: React.FC = () => {
         <div><ShieldCheck size={18} /><span>Resolved in view</span><strong>{resolvedCount}</strong></div>
       </section>
 
-      {error && <div className="welfare-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
+      {error && <div className="welfare-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" className="welfare-retry" onClick={() => void loadAlerts()} disabled={loading}>Retry</button><button type="button" onClick={() => setError(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
       {notice && <div className="welfare-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
 
       <div className="welfare-filters" role="tablist" aria-label="Welfare status">{FILTERS.map((item) => <button type="button" role="tab" aria-selected={filter === item.id} className={filter === item.id ? 'is-active' : ''} onClick={() => setFilter(item.id)} key={item.id}>{item.label}</button>)}</div>
@@ -188,22 +187,22 @@ const WelfareAlertsPage: React.FC = () => {
         <aside className="welfare-detail">
           {!selected ? <div className="welfare-empty"><ShieldAlert size={22} /> Select an alert to review</div> : (
             <>
-              <div className="welfare-panel-heading"><div><span>Officer response</span><h2>{selected.officer?.display_name ?? 'Officer'}</h2></div><span className={`welfare-status status-${selected.status}`}>{selected.status}</span></div>
+              <div className="welfare-panel-heading"><div><span>Officer response</span><h2>{formatActor(selected.officer_user_id, 'Officer')}</h2></div><span className={`welfare-status status-${selected.status}`}>{selected.status}</span></div>
               <div className={`welfare-alert-banner type-${selected.alert_type}`}><AlertTypeIcon type={selected.alert_type} /><div><strong>{ALERT_LABEL[selected.alert_type]}</strong><span>Escalation level {selected.escalation_level} · triggered {formatAge(selected.triggered_at)}</span></div></div>
 
               <dl className="welfare-facts">
                 <div><dt>Triggered</dt><dd>{new Date(selected.triggered_at).toLocaleString('en-NZ')}</dd></div>
                 <div><dt>Last escalation</dt><dd>{selected.escalated_at ? new Date(selected.escalated_at).toLocaleString('en-NZ') : 'Not escalated'}</dd></div>
-                <div><dt>Phone</dt><dd>{selected.officer_phone ?? selected.officer?.phone ?? 'Not available'}</dd></div>
+                <div><dt>Phone</dt><dd>{selected.officer_phone ?? 'Not available'}</dd></div>
                 <div><dt>GPS accuracy</dt><dd>{selected.gps_accuracy != null ? `±${Math.round(selected.gps_accuracy)} m` : 'Not recorded'}</dd></div>
               </dl>
 
               {selected.notes && <section className="welfare-notes"><span>Alert evidence</span><p>{selected.notes}</p></section>}
-              {selected.acknowledgement_notes && <section className="welfare-history-note"><UserCheck size={16} /><div><strong>Acknowledgement</strong><span>{selected.acknowledgement_notes}</span><small>{selected.acknowledger?.display_name ?? 'Responder unavailable'}{selected.acknowledged_at ? ` · ${new Date(selected.acknowledged_at).toLocaleString('en-NZ')}` : ''}</small></div></section>}
-              {selected.resolution_notes && <section className="welfare-history-note is-resolved"><CheckCircle2 size={16} /><div><strong>Resolution</strong><span>{selected.resolution_notes}</span><small>{selected.resolver?.display_name ?? 'Responder unavailable'}{selected.resolved_at ? ` · ${new Date(selected.resolved_at).toLocaleString('en-NZ')}` : ''}</small></div></section>}
+              {selected.acknowledgement_notes && <section className="welfare-history-note"><UserCheck size={16} /><div><strong>Acknowledgement</strong><span>{selected.acknowledgement_notes}</span><small>{formatActor(selected.acknowledged_by, 'Responder unavailable')}{selected.acknowledged_at ? ` · ${new Date(selected.acknowledged_at).toLocaleString('en-NZ')}` : ''}</small></div></section>}
+              {selected.resolution_notes && <section className="welfare-history-note is-resolved"><CheckCircle2 size={16} /><div><strong>Resolution</strong><span>{selected.resolution_notes}</span><small>{formatActor(selected.resolved_by, 'Responder unavailable')}{selected.resolved_at ? ` · ${new Date(selected.resolved_at).toLocaleString('en-NZ')}` : ''}</small></div></section>}
 
               <div className="welfare-contact-actions">
-                {(selected.officer_phone ?? selected.officer?.phone) ? <a href={`tel:${selected.officer_phone ?? selected.officer?.phone}`}><Phone size={16} /> Call officer</a> : <button type="button" disabled><Phone size={16} /> Phone unavailable</button>}
+                {selected.officer_phone ? <a href={`tel:${selected.officer_phone}`}><Phone size={16} /> Call officer</a> : <button type="button" disabled><Phone size={16} /> Phone unavailable</button>}
                 {selected.gps_lat != null && selected.gps_lng != null ? <a href={`https://www.google.com/maps?q=${selected.gps_lat},${selected.gps_lng}`} target="_blank" rel="noreferrer"><MapPin size={16} /> Open location</a> : <button type="button" disabled><Crosshair size={16} /> Location unavailable</button>}
               </div>
 
@@ -217,7 +216,7 @@ const WelfareAlertsPage: React.FC = () => {
         <div className="welfare-dialog-backdrop">
           <form className="welfare-dialog" onSubmit={submitAction} role="dialog" aria-modal="true" aria-labelledby="welfare-action-title">
             <div className="welfare-panel-heading"><div><span>Safety lifecycle</span><h2 id="welfare-action-title">{action === 'acknowledge' ? 'Acknowledge alert' : 'Resolve alert'}</h2></div><button type="button" onClick={() => setAction(null)}><X size={18} /><span className="sr-only">Close</span></button></div>
-            <div className="welfare-dialog-alert"><strong>{selected.officer?.display_name ?? 'Officer'} · {ALERT_LABEL[selected.alert_type]}</strong><span>Escalation level {selected.escalation_level}</span></div>
+            <div className="welfare-dialog-alert"><strong>{formatActor(selected.officer_user_id, 'Officer')} · {ALERT_LABEL[selected.alert_type]}</strong><span>Escalation level {selected.escalation_level}</span></div>
             <p>{action === 'acknowledge' ? 'Acknowledgement records that a responder has taken ownership and pauses automatic escalation. It does not declare the officer safe.' : 'Resolution closes the alert. Record the positive safety outcome or verified reason for closure.'}</p>
             <label><span>{action === 'acknowledge' ? 'Response plan' : 'Verified safety outcome'}</span><textarea required rows={4} value={actionNotes} onChange={(event) => setActionNotes(event.target.value)} placeholder={action === 'acknowledge' ? 'Who is responding and what action is underway?' : 'How was the officer confirmed safe, and by whom?'} /></label>
             <div className="welfare-dialog-actions"><button type="button" onClick={() => setAction(null)}>Cancel</button><button type="submit" className={action === 'acknowledge' ? 'is-acknowledge' : 'is-resolve'} disabled={busyId === selected.id || !actionNotes.trim()}>{busyId === selected.id ? 'Saving' : action === 'acknowledge' ? 'Confirm acknowledgement' : 'Confirm resolution'}</button></div>
@@ -230,7 +229,7 @@ const WelfareAlertsPage: React.FC = () => {
 };
 
 function AlertRow({ alert, selected, onSelect }: { alert: WelfareAlert; selected: boolean; onSelect: () => void }) {
-  return <button type="button" className={`${selected ? 'is-selected' : ''} status-${alert.status} type-${alert.alert_type}`} onClick={onSelect}><span className="welfare-row-icon"><AlertTypeIcon type={alert.alert_type} /></span><div><strong>{alert.officer?.display_name ?? 'Officer'}</strong><small>{ALERT_LABEL[alert.alert_type]} · level {alert.escalation_level}</small></div><div><span>{alert.status}</span><time dateTime={alert.triggered_at}>{formatAge(alert.triggered_at)}</time></div></button>;
+  return <button type="button" className={`${selected ? 'is-selected' : ''} status-${alert.status} type-${alert.alert_type}`} onClick={onSelect}><span className="welfare-row-icon"><AlertTypeIcon type={alert.alert_type} /></span><div><strong>{formatActor(alert.officer_user_id, 'Officer')}</strong><small>{ALERT_LABEL[alert.alert_type]} · level {alert.escalation_level}</small></div><div><span>{alert.status}</span><time dateTime={alert.triggered_at}>{formatAge(alert.triggered_at)}</time></div></button>;
 }
 
 function AlertTypeIcon({ type }: { type: AlertType }) {
@@ -246,6 +245,10 @@ function formatAge(value: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+function formatActor(id: string | null, fallback: string): string {
+  return id ? `${fallback} ${id.slice(0, 8)}` : fallback;
 }
 
 export default WelfareAlertsPage;

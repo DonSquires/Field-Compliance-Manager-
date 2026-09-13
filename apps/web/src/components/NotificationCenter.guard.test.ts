@@ -22,4 +22,10 @@ describe('enterprise notification center', () => {
     expect(source).toContain('onNavigate?.(notification)');
     expect(source).not.toContain('window.location');
   });
+
+  it('fails closed and explains unavailable tenant scope', () => {
+    expect(source).toContain('setLoading(false);');
+    expect(source).toContain('disabled={!profile?.organizationId}');
+    expect(source).toContain('Notifications unavailable until organisation access is confirmed');
+  });
 });

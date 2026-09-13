@@ -42,7 +42,10 @@ const NoiseControlOversightPage: React.FC = () => {
   // ATLAS READS: noise_assessments
   const load = useCallback(async () => {
       const orgId = profile?.organizationId;
-      if (!orgId) return;
+      if (!orgId) {
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);

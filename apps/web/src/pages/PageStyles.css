@@ -630,6 +630,23 @@
   font-size: 13px;
 }
 
+.module-access-state {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 24px 0;
+  padding: 28px 20px;
+  border: 1px solid var(--color-border, #334155);
+  border-radius: 8px;
+  color: var(--color-text-secondary, #cbd5e1);
+  background: var(--color-bg-secondary, #111827);
+  text-align: center;
+}
+
+.module-access-state svg { color: var(--color-accent, #14c8d4); }
+.module-access-state h2 { margin: 0; font-size: 16px; }
+.module-access-state p { max-width: 480px; margin: 0; color: var(--color-text-muted, #94a3b8); font-size: 13px; }
+
 .btn-sm {
   padding: 6px 10px;
   font-size: 12px;

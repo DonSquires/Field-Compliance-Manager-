@@ -20,4 +20,9 @@ describe('parking oversight schema parity', () => {
     expect(page).toContain('overdueCount');
     expect(page).toContain('reviewCount');
   });
+
+  it('clears loading state when organization scope is unavailable', () => {
+    expect(page).toContain('if (!orgId) {');
+    expect(page).toContain('setLoading(false);');
+  });
 });

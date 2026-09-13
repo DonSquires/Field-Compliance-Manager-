@@ -105,7 +105,16 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const [trend, setTrend] = useState<TrendPoint[]>([]);
 
   const loadDashboard = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      const message = 'Organisation access could not be confirmed. Operational metrics are unavailable.';
+      setMetrics(Object.fromEntries(Object.keys(EMPTY_METRICS).map((key) => [key, { value: null, error: message }])) as unknown as Metrics);
+      setQueue([]);
+      setTrend([]);
+      setQueueWarnings([message]);
+      setLastUpdated(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setQueueWarnings([]);
 

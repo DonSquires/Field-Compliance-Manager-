@@ -33,4 +33,9 @@ describe('governed noise review return', () => {
     expect(sql).toContain('revoke update,delete on table public.noise_assessments from authenticated');
     expect(sql).toContain('from public,anon;');
   });
+
+  it('clears loading state when organization scope is unavailable', () => {
+    expect(admin).toContain('if (!orgId) {');
+    expect(admin).toContain('setLoading(false);');
+  });
 });

@@ -258,7 +258,10 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   // ATLAS READS: organizations, crm_account_list (view), service_agreements
   const loadCrm = useCallback(async () => {
     const orgId = operatingOrganizationId ?? profile?.organizationId;
-    if (!orgId) return;
+    if (!orgId) {
+      setState((s) => ({ ...s, loading: false, error: null }));
+      return;
+    }
 
     try {
       setState((s) => ({ ...s, loading: true, error: null }));

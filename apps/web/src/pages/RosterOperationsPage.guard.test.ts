@@ -61,4 +61,9 @@ describe('enterprise roster operations', () => {
     expect(page).toContain('Return to handoff');
     expect(page).toContain('`/admin/handoffs${workflowContextQuery(workflowContext)}`');
   });
+
+  it('clears loading state when organization scope is unavailable', () => {
+    expect(page).toContain('if (!org) {');
+    expect(page).toContain('setLoading(false);');
+  });
 });

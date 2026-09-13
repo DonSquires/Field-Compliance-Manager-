@@ -25,16 +25,24 @@ describe('supervisor welfare response workbench', () => {
     expect(source).not.toContain(".from('welfare_alerts').update");
   });
 
-  it('shows the governed responder identity for each recorded transition', () => {
-    expect(source).toContain('acknowledger:acknowledged_by(id, display_name)');
-    expect(source).toContain('resolver:resolved_by(id, display_name)');
-    expect(source).toContain("selected.acknowledger?.display_name ?? 'Responder unavailable'");
-    expect(source).toContain("selected.resolver?.display_name ?? 'Responder unavailable'");
+  it('avoids RLS-sensitive profile expansions while preserving actor identity IDs', () => {
+    expect(source).toContain('acknowledged_by, acknowledged_at');
+    expect(source).toContain('resolved_by, resolved_at');
+    expect(source).toContain('formatActor(selected.acknowledged_by,');
+    expect(source).toContain('formatActor(selected.resolved_by,');
+    expect(source).not.toContain('officer:officer_user_id(');
+    expect(source).not.toContain('acknowledger:acknowledged_by(');
+    expect(source).not.toContain('resolver:resolved_by(');
   });
 
   it('requires human notes and surfaces concurrent transition failures', () => {
     expect(source).toContain('required rows={4}');
     expect(source).toContain('This alert changed before your action was saved');
+  });
+
+  it('provides a recovery action when alert loading fails', () => {
+    expect(source).toContain('className="welfare-retry"');
+    expect(source).toContain('onClick={() => void loadAlerts()}');
   });
 
   it('uses real phone and GPS actions rather than inert controls', () => {

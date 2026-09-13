@@ -132,6 +132,12 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name,');
   });
 
+  it('clears CRM loading state when operating organization scope is unavailable', () => {
+    expect(page).toContain('if (!orgId) {');
+    expect(page).toContain('loading: false');
+    expect(page).toContain('setState((s) => ({ ...s, loading: false, error: null }));');
+  });
+
   it('searches and manages the organization spine with evidence-backed next actions', () => {
     expect(page).toContain('CrmOrganizationDialog');
     expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);

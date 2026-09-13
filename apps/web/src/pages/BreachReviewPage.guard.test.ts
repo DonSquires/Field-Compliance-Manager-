@@ -38,4 +38,9 @@ describe('governed breach outcome return', () => {
     expect(sql).toContain('revoke update,delete on table public.breach_alerts from authenticated');
     expect(sql).toContain('from public,anon;');
   });
+
+  it('clears loading state when organization scope is unavailable', () => {
+    expect(page).toContain('if (!orgId) {');
+    expect(page).toContain('setLoading(false);');
+  });
 });

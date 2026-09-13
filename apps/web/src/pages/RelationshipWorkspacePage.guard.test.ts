@@ -10,4 +10,10 @@ describe('operating branch relationship workspace', () => {
     expect(page).toContain('provider_organization_id.eq.${operatingBranchId}');
     expect(page).toContain('agreement.provider_organization_id === operatingBranchId');
   });
+
+  it('clears loading state when no operating branch is available', () => {
+    expect(page).toContain('if (!operatingBranchId) {');
+    expect(page).toContain('setLoading(false);');
+    expect(page).toContain('setError(null);');
+  });
 });

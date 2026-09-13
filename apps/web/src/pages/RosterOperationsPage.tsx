@@ -74,7 +74,10 @@ const RosterOperationsPage: React.FC = () => {
 
   const load = useCallback(async () => {
     const org = operatingOrganizationId ?? profile?.organizationId;
-    if (!org) return;
+    if (!org) {
+      setLoading(false);
+      return;
+    }
     const operatingContext = operatingOrganizations.find((context) => context.organizationId === org);
     if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
       setError('Select a delivery branch to view roster operations.');

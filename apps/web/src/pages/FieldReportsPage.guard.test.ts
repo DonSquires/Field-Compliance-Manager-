@@ -24,6 +24,13 @@ describe('field report review workbench', () => {
     expect(source).toContain('Review recorded with supervisor notes and audit provenance.');
   });
 
+  it('does not leave the review queue loading without organization scope', () => {
+    expect(source).toContain('setLoading(false);');
+    expect(source).toContain('Report review is unavailable until organisation access is confirmed.');
+    expect(source).toContain('>Try again</button>');
+    expect(source).toContain('onClick={() => void loadReports()}');
+  });
+
   it('returns each review outcome to the submitting officer', () => {
     expect(outcomeSql).toContain("'report_reviewed'");
     expect(outcomeSql).toContain('p_recipient_user_id=>v_report.officer_id');

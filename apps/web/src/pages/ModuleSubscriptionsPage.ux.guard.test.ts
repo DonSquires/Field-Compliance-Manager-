@@ -24,4 +24,16 @@ describe('module subscriptions UX safeguards', () => {
     expect(css).toContain('.status-badge.status-suspended');
     expect(css).toContain('.status-badge.status-cancelled');
   });
+
+  it('does not leave an unscoped tenant in an indefinite loading state', () => {
+    expect(page).toContain('setLoading(false);');
+    expect(page).toContain('Organisation context unavailable');
+    expect(page).toContain('Reload access');
+  });
+
+  it('provides a retry action when subscription reads fail', () => {
+    expect(page).toContain('>Retry</button>');
+    expect(page).toContain('onClick={() => void load()}');
+    expect(css).toContain('.module-access-state');
+  });
 });

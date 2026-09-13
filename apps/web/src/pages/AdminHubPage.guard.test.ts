@@ -35,4 +35,10 @@ describe('Admin Hub operational data contract', () => {
     expect(source).toContain('const attentionUnavailable = attentionMetrics.some((value) => value === null);');
     expect(source).toContain('Some active safety, dispatch, or compliance counts are unavailable.');
   });
+
+  it('does not leave the operations landing page in an indefinite loading state without tenant scope', () => {
+    expect(source).toContain('Organisation access could not be confirmed. Operational metrics are unavailable.');
+    expect(source).toContain('setQueueWarnings([message]);');
+    expect(source).toContain('setLoading(false);');
+  });
 });

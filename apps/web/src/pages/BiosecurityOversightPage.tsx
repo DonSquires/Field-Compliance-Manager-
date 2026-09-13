@@ -39,7 +39,10 @@ const BiosecurityOversightPage: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       const orgId = profile?.organizationId;
-      if (!orgId) return;
+      if (!orgId) {
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);

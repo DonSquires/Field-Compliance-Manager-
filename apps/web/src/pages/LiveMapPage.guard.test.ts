@@ -30,4 +30,9 @@ describe('live officer safety layer', () => {
     expect(source).toContain('Safety unavailable');
     expect(source).toContain('no officer is shown as safe');
   });
+
+  it('clears loading state when organization scope is unavailable', () => {
+    expect(source).toContain('if (!orgId) {');
+    expect(source).toContain('setLoading(false);');
+  });
 });

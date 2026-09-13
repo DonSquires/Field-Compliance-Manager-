@@ -68,7 +68,11 @@ const AccessControlPage: React.FC = () => {
   const loadAll = useCallback(async () => {
     const orgId = profile?.organizationId;
     const operatingBranchId = operatingOrganizationId ?? orgId;
-    if (!orgId || !operatingBranchId) return;
+    if (!orgId || !operatingBranchId) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
     const operatingContext = operatingOrganizations.find((context) => context.organizationId === operatingBranchId);
     if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
       setError('Select a delivery branch to manage branch access.');

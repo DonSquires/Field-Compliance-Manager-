@@ -37,7 +37,10 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
   const [filter, setFilter] = useState<ViewFilter>('all');
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -117,7 +120,7 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
 
   return (
     <div className="notification-center" ref={panelRef}>
-      <button type="button" className="notification-trigger" onClick={() => setOpen((value) => !value)} aria-expanded={open} title={unreadCount ? `${unreadCount} unread notifications` : 'Notifications'}>
+      <button type="button" className="notification-trigger" onClick={() => setOpen((value) => !value)} disabled={!profile?.organizationId} aria-expanded={open} title={!profile?.organizationId ? 'Notifications unavailable until organisation access is confirmed' : unreadCount ? `${unreadCount} unread notifications` : 'Notifications'}>
         {unreadCount ? <BellRing size={19} aria-hidden="true" /> : <Bell size={19} aria-hidden="true" />}
         {unreadCount > 0 && <span>{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
@@ -131,7 +134,7 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
           </div>
 
           {error && <div className="notification-error" role="alert"><AlertTriangle size={16} /> {error}</div>}
-          {loading ? <div className="notification-empty"><RefreshCw size={19} className="is-spinning" /> Loading notifications</div> : visibleRows.length === 0 ? <div className="notification-empty"><Bell size={19} /> No notifications in this view</div> : (
+          {!profile?.organizationId ? <div className="notification-empty"><ShieldAlert size={19} /> Notifications unavailable until organisation access is confirmed.</div> : loading ? <div className="notification-empty"><RefreshCw size={19} className="is-spinning" /> Loading notifications</div> : visibleRows.length === 0 ? <div className="notification-empty"><Bell size={19} /> No notifications in this view</div> : (
             <div className="notification-list">
               {visibleRows.map((notification) => {
                 const SeverityIcon = notification.severity === 'critical' ? ShieldAlert : notification.severity === 'warning' ? CircleAlert : Info;

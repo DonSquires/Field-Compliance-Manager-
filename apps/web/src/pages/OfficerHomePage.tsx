@@ -111,7 +111,10 @@ function useOpenShifts(organizationId: string | null | undefined) {
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!organizationId) return;
+    if (!organizationId) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -303,7 +306,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           </button>
         </div>
 
-        {openShiftsError && <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /> {openShiftsError}</div>}
+        {!profile?.organizationId ? <div className="officer-notice is-error" role="status"><AlertTriangle size={18} aria-hidden="true" /> Coverage is unavailable until organisation access is confirmed.</div> : openShiftsError && <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>{openShiftsError}</span><button type="button" className="btn-secondary" onClick={() => void reload()} disabled={openShiftsLoading}>Try again</button></div>}
         {notice && <div className="officer-notice is-success" role="status"><CheckCircle2 size={18} aria-hidden="true" /> {notice}</div>}
         {openShiftsLoading ? (
           <div className="officer-shift-empty"><RefreshCw size={20} className="is-spinning" aria-hidden="true" /> Checking coverage</div>

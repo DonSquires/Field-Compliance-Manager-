@@ -24,4 +24,9 @@ describe('admin patrol evidence oversight', () => {
     expect(migration).toContain('revoke all on function public.complete_shift_stop(uuid,text,double precision,double precision) from public,anon,authenticated');
     expect(migration).toContain('grant execute on function public.complete_shift_stop(uuid,text,double precision,double precision) to service_role');
   });
+
+  it('clears loading state when organization scope is unavailable', () => {
+    expect(page).toContain('if (!organizationId) {');
+    expect(page).toContain('setLoading(false);');
+  });
 });

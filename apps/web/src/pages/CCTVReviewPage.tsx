@@ -217,7 +217,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const loadJobs = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

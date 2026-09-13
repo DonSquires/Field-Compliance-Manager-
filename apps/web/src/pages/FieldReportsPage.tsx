@@ -45,7 +45,11 @@ const FieldReportsPage: React.FC = () => {
 
   const loadReports = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
-    if (!organizationId) return;
+    if (!organizationId) {
+      setLoading(false);
+      setError('Report review is unavailable until organisation access is confirmed.');
+      return;
+    }
     setLoading(true);
     setError(null);
     const { data, error: reportError } = await supabase
@@ -154,7 +158,7 @@ const FieldReportsPage: React.FC = () => {
         <button type="button" onClick={() => void loadReports()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button>
       </header>
       <section className="field-reports-summary" aria-label="Report workload"><div className={criticalCount > 0 ? 'is-critical' : ''}><AlertTriangle size={18} /><span>Critical submitted</span><strong>{criticalCount}</strong></div><div><FileText size={18} /><span>Awaiting review</span><strong>{submittedCount}</strong></div><div><ShieldCheck size={18} /><span>Total records</span><strong>{reports.length}</strong></div></section>
-      {error && <div className="field-reports-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
+      {error && <div className="field-reports-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" className="btn-secondary" onClick={() => void loadReports()} disabled={loading}>Try again</button><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
       {notice && <div className="field-reports-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
       <div className="field-reports-toolbar">
         <label><Search size={16} /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search reports or officers" /></label>
