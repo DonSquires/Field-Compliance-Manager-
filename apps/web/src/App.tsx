@@ -4,6 +4,7 @@ import { ServiceRelationshipProvider } from './context/ServiceRelationshipContex
 import { RoleRouter } from './routing/RoleRouter';
 import LoginPage from './pages/LoginPage';
 import PublicDisputePage from './pages/PublicDisputePage';
+import AcceptCapabilityShareInvitePage from './pages/AcceptCapabilityShareInvitePage';
 
 function AuthGate() {
   const { profile, hasSession, recoveryMode, loading } = useAuth();
@@ -36,6 +37,7 @@ export function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/dispute" element={<PublicDisputePage />} />
+            <Route path="/invite/capability/:token" element={<AcceptCapabilityShareInvitePage />} />
             <Route path="*" element={<AuthGate />} />
             <Route path="/" element={<Navigate to="/officer" replace />} />
           </Routes>
