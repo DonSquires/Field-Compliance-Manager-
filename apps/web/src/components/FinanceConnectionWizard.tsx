@@ -35,7 +35,11 @@ export function FinanceConnectionWizard() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setError('Organisation access could not be confirmed. Finance connection setup is unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const [accountResponse, connectionResponse, taxResponse] = await Promise.all([
       supabase.from('bank_accounts').select('id,account_name,account_number,bank_name').eq('organization_id', profile.organizationId).eq('is_active', true).ilike('bank_name', '%ANZ%').order('account_name'),

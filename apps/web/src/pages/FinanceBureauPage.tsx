@@ -44,7 +44,11 @@ export default function FinanceBureauPage({ onOpenBob, onNavigate, view = 'home'
   const selectedRules = rules.filter((rule) => rule.schedule_id === selectedScheduleId);
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setError('Organisation access could not be confirmed. Pricing data is unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true); setError(null);
     const [scheduleResponse, moduleResponse] = await Promise.all([
       supabase.from('commercial_discount_schedules').select('id,name,status,effective_from,effective_to,version').eq('provider_organization_id', profile.organizationId).order('status').order('name'),

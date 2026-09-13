@@ -72,7 +72,11 @@ const RosterTargetsPage: React.FC = () => {
   });
   const load = useCallback(async () => {
     const org = operatingOrganizationId ?? profile?.organizationId;
-    if (!org) return;
+    if (!org) {
+      setError('Organisation access could not be confirmed. Work units are unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,required_skill_names').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code')]);

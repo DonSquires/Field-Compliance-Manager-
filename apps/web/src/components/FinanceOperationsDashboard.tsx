@@ -26,7 +26,11 @@ export function FinanceOperationsDashboard() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setError('Organisation access could not be confirmed. Finance operations are unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const [periodResponse, snapshotResponse, taxResponse, varianceResponse, receiptResponse, transactionResponse] = await Promise.all([

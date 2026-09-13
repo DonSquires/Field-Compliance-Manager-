@@ -92,7 +92,11 @@ export default function ZoneDetailPage() {
 
   useEffect(() => {
     const load = async () => {
-      if (!profile?.organizationId) return;
+      if (!profile?.organizationId) {
+        setError('Organisation access could not be confirmed. Zone data is unavailable.');
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       const { data, error: zonesError } = await supabase.rpc(

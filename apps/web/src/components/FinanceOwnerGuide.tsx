@@ -23,7 +23,11 @@ export function FinanceOwnerGuide({ onOpenBob }: FinanceOwnerGuideProps) {
   const [assessing, setAssessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadBrief = useCallback(async () => {
-    if (!profile?.organizationId) return;
+    if (!profile?.organizationId) {
+      setError('Organisation access could not be confirmed. Finance guidance is unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true); setError(null);
     const { data, error: briefError } = await supabase.rpc('get_finance_owner_brief');
     if (briefError) setError(briefError.message); else setBrief(data as OwnerBrief);

@@ -279,7 +279,11 @@ const FileSystemPage: React.FC = () => {
 
   const loadDocuments = useCallback(async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
-    if (!organizationId) return;
+    if (!organizationId) {
+      setError('An active organisation is required before loading files.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const [{ data, error: loadError }, { data: intakeData, error: intakeError }, { data: batchData, error: batchError }, { data: outputData, error: outputError }, { data: vacateData, error: vacateError }, { data: infringementData, error: infringementError }] = await Promise.all([supabase

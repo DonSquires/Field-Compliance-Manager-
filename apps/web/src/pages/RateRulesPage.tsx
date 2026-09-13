@@ -42,7 +42,11 @@ export default function RateRulesPage() {
 
   const load = useCallback(async () => {
     const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
-    if (!operatingBranchId) return;
+    if (!operatingBranchId) {
+      setError('Organisation access could not be confirmed. Rate rules are unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true); setError(null);
     const [rulesResponse, jobsResponse, payLinesResponse] = await Promise.all([
       supabase.from('rate_rules').select('id,rule_kind,name,rate_type,amount,pay_code,service_type,job_type,day_category,priority,active,updated_at').eq('organization_id', operatingBranchId).order('active', { ascending: false }).order('priority', { ascending: false }).order('name'),
