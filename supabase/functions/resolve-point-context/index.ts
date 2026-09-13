@@ -164,6 +164,7 @@ serve(async (req)=>{
     const lat = Number(body.lat);
     const lng = Number(body.lng);
     const orgId = String(body.organization_id ?? '').trim();
+    const moduleKey = body.module_key ? String(body.module_key).trim() : null;
     if (!isFinite(lat) || !isFinite(lng)) {
       return json({
         error: 'lat and lng are required numbers'
@@ -274,7 +275,9 @@ serve(async (req)=>{
       const { data: siteRows, error: siteContextError } = await admin.rpc('resolve_verified_site_context', {
         p_lat: lat,
         p_lng: lng,
-        p_client_org_ids: clientOrgIds
+        p_client_org_ids: clientOrgIds,
+        p_module_key: moduleKey,
+        p_provider_org_id: orgId
       });
       if (siteContextError) return json({
         error: 'Verified Site context could not be resolved'

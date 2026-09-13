@@ -21,6 +21,9 @@ test('point context verifies caller organization scope before privileged resolut
   assert.match(source, /if \(descendantsError\) return json\(\{[\s\S]*?Site organization scope could not be resolved/);
   assert.match(source, /if \(agreementsError\) return json\(\{[\s\S]*?Site agreement scope could not be resolved/);
   assert.match(source, /admin\.rpc\('resolve_verified_site_context'/);
+  assert.match(source, /const moduleKey = body\.module_key/);
+  assert.match(source, /p_module_key: moduleKey/);
+  assert.match(source, /p_provider_org_id: orgId/);
   assert.match(source, /if \(siteContextError\) return json\(\{[\s\S]*?Verified Site context could not be resolved/);
   assert.doesNotMatch(source, /haversineM/);
   assert.doesNotMatch(source, /Non-fatal: continue to reverse geocoding/);
