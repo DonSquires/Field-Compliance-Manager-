@@ -20,11 +20,19 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
     expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
     expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
-    expect(source).toContain('items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role))');
+    expect(source).toContain("items.filter((item) => isPageEnabled(item.id as AdminPage))");
+  });
+
+  it('gates platform module pages (crm, rostering, hr, finance) by organisation subscription', () => {
+    expect(source).toContain('PAGE_PLATFORM_MODULE');
+    expect(source).toContain("crm: 'crm'");
+    expect(source).toContain("roster: 'rostering'");
+    expect(source).toContain("'people-hr': 'hr'");
+    expect(source).toContain('if (requiredModule && !isModuleEnabled(requiredModule)) return false;');
   });
 
   it('guards direct URLs and visible navigation', () => {
-    expect(source).toContain('!canAccessAdminPage(page, profile?.role)');
+    expect(source).toContain('!canAccessAdminPage(page, profile?.role, isModuleEnabled)');
     expect(source).toContain("group !== 'System' && group !== 'Platform'");
     expect(source).toContain('This area is not available for your current role.');
   });

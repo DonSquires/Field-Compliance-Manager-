@@ -142,9 +142,21 @@ const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'debrief-followup',
 ]);
 
-function canAccessAdminPage(page: AdminPage, role: string | undefined): boolean {
+// Maps an AdminPage to the platform module (see platformModuleManifest.ts)
+// that must be enabled for the caller's org to reach it. Pages absent here
+// have no module gate (role checks below still apply).
+const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
+  crm: 'crm', relationships: 'crm', onboarding: 'crm', handoffs: 'crm',
+  roster: 'rostering', 'roster-targets': 'rostering',
+  'people-hr': 'hr',
+  'finance-bureau': 'finance', 'finance-connections': 'finance', 'finance-money': 'finance', 'finance-costing': 'finance', 'finance-pricing': 'finance', 'rate-rules': 'finance',
+};
+
+function canAccessAdminPage(page: AdminPage, role: string | undefined, isModuleEnabled: (moduleKey: string) => boolean): boolean {
   if (PLATFORM_ONLY_PAGES.has(page)) return role === 'grand_master' || role === 'master';
-  if (CRM_MANAGEMENT_PAGES.has(page)) return role === 'grand_master' || role === 'master' || role === 'admin';
+  if (CRM_MANAGEMENT_PAGES.has(page) && !(role === 'grand_master' || role === 'master' || role === 'admin')) return false;
+  const requiredModule = PAGE_PLATFORM_MODULE[page];
+  if (requiredModule && !isModuleEnabled(requiredModule)) return false;
   return true;
 }
 
@@ -270,7 +282,7 @@ const AdminShell: React.FC = () => {
   const location = useLocation();
   const { profile, signOut, operatingOrganizationId, operatingOrganizations, setOperatingOrganization } = useAuth();
   const activeOrganizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
-  const { status: modulesStatus } = useEnabledModules(activeOrganizationId);
+  const { status: modulesStatus, isModuleEnabled } = useEnabledModules(activeOrganizationId);
   const { agreements, sites, zones, selectedAgreement, selectedSite, selectedZone, loading: relationshipLoading } = useServiceRelationships();
 
   const [activePage, setActivePage] = useState<AdminPage>('hub');
@@ -305,7 +317,7 @@ const AdminShell: React.FC = () => {
     const redirectTarget = LEGACY_REDIRECT_MAP[page];
 
     if (redirectTarget) {
-      if (!canAccessAdminPage(redirectTarget.page, profile?.role)) {
+      if (!canAccessAdminPage(redirectTarget.page, profile?.role, isModuleEnabled)) {
         setAccessNotice('This area is not available for your current role.');
         setActivePage('hub');
         navigate('/admin/hub', { replace: true });
@@ -318,7 +330,7 @@ const AdminShell: React.FC = () => {
       if (redirectTarget.reportsTab) setReportsTab(redirectTarget.reportsTab);
       const areaQuery = redirectTarget.fieldOpsSubArea ? `?area=${redirectTarget.fieldOpsSubArea}` : '';
       navigate(`/admin/${redirectTarget.page}${areaQuery}`, { replace: true });
-    } else if (!canAccessAdminPage(page, profile?.role)) {
+    } else if (!canAccessAdminPage(page, profile?.role, isModuleEnabled)) {
       setAccessNotice('This area is not available for your current role.');
       setActivePage('hub');
       navigate('/admin/hub', { replace: true });
@@ -330,7 +342,7 @@ const AdminShell: React.FC = () => {
         setFieldOpsSubArea(requestedArea && FIELD_OPS_AREAS.has(requestedArea) ? requestedArea : 'landing');
       }
     }
-  }, [location.pathname, location.search, navigate, pageFromUrl, profile?.role]);
+  }, [location.pathname, location.search, navigate, pageFromUrl, profile?.role, isModuleEnabled]);
 
   useEffect(() => {
     const loadOrgName = async () => {
@@ -364,8 +376,8 @@ const AdminShell: React.FC = () => {
   }, []);
 
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
-    return canAccessAdminPage(page, profile?.role);
-  }, [profile?.role]);
+    return canAccessAdminPage(page, profile?.role, isModuleEnabled);
+  }, [profile?.role, isModuleEnabled]);
 
   const navigateToPage = useCallback((page: AdminPage, context?: WorkflowContext) => {
     if (!isPageEnabled(page)) {
@@ -581,12 +593,12 @@ const AdminShell: React.FC = () => {
             </button>
           </div>
 
-          {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || canAccessAdminPage('platform', profile?.role)).map(([group, items]) => (
+          {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || isPageEnabled('platform')).map(([group, items]) => (
             <div key={group} className="admin-nav-group">
               {!sidebarCollapsed && (
                 <div className="admin-nav-group-label">{group}</div>
               )}
-              {items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role)).map((item) => (
+              {items.filter((item) => isPageEnabled(item.id as AdminPage)).map((item) => (
                 <NavItem
                   key={item.id}
                   id={item.id}
@@ -679,10 +691,10 @@ const AdminShell: React.FC = () => {
       {mobileMenuOpen && (
         <div className="admin-mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
           <nav className="admin-mobile-drawer" onClick={(e) => e.stopPropagation()}>
-            {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || canAccessAdminPage('platform', profile?.role)).map(([group, items]) => (
+            {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || isPageEnabled('platform')).map(([group, items]) => (
               <div key={group} className="admin-mobile-nav-group">
                 <div>{group}</div>
-                {items.filter((item) => canAccessAdminPage(item.id as AdminPage, profile?.role)).map((item) => {
+                {items.filter((item) => isPageEnabled(item.id as AdminPage)).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button key={item.id} onClick={() => navigateToPage(item.id as AdminPage)} className={`admin-mobile-nav-item ${activePage === item.id ? 'is-active' : ''}`} aria-current={activePage === item.id ? 'page' : undefined}>
