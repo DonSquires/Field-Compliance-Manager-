@@ -11,6 +11,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import { NoticePrintActions } from '../components/NoticePrintActions';
 import type { NoticeReceiptData } from '../lib/thermalReceipt';
@@ -57,6 +58,7 @@ const ACTION_OPTIONS: { type: ActionType; label: string; btnClass: string }[] = 
 const BreachReviewPage: React.FC = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const [alerts, setAlerts] = useState<BreachAlert[]>([]);
   const [statusFilter, setStatusFilter] = useState<'open' | 'acknowledged' | 'actioned' | 'dismissed' | 'resolved' | 'exempt_homeless' | 'all'>('open');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -89,6 +91,10 @@ const BreachReviewPage: React.FC = () => {
         )
         .eq('organization_id', orgId);
 
+      if (selectedAgreementZones.length > 0) {
+        query = query.in('zone_id', selectedAgreementZones.map((zone) => zone.id));
+      }
+
       if (statusFilter !== 'all') {
         query = query.eq('status', statusFilter);
       }
@@ -120,7 +126,7 @@ const BreachReviewPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, statusFilter]);
+  }, [profile?.organizationId, selectedAgreementZones, statusFilter]);
 
   useEffect(() => {
     loadAlerts();

@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import { NoticePrintActions } from '../components/NoticePrintActions';
 import type { NoticeReceiptData } from '../lib/thermalReceipt';
@@ -36,6 +37,7 @@ type ParkingFilter = 'all' | 'active' | 'overdue' | 'review';
 
 const ParkingOversightPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const [records, setRecords] = useState<ChalkRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,10 +56,14 @@ const ParkingOversightPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const { data, error: err } = await supabase
+      let query = supabase
         .from('parking_chalk_records')
         .select('id, plate, officer_name, location_name, status, chalked_at, return_by, infringement_number, movement_detected, bob_classification, bob_confidence, effective_time_limit_minutes, sign_confidence, rego_status, wof_status, cof_status, vehicle_compliance_flags')
-        .eq('organization_id', orgId)
+        .eq('organization_id', orgId);
+      if (selectedAgreementZones.length > 0) {
+        query = query.in('zone_id', selectedAgreementZones.map((zone) => zone.id));
+      }
+      const { data, error: err } = await query
         .order('chalked_at', { ascending: false })
         .limit(100);
 
@@ -68,7 +74,7 @@ const ParkingOversightPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, selectedAgreementZones]);
 
   useEffect(() => {
     loadRecords();

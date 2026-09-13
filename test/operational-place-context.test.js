@@ -8,6 +8,8 @@ const sources = {
   dispatch: fs.readFileSync(path.join(root, 'DispatchConsolePage.tsx'), 'utf8'),
   welfare: fs.readFileSync(path.join(root, 'WelfareAlertsPage.tsx'), 'utf8'),
   admin: fs.readFileSync(path.join(root, 'AdminHubPage.tsx'), 'utf8'),
+  breachReview: fs.readFileSync(path.join(root, 'BreachReviewPage.tsx'), 'utf8'),
+  parkingOversight: fs.readFileSync(path.join(root, 'ParkingOversightPage.tsx'), 'utf8'),
 };
 
 test('dispatch console resolves agreement zones before organization fallback', () => {
@@ -27,4 +29,16 @@ test('admin command centre resolves agreement zones before organization fallback
   assert.match(sources.admin, /selectedAgreementZones/);
   assert.match(sources.admin, /in\('zone_id', activeZoneIds\)/);
   assert.match(sources.admin, /eq\('organization_id', organizationId\)/);
+});
+
+test('breach review resolves agreement zones before organization fallback', () => {
+  assert.match(sources.breachReview, /useServiceRelationships/);
+  assert.match(sources.breachReview, /selectedAgreementZones/);
+  assert.match(sources.breachReview, /query\.in\('zone_id'/);
+});
+
+test('parking oversight resolves agreement zones before organization fallback', () => {
+  assert.match(sources.parkingOversight, /useServiceRelationships/);
+  assert.match(sources.parkingOversight, /selectedAgreementZones/);
+  assert.match(sources.parkingOversight, /query\.in\('zone_id'/);
 });
