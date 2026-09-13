@@ -82,9 +82,12 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
       try {
         setResult(await submitOfficerScan(payload));
         setPhotoUri(null);
+        setPlateNumber('');
       } catch (error) {
         if (!isNetworkFailure(error)) throw error;
         await queueOfficerScan(payload);
+        setPhotoUri(null);
+        setPlateNumber('');
         await refreshQueue();
         Alert.alert('Queued for sync', 'The scan is stored securely on this device and will be retried from the queue.');
       }
