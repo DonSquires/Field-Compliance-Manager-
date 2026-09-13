@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCsvPreview, parseXlsxPreview, sha256Hex } from './importPreview';
+import { parseCsvPreview, parseJsonPreview, parseXlsxPreview, sha256Hex } from './importPreview';
 
 describe('CSV import preview', () => {
   it('detects mappings, date range, and duplicate rows without writing data', () => {
@@ -31,5 +31,15 @@ describe('CSV import preview', () => {
     expect(preview.unresolved_count).toBe(1);
     expect(preview.warnings).toContain('1 malformed rows have a different column count');
     expect(preview.warnings).toContain('1 rows have unresolved mapped values');
+  });
+});
+
+describe('JSON import preview', () => {
+  it('previews arrays and records containers without writing data', () => {
+    const preview = parseJsonPreview(JSON.stringify({ generatedAt: '2026-04-23T06:48:14Z', records: [{ id: 'zone-1', name: 'Test zone', polygon: [[-41.3, 173.1]] }] }), 'client-geofence-registry.json');
+    expect(preview.parser).toBe('JSON / schema detection');
+    expect(preview.row_count).toBe(1);
+    expect(preview.headers).toEqual(expect.arrayContaining(['id', 'name', 'polygon']));
+    expect(preview.warnings).toContain('Preview only: no canonical records will be written');
   });
 });

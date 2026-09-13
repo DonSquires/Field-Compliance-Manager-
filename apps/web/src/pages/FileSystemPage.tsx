@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Clock3, Download, FileArchive, FileText, FolderOpen, Image, RefreshCw, Search, ShieldCheck, Upload, Video, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ImportSchemaPreview, parseCsvPreview, parseXlsxPreview, sha256Hex } from '../lib/importPreview';
+import { ImportSchemaPreview, parseCsvPreview, parseJsonPreview, parseXlsxPreview, sha256Hex } from '../lib/importPreview';
 import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './PageStyles.css';
@@ -443,13 +443,17 @@ const FileSystemPage: React.FC = () => {
   const previewImportFile = async (file: File) => {
     setPreviewError(null);
     const lowerName = file.name.toLowerCase();
-    if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.xlsx')) {
-      setPreviewError('Preview supports CSV and XLSX files. Other formats remain staged for their dedicated parser.');
+    if (!lowerName.endsWith('.csv') && !lowerName.endsWith('.xlsx') && !lowerName.endsWith('.json')) {
+      setPreviewError('Preview supports JSON, CSV, and XLSX files. Other formats remain staged for their dedicated parser.');
       return;
     }
     try {
       const bytes = await file.arrayBuffer();
-      const preview = lowerName.endsWith('.xlsx') ? await parseXlsxPreview(bytes, file.name) : parseCsvPreview(new TextDecoder().decode(bytes), file.name);
+      const preview = lowerName.endsWith('.xlsx')
+        ? await parseXlsxPreview(bytes, file.name)
+        : lowerName.endsWith('.json')
+          ? parseJsonPreview(new TextDecoder().decode(bytes), file.name)
+          : parseCsvPreview(new TextDecoder().decode(bytes), file.name);
       setUploadedImportPreview({ ...preview, source_sha256: await sha256Hex(bytes) });
     } catch {
       setPreviewError('The CSV could not be parsed safely for preview.');

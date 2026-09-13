@@ -76,6 +76,25 @@ export function parseCsvPreview(text: string, fileName: string): ImportSchemaPre
   return buildPreview(rows, fileName, 'CSV / schema detection');
 }
 
+export function parseJsonPreview(text: string, fileName: string): ImportSchemaPreview {
+  const parsed = JSON.parse(text) as unknown;
+  const records = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { records?: unknown }).records)
+      ? (parsed as { records: unknown[] }).records
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { jurisdictions?: unknown }).jurisdictions)
+        ? (parsed as { jurisdictions: unknown[] }).jurisdictions
+        : [parsed];
+  const objectRecords = records.filter((record): record is Record<string, unknown> => Boolean(record && typeof record === 'object' && !Array.isArray(record)));
+  if (objectRecords.length === 0) throw new Error('JSON must contain an object or an array of objects.');
+  const headers = Array.from(new Set(objectRecords.flatMap((record) => Object.keys(record))));
+  const rows = [headers, ...objectRecords.map((record) => headers.map((header) => {
+    const value = record[header];
+    return value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+  }))];
+  return buildPreview(rows, fileName, 'JSON / schema detection');
+}
+
 export function parseXlsxPreview(data: ArrayBuffer, fileName: string): Promise<ImportSchemaPreview> {
   return readXlsxFile(data).then((sheets) => {
     const sheet = sheets[0];
