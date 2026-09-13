@@ -457,11 +457,14 @@ const OfficerShell: React.FC = () => {
                   if (!meta) return null;
                   const Icon = meta.icon;
                   return (
-                    <button key={mod} onClick={() => navigateToModule(mod as ActiveModule)}>
-                      <span><Icon size={21} /></span>
-                      <strong>{meta.label}</strong>
-                      <small>{meta.description}</small>
-                    </button>
+                    <article className="officer-module-card" key={mod}>
+                      <button type="button" className="officer-module-card-main" onClick={() => navigateToModule(mod as ActiveModule)}>
+                        <span><Icon size={21} /></span>
+                        <strong>{meta.label}</strong>
+                        <small>{meta.description}</small>
+                      </button>
+                      <button type="button" className="officer-module-card-standalone" onClick={() => navigate(`/modules/${mod}`)}>Open standalone app</button>
+                    </article>
                   );
                 })}
               </div>
@@ -471,7 +474,7 @@ const OfficerShell: React.FC = () => {
       default:
         return <LazyPageFallback />;
     }
-  }, [activeModule, grantedModules, navigateToModule]);
+  }, [activeModule, grantedModules, navigate, navigateToModule]);
 
   return (
     <div className="officer-shell">

@@ -20,6 +20,7 @@ import AdminShell from '../shells/AdminShell';
 import OfficerShell from '../shells/OfficerShell';
 import { ClientShell } from '../shells/ClientShell';
 import { ScanShell } from '../shells/ScanShell';
+import ModuleShell from '../shells/ModuleShell';
 
 const PORTAL_CHOICE_KEY = 'fcm.admin_officer.portal';
 type PortalChoice = 'admin' | 'field';
@@ -94,8 +95,18 @@ export function RoleRouter() {
   }
 
   const path = location.pathname;
-  if (!isWithinRolePrefix(path, expectedPrefix)) {
+  const standaloneModulePath = (role === 'officer' || (role === 'admin_officer' && portalChoice === 'field')) && path.startsWith('/modules/');
+  if (!standaloneModulePath && !isWithinRolePrefix(path, expectedPrefix)) {
     return <Navigate to={expectedPrefix} replace />;
+  }
+
+  if (standaloneModulePath) {
+    return (
+      <Routes>
+        <Route path="/modules/:moduleKey" element={<ModuleShell />} />
+        <Route path="*" element={<Navigate to="/officer" replace />} />
+      </Routes>
+    );
   }
 
   if (expectedPrefix === '/admin') {

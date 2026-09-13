@@ -312,24 +312,37 @@
   margin-top: 18px;
 }
 
+.officer-module-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #2b3c50;
+  border-radius: 7px;
+  background: #0d1827;
+}
+
 .officer-module-grid button {
   display: flex;
   align-items: center;
   gap: 11px;
   min-height: 62px;
   padding: 10px 12px;
-  border: 1px solid #2b3c50;
+  border: 0;
   border-radius: 7px;
   color: #dce7f1;
-  background: #0d1827;
+  background: transparent;
   cursor: pointer;
   text-align: left;
 }
 
 .officer-module-grid button:hover {
-  border-color: #568d87;
   background: #0d2224;
 }
+
+.officer-module-card:hover { border-color: #568d87; }
+.officer-module-card-main { width: 100%; }
+.officer-module-card-standalone { min-height: 28px !important; padding: 0 8px !important; border: 1px solid #315969 !important; border-radius: 5px !important; color: #9ee0c2 !important; background: #10292a !important; font-size: 10px !important; font-weight: 800; text-align: center !important; }
 
 .officer-module-grid button span {
   display: grid;
