@@ -7,6 +7,7 @@ const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migration
 const projection = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913135000_house_event_anchor_projection.sql'), 'utf8');
 const contextContract = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913137000_event_context_snapshot_contract.sql'), 'utf8');
 const contextHardening = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913137100_harden_event_context_snapshot_rpc.sql'), 'utf8');
+const governedWriter = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260913139000_create_governed_location_event.sql'), 'utf8');
 
 test('location event writes enforce checkpoint parent consistency and Site XOR Zone', () => {
   assert.match(migration, /NEW\.client_site_id IS NOT NULL AND NEW\.zone_id IS NOT NULL/);
@@ -36,4 +37,11 @@ test('future event context snapshots separate place anchors from immutable autho
   }
   assert.match(contextContract, /event_context_snapshots_source_key/);
   assert.match(contextContract, /DO NOTHING/);
+});
+
+test('future event writers use the canonical event plus context transaction', () => {
+  assert.match(governedWriter, /create_location_event/);
+  assert.match(governedWriter, /INSERT INTO public\.location_events/);
+  assert.match(governedWriter, /create_event_context_snapshot/);
+  assert.match(governedWriter, /Location event organization access denied/);
 });
