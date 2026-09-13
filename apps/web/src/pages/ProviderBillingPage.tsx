@@ -52,6 +52,13 @@ const ProviderBillingPage: React.FC = () => {
 
   // ATLAS READS: org_module_subscriptions, organizations
   const loadSubscriptions = useCallback(async () => {
+    if (!isGrandMaster && !profile?.organizationId) {
+      setSubscriptions([]);
+      setOrgs({});
+      setError('Organisation access could not be confirmed. Provider billing is unavailable.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -63,7 +70,7 @@ const ProviderBillingPage: React.FC = () => {
 
       const { data, error: err } = isGrandMaster
         ? await query
-        : await query.eq('organization_id', profile?.organizationId ?? '');
+        : await query.eq('organization_id', profile.organizationId);
 
       if (err) throw err;
       const rows = (data as SubscriptionRow[]) || [];
