@@ -21,6 +21,13 @@ test('governed scan preserves the manual plate fallback contract', () => {
   assert.match(edgeFunction, /runInference\(imageBase64\)/);
 });
 
+test('governed scan retries use a durable request receipt', () => {
+  assert.match(edgeFunction, /from\('officer_command_requests'\)/);
+  assert.match(edgeFunction, /command_status: 'processing'/);
+  assert.match(edgeFunction, /command_status: 'completed'/);
+  assert.match(edgeFunction, /existingReceipt\.response\?\.success === true/);
+});
+
 test('mobile scan queue preserves capture time and retry provenance', () => {
   assert.match(source, /captured_at: string/);
   assert.match(source, /offline_queued: true/);

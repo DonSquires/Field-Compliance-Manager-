@@ -69,7 +69,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
     setWorking(true);
     setResult(null);
     try {
-      const payload: OfficerScanPayload = { image_base64: await imageUriToBase64(photoUri), gps_lat: coordinates.lat, gps_lng: coordinates.lng, module_key: moduleKey, captured_at: new Date().toISOString() };
+      const payload: OfficerScanPayload = { image_base64: await imageUriToBase64(photoUri), gps_lat: coordinates.lat, gps_lng: coordinates.lng, module_key: moduleKey, captured_at: new Date().toISOString(), client_request_id: crypto.randomUUID() };
       try {
         setResult(await submitOfficerScan(payload));
         setPhotoUri(null);

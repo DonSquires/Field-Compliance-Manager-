@@ -37,6 +37,10 @@ describe('officer scan contract', () => {
     expect(canSubmitOfficerScan(payload)).toBe(true);
   });
 
+  it('preserves a client request id for offline retries', () => {
+    expect(buildOfficerScanPayload({ clientRequestId: 'scan-request-1' }).client_request_id).toBe('scan-request-1');
+  });
+
   it('requires evidence and either GPS or a selected zone', () => {
     expect(canSubmitOfficerScan(buildOfficerScanPayload({}))).toBe(false);
     expect(canSubmitOfficerScan(buildOfficerScanPayload({ imageBase64: 'encoded-image' }))).toBe(false);

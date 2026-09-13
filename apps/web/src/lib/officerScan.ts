@@ -9,6 +9,7 @@ export interface OfficerScanPayload {
   zone_id?: string;
   module_key: ScanModuleKey;
   captured_at: string;
+  client_request_id?: string;
   offline_queued?: boolean;
   synced_at?: string;
 }
@@ -68,6 +69,7 @@ export function buildOfficerScanPayload(input: {
   zoneId?: string;
   capturedAt?: string;
   moduleKey?: ScanModuleKey;
+  clientRequestId?: string;
 }): OfficerScanPayload {
   const plateNumber = normalizePlate(input.plateNumber ?? '');
   return {
@@ -78,6 +80,7 @@ export function buildOfficerScanPayload(input: {
     ...(input.zoneId ? { zone_id: input.zoneId } : {}),
     module_key: input.moduleKey ?? 'freedom_camping',
     captured_at: input.capturedAt ?? new Date().toISOString(),
+    ...(input.clientRequestId ? { client_request_id: input.clientRequestId } : {}),
   };
 }
 

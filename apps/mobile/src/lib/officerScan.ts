@@ -14,6 +14,7 @@ export type OfficerScanPayload = {
   gps_lng: number | null;
   module_key: ScanModuleKey;
   captured_at: string;
+  client_request_id: string;
   offline_queued?: boolean;
   synced_at?: string;
 };

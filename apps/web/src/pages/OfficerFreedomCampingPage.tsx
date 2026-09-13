@@ -91,6 +91,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [zoneId, setZoneId] = useState('');
   const [plateNumber, setPlateNumber] = useState('');
+  const [clientRequestId, setClientRequestId] = useState(() => crypto.randomUUID());
   const [imageBase64, setImageBase64] = useState<string>();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string>();
   const [capturedAt, setCapturedAt] = useState<string>();
@@ -264,19 +265,21 @@ const OfficerFreedomCampingPage: React.FC = () => {
   }, [imagePreviewUrl]);
 
   const payload = useMemo(() => buildOfficerScanPayload({
+    clientRequestId,
     plateNumber,
     imageBase64,
     latitude: location.latitude,
     longitude: location.longitude,
     zoneId,
     capturedAt,
-  }), [capturedAt, imageBase64, location.latitude, location.longitude, zoneId]);
+  }), [capturedAt, clientRequestId, imageBase64, location.latitude, location.longitude, zoneId, plateNumber]);
 
   const clearCapture = useCallback(() => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(undefined);
     setImageBase64(undefined);
     setPlateNumber('');
+    setClientRequestId(crypto.randomUUID());
     setCapturedAt(undefined);
     setSubmitError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -289,6 +292,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     setSubmitError(null);
     setResult(null);
     setPlateNumber('');
+    setClientRequestId(crypto.randomUUID());
     try {
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
       setImagePreviewUrl(URL.createObjectURL(file));

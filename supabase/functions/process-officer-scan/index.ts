@@ -729,6 +729,30 @@ serve(async (req)=>{
     const body = await req.json();
     const { plate_number: manualPlateNumberInput, image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
     const manualPlateNumber = typeof manualPlateNumberInput === 'string' ? manualPlateNumberInput.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) : '';
+    const clientRequestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : '';
+    const completeReceipt = async (response) => {
+      if (clientRequestId) {
+        const { error: receiptError } = await supabase.from('officer_command_requests').update({ command_status: 'completed', response }).eq('request_id', clientRequestId).eq('actor_user_id', officerId);
+        if (receiptError) console.error('[scan] receipt completion failed:', receiptError.message);
+      }
+      return json(response);
+    };
+    if (clientRequestId) {
+      const { data: existingReceipt, error: receiptLookupError } = await supabase.from('officer_command_requests').select('command_status, response').eq('request_id', clientRequestId).eq('actor_user_id', officerId).maybeSingle();
+      if (receiptLookupError) return json({ error: 'Scan request receipt could not be checked' }, 503);
+      if (existingReceipt?.command_status === 'completed' && existingReceipt.response?.success === true) return json(existingReceipt.response);
+      if (existingReceipt) return json({ error: 'This scan request is already being processed', request_id: clientRequestId }, 409);
+      const { error: receiptInsertError } = await supabase.from('officer_command_requests').insert({
+        request_id: clientRequestId,
+        organization_id: orgId,
+        actor_user_id: officerId,
+        command_type: 'process_officer_scan',
+        command_status: 'processing',
+        response: {}
+      });
+      if (receiptInsertError?.code === '23505') return json({ error: 'This scan request is already being processed', request_id: clientRequestId }, 409);
+      if (receiptInsertError) return json({ error: 'Scan request receipt could not be created' }, 503);
+    }
     if (!['freedom_camping', 'parking_enforcement'].includes(moduleKey)) return json({
       error: 'Unsupported scan module'
     }, 400);
@@ -1181,7 +1205,7 @@ serve(async (req)=>{
         }).then(()=>{});
       }
       // Step 12P: Return parking verdict
-      return json({
+      return completeReceipt({
         success: true,
         // Parking-specific fields
         verdict: parkingCompliance.verdict,
@@ -1621,7 +1645,7 @@ serve(async (req)=>{
       }).then(()=>{});
     }
     // Step 12: Return verdict
-    return json({
+    return completeReceipt({
       success: true,
       plate_number: plateNumber,
       plate_confidence: plateConfidence,
