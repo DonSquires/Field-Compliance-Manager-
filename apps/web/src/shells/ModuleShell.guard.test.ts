@@ -22,6 +22,7 @@ describe('standalone module shell contract', () => {
     expect(manifest).toContain('standalonePath');
     expect(manifest).toContain("key: 'freedom_camping'");
     expect(shell).toContain('module.integratedKey === moduleKey');
+    expect(shell).toContain('activeModule: canonicalKey');
     expect(shell).toContain('Switch standalone module');
   });
 

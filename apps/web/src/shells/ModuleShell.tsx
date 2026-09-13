@@ -72,7 +72,7 @@ export function ModuleShell() {
   }, [allowed, navigate, status]);
 
   const bobContext = useMemo(() => ({
-    activeModule: moduleKey,
+    activeModule: canonicalKey,
     officerState: 'module',
     shift,
     welfareStatus: safety.activeAlert ? 'alert' : safety.status,
