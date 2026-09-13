@@ -7,6 +7,12 @@ const shell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx')
 const completionFix = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901018000_fix_officer_shift_completion.sql'), 'utf8');
 
 describe('officer debrief workspace', () => {
+  it('fails closed when officer organisation context is unavailable', () => {
+    expect(page).toContain("if (!profile?.id || !profile.organizationId) {");
+    expect(page).toContain("setError('Organisation access could not be confirmed. Debrief data is unavailable.');");
+    expect(page).toContain('setLoading(false);');
+  });
+
   it('replaces the exposed placeholder with a real handover page', () => {
     expect(shell).toContain('return <OfficerDebriefPage onNavigate=');
     expect(shell).not.toContain('return <ComingSoonPage title="Debrief" />');

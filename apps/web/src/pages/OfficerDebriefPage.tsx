@@ -32,7 +32,13 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
   const eventIdRef = useRef(crypto.randomUUID());
 
   const loadDebriefData = useCallback(async () => {
-    if (!profile?.id || !profile.organizationId) return;
+    if (!profile?.id || !profile.organizationId) {
+      setShifts([]);
+      setDebriefs([]);
+      setError('Organisation access could not be confirmed. Debrief data is unavailable.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
