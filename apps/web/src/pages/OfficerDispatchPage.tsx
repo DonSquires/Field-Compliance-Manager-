@@ -10,6 +10,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { CheckCircle2, FileText, Home, Map, ShieldCheck } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { OfficerRouteGuidance } from '../components/OfficerRouteGuidance';
 import { supabase } from '../lib/supabase';
@@ -58,6 +59,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
   const location = useLocation();
   const requestedJobId = new URLSearchParams(location.search).get('job');
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,12 +86,17 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
     try {
       setLoading(true);
       setError(null);
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
-      const { data: shifts, error: shiftErr } = await supabase
+      const shiftQuery = supabase
         .from('shifts')
         .select('id')
         .eq('officer_user_id', profile.id)
         .in('status', ['accepted', 'in_progress']);
+      const scopedShiftQuery = activeZoneIds && activeZoneIds.length > 0
+        ? shiftQuery.in('zone_id', activeZoneIds)
+        : shiftQuery;
+      const { data: shifts, error: shiftErr } = await scopedShiftQuery;
 
       if (shiftErr) throw shiftErr;
 
@@ -99,11 +106,15 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
         return;
       }
 
-      const { data, error: err } = await supabase
+      const jobQuery = supabase
         .from('dispatch_jobs')
         .select('id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, site:client_site_id(name, address, hs_notes, access_instructions)')
         .or(`${shiftIds.length ? `shift_id.in.(${shiftIds.join(',')}),` : ''}assigned_officer_id.eq.${profile.id}`)
-        .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[])
+        .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]);
+      const scopedJobQuery = activeZoneIds && activeZoneIds.length > 0
+        ? jobQuery.in('zone_id', activeZoneIds)
+        : jobQuery;
+      const { data, error: err } = await scopedJobQuery
         .order('priority', { ascending: false })
         .order('created_at', { ascending: true });
 
@@ -114,7 +125,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
     } finally {
       setLoading(false);
     }
-  }, [profile?.id, profile?.organizationId]);
+  }, [profile?.id, profile?.organizationId, selectedAgreementZones]);
 
   useEffect(() => {
     loadJobs();

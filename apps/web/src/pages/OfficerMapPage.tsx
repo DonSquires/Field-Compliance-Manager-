@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -21,6 +22,7 @@ interface GpsPing {
 
 const OfficerMapPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const [positions, setPositions] = useState<(GpsPing & { officer_name: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,12 +43,15 @@ const OfficerMapPage: React.FC = () => {
         setError(null);
 
         const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-        const { data, error: err } = await supabase
+        const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+        const gpsQuery = supabase
           .from('officer_gps_log')
           .select('officer_id, gps_lat, gps_lng, recorded_at')
-          .eq('organization_id', orgId)
-          .gte('created_at', since)
-          .order('created_at', { ascending: false });
+          .gte('created_at', since);
+        const scopedGpsQuery = activeZoneIds && activeZoneIds.length > 0
+          ? gpsQuery.in('zone_id', activeZoneIds)
+          : gpsQuery.eq('organization_id', orgId);
+        const { data, error: err } = await scopedGpsQuery.order('created_at', { ascending: false });
 
         if (err) throw err;
 
@@ -78,7 +83,7 @@ const OfficerMapPage: React.FC = () => {
       } finally {
         setLoading(false);
       }
-    }, [profile?.id, profile?.organizationId]);
+    }, [profile?.id, profile?.organizationId, selectedAgreementZones]);
 
   useEffect(() => { void load(); }, [load]);
 

@@ -10,6 +10,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -26,6 +27,7 @@ interface OvernightSession {
 
 const OfficerOvernightVerificationPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
   const [sessions, setSessions] = useState<OvernightSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,12 +46,16 @@ const OfficerOvernightVerificationPage: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        const { data, error: err } = await supabase
+        const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+        const sessionQuery = supabase
           .from('vehicle_overnight_sessions')
           .select(
             'id, plate_number, overnight_date, verification_status, movement_decision, evidence_strength, evening_seen_at, morning_seen_at'
-          )
-          .eq('organization_id', orgId)
+          );
+        const scopedSessionQuery = activeZoneIds && activeZoneIds.length > 0
+          ? sessionQuery.in('zone_id', activeZoneIds)
+          : sessionQuery.eq('organization_id', orgId);
+        const { data, error: err } = await scopedSessionQuery
           .order('overnight_date', { ascending: false })
           .limit(50);
 
@@ -60,7 +66,7 @@ const OfficerOvernightVerificationPage: React.FC = () => {
       } finally {
         setLoading(false);
       }
-    }, [profile?.organizationId]);
+    }, [profile?.organizationId, selectedAgreementZones]);
 
   useEffect(() => { void load(); }, [load]);
 
