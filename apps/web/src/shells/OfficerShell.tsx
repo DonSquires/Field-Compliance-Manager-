@@ -48,6 +48,7 @@ import { useAuth } from '../context/AuthContext';
 import { useActiveShift } from '../hooks/useActiveShift';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useEnabledModules } from '../hooks/useEnabledModules';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
@@ -140,6 +141,7 @@ const OfficerShell: React.FC = () => {
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext(activeModule ?? null);
 
   const getGps = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
@@ -184,9 +186,12 @@ const OfficerShell: React.FC = () => {
     if (!module) return true;
     if (module === 'modules') return true;
     if (CORE_OFFICER_MODULES.has(module)) return true;
+    if (moduleContext.moduleKey === module && moduleContext.policyStatus && moduleContext.policyStatus !== 'needs_resolution') {
+      return moduleContext.enabled;
+    }
     return grantedModules.includes(module)
       || (moduleStatus === 'configured' && enabledModules.has(module) && (profile?.moduleAccess ?? []).includes(module));
-  }, [enabledModules, grantedModules, moduleStatus, profile?.moduleAccess]);
+  }, [enabledModules, grantedModules, moduleContext.enabled, moduleContext.moduleKey, moduleContext.policyStatus, moduleStatus, profile?.moduleAccess]);
 
   // Derive active module from URL
   const moduleFromUrl = useCallback((pathname: string): ActiveModule => {

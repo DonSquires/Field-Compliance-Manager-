@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from 'react-router-dom';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
 import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
 import {
@@ -85,6 +87,8 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const routeLocation = useLocation();
   const requestedBreachId = new URLSearchParams(routeLocation.search).get('breach');
   const { profile } = useAuth();
+  const { selectedAgreement, selectedAgreementZones, selectedZone } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('freedom_camping');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [observations, setObservations] = useState<ObservationSummary[]>([]);
   const [zones, setZones] = useState<ZoneOption[]>([]);
@@ -123,6 +127,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
     try {
       setLoadingHistory(true);
       setHistoryError(null);
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const [observationsResponse, zonesResponse] = await Promise.all([
         supabase
           .from('observations')
@@ -131,12 +136,9 @@ const OfficerFreedomCampingPage: React.FC = () => {
           .eq('module_key', 'freedom_camping')
           .order('observed_at', { ascending: false })
           .limit(8),
-        supabase
-          .from('location_zones')
-          .select('id, name')
-          .eq('organization_id', profile.organizationId)
-          .eq('module_key', 'freedom_camping')
-          .order('name'),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('location_zones').select('id, name').in('id', activeZoneIds).eq('module_key', 'freedom_camping').order('name')
+          : supabase.from('location_zones').select('id, name').eq('organization_id', profile.organizationId).eq('module_key', 'freedom_camping').order('name'),
       ]);
       if (observationsResponse.error) throw observationsResponse.error;
       if (zonesResponse.error) throw zonesResponse.error;
@@ -154,7 +156,13 @@ const OfficerFreedomCampingPage: React.FC = () => {
     } finally {
       setLoadingHistory(false);
     }
-  }, [profile?.id, profile?.organizationId]);
+  }, [profile?.id, profile?.organizationId, selectedAgreementZones]);
+
+  useEffect(() => {
+    if (selectedZone && !zoneId) {
+      setZoneId(selectedZone.id);
+    }
+  }, [selectedZone, zoneId]);
 
   useEffect(() => {
     if (requestedBreachId) {

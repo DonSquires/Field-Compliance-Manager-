@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, MapPin, RefreshCw, ShieldCheck, Signpost, TriangleAlert } from 'lucide-react';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import './OfficerStaticGuardPage.css';
 
@@ -47,6 +49,8 @@ async function currentPosition(): Promise<{ latitude: number; longitude: number;
 }
 
 export default function OfficerStaticGuardPage() {
+  const { selectedAgreementZones } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('site_guard');
   const [post, setPost] = useState<StaticPost | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -58,14 +62,19 @@ export default function OfficerStaticGuardPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);setError(null);
-      const { data, error: rpcError } = await supabase.rpc('get_officer_static_post', { p_shift_id: null });
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+      const { data, error: rpcError } = await supabase.rpc('get_officer_static_post', {
+        p_shift_id: null,
+        p_zone_ids: activeZoneIds,
+        p_module_key: 'site_guard',
+      });
       if (rpcError) throw rpcError;
       const next = data as StaticPost | null;
       setPost(next);setNotes(next?.stop.officer_notes ?? '');
     } catch (loadError) {
       setError(errorMessage(loadError, 'Static post could not be loaded.'));
     } finally { setLoading(false); }
-  }, []);
+  }, [selectedAgreementZones]);
 
   useEffect(() => { void load(); }, [load]);
 

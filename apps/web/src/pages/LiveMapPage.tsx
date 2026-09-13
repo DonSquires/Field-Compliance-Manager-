@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Crosshair, MapPin, RefreshCw, ShieldAlert, ShieldCheck, WifiOff } from 'lucide-react';
 import type { SafetyStatus } from '../hooks/useOfficerSafety';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useEnabledModules } from '../hooks/useEnabledModules';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { SafetyGate } from '../components/SafetyGate';
 import { deriveAdminSafetyStatus, deriveOfficerPinStatus, type OfficerPinStatus } from '../lib/officerPinStatus';
 import { supabase } from '../lib/supabase';
@@ -50,6 +52,8 @@ const STATUS_LABEL: Record<OfficerPinStatus, string> = {
 
 const LiveMapPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('dispatch');
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [positions, setPositions] = useState<OfficerLatest[]>([]);
@@ -71,12 +75,20 @@ const LiveMapPage: React.FC = () => {
     let safetyLoadFailed = false;
     try {
       const since = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
-      const { data, error: gpsError } = await supabase
-        .from('officer_gps_log')
-        .select('id, officer_id, gps_lat, gps_lng, activity_type, speed_kmh, created_at')
-        .eq('organization_id', orgId)
-        .gte('created_at', since)
-        .order('created_at', { ascending: false });
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+      const { data, error: gpsError } = activeZoneIds && activeZoneIds.length > 0
+        ? await supabase
+            .from('officer_gps_log')
+            .select('id, officer_id, gps_lat, gps_lng, activity_type, speed_kmh, created_at')
+            .in('zone_id', activeZoneIds)
+            .gte('created_at', since)
+            .order('created_at', { ascending: false })
+        : await supabase
+            .from('officer_gps_log')
+            .select('id, officer_id, gps_lat, gps_lng, activity_type, speed_kmh, created_at')
+            .eq('organization_id', orgId)
+            .gte('created_at', since)
+            .order('created_at', { ascending: false });
       if (gpsError) throw gpsError;
 
       const latestByOfficer = new Map<string, GpsPing>();
@@ -86,12 +98,19 @@ const LiveMapPage: React.FC = () => {
 
       const activeAlerts = new Map<string, ActiveWelfareAlert>();
       if (welfareEnabled) {
-        const { data: alertRows, error: alertError } = await supabase
-          .from('welfare_alerts')
-          .select('id, officer_user_id, gps_lat, gps_lng, triggered_at')
-          .eq('organization_id', orgId)
-          .in('status', ['pending', 'acknowledged'])
-          .order('triggered_at', { ascending: false });
+        const { data: alertRows, error: alertError } = activeZoneIds && activeZoneIds.length > 0
+          ? await supabase
+              .from('welfare_alerts')
+              .select('id, officer_user_id, gps_lat, gps_lng, triggered_at')
+              .in('zone_id', activeZoneIds)
+              .in('status', ['pending', 'acknowledged'])
+              .order('triggered_at', { ascending: false })
+          : await supabase
+              .from('welfare_alerts')
+              .select('id, officer_user_id, gps_lat, gps_lng, triggered_at')
+              .eq('organization_id', orgId)
+              .in('status', ['pending', 'acknowledged'])
+              .order('triggered_at', { ascending: false });
         if (alertError) {
           safetyLoadFailed = true;
           setSafetyError(alertError.message);
@@ -117,11 +136,17 @@ const LiveMapPage: React.FC = () => {
         });
 
         if (welfareEnabled) {
-          const settingsResponse = await supabase
-            .from('officer_welfare_settings')
-            .select('officer_user_id, welfare_check_enabled, check_interval_minutes, last_checkin_at')
-            .eq('organization_id', orgId)
-            .in('officer_user_id', officerIds);
+          const settingsResponse = activeZoneIds && activeZoneIds.length > 0
+            ? await supabase
+                .from('officer_welfare_settings')
+                .select('officer_user_id, welfare_check_enabled, check_interval_minutes, last_checkin_at')
+                .in('zone_id', activeZoneIds)
+                .in('officer_user_id', officerIds)
+            : await supabase
+                .from('officer_welfare_settings')
+                .select('officer_user_id, welfare_check_enabled, check_interval_minutes, last_checkin_at')
+                .eq('organization_id', orgId)
+                .in('officer_user_id', officerIds);
 
           if (settingsResponse.error) {
             safetyLoadFailed = true;

@@ -16,9 +16,11 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { SafetyGate } from '../components/SafetyGate';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { useEnabledModules } from '../hooks/useEnabledModules';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
@@ -69,6 +71,8 @@ function toMetric(response: { count: number | null; error: { message: string } |
 
 const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate }) => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('dispatch');
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
@@ -83,13 +87,22 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
     setLoading(true);
     const now = new Date().toISOString();
     const organizationId = profile.organizationId;
+    const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
     const [onDuty, dispatch, welfare, reports] = await Promise.all([
-      supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress']),
-      supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
+      activeZoneIds && activeZoneIds.length > 0
+        ? supabase.from('shifts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress'])
+        : supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress']),
+      activeZoneIds && activeZoneIds.length > 0
+        ? supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES)
+        : supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
       welfareEnabled
-        ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
+        ? (activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ['pending', 'acknowledged'])
+          : supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']))
         : Promise.resolve({ count: null, error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
-      supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted'),
+      activeZoneIds && activeZoneIds.length > 0
+        ? supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted')
+        : supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted'),
     ]);
     setMetrics({ onDuty: toMetric(onDuty), activeDispatch: toMetric(dispatch), welfareAlerts: toMetric(welfare), reportFollowUp: toMetric(reports) });
     setUpdatedAt(new Date());

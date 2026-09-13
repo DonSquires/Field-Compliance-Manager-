@@ -48,6 +48,8 @@ describe('OfficerShell state routing', () => {
     expect(source).toContain("navigate('/officer', { replace: true });");
     expect(source).toContain('grantedModules.includes');
     expect(source).toContain('module === \'modules\'');
+    expect(source).toContain('useActiveModuleContext');
+    expect(source).toContain('moduleContext.enabled');
   });
 
   it('exposes stateful accessible semantics on persistent controls', () => {

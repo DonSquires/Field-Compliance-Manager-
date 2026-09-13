@@ -9,6 +9,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Camera, CheckCircle2, MapPin, Search, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
 import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
@@ -42,6 +44,8 @@ interface ParkingScanResult {
 
 const OfficerParkingPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementZones, selectedZone } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('parking_enforcement');
   const [records, setRecords] = useState<ChalkRecord[]>([]);
   const [zones, setZones] = useState<ParkingZone[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -73,20 +77,16 @@ const OfficerParkingPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const [{ data, error: err }, { data: zoneData, error: zoneError }] = await Promise.all([
         supabase
         .from('parking_chalk_records')
         .select('id, plate, chalked_at, return_by, status, location_name, notes')
         .eq('officer_id', profile.id)
           .order('chalked_at', { ascending: false }),
-        supabase
-          .from('location_zones')
-          .select('id, name, address')
-          .eq('organization_id', profile.organizationId)
-          .eq('module_key', 'parking_enforcement')
-          .eq('is_active', true)
-          .eq('boundary_verification', 'verified')
-          .order('name'),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('location_zones').select('id, name, address').in('id', activeZoneIds).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name')
+          : supabase.from('location_zones').select('id, name, address').eq('organization_id', profile.organizationId ?? '').eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
       ]);
 
       if (err) throw err;
@@ -98,7 +98,13 @@ const OfficerParkingPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.id]);
+  }, [profile?.id, profile?.organizationId, selectedAgreementZones]);
+
+  useEffect(() => {
+    if (selectedZone && !form.zone_id) {
+      setForm((current) => ({ ...current, zone_id: selectedZone.id }));
+    }
+  }, [selectedZone, form.zone_id]);
 
   useEffect(() => {
     loadRecords();

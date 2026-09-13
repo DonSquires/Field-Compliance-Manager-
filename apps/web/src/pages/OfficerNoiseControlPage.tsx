@@ -10,6 +10,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Crosshair, MapPin, RefreshCw, Search } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -42,6 +44,8 @@ const OfficerNoiseControlPage: React.FC = () => {
   const location=useLocation();
   const requestedAssessmentId=new URLSearchParams(location.search).get('assessment');
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('noise_control');
   const [assessments, setAssessments] = useState<NoiseAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,11 +70,16 @@ const OfficerNoiseControlPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const { data, error: err } = await supabase
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+      const query = supabase
         .from('noise_assessments')
         .select('id, decibel_reading, noise_source, prior_notice_count, action_taken, scene_description, assessed_at, review_status, reviewed_at, review_notes, follow_up_required')
         .eq('officer_user_id', profile.id)
         .order('assessed_at', { ascending: false });
+
+      const { data, error: err } = activeZoneIds && activeZoneIds.length > 0
+        ? await query.in('zone_id', activeZoneIds)
+        : await query.eq('organization_id', profile.organizationId ?? '');
 
       if (err) throw err;
       setAssessments((data as NoiseAssessment[]) || []);

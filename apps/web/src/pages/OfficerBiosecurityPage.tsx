@@ -9,6 +9,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Camera, CheckCircle2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -28,6 +30,8 @@ interface BiosecurityAssessment {
 
 const OfficerBiosecurityPage: React.FC = () => {
   const { profile } = useAuth();
+  const { selectedAgreementZones } = useServiceRelationships();
+  const moduleContext = useActiveModuleContext('biosecurity');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [assessments, setAssessments] = useState<BiosecurityAssessment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,11 +73,16 @@ const OfficerBiosecurityPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const { data, error: err } = await supabase
+      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+      const query = supabase
         .from('biosecurity_assessments')
         .select('id, species_name, density_estimate, action_taken, scene_description, status, assessed_at')
         .eq('officer_user_id', profile.id)
         .order('assessed_at', { ascending: false });
+
+      const { data, error: err } = activeZoneIds && activeZoneIds.length > 0
+        ? await query.in('zone_id', activeZoneIds)
+        : await query.eq('organization_id', profile.organizationId ?? '');
 
       if (err) throw err;
       setAssessments((data as BiosecurityAssessment[]) || []);

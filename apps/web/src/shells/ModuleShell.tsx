@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useActiveShift } from '../hooks/useActiveShift';
 import { useEnabledModules } from '../hooks/useEnabledModules';
+import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
@@ -51,6 +52,7 @@ export function ModuleShell() {
   const { profile } = useAuth();
   const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
   const { status, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
+  const moduleContext = useActiveModuleContext(canonicalKey || null);
   const { shift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const safety = useOfficerSafety({
     officerId: profile?.id ?? null,
@@ -64,8 +66,13 @@ export function ModuleShell() {
   const moduleDefinition = SPECIALTY_MODULES.find((module) => module.key === moduleKey || module.integratedKey === moduleKey);
   const canonicalKey = moduleDefinition?.key ?? (moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey);
   const label = moduleDefinition?.label;
-  const allowed = status !== 'loading' && Boolean(moduleDefinition) && isModuleEnabled(canonicalKey);
-  const availableModules = SPECIALTY_MODULES.filter((module) => isModuleEnabled(module.key));
+  const allowed = status !== 'loading'
+    && Boolean(moduleDefinition)
+    && (!moduleContext.loading && moduleContext.moduleKey === canonicalKey ? moduleContext.enabled : isModuleEnabled(canonicalKey));
+  const availableModules = SPECIALTY_MODULES.filter((module) => {
+    const moduleAllowed = !moduleContext.loading && moduleContext.moduleKey === module.key ? moduleContext.enabled : isModuleEnabled(module.key);
+    return moduleAllowed;
+  });
 
   useEffect(() => {
     if (status !== 'loading' && !allowed) navigate('/officer', { replace: true });
