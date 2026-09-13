@@ -215,7 +215,9 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'get_approvals_activity') { await route.fulfill(fulfillJson(approvalActions)); return; }
     if (table === 'staff_profiles') {
       const hrQuery = (url.searchParams.get('select') ?? '').includes('end_date');
-      await route.fulfill(fulfillJson([{ id: OFFICER_ID, user_id: OFFICER_ID, employment_type: 'permanent', start_date: '2025-02-03', end_date: null, work_ready: anaWorkReady }, { id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, employment_type: 'casual', start_date: '2026-03-01', end_date: null, work_ready: hrQuery ? false : true }]));
+      const profiles = [{ id: OFFICER_ID, user_id: OFFICER_ID, employment_type: 'permanent', start_date: '2025-02-03', end_date: null, work_ready: anaWorkReady }, { id: SECOND_OFFICER_ID, user_id: SECOND_OFFICER_ID, employment_type: 'casual', start_date: '2026-03-01', end_date: null, work_ready: hrQuery ? false : true }];
+      const singleOfficerProfileQuery = !hrQuery && (url.searchParams.get('or') ?? '').includes(`user_id.eq.${OFFICER_ID}`);
+      await route.fulfill(fulfillJson(singleOfficerProfileQuery ? [profiles[0]] : profiles));
       return;
     }
     if (table === 'get_operating_organization_contexts') { await route.fulfill(fulfillJson([{ organization_id: '41414141-4141-4141-8141-414141414141', organization_name: 'Northern Branch', authority_basis: 'corporate_oversight', role_at_branch: null, module_access: [], can_be_rostered: false, is_default: true }, { organization_id: '45454545-4545-4545-8545-454545454545', organization_name: 'Southern Branch', authority_basis: 'corporate_oversight', role_at_branch: null, module_access: [], can_be_rostered: false, is_default: false }])); return; }

@@ -1,0 +1,63 @@
+/* Shared baseline selectors for legacy page surfaces that render through the
+   application shell but do not own a dedicated stylesheet. */
+.bob-agent-next,.bob-studio-editor-link,.bob-studio-header-actions,.crm-completed-badge,.crm-location-lookup-results,.crm-place-action,.crm-org-external-link,.finance-control-shift-warning,.onboarding-shell,.admin-shell-surface,.approvals-shell,.bob-unconfirmed-badge,.cctv-decision-message,.cctv-vehicle-link-editor,.crm-commercial-oversight,.crm-finance-section,.crm-quote-lines-list,.crm-quote-package,.file-system-generated-registry,.file-system-header-actions,.file-system-output-card,.file-system-output-filters,.file-system-output-grid,.file-system-shell,.panel-header,.assessment-actions,.officer-report-shell,.location-ready,.boundary-shell,.roster-attendance-queue {
+  box-sizing: border-box;
+}
+
+.bob-studio-header-actions,.file-system-header-actions,.metrics-grid,.roster-hr-page .metrics-grid,.crm-quote-lines-list,.crm-finance-section,.crm-commercial-oversight {
+  display: grid;
+  gap: var(--space-3, 1rem);
+}
+
+.bob-studio-editor-link,.crm-org-external-link,.crm-place-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, .5rem);
+}
+
+.crm-completed-badge,.bob-unconfirmed-badge,.status-pending,.is-rejected,.is-loading,.is-success,.is-warning,.location-ready,.severity-high {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, .25rem);
+}
+
+.finance-control-shift-warning,.form-hint {
+  color: var(--muted, #64748b);
+  font-size: .8125rem;
+}
+
+.form-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, .5rem);
+}
+
+.patrol-page,.patrol-session,.reports-hub-page,.roster-hr-page,.officer-report-shell,.file-system-shell,.boundary-shell {
+  min-width: 0;
+}
+
+.shift-selector,.checkpoints-container,.roster-attendance-queue,.file-system-output-card,.file-system-output-filters,.file-system-generated-registry,.cctv-decision-message,.cctv-vehicle-link-editor,.assessment-actions {
+  margin-top: var(--space-3, 1rem);
+}
+
+.shift-name,.shift-time {
+  display: block;
+}
+
+.metrics-grid {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.metric-card {
+  min-width: 0;
+}
+
+.is-left,.is-right {
+  cursor: col-resize;
+}
+
+.btn-success,.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, .5rem);
+}

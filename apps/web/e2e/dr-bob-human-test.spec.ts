@@ -108,4 +108,49 @@ test.describe("Dr. Bob's human browser test", () => {
     }
     await session.finish();
   });
+
+  test('observes every officer module route without executing writes', async ({ page }, testInfo) => {
+    const session = new HumanTestSession(page, testInfo);
+    await installSupabaseFixtures(page);
+    await signInAsOfficer(page, '/officer/schedule');
+    await session.observe('officer shell before module catalog');
+
+    const modules = [
+      'schedule', 'report', 'leave', 'timesheet', 'credentials', 'vehicle_lookup',
+      'noise_control', 'parking', 'dispatch', 'biosecurity', 'freedom_camping',
+      'overnight_verification', 'site_guard', 'debrief', 'map', 'patrol', 'bob', 'modules',
+    ];
+    for (const module of modules) {
+      await session.step(`observe officer module: ${module}`, async () => {
+        await page.goto(`/officer/${module}`);
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForTimeout(250);
+        await session.observe(`officer module: ${module}`);
+      });
+    }
+    await session.finish();
+  });
+
+  test('observes every admin route family without executing writes', async ({ page }, testInfo) => {
+    const session = new HumanTestSession(page, testInfo);
+    await installSupabaseFixtures(page);
+    await signInAsAdmin(page, '/admin');
+    const routes = [
+      '/admin/hub', '/admin/approvals', '/admin/field-ops', '/admin/reports', '/admin/files',
+      '/admin/investigations', '/admin/sites', '/admin/locations', '/admin/zones', '/admin/users',
+      '/admin/access-control', '/admin/org-setup', '/admin/module-subscriptions', '/admin/relationships',
+      '/admin/onboarding', '/admin/handoffs', '/admin/finance-bureau', '/admin/finance-connections',
+      '/admin/finance-money', '/admin/finance-costing', '/admin/finance-pricing', '/admin/rate-rules',
+      '/admin/roster', '/admin/people-hr', '/admin/roster-targets', '/admin/bob', '/admin/document-studio',
+    ];
+    for (const route of routes) {
+      await session.step(`observe admin route: ${route}`, async () => {
+        await page.goto(route);
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForTimeout(250);
+        await session.observe(`admin route: ${route}`);
+      });
+    }
+    await session.finish();
+  });
 });

@@ -119,11 +119,13 @@ export class HumanTestSession {
     const buttons = await this.visibleLabels('button');
     const links = await this.visibleLabels('a');
     const fields = await this.page.locator('input:visible, textarea:visible, select:visible').count();
+    const controls = await this.visibleControls();
     console.log(`[HUMAN OBSERVE] ${label}`);
     console.log(`  url: ${this.page.url()}`);
     console.log(`  heading: ${heading || '(none)'}`);
-    console.log(`  fields: ${fields}; buttons: ${buttons.slice(0, 8).join(' | ') || '(none)'}`);
-    console.log(`  links: ${links.slice(0, 8).join(' | ') || '(none)'}`);
+    console.log(`  fields: ${fields}; buttons (${buttons.length}): ${buttons.join(' | ') || '(none)'}`);
+    console.log(`  links (${links.length}): ${links.join(' | ') || '(none)'}`);
+    console.log(`  controls: ${JSON.stringify(controls)}`);
     console.log(`  text: ${bodyText || '(empty)'}`);
     if (!bodyText) {
       this.findings.push({ severity: 'warning', message: 'The rendered page contains no visible text.', url: this.page.url(), step: label });
@@ -228,8 +230,7 @@ export class HumanTestSession {
     const navItems = this.page.locator('button.admin-nav-item:visible');
     const count = await navItems.count();
     console.log(`[HUMAN NAV] Found ${count} visible admin navigation items`);
-    const limit = Math.min(count, 4);
-    for (let index = 0; index < limit; index += 1) {
+    for (let index = 0; index < count; index += 1) {
       const item = navItems.nth(index);
       const label = compact(await item.textContent());
       if (!label || UNSAFE_ACTION.test(label)) continue;
@@ -247,7 +248,7 @@ export class HumanTestSession {
   async walkSafeTabsAndFields(): Promise<void> {
     const tabs = this.page.locator('[role="tab"]:visible');
     const tabCount = await tabs.count();
-    for (let index = 0; index < Math.min(tabCount, 12); index += 1) {
+    for (let index = 0; index < tabCount; index += 1) {
       const tab = tabs.nth(index);
       const label = compact(await tab.textContent());
       if (!label || UNSAFE_ACTION.test(label)) continue;
@@ -297,7 +298,16 @@ export class HumanTestSession {
   }
 
   private async visibleLabels(selector: string): Promise<string[]> {
-    const values = await this.page.locator(`${selector}:visible`).evaluateAll((elements) => elements.map((element) => (element.textContent ?? element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean));
-    return values.slice(0, 12);
+    return this.page.locator(`${selector}:visible`).evaluateAll((elements) => elements.map((element) => (element.textContent ?? element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean));
+  }
+
+  private async visibleControls(): Promise<Array<{ kind: string; label: string; disabled: boolean; action: 'safe' | 'write-or-destructive' }>> {
+    return this.page.locator('button:visible, a:visible, input:visible, textarea:visible, select:visible').evaluateAll((elements) => elements.map((element) => {
+      const control = element as HTMLInputElement;
+      const parentLabel = element.closest('label')?.textContent ?? '';
+      const label = (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || control.placeholder || parentLabel).replace(/\s+/g, ' ').trim();
+      const action = /^(delete|remove|destroy|approve|reject|resolve|acknowledge|submit|save|create|sign out|log out|logout|publish|send|apply|confirm|assign|claim|complete|finish|activate|deactivate|retry)/i.test(label) ? 'write-or-destructive' : 'safe';
+      return { kind: element.tagName.toLowerCase(), label, disabled: Boolean(control.disabled), action };
+    }));
   }
 }
