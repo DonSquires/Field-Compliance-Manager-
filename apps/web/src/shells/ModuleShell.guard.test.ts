@@ -19,6 +19,7 @@ describe('standalone module shell contract', () => {
     expect(shell).toContain('useEnabledModules');
     expect(shell).toContain('BobPanel');
     expect(shell).toContain("status !== 'loading'");
+    expect(shell).toContain('Module unavailable');
     expect(manifest).toContain('standalonePath');
     expect(manifest).toContain("key: 'freedom_camping'");
     expect(shell).toContain('module.integratedKey === moduleKey');

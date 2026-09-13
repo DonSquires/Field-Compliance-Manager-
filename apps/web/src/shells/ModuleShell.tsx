@@ -83,7 +83,8 @@ export function ModuleShell() {
     moduleGateStatus: status,
   }), [moduleKey, profile?.role, safety.activeAlert, safety.status, selectedAgreement, selectedSite, selectedZone, shift, status]);
 
-  if (status === 'loading' || !label || !allowed) return <div className="module-shell-loading">Checking module access...</div>;
+  if (status === 'loading') return <div className="module-shell-access-state"><strong>Checking module access</strong><span>Verifying your organization entitlement.</span></div>;
+  if (!label || !allowed) return <div className="module-shell-access-state"><strong>Module unavailable</strong><span>This module is not enabled for your current organization or role.</span><button type="button" onClick={() => navigate('/officer')}>Return to field operations</button></div>;
 
   return (
     <div className="module-shell">

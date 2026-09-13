@@ -14,4 +14,8 @@
 .module-shell-sos:disabled { opacity: .5; cursor: not-allowed; }
 .module-shell-content { min-height: calc(100vh - 58px); }
 .module-shell-loading { display: grid; place-items: center; min-height: 50vh; color: var(--color-text-secondary); font-size: 13px; }
+.module-shell-access-state { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 50vh; padding: 24px; color: #dce7f1; text-align: center; }
+.module-shell-access-state strong { font-size: 18px; }
+.module-shell-access-state span { color: var(--color-text-secondary); font-size: 13px; }
+.module-shell-access-state button { min-height: 38px; margin-top: 8px; padding: 0 13px; border: 1px solid #315969; border-radius: 6px; color: #bcebcf; background: #10292a; cursor: pointer; font-weight: 800; }
 @media (max-width: 620px) { .module-shell-header { grid-template-columns: auto 1fr auto; padding: 0 10px; } .module-shell-back span { display: none; } .module-shell-title { justify-items: start; } .module-shell-safety { display: none; } .module-shell-switch select { max-width: 112px; } }
