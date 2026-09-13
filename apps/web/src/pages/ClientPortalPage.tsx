@@ -39,6 +39,8 @@ interface MonthlyReportPack {
   status: 'draft' | 'generated' | 'sent' | 'failed';
   generated_at: string | null;
   sent_at: string | null;
+  pdf_path: string | null;
+  pdf_sha256: string | null;
   delivery_error: string | null;
 }
 
@@ -89,7 +91,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
       const reportPromise = allowedPages.has('reports')
         ? supabase
             .from('monthly_report_packs')
-            .select('id, template_code, period_start, period_end, status, generated_at, sent_at, delivery_error')
+            .select('id, template_code, period_start, period_end, status, generated_at, sent_at, pdf_path, pdf_sha256, delivery_error')
             .eq('service_agreement_id', agreement.id)
             .order('period_end', { ascending: false })
             .limit(24)
@@ -301,12 +303,25 @@ function LocationGrid({ sites, zones }: { sites: Array<{ id: string; name: strin
 }
 
 function ReportRow({ report }: { report: MonthlyReportPack }) {
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const openPdf = async () => {
+    if (!report.pdf_path) return;
+    setOpening(true);
+    setError(null);
+    const { data, error: signedError } = await supabase.storage.from('bob-uploads').createSignedUrl(report.pdf_path, 900);
+    if (signedError || !data?.signedUrl) setError(signedError?.message ?? 'The report PDF could not be opened.');
+    else window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    setOpening(false);
+  };
   return (
     <article className="client-report-row">
       <span><CalendarRange size={19} /></span>
       <div><strong>{new Date(`${report.period_start}T00:00:00`).toLocaleDateString('en-NZ', { month: 'long', year: 'numeric' })}</strong><small>{report.template_code.replace(/_/g, ' ')}</small></div>
       <div><strong>{report.status}</strong><small>{report.sent_at ? `Sent ${new Date(report.sent_at).toLocaleDateString('en-NZ')}` : report.generated_at ? `Generated ${new Date(report.generated_at).toLocaleDateString('en-NZ')}` : 'Not generated'}</small></div>
+      {report.pdf_path && <button type="button" onClick={() => void openPdf()} disabled={opening} title="Open report PDF"><FileText size={17} aria-hidden="true" /><span className="sr-only">{opening ? 'Opening report PDF' : 'Open report PDF'}</span></button>}
       {report.status === 'failed' ? <AlertTriangle size={18} className="is-danger" /> : <CheckCircle2 size={18} className="is-success" />}
+      {error && <small role="alert">{error}</small>}
     </article>
   );
 }
