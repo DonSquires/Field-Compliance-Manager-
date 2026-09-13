@@ -39,12 +39,8 @@ import {
   Moon,
   Radio,
   Route,
-  Shield,
   Siren,
-  Tent,
   UserRound,
-  Volume2,
-  Wind,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -58,6 +54,7 @@ import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
+import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import {
   buildOfficerBreadcrumb,
   captureOfficerBreadcrumb,
@@ -98,13 +95,13 @@ type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 type OfficerState = 'standby' | 'home' | 'selector' | 'portal';
 
 // Module metadata
+const SPECIALTY_METADATA = Object.fromEntries(SPECIALTY_MODULES.flatMap((module) => [
+  [module.key, { label: module.label, description: module.description, icon: module.icon }],
+  [module.integratedKey, { label: module.label, description: module.description, icon: module.icon }],
+])) as Record<string, { label: string; description: string; icon: LucideIcon }>;
+
 const MODULE_METADATA: Record<string, { label: string; description: string; icon: LucideIcon }> = {
-  freedom_camping: { label: 'Freedom Camping', description: 'Vehicle scans and breach observations', icon: Tent },
-  parking: { label: 'Parking', description: 'Chalk, recheck, and enforcement', icon: Car },
-  noise_control: { label: 'Noise Control', description: 'Assessments and notices', icon: Volume2 },
-  biosecurity: { label: 'Biosecurity', description: 'Inspections and compliance evidence', icon: Activity },
-  smoke_control: { label: 'Smoke Control', description: 'Complaints and field outcomes', icon: Wind },
-  site_guard: { label: 'Site Guard', description: 'Checkpoints and site security', icon: Shield },
+  ...SPECIALTY_METADATA,
   ems: { label: 'EMS', description: 'Emergency response reporting', icon: Activity },
   patrol: { label: 'Patrol', description: 'Routes, stops, and checkpoints', icon: Route },
   report: { label: 'Reports', description: 'Submit a field report', icon: FileText },
@@ -463,7 +460,7 @@ const OfficerShell: React.FC = () => {
                         <strong>{meta.label}</strong>
                         <small>{meta.description}</small>
                       </button>
-                      <button type="button" className="officer-module-card-standalone" onClick={() => navigate(`/modules/${mod}`)}>Open standalone app</button>
+                      <button type="button" className="officer-module-card-standalone" onClick={() => navigate(SPECIALTY_MODULES.find((module) => module.key === mod || module.integratedKey === mod)?.standalonePath ?? `/modules/${mod}`)}>Open standalone app</button>
                     </article>
                   );
                 })}

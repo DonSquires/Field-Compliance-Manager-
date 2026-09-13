@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/ModuleShell.tsx'), 'utf8');
 const router = readFileSync(resolve(process.cwd(), 'src/routing/RoleRouter.tsx'), 'utf8');
 const officerShell = readFileSync(resolve(process.cwd(), 'src/shells/OfficerShell.tsx'), 'utf8');
+const manifest = readFileSync(resolve(process.cwd(), 'src/config/specialtyModules.ts'), 'utf8');
 
 describe('standalone module shell contract', () => {
   it('keeps specialty pages inside a reusable module shell', () => {
@@ -15,6 +16,8 @@ describe('standalone module shell contract', () => {
     expect(shell).toContain('useEnabledModules');
     expect(shell).toContain('BobPanel');
     expect(shell).toContain("status !== 'loading'");
+    expect(manifest).toContain('standalonePath');
+    expect(manifest).toContain("key: 'freedom_camping'");
   });
 
   it('exposes module URLs without bypassing role routing', () => {

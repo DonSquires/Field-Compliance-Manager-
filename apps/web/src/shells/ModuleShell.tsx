@@ -7,17 +7,8 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { useOfficerSafety } from '../hooks/useOfficerSafety';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
+import { SPECIALTY_MODULE_BY_KEY, type SpecialtyModuleKey } from '../config/specialtyModules';
 import './ModuleShell.css';
-
-const MODULE_LABELS: Record<string, string> = {
-  freedom_camping: 'Freedom Camping',
-  parking_enforcement: 'Parking Enforcement',
-  noise_control: 'Noise Control',
-  biosecurity: 'Biosecurity',
-  smoke_complaints: 'Smoke Control',
-  smoke_control: 'Smoke Control',
-  static_guarding: 'Static Guarding',
-};
 
 const OfficerFreedomCampingPage = React.lazy(() => import('../pages/OfficerFreedomCampingPage'));
 const OfficerParkingPage = React.lazy(() => import('../pages/OfficerParkingPage'));
@@ -64,8 +55,10 @@ export function ModuleShell() {
     getGps,
   });
   const [bobOpen, setBobOpen] = useState(false);
-  const label = MODULE_LABELS[moduleKey];
-  const allowed = status !== 'loading' && Boolean(label) && isModuleEnabled(moduleKey);
+  const canonicalKey = moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey;
+  const moduleDefinition = SPECIALTY_MODULE_BY_KEY[canonicalKey as SpecialtyModuleKey];
+  const label = moduleDefinition?.label;
+  const allowed = status !== 'loading' && Boolean(moduleDefinition) && isModuleEnabled(canonicalKey);
 
   useEffect(() => {
     if (status !== 'loading' && !allowed) navigate('/officer', { replace: true });
