@@ -120,10 +120,10 @@ const ModuleSubscriptionsPage: React.FC = () => {
                   <td>{subscriptions[module.key] ? <span className={`status-badge status-${subscriptions[module.key]}`}>{subscriptions[module.key]}</span> : <span className="status-badge status-inactive">not subscribed</span>}</td>
                   <td>
                     {confirming ? (
-                      <div role="alertdialog" aria-label={`Confirm disabling ${module.label}`}>
+                      <div className="alert alert-warning" role="alertdialog" aria-label={`Confirm disabling ${module.label}`}>
                         <p><AlertTriangle size={14} aria-hidden="true" /> Disabling {module.label} will immediately remove access to: {MODULE_GATED_AREAS[module.key]?.join(', ')}.</p>
-                        <button type="button" disabled={savingKey === module.key} onClick={() => void toggle(module.key, false)}>{savingKey === module.key ? 'Disabling…' : 'Confirm disable'}</button>
-                        <button type="button" disabled={savingKey === module.key} onClick={() => setConfirmDisableKey(null)}>Cancel</button>
+                        <button type="button" className="btn-danger" disabled={savingKey === module.key} onClick={() => void toggle(module.key, false)}>{savingKey === module.key ? 'Disabling…' : 'Confirm disable'}</button>
+                        <button type="button" className="btn-secondary" disabled={savingKey === module.key} onClick={() => setConfirmDisableKey(null)}>Cancel</button>
                       </div>
                     ) : blocked ? (
                       <span title={`Requires ${missing.join(', ')} to be enabled first`}><Lock size={14} aria-hidden="true" /> Requires {missing.join(', ')}</span>
