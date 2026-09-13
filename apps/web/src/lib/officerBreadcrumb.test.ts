@@ -32,6 +32,7 @@ describe('officer breadcrumb capture', () => {
       accuracyMeters: 6,
       heading: 182,
       speedKmh: 36,
+      physicalAddress: null,
       activityType: 'gps_update',
       shiftId: 'shift-1',
     });

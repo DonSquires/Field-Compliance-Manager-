@@ -63,6 +63,7 @@ import {
   flushOfficerBreadcrumbs,
   isBreadcrumbDue,
 } from '../lib/officerBreadcrumb';
+import { resolveAddressForCoordinates } from '../lib/locationAddress';
 import './OfficerShell.css';
 
 const PatrolPage = React.lazy(() => import('../pages/PatrolPage'));
@@ -241,9 +242,12 @@ const OfficerShell: React.FC = () => {
         const capturedAt = Date.now();
         if (!isBreadcrumbDue(lastBreadcrumbAtRef.current, capturedAt)) return;
         lastBreadcrumbAtRef.current = capturedAt;
-        void captureOfficerBreadcrumb(buildOfficerBreadcrumb(position, activeShift?.id)).then((result) => {
-          setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
-        });
+        void resolveAddressForCoordinates(position.coords.latitude, position.coords.longitude)
+          .catch(() => null)
+          .then((address) => captureOfficerBreadcrumb(buildOfficerBreadcrumb(position, activeShift?.id, address?.label ?? null)))
+          .then((result) => {
+            setBreadcrumbIssue(result.confirmed ? null : { pendingCount: result.pendingCount, error: result.error });
+          });
       },
       () => undefined,
       { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },

@@ -10,6 +10,7 @@ export interface OfficerBreadcrumb {
   accuracyMeters: number | null;
   heading: number | null;
   speedKmh: number | null;
+  physicalAddress: string | null;
   activityType: 'gps_update';
   shiftId: string | null;
 }
@@ -28,7 +29,7 @@ const DB_NAME = 'fcm-officer-breadcrumbs';
 const DB_VERSION = 1;
 const STORE_NAME = 'pending-breadcrumbs';
 
-export function buildOfficerBreadcrumb(position: GeolocationPosition, shiftId?: string | null): OfficerBreadcrumb {
+export function buildOfficerBreadcrumb(position: GeolocationPosition, shiftId?: string | null, physicalAddress?: string | null): OfficerBreadcrumb {
   return {
     clientEventId: crypto.randomUUID(),
     recordedAt: new Date(position.timestamp).toISOString(),
@@ -37,6 +38,7 @@ export function buildOfficerBreadcrumb(position: GeolocationPosition, shiftId?: 
     accuracyMeters: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null,
     heading: position.coords.heading,
     speedKmh: position.coords.speed === null ? null : position.coords.speed * 3.6,
+    physicalAddress: physicalAddress ?? null,
     activityType: 'gps_update',
     shiftId: shiftId ?? null,
   };
@@ -95,6 +97,7 @@ async function sendBreadcrumb(event: OfficerBreadcrumb): Promise<void> {
     p_accuracy_meters: event.accuracyMeters,
     p_heading: event.heading,
     p_speed_kmh: event.speedKmh,
+    p_physical_address: event.physicalAddress,
     p_activity_type: event.activityType,
     p_shift_id: event.shiftId,
   });
