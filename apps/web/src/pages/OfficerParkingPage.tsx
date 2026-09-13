@@ -62,7 +62,13 @@ const OfficerParkingPage: React.FC = () => {
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
-    if (!profile?.id) return;
+    if (!profile?.id || !profile.organizationId) {
+      setRecords([]);
+      setZones([]);
+      setError('Organisation access could not be confirmed. Parking records are unavailable.');
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -76,7 +82,7 @@ const OfficerParkingPage: React.FC = () => {
         supabase
           .from('location_zones')
           .select('id, name, address')
-          .eq('organization_id', profile.organizationId ?? '')
+          .eq('organization_id', profile.organizationId)
           .eq('module_key', 'parking_enforcement')
           .eq('is_active', true)
           .eq('boundary_verification', 'verified')
