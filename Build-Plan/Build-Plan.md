@@ -1,5 +1,16 @@
 # Bob App Builder - Build Plan
 
+## Product Vision & Core Mission
+
+Field Compliance Manager is an enterprise operations and compliance platform designed to replace multiple disparate single-purpose applications used by security companies, field compliance providers, and local councils (e.g. separate apps for noise control, parking, freedom camping, patrol routes, static guarding, biosecurity, smoke complaints, PTT dispatch, and welfare monitoring) into a single, unified, multi-tenant platform.
+
+### Core Build Directives
+
+1. **Multi-Module Consolidation & Independence**: Any organization can subscribe to any single module or any combination of modules. All modules share the global canonical identity spine (`person`, `place`, `vehicle`, `organisation`, `scv`).
+2. **Court-Ready 100% Honest Evidence**: 100% truthful, tamper-evident reporting. Immutable provenance (GPS, timestamps, geofence, officer ID, photo hashes). Zero silent fabrication.
+3. **Bob Heuristic Field Copilot**: Integrated into all portals via a clean human interface for contextual assistance, hazard alerts, shift debriefs, and evidence drafting.
+4. **Bob Multimedia Owner/Grand-Master Studio**: An advanced studio allowing owners and grand-masters to work with Bob inside the app to build, extend, and maintain the system. Powered by the server-side Bob Control Plane Server (`bob-control-plane-server.js`) to bypass Supabase Edge limits while retaining strict non-root isolated workers and human approval gates.
+
 ## Goal
 
 Extend the existing Bob control-room platform on VPS 1601189 with a controlled AI sub-agent for building applications through product analysis, UX/UI design, coding, testing, security review, and release preparation.

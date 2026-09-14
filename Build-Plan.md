@@ -10,37 +10,30 @@ The app exists to encourage and ensure accountability: record field work honestl
 
 ### Product definition
 
-Field Compliance Manager is an operations and compliance platform for organisations that manage field work across clients, sites, patrols, dispatch, incidents, evidence, compliance actions, reporting, and finance. The system is built to answer: what happened, where, when, by whom, under what authority, and what supports that account.
+Field Compliance Manager is an enterprise operations and compliance platform designed to replace multiple disparate single-purpose applications used by security companies, field compliance providers, and local councils (e.g. separate apps for noise control, parking, freedom camping, patrol routes, static guarding, biosecurity, smoke complaints, PTT dispatch, and welfare monitoring) into a single, unified, multi-tenant platform.
 
-### Design doctrine
+The system allows any organisation to subscribe to and operate any single module independently or any combination of modules together. It is built around a global canonical identity spine (person, place, vehicle, organisation, certification) and answers: what happened, where, when, by whom, under what authority, and what court-ready evidence supports that account.
 
-1. Reference vs operational separation — stable shared meaning belongs in reference tables; field activity and events belong in module tables. If you mix them, the system becomes brittle and reporting starts lying politely.
-2. Additive schema change — history is part of the product. We add columns and deprecate carefully; we do not casually remove what the record once held.
-3. Live schema is authority — migrations describe intent; the live database tells the truth. If they differ, reality wins.
-4. Provenance travels with the record — who did it, when, and why should be captured as data, not left to folklore or a comment thread.
-5. Parent before child — no orphan records. A site needs its org; a zone needs its owning context; accountability chains must be intact.
-6. Read the build before judging it — code review and architecture assessment should be grounded in the actual live wiring, not a summary someone typed in a hurry.
-7. Bob proposes, humans approve — consequential changes go through propose, approve, execute. I prepare the work; a human ratifies it.
-8. No silent fabrication — if something is unknown, we say it is unknown. A guessed compliance record is worse than an incomplete one.
+### Court-Ready Reporting & 100% Honest Evidence Doctrine
 
-### Bob’s role
+The platform must generate court-ready, legally defensible, tamper-evident compliance and incident reports.
+- **100% Truthful Record Keeping:** Every record, observation, notice, chalk, assessment, and report must preserve immutable provenance (timestamp, GPS coords, verified geofence boundary, officer identity, vehicle plate, photo hash, and statutory authority).
+- **Zero Silent Fabrication:** If spatial data, rate rules, or witness facts are missing, the system explicitly marks them as unknown. No record is ever guessed, back-filled, or fabricated.
+- **Tamper-Evident Audit Chains:** Changes to operational records generate append-only audit entries and receipts, ensuring reports stand up in judicial, council, and administrative hearings.
 
-Bob is the operational copilot and system intelligence layer. He sits across the platform rather than inside one narrow screen. His purpose is to help staff navigate the system, reason across modules, prepare governed actions, reduce administrative friction, and surface risk without weakening control.
+### Bob’s Dual Architectural Role: Heuristic Field Copilot & In-House App Builder
 
-Bob must:
+Bob is the integrated AI intelligence layer across the entire platform, operating with two complementary roles:
 
-- guide work across dispatch, sites, incidents, evidence, and reporting
-- reason across the connected system rather than per-module islands
-- prepare actions for human review and approval
-- surface missing links, duplication, ownership problems, or incomplete records
-- preserve proof and accountability over convenience
+#### 1. Heuristic & Agentic Operational Copilot (Simple Field & Admin Interface)
+- Integrated into every portal (`OfficerShell`, `AdminShell`, `ModuleShell`) through a clean, intuitive human interface (side panel, voice interface, notification center, and contextual action triggers).
+- Operates heuristically across modules to assist officers and dispatchers with live spatial resolution, hazard alerts, shift debriefs, and evidence drafting.
+- Guided by the **Conductor-Caddie-Planner-Oracle** architecture (`onspace-ai-chat`), where policy enforcement and safety precedence are server-enforced at the post-selection seam.
 
-Bob must not:
-
-- silently make consequential changes on his own
-- bypass approval gates for high-impact actions
-- fabricate missing facts or compliance records
-- treat the system as flat when it is connected end-to-end
+#### 2. Advanced Multi-Media & Multi-Ability Studio (Owner / Grand-Master Control Plane)
+- A dedicated, high-capability Studio interface giving owners and grand-masters the ability to work directly with Bob inside the application to continuously build, extend, test, and refine the app.
+- Operates with capabilities matching IDE/Codespace AI agents (product analysis, UX design, code extraction, multi-file editing, test execution, security review).
+- Bypasses standard Supabase Edge Function payload and timeout restrictions via the server-side **Bob Control Plane Server** (`bob-control-plane-server.js` running on dedicated compute / VPS runner infrastructure), while strictly enforcing role governance, isolated disposable worker containers, immutable audit trails, and human approval gates before production publication.
 
 ## NZ security good-practice build track
 

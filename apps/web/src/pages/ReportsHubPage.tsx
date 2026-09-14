@@ -62,6 +62,12 @@ interface MonthlyReportPack {
   agreement: Array<{ name: string }> | null;
 }
 
+function exclusiveEndIso(date: string): string {
+  const end = new Date(`${date}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return end.toISOString();
+}
+
 const ReportsHubPage: React.FC = () => {
   const { profile } = useAuth();
   const { selectedAgreement, selectedAgreementZones } = useServiceRelationships();
@@ -100,6 +106,7 @@ const ReportsHubPage: React.FC = () => {
       setError(null);
 
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+      const timestampEndExclusive = exclusiveEndIso(dateRange.end);
       const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
         activeZoneIds && activeZoneIds.length > 0
           ? supabase
@@ -107,14 +114,14 @@ const ReportsHubPage: React.FC = () => {
               .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
               .in('zone_id', activeZoneIds)
               .gte('created_at', dateRange.start)
-              .lte('created_at', dateRange.end)
+              .lt('created_at', timestampEndExclusive)
               .order('created_at', { ascending: false })
           : supabase
               .from('breach_alerts')
               .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
               .eq('organization_id', profile.organizationId)
               .gte('created_at', dateRange.start)
-              .lte('created_at', dateRange.end)
+              .lt('created_at', timestampEndExclusive)
               .order('created_at', { ascending: false }),
         activeZoneIds && activeZoneIds.length > 0
           ? supabase
@@ -122,14 +129,14 @@ const ReportsHubPage: React.FC = () => {
               .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
               .in('zone_id', activeZoneIds)
               .gte('observed_at', dateRange.start)
-              .lte('observed_at', dateRange.end)
+              .lt('observed_at', timestampEndExclusive)
               .order('observed_at', { ascending: false })
           : supabase
               .from('observations')
               .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
               .eq('organization_id', profile.organizationId)
               .gte('observed_at', dateRange.start)
-              .lte('observed_at', dateRange.end)
+              .lt('observed_at', timestampEndExclusive)
               .order('observed_at', { ascending: false }),
         selectedAgreement?.id
           ? supabase

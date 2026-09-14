@@ -21,7 +21,7 @@ function flatten(value: unknown, prefix = ''): string[] {
   return [`${prefix.replace(/_/g, ' ')}: ${String(value)}`];
 }
 
-async function renderPdf(title: string, period: string, data: unknown): Promise<Uint8Array> {
+async function renderPdf(title: string, period: string, packId: string, snapshotGeneratedAt: string | null, data: unknown): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const normal = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -35,7 +35,11 @@ async function renderPdf(title: string, period: string, data: unknown): Promise<
   draw('Field Compliance Manager', bold, 15);
   draw(title, bold, 18);
   draw(`Reporting period: ${period}`, normal, 10);
-  draw(`Generated ${new Date().toISOString()}`, normal, 9);
+  draw(`Report pack ID: ${packId}`, normal, 9);
+  draw(`Source snapshot generated: ${snapshotGeneratedAt ?? 'Not recorded'}`, normal, 9);
+  draw(`PDF rendered: ${new Date().toISOString()}`, normal, 9);
+  draw(`Renderer: ${rendererVersion}`, normal, 8);
+  draw('Scope: governed aggregate snapshot; use the source records and evidence exports for detailed reconstruction.', normal, 8);
   page.drawLine({ start: { x: 54, y: y + 2 }, end: { x: 541, y: y + 2 }, thickness: 1.5, color: rgb(0.18, 0.49, 0.45) });
   y -= 14;
   for (const line of flatten(data)) draw(line);
@@ -59,11 +63,11 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const packId = String(body.pack_id ?? '').trim();
     if (!packId) return json({ error: 'pack_id is required' }, 400);
-    const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data').eq('id', packId).single();
+    const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,generated_at').eq('id', packId).single();
     if (packError || !pack) return json({ error: 'Report pack not found' }, 404);
     if (String(profile.role) !== 'grand_master' && pack.organization_id !== profile.organization_id) return json({ error: 'Forbidden' }, 403);
     if (!['generated', 'sent'].includes(pack.status)) return json({ error: 'Only generated report packs can be rendered' }, 409);
-    const bytes = await renderPdf(`${pack.template_code.replace(/_/g, ' ')} report pack`, `${pack.period_start} to ${pack.period_end}`, pack.data ?? {});
+    const bytes = await renderPdf(`${pack.template_code.replace(/_/g, ' ')} report pack`, `${pack.period_start} to ${pack.period_end}`, pack.id, pack.generated_at, pack.data ?? {});
     const checksum = await sha256(bytes);
     const path = `org/${pack.organization_id}/report-packs/${pack.id}.pdf`;
     const { error: uploadError } = await admin.storage.from('bob-uploads').upload(path, new Blob([bytes], { type: 'application/pdf' }), { upsert: true, contentType: 'application/pdf' });

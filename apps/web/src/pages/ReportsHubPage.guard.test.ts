@@ -19,6 +19,14 @@ describe('governed monthly report pack generation', () => {
     expect(page).toContain('Generate report packs');
   });
 
+  it('includes the complete selected end date for timestamped evidence', () => {
+    expect(page).toContain('function exclusiveEndIso(date: string): string');
+    expect(page).toContain(".lt('created_at', timestampEndExclusive)");
+    expect(page).toContain(".lt('observed_at', timestampEndExclusive)");
+    expect(page).not.toContain(".lte('created_at', dateRange.end)");
+    expect(page).not.toContain(".lte('observed_at', dateRange.end)");
+  });
+
   it('sends generated packs through the authenticated delivery function', () => {
     expect(page).toContain("supabase.functions.invoke('send-report-pack'");
     expect(page).toContain('pack_id: pack.id');

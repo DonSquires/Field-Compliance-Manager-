@@ -1,9 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(resolve(process.cwd(), 'src/pages/ObservationSearchPage.tsx'), 'utf8');
-const searchMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260908120000_observation_links_and_global_search.sql'), 'utf8');
+const sourcePath = existsSync(resolve(process.cwd(), 'apps/web/src/pages/ObservationSearchPage.tsx'))
+  ? resolve(process.cwd(), 'apps/web/src/pages/ObservationSearchPage.tsx')
+  : resolve(process.cwd(), 'src/pages/ObservationSearchPage.tsx');
+const migrationPath = existsSync(resolve(process.cwd(), 'supabase/migrations/20260908120000_observation_links_and_global_search.sql'))
+  ? resolve(process.cwd(), 'supabase/migrations/20260908120000_observation_links_and_global_search.sql')
+  : resolve(process.cwd(), '../../supabase/migrations/20260908120000_observation_links_and_global_search.sql');
+
+const source = readFileSync(sourcePath, 'utf8');
+const searchMigration = readFileSync(migrationPath, 'utf8');
 
 describe('Observation Search canonical entity contract', () => {
   it('exposes every governed search_observations filter', () => {

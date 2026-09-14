@@ -11,6 +11,7 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { normalizePlateNumber } from '../lib/canonicalIdentity';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -84,7 +85,7 @@ const VehicleSearchPage: React.FC = () => {
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanPlate = plate.trim().toUpperCase();
+    const cleanPlate = normalizePlateNumber(plate);
     if (!cleanPlate) return;
 
     try {

@@ -61,6 +61,9 @@ const PLATE_RECOGNIZER_TIMEOUT_MS = 20_000;
 const INFER_TIMEOUT_MS = 30_000;
 const MIN_ALPR_CONFIDENCE = 0.75;
 const SCAN_BUCKET = 'scans';
+function normalizePlateNumber(value) {
+  return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+}
 // ── Inference service helpers ─────────────────────────────────────────────────
 function inferenceHeaders() {
   return {
@@ -142,7 +145,7 @@ function inferenceHeaders() {
     const rawPlate = best?.plate;
     const confidence = Number(best?.score ?? 0);
     const box = best?.box;
-    const plate = rawPlate ? rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '') : null;
+    const plate = rawPlate ? normalizePlateNumber(rawPlate) : null;
     if (!plate) return null;
     return {
       plate,
@@ -728,7 +731,7 @@ serve(async (req)=>{
     // Step 2: Parse input
     const body = await req.json();
     const { plate_number: manualPlateNumberInput, image_base64: imageBase64, gps_lat: gpsLat, gps_lng: gpsLng, zone_id: manualZoneId, module_key: moduleKey = 'freedom_camping', captured_at: capturedAt, offline_queued: offlineQueued = false, synced_at: syncedAt } = body;
-    const manualPlateNumber = typeof manualPlateNumberInput === 'string' ? manualPlateNumberInput.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) : '';
+    const manualPlateNumber = typeof manualPlateNumberInput === 'string' ? normalizePlateNumber(manualPlateNumberInput) : '';
     const clientRequestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : '';
     const completeReceipt = async (response) => {
       if (clientRequestId) {
@@ -816,7 +819,7 @@ serve(async (req)=>{
       }
       alprUsed = alprResult !== null;
     }
-    const plateNumber = manualPlateNumber || (alprResult?.plate ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const plateNumber = manualPlateNumber || normalizePlateNumber(alprResult?.plate ?? '');
     if (!plateNumber) return json({
       error: 'A plate could not be confirmed from the photo. Capture a clearer image and try again.'
     }, 400);

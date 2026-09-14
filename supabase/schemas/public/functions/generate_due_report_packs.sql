@@ -14,7 +14,7 @@ declare
   v_count       integer := 0;
   v_data        jsonb;
   v_start_ts    timestamptz := p_period_start::timestamptz;
-  v_end_ts      timestamptz := (p_period_end::timestamptz + interval '1 day' - interval '1 second');
+  v_end_ts      timestamptz := (p_period_end::timestamptz + interval '1 day');
   v_sla_met     integer;
   v_sla_breached integer;
   v_sla_running integer;
@@ -43,7 +43,7 @@ begin
     into v_sla_met, v_sla_breached, v_sla_running
     from sla_clocks
     where service_agreement_id = v_agreement.id
-      and started_at >= v_start_ts and started_at <= v_end_ts;
+      and started_at >= v_start_ts and started_at < v_end_ts;
 
     -- Incidents over the period (org-wide).
     select count(*),
@@ -53,19 +53,19 @@ begin
       select severity, count(*) as n
       from incidents
       where organization_id = v_agreement.provider_organization_id
-        and occurred_at >= v_start_ts and occurred_at <= v_end_ts
+        and occurred_at >= v_start_ts and occurred_at < v_end_ts
       group by severity
     ) s;
 
     select count(*) into v_checkpoints
     from patrol_checkpoint_visits
     where organization_id = v_agreement.provider_organization_id
-      and visited_at >= v_start_ts and visited_at <= v_end_ts;
+      and visited_at >= v_start_ts and visited_at < v_end_ts;
 
     select count(*) into v_breaches
     from breach_alerts
     where organization_id = v_agreement.provider_organization_id
-      and created_at >= v_start_ts and created_at <= v_end_ts;
+      and created_at >= v_start_ts and created_at < v_end_ts;
 
     -- Per-facility patrol completion from shift_stops.
     select coalesce(jsonb_agg(jsonb_build_object(
@@ -81,7 +81,7 @@ begin
       from shift_stops ss
       left join client_sites cs on cs.id = ss.site_id
       where ss.organization_id = v_agreement.provider_organization_id
-        and ss.sla_arrive_by >= v_start_ts and ss.sla_arrive_by <= v_end_ts
+        and ss.sla_arrive_by >= v_start_ts and ss.sla_arrive_by < v_end_ts
       group by coalesce(cs.name, 'Unknown site')
     ) f;
 
