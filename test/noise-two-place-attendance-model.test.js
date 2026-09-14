@@ -27,12 +27,12 @@ test('the migration is additive: no drops of tables, columns or custody policies
   assert.match(migration, /arrival_verification IN \('verified_on_site', 'near_site', 'off_site', 'unverified_boundary', 'no_geofence', 'no_gps'\)/);
 });
 
-test('the live submit RPC wrote a column that does not exist; the migration restores it with the same signature', () => {
+test('the submit RPC writes shift_id, which the migration created (it was missing live until 2026-09-14), with the same signature', () => {
   const live = schema.slice(schema.indexOf('CREATE OR REPLACE FUNCTION "public"."submit_officer_noise_assessment"('));
   const liveHeader = live.slice(0, live.indexOf('\n'));
   assert.match(live.slice(0, live.indexOf('$function$;')), /incident_report_text, follow_up_required, shift_id, dispatch_job_id/);
   const liveTable = schema.slice(schema.indexOf('CREATE TABLE IF NOT EXISTS "public"."noise_assessments" ('));
-  assert.doesNotMatch(liveTable.slice(0, liveTable.indexOf('\n);')), /"shift_id"/);
+  assert.match(liveTable.slice(0, liveTable.indexOf('\n);')), /"shift_id" "uuid"/, 'live schema must carry noise_assessments.shift_id after 20260914110000');
   assert.match(migration, /ALTER TABLE public\.noise_assessments\s+ADD COLUMN IF NOT EXISTS shift_id uuid REFERENCES public\.shifts\(id\)/);
   const reissued = migration.slice(migration.indexOf('CREATE OR REPLACE FUNCTION "public"."submit_officer_noise_assessment"('));
   assert.equal(reissued.slice(0, reissued.indexOf('\n')), liveHeader, 'signature must be identical so no overload is created');
