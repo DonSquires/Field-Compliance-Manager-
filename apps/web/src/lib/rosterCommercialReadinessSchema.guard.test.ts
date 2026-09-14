@@ -31,7 +31,7 @@ describe('roster commercial readiness', () => {
     expect(sql).toContain("return 'missing'");
     expect(sql).toContain("then 'verified'");
     expect(sql).toContain("u.cost_centre_id is not null then 'ready'");
-    expect(schema).toContain('CREATE FUNCTION "public"."get_roster_commercial_readiness"');
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."get_roster_commercial_readiness"/);
     expect(sql).toContain('from public,anon,authenticated');
   });
 });

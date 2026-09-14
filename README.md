@@ -94,13 +94,23 @@ Do not commit `.env` files, database passwords, access tokens, runtime `bob-data
 
 ## Supabase schema refresh
 
-After authenticating with the Supabase CLI:
+`supabase/schema.sql` is the ground truth the Atlas playbook in [AGENTS.md](AGENTS.md) cross-checks against, so it must reflect the live database, not a hand-edited hybrid. Two supported ways to refresh it:
+
+1. Full dump (needs the database password):
 
 ```bash
 npx supabase login
 npx supabase link --project-ref dotczcyyzgabmtmnglqj
 npx supabase db dump --linked --schema public --file supabase/schema.sql
 ```
+
+2. Live-catalog snapshot via the Management API (needs only a personal access token; what this Codespace uses):
+
+```bash
+SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE" node scripts/schema-snapshot-live.mjs
+```
+
+It reads `pg_catalog` read-only and writes the same quoted dialect as `db dump` (tables, constraints, indexes, views, functions with grants/revokes, triggers, RLS policies, comments), excluding extension-owned objects. Never append migration text to `schema.sql` by hand — regenerate it.
 
 The VPS source was imported separately from Supabase. Supabase stores the application data and services, not the original application source.
 

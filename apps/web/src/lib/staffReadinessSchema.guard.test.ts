@@ -28,7 +28,7 @@ describe('governed staff readiness', () => {
   it('closes direct authenticated profile writes', () => {
     expect(sql).toContain('drop policy if exists staff_profiles_update');
     expect(sql).toContain('revoke insert,update,delete on public.staff_profiles');
-    expect(schema).toContain('CREATE FUNCTION "public"."get_staff_readiness_assessment"');
-    expect(schema).toContain('CREATE FUNCTION "public"."set_staff_work_readiness"');
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."get_staff_readiness_assessment"/);
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."set_staff_work_readiness"/);
   });
 });

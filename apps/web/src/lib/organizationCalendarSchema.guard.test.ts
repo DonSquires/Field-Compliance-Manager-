@@ -20,7 +20,7 @@ describe('organization calendar settings', () => {
   it('keeps direct writes server-owned', () => {
     expect(sql).toContain('grant select on public.organization_calendar_settings to authenticated');
     expect(sql).not.toContain('grant insert on public.organization_calendar_settings to authenticated');
-    expect(schema).toContain('CREATE TABLE "public"."organization_calendar_settings"');
-    expect(schema).toContain('CREATE FUNCTION "public"."set_organization_calendar_region"');
+    expect(schema).toMatch(/CREATE TABLE (IF NOT EXISTS )?"public"\."organization_calendar_settings"/);
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."set_organization_calendar_region"/);
   });
 });

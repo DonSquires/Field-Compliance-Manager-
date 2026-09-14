@@ -11,7 +11,7 @@ describe('admin roster slot reassignment', () => {
     expect(sql).toContain('v_slot.status<>p_expected_status');
     expect(sql).toContain("v_slot.status not in('draft','published','accepted','declined')");
     expect(sql).toContain('Reassignment reason is required');
-    expect(schema).toContain('CREATE FUNCTION "public"."reassign_roster_slot"');
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."reassign_roster_slot"/);
   });
 
   it('checks replacement readiness, leave, and both planning conflicts', () => {

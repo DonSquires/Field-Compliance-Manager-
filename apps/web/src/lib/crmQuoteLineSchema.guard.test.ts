@@ -27,6 +27,6 @@ describe('governed CRM quote lines', () => {
 
   it('closes direct authenticated line writes', () => {
     expect(sql).toContain('revoke insert,update,delete on public.quote_lines');
-    expect(schema).toContain('CREATE FUNCTION "public"."add_crm_quote_line"');
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."add_crm_quote_line"/);
   });
 });

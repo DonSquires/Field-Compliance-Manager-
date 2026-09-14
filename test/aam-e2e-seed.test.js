@@ -41,7 +41,7 @@ test('AAM runner creates marked auth identities and exercises governed human wor
 });
 
 test('canonical schema includes the service-only AAM seed contract', () => {
-  assert.match(schema, /CREATE FUNCTION "public"\."seed_aam_e2e_dataset"/);
-  assert.match(schema, /CREATE FUNCTION "public"\."purge_aam_e2e_dataset"/);
+  assert.match(schema, /CREATE (OR REPLACE )?FUNCTION "public"\."seed_aam_e2e_dataset"/);
+  assert.match(schema, /CREATE (OR REPLACE )?FUNCTION "public"\."purge_aam_e2e_dataset"/);
   assert.match(schema, /GRANT EXECUTE ON FUNCTION "public"\."purge_aam_e2e_dataset"[^;]+ TO "service_role"/);
 });

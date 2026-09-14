@@ -30,6 +30,6 @@ describe('governed CRM quote lifecycle', () => {
     expect(sql).toContain("'crm_quote_sent'");
     expect(sql).toContain("'crm_quote_accepted'");
     expect(sql).toContain("'crm_quote_declined'");
-    expect(schema).toContain('CREATE FUNCTION "public"."manage_crm_quote"');
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."manage_crm_quote"/);
   });
 });

@@ -22,7 +22,7 @@ describe('roster availability invariant', () => {
   it('enforces all slot writers through a trigger', () => {
     expect(sql).toContain('before insert or update of staff_id,scheduled_start,scheduled_end,status on public.roster_slots');
     expect(sql).toContain('revoke all on function public.staff_has_roster_availability_conflict');
-    expect(schema).toContain('CREATE FUNCTION "public"."staff_has_roster_availability_conflict"');
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."staff_has_roster_availability_conflict"/);
     expect(schema).toContain('CREATE TRIGGER "trg_enforce_roster_slot_availability"');
   });
 });
