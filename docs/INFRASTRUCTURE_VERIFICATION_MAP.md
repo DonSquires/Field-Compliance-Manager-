@@ -110,6 +110,18 @@ def run_vps_cmd(cmd_to_run):
 | `MASTER_TEST_PASSWORD` | Alternate password auth for VPS SSH |
 | `RUNPOD_API` | API Bearer key for RunPod (`katqqnmds1dphs`) |
 | `SUPABASE_URL` | Primary Supabase URL (`https://dotczcyyzgabmtmnglqj.supabase.co`) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Primary Supabase Service-Role Key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Primary Supabase Service-Role Key (data-plane only; cannot deploy functions) |
+| `FIELD_COMPLIANCE_CODESPACE` | Supabase personal access token (`sbp_…`) for the Management API / CLI. Sees both projects (`dotczcyyzgabmtmnglqj`, `kxwjcupuxnnbnzcgmkoi`). Use as `SUPABASE_ACCESS_TOKEN` for `supabase functions deploy` |
+| `SUPABASE_ACCESS_KEY` | Stale `sbp_…` token — returns `401 Unauthorized` from the Management API as of 2026-09-14. Do not use |
 | `FREEDOM_SUPABASE_URL` | Freedom Supabase URL (`https://kxwjcupuxnnbnzcgmkoi.supabase.co`) |
 | `FREEDOM_SUPABASE_SERVICE_ROLE_KEY` | Freedom Supabase Service-Role Key |
+
+### Edge function deploy (from Codespace)
+
+```bash
+export SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE"
+npx --yes supabase functions deploy <function-name> --project-ref dotczcyyzgabmtmnglqj --use-api
+```
+
+Verify with the Management API (`GET /v1/projects/dotczcyyzgabmtmnglqj/functions/<function-name>`)
+— `version` increments and `updated_at` moves on each deploy.
