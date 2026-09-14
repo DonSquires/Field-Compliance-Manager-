@@ -1,0 +1,127 @@
+> **Canonical copy.** Origin: GitLab `don-squires1/field-compliance-manager` `` @ `Main`, read 2026-09-14 via `scripts/gitlab-read.mjs`. This repository (`DonSquires/Field-Compliance-Manager-` `main`) is the authoritative home from now on; the GitLab text is lineage. Edit here and record the ruling — never fork the text. Links to files that do not exist in this repo refer to that lineage.
+
+# Organisation and Service Model — Model A (Own-Rooted)
+
+> **Ratified 2026-07-21.** This document describes Model A: every org is
+> own-rooted, role is contextual per service_agreement. The machine-readable
+> summary Bob uses is `knowledge_base/corpus/org-model.md`.
+>
+> **Supersedes** the old tree-parented client model (clients hanging under
+> branches via `parent_organization_id`). See
+> `docs/design/ONBOARDING_AND_ENTITLEMENT_EXPERIENCE.md` for the full design.
+> Migration 0271 implements the access-layer fix. Issue #214, Epic #213.
+
+## Model A: every org is its own entity
+
+Every organisation is **own-rooted** (`parent_organization_id = NULL`). Role
+(client vs provider) is **contextual per `service_agreement`**, not baked into
+`organization_type`. The only link between Iron Eagle and another org is the
+financial (Layer-1) service agreement.
+
+```
+Iron Eagle Security (owner, own-rooted)
+Acme Council (government, own-rooted)
+  └─ linked by service_agreement (Iron Eagle = provider, Acme = client)
+Beta Security Ltd (service_provider, own-rooted)
+  └─ linked by service_agreement (Iron Eagle = provider, Beta = client)
+  └─ linked by service_agreement (Beta = provider, Acme = client)
+```
+
+`organization_type` values: owner, service_provider, branch, client, contractor,
+government, private_enterprise. These describe what the org IS, not its role in
+any specific relationship.
+
+> **Legacy table naming (read this before touching sites/zones).** The Site
+> table is **`client_sites`** and the Zone table is **`location_zones`** - these
+> names are LEGACY. `client_sites` is NOT "client-owned sites"; it is the **Site
+> facet** of a Location ("house"), and `location_zones` is the **Zone facet** -
+> siblings under a `locations` row, linked by `location_id` (House model,
+> migration 0145). Read `client_sites` as "sites" and `client_sites.client_organization_id`
+> as the place's OWNER org. The tables were repurposed, not renamed, to avoid a
+> wide rename across RPCs/RLS/edge-functions/frontend/Bob-knowledge. See
+> migration 0312, `house_location_model` Bob card, and `docs/LOCATION_HIERARCHY.md`.
+
+## How organisations link: service_agreements
+
+The `service_agreements` table is the canonical inter-org link:
+
+| Column | Meaning |
+|---|---|
+| `provider_organization_id` | The org providing the service |
+| `client_organization_id` | The org receiving the service |
+| `ends_on` | NULL = perpetual; `>= current_date` = active |
+| `enabled_modules` | Which modules the agreement covers |
+
+An org can be a provider in one agreement and a client in another.
+
+## Legacy tree model (still supported)
+
+The `parent_organization_id` tree still works for orgs created under the old
+model (branches under a service provider, clients under a branch). The access
+layer supports **both** paths — tree-based and agreement-based (migration 0271).
+New orgs are own-rooted.
+
+## Access layer
+
+### Visibility: `org_access_allowed(target_org_id)`
+
+Gates SELECT on ~60 tables. Passes if ANY of these is true:
+
+1. **grand_master** — unrestricted.
+2. **Direct membership** — user's `organization_id` = target.
+3. **Authorized branches** — target in `authorized_organization_ids`.
+4. **Tree descent** — master/admin: target in descendant tree of their org.
+5. **Access grants** — `provider_client_access_grants` row exists.
+6. **Agreement-based (0271)** — user's org (or employer org) is a party on
+   an active `service_agreement` with the target org. **Bidirectional.**
+
+### Write gates
+
+- **`is_master_for_org(p_org_id)`** — master can manage orgs in their
+  descendant tree **OR** orgs that are the client on an active agreement
+  where the master's org is the provider (0271, provider-side only).
+- **`is_admin_for_org(target_org_id)`** — same pattern for admin role,
+  plus grand_master unrestricted.
+
+### Organisation INSERT
+
+- **grand_master** can create any org (including own-rooted, parent = NULL)
+  via `gm_full_access` (0076).
+- **master** can create sub-orgs (client/branch/contractor) under their
+  tree via `master_manage_orgs_insert` (0093). Cannot create own-rooted orgs.
+
+## How a user links (three columns)
+
+| Column | Meaning |
+|---|---|
+| `employer_organization_id` | Corporate employer (HR/payroll). |
+| `staff_branch_authorisations` (+ mirrored `authorized_organization_ids`) | Branch(es) the user operates at = **workspace**. |
+| `organization_id` | Operational home. For own-rooted org users: their org. For branch users: their branch. |
+
+## Login rule
+
+- **Own-rooted org user** (no branch authorisations): lands at their own org
+  directly (`single_branch` mode, org = workspace).
+- **Branch user**: lands at their branch (single → straight in; multiple →
+  branch picker).
+- **grand_master**: whole-tree view, optional branch filter.
+
+## Onboarding (Model A)
+
+Iron Eagle (grand_master) creates each org as own-rooted, provisions a first
+user as `master`, and creates a Layer-1 service agreement. The org's master
+then manages their own data.
+
+## Two-layer billing (issue #2, migration 0253)
+
+- **Layer 1** = Iron Eagle → org (platform subscription): `module_catalog`,
+  `org_module_subscriptions`.
+- **Layer 2** = provider → client (on-charge): `crm_commercial_settings`,
+  `rate_rules`, `invoice_line_items`.
+
+## Standing rule
+
+Every create-user / create-org / onboarding path MUST set the three user org
+columns correctly. For own-rooted org users: `organization_id` =
+`employer_organization_id` = their org. For branch users: follow the branch
+convention.

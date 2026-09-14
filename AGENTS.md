@@ -1,5 +1,16 @@
 # Working in this repo: Atlas + schema, together, before any edit
 
+**Read the canon first.** [FOUNDATION.md](FOUNDATION.md) says why the app exists
+(accountability; the harmed party and the place of harm are the anchor; the
+operator is custodian, not owner). [docs/canon/README.md](docs/canon/README.md)
+gives the order of authority — access doctrine and model, Model A organisations,
+the location house model, the unified field-operations model ("a guard on a
+place for a shift, with a toolset"), module-as-data, geofence principles, Bob
+doctrine, product design. [docs/REBUILD_PLAN.md](docs/REBUILD_PLAN.md) is the
+sequence of work that brings the build into conformance. When code and canon
+disagree, the code is wrong or a dated ruling must be recorded in the owning
+canon document before the code stands.
+
 This is a multi-org, multi-tenant, enterprise SaaS field-compliance platform
 (HR, finance, rostering, reporting, field-staff portal, and many vertical
 modules — parking, noise, biosecurity, smoke control, welfare/safety,
@@ -57,7 +68,16 @@ path, and telling a "small" change from a cross-module one.
 
 Atlas edges are periodically generated/ci-seeded and can lag or under-report
 (see the `references`-only gap above). `supabase/schema.sql` is the ground
-truth for what a column/table/function/trigger actually does right now.
+truth for what a column/table/function/trigger actually does right now — and
+it is only true because it is **regenerated from the live catalog**
+(`SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE" node scripts/schema-snapshot-live.mjs`,
+or `supabase db dump --linked --schema public`). Never append migration text to
+it by hand; re-run the snapshot after applying a migration. Two more honesty
+rules: `bob_capability_map.exercised` is unpopulated live (0 rows), so `wired`
+is the strongest Atlas claim available and no surface may be called "exercised"
+without invocation evidence; and the GitLab lineage
+(`don-squires1/field-compliance-manager`, readable read-only with
+`scripts/gitlab-read.mjs`) is history and evidence, not the authoritative home.
 Practical rhythm:
 1. Query capability map + terrain edges for the entity you're about to touch.
 2. Cross-check against `supabase/schema.sql` (`grep` for the column/table —

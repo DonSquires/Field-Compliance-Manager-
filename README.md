@@ -2,11 +2,13 @@
 
 Backend and deployment workspace for the Field Compliance Manager project.
 
+**Start with the canon.** [FOUNDATION.md](FOUNDATION.md) is why the app exists; [docs/canon/README.md](docs/canon/README.md) is the order of authority (access doctrine, organisation model, location house model, unified field-operations model, module-as-data, geofence principles, Bob doctrine, product design); [docs/REBUILD_PLAN.md](docs/REBUILD_PLAN.md) is the sequenced work that brings this build into conformance with it.
+
 **Before editing shared code (schema, hooks, shared components), read [AGENTS.md](AGENTS.md) first** — it explains how to query the live Atlas terrain map (`bob_capability_map`/`bob_app_map_edges`) alongside `supabase/schema.sql` to check blast radius before touching anything that isn't purely local to one page.
 
 ## Architecture
 
-Read the canonical product and governance model in [FCM_PLATFORM_ARCHITECTURE_BRIEF.md](docs/FCM_PLATFORM_ARCHITECTURE_BRIEF.md) before changing shared domains, UI workflows, Bob behavior, or schema ownership.
+Read the working summary in [FCM_PLATFORM_ARCHITECTURE_BRIEF.md](docs/FCM_PLATFORM_ARCHITECTURE_BRIEF.md) before changing shared domains, UI workflows, Bob behavior, or schema ownership; it is read under the canon and reconciled with it.
 
 GitHub `DonSquires/Field-Compliance-Manager-` on `main` is the authoritative source and Vercel deployment branch for the customer-facing web app. Gitea is a direct downstream mirror used by the VPS-facing Bob development workflow. The VPS contains the Node-based Field Compliance Manager backend, Bob's control plane, a PTT service, and Docker deployment definitions. Supabase provides the database, authentication, storage, row-level security, and workflow data used by the application.
 

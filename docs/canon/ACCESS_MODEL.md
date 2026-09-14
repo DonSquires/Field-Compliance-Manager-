@@ -1,0 +1,294 @@
+> **Canonical copy.** Origin: GitLab `don-squires1/field-compliance-manager` `` @ `Main`, read 2026-09-14 via `scripts/gitlab-read.mjs`. This repository (`DonSquires/Field-Compliance-Manager-` `main`) is the authoritative home from now on; the GitLab text is lineage. Edit here and record the ruling — never fork the text. Links to files that do not exist in this repo refer to that lineage.
+
+# ACCESS MODEL — the composed access constitution
+
+> **Status: RATIFIED (owner-signed 2026-08-01). This is the authoritative
+> implementation and test contract for record access.** It supersedes the
+> proposal pack (!1210 `PROPOSAL_user_has_task_entitlement`, !1211
+> `PROPOSAL_access_basis_ux`, !1212 `PROPOSAL_access_scenario_pack`). Those
+> proposals are historical; this document is the source of truth.
+>
+> Sits BELOW `FOUNDATION.md` and `docs/ACCESS_DOCTRINE.md` (the principle layer)
+> and BELOW them in authority; it is the executable expression of that doctrine.
+
+## 0. The re-founding — accountable service, not restriction (READ FIRST)
+
+> Ruled 2026-08-01, owner + Bob. This is a CONSTITUTIONAL CORRECTION to the
+> framing of everything below it — not wording polish. Recorded at the head of
+> the model so no later reader mistakes the tone that follows for style. The
+> mechanism is easy to keep and the reason easy to forget; this is the guard.
+
+**The re-founding.** Access is **purpose-bound, situational, and accountable** —
+granted by a live work basis, not held as an abstract, permanent possession. The
+model was first composed in the grammar of restriction (deny-by-default,
+fail-closed-as-virtue, `must-never`); that framing is the inverse of the app's
+own method — teach, positively correct, reason — and re-installs
+**operator-as-owner**, which the accountability re-anchor exists to demote to
+**custodian**. The correction is one of framing and posture.
+
+**What does NOT change.** The underlying controls remain necessary in full. Every
+ratified rule below stands unchanged — the four states, the two place gates, the
+basis-type logic, R1–R4, and the 13-scenario oracle. This is a re-founding of the
+*lens*, not a relaxation of *outcomes*: "less punitive language" does not mean
+"fewer constraints." Wrongful denial is a harm; so is wrongful disclosure. Both
+are controlled — one by enablement, the other by depth and the hard-stops below.
+
+**The governing sentence:**
+
+> **You can see this because you are doing this job now.**
+
+**Fuller form (Bob):** *this specific job, on this specific matter, at this
+specific time.*
+
+**The floor formula (Bob, verbatim):**
+
+> The floor is not a lock. The floor is not merely a ledger. **The floor is a
+> basis engine plus an honest ledger.**
+> - The **engine** answers: what is the live purpose, what is the lawful /
+>   operational basis, and what DEPTH of disclosure follows from it right now?
+> - The **ledger** answers: who reached what, why, under which basis, and what
+>   they did next?
+
+**The interpretive grammar (how every rule below is now read):**
+- **Enable by proved purpose** — the record flows to whoever serves its live
+  accountable purpose; never a privilege handed to the operator for its own sake.
+- **Limit by disclosure DEPTH, not blanket refusal** — the four states are
+  *depths granted by basis*, not punitive caps. Grant the depth the basis
+  justifies; withhold only the depth it does not.
+- **Explain the basis to the worker** — "Why can I see this?" is a teaching
+  surface, not a scolding one.
+- **Record every meaningful access** — accountability is the control plane;
+  generous access is safe because it is legible afterward.
+
+**Hard-stops (design realities, not softness).** Restriction remains unavoidable,
+and is not apologised for, in exactly these cases:
+1. there is **no live work basis** at all;
+2. the person **lacks standing authority** for that module or place;
+3. the data is **existence- or safety-sensitive** enough that even confirming it
+   would itself be a disclosure;
+4. the request is for **narrative / historical depth** when only operational-only
+   disclosure is justified by the live basis;
+5. the record concerns a **protected escalation path** where broad visibility
+   would create fresh harm.
+Outside these, the posture is enable-and-teach, not prove-you-may.
+
+**The mission line for this layer (Bob, verbatim):** make legitimate work easy,
+illegitimate access difficult, and every meaningful access legible afterward.
+Trust made accountable — and trust given shape.
+
+> Everything below is read through this lens. Where the older text below still
+> carries restriction-first phrasing, THIS section governs; the ratified RULES
+> (four states, two gates, basis types, R1–R4, the 13-scenario oracle) are
+> unchanged — only their framing is corrected from punitive cap to
+> basis-granted depth.
+
+## 0.1 Governing sentences (from `ACCESS_DOCTRINE.md`)
+
+> Permanent module access authorises an officer to perform that class of work;
+> geofence and task linkage determine whether they may access this specific
+> record now.
+>
+> Presence at place does not itself confer entitlement to historical or narrative
+> record content.
+>
+> The engine decides; the UI teaches; the refusal must not disclose more than the
+> access decision itself lawfully permits.
+>
+> The system may explain why access was GRANTED more freely than why access was
+> DENIED. Grant reasons strengthen accountability; denial reasons can leak target
+> existence.
+
+## 1. Standing authority vs situational entitlement
+
+- **Standing authority** = permanent module access. *May this officer perform
+  this class of work at all?* Unlocks the TOOL, not the case universe. Exists for
+  five ordinary reasons: designated responders; self-initiation when work appears
+  without dispatch; rotation across many sites/zones; continuity for follow-up /
+  reporting / evidence; predictable capability coverage across shifts + after
+  hours. It NEVER confers ambient read of a module's existing records.
+- **Situational entitlement** = place + task linkage. *May they access THIS
+  record now?*
+
+## 2. The two place gates (never collapsed)
+
+- **place_authority** — the work is legitimate at this site/zone for this org /
+  module context. Mechanism: `has_location_access()` (0261). ORG-level.
+- **place_relevance** — this officer is here now, where this access mode requires
+  it. Mechanism: live GEOFENCE. OFFICER-level, live.
+
+**Approach-radius rule:** for approach-based modules (noise, smoke, biosecurity)
+place_relevance = within the operational approach radius of the source location,
+not necessarily inside the parcel. Boundary inclusion applies to patrol, freedom
+camping, static guarding, and similar site/zone work.
+
+## 3. Geofence is basis-type-dependent (NOT a blanket gate)
+
+The engine evaluates the access-basis TYPE first:
+- **Presence-derived** (dispatch on-scene, rostered presence, backup attendance)
+  — place_relevance (geofence) is REQUIRED.
+- **Ownership-derived** (follow-up ownership, direct initiation, explicit claim)
+  — geofence may be FALSE and access is still valid (report writing, QA, handover
+  must not break).
+
+## 4. Task signals (situational entitlement)
+
+**Confirmed (6):**
+1. **rostered_presence** — officer on a shift stop at the site/zone.
+2. **dispatch_response** — dispatched officer at the LOI. Graduated: `operational_only`
+   from **`dispatched_at`** (en route) → `full_access` on geofence match.
+3. **supervisory_review** — scoped (see R2).
+4. **follow_up_ownership** — assigned reviewer/QA/owner (ownership-derived).
+5. **direct_module_initiation** — permanent grant + officer initiated OR explicitly
+   CLAIMED this record (a logged act, never the bare grant). PTT/phone are how a
+   job is LEARNED of; access still comes from initiating the record.
+6. **backup_attachment** — formally attached to a live response (never proximity);
+   graduated, see R1.
+
+## 5. Ratified rulings (R1–R4) — strict default + named, logged exception
+
+### R1 — backup_attachment: graduated presence basis
+- Attached + en route → `operational_only`; on-scene / geofence match → `full_access`.
+- End: detachment OR incident closure OR reassignment.
+
+### R2 — supervision: scoped default; inversion only for officer-safety
+- **Default (sensitive SUBJECT-matter):** `operational_only` unless the supervisor
+  has direct review responsibility on THAT record.
+- **Exception (officer-SAFETY: duress, welfare, man-down):** `full_access` for the
+  explicitly responsible human in the escalation chain for THAT officer (named
+  welfare authority / line supervisor / incident commander) — bound to the record,
+  NOT to a role class.
+- **Rejection test:** if the basis could be claimed by a supervisor NOT in this
+  officer's escalation chain, the drafting is too broad.
+- End: reporting/escalation responsibility ends OR event resolved.
+
+### R3 — custody: narrow ordinary custody + separate logged lawful_production
+- **Ordinary custody:** continuity, routing, assignment, closure admin. Container
+  management, NOT narrative read.
+- **lawful_production (separate NAMED, LOGGED basis):** discovery, Privacy Act
+  response, complaint investigation, court-directed production. Reason-coded,
+  audited (break-glass discipline).
+- End: production task complete OR authority withdrawn.
+
+### R4 — retention: state-based expiry
+- End: case closed AND no active dispute/appeal AND outside any relevant
+  challenge / statutory production window. Named expiry rule PER basis, not one
+  universal number.
+
+## 6. Final four rulings (settled 2026-08-01)
+
+- **S3 start rule: `dispatched_at`.** Access begins at dispatch for the attached
+  responder; `operational_only` en route; → `full_access` on geofence match.
+  `acknowledged_at` would create a preventable safety blind spot (coherent with R1).
+- **Q1 dispatch grace: 24 hours.** Write-up / continuity grace, not a casual read
+  window. End: earlier of report completion, reassignment, or 24h expiry.
+- **S5 handover overlap: until incoming acknowledges, capped at 1 hour.** Both
+  named parties access during overlap. End: incoming ack, 1h cap, closure, or
+  explicit reassignment reversal. If no ack before cap, the outgoing basis ends
+  unless separately reattached by another valid basis.
+- **Performance: numeric target DEFERRED to build-time measurement, but MANDATORY.**
+  The helper must be benchmarked before live rollout; an explicit benchmark gate
+  is required in the implementation/test plan. (Do not constitutionalise a number
+  before the helper exists — but the measure-before-live requirement is ratified.)
+
+## 7. Composition
+
+```
+visible =
+    operator_custody                         -- separate named basis (ordinary) ; lawful_production is its own logged basis (R3)
+  OR (
+       module_grant                          -- standing authority (opens the tool)
+       AND place_authority                   -- has_location_access (org-level)
+       AND task_signal_matches               -- one of the confirmed signals (§4)
+       AND ( basis_is_ownership_derived      -- follow-up / initiation / claim
+             OR place_relevance )            -- else live geofence must match
+     )
+```
+decision_state (full / operational_only / custodian / no_task_entitlement /
+hard_stop) then sets content scope: presence-alone caps at operational_only;
+en-route caps at operational_only until geofence/ownership upgrades to full.
+
+## 7.1 Reading decision_state as disclosure DEPTH (per §0)
+
+**Purpose.** This section introduces NO new state and alters NO field of the §8
+return contract or the §9 oracle. It explains how the EXISTING `decision_state`
+values are to be read under the §0 re-founding: each is a disclosure DEPTH
+granted by a live basis — not a punitive cap, and not a permission withheld.
+
+**Rule.** Each state names the depth of disclosure justified by a live basis in a
+specific job, on a specific matter, at a specific time. The state is what the
+basis EARNS, read forward from purpose — never a ceiling read backward from
+suspicion.
+
+**Mapping (existing values → depth read):**
+- **`full_access`** — working depth: the live basis supports narrative / history
+  (ownership-derived, or presence-derived with place_relevance met).
+- **`operational_only`** — narrow operational depth justified by a live
+  task / place / protective need, WITHOUT narrative history. A granted depth for
+  live operational handling, not a punishment cap. (The "only" bounds the depth;
+  it does not withhold a legitimate one.)
+- **`custodian`** — continuity / holding depth justified by custody or transfer
+  responsibility (R3 ordinary custody): container management and routing, not
+  substantive narrative read.
+- **`no_task_entitlement`** — there is no current live basis to disclose
+  operational or narrative subject detail. A statement about absent basis, not a
+  verdict on the reader. (Label retained per ruling A; a less penal name is
+  deferred to the helper-build contract change, §11.)
+- **`hard_stop`** — disclosure cannot be justified because confirming or showing
+  the information would itself be wrongful or safety-sensitive (the §0
+  hard-stops). An honest design reality, not the restriction reflex.
+
+**Teaching line.** The UI / explanation answers **"why can I see this now?"** in
+BASIS language, not denial language — the granted depth and the live basis that
+earned it. Consistent with §0 ("explain the basis to the worker") and the §8
+boundary (RLS gets the strict boolean; the UI gets the shaped object).
+
+## 8. Return-shape contract (engine + UI aligned)
+
+| Field | Values |
+|---|---|
+| decision_state | full_access \| operational_only \| custodian \| no_task_entitlement \| hard_stop |
+| granted_basis | operator_custody \| lawful_production \| rostered_presence \| dispatch_response \| supervisory_review \| follow_up_ownership \| direct_module_initiation \| backup_attachment \| null |
+| failed_gate | module_grant \| place_authority \| place_relevance \| task \| none |
+| expiry_end_condition | explicit END rule for the granted basis (never null when access granted) |
+| sensitivity_mode | informative \| quiet |
+| message_key | stable UI token |
+
+**Boundary:** RLS gets a strict boolean; the UI gets this shaped object. Never mix.
+
+## 9. The 13 scenarios (the isolation + UX test oracle)
+
+S1 no-live-task · S2 live dispatch · S3 arrival-before-acceptance (dispatched_at) ·
+S4 backup attached (graduated) · S5 shift handover (ack-capped 1h) · S6 follow-up
+ownership · S7 supervisor review (R2) · S8 custodian container-vs-narrative (R3) ·
+S9 sensitive-existence quiet mode · S10 welfare exception (human escalation) ·
+S11 inside-geofence-no-task (operational_only max, never history) · S12
+outside-geofence-owns-record (full) · S13 dispatch en-route→on-scene (graduated).
+
+These are asserted BOTH directions in the helper isolation tests: **no leak
+(unrelated readers see nothing) AND no lockout (legitimate readers are not
+blocked).** The full row detail lives in the superseded pack's history (!1212).
+
+## 10. Break-glass
+
+Forbidden in v1. Welfare/safety urgency escalates to a named human authority
+(R2 exception + S10). Revisit only once the ordinary model is proven under shift
+conditions.
+
+## 11. Build sequence (after ratification — this doc is the contract)
+
+1. Helper: `user_has_task_entitlement` (strict boolean) + `resolve_access_basis`
+   companion (§8 shape) — with the 13 scenarios as automated isolation tests and
+   the mandatory performance benchmark gate (§6).
+2. Keystone: `observations` composed SELECT referencing the helper (additive;
+   writes untouched; operator custody preserved as a named basis).
+3. Shared UI: the access-basis chip + drawer + tiered denial, one component,
+   applied across patrol / dispatch / incidents / observations.
+4. Propagate through the accountability fact tables in timeline-of-harm order
+   (per `docs/ALIGNMENT_LEDGER.md`).
+
+## History trace
+
+Derived across session 2026-07-31 (foundation) → 2026-08-01 (alignment + access
+model). Authors: Don Squires (rulings + derivation), Bob (rigour, the friction
+and handover findings, the four-question discipline), Rebekah Squires (the keeper
+principle beneath it). Superseded proposals retained in MR history: !1209–!1212.
