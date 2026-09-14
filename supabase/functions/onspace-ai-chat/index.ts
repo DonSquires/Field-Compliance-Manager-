@@ -8096,7 +8096,7 @@ serve(async (req)=>{
             // formatting slip on a newer model), replace with a graceful line.
             let fallback = String(d.reply || '').trim();
             if (!fallback || /^[\[{]/.test(fallback)) {
-              fallback = "I'm not sure how to help with that yet — could you rephrase?";
+              fallback = "Your requested draft was incomplete, but I understood the task. Please ask me to draft it again from the data in this chat; I will keep it as a reviewable draft and will not change any records.";
             }
             return {
               reply: fallback,

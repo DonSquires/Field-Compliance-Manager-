@@ -21,3 +21,8 @@ test('Conductor supplies caller scope to Oracle truth-state at the enforcement s
   assert.match(conductor, /turn_scope: \{ tier: caps\.tier, scope_org_ids: caps\.scopeOrgIds, organization_id: orgId, user_id: user\.id \}/);
   assert.match(conductor, /proof_grade: 'observed'/);
 });
+
+test('Conductor reports incomplete planner drafts without discarding the understood request', () => {
+  assert.match(conductor, /Your requested draft was incomplete/);
+  assert.doesNotMatch(conductor, /I'm not sure how to help with that yet/);
+});
