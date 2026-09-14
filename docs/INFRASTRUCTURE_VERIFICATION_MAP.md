@@ -125,3 +125,30 @@ npx --yes supabase functions deploy <function-name> --project-ref dotczcyyzgabmt
 
 Verify with the Management API (`GET /v1/projects/dotczcyyzgabmtmnglqj/functions/<function-name>`)
 — `version` increments and `updated_at` moves on each deploy.
+
+## 7. GitLab source lineage (read-only, via Bob's reader)
+
+The most recent build line lives in GitLab `don-squires1/field-compliance-manager`
+(project `83317421`, ref `Main`). No `GITLAB_*` credential exists in the Codespace;
+the project token is a Supabase function secret used only inside
+`bob-repo-search`. Read it the same way Bob does — sign in as the dedicated
+`grand_master` test identity and call the function (verified 2026-09-14):
+
+```bash
+node scripts/gitlab-read.mjs search 'filename:*.md path:docs' 100   # blob search (GitLab basic syntax, | = OR)
+node scripts/gitlab-read.mjs read docs/ARCHITECTURE.md 1 200         # line window
+node scripts/gitlab-read.mjs dump - FOUNDATION.md docs/ACCESS_MODEL.md  # whole files -> $GITLAB_READ_OUT (default /tmp/gitlab-read)
+```
+
+Requires `SUPABASE_URL`, `FIELD_COMPLIANCE_CODESPACE` (to fetch the public anon
+key), `GRANDMASTER_TEST_EMAIL`, `GRANDMASTER_TEST_PASSWORD`. Secret-looking paths
+and lines are excluded/redacted server-side; there is no tree listing, so
+enumerate files with `filename:<prefix>*.<ext>` searches (100-hit cap per query).
+
+GitLab-only canonical docs (absent from GitHub): `FOUNDATION.md`,
+`docs/ARCHITECTURE.md`, `docs/ORG_SERVICE_MODEL.md`, `docs/ACCESS_DOCTRINE.md`,
+`docs/ACCESS_MODEL.md`, `docs/architecture/PLATFORM_ENGINES_AND_MODULE_PROFILE.md`,
+`docs/MODULE_INTEGRATION_CONTRACT.md`, `packages/shared/src/moduleManifest.ts`,
+`docs/design/GEOFENCE_SYSTEM_REDESIGN.md`, `docs/ALIGNMENT_LEDGER.md`,
+`docs/PRODUCT_DESIGN.md`, `docs/ENTERPRISE_READINESS_REVIEW.md`, `docs/STAGING.md`
+(13.7k-line watch log; the head is the current state).
