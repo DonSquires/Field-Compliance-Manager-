@@ -1,0 +1,32 @@
+/* Officer noise control: two-place job flow (source = work anchor, complainant = protected harm anchor). */
+.noise-job-card{border:1px solid var(--color-border,#243447);border-radius:8px;padding:12px;background:var(--color-bg-surface,#0f1a2b);display:grid;gap:10px;margin-top:12px}
+.noise-job-card.is-selected{border-color:var(--color-brand-primary,#d32f2f)}
+.noise-job-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap}
+.noise-job-header h3{margin:0;font-size:16px}
+.noise-places{display:grid;gap:8px}
+.noise-place{display:grid;gap:2px;padding:8px 10px;border-radius:6px;background:var(--color-bg-elevated,#16233a)}
+.noise-place-label{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--color-text-secondary,#94a3b8)}
+.noise-place-address{font-size:15px}
+.noise-place-note{font-size:12px;color:var(--color-text-secondary,#94a3b8)}
+.noise-sla{font-size:13px;color:var(--color-text-secondary,#94a3b8)}
+.noise-sla.is-breached{color:var(--color-status-critical,#ef5350);font-weight:600}
+.noise-dossier{display:flex;flex-wrap:wrap;gap:6px}
+.noise-flag{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid transparent}
+.noise-flag.is-danger{background:rgba(198,40,40,.18);border-color:rgba(239,83,80,.5);color:#ffb4b4}
+.noise-flag.is-warn{background:rgba(255,152,0,.16);border-color:rgba(255,152,0,.5);color:#ffd699}
+.noise-flag.is-ok{background:rgba(76,175,80,.14);border-color:rgba(76,175,80,.45);color:#b9f0bc}
+.noise-steps{display:grid;gap:10px}
+.noise-step{border:1px solid var(--color-border,#243447);border-radius:8px;padding:10px 12px;display:grid;gap:8px}
+.noise-step.is-done{border-color:rgba(76,175,80,.45)}
+.noise-step-title{display:flex;align-items:center;gap:8px;font-weight:600}
+.noise-verification{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:6px;font-size:13px;font-weight:600}
+.noise-verification.is-verified_on_site{background:rgba(76,175,80,.18);color:#b9f0bc}
+.noise-verification.is-near_site{background:rgba(255,193,7,.18);color:#ffe08a}
+.noise-verification.is-off_site,.noise-verification.is-no_gps{background:rgba(198,40,40,.2);color:#ffb4b4}
+.noise-verification.is-unverified_boundary,.noise-verification.is-no_geofence{background:rgba(255,152,0,.18);color:#ffd699}
+.noise-stop-row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+.noise-contact-reveal{display:grid;gap:4px;padding:8px 10px;border-radius:6px;border:1px dashed var(--color-accent-silver,#9e9e9e);font-size:14px}
+.noise-contact-reveal small{color:var(--color-text-secondary,#94a3b8)}
+.noise-actions{display:flex;gap:8px;flex-wrap:wrap}
+.noise-actions .btn{min-height:44px}
+.noise-legal-note{font-size:12px;color:var(--color-text-secondary,#94a3b8);margin:0}

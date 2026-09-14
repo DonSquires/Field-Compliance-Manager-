@@ -87,20 +87,24 @@ geofence-verified ad-hoc stops, complainant contact recorded, END period held as
 a dated council rule under the statutory cap (8 days since 21 Aug 2025), seizure
 gated on Police presence, and a client report that discloses by basis.
 
-1. **Apply the drafted slice** — `20260914110000_noise_two_place_attendance_model.sql`
-   (owner applies; protected path). It also repairs a latent live defect: the
-   re-issued `submit_officer_noise_assessment` writes `noise_assessments.shift_id`,
-   which does not exist, so every officer submission has failed since 2026-09-13.
-   Then re-snapshot the schema and refresh Atlas.
+1. **Applied 2026-09-14 (owner-authorized)** — `20260914100000` and
+   `20260914110000` are live and in the ledger (`scripts/apply-migrations-live.mjs`);
+   schema re-snapshotted and Atlas refreshed. The latent defect (the re-issued
+   `submit_officer_noise_assessment` writing a non-existent `shift_id`) is repaired.
 2. **Truth table stays green** — `scripts/run-rls-oracle.sh … --oracle
    supabase/tests/20260914110000_noise_two_place_rls.sql` (34 checks, real RLS,
    disposable Postgres, `--network=none`). Any change to the noise RPCs or
    policies re-runs it before merge.
-3. **Officer flow** on the new contract: job card with both places and the
-   pre-arrival dossier → arrive (verification shown loudly) → assess (distance to
-   complainant shown) → action (END oral/written + expiry; seizure needs Police;
-   s.328(5) notice when unoccupied) → contact complainant (optional) → depart
-   (delay reason if SLA breached).
+3. **Officer flow — built 2026-09-14** (`apps/web/src/pages/OfficerNoiseControlPage.tsx`,
+   guard `OfficerNoiseControlPage.guard.test.ts`): job card with both places and
+   the pre-arrival dossier → arrive (verification shown loudly, never blocking) →
+   assess (position rule stated; distance recorded server-side) → action (END
+   only with a complaint job; seizure only with Police present; statutory
+   number required) → contact complainant (identity via the audited RPC only;
+   in-person contact requires arrival at the complainant place) → depart (delay
+   reason when the SLA was breached). **Owed:** a human test with a real job on
+   the live build (gate below), and the s.328(5) unoccupied-entry fields once a
+   `record_noise_direction_particulars` command exists.
 4. **Dispatch intake** takes both addresses through the canonical site-entry
    pipeline and records the protected party via `set_dispatch_job_harmed_party`.
 5. **Client report and oversight** render `get_noise_attendance_report`; the
