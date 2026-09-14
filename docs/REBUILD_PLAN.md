@@ -129,7 +129,7 @@ gated on Police presence, and a client report that discloses by basis.
    noise jobs the intake captures the complainant place (known site or address)
    and identity, and writes them through `set_dispatch_job_harmed_party` after
    the job is created; identity never goes into briefing notes. **Site-entry
-   seam drafted 2026-09-14, NOT YET APPLIED LIVE** —
+   seam applied live 2026-09-14 (owner-authorized)** —
    `20260914130000_dispatch_place_site_entry.sql` adds one internal
    resolve-or-create (`resolve_or_create_dispatch_place_site`: house first,
    dedup by address key within the owner org, a house under another org is
@@ -166,7 +166,7 @@ source-side reader's report carries no complainant data.
    (data migration with provenance, reviewed).
 3. Canonical site-entry pipeline (Q10): inventory every address entry point in
    `apps/web` and route all of them through LINZ autocomplete → dedup → create.
-   Dispatch included. **Dispatch slice drafted 2026-09-14** (see §2b item 4):
+   Dispatch included. **Dispatch slice applied live 2026-09-14** (see §2b item 4):
    both dispatch place writers now share `resolve_or_create_dispatch_place_site`,
    which resolves-or-creates the house first (§3.1 shape, SQL). Remaining entry
    points (CRM `create_crm_site`/`manage_crm_location`, the edge

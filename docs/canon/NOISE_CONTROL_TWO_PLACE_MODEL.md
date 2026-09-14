@@ -219,7 +219,7 @@ above is primary-source; council overlays are configured, not assumed.
 3. **Dispatch intake** — the intake path takes both addresses through the
    canonical site-entry pipeline (Q10) and calls `set_dispatch_job_harmed_party`;
    both places resolve-or-create a house (`LOCATION_HOUSE_MODEL.md`).
-   **Drafted 2026-09-14** as `20260914130000_dispatch_place_site_entry.sql`:
+   **Applied live 2026-09-14** as `20260914130000_dispatch_place_site_entry.sql`:
    one internal seam `resolve_or_create_dispatch_place_site` (house first;
    dedup by address key within the owner org; a house under another org →
    facet without a house, `ownership_status = 'needs_review'`, never reused or
