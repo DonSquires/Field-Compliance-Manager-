@@ -15,7 +15,8 @@ test('mobile scan submits evidence only through the governed scan edge function'
 
 test('governed scan preserves the manual plate fallback contract', () => {
   assert.match(edgeFunction, /plate_number: manualPlateNumberInput/);
-  assert.match(edgeFunction, /manualPlateNumberInput\.toUpperCase\(\)/);
+  assert.match(edgeFunction, /normalizePlateNumber\(manualPlateNumberInput\)/);
+  assert.match(edgeFunction, /function normalizePlateNumber\(value\)[\s\S]*toUpperCase\(\)\.replace\(\/\[\^A-Z0-9\]\/g, ''\)\.slice\(0, 10\)/);
   assert.match(edgeFunction, /const plateSource = manualPlateNumber \? 'manual' : 'alpr'/);
   assert.match(edgeFunction, /manualPlateNumber \? Promise\.resolve\(null\) : runAlpr\(imageBase64\)/);
   assert.match(edgeFunction, /runInference\(imageBase64\)/);

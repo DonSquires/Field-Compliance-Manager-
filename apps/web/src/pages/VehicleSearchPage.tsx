@@ -11,7 +11,7 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { normalizePlateNumber } from '../lib/canonicalIdentity';
+import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -94,7 +94,9 @@ const VehicleSearchPage: React.FC = () => {
       setSearched(true);
 
       // ATLAS READS: canonical_vehicles, canonical_scv, observations, breach_alerts
-      const [vehRes, scvRes, obsRes, breachRes] = await Promise.all([
+      // Resolve the canonical vehicle first so observation history follows the
+      // global identity link, not only the plate text recorded at scan time.
+      const [vehRes, scvRes] = await Promise.all([
         supabase
           .from('canonical_vehicles')
           .select(
@@ -107,10 +109,14 @@ const VehicleSearchPage: React.FC = () => {
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
+      ]);
+      const canonicalVehicleId = (vehRes.data as Vehicle | null)?.id ?? null;
+      const historyFilter = vehicleHistoryOrFilter(cleanPlate, canonicalVehicleId);
+      const [obsRes, breachRes] = await Promise.all([
         supabase
           .from('observations')
           .select('id, observed_at, is_compliant, compliance_reason, nights_this_zone, zone:zone_id(name)')
-          .ilike('plate_number', cleanPlate)
+          .or(historyFilter)
           .order('observed_at', { ascending: false })
           .limit(10),
         supabase

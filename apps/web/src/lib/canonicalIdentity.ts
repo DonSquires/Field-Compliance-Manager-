@@ -52,6 +52,22 @@ export function buildCanonicalScvKey(plate: string): string {
   return `scv:${safePlate}`;
 }
 
+/**
+ * PostgREST `.or()` filter matching rows that carry the canonical vehicle link
+ * or whose stored plate text normalizes to the same identity. Callers pass the
+ * resolved canonical id when one exists so history follows the vehicle even
+ * when the recorded plate text varies.
+ */
+export function vehicleHistoryOrFilter(plate: string, canonicalVehicleId?: string | null): string {
+  const safePlate = normalizePlateNumber(plate);
+  if (!safePlate) {
+    throw new Error('A vehicle plate is required');
+  }
+  const clauses = [`plate_number.ilike.${safePlate}`];
+  if (canonicalVehicleId) clauses.unshift(`canonical_vehicle_id.eq.${canonicalVehicleId}`);
+  return clauses.join(',');
+}
+
 export function dedupeByPlate(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>();
   const result: string[] = [];

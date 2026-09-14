@@ -8,6 +8,7 @@ import {
   canonicalEntityKey,
   dedupeByPlate,
   normalizePlateNumber,
+  vehicleHistoryOrFilter,
 } from './canonicalIdentity';
 
 describe('canonical identity helpers', () => {
@@ -31,5 +32,11 @@ describe('canonical identity helpers', () => {
 
   it('deduplicates plates across repeated values and whitespace', () => {
     expect(dedupeByPlate(['ab-123', ' AB123 ', 'ab-123', null])).toEqual(['AB123']);
+  });
+
+  it('builds a history filter that prefers the canonical vehicle link and falls back to plate', () => {
+    expect(vehicleHistoryOrFilter(' ab-123 ', 'veh-uuid')).toBe('canonical_vehicle_id.eq.veh-uuid,plate_number.ilike.AB123');
+    expect(vehicleHistoryOrFilter('ab-123', null)).toBe('plate_number.ilike.AB123');
+    expect(() => vehicleHistoryOrFilter('  --  ', 'veh-uuid')).toThrow('A vehicle plate is required');
   });
 });

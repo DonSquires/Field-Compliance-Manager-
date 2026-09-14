@@ -16,8 +16,8 @@ test('report-pack RPC uses an exclusive next-day timestamp boundary', () => {
   for (const source of [migration, declarative]) {
     assert.match(source, /interval '1 day'\);/);
     assert.doesNotMatch(source, /interval '1 second'/);
-    assert.match(source, /started_at >= v_start_ts and started_at < v_end_ts/);
-    assert.match(source, /created_at >= v_start_ts and created_at < v_end_ts/);
-    assert.doesNotMatch(source, /created_at >= v_start_ts and created_at <= v_end_ts/);
+    assert.match(source, /started_at >= v_start_ts and started_at < v_end_ts/i);
+    assert.match(source, /created_at >= v_start_ts and created_at < v_end_ts/i);
+    assert.doesNotMatch(source, /created_at >= v_start_ts and created_at <= v_end_ts/i);
   }
 });

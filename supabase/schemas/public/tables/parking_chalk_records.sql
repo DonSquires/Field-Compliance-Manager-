@@ -41,6 +41,8 @@ create table "public"."parking_chalk_records" (
   "updated_at"                   timestamp with time zone not null default now(),
   "photo_urls"                   jsonb                    default '[]'::jsonb,
   "geofence_context"             jsonb                    not null default '{}'::jsonb,
+  "canonical_vehicle_id"         uuid,
+  constraint "parking_chalk_records_canonical_vehicle_id_fkey" foreign key (canonical_vehicle_id) references public.canonical_vehicles(id) on delete set null,
   constraint "parking_chalk_records_client_site_id_fkey" foreign key (client_site_id) references public.client_sites(id) on delete set null,
   constraint "parking_chalk_records_cof_status_check" check ((cof_status = ANY (ARRAY['current'::text, 'expired'::text, 'unknown'::text]))),
   constraint "parking_chalk_records_organization_id_fkey" foreign key (organization_id) references public.organizations(id) on delete cascade,
