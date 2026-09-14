@@ -42,3 +42,19 @@ describe('governed noise review return', () => {
     expect(officer).toContain('setLoading(false);');
   });
 });
+describe('attendance report and review-queue flags', () => {
+  it('renders the client attendance report only through the basis-scoped RPC', () => {
+    expect(admin).toContain("rpc('get_noise_attendance_report'");
+    expect(admin).toContain('complainant identity is never in this report');
+    expect(admin).not.toContain("from('dispatch_job_protected_parties')");
+    expect(admin).not.toContain("from('shift_stops')");
+    expect(admin).toContain('DELAY REASON MISSING');
+  });
+
+  it('flags statutory and evidence gaps in the review queue', () => {
+    expect(admin).toContain("flags.push('END without a complaint job')");
+    expect(admin).toContain("flags.push('Seizure without Police present')");
+    expect(admin).toContain("flags.push('Assessment position not measured')");
+    expect(admin).toContain("['off_site', 'no_gps', 'unverified_boundary', 'no_geofence'].includes(stop.arrival_verification)");
+  });
+});

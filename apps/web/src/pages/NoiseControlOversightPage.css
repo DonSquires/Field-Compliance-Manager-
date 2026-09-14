@@ -1,1 +1,13 @@
 .noise-review-actions{display:flex;flex-wrap:wrap;gap:5px}.noise-review-backdrop{position:fixed;inset:0;z-index:1100;display:grid;place-items:center;padding:16px;background:rgba(0,0,0,.72)}.noise-review-dialog{width:min(100%,500px);padding:18px;border:1px solid #31485b;border-radius:8px;color:#e7eef4;background:#0b1622}.noise-review-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.noise-review-dialog header span{color:#69c4af;font-size: 12px;font-weight:850;text-transform:uppercase}.noise-review-dialog h2{margin:4px 0}.noise-review-dialog header button{width:32px;height:32px;border:1px solid #3a5367;border-radius:5px;color:#dce6ed;background:#122231}.noise-review-dialog>p{color:#9dafbd;font-size:12px}.noise-review-dialog label{display:grid;gap:6px;color:#b9c7d1;font-size: 12px}.noise-review-dialog textarea{padding:10px;border:1px solid #3a5367;border-radius:5px;color:#eef5f8;background:#07111b}.noise-review-dialog footer{display:flex;justify-content:flex-end;gap:7px;margin-top:14px}@media(max-width:560px){.noise-review-backdrop{align-items:end;padding:10px}.noise-review-dialog footer .btn{flex:1}}
+.noise-review-flag{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:rgba(198,40,40,.18);border:1px solid rgba(239,83,80,.5);color:#ffb4b4}
+.noise-report{margin-top:16px;padding:14px;border:1px solid var(--color-border,#243447);border-radius:8px;background:var(--color-bg-surface,#0f1a2b);display:grid;gap:10px}
+.noise-report-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.noise-report-header h2{margin:2px 0 0;font-size:18px}
+.noise-report-kicker{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--color-brand-primary,#d32f2f);font-weight:700}
+.noise-report-disclosure{margin:0;font-size:12px;color:var(--color-text-secondary,#94a3b8)}
+.noise-report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin:0}
+.noise-report-grid dt{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--color-text-secondary,#94a3b8)}
+.noise-report-grid dd{margin:2px 0 0;font-size:14px}
+.noise-report h3{margin:6px 0 0;font-size:14px}
+.noise-report-row{margin:0;font-size:13px;padding:6px 8px;border-radius:4px;background:var(--color-bg-elevated,#16233a)}
+.noise-report-row.is-flagged{border-left:3px solid var(--color-status-action,#ff9800)}

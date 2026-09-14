@@ -96,3 +96,24 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain('supabase.rpc(rpc, payload)');
   });
 });
+describe('noise complaint intake — two places, protected identity', () => {
+  it('captures the complainant place and identity only for noise jobs and only through the governed RPC', () => {
+    expect(source).toContain("formJobType === 'noise_control' && (");
+    expect(source).toContain('Complainant place (harmed party · protected)');
+    expect(source).toContain("rpc('set_dispatch_job_harmed_party'");
+    expect(source).toContain("p_party_role: 'complainant'");
+    expect(source).toContain('p_display_name: formComplainantName.trim() || null');
+    expect(source).not.toContain("from('dispatch_job_protected_parties')");
+  });
+
+  it('keeps identity out of briefing notes and says so, and is honest about a place without a geofence', () => {
+    expect(source).toContain('never put it in briefing notes');
+    expect(source).toContain('the complainant place has no geofence yet, so attendance there is recorded by time only');
+    expect(source).not.toMatch(/briefingNotes[^;]*formComplainant(Name|Phone)/);
+  });
+
+  it('never silently drops the complainant when the follow-up write fails', () => {
+    expect(source).toContain('Job created, but the complainant details were not saved');
+    expect(source).toContain('setWarning(');
+  });
+});

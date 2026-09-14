@@ -260,6 +260,14 @@ const DispatchConsolePage: React.FC = () => {
   const [formAlarmIntakeChannel, setFormAlarmIntakeChannel] = useState<AlarmIntakeChannel>('phone');
   const [formAlarmReceivedAt, setFormAlarmReceivedAt] = useState(() => new Date().toISOString().slice(0, 16));
   const [formZoneId, setFormZoneId] = useState<string>('');
+  // Harmed party (complainant) for dual-place jobs: place on the job, identity behind the guarded RPC.
+  const [formComplainantAddress, setFormComplainantAddress] = useState('');
+  const [resolvedComplainant, setResolvedComplainant] = useState<{ label: string; lat: number; lng: number } | null>(null);
+  const [formComplainantSiteId, setFormComplainantSiteId] = useState('');
+  const [formComplainantName, setFormComplainantName] = useState('');
+  const [formComplainantPhone, setFormComplainantPhone] = useState('');
+  const [formComplainantNotes, setFormComplainantNotes] = useState('');
+  const [warning, setWarning] = useState<string | null>(null);
   const [formRequestId, setFormRequestId] = useState(() => crypto.randomUUID());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -554,6 +562,24 @@ const DispatchConsolePage: React.FC = () => {
       if (error) throw error;
       if (!data?.length) throw new Error('The dispatch job was not confirmed after creation.');
 
+      const complainantAddress = (resolvedComplainant?.label ?? formComplainantAddress).trim();
+      const hasComplainant = formJobType === 'noise_control' && Boolean(formComplainantSiteId || complainantAddress || formComplainantName.trim() || formComplainantPhone.trim() || formComplainantNotes.trim());
+      if (hasComplainant) {
+        // ATLAS WRITES: set_dispatch_job_harmed_party (place on the job; identity only in the protected table)
+        const { error: harmedPartyError } = await supabase.rpc('set_dispatch_job_harmed_party', {
+          p_client_request_id: crypto.randomUUID(),
+          p_dispatch_job_id: (data as Array<{ id: string }>)[0].id,
+          p_harmed_party_site_id: formComplainantSiteId || null,
+          p_harmed_party_address: complainantAddress || null,
+          p_party_role: 'complainant',
+          p_display_name: formComplainantName.trim() || null,
+          p_phone: formComplainantPhone.trim() || null,
+          p_email: null,
+          p_notes: formComplainantNotes.trim() || null,
+        });
+        if (harmedPartyError) setWarning(`Job created, but the complainant details were not saved: ${harmedPartyError.message}. Record them on the job before dispatching.`);
+      }
+
       setShowNewJob(false);
       setFormJobType('alarm_response');
       setFormPriority('high');
@@ -568,6 +594,12 @@ const DispatchConsolePage: React.FC = () => {
       setFormAlarmIntakeChannel('phone');
       setFormAlarmReceivedAt(new Date().toISOString().slice(0, 16));
       setFormZoneId('');
+      setFormComplainantAddress('');
+      setResolvedComplainant(null);
+      setFormComplainantSiteId('');
+      setFormComplainantName('');
+      setFormComplainantPhone('');
+      setFormComplainantNotes('');
       setFormRequestId(crypto.randomUUID());
 
       await loadPhaseA();
@@ -577,7 +609,20 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes]);
+
+  const resolveComplainantLocation = useCallback(async () => {
+    try {
+      const candidate = (await resolveAddressCandidates(formComplainantAddress, 1))[0];
+      if (!candidate) throw new Error('No matching complainant address was found.');
+      setResolvedComplainant(candidate);
+      setFormComplainantAddress(candidate.label);
+      setError(null);
+    } catch (err) {
+      setResolvedComplainant(null);
+      setError(err instanceof Error ? err.message : 'Unable to resolve the complainant address.');
+    }
+  }, [formComplainantAddress]);
 
   const resolveIncidentLocation = useCallback(async () => {
     try {
@@ -762,6 +807,7 @@ const DispatchConsolePage: React.FC = () => {
             <strong>({activeShifts.length})</strong>
           </div>
           {error && <div className="dispatch-console-error-box">{error}</div>}
+          {warning && <div className="dispatch-console-inline-warning" role="status">{warning} <button type="button" className="btn btn-sm btn-secondary" onClick={() => setWarning(null)}>Dismiss</button></div>}
           <button type="button" className="dispatch-console-primary-button" onClick={() => setShowNewJob(!showNewJob)}>
             + New Job
           </button>
@@ -876,6 +922,30 @@ const DispatchConsolePage: React.FC = () => {
                 )}
                 {isNewIncidentLocation && resolvedLocation && <div className="dispatch-console-inline-success">Resolved: {resolvedLocation.label}</div>}
               </div>
+
+              {formJobType === 'noise_control' && (
+                <div className="dispatch-console-form-field">
+                  <label className="dispatch-console-form-label">Complainant place (harmed party · protected)</label>
+                  <div className="dispatch-console-form-note">The site above is the noise source, where the officer works. Record where the complaint comes from so the officer can assess near it and attend it. Identity is stored behind an audited read — never put it in briefing notes.</div>
+                  <select value={formComplainantSiteId} onChange={(e) => setFormComplainantSiteId(e.target.value)} aria-label="Complainant place as a known site">
+                    <option value="">Not a known site — enter the address below</option>
+                    {sites.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <div className="dispatch-console-address-row">
+                    <input value={formComplainantAddress} onChange={(event) => { setFormComplainantAddress(event.target.value); setResolvedComplainant(null); }} placeholder="Complainant address" aria-label="Complainant address" />
+                    <button type="button" onClick={resolveComplainantLocation} disabled={!formComplainantAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
+                  </div>
+                  {resolvedComplainant && <div className="dispatch-console-inline-success">Resolved: {resolvedComplainant.label}</div>}
+                  {!formComplainantSiteId && formComplainantAddress.trim() && <div className="dispatch-console-inline-warning">Address only: the complainant place has no geofence yet, so attendance there is recorded by time only until it is resolved to a site.</div>}
+                  <div className="dispatch-console-address-row">
+                    <input value={formComplainantName} onChange={(e) => setFormComplainantName(e.target.value)} placeholder="Complainant name (protected)" aria-label="Complainant name" autoComplete="off" />
+                    <input value={formComplainantPhone} onChange={(e) => setFormComplainantPhone(e.target.value)} placeholder="Complainant phone (protected)" aria-label="Complainant phone" autoComplete="off" />
+                  </div>
+                  <input value={formComplainantNotes} onChange={(e) => setFormComplainantNotes(e.target.value)} placeholder="Contact preferences (protected)" aria-label="Complainant contact preferences" />
+                </div>
+              )}
 
               <div className="dispatch-console-form-field">
                 <label className="dispatch-console-form-label">Dispatch Resource</label>

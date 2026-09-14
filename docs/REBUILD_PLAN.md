@@ -105,11 +105,19 @@ gated on Police presence, and a client report that discloses by basis.
    reason when the SLA was breached). **Owed:** a human test with a real job on
    the live build (gate below), and the s.328(5) unoccupied-entry fields once a
    `record_noise_direction_particulars` command exists.
-4. **Dispatch intake** takes both addresses through the canonical site-entry
-   pipeline and records the protected party via `set_dispatch_job_harmed_party`.
-5. **Client report and oversight** render `get_noise_attendance_report`; the
-   review queue flags `off_site` / `unverified_boundary` / `no_gps`, breached
-   SLA without reason, END without complaint.
+4. **Dispatch intake — built 2026-09-14** (`DispatchConsolePage.tsx`): for
+   noise jobs the intake captures the complainant place (known site or address)
+   and identity, and writes them through `set_dispatch_job_harmed_party` after
+   the job is created; identity never goes into briefing notes. **Owed:** the
+   canonical site-entry pipeline (Workstream 3.3, Q10) so an address-only
+   complainant place becomes a geofenced house/site — until then the UI says
+   attendance there is recorded by time only.
+5. **Client report and oversight — built 2026-09-14** (`NoiseControlOversightPage.tsx`):
+   the attendance report renders `get_noise_attendance_report` at the reader's
+   disclosure level; the review queue flags END without a complaint job, seizure
+   without Police present, unmeasured assessment position, and flagged
+   attendances (`off_site` / `no_gps` / `unverified_boundary` / `no_geofence`),
+   and shows a missing delay reason on a breached SLA loudly.
 6. **Legacy import re-anchor** — split the Nelson export's inline complainant
    details into protected parties and two places; each historic attendance
    becomes a stop with its on-site/off-site times.
