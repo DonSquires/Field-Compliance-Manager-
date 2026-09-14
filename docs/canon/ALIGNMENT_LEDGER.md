@@ -256,3 +256,39 @@ grants nothing beyond `grand_master`). They become live the moment W2 populates
 the anchors — which is why the W2 write contracts must land with the
 13-scenario oracle green, and why completion language stays
 "operationally corrected / doctrinally incomplete" until both halves are live.
+
+### 2026-09-14 (later) — Clarification of the anchor ruling for dual-place modules (Don Squires)
+
+> "The place of harm is the address the officer attends to conduct the job. The
+> tricky one is noise control, and potentially smoke and biosecurity: record the
+> complainant address and the address the noise is coming from and ensure both
+> are associated. The officer assesses as close to the complainant's address as
+> possible without giving away who complained. The noise address is where the
+> officer does most of the work, records the assessment against, and issues the
+> END or seizure. Where the officer needs to talk to the complainant, record that
+> interaction too, linked, so the client report reflects exactly what happened.
+> Each location needs a geofence so there is verification the officer was on site."
+
+How this composes with the anchor rule above (no contradiction):
+
+- **Two places, both attended, both geofenced, one job.** The *harmed party's*
+  place (complainant / protected land) remains the anchor that grants the
+  accountability read (W1). The *subject's* place (the source) is the work
+  anchor: the assessment, END and seizure are recorded against it and all
+  repeat-offender logic keys off it (lineage rule #157). Neither replaces the
+  other; the job carries both and every attendance is a geofence-verified stop.
+- **Confidentiality holds at the data layer.** Complainant identity is readable
+  only through a guarded, audited path; served documents and the source-side
+  reader see only the source. The assessment position is recorded as a distance
+  to the complainant's boundary, never as the complainant's address.
+- **Statute agrees** (RMA 1991, read at source 2026-09-14): s.326 defines
+  excessive noise by its effect on a person *other than* one at the emitting
+  place; s.327(1) requires a received complaint and an investigation before an
+  END; s.328(3) requires a constable for officer-led seizure; s.327(3) now binds
+  for **8 days** (amended 21 Aug 2025 — the "72 hours" in this repo's earlier
+  documents is superseded and must be held as an effective-dated rule).
+
+Design and build slice: `docs/canon/NOISE_CONTROL_TWO_PLACE_MODEL.md`;
+migration `20260914110000_noise_two_place_attendance_model.sql` (drafted, not
+applied); truth table `supabase/tests/20260914110000_noise_two_place_rls.sql`
+(green in the disposable database). Smoke and biosecurity take the same shape.

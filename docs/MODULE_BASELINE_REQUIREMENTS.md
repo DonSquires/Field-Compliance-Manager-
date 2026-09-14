@@ -89,7 +89,8 @@ evidence, notifications, and audit remain shared platform systems.
 ### B. Noise Control (`noise_control`)
 - **6-Step Assessment Workflow:** Attend $\rightarrow$ Identify $\rightarrow$ Measure/Assess Matrix $\rightarrow$ History/Config Check $\rightarrow$ Action Taken $\rightarrow$ Follow-Up & Audit.
 - **Matrix Calculation:** Volume (0–4) + Time (1–4) + Tone (0–2) = Total (Excessive threshold $\ge 5$ default).
-- **Enforcement Ladder:** Verbal Warning $\rightarrow$ Excessive Noise Direction (END, 72h validity) $\rightarrow$ Abatement Notice (RMA s.326) $\rightarrow$ Equipment Seizure (RMA s.327, itemized in `noise_seizures`, requires police presence).
+- **Two places, one job (ruling 2026-09-14):** the complainant's place (harmed party, protected, grants the accountability read) and the noise source (subject; the assessment, END and seizure are recorded against it). Both attended as geofence-verified stops; complainant contact recorded; see `docs/canon/NOISE_CONTROL_TWO_PLACE_MODEL.md`.
+- **Enforcement Ladder (RMA 1991, verified at source 2026-09-14):** Verbal Warning $\rightarrow$ Excessive Noise Direction (s.327; requires a received complaint and an investigation; oral or written; binds the place for **8 days or a shorter period the officer specifies** — amended 21 Aug 2025, previously 72 h; held as a dated council rule `noise_module_config.end_validity_hours`, never a constant) $\rightarrow$ non-compliance seizure with a constable (s.328(3); s.328(5) notice when unoccupied) $\rightarrow$ Abatement Notice for unreasonable noise (s.322(1)(c)) $\rightarrow$ seizure under s.323(2) $\rightarrow$ return of property (s.336). Itemised in `noise_seizures`; officer-led seizure requires Police present.
 
 ### C. Biosecurity (`biosecurity`)
 - **Target Pests:** Chilean Needlegrass (*Nassella neesiana*), pest plants, and vector risk.

@@ -79,6 +79,42 @@ the harm is the separately anchored subject) is recorded in
 cross-tenant negative test per new policy; completion recorded as
 "operationally corrected / doctrinally incomplete" until both W1 and W2 land.
 
+## 2b. Noise control — the two-place model (ruling 2026-09-14)
+
+Design: `docs/canon/NOISE_CONTROL_TWO_PLACE_MODEL.md`. One job, two places
+(complainant = harm anchor, protected; source = work anchor), both attended as
+geofence-verified ad-hoc stops, complainant contact recorded, END period held as
+a dated council rule under the statutory cap (8 days since 21 Aug 2025), seizure
+gated on Police presence, and a client report that discloses by basis.
+
+1. **Apply the drafted slice** — `20260914110000_noise_two_place_attendance_model.sql`
+   (owner applies; protected path). It also repairs a latent live defect: the
+   re-issued `submit_officer_noise_assessment` writes `noise_assessments.shift_id`,
+   which does not exist, so every officer submission has failed since 2026-09-13.
+   Then re-snapshot the schema and refresh Atlas.
+2. **Truth table stays green** — `scripts/run-rls-oracle.sh … --oracle
+   supabase/tests/20260914110000_noise_two_place_rls.sql` (34 checks, real RLS,
+   disposable Postgres, `--network=none`). Any change to the noise RPCs or
+   policies re-runs it before merge.
+3. **Officer flow** on the new contract: job card with both places and the
+   pre-arrival dossier → arrive (verification shown loudly) → assess (distance to
+   complainant shown) → action (END oral/written + expiry; seizure needs Police;
+   s.328(5) notice when unoccupied) → contact complainant (optional) → depart
+   (delay reason if SLA breached).
+4. **Dispatch intake** takes both addresses through the canonical site-entry
+   pipeline and records the protected party via `set_dispatch_job_harmed_party`.
+5. **Client report and oversight** render `get_noise_attendance_report`; the
+   review queue flags `off_site` / `unverified_boundary` / `no_gps`, breached
+   SLA without reason, END without complaint.
+6. **Legacy import re-anchor** — split the Nelson export's inline complainant
+   details into protected parties and two places; each historic attendance
+   becomes a stop with its on-site/off-site times.
+7. **Smoke and biosecurity** take the same shape (`harmed_party_site_id` on the
+   job; `protected_land_site_id` for biosecurity; derived anchors on submit).
+
+**Gate:** the human test in the design doc §7 passes end to end and the
+source-side reader's report carries no complainant data.
+
 ## 3. Place convergence (LOCATION_HOUSE_MODEL, GEOFENCE_PRINCIPLES)
 
 1. Every site/zone create path resolves-or-creates the house first; port

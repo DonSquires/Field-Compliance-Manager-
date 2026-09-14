@@ -46,6 +46,10 @@ the code is wrong **or** a ruling must be recorded here before the code stands.
     and [`../ui-baseline.md`](../ui-baseline.md).
 13. [`FREEDOM_CAMPING_IMPLEMENTATION_BLUEPRINT.md`](FREEDOM_CAMPING_IMPLEMENTATION_BLUEPRINT.md)
     — the reference vertical for the vehicle-compliance style.
+13a. [`NOISE_CONTROL_TWO_PLACE_MODEL.md`](NOISE_CONTROL_TWO_PLACE_MODEL.md) — the
+    reference design for the dual-place (RMA / environmental) style: complainant
+    place and source place on one job, both geofenced, protected identity,
+    statute verified at source; smoke and biosecurity follow it.
 14. [`ALIGNMENT_LEDGER.md`](ALIGNMENT_LEDGER.md) — the audited gap between the
     foundation and what RLS enforces today (W1 access-side / W2 record-side).
 15. [`../FCM_PLATFORM_ARCHITECTURE_BRIEF.md`](../FCM_PLATFORM_ARCHITECTURE_BRIEF.md),
