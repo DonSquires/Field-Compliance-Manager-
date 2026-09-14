@@ -128,10 +128,20 @@ gated on Police presence, and a client report that discloses by basis.
 4. **Dispatch intake — built 2026-09-14** (`DispatchConsolePage.tsx`): for
    noise jobs the intake captures the complainant place (known site or address)
    and identity, and writes them through `set_dispatch_job_harmed_party` after
-   the job is created; identity never goes into briefing notes. **Owed:** the
-   canonical site-entry pipeline (Workstream 3.3, Q10) so an address-only
-   complainant place becomes a geofenced house/site — until then the UI says
-   attendance there is recorded by time only.
+   the job is created; identity never goes into briefing notes. **Site-entry
+   seam drafted 2026-09-14, NOT YET APPLIED LIVE** —
+   `20260914130000_dispatch_place_site_entry.sql` adds one internal
+   resolve-or-create (`resolve_or_create_dispatch_place_site`: house first,
+   dedup by address key within the owner org, a house under another org is
+   flagged `needs_review` and never reused or forked, provisional centre and
+   unverified boundary, audited) and puts both dispatch place writers on it:
+   `set_dispatch_job_harmed_party` (re-issued with optional coordinates; a
+   resolved address-only complainant place becomes a real site so arrival
+   there is `unverified_boundary` with a distance rather than `no_geofence`;
+   a supplied site must belong to the job's client or custodian because it
+   grants the W1 read) and `create_dispatch_intake_job` (identical signature).
+   Truth table 56 checks; guard `test/dispatch-place-site-entry.test.js`. The
+   console sends the resolved coordinates and states resolved vs unresolved.
 5. **Client report and oversight — built 2026-09-14** (`NoiseControlOversightPage.tsx`):
    the attendance report renders `get_noise_attendance_report` at the reader's
    disclosure level; the review queue flags END without a complaint job, seizure
@@ -156,7 +166,12 @@ source-side reader's report carries no complainant data.
    (data migration with provenance, reviewed).
 3. Canonical site-entry pipeline (Q10): inventory every address entry point in
    `apps/web` and route all of them through LINZ autocomplete → dedup → create.
-   Dispatch included.
+   Dispatch included. **Dispatch slice drafted 2026-09-14** (see §2b item 4):
+   both dispatch place writers now share `resolve_or_create_dispatch_place_site`,
+   which resolves-or-creates the house first (§3.1 shape, SQL). Remaining entry
+   points (CRM `create_crm_site`/`manage_crm_location`, the edge
+   `houseResolve.ts` with its differently-normalised key, investigation and
+   context site creates) still run their own paths.
 4. `resolution_status` audit: `process-officer-scan`, dispatch intake and the
    billing zone-tier must branch on the five outcomes; no boolean fallbacks.
 5. `location_events`: either land the governed writer (dual-write from the

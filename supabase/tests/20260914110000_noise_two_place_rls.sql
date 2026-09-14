@@ -37,7 +37,12 @@ declare
   v_shift uuid := gen_random_uuid();
   v_job uuid := gen_random_uuid();
   v_resource uuid := gen_random_uuid();
+  v_job2 uuid := gen_random_uuid();
+  v_job3 uuid := gen_random_uuid();
+  v_stranger_site uuid := gen_random_uuid();
+  v_provider_admin uuid := gen_random_uuid();
   v_arrive record; v_arrive2 record; v_depart record; v_submit record; v_inter record; v_part record;
+  v_hp record; v_hp2 record; v_hp3 record; v_hp4 record; v_arrive3 record; v_intake record; v_cs public.client_sites%rowtype;
   v_report jsonb; v_party jsonb; v_na public.noise_assessments%rowtype;
   v_count int; v_err text;
 begin
@@ -48,7 +53,7 @@ begin
   insert into public.user_profiles (id, organization_id, role, display_name) values
     (v_dispatcher, v_provider, 'admin_officer', 'Dispatcher'), (v_officer, v_provider, 'officer', 'Officer'),
     (v_council_user, v_council, 'admin', 'CouncilUser'), (v_landlord_user, v_landlord, 'admin', 'LandlordUser'),
-    (v_stranger, v_stranger_org, 'admin', 'Stranger');
+    (v_stranger, v_stranger_org, 'admin', 'Stranger'), (v_provider_admin, v_provider, 'admin', 'ProviderAdmin');
   insert into public.service_agreements (id, provider_organization_id, client_organization_id, name, starts_on, agreement_type, invitation_status)
     values (v_agreement, v_provider, v_council, 'Noise after-hours', current_date - 30, 'operational', 'accepted');
   -- Source place (landlord-owned), verified 20 m boundary; complainant place (council-owned) ~120 m away, verified.
@@ -235,6 +240,73 @@ begin
     get stacked diagnostics v_err = message_text;
     perform pg_temp.check('a reader outside the custodian org cannot record particulars', v_err like '%not found in the officer organisation%' or v_err like '%Active officer profile required%');
   end;
+
+  -- ── dispatch place site-entry (20260914130000): an address-only complainant place becomes a provisional site ──
+  perform pg_temp.as_admin();
+  insert into public.dispatch_jobs (id, organization_id, service_agreement_id, dispatch_resource_id, client_site_id, job_type, priority, status, sla_minutes, sla_respond_by, created_at, dispatched_at, module_key, assigned_officer_id, shift_id)
+    values (v_job2, v_provider, v_agreement, v_resource, v_source_site, 'noise_control', 'high', 'dispatched', 60, now() + interval '55 minutes', now() - interval '5 minutes', now() - interval '4 minutes', 'noise_control', v_officer, v_shift);
+  insert into public.dispatch_jobs (id, organization_id, service_agreement_id, client_site_id, job_type, priority, status, sla_minutes, sla_respond_by, module_key)
+    values (v_job3, v_provider, v_agreement, v_source_site, 'noise_control', 'normal', 'pending', 60, now() + interval '60 minutes', 'noise_control');
+  perform pg_temp.as_user(v_dispatcher);
+  select * into v_hp from public.set_dispatch_job_harmed_party(gen_random_uuid(), v_job2, null, '51 Example St', 'complainant', 'B Complainant', null, null, null, -41.2706, 173.2860);
+  perform pg_temp.check('address-only complainant place becomes a site on the job', v_hp.out_harmed_party_site_id is not null and v_hp.place_created and v_hp.house_action = 'created_house');
+  perform pg_temp.as_admin();
+  select * into v_cs from public.client_sites where id = v_hp.out_harmed_party_site_id;
+  perform pg_temp.check('the complainant site is a provisional adhoc facet of the client org with a house',
+    v_cs.client_organization_id = v_council and v_cs.organization_id = v_provider and v_cs.site_origin = 'adhoc' and v_cs.boundary_status = 'provisional'
+    and v_cs.boundary_verification = 'unverified' and v_cs.address_match_key = '51examplest' and v_cs.location_id is not null and v_cs.ownership_status = 'resolved');
+  perform pg_temp.check('the house belongs to the client org with the same key', exists (select 1 from public.locations h where h.id = v_cs.location_id and h.organization_id = v_council and h.address_match_key = '51examplest'));
+  perform pg_temp.check('the centre is the resolved coordinate', st_distance(v_cs.center_point::geography, st_setsrid(st_makepoint(173.2860, -41.2706), 4326)::geography) < 1);
+  perform pg_temp.check('the complainant place is attached to the client agreement by the platform autolink, marked adhoc', exists (select 1 from public.service_agreement_locations l where l.site_id = v_cs.id and l.service_agreement_id = v_agreement) and v_cs.site_origin = 'adhoc');
+  perform pg_temp.check('the job keeps the address as received', exists (select 1 from public.dispatch_jobs d where d.id = v_job2 and d.harmed_party_address = '51 Example St' and d.harmed_party_site_id = v_cs.id));
+  -- same address, different spelling: the same site and house, no fork
+  perform pg_temp.as_user(v_dispatcher);
+  select * into v_hp2 from public.set_dispatch_job_harmed_party(gen_random_uuid(), v_job2, null, '51 example st.', 'complainant', null, null, null, null, -41.27061, 173.28601);
+  perform pg_temp.check('the same address resolves to the same site (no fork)', v_hp2.out_harmed_party_site_id = v_hp.out_harmed_party_site_id and not v_hp2.place_created and v_hp2.house_action = 'existing_house');
+  perform pg_temp.as_admin();
+  select count(*) into v_count from public.locations where organization_id = v_council and address_match_key = '51examplest';
+  perform pg_temp.check('one house per address per owner', v_count = 1);
+  -- arrival at the complainant place is measured against the provisional centre, not "no geofence"
+  perform pg_temp.as_user(v_officer);
+  select * into v_arrive3 from public.arrive_at_dispatch_place(gen_random_uuid(), v_job2, 'harmed_party_place', -41.2706, 173.2861, 5.0, null);
+  perform pg_temp.check('arrival at a provisional complainant place is unverified_boundary with a distance', v_arrive3.arrival_verification = 'unverified_boundary' and v_arrive3.arrival_distance_m is not null and v_arrive3.arrival_distance_m < 20);
+  -- a site owned by an unrelated org cannot be the harmed-party place (it would hand that org the W1 read)
+  perform pg_temp.as_admin();
+  insert into public.client_sites (id, client_organization_id, organization_id, name, address, center_point, boundary_verification, active)
+    values (v_stranger_site, v_stranger_org, v_provider, 'T_STRANGER_SITE', '99 Elsewhere Rd', st_setsrid(st_makepoint(173.30, -41.28), 4326), 'unverified', true);
+  perform pg_temp.as_user(v_dispatcher);
+  begin
+    perform public.set_dispatch_job_harmed_party(gen_random_uuid(), v_job2, v_stranger_site, null, 'complainant', null, null, null, null, null, null);
+    perform pg_temp.check('a stranger-org site cannot be the harmed-party place', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a stranger-org site cannot be the harmed-party place', v_err like '%client or custodian organisation%');
+  end;
+  -- a house already held by another org at that address: facet created without a house and flagged for review
+  perform pg_temp.as_admin();
+  insert into public.locations (organization_id, name, address, address_match_key) values (v_stranger_org, 'T_OTHER_HOUSE', '53 Example St', '53examplest');
+  perform pg_temp.as_user(v_dispatcher);
+  select * into v_hp3 from public.set_dispatch_job_harmed_party(gen_random_uuid(), v_job2, null, '53 Example St', 'complainant', null, null, null, null, -41.2706, 173.2870);
+  perform pg_temp.as_admin();
+  select * into v_cs from public.client_sites where id = v_hp3.out_harmed_party_site_id;
+  perform pg_temp.check('a house under another org is neither reused nor forked: facet flagged needs_review',
+    v_hp3.house_action = 'other_org_house' and v_cs.location_id is null and v_cs.ownership_status = 'needs_review' and v_cs.ownership_signals->>'house_conflict' = 'other_org_house');
+  select count(*) into v_count from public.locations where address_match_key = '53examplest';
+  perform pg_temp.check('no second house was created for the conflicted address', v_count = 1);
+  -- an address without coordinates stays text on the job; no site is invented
+  perform pg_temp.as_user(v_dispatcher);
+  select * into v_hp4 from public.set_dispatch_job_harmed_party(gen_random_uuid(), v_job3, null, '55 Example St', 'complainant', null, null, null, null, null, null);
+  perform pg_temp.check('an unresolved address stays text-only (no site invented)', v_hp4.out_harmed_party_site_id is null and not v_hp4.place_created and v_hp4.house_action is null);
+  -- the work-place intake rides the same pipeline: provisional site with a house, attached to the agreement
+  perform pg_temp.as_user(v_provider_admin);
+  select * into v_intake from public.create_dispatch_intake_job(v_provider, v_agreement, gen_random_uuid(), 'noise_control', 'high', 60, '57 Example St', '57 Example St', -41.2706, 173.2880, null, null, null);
+  perform pg_temp.as_admin();
+  select * into v_cs from public.client_sites where id = v_intake.client_site_id;
+  perform pg_temp.check('intake creates the work place as a provisional site with a house, attached to the agreement',
+    v_intake.created and v_cs.client_organization_id = v_council and v_cs.location_id is not null and v_cs.site_origin = 'adhoc' and v_cs.boundary_status = 'provisional'
+    and exists (select 1 from public.service_agreement_locations l where l.service_agreement_id = v_agreement and l.site_id = v_cs.id and l.status = 'active'));
+  select count(*) into v_count from public.audit_log where action in ('dispatch_place_site_created', 'dispatch_place_house_created');
+  perform pg_temp.check('every created place and house is audited', v_count = 5);
 
   perform pg_temp.as_admin();
   raise notice '=== NOISE TWO-PLACE TRUTH TABLE COMPLETE ===';

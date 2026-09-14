@@ -106,10 +106,20 @@ describe('noise complaint intake — two places, protected identity', () => {
     expect(source).not.toContain("from('dispatch_job_protected_parties')");
   });
 
-  it('keeps identity out of briefing notes and says so, and is honest about a place without a geofence', () => {
+  it('keeps identity out of briefing notes and says so, and is honest about a place with and without a centre', () => {
     expect(source).toContain('never put it in briefing notes');
-    expect(source).toContain('the complainant place has no geofence yet, so attendance there is recorded by time only');
+    expect(source).toContain('will be recorded as a provisional site (centre from the address, boundary unverified) so attendance there is measured, not assumed');
+    expect(source).toContain('otherwise attendance there is recorded by time only');
     expect(source).not.toMatch(/briefingNotes[^;]*formComplainant(Name|Phone)/);
+  });
+
+  it('sends the resolved coordinates so the server creates the complainant place through the shared site-entry pipeline', () => {
+    expect(source).toContain('p_harmed_party_lat: formComplainantSiteId ? null : resolvedComplainant?.lat ?? null');
+    expect(source).toContain('p_harmed_party_lng: formComplainantSiteId ? null : resolvedComplainant?.lng ?? null');
+    expect(source).not.toMatch(/from\('client_sites'\)[\s\S]{0,200}\.(insert|upsert)\(/);
+    expect(source).not.toMatch(/from\('locations'\)[\s\S]{0,200}\.(insert|upsert)\(/);
+    expect(source).toContain("harmedPartyReceipt?.house_action === 'other_org_house'");
+    expect(source).toContain('flagged for ownership review');
   });
 
   it('never silently drops the complainant when the follow-up write fails', () => {

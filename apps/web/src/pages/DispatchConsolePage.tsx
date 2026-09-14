@@ -566,7 +566,7 @@ const DispatchConsolePage: React.FC = () => {
       const hasComplainant = formJobType === 'noise_control' && Boolean(formComplainantSiteId || complainantAddress || formComplainantName.trim() || formComplainantPhone.trim() || formComplainantNotes.trim());
       if (hasComplainant) {
         // ATLAS WRITES: set_dispatch_job_harmed_party (place on the job; identity only in the protected table)
-        const { error: harmedPartyError } = await supabase.rpc('set_dispatch_job_harmed_party', {
+        const { data: harmedPartyData, error: harmedPartyError } = await supabase.rpc('set_dispatch_job_harmed_party', {
           p_client_request_id: crypto.randomUUID(),
           p_dispatch_job_id: (data as Array<{ id: string }>)[0].id,
           p_harmed_party_site_id: formComplainantSiteId || null,
@@ -576,8 +576,13 @@ const DispatchConsolePage: React.FC = () => {
           p_phone: formComplainantPhone.trim() || null,
           p_email: null,
           p_notes: formComplainantNotes.trim() || null,
+          p_harmed_party_lat: formComplainantSiteId ? null : resolvedComplainant?.lat ?? null,
+          p_harmed_party_lng: formComplainantSiteId ? null : resolvedComplainant?.lng ?? null,
         });
+        const harmedPartyReceipt = (harmedPartyData as Array<{ out_harmed_party_site_id: string | null; place_created: boolean; house_action: string | null }> | null)?.[0];
         if (harmedPartyError) setWarning(`Job created, but the complainant details were not saved: ${harmedPartyError.message}. Record them on the job before dispatching.`);
+        else if (harmedPartyReceipt?.house_action === 'other_org_house') setWarning('Job created. The complainant place was recorded as a provisional site but its address is already held by another organisation, so it is flagged for ownership review.');
+        else if (complainantAddress && !formComplainantSiteId && !harmedPartyReceipt?.out_harmed_party_site_id) setWarning('Job created. The complainant address was not resolved to coordinates, so attendance there will be recorded by time only.');
       }
 
       setShowNewJob(false);
@@ -938,7 +943,8 @@ const DispatchConsolePage: React.FC = () => {
                     <button type="button" onClick={resolveComplainantLocation} disabled={!formComplainantAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
                   </div>
                   {resolvedComplainant && <div className="dispatch-console-inline-success">Resolved: {resolvedComplainant.label}</div>}
-                  {!formComplainantSiteId && formComplainantAddress.trim() && <div className="dispatch-console-inline-warning">Address only: the complainant place has no geofence yet, so attendance there is recorded by time only until it is resolved to a site.</div>}
+                  {!formComplainantSiteId && formComplainantAddress.trim() && resolvedComplainant && <div className="dispatch-console-inline-warning">Resolved address: the complainant place will be recorded as a provisional site (centre from the address, boundary unverified) so attendance there is measured, not assumed.</div>}
+                  {!formComplainantSiteId && formComplainantAddress.trim() && !resolvedComplainant && <div className="dispatch-console-inline-warning">Unresolved address: resolve it to give the complainant place a centre; otherwise attendance there is recorded by time only.</div>}
                   <div className="dispatch-console-address-row">
                     <input value={formComplainantName} onChange={(e) => setFormComplainantName(e.target.value)} placeholder="Complainant name (protected)" aria-label="Complainant name" autoComplete="off" />
                     <input value={formComplainantPhone} onChange={(e) => setFormComplainantPhone(e.target.value)} placeholder="Complainant phone (protected)" aria-label="Complainant phone" autoComplete="off" />

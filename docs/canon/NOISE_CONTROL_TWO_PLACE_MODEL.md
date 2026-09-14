@@ -219,6 +219,19 @@ above is primary-source; council overlays are configured, not assumed.
 3. **Dispatch intake** — the intake path takes both addresses through the
    canonical site-entry pipeline (Q10) and calls `set_dispatch_job_harmed_party`;
    both places resolve-or-create a house (`LOCATION_HOUSE_MODEL.md`).
+   **Drafted 2026-09-14** as `20260914130000_dispatch_place_site_entry.sql`:
+   one internal seam `resolve_or_create_dispatch_place_site` (house first;
+   dedup by address key within the owner org; a house under another org →
+   facet without a house, `ownership_status = 'needs_review'`, never reused or
+   forked; provisional centre, unverified boundary; audited) used by both
+   `create_dispatch_intake_job` (work place) and `set_dispatch_job_harmed_party`
+   (complainant place, now accepting the resolved coordinates). The platform's
+   `autolink_client_site_service_agreement` trigger attaches every client-org
+   site to its current agreement — that is what gives the custodian access —
+   and `site_origin = 'adhoc'` marks these places as not contracted. A
+   supplied harmed-party site must belong to the job's client or custodian
+   because it grants the W1 read. An address without coordinates stays text on
+   the job; no site is invented. Truth table extended to 56 checks.
 4. **Officer flow** — job card with both places and the pre-arrival dossier;
    Arrive (source) → Assess (matrix, GPS position, distances shown) → Action
    (END with oral/written and expiry; seizure blocked without Police present;
