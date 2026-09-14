@@ -99,7 +99,7 @@ gated on Police presence, and a client report that discloses by basis.
    each table's grants, so a database restored from `supabase/schema.sql`
    carries the live privileges exactly (a fresh Supabase database's default
    privileges had been silently widening `dispatch_job_protected_parties`).
-2a. **Direction particulars — drafted 2026-09-14, NOT YET APPLIED LIVE** —
+2a. **Direction particulars — applied live 2026-09-14 (owner-authorized)** —
    `20260914120000_noise_direction_particulars.sql` adds one governed command,
    `record_noise_direction_particulars`, writing only the columns `20260914110000`
    created: how the direction was given (oral/written, s.327(2)), to whom
@@ -109,8 +109,9 @@ gated on Police presence, and a client report that discloses by basis.
    mandatory and must be written when no occupier was identified. Officer-owned
    (assessing officer or org admin), idempotent by `client_request_id`,
    audited. Guard: `test/noise-direction-particulars.test.js`; truth table
-   extended by 7 checks. Applying it live is a protected path and waits for the
-   owner's go-ahead.
+   extended by 7 checks. Ledger tip `20260914120000`; schema re-snapshotted;
+   Atlas shows the RPC present + wired with `calls`/`reads`/`writes` edges
+   (not `exercised` — no live invocation yet).
 3. **Officer flow — built 2026-09-14** (`apps/web/src/pages/OfficerNoiseControlPage.tsx`,
    guard `OfficerNoiseControlPage.guard.test.ts`): job card with both places and
    the pre-arrival dossier → arrive (verification shown loudly, never blocking) →

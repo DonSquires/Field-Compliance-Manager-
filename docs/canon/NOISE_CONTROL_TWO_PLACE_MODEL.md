@@ -173,7 +173,7 @@ above is primary-source; council overlays are configured, not assumed.
 | Attendance / presence per place | `shift_stops` (arrival/departure, GPS, SLA) exist but nothing creates them for a noise job; `arrived_at/departed_at` on the assessment are officer-asserted | `arrive_at_dispatch_place` / `depart_dispatch_place` find-or-create the ad-hoc stop per `place_role`, verify against the place geofence, record BWC ref, receipt, audit |
 | Assessment position | `assessment_gps_*`, `assessment_location` | add server-computed distances to complainant and source; link stops |
 | Complainant interaction | none | `job_party_interactions` + `record_job_party_interaction` |
-| END validity | `prior_end_within_72hrs` (pre-2025 law) | `noise_module_config.end_validity_hours` (default/cap 192 h), `end_expires_at`, oral/written, recipient role, s328(5) notice — columns live (`20260914110000`); written by `record_noise_direction_particulars` (`20260914120000`, drafted, oracle-proven, not yet applied) |
+| END validity | `prior_end_within_72hrs` (pre-2025 law) | `noise_module_config.end_validity_hours` (default/cap 192 h), `end_expires_at`, oral/written, recipient role, s328(5) notice — columns live (`20260914110000`); written by `record_noise_direction_particulars` (`20260914120000`, applied live 2026-09-14, oracle-proven) |
 | END requires a complaint | not enforced | enforced in the submit RPC |
 | Seizure requires Police | `police_present` recorded, not enforced | enforced in the submit RPC for `equipment_seized` |
 | Harmed-party read | none on `noise_assessments` live (lineage 0367 never landed) | `20260914100000_harmed_party_read_assessments.sql` (drafted) |
