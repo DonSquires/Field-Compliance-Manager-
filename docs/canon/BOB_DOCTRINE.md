@@ -114,18 +114,19 @@ officer shell.
 
 ## 7. Open owner decisions (do not resolve by drift)
 
-1. **Governance lock vs de-caging.** The lineage retired universal
-   propose→approve as the default posture, yet `isGovernanceLocked` ("no
-   operational writes from the chat path") still ships in both lines. Decide
-   per write class which LOW-tier writes may `auto_in_context` with a surface
-   confirm, and record it as a ruling; until then the lock stands.
+1. **Governance lock vs de-caging — RULED for the agentic lane 2026-09-14 (see §9).**
+   The chat lane stays egress-governed by rank; the agentic/Builder lane works
+   as a coding agent works, with subagents supporting and verifying. Still open:
+   whether any LOW-tier *operational* write may `auto_in_context` from the chat
+   path (`isGovernanceLocked` stands there until ruled).
 2. **Rank gate finding.** A `master` reached full cross-org resolution unchecked
    in the lineage (#324). The Tier-1/2 egress rule must be re-proven here.
 3. **Tier-3 HSWA duty-to-warn path.** `safetyFloor` exists but the Tier-3 egress
    path (surface warning, strip identity) must be verified end-to-end.
-4. **Builder autonomy ceiling.** This repo's Builder runs bounded sequences with
-   human approval gates and stops at `release_ready`; deployment stays a
-   separate human act. Keep it so unless a ruling widens it.
+4. **Builder autonomy ceiling.** Human approval stays at the protected paths
+   (§9). The eight-action ceiling in the bounded runner is an operational safety
+   limit, not a governance gate; widening it needs evidence of stable
+   subagent verification, not a ruling.
 
 ## 8. Rules for every Bob change
 
@@ -138,3 +139,43 @@ officer shell.
   declared.
 - Never expose service-role credentials, tokens or another person's session to
   Bob, a worker, a prompt, a log or a browser (`docs/BOB_CREDENTIAL_BOUNDARIES.md`).
+
+## 9. Rulings recorded in this repository
+
+### 2026-09-14 — Two lanes, one Bob (Don Squires)
+
+> "Bob chat should be governed on what is shared with the user except owner;
+> agentic Bob should be able to work as you do, with subagents supporting and
+> verifying the work."
+
+**Chat lane.** What Bob *shares* with the user is governed by the caller's rank
+(the four-tier egress model, §3). The owner (`grand_master` / admiral) is
+unrestricted. This is a disclosure rule, not a reasoning cage: Bob still thinks
+fleet-wide. Operational writes from the chat path are unchanged by this ruling
+(`isGovernanceLocked` stands until a separate ruling names the write classes).
+
+**Agentic lane.** Bob works the way a coding agent works: plan → implement →
+verify → iterate, delegating research, implementation and verification to
+subagents and continuing without a human confirm at each step. In this
+repository the subagents are the Builder specialists
+(`supabase/functions/_shared/builder-*.js`: product analyst, UX designer,
+frontend and backend engineers, independent code review, security review,
+release engineer) plus the isolated worker profiles (`worker-executor.js`:
+`frontend-verify`, `backend-verify`, `security-review`, `test`, `build`, `lint`).
+Independent review and security review are the *verifying* subagents and keep
+their rule: a different model identity from the author, recommend-only, bound
+to the exact patch and commit.
+
+**What does not move.** The protected paths remain human-approved and are the
+only places a human is required: merge to a protected branch, deployment,
+applying a migration or any DDL, auth/RLS changes, dependency and environment
+changes, destructive bulk operations. Bob drafts these (branch, MR, proposal
+artifact, `release_ready`); a person applies them. The sensitive floor (auth,
+identity, governance, audit tables read-only to Bob) and the two rails are
+untouched.
+
+**Build implication (`docs/REBUILD_PLAN.md` §9).** Let the bounded Builder
+runner continue through implement → verify → repair loops on subagent evidence
+rather than stopping for a human after each specialist action; stop only at a
+protected path, a blocked state, a failed verification the subagents cannot
+repair, or the operational action ceiling.

@@ -209,3 +209,50 @@ Never a big-bang RLS rewrite.
 - It changes NO behaviour. It is the map. The first policy move is a separate,
   reviewable, reversible MR taken with this ledger in hand and the owner rulings
   recorded.
+
+---
+
+## Rulings and live status recorded in this repository
+
+### 2026-09-14 — Anchor ruling (Don Squires)
+
+> "Yes: place of harm, and the person or vehicle doing the harming."
+
+This settles edges 1, 2, 3 and confirms 5 above. Every accountability record has
+**two anchors, kept separate**: the **place of harm** (the harmed party's site or
+zone — this anchor grants the accountability read) and the **subject** (the
+person or vehicle doing the harm — `person_id` / `vehicle_id` / the source
+`site_id`; this anchor exists for repeat-subject reasoning and enforcement and
+never grants the read to the subject's side). Concretely:
+
+| Edge | Ruling applied |
+|---|---|
+| 1 `incidents` | Anchor to the place (Tier-1 to the harmed party at `client_site_id` / `zone_id`). Officer-H&S incidents stay operator-private through `is_staff_sensitive`. |
+| 2 `notices` | Served on the **subject** (`vehicle_id` / `person_id`); **visible to the harmed party at the place of harm**. Data-layer confidentiality holds: the complainant never appears on the served document and the subject's side never gains the read. |
+| 3 interrupt tier (`parking_sessions`, `vehicle_observations`, `breach_records`) | The victim is latent (the commons, represented by the council as place owner): anchor = **zone**; subject = vehicle. |
+| 5 custodian read-back | Confirmed: harmed party reads Tier-1 via `client_reads_provider`; operator retains custody via the preserved `org_access_allowed` gate. Two paths, both true. |
+
+### Live status of Bucket B (verified against project `dotczcyyzgabmtmnglqj`, 2026-09-14)
+
+The 2026-08-17 table above is stale relative to the live database; W1 has moved
+on every row but two.
+
+| Entity | W1 access-side (live) | W2 record-side | Owed |
+|---|---|---|---|
+| `observations` | keystone: `observations_task_entitlement_select` + `observations_client_org_select` | harmed-party anchor question tracked with assessments | — |
+| `incidents` | `incidents_place_reachable_select` — `is_staff_sensitive = false AND has_location_access(client_site_id, zone_id, 'client_reads_provider')` | — | — (edge 1 implemented) |
+| `breach_records` | `br_zone_reachable_select` on `zone_id` | — | — (edge 3 implemented) |
+| `parking_sessions` | `ps_zone_reachable_select` on `zone_id` | — | — (edge 3 implemented) |
+| `vehicle_observations` | `vo_zone_reachable_select` on `zone_id` | — | — (edge 3 implemented) |
+| `noise_assessments` | officer situational read only (`na_task_entitlement_select` → `resolve_access_basis`); **no harmed-party read** | `complainant_site_id` present, inert | harmed-party SELECT anchored on `complainant_site_id` — drafted in `supabase/migrations/20260914100000_harmed_party_read_assessments.sql`, guard test `test/harmed-party-read-assessments.test.js`; **not applied** (protected path, owner applies) |
+| `smoke_assessments` | as noise (`sa_task_entitlement_select`) | `complainant_site_id` present, inert | same migration |
+| `biosecurity_assessments` | as noise (`ba_task_entitlement_select`) | `protected_land_site_id` present, inert | same migration (anchor = protected land) |
+| `noise_seizures` | operator gate only | no place columns (follows the assessment) | same migration: readable when the parent assessment is readable |
+| `notices` | operator gate only | has `vehicle_id`, `person_id` (subject) and a bare `location_id` with **no FK**; no site/zone anchor; 0 rows | needs a place-of-harm anchor before W1: derive via `breach_id → breach_records.zone_id` for interrupt-tier notices and add `client_site_id` for RMA notices, then an additive harmed-party SELECT. Design slice, not yet drafted. |
+
+Reading: because the harmed-party columns are unpopulated, the drafted policies
+widen no read on the day they are applied (`has_location_access(NULL, NULL, …)`
+grants nothing beyond `grand_master`). They become live the moment W2 populates
+the anchors — which is why the W2 write contracts must land with the
+13-scenario oracle green, and why completion language stays
+"operationally corrected / doctrinally incomplete" until both halves are live.

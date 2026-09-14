@@ -21,6 +21,16 @@ not a flat app, and check the graph before editing shared terrain.
 
 ## Two separate things named "Atlas" — do not confuse them
 
+**What Atlas is for (owner ruling, 2026-09-14).** The app is not a flat set of
+tables; it is a ball with many layers and touchpoints. Atlas is the
+multi-layered map of that ball, for agents and for Bob, to find their way around
+the build and to see what moves when one thing is changed and where that change
+travels. A refresh (`node scripts/atlas-refresh.js --apply`) writes only Atlas's
+own tables — `bob_capability_map` and `bob_app_map_edges` (upsert, or mark
+`legacy`) — and never the active app or the schema. Refresh it whenever the
+truthful schema or the code changes; read it before touching shared terrain;
+never hand-edit it.
+
 1. **Bob's Atlas** — the in-app AI assistant's own `query_atlas` tool
    (`supabase/functions/bob-query-atlas/index.ts`), gated to the admiral role.
    This is Bob navigating his own build during a live chat turn.

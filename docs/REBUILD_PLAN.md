@@ -27,33 +27,52 @@ glass-proven.** A workstream item is done only when its evidence gate is met.
 - Canon imported and reconciled (`docs/canon/`), `FOUNDATION.md` at root.
 - GitLab lineage readable read-only (`scripts/gitlab-read.mjs`).
 - Baseline health: 556 root tests, web typecheck and lint clean, 393 unique
-  migrations, CSS contracts clean. Atlas dry-run on the truthful schema: 1,046
-  capabilities / 3,814 edges (was 849 / 2,991). **Gate:** run
-  `node scripts/atlas-refresh.js --apply` through the governed refresh path so
-  Atlas reflects the truthful schema, then re-baseline the gap report.
+  migrations, CSS contracts clean. Atlas refreshed from the truthful schema on
+  2026-09-14 under the owner's ruling that a refresh writes only Atlas's own
+  tables (`bob_capability_map`, `bob_app_map_edges`): 46 capability upserts,
+  90 edge upserts, 3 stale edges retired; live now 1,324 live capabilities /
+  6,214 live edges / 1,906 wired / 0 exercised. **Gate (standing):** re-run the
+  refresh after every schema or code change that touches shared terrain, and
+  re-baseline the gap report.
 
 ## 2. Accountability and access conformance (FOUNDATION → ACCESS_MODEL)
 
 The keystone is done: `observations` carries the composed SELECT
-(`observations_task_entitlement_select` → `user_has_task_entitlement`). The rest
-of Bucket B in `docs/canon/ALIGNMENT_LEDGER.md` still gates on
-`org_access_allowed(organization_id)` alone.
+(`observations_task_entitlement_select` → `user_has_task_entitlement`). Live
+verification on 2026-09-14 showed W1 is further along than the ledger's
+2026-08-17 snapshot: `incidents`, `breach_records`, `parking_sessions` and
+`vehicle_observations` already carry place-reachable SELECTs; the three
+assessment tables carry officer situational entitlement but **no harmed-party
+read**; `notices` and `noise_seizures` carry the operator gate only. The anchor
+ruling of 2026-09-14 (place of harm grants the read; the person or vehicle doing
+the harm is the separately anchored subject) is recorded in
+`docs/canon/ALIGNMENT_LEDGER.md` and settles edges 1, 2, 3 and 5.
 
-1. Recover the 13-scenario RLS oracle from the lineage
+1. **Apply the drafted W1 slice** —
+   `supabase/migrations/20260914100000_harmed_party_read_assessments.sql`
+   (guard test `test/harmed-party-read-assessments.test.js`): additive
+   harmed-party SELECTs on `noise_assessments` / `smoke_assessments`
+   (`complainant_site_id`), `biosecurity_assessments`
+   (`protected_land_site_id`), and `noise_seizures` (follows the parent). It
+   widens no read until W2 populates the anchors. Applying a migration is a
+   protected path: the owner applies it, then `scripts/schema-snapshot-live.mjs`
+   is re-run and Atlas refreshed.
+2. Recover the 13-scenario RLS oracle from the lineage
    (`supabase/tests/0325_observations_keystone_rls.sql`) and run it here against a
-   disposable Postgres (the `backend-verify` worker already boots the pinned image).
-2. W1 access-side additive SELECTs, in timeline-of-harm order: `noise_assessments`
-   (anchor = harmed party `complainant_site_id`, per the 2026-08-17 ruling) →
-   `smoke_assessments` → `biosecurity_assessments` (anchor = `protected_land_site_id`)
-   → `noise_seizures` → `parking_sessions` / `vehicle_observations` (needs the
-   interrupt-tier ruling: anchor = zone) → `incidents`, `notices`, `breach_records`
-   (need edge rulings 1 and 2).
+   disposable Postgres (the `backend-verify` worker already boots the pinned
+   image) — required before any W2 write contract goes live.
 3. W2 record-side: make the harmed-party columns live — the governed submit
-   functions populate them and the review surfaces read them.
-4. Access-basis UX: one shared "why can I see this?" chip + drawer rendering the
+   functions populate them (noise/smoke: complainant site; biosecurity: protected
+   land) and the review surfaces read them. Lineage plans:
+   `WRITE_CONTRACT_SLICE1_SMOKE.md`, `WRITE_CONTRACT_SLICE2_BIOSECURITY.md`.
+4. `notices` place-of-harm anchor: derive via `breach_id → breach_records.zone_id`
+   for interrupt-tier notices and add `client_site_id` for RMA notices (the live
+   `location_id` has no FK and no site/zone); then the additive harmed-party
+   SELECT. Subject anchors (`vehicle_id`, `person_id`) never grant the read.
+5. Access-basis UX: one shared "why can I see this?" chip + drawer rendering the
    §8 return shape (`resolve_access_basis` is live), applied across observations,
    dispatch, incidents, reports.
-5. Model A W0 audit: prove own-rooted orgs (10 of 55 today) are fully operable —
+6. Model A W0 audit: prove own-rooted orgs (10 of 55 today) are fully operable —
    `get_descendant_organizations`, branch login, `create_client_org`, wizards W1/W2.
 
 **Gate:** oracle green both directions (no leak, no lockout) per table; a
@@ -157,18 +176,37 @@ tests.
 
 ## 9. Bob (BOB_DOCTRINE)
 
+Ruling 2026-09-14 (recorded in `docs/canon/BOB_DOCTRINE.md` §9): the **chat
+lane** is governed on what is shared with the user, by rank, owner unrestricted;
+the **agentic lane** works as a coding agent works — plan, implement, verify,
+iterate — with subagents supporting and verifying, stopping for a human only at
+the protected paths (merge, deploy, migration/DDL, auth/RLS, dependencies,
+destructive bulk operations).
+
 1. Root-cause the planner's empty-reply turns (`callPlan` → VPS `/api/bob/plan`)
    using `bob_event_log`; the fallback text fix shipped 2026-09-14 is a stopgap.
-2. Populate `bob_capability_map.exercised` from real invocation evidence
+2. Agentic lane: let the bounded Builder runner continue through implement →
+   verify → repair loops on specialist evidence (independent code review and
+   security review as the verifying subagents, different model identity from the
+   author) instead of pausing for a human after each specialist action; stop at
+   a protected path, a blocked state, an unrepairable verification failure, or
+   the operational action ceiling. Keep `release_ready` as the hand-off to the
+   human for merge and deploy.
+3. Chat lane: re-prove the four-tier egress model per rank (the lineage's #324
+   finding that a `master` reached full cross-org resolution), and wire the
+   Tier-3 HSWA duty-to-warn path (`safetyFloor`) end-to-end. Operational writes
+   from chat stay behind `isGovernanceLocked` until a separate ruling names the
+   write classes.
+4. Populate `bob_capability_map.exercised` from real invocation evidence
    (edge-function logs, `bob_event_log`, RPC stats); today it is 0 everywhere.
-3. Owner rulings: governance lock vs LOW-tier `auto_in_context`; Tier-3 HSWA
-   egress path end-to-end; re-prove the master rank gate.
-4. Cockpit primitives: who-is-flying indicator, takeback, result-in-habitat.
-5. Re-create the RunPod QA endpoint and run `full-page-audit` on Bob's
+5. Cockpit primitives: who-is-flying indicator, takeback, result-in-habitat.
+6. Re-create the RunPod QA endpoint and run `full-page-audit` on Bob's
    infrastructure.
 
-**Gate:** live `bob_messages` show no context-losing fallbacks; Atlas `exercised`
-is populated from evidence, not asserted.
+**Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
+runs implement → verify → repair without human touch and stops cleanly at
+`release_ready`; egress proven per rank; Atlas `exercised` is populated from
+evidence, not asserted.
 
 ## 10. Enterprise hardening (parallel track)
 
