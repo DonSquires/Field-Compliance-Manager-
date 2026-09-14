@@ -37,7 +37,7 @@ declare
   v_shift uuid := gen_random_uuid();
   v_job uuid := gen_random_uuid();
   v_resource uuid := gen_random_uuid();
-  v_arrive record; v_arrive2 record; v_depart record; v_submit record; v_inter record;
+  v_arrive record; v_arrive2 record; v_depart record; v_submit record; v_inter record; v_part record;
   v_report jsonb; v_party jsonb; v_na public.noise_assessments%rowtype;
   v_count int; v_err text;
 begin
@@ -196,6 +196,45 @@ begin
   perform pg_temp.as_user(v_council_user);
   select count(*) into v_count from public.job_party_interactions where dispatch_job_id = v_job;
   perform pg_temp.check('client cannot read interaction rows directly', v_count = 0);
+
+  -- ── direction particulars (20260914120000): s327(2) form, s327(3) shorter period, s328(5) notice ──
+  perform pg_temp.as_user(v_officer);
+  select * into v_part from public.record_noise_direction_particulars(gen_random_uuid(), v_submit.id, false, 'occupier', 48::smallint, null);
+  perform pg_temp.check('direction particulars receipt returned', v_part.assessment_id = v_submit.id and v_part.end_recipient_role = 'occupier');
+  perform pg_temp.as_admin();
+  select * into v_na from public.noise_assessments where id = v_submit.id;
+  perform pg_temp.check('written direction to the occupier recorded', v_na.end_given_orally = false and v_na.end_recipient_role = 'occupier');
+  perform pg_temp.check('expiry is assessed_at + 48 h after the officer specified 48 h', v_na.end_expires_at = v_na.assessed_at + interval '48 hours');
+  perform pg_temp.as_user(v_officer);
+  begin
+    perform public.record_noise_direction_particulars(gen_random_uuid(), v_submit.id, false, 'occupier', 200::smallint, null);
+    perform pg_temp.check('a period beyond the council rule / statute is refused', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a period beyond the council rule / statute is refused', v_err like '%between 1 and 192 hours%');
+  end;
+  begin
+    perform public.record_noise_direction_particulars(gen_random_uuid(), v_submit.id, false, 'unoccupied_notice_left', null, false);
+    perform pg_temp.check('unoccupied entry without the notice left is refused (s328(5))', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('unoccupied entry without the notice left is refused (s328(5))', v_err like '%RMA s328(5)%');
+  end;
+  begin
+    perform public.record_noise_direction_particulars(gen_random_uuid(), v_submit.id, true, 'unoccupied_notice_left', null, true);
+    perform pg_temp.check('an oral direction cannot be the one left at an unoccupied place', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('an oral direction cannot be the one left at an unoccupied place', v_err like '%must be written%');
+  end;
+  perform pg_temp.as_user(v_council_user);
+  begin
+    perform public.record_noise_direction_particulars(gen_random_uuid(), v_submit.id, false, 'occupier', null, null);
+    perform pg_temp.check('a reader outside the custodian org cannot record particulars', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a reader outside the custodian org cannot record particulars', v_err like '%not found in the officer organisation%' or v_err like '%Active officer profile required%');
+  end;
 
   perform pg_temp.as_admin();
   raise notice '=== NOISE TWO-PLACE TRUTH TABLE COMPLETE ===';

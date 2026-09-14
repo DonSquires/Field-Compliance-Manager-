@@ -102,7 +102,7 @@ async function main() {
   const sequenceOwnership = sequences.filter((s) => s.owned_by).map((s) => `ALTER SEQUENCE "public".${q(s.relname)} OWNED BY "public".${s.owned_by.split('.').map((p) => q(p.replace(/^"|"$/g, ''))).join('.')};`);
 
   // Tables
-  const tables = await sql(`select c.oid::int as oid, c.relname, c.relrowsecurity, c.relforcerowsecurity, obj_description(c.oid, 'pg_class') as comment, (select json_agg(json_build_object('name', a.attname, 'type', format_type(a.atttypid, a.atttypmod), 'notnull', a.attnotnull, 'default', pg_get_expr(ad.adbin, ad.adrelid), 'identity', a.attidentity, 'generated', a.attgenerated, 'comment', col_description(c.oid, a.attnum)) order by a.attnum) from pg_attribute a left join pg_attrdef ad on ad.adrelid = a.attrelid and ad.adnum = a.attnum where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) as cols, (select string_agg(format('GRANT %s ON TABLE "public"."%s" TO %s;', a.privilege_type, replace(c.relname, '"', '""'), case when a.grantee = 0 then 'PUBLIC' else '"' || replace(pg_get_userbyid(a.grantee), '"', '""') || '"' end), chr(10) order by a.grantee, a.privilege_type) from aclexplode(c.relacl) a) as grants from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and ${NOT_EXTENSION('c.oid', 'pg_class')} order by c.relname`);
+  const tables = await sql(`select c.oid::int as oid, c.relname, c.relrowsecurity, c.relforcerowsecurity, c.relacl is not null as has_acl, obj_description(c.oid, 'pg_class') as comment, (select json_agg(json_build_object('name', a.attname, 'type', format_type(a.atttypid, a.atttypmod), 'notnull', a.attnotnull, 'default', pg_get_expr(ad.adbin, ad.adrelid), 'identity', a.attidentity, 'generated', a.attgenerated, 'comment', col_description(c.oid, a.attnum)) order by a.attnum) from pg_attribute a left join pg_attrdef ad on ad.adrelid = a.attrelid and ad.adnum = a.attnum where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) as cols, (select string_agg(format('GRANT %s ON TABLE "public"."%s" TO %s;', a.privilege_type, replace(c.relname, '"', '""'), case when a.grantee = 0 then 'PUBLIC' else '"' || replace(pg_get_userbyid(a.grantee), '"', '""') || '"' end), chr(10) order by a.grantee, a.privilege_type) from aclexplode(c.relacl) a) as grants from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and ${NOT_EXTENSION('c.oid', 'pg_class')} order by c.relname`);
   for (const t of tables) {
     const cols = (t.cols ?? []).map((c) => {
       let line = `    ${q(c.name)} ${quoteType(c.type)}`;
@@ -211,8 +211,12 @@ async function main() {
     emit('');
   }
 
-  // Grants
-  for (const t of tables) if (t.grants) emit(t.grants);
+  // Grants. An explicit ACL is reproduced exactly: revoke first so the target database's default
+  // privileges (anon/authenticated/service_role on new tables) cannot widen a deliberately narrow table.
+  for (const t of tables) {
+    if (t.has_acl) emit(`REVOKE ALL ON TABLE "public".${q(t.relname)} FROM PUBLIC, "anon", "authenticated", "service_role";`);
+    if (t.grants) emit(t.grants);
+  }
   emit('');
 
   const summary = { tables: tables.length, views: views.length, functions: fnDefs.length, enums: enums.length, composites: composites.length, domains: domains.length, sequences: sequences.length, constraints: constraints.length, indexes: indexes.length, triggers: triggers.length, policies: policies.length, rls_tables: tables.filter((t) => t.relrowsecurity).length };

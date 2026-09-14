@@ -38,6 +38,9 @@ interface NoiseAssessment {
   follow_up_required: boolean;
   end_number: string | null;
   end_expires_at: string | null;
+  end_given_orally: boolean | null;
+  end_recipient_role: string | null;
+  entry_notice_left: boolean | null;
   assessment_distance_to_complainant_m: number | null;
   dispatch_job_id: string | null;
 }
@@ -78,6 +81,14 @@ type RevealedContact = { display_name: string | null; phone: string | null } | '
 
 const ACTIONS = ['no_action', 'verbal_warning', 'abatement_notice', 'direction_notice', 'enforcement_notice', 'equipment_seized', 'prosecution_referral'] as const;
 const STATUTORY_ACTIONS: ReadonlyArray<string> = ['abatement_notice', 'direction_notice', 'enforcement_notice', 'equipment_seized'];
+const DIRECTION_ACTIONS: ReadonlyArray<string> = ['direction_notice', 'equipment_seized'];
+const RECIPIENT_LABEL: Record<string, string> = {
+  occupier: 'the occupier',
+  responsible_person: 'the person responsible for the noise',
+  unoccupied_notice_left: 'no occupier identified — written direction and entry notice left (s328(5))',
+};
+const STATUTORY_END_HOURS = 192;
+const EMPTY_PARTICULARS = { assessmentId: null as string | null, givenOrally: false, recipientRole: 'occupier', periodHours: '', entryNoticeLeft: false };
 const VERIFICATION_LABEL: Record<string, string> = {
   verified_on_site: 'On site — GPS inside the place geofence',
   near_site: 'Near the place — within approach distance',
@@ -137,6 +148,8 @@ const OfficerNoiseControlPage: React.FC = () => {
   const [contact, setContact] = useState({ mode: 'phone', summary: '' });
   const [revealedContact, setRevealedContact] = useState<RevealedContact>(null);
   const [delayReason, setDelayReason] = useState('');
+  const [particulars, setParticulars] = useState(EMPTY_PARTICULARS);
+  const [endCapHours, setEndCapHours] = useState(STATUTORY_END_HOURS);
 
   const selectedJob = useMemo(() => jobs.find((job) => job.id === selectedJobId) ?? null, [jobs, selectedJobId]);
   const sourceStop = useMemo(() => stops.filter((stop) => stop.place_role === 'work_place').sort((a, b) => b.visit_number - a.visit_number)[0] ?? null, [stops]);
@@ -154,6 +167,12 @@ const OfficerNoiseControlPage: React.FC = () => {
   const seizureWithoutPolice = form.action_taken === 'equipment_seized' && !form.police_present;
   const canSubmit = Boolean(form.noise_source.trim() && form.noise_source_address.trim() && form.scene_description.trim() && form.volume_score !== '' && form.hs_checklist_completed) && !statutoryNumberMissing && !endWithoutComplaint && !seizureWithoutPolice;
 
+  const particularsPeriod = particulars.periodHours.trim() === '' ? null : Number(particulars.periodHours);
+  const particularsPeriodInvalid = particularsPeriod !== null && (!Number.isInteger(particularsPeriod) || particularsPeriod < 1 || particularsPeriod > endCapHours);
+  const unoccupiedWithoutNotice = particulars.recipientRole === 'unoccupied_notice_left' && !particulars.entryNoticeLeft;
+  const unoccupiedOral = particulars.recipientRole === 'unoccupied_notice_left' && particulars.givenOrally;
+  const canRecordParticulars = Boolean(particulars.assessmentId) && !particularsPeriodInvalid && !unoccupiedWithoutNotice && !unoccupiedOral;
+
   // ATLAS READS: noise_assessments
   const loadAssessments = useCallback(async () => {
     if (!profile?.id || !profile?.organizationId) {
@@ -168,7 +187,7 @@ const OfficerNoiseControlPage: React.FC = () => {
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const query = supabase
         .from('noise_assessments')
-        .select('id, decibel_reading, noise_source, noise_source_address, prior_notice_count, action_taken, scene_description, assessed_at, review_status, reviewed_at, review_notes, follow_up_required, end_number, end_expires_at, assessment_distance_to_complainant_m, dispatch_job_id')
+        .select('id, decibel_reading, noise_source, noise_source_address, prior_notice_count, action_taken, scene_description, assessed_at, review_status, reviewed_at, review_notes, follow_up_required, end_number, end_expires_at, end_given_orally, end_recipient_role, entry_notice_left, assessment_distance_to_complainant_m, dispatch_job_id')
         .eq('officer_user_id', profile.id)
         .order('assessed_at', { ascending: false });
       const { data, error: err } = activeZoneIds && activeZoneIds.length > 0
@@ -219,8 +238,24 @@ const OfficerNoiseControlPage: React.FC = () => {
     setSourceHistory((historyResult.data as SourceHistory[]) || []);
   }, []);
 
+  // ATLAS READS: noise_module_config (the council rule for how long a direction binds; statute caps it at 8 days)
+  const loadEndCap = useCallback(async () => {
+    if (!profile?.organizationId) return;
+    const { data } = await supabase
+      .from('noise_module_config')
+      .select('end_validity_hours')
+      .eq('organization_id', profile.organizationId)
+      .eq('is_current', true)
+      .order('effective_from', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const hours = Number((data as { end_validity_hours: number | null } | null)?.end_validity_hours);
+    setEndCapHours(Number.isInteger(hours) && hours >= 1 && hours <= STATUTORY_END_HOURS ? hours : STATUTORY_END_HOURS);
+  }, [profile?.organizationId]);
+
   useEffect(() => { void loadAssessments(); }, [loadAssessments]);
   useEffect(() => { void loadJobs(); }, [loadJobs]);
+  useEffect(() => { void loadEndCap(); }, [loadEndCap]);
   useEffect(() => { void loadJobDetail(selectedJob); setRevealedContact(null); }, [selectedJob, loadJobDetail]);
   useEffect(() => { if (requestedAssessmentId) document.getElementById(`officer-noise-${requestedAssessmentId}`)?.scrollIntoView({ block: 'center' }); }, [assessments, requestedAssessmentId]);
   useEffect(() => {
@@ -311,6 +346,24 @@ const OfficerNoiseControlPage: React.FC = () => {
     await loadJobDetail(selectedJob);
   });
 
+  const recordParticulars = () => runCommand('particulars', async () => {
+    if (!particulars.assessmentId) return;
+    // ATLAS WRITES: record_noise_direction_particulars
+    const { data, error: err } = await supabase.rpc('record_noise_direction_particulars', {
+      p_client_request_id: crypto.randomUUID(),
+      p_assessment_id: particulars.assessmentId,
+      p_given_orally: particulars.givenOrally,
+      p_recipient_role: particulars.recipientRole,
+      p_period_hours: particularsPeriod,
+      p_entry_notice_left: particulars.entryNoticeLeft || null,
+    });
+    const receipt = (data as Array<{ assessment_id: string; end_expires_at: string | null }> | null)?.[0];
+    if (err || !receipt?.assessment_id) throw err ?? new Error('Direction particulars receipt was not confirmed.');
+    setParticulars(EMPTY_PARTICULARS);
+    setNotice(`Direction particulars recorded${receipt.end_expires_at ? ` — binds until ${new Date(receipt.end_expires_at).toLocaleString('en-NZ')}` : ''}.`);
+    await loadAssessments();
+  });
+
   const resolveNoiseSourceAddress = async () => {
     const query = form.noise_source_address.trim() || form.noise_source.trim();
     if (!query) return;
@@ -364,7 +417,8 @@ const OfficerNoiseControlPage: React.FC = () => {
       setForm(EMPTY_FORM);
       setGps(IDLE_GPS);
       setShowForm(false);
-      setNotice(submittedAction === 'direction_notice' ? 'Assessment recorded. The excessive noise direction binds this place for the period in the council rule (statutory maximum 8 days).' : 'Assessment recorded.');
+      if (DIRECTION_ACTIONS.includes(submittedAction) && selectedJob) setParticulars({ ...EMPTY_PARTICULARS, assessmentId: receipt.id });
+      setNotice(submittedAction === 'direction_notice' ? 'Assessment recorded. The excessive noise direction binds this place for the period in the council rule (statutory maximum 8 days). Now record how it was given.' : 'Assessment recorded.');
       await Promise.all([loadAssessments(), loadJobDetail(selectedJob)]);
     });
   };
@@ -476,7 +530,53 @@ const OfficerNoiseControlPage: React.FC = () => {
 
           <div className={`noise-step ${jobAssessments.length ? 'is-done' : ''}`}>
             <div className="noise-step-title">{jobAssessments.length ? <CheckCircle2 size={16} /> : <Search size={16} />} Assessment {jobAssessments.length ? `· ${jobAssessments.length} recorded` : ''}</div>
-            {jobAssessments.map((a) => <p key={a.id} className="contact-meta">{a.action_taken?.replaceAll('_', ' ')}{a.assessment_distance_to_complainant_m != null ? ` · assessed ${a.assessment_distance_to_complainant_m} m from the complainant boundary` : ''}{a.end_expires_at ? ` · END in force until ${new Date(a.end_expires_at).toLocaleString('en-NZ')}` : ''}</p>)}
+            {jobAssessments.map((a) => (
+              <div key={a.id} className="noise-assessment-row">
+                <p className="contact-meta">{a.action_taken?.replaceAll('_', ' ')}{a.assessment_distance_to_complainant_m != null ? ` · assessed ${a.assessment_distance_to_complainant_m} m from the complainant boundary` : ''}{a.end_expires_at ? ` · END in force until ${new Date(a.end_expires_at).toLocaleString('en-NZ')}` : ''}</p>
+                {DIRECTION_ACTIONS.includes(a.action_taken ?? '') && a.end_recipient_role && (
+                  <p className="contact-meta">Direction given {a.end_given_orally ? 'orally' : 'in writing'} to {RECIPIENT_LABEL[a.end_recipient_role] ?? a.end_recipient_role}{a.entry_notice_left ? ' · entry notice left' : ''}</p>
+                )}
+                {DIRECTION_ACTIONS.includes(a.action_taken ?? '') && !a.end_recipient_role && particulars.assessmentId !== a.id && (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setParticulars({ ...EMPTY_PARTICULARS, assessmentId: a.id })}>Record how the direction was given</button>
+                )}
+              </div>
+            ))}
+            {particulars.assessmentId && jobAssessments.some((a) => a.id === particulars.assessmentId) && (
+              <div className="noise-particulars">
+                <strong>How the excessive noise direction was given (RMA s327(2)-(3), s328(5))</strong>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="noise-end-given">Given</label>
+                    <select id="noise-end-given" value={particulars.givenOrally ? 'oral' : 'written'} onChange={(e) => setParticulars({ ...particulars, givenOrally: e.target.value === 'oral' })}>
+                      <option value="written">In writing</option>
+                      <option value="oral">Orally</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="noise-end-recipient">Given to</label>
+                    <select id="noise-end-recipient" value={particulars.recipientRole} onChange={(e) => setParticulars({ ...particulars, recipientRole: e.target.value })}>
+                      <option value="occupier">Occupier</option>
+                      <option value="responsible_person">Person responsible for the noise</option>
+                      <option value="unoccupied_notice_left">No occupier identified — notice left</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="noise-end-period">Period the direction binds (hours) — leave blank for the council rule ({endCapHours} h)</label>
+                  <input id="noise-end-period" type="number" inputMode="numeric" min={1} max={endCapHours} step={1} value={particulars.periodHours} onChange={(e) => setParticulars({ ...particulars, periodHours: e.target.value })} placeholder={`1–${endCapHours}`} />
+                </div>
+                {particulars.recipientRole === 'unoccupied_notice_left' && (
+                  <label className="form-checkbox"><input type="checkbox" checked={particulars.entryNoticeLeft} onChange={(e) => setParticulars({ ...particulars, entryNoticeLeft: e.target.checked })} /> Written direction and entry notice left in a prominent position (required — RMA s328(5))</label>
+                )}
+                {particularsPeriodInvalid && <p className="form-hint">The direction binds for 8 days or a shorter period you specify: enter a whole number of hours between 1 and {endCapHours} (RMA s327(3); council rule).</p>}
+                {unoccupiedOral && <p className="form-hint">A direction left at an unoccupied place must be in writing (RMA s328(5)(a)).</p>}
+                {unoccupiedWithoutNotice && !unoccupiedOral && <p className="form-hint">Confirm the written direction and entry notice were left before recording.</p>}
+                <div className="noise-actions">
+                  <button type="button" className="btn btn-primary" onClick={() => void recordParticulars()} disabled={busy !== null || !canRecordParticulars}>{busy === 'particulars' ? <RefreshCw size={16} className="is-spinning" /> : null} Record direction particulars</button>
+                  <button type="button" className="btn btn-secondary" onClick={() => setParticulars(EMPTY_PARTICULARS)} disabled={busy !== null}>Later</button>
+                </div>
+              </div>
+            )}
             {!showForm && <button className="btn btn-primary btn-block" onClick={() => setShowForm(true)}>Record assessment</button>}
           </div>
 
@@ -589,6 +689,7 @@ const OfficerNoiseControlPage: React.FC = () => {
                 {a.scene_description && <p>{a.scene_description}</p>}
                 <p className="contact-meta">{a.prior_notice_count} prior notice(s) · {new Date(a.assessed_at).toLocaleString()}</p>
                 {a.action_taken && <p className="contact-meta">Action: {a.action_taken.replaceAll('_', ' ')}{a.end_number ? ` · ${a.end_number}` : ''}{a.end_expires_at ? ` · in force until ${new Date(a.end_expires_at).toLocaleString('en-NZ')}` : ''}</p>}
+                {a.end_recipient_role && <p className="contact-meta">Direction given {a.end_given_orally ? 'orally' : 'in writing'} to {RECIPIENT_LABEL[a.end_recipient_role] ?? a.end_recipient_role}{a.entry_notice_left ? ' · entry notice left' : ''}</p>}
                 {a.assessment_distance_to_complainant_m != null && <p className="contact-meta">Assessed {a.assessment_distance_to_complainant_m} m from the complainant boundary</p>}
                 {a.review_status !== 'open' && <section className="noise-officer-review"><strong>Supervisor review · {a.review_status.replaceAll('_', ' ')}</strong><span>{a.review_notes ?? 'Review note unavailable'}</span><small>{a.follow_up_required ? 'Follow-up required' : 'No further follow-up'}{a.reviewed_at ? ` · ${new Date(a.reviewed_at).toLocaleString('en-NZ')}` : ''}</small></section>}
               </div>

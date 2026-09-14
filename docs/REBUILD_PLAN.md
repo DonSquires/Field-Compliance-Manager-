@@ -92,9 +92,25 @@ gated on Police presence, and a client report that discloses by basis.
    schema re-snapshotted and Atlas refreshed. The latent defect (the re-issued
    `submit_officer_noise_assessment` writing a non-existent `shift_id`) is repaired.
 2. **Truth table stays green** — `scripts/run-rls-oracle.sh … --oracle
-   supabase/tests/20260914110000_noise_two_place_rls.sql` (34 checks, real RLS,
+   supabase/tests/20260914110000_noise_two_place_rls.sql` (41 checks, real RLS,
    disposable Postgres, `--network=none`). Any change to the noise RPCs or
-   policies re-runs it before merge.
+   policies re-runs it before merge. The snapshot generator now emits
+   `REVOKE ALL ON TABLE … FROM PUBLIC, anon, authenticated, service_role` before
+   each table's grants, so a database restored from `supabase/schema.sql`
+   carries the live privileges exactly (a fresh Supabase database's default
+   privileges had been silently widening `dispatch_job_protected_parties`).
+2a. **Direction particulars — drafted 2026-09-14, NOT YET APPLIED LIVE** —
+   `20260914120000_noise_direction_particulars.sql` adds one governed command,
+   `record_noise_direction_particulars`, writing only the columns `20260914110000`
+   created: how the direction was given (oral/written, s.327(2)), to whom
+   (occupier / responsible person / unoccupied — notice left), an
+   officer-specified shorter period within the council rule (s.327(3);
+   `end_expires_at` recomputed), and the s.328(5) entry notice, which is
+   mandatory and must be written when no occupier was identified. Officer-owned
+   (assessing officer or org admin), idempotent by `client_request_id`,
+   audited. Guard: `test/noise-direction-particulars.test.js`; truth table
+   extended by 7 checks. Applying it live is a protected path and waits for the
+   owner's go-ahead.
 3. **Officer flow — built 2026-09-14** (`apps/web/src/pages/OfficerNoiseControlPage.tsx`,
    guard `OfficerNoiseControlPage.guard.test.ts`): job card with both places and
    the pre-arrival dossier → arrive (verification shown loudly, never blocking) →
@@ -102,9 +118,12 @@ gated on Police presence, and a client report that discloses by basis.
    only with a complaint job; seizure only with Police present; statutory
    number required) → contact complainant (identity via the audited RPC only;
    in-person contact requires arrival at the complainant place) → depart (delay
-   reason when the SLA was breached). **Owed:** a human test with a real job on
-   the live build (gate below), and the s.328(5) unoccupied-entry fields once a
-   `record_noise_direction_particulars` command exists.
+   reason when the SLA was breached) → **direction particulars** (after an END
+   or seizure: given orally/in writing, to whom, a shorter period within the
+   council rule read from `noise_module_config.end_validity_hours`, and the
+   s.328(5) notice when unoccupied — through `record_noise_direction_particulars`
+   only; the form mirrors the statutory rules before the server enforces them).
+   **Owed:** a human test with a real job on the live build (gate below).
 4. **Dispatch intake — built 2026-09-14** (`DispatchConsolePage.tsx`): for
    noise jobs the intake captures the complainant place (known site or address)
    and identity, and writes them through `set_dispatch_job_harmed_party` after

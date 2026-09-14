@@ -85,4 +85,25 @@ describe('officer noise control — two-place job flow', () => {
     expect(page).toContain('No open noise complaint jobs are assigned to you.');
     expect(page).toContain('an excessive noise direction needs a received complaint (RMA s327)');
   });
+
+  it('records how a direction was given only through the governed command, with the statutory rules mirrored in the form', () => {
+    expect(page).toContain("rpc('record_noise_direction_particulars'");
+    expect(page).toContain('p_given_orally: particulars.givenOrally');
+    expect(page).toContain('p_recipient_role: particulars.recipientRole');
+    expect(page).toContain('p_period_hours: particularsPeriod');
+    expect(page).toContain('p_entry_notice_left: particulars.entryNoticeLeft || null');
+    expect(page).not.toMatch(/from\('noise_assessments'\)[\s\S]{0,200}\.(insert|update|upsert)\(/);
+    // s327(3): 8 days or a shorter officer-specified period, never beyond the council rule.
+    expect(page).toContain('const STATUTORY_END_HOURS = 192;');
+    expect(page).toContain("from('noise_module_config')");
+    expect(page).toContain('hours >= 1 && hours <= STATUTORY_END_HOURS ? hours : STATUTORY_END_HOURS');
+    expect(page).toContain('particularsPeriod < 1 || particularsPeriod > endCapHours');
+    // s328(5): an unoccupied entry leaves the written direction and an entry notice.
+    expect(page).toContain("const unoccupiedWithoutNotice = particulars.recipientRole === 'unoccupied_notice_left' && !particulars.entryNoticeLeft;");
+    expect(page).toContain("const unoccupiedOral = particulars.recipientRole === 'unoccupied_notice_left' && particulars.givenOrally;");
+    expect(page).toContain('&& !particularsPeriodInvalid && !unoccupiedWithoutNotice && !unoccupiedOral');
+    expect(page).toContain('Written direction and entry notice left in a prominent position (required — RMA s328(5))');
+    expect(page).toContain('Now record how it was given.');
+    expect(page).toContain('Record how the direction was given');
+  });
 });
