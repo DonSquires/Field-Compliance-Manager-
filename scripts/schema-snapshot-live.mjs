@@ -36,12 +36,15 @@ const lit = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 // pg_dump leaves SQL-standard type keywords unquoted and quotes everything else.
 const STANDARD_TYPES = new Set(['boolean', 'integer', 'bigint', 'smallint', 'real', 'double precision', 'numeric', 'character varying', 'character', 'timestamp with time zone', 'timestamp without time zone', 'time with time zone', 'time without time zone', 'interval', 'bit', 'bit varying']);
+const PUBLIC_TYPES = new Set();
 function quoteType(formatted) {
   const m = /^(.*?)(\((?:[^()]|\([^()]*\))*\))?((?:\[\])*)$/.exec(formatted.trim());
   const base = m[1].trim(); const mod = m[2] ?? ''; const arr = m[3] ?? '';
   if (STANDARD_TYPES.has(base)) return `${base}${mod}${arr}`;
-  const parts = base.split('.').map((p) => q(p.replace(/^"|"$/g, '')));
-  return `${parts.join('.')}${mod}${arr}`;
+  const parts = base.split('.').map((p) => p.replace(/^"|"$/g, ''));
+  // format_type() omits the schema for types visible on the live search_path; the file must not depend on that.
+  if (parts.length === 1 && PUBLIC_TYPES.has(parts[0])) parts.unshift('public');
+  return `${parts.map(q).join('.')}${mod}${arr}`;
 }
 // Casts and function calls inside defaults follow the same quoting rule.
 function quoteExpr(expr) {
@@ -50,7 +53,9 @@ function quoteExpr(expr) {
     .replace(/::((?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_ ]*?)(\[\])*(?=[^a-z0-9_ ]|$)/gi, (all, type, arr) => {
       const base = type.trim();
       if (STANDARD_TYPES.has(base)) return all;
-      return `::${base.split('.').map(q).join('.')}${arr ?? ''}`;
+      const parts = base.split('.');
+      if (parts.length === 1 && PUBLIC_TYPES.has(parts[0])) parts.unshift('public');
+      return `::${parts.map(q).join('.')}${arr ?? ''}`;
     })
     .replace(/\b(gen_random_uuid|now|uuid_generate_v4|timezone|nextval|lower|upper|date_trunc|jsonb_build_object|json_build_object|coalesce)\(/g, (all, fn) => `${q(fn)}(`)
     .replace(/'([^']*)'::"regclass"/g, (all, seq) => `'${seq.replace(/^public\./, '"public".')}'::"regclass"`);
@@ -71,7 +76,13 @@ async function main() {
   emit('');
 
   const extensions = await sql(`select e.extname, n.nspname, e.extversion from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname <> 'plpgsql' order by 1`);
+  for (const schema of new Set(extensions.map((e) => e.nspname).filter((n) => !['public', 'pg_catalog'].includes(n)))) emit(`CREATE SCHEMA IF NOT EXISTS ${q(schema)};`);
   for (const e of extensions) emit(`CREATE EXTENSION IF NOT EXISTS ${q(e.extname)} WITH SCHEMA ${q(e.nspname)};`);
+  emit('');
+  for (const row of await sql(`select t.typname from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public'`)) PUBLIC_TYPES.add(row.typname);
+  // Catalog-rendered expressions (policies, defaults, view bodies, function bodies) leave public
+  // objects unqualified exactly as the live session sees them; load them the same way.
+  emit(`SET search_path TO 'public', 'extensions', 'pg_catalog';`);
   emit('');
 
   // Types
@@ -82,33 +93,13 @@ async function main() {
   const domains = await sql(`select t.typname, format_type(t.typbasetype, t.typtypmod) as base, t.typnotnull, pg_get_expr(t.typdefaultbin, 0) as dflt, (select string_agg(pg_get_constraintdef(c.oid), ' ') from pg_constraint c where c.contypid = t.oid) as checks from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typtype = 'd' and ${NOT_EXTENSION('t.oid', 'pg_type')} order by 1`);
   for (const d of domains) emit(`CREATE DOMAIN "public".${q(d.typname)} AS ${quoteType(d.base)}${d.dflt ? ` DEFAULT ${quoteExpr(d.dflt)}` : ''}${d.typnotnull ? ' NOT NULL' : ''}${d.checks ? ` ${d.checks}` : ''};\n`);
 
-  // Functions (paged; pg_get_functiondef is exact)
-  const fnRows = await sql(`select p.oid::int as oid, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind in ('f','p') and ${NOT_EXTENSION('p.oid', 'pg_proc')} order by p.proname, p.oid`);
-  const fnDefs = [];
-  for (let i = 0; i < fnRows.length; i += 25) {
-    const batch = fnRows.slice(i, i + 25).map((r) => r.oid);
-    const rows = await sql(`select p.oid::int as oid, p.proname, pg_get_functiondef(p.oid) as def, pg_get_function_identity_arguments(p.oid) as idargs, p.proacl is not null as has_acl, exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE') as public_execute, (select string_agg(format('GRANT %s ON FUNCTION "public"."%s"(%s) TO %s;', a.privilege_type, replace(p.proname, '"', '""'), pg_get_function_identity_arguments(p.oid), case when a.grantee = 0 then 'PUBLIC' else '"' || replace(pg_get_userbyid(a.grantee), '"', '""') || '"' end), chr(10) order by a.grantee) from aclexplode(p.proacl) a where a.privilege_type = 'EXECUTE') as grants, obj_description(p.oid, 'pg_proc') as comment from pg_proc p where p.oid = any(array[${batch.join(',')}]) order by p.proname, p.oid`);
-    fnDefs.push(...rows);
-    process.stderr.write(`functions ${Math.min(i + 25, fnRows.length)}/${fnRows.length}\r`);
-  }
-  process.stderr.write('\n');
-  for (const f of fnDefs) {
-    const def = f.def.replace(/^CREATE OR REPLACE (FUNCTION|PROCEDURE) public\.("?)([a-zA-Z_][a-zA-Z0-9_]*)\2\(/, (all, kind, _q, name) => `CREATE OR REPLACE ${kind} "public".${q(name)}(`);
-    emit(def.trimEnd().replace(/;?$/, ';'));
-    if (f.comment) emit(`COMMENT ON FUNCTION "public".${q(f.proname)}(${f.idargs}) IS ${lit(f.comment)};`);
-    // A non-null ACL without a PUBLIC grant means EXECUTE was revoked from PUBLIC (pg_dump records this too).
-    if (f.has_acl && !f.public_execute) emit(`REVOKE ALL ON FUNCTION "public".${q(f.proname)}(${f.idargs}) FROM PUBLIC;`);
-    if (f.grants) emit(f.grants);
-    emit('');
-  }
-
   // Sequences not implemented as identity columns
   const sequences = await sql(`select c.relname, s.seqtypid::regtype::text as type, s.seqstart, s.seqincrement, s.seqmin, s.seqmax, s.seqcache, s.seqcycle, (select format('%I.%I', t.relname, a.attname) from pg_depend d join pg_class t on t.oid = d.refobjid join pg_attribute a on a.attrelid = t.oid and a.attnum = d.refobjsubid where d.objid = c.oid and d.classid = 'pg_class'::regclass and d.deptype = 'a' limit 1) as owned_by from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_sequence s on s.seqrelid = c.oid where n.nspname = 'public' and c.relkind = 'S' and ${NOT_EXTENSION('c.oid', 'pg_class')} and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype = 'i') order by 1`);
   for (const s of sequences) {
     emit(`CREATE SEQUENCE IF NOT EXISTS "public".${q(s.relname)}\n    AS ${s.type}\n    START WITH ${s.seqstart}\n    INCREMENT BY ${s.seqincrement}\n    MINVALUE ${s.seqmin}\n    MAXVALUE ${s.seqmax}\n    CACHE ${s.seqcache}${s.seqcycle ? '\n    CYCLE' : ''};`);
-    if (s.owned_by) emit(`ALTER SEQUENCE "public".${q(s.relname)} OWNED BY "public".${s.owned_by.split('.').map((p) => q(p.replace(/^"|"$/g, ''))).join('.')};`);
     emit('');
   }
+  const sequenceOwnership = sequences.filter((s) => s.owned_by).map((s) => `ALTER SEQUENCE "public".${q(s.relname)} OWNED BY "public".${s.owned_by.split('.').map((p) => q(p.replace(/^"|"$/g, ''))).join('.')};`);
 
   // Tables
   const tables = await sql(`select c.oid::int as oid, c.relname, c.relrowsecurity, c.relforcerowsecurity, obj_description(c.oid, 'pg_class') as comment, (select json_agg(json_build_object('name', a.attname, 'type', format_type(a.atttypid, a.atttypmod), 'notnull', a.attnotnull, 'default', pg_get_expr(ad.adbin, ad.adrelid), 'identity', a.attidentity, 'generated', a.attgenerated, 'comment', col_description(c.oid, a.attnum)) order by a.attnum) from pg_attribute a left join pg_attrdef ad on ad.adrelid = a.attrelid and ad.adnum = a.attnum where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped) as cols, (select string_agg(format('GRANT %s ON TABLE "public"."%s" TO %s;', a.privilege_type, replace(c.relname, '"', '""'), case when a.grantee = 0 then 'PUBLIC' else '"' || replace(pg_get_userbyid(a.grantee), '"', '""') || '"' end), chr(10) order by a.grantee, a.privilege_type) from aclexplode(c.relacl) a) as grants from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','p') and ${NOT_EXTENSION('c.oid', 'pg_class')} order by c.relname`);
@@ -126,6 +117,9 @@ async function main() {
     for (const c of t.cols ?? []) if (c.comment) emit(`COMMENT ON COLUMN "public".${q(t.relname)}.${q(c.name)} IS ${lit(c.comment)};`);
     emit('');
   }
+
+  for (const statement of sequenceOwnership) emit(statement);
+  if (sequenceOwnership.length) emit('');
 
   // Constraints: keys/checks first, foreign keys after every table exists
   const constraints = await sql(`select c.conname, t.relname, c.contype, pg_get_constraintdef(c.oid, true) as def from pg_constraint c join pg_class t on t.oid = c.conrelid join pg_namespace n on n.oid = t.relnamespace where n.nspname = 'public' and t.relkind in ('r','p') and c.contype in ('p','u','c','x','f') and ${NOT_EXTENSION('t.oid', 'pg_class')} order by case c.contype when 'p' then 0 when 'u' then 1 when 'c' then 2 when 'x' then 3 else 4 end, t.relname, c.conname`);
@@ -149,9 +143,38 @@ async function main() {
   }
   emit('');
 
-  // Views
-  const views = await sql(`select c.relname, c.relkind, pg_get_viewdef(c.oid, true) as def, obj_description(c.oid, 'pg_class') as comment from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('v','m') and ${NOT_EXTENSION('c.oid', 'pg_class')} order by c.relname`);
-  for (const v of views) {
+  // Functions after tables/constraints/indexes: bodies are not checked at load, but return
+  // types and argument types that name a table must already exist. Views, triggers and
+  // policies that call functions follow.
+  const fnRows = await sql(`select p.oid::int as oid, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind in ('f','p') and ${NOT_EXTENSION('p.oid', 'pg_proc')} order by p.proname, p.oid`);
+  const fnDefs = [];
+  for (let i = 0; i < fnRows.length; i += 25) {
+    const batch = fnRows.slice(i, i + 25).map((r) => r.oid);
+    const rows = await sql(`select p.oid::int as oid, p.proname, pg_get_functiondef(p.oid) as def, pg_get_function_identity_arguments(p.oid) as idargs, p.proacl is not null as has_acl, exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE') as public_execute, (select string_agg(format('GRANT %s ON FUNCTION "public"."%s"(%s) TO %s;', a.privilege_type, replace(p.proname, '"', '""'), pg_get_function_identity_arguments(p.oid), case when a.grantee = 0 then 'PUBLIC' else '"' || replace(pg_get_userbyid(a.grantee), '"', '""') || '"' end), chr(10) order by a.grantee) from aclexplode(p.proacl) a where a.privilege_type = 'EXECUTE') as grants, obj_description(p.oid, 'pg_proc') as comment from pg_proc p where p.oid = any(array[${batch.join(',')}]) order by p.proname, p.oid`);
+    fnDefs.push(...rows);
+    process.stderr.write(`functions ${Math.min(i + 25, fnRows.length)}/${fnRows.length}\r`);
+  }
+  process.stderr.write('\n');
+  for (const f of fnDefs) {
+    const def = f.def.replace(/^CREATE OR REPLACE (FUNCTION|PROCEDURE) public\.("?)([a-zA-Z_][a-zA-Z0-9_]*)\2\(/, (all, kind, _q, name) => `CREATE OR REPLACE ${kind} "public".${q(name)}(`);
+    emit(def.trimEnd().replace(/;?$/, ';'));
+    if (f.comment) emit(`COMMENT ON FUNCTION "public".${q(f.proname)}(${f.idargs}) IS ${lit(f.comment)};`);
+    // A non-null ACL without a PUBLIC grant means EXECUTE was revoked from PUBLIC (pg_dump records this too).
+    if (f.has_acl && !f.public_execute) emit(`REVOKE ALL ON FUNCTION "public".${q(f.proname)}(${f.idargs}) FROM PUBLIC;`);
+    if (f.grants) emit(f.grants);
+    emit('');
+  }
+
+  // Views, in dependency order. pg_get_viewdef prints public objects unqualified when they were
+  // on the live session's search_path, so the block runs with search_path = public.
+  const views = await sql(`select c.oid::int as oid, c.relname, c.relkind, pg_get_viewdef(c.oid, true) as def, obj_description(c.oid, 'pg_class') as comment, (select coalesce(json_agg(distinct dep.relname), '[]'::json) from pg_rewrite r join pg_depend d on d.objid = r.oid and d.classid = 'pg_rewrite'::regclass join pg_class dep on dep.oid = d.refobjid where r.ev_class = c.oid and dep.relkind in ('v','m') and dep.oid <> c.oid) as depends_on from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('v','m') and ${NOT_EXTENSION('c.oid', 'pg_class')} order by c.relname`);
+  const ordered = []; const placed = new Set(); const names = new Set(views.map((v) => v.relname));
+  while (ordered.length < views.length) {
+    const ready = views.filter((v) => !placed.has(v.relname) && (v.depends_on ?? []).every((d) => placed.has(d) || !names.has(d)));
+    if (!ready.length) { for (const v of views) if (!placed.has(v.relname)) { ordered.push(v); placed.add(v.relname); } break; }
+    for (const v of ready) { ordered.push(v); placed.add(v.relname); }
+  }
+  for (const v of ordered) {
     emit(`CREATE ${v.relkind === 'm' ? 'MATERIALIZED VIEW' : 'OR REPLACE VIEW'} "public".${q(v.relname)} AS\n${v.def.trimEnd().replace(/;$/, '')};`);
     if (v.comment) emit(`COMMENT ON ${v.relkind === 'm' ? 'MATERIALIZED VIEW' : 'VIEW'} "public".${q(v.relname)} IS ${lit(v.comment)};`);
     emit('');
