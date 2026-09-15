@@ -138,6 +138,7 @@ camping overnight, parking daytime). Zones (area + rules) and checkpoints (point
 | Callers branching on `resolution_status` | `process-officer-scan` conformed 2026-09-15 (fails closed on no row; distinct notice per outcome persisted on `observations.geofence_context` and returned to web + mobile); dispatch intake requires resolved coordinates; no billing zone-tier resolver exists live yet | `test/geofence-p1-callers.test.js` guards the branching |
 | Workbench engine (`boundary_proposals`, `propose_/accept_/reject_boundary_proposal`, `get_geofence_review_queue`) | live (`20260914004000`) | P2 for every source; truth table 42 checks |
 | `verify_boundary` refuses missing/invalid geometry (all four tiers) | live (`20260914140000`, applied 2026-09-15) | `verified` now means present + valid + human-confirmed, versioned in history |
+| Tier 4 checkpoints: governed direct save, structural P2 reset trigger, server-measured visits | **drafted** (`20260915100000`), not applied | live has no checkpoint create path (0 rows), no reset on move, and visits store the client's `within_radius` claim |
 | Canonical site-entry pipeline (Q10) | dispatch slice live (`20260914130000`, both dispatch place writers share `resolve_or_create_dispatch_place_site`); other address entry points still separate | audit item in `docs/REBUILD_PLAN.md` §3.3 |
 
 ## Rules for every future change

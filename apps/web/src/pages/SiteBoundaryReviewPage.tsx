@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AlertTriangle, CheckCircle2, Clock3, History, Landmark, MapPin, PenTool, RefreshCw, Ruler, Search, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, Crosshair, History, Landmark, MapPin, PenTool, RefreshCw, Ruler, Search, ShieldCheck, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { resolveAddressCandidates, type AddressCandidate } from '../lib/locationAddress';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './SiteBoundaryReviewPage.css';
@@ -58,6 +59,11 @@ interface ProposeReceipt { proposal_id: string; area_m2: number; gate_ok: boolea
 interface AcceptReceipt { entity_type: string; entity_id: string; area_m2: number; human_edited: boolean; verified: boolean; history_version: number }
 interface LinzBoundary { kind: 'parcel' | 'building' | null; geometry: GeoJSON.Geometry | null; properties?: Record<string, unknown>; matched_via?: { layer: string; radius_m: number; exact: boolean } | null; note?: string }
 
+// Tier 4: a point + radius at a site, direct-save (Q3) but never verified by its writer (P2).
+interface Checkpoint { id: string; name: string; description: string | null; gps_lat: number | null; gps_lng: number | null; radius_meters: number; qr_code: string | null; active: boolean; checkpoint_verification: 'verified' | 'unverified'; checkpoint_verified_at: string | null }
+interface CheckpointReceipt { id: string; name: string; radius_meters: number; checkpoint_verification: string; created: boolean; geometry_changed: boolean; history_version: number | null }
+const EMPTY_CHECKPOINT_FORM = { name: '', radius: '', qrCode: '', latitude: '', longitude: '' };
+
 type QueueFilter = 'attention' | 'proposals' | 'verified' | 'all';
 type SourcePanel = 'linz' | 'radius' | 'draw';
 
@@ -105,6 +111,7 @@ export function ringPolygon(ring: Ring): GeoJSON.Polygon {
 }
 
 const SiteBoundaryReviewPage = () => {
+  const { profile } = useAuth();
   const [queue, setQueue] = useState<QueueEntity[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [history, setHistory] = useState<BoundaryHistory[]>([]);
@@ -123,17 +130,35 @@ const SiteBoundaryReviewPage = () => {
   const [visualReviewConfirmed, setVisualReviewConfirmed] = useState(false);
   const [decisionNote, setDecisionNote] = useState('');
   const [rejectNote, setRejectNote] = useState('');
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [checkpointForm, setCheckpointForm] = useState(EMPTY_CHECKPOINT_FORM);
+  const [placingCheckpoint, setPlacingCheckpoint] = useState(false);
+  const [checkpointReviewed, setCheckpointReviewed] = useState<string | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const overlayRef = useRef<L.LayerGroup | null>(null);
   const drawModeRef = useRef(false);
+  const placingRef = useRef(false);
 
   const selected = useMemo(() => queue.find((entity) => keyOf(entity) === selectedKey) ?? null, [queue, selectedKey]);
   const proposalRing = useMemo(() => editableRing(selected?.open_proposal_geojson ?? null), [selected?.open_proposal_geojson]);
   const proposalEdited = Boolean(editRing && proposalRing && JSON.stringify(editRing) !== JSON.stringify(proposalRing));
   const drawMode = sourcePanel === 'draw' && !selected?.open_proposal_id;
   drawModeRef.current = drawMode;
+  placingRef.current = placingCheckpoint;
+  const pickedPoint = Number.isFinite(Number(checkpointForm.latitude)) && Number.isFinite(Number(checkpointForm.longitude)) && checkpointForm.latitude.trim() && checkpointForm.longitude.trim()
+    ? { lat: Number(checkpointForm.latitude), lng: Number(checkpointForm.longitude) } : null;
   const centre = selected && selected.center_lat != null && selected.center_lng != null ? { lat: selected.center_lat, lng: selected.center_lng } : addressCandidate ? { lat: addressCandidate.lat, lng: addressCandidate.lng } : null;
+
+  const loadCheckpoints = useCallback(async (entity: QueueEntity) => {
+    if (entity.entity_type !== 'client_site') { setCheckpoints([]); return; }
+    // ATLAS READS: patrol_checkpoints (Tier 4 facets of the selected site)
+    const { data, error: checkpointError } = await supabase.from('patrol_checkpoints')
+      .select('id, name, description, gps_lat, gps_lng, radius_meters, qr_code, active, checkpoint_verification, checkpoint_verified_at')
+      .eq('client_site_id', entity.entity_id).order('name');
+    if (checkpointError) throw checkpointError;
+    setCheckpoints((data as Checkpoint[]) ?? []);
+  }, []);
 
   const loadHistory = useCallback(async (entity: QueueEntity) => {
     // ATLAS READS: get_boundary_history
@@ -152,11 +177,11 @@ const SiteBoundaryReviewPage = () => {
       const nextKey = preferredKey && rows.some((entity) => keyOf(entity) === preferredKey) ? preferredKey : rows[0] ? keyOf(rows[0]) : null;
       setQueue(rows); setSelectedKey(nextKey);
       const next = rows.find((entity) => keyOf(entity) === nextKey);
-      if (next) await loadHistory(next); else setHistory([]);
+      if (next) await Promise.all([loadHistory(next), loadCheckpoints(next)]); else { setHistory([]); setCheckpoints([]); }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'The geofence review queue could not be loaded.');
     } finally { setLoading(false); }
-  }, [loadHistory]);
+  }, [loadHistory, loadCheckpoints]);
 
   useEffect(() => { void loadQueue(); }, [loadQueue]);
 
@@ -164,6 +189,7 @@ const SiteBoundaryReviewPage = () => {
     if (!selected) return;
     setCoordinates({ latitude: selected.center_lat?.toString() ?? '', longitude: selected.center_lng?.toString() ?? '', radius: '50' });
     setVisualReviewConfirmed(false); setDecisionNote(''); setRejectNote(''); setDrawPoints([]); setAddressCandidate(null); setAddressQuery('');
+    setCheckpointForm(EMPTY_CHECKPOINT_FORM); setPlacingCheckpoint(false); setCheckpointReviewed(null);
     setSourcePanel(selected.entity_type === 'location_zone' && selected.center_lat == null ? 'draw' : 'linz');
   }, [selectedKey]);
 
@@ -181,6 +207,10 @@ const SiteBoundaryReviewPage = () => {
     L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, undefined, { collapsed: true }).addTo(map);
     overlayRef.current = L.layerGroup().addTo(map);
     map.on('click', (event: L.LeafletMouseEvent) => {
+      if (placingRef.current) {
+        setCheckpointForm((form) => ({ ...form, latitude: event.latlng.lat.toFixed(7), longitude: event.latlng.lng.toFixed(7) }));
+        return;
+      }
       if (!drawModeRef.current) return;
       setDrawPoints((points) => [...points, [Number(event.latlng.lng.toFixed(7)), Number(event.latlng.lat.toFixed(7))]]);
     });
@@ -220,8 +250,14 @@ const SiteBoundaryReviewPage = () => {
       latlngs.forEach((latlng, index) => L.circleMarker(latlng, { radius: 5, color: '#e7f0f2', fillColor: '#2fc4a7', fillOpacity: 1 }).bindTooltip(`Point ${index + 1}`).addTo(overlay));
     }
     if (centre) L.circleMarker([centre.lat, centre.lng], { radius: 4, color: '#e7f0f2', fillColor: '#e0a93a', fillOpacity: 1 }).bindTooltip('Recorded centre').addTo(overlay);
+    checkpoints.filter((checkpoint) => checkpoint.gps_lat != null && checkpoint.gps_lng != null).forEach((checkpoint) => {
+      const colour = !checkpoint.active ? '#7a8794' : checkpoint.checkpoint_verification === 'verified' ? '#2fc4a7' : '#e0a93a';
+      L.circle([checkpoint.gps_lat as number, checkpoint.gps_lng as number], { radius: checkpoint.radius_meters, color: colour, weight: 2, fillColor: colour, fillOpacity: 0.25 })
+        .bindTooltip(`${checkpoint.name} · ${checkpoint.radius_meters} m · ${!checkpoint.active ? 'inactive' : checkpoint.checkpoint_verification}`).addTo(overlay);
+    });
+    if (pickedPoint) L.marker([pickedPoint.lat, pickedPoint.lng], { icon: L.divIcon({ className: 'workbench-vertex is-checkpoint', iconSize: [16, 16] }), title: 'Checkpoint position' }).bindTooltip('New checkpoint position').addTo(overlay);
     if (addressCandidate && selected.center_lat == null) map.setView([addressCandidate.lat, addressCandidate.lng], 18);
-  }, [selected, editRing, drawMode, drawPoints, centre?.lat, centre?.lng, addressCandidate]);
+  }, [selected, editRing, drawMode, drawPoints, centre?.lat, centre?.lng, addressCandidate, checkpoints, pickedPoint?.lat, pickedPoint?.lng]);
 
   const run = async (label: string, command: () => Promise<string | void>) => {
     setBusy(label); setError(null); setNotice(null);
@@ -235,7 +271,66 @@ const SiteBoundaryReviewPage = () => {
 
   const chooseEntity = (entity: QueueEntity) => run('select', async () => {
     setSelectedKey(keyOf(entity));
-    await loadHistory(entity);
+    await Promise.all([loadHistory(entity), loadCheckpoints(entity)]);
+  });
+
+  const manageCheckpoint = async (action: 'create' | 'update' | 'deactivate' | 'reactivate', checkpoint: Checkpoint | null) => {
+    if (!selected || selected.entity_type !== 'client_site' || !profile?.organizationId) throw new Error('Select a site in your organisation first.');
+    const radius = checkpointForm.radius.trim() === '' ? null : Number(checkpointForm.radius);
+    if (radius !== null && (!Number.isInteger(radius) || radius < 1 || radius > 500)) throw new Error('Radius must be a whole number of metres between 1 and 500 (leave blank for the organisation rule).');
+    // ATLAS WRITES: manage_patrol_checkpoint (Q3 direct save; lands unverified; P2 reset on any move)
+    const { data, error: manageError } = await supabase.rpc('manage_patrol_checkpoint', {
+      p_client_request_id: crypto.randomUUID(),
+      p_action: action,
+      p_organization_id: profile.organizationId,
+      p_checkpoint_id: checkpoint?.id ?? null,
+      p_client_site_id: action === 'create' ? selected.entity_id : null,
+      p_name: action === 'create' ? checkpointForm.name.trim() : null,
+      p_description: null,
+      p_gps_lat: action === 'create' || action === 'update' ? pickedPoint?.lat ?? null : null,
+      p_gps_lng: action === 'create' || action === 'update' ? pickedPoint?.lng ?? null : null,
+      p_radius_meters: action === 'create' || action === 'update' ? radius : null,
+      p_qr_code: action === 'create' ? checkpointForm.qrCode.trim() || null : null,
+    });
+    const receipt = (data as CheckpointReceipt[] | null)?.[0];
+    if (manageError || !receipt?.id) throw manageError ?? new Error('The checkpoint receipt was not confirmed.');
+    setCheckpointForm(EMPTY_CHECKPOINT_FORM); setPlacingCheckpoint(false); setCheckpointReviewed(null);
+    await loadCheckpoints(selected);
+    return receipt;
+  };
+
+  const placeCheckpoint = (event: FormEvent) => {
+    event.preventDefault();
+    void run('checkpoint', async () => {
+      if (!checkpointForm.name.trim()) throw new Error('A checkpoint name is required.');
+      if (!pickedPoint) throw new Error('Pick the checkpoint position on the map or enter its coordinates.');
+      const receipt = await manageCheckpoint('create', null);
+      return `${receipt.name} placed (${receipt.radius_meters} m, history v${receipt.history_version ?? 1}). It is unverified until you confirm its position on the map.`;
+    });
+  };
+
+  const moveCheckpoint = (checkpoint: Checkpoint) => run('checkpoint', async () => {
+    if (!pickedPoint && checkpointForm.radius.trim() === '') throw new Error('Pick a new position on the map or enter a new radius first.');
+    const receipt = await manageCheckpoint('update', checkpoint);
+    return receipt.geometry_changed
+      ? `${receipt.name} moved (history v${receipt.history_version}). Its verification was reset — confirm the new position on the map.`
+      : `${receipt.name} unchanged: the geometry is identical, so its verification stands.`;
+  });
+
+  const toggleCheckpoint = (checkpoint: Checkpoint) => run('checkpoint', async () => {
+    const receipt = await manageCheckpoint(checkpoint.active ? 'deactivate' : 'reactivate', checkpoint);
+    return `${receipt.name} ${checkpoint.active ? 'deactivated; officers will no longer be offered it' : 'reactivated'}.`;
+  });
+
+  const verifyCheckpoint = (checkpoint: Checkpoint) => run('checkpoint-verify', async () => {
+    if (!selected || checkpointReviewed !== checkpoint.id) return;
+    // ATLAS WRITES: verify_boundary (patrol_checkpoint) — refuses a checkpoint with no point (P1)
+    const { data, error: verifyError } = await supabase.rpc('verify_boundary', { p_entity_type: 'patrol_checkpoint', p_entity_id: checkpoint.id });
+    if (verifyError) throw verifyError;
+    if (data !== true) throw new Error('The checkpoint could not be found for verification.');
+    setCheckpointReviewed(null);
+    await loadCheckpoints(selected);
+    return `${checkpoint.name} verified from visual map review.`;
   });
 
   const propose = async (entity: QueueEntity, geometry: GeoJSON.Geometry, source: string, sourceRef: Record<string, unknown>) => {
@@ -406,6 +501,34 @@ const SiteBoundaryReviewPage = () => {
             </div>}
             {sourcePanel === 'radius' && <form onSubmit={proposePointRadius} role="tabpanel"><label><span>Latitude</span><input aria-label="Latitude" type="number" min="-90" max="90" step="any" required value={coordinates.latitude} onChange={(event) => setCoordinates({ ...coordinates, latitude: event.target.value })} /></label><label><span>Longitude</span><input aria-label="Longitude" type="number" min="-180" max="180" step="any" required value={coordinates.longitude} onChange={(event) => setCoordinates({ ...coordinates, longitude: event.target.value })} /></label><label><span>Radius (metres)</span><div><Ruler size={14} /><input aria-label="Radius in metres" type="number" min="5" max="5000" required value={coordinates.radius} onChange={(event) => setCoordinates({ ...coordinates, radius: event.target.value })} /></div></label><button type="submit" disabled={busy !== null || !coordinates.latitude || !coordinates.longitude}>{busy === 'radius' ? 'Proposing' : 'Propose point-radius boundary'}</button></form>}
             {selected.has_boundary && selected.boundary_verification !== 'verified' && <div className="boundary-review-gate"><ShieldCheck size={18} /><div><strong>Verify the existing boundary</strong><span>Confirm the rendered boundary encloses the intended operating {placeNoun} before certifying it for runtime use.</span><label><input type="checkbox" checked={visualReviewConfirmed} onChange={(event) => setVisualReviewConfirmed(event.target.checked)} />I inspected the full boundary against the {inspectionTarget}.</label></div><button type="button" onClick={() => void verifyBoundary()} disabled={busy !== null || !visualReviewConfirmed}>{busy === 'verify' ? 'Verifying' : 'Verify boundary'}</button></div>}
+          </section>
+        )}
+
+        {selected.entity_type === 'client_site' && (
+          <section className="boundary-action-panel workbench-checkpoints" aria-label="Checkpoints at this site">
+            <div className="boundary-panel-heading"><div><Crosshair size={18} /><span><strong>Checkpoints (Tier 4)</strong><small>Point + radius, saved directly (Q3). Every placement lands unverified; moving one resets it. Only the map confirmation certifies it.</small></span></div></div>
+            {checkpoints.length ? <ul className="workbench-checkpoint-list">{checkpoints.map((checkpoint) => <li key={checkpoint.id} className={!checkpoint.active ? 'is-inactive' : checkpoint.checkpoint_verification === 'verified' ? 'is-verified' : 'is-unverified'}>
+              <div><strong>{checkpoint.name}</strong><small>{checkpoint.gps_lat != null && checkpoint.gps_lng != null ? `${checkpoint.gps_lat.toFixed(5)}, ${checkpoint.gps_lng.toFixed(5)}` : 'No position recorded'} · {checkpoint.radius_meters} m{checkpoint.qr_code ? ` · QR ${checkpoint.qr_code}` : ''}</small></div>
+              <em>{!checkpoint.active ? 'Inactive' : checkpoint.checkpoint_verification === 'verified' ? 'Verified' : 'Unverified'}</em>
+              <div className="workbench-decision-actions">
+                {checkpoint.active && checkpoint.checkpoint_verification !== 'verified' && checkpoint.gps_lat != null && <label className="workbench-inline-gate"><input type="checkbox" checked={checkpointReviewed === checkpoint.id} onChange={(event) => setCheckpointReviewed(event.target.checked ? checkpoint.id : null)} />Position inspected on the map</label>}
+                {checkpoint.active && checkpoint.checkpoint_verification !== 'verified' && checkpoint.gps_lat != null && <button type="button" onClick={() => void verifyCheckpoint(checkpoint)} disabled={busy !== null || checkpointReviewed !== checkpoint.id}>{busy === 'checkpoint-verify' ? 'Verifying' : 'Verify checkpoint'}</button>}
+                {checkpoint.active && (pickedPoint || checkpointForm.radius.trim()) && <button type="button" className="is-secondary" onClick={() => void moveCheckpoint(checkpoint)} disabled={busy !== null}>Move here{checkpointForm.radius.trim() ? ` · ${checkpointForm.radius} m` : ''}</button>}
+                <button type="button" className="is-secondary" onClick={() => void toggleCheckpoint(checkpoint)} disabled={busy !== null}>{checkpoint.active ? 'Deactivate' : 'Reactivate'}</button>
+              </div>
+            </li>)}</ul> : <p className="workbench-hint">No checkpoints at this site yet. Officers on patrol are offered the site's active checkpoints; a visit records the server-measured distance and the checkpoint's verification state.</p>}
+            <form className="workbench-checkpoint-form" onSubmit={placeCheckpoint}>
+              <label><span>Name</span><input aria-label="Checkpoint name" value={checkpointForm.name} onChange={(event) => setCheckpointForm({ ...checkpointForm, name: event.target.value })} placeholder="e.g. Gate A" /></label>
+              <label><span>Radius (m)</span><input aria-label="Checkpoint radius in metres" type="number" min="1" max="500" step="1" value={checkpointForm.radius} onChange={(event) => setCheckpointForm({ ...checkpointForm, radius: event.target.value })} placeholder="org rule" title="Leave blank to use the organisation rule (checkpoint_radius_m, platform default 5 m)" /></label>
+              <label><span>QR code (optional)</span><input aria-label="Checkpoint QR code" value={checkpointForm.qrCode} onChange={(event) => setCheckpointForm({ ...checkpointForm, qrCode: event.target.value })} /></label>
+              <label><span>Latitude</span><input aria-label="Checkpoint latitude" type="number" step="any" min="-90" max="90" value={checkpointForm.latitude} onChange={(event) => setCheckpointForm({ ...checkpointForm, latitude: event.target.value })} /></label>
+              <label><span>Longitude</span><input aria-label="Checkpoint longitude" type="number" step="any" min="-180" max="180" value={checkpointForm.longitude} onChange={(event) => setCheckpointForm({ ...checkpointForm, longitude: event.target.value })} /></label>
+              <div className="workbench-decision-actions">
+                <button type="button" className={placingCheckpoint ? '' : 'is-secondary'} aria-pressed={placingCheckpoint} onClick={() => setPlacingCheckpoint((value) => !value)}><Crosshair size={14} /> {placingCheckpoint ? 'Click the map to set the position' : 'Pick position on map'}</button>
+                <button type="submit" disabled={busy !== null || !checkpointForm.name.trim() || !pickedPoint}>{busy === 'checkpoint' ? 'Saving' : 'Place checkpoint'}</button>
+              </div>
+              <p className="workbench-hint workbench-checkpoint-hint">A blank radius uses the organisation rule (platform default 5 m). The QR code is what the officer scans; the radius is how close the GPS fix must be for the server to record the visit as within range.</p>
+            </form>
           </section>
         )}
 

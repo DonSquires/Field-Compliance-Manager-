@@ -159,8 +159,10 @@ async function main() {
     const def = f.def.replace(/^CREATE OR REPLACE (FUNCTION|PROCEDURE) public\.("?)([a-zA-Z_][a-zA-Z0-9_]*)\2\(/, (all, kind, _q, name) => `CREATE OR REPLACE ${kind} "public".${q(name)}(`);
     emit(def.trimEnd().replace(/;?$/, ';'));
     if (f.comment) emit(`COMMENT ON FUNCTION "public".${q(f.proname)}(${f.idargs}) IS ${lit(f.comment)};`);
-    // A non-null ACL without a PUBLIC grant means EXECUTE was revoked from PUBLIC (pg_dump records this too).
-    if (f.has_acl && !f.public_execute) emit(`REVOKE ALL ON FUNCTION "public".${q(f.proname)}(${f.idargs}) FROM PUBLIC;`);
+    // An explicit ACL is reproduced exactly: revoke from PUBLIC and the Supabase API roles first, so the
+    // target database's default privileges (anon/authenticated/service_role EXECUTE on new functions)
+    // cannot widen a deliberately narrow function; the recorded GRANTs then restore exactly what is live.
+    if (f.has_acl) emit(`REVOKE ALL ON FUNCTION "public".${q(f.proname)}(${f.idargs}) FROM PUBLIC, "anon", "authenticated", "service_role";`);
     if (f.grants) emit(f.grants);
     emit('');
   }

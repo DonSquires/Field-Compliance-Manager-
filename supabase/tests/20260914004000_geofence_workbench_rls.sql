@@ -38,6 +38,12 @@ declare
   v_zone uuid := gen_random_uuid();         -- provider-owned freedom camping zone, no boundary
   v_cp_nopoint uuid := gen_random_uuid();   -- provider checkpoint with no coordinates
   v_cp uuid := gen_random_uuid();           -- provider checkpoint with a point + 5 m radius
+  v_officer uuid := gen_random_uuid();      -- provider officer on an in-progress shift (checkpoint visits)
+  v_shift uuid := gen_random_uuid();
+  v_stranger_site uuid := gen_random_uuid(); -- owned by the stranger org: outside the provider's reach
+  v_req uuid := gen_random_uuid();
+  v_sneaky uuid;
+  v_cpn record; v_cpn2 record; v_visit record; v_pv public.patrol_checkpoint_visits%rowtype;
   v_p1 record; v_p2 record; v_tiny record; v_pz record; v_porg record; v_pmulti record; v_acc record; v_accz record;
   v_cs public.client_sites%rowtype; v_z public.location_zones%rowtype; v_bp public.boundary_proposals%rowtype;
   v_row record; v_count int; v_err text; v_ok boolean;
@@ -57,6 +63,11 @@ begin
     values (v_zone, v_provider, 'T_ZONE', 'freedom_camping', 'freedom_camping', true, 'unverified');
   insert into public.patrol_checkpoints (id, organization_id, client_site_id, name, gps_lat, gps_lng, radius_meters)
     values (v_cp_nopoint, v_provider, v_site, 'T_CP_NOPOINT', null, null, 5), (v_cp, v_provider, v_site, 'T_CP', -41.2706, 173.2840, 5);
+  insert into public.user_profiles (id, organization_id, role, display_name) values (v_officer, v_provider, 'officer', 'Officer');
+  insert into public.shifts (id, organization_id, officer_user_id, service_type, scheduled_start, scheduled_end, actual_start, status)
+    values (v_shift, v_provider, v_officer, 'patrol', now() - interval '2 hours', now() + interval '6 hours', now() - interval '2 hours', 'in_progress');
+  insert into public.client_sites (id, client_organization_id, organization_id, name, address, center_point, boundary_verification, active)
+    values (v_stranger_site, v_stranger_org, v_stranger_org, 'T_STRANGER_SITE', '99 Elsewhere Rd', st_setsrid(st_makepoint(173.30, -41.28), 4326), 'unverified', true);
 
   -- ── staging table: readable within reach, never writable from the browser ──
   perform pg_temp.as_user(v_admin);
@@ -167,6 +178,95 @@ begin
   perform pg_temp.check('the pointless checkpoint stayed unverified with no history',
     (select checkpoint_verification from public.patrol_checkpoints where id = v_cp_nopoint) = 'unverified'
     and not exists (select 1 from public.geofence_boundary_history where entity_type = 'patrol_checkpoint' and entity_id = v_cp_nopoint));
+
+  -- ── Tier 4 direct-save (20260915100000): placed at a site, unverified, versioned; any move resets (Q3/Q4/Q8/P2) ──
+  perform pg_temp.as_user(v_admin);
+  select * into v_cpn from public.manage_patrol_checkpoint(v_req, 'create', v_provider, null, v_site, 'Gate A', 'Main gate', -41.27062, 173.28402, null, 'QR-GATE-A');
+  perform pg_temp.check('a checkpoint is placed at a site with the platform default radius, unverified',
+    v_cpn.created and v_cpn.radius_meters = 5 and v_cpn.checkpoint_verification = 'unverified' and v_cpn.history_version = 1 and v_cpn.client_site_id = v_site);
+  perform pg_temp.as_admin();
+  perform pg_temp.check('placement is versioned as a point-radius geometry and audited',
+    exists (select 1 from public.geofence_boundary_history h where h.entity_type = 'patrol_checkpoint' and h.entity_id = v_cpn.id and h.version = 1
+            and h.boundary_source = 'manual_point_radius' and h.changed_via = 'direct_edit' and h.verification_state = 'unverified' and st_area(h.boundary::geography) between 70 and 90)
+    and exists (select 1 from public.audit_log a where a.action = 'patrol_checkpoint_created' and a.target_id = v_cpn.id));
+  perform pg_temp.as_user(v_admin);
+  select * into v_cpn2 from public.manage_patrol_checkpoint(v_req, 'create', v_provider, null, v_site, 'Gate A', null, -41.27062, 173.28402, null, null);
+  perform pg_temp.check('replaying the same client_request_id returns the same checkpoint', not v_cpn2.created and v_cpn2.id = v_cpn.id and v_cpn2.history_version = 1);
+  perform pg_temp.as_admin();
+  insert into public.org_geofence_config (organization_id, config_key, config_value) values (v_provider, 'checkpoint_radius_m', 8);
+  perform pg_temp.as_user(v_admin);
+  select * into v_cpn2 from public.manage_patrol_checkpoint(gen_random_uuid(), 'create', v_provider, null, v_site, 'Gate B', null, -41.27070, 173.28410, null, null);
+  perform pg_temp.check('the radius follows the organisation rule when one is set (Q8)', v_cpn2.radius_meters = 8);
+  v_ok := public.verify_boundary('patrol_checkpoint', v_cpn.id);
+  select * into v_cpn2 from public.manage_patrol_checkpoint(gen_random_uuid(), 'update', v_provider, v_cpn.id, null, null, null, -41.27080, 173.28402, null, null);
+  perform pg_temp.check('moving a verified checkpoint resets it to unverified and writes a new version',
+    v_ok and v_cpn2.geometry_changed and v_cpn2.checkpoint_verification = 'unverified' and v_cpn2.history_version = 3 and v_cpn2.gps_lat = -41.27080);
+  v_ok := public.verify_boundary('patrol_checkpoint', v_cpn.id);
+  select * into v_cpn2 from public.manage_patrol_checkpoint(gen_random_uuid(), 'update', v_provider, v_cpn.id, null, 'Gate A (north)', null, null, null, null, null);
+  perform pg_temp.check('a rename keeps the verification and adds no version',
+    v_ok and not v_cpn2.geometry_changed and v_cpn2.checkpoint_verification = 'verified' and v_cpn2.history_version = 4 and v_cpn2.name = 'Gate A (north)');
+  perform pg_temp.as_admin();
+  update public.patrol_checkpoints set radius_meters = 6 where id = v_cpn.id;
+  perform pg_temp.check('a direct table edit of the geometry also resets verification (structural P2)',
+    (select checkpoint_verification from public.patrol_checkpoints where id = v_cpn.id) = 'unverified'
+    and (select checkpoint_verified_by from public.patrol_checkpoints where id = v_cpn.id) is null);
+  begin
+    update public.patrol_checkpoints set radius_meters = 0 where id = v_cpn.id;
+    perform pg_temp.check('a zero radius is refused at the table', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a zero radius is refused at the table', v_err like '%between 1 and 500 metres%');
+  end;
+  insert into public.patrol_checkpoints (organization_id, client_site_id, name, gps_lat, gps_lng, radius_meters, checkpoint_verification, checkpoint_verified_by, checkpoint_verified_at)
+    values (v_provider, v_site, 'T_SNEAKY', -41.27, 173.28, 5, 'verified', v_admin, now()) returning id into v_sneaky;
+  perform pg_temp.check('nothing lands verified, whatever the writer claims', (select checkpoint_verification from public.patrol_checkpoints where id = v_sneaky) = 'unverified'
+    and (select checkpoint_verified_by from public.patrol_checkpoints where id = v_sneaky) is null);
+  perform pg_temp.as_user(v_stranger);
+  begin
+    perform public.manage_patrol_checkpoint(gen_random_uuid(), 'create', v_provider, null, v_site, 'X', null, -41.27, 173.28, null, null);
+    perform pg_temp.check('a stranger cannot place checkpoints for another org', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a stranger cannot place checkpoints for another org', v_err like '%Organisation administrator required%');
+  end;
+  perform pg_temp.as_user(v_admin);
+  begin
+    perform public.manage_patrol_checkpoint(gen_random_uuid(), 'create', v_provider, null, v_stranger_site, 'X', null, -41.28, 173.30, null, null);
+    perform pg_temp.check('a checkpoint cannot be placed at a site outside the caller''s reach', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a checkpoint cannot be placed at a site outside the caller''s reach', v_err like '%outside your reach%');
+  end;
+  begin
+    perform public.manage_patrol_checkpoint(gen_random_uuid(), 'create', v_provider, null, v_site, 'X', null, null, null, null, null);
+    perform pg_temp.check('a checkpoint needs a map position', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a checkpoint needs a map position', v_err like '%map position is required%');
+  end;
+
+  -- ── visits: presence is measured by the server from the recorded point; the client's claim is not the record (P1) ──
+  perform pg_temp.as_user(v_officer);
+  select * into v_visit from public.record_officer_checkpoint_visit(gen_random_uuid(), v_shift, v_cpn.id, -41.27077, 173.28402, 4.0, 1.0, true);
+  perform pg_temp.as_admin();
+  select * into v_pv from public.patrol_checkpoint_visits where id = v_visit.visit_id;
+  perform pg_temp.check('a visit 3 m from the point is within the 6 m radius, distance measured by the server, unverified state recorded',
+    v_visit.created and v_pv.gps_distance_from_checkpoint between 2.5 and 4.0 and v_pv.within_radius and v_pv.checkpoint_verification_at_visit = 'unverified');
+  perform pg_temp.as_user(v_officer);
+  select * into v_visit from public.record_officer_checkpoint_visit(gen_random_uuid(), v_shift, v_cpn.id, -41.27044, 173.28402, 4.0, 1.0, true);
+  perform pg_temp.as_admin();
+  select * into v_pv from public.patrol_checkpoint_visits where id = v_visit.visit_id;
+  perform pg_temp.check('a client claiming within_radius from 40 m away is recorded as outside', v_pv.gps_distance_from_checkpoint between 35 and 45 and v_pv.within_radius = false);
+  perform pg_temp.as_user(v_officer);
+  select * into v_visit from public.record_officer_checkpoint_visit(gen_random_uuid(), v_shift, v_cp_nopoint, -41.2706, 173.2840, 4.0, 0.0, true);
+  perform pg_temp.as_admin();
+  select * into v_pv from public.patrol_checkpoint_visits where id = v_visit.visit_id;
+  perform pg_temp.check('a checkpoint with no point yields no distance and no verdict, never a guess', v_pv.gps_distance_from_checkpoint is null and v_pv.within_radius is null);
+  perform pg_temp.as_user(v_officer);
+  select * into v_visit from public.record_officer_checkpoint_visit(gen_random_uuid(), v_shift, v_cp, -41.27061, 173.28401, 3.0, null, null);
+  perform pg_temp.as_admin();
+  select * into v_pv from public.patrol_checkpoint_visits where id = v_visit.visit_id;
+  perform pg_temp.check('a visit at a verified checkpoint carries the verified state', v_pv.checkpoint_verification_at_visit = 'verified' and v_pv.within_radius);
 
   -- ── accept: the human's (edited) shape becomes the live boundary, unverified ──
   perform pg_temp.as_user(v_admin);

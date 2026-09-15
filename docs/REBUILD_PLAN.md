@@ -212,13 +212,36 @@ source-side reader's report carries no complainant data.
   refreshed baselines.
 - **G3 P1 callers — built; `process-officer-scan` redeployed 2026-09-15
   (v610, owner-authorized)** (see §3.4).
-- **Remaining:** Tier 1 organisation jurisdiction through the governed
-  proposal path (Q5) with map preview; checkpoint create/edit UI on the
-  workbench (Q3: direct save, still verified on the map); Q6 source registry
-  rungs (council ArcGIS / NZTA) as proposal sources; backfill of the 75
-  unverified sites through the queue (human work, not a script); human test
-  of the workbench on the live build (propose from LINZ → edit → accept →
-  verify → scan resolves).
+- **G4 Tier 4 checkpoints — drafted 2026-09-15, NOT YET APPLIED** —
+  `20260915100000_checkpoint_tier_workbench.sql`: `manage_patrol_checkpoint`
+  (Q3 direct save at a site within reach, map position required, radius from
+  `org_geofence_config.checkpoint_radius_m` else 5 m (Q8), idempotent create,
+  versioned in `geofence_boundary_history` as point + radius (Q4), audited);
+  a BEFORE INSERT/UPDATE trigger that forces every placement to land
+  `unverified` and resets verification on any geometry change, whoever wrote
+  it (structural P2 — RLS lets an org admin edit the table directly);
+  `record_officer_checkpoint_visit` re-issued with its exact signature so the
+  visit's distance and `within_radius` are measured by the server from the
+  recorded point (the officer client's claim is audited, not stored) and the
+  checkpoint's verification state is recorded on the visit
+  (`checkpoint_verification_at_visit`). Live today there is no checkpoint
+  create path at all (0 rows), no P2 reset, and the visit writer stores what
+  the client asserts. Truth table extended to 58 checks; guard
+  `test/checkpoint-tier-workbench.test.js`. Workbench UI: a "Checkpoints
+  (Tier 4)" panel on every selected site — list with state, place by picking
+  a point on the map or typing coordinates, move/resize, (de)activate, and
+  verify only after the "position inspected on the map" tick. Admin sidebar
+  entry renamed to "Geofence Workbench".
+- The snapshot generator now also emits `REVOKE ALL ON FUNCTION … FROM
+  PUBLIC, anon, authenticated, service_role` before each function's grants
+  (same fidelity gap as the table fix: default privileges in a fresh database
+  had widened `_gbh_next_version` to anon/authenticated in the oracle only).
+- **Remaining:** apply `20260915100000` (owner go-ahead); Tier 1 organisation
+  jurisdiction through the governed proposal path (Q5) with map preview; Q6
+  source registry rungs (council ArcGIS / NZTA) as proposal sources; backfill
+  of the 75 unverified sites through the queue (human work, not a script);
+  human test of the workbench on the live build (propose from LINZ → edit →
+  accept → verify → place a checkpoint → scan resolves).
 5. `location_events`: either land the governed writer (dual-write from the
    module submit functions) or keep it out of every UI as an explicit seam.
 

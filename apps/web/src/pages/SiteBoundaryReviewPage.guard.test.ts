@@ -59,4 +59,21 @@ describe('geofence workbench — every boundary is a proposal until a human acce
     expect(page).toContain('Keyboard users: use point + radius.');
     expect(page).toContain('aria-label="Radius in metres"');
   });
+
+  it('places and moves Tier 4 checkpoints only through the governed direct-save, and certifies them only by the map confirmation (Q3/P2)', () => {
+    expect(page).toContain("supabase.rpc('manage_patrol_checkpoint'");
+    expect(page).toContain("p_client_site_id: action === 'create' ? selected.entity_id : null");
+    expect(page).toContain('p_organization_id: profile.organizationId');
+    expect(page).not.toMatch(/from\('patrol_checkpoints'\)[\s\S]{0,300}\.(insert|update|upsert|delete)\(/);
+    expect(page).toContain("p_entity_type: 'patrol_checkpoint'");
+    expect(page).toContain('disabled={busy !== null || checkpointReviewed !== checkpoint.id}');
+    expect(page).toContain('Position inspected on the map');
+    expect(page).toContain('Every placement lands unverified; moving one resets it. Only the map confirmation certifies it.');
+    expect(page).toContain('Its verification was reset — confirm the new position on the map.');
+    // Radius blank means the organisation rule (Q8); the server applies it.
+    expect(page).toContain("const radius = checkpointForm.radius.trim() === '' ? null : Number(checkpointForm.radius);");
+    expect(page).toContain('A blank radius uses the organisation rule (platform default 5 m).');
+    // A checkpoint with no point cannot be verified (P1): the verify control is not offered for it.
+    expect(page).toContain("checkpoint.checkpoint_verification !== 'verified' && checkpoint.gps_lat != null && <button");
+  });
 });

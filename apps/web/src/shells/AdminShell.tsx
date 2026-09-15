@@ -219,7 +219,7 @@ const NAVIGATION_MAP = {
     { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
     { id: 'locations', label: 'Location Houses', icon: MapPin },
     { id: 'zones', label: 'Zone Facets', icon: MapPin },
-    { id: 'sites', label: 'Boundary Validation', icon: ClipboardCheck },
+    { id: 'sites', label: 'Geofence Workbench', icon: ClipboardCheck },
     { id: 'users', label: 'People & Access', icon: Users },
     { id: 'access-control', label: 'Access Rules', icon: KeyRound },
     { id: 'org-setup', label: 'Organization Settings', icon: Settings },
