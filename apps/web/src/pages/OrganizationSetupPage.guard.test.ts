@@ -30,4 +30,23 @@ describe('governed organization profile setup', () => {
     expect(source).toContain('setLoading(false);');
     expect(source).toContain('setError(null);');
   });
+
+  it('adds and archives branches only through the governed provider-branch RPCs', () => {
+    expect(source).toContain("supabase.rpc('create_provider_branch'");
+    expect(source).toContain('p_client_request_id: branchRequestId');
+    expect(source).toContain("supabase.rpc('archive_provider_branch'");
+    expect(source).toContain('p_expected_updated_at: branch.updated_at');
+    expect(source).not.toMatch(/from\(['"]organizations['"]\)[\s\S]{0,200}\.insert\(/);
+    // A new or archived branch must show up in (or leave) the "Working in" selector without a reload.
+    expect(source).toContain('await refreshOperatingOrganizations();');
+    // Branch management is an organisation-level act; a branch does not nest branches from this page.
+    expect(source).toContain("const isBranch = org?.organization_type === 'branch';");
+    expect(source).toContain('{!isBranch && (');
+  });
+
+  it('explains modules and distances in plain language instead of raw keys', () => {
+    expect(source).toContain('function moduleLabel(key: string)');
+    expect(source).toContain("label: 'On site', help: 'How close (metres)");
+    expect(source).toContain("Turn on {missing.map((dep) => moduleLabel(dep).label).join(', ')} first.");
+  });
 });

@@ -1,25 +1,28 @@
 /**
- * OrganizationSetupPage.tsx
+ * OrganizationSetupPage.tsx — "Organisation settings"
  *
- * Canonical schema: organizations (profile fields, enforcement_workflow_mode,
- * jurisdiction_verification) + organization_modules (per-module enablement)
- * + notice_templates (read-only reference for enforcement notice config).
- * Jurisdiction geometry verification is a Bob-assisted workflow
- * (bob-jurisdiction-preview / bob_agentic_actions) not yet wired here — do
- * not fabricate that integration.
+ * One place for a subscriber's master/admin to run their organisation:
+ * company details, branches, modules in use, location accuracy (geofence
+ * radii), service area, notice templates. Every write goes through the
+ * governed operating-organisation RPCs; the page reads
+ * organizations, organization_modules, org_geofence_config, notice_templates.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Building2, GitBranch, MapPin, Package, Ruler, ScrollText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { PLATFORM_MODULE_BY_KEY, type PlatformModuleKey } from '../config/platformModuleManifest';
 import './PageStyles.css';
 import './OrganizationSetupPage.css';
 
 interface OrgProfile {
   id: string;
   name: string;
+  organization_type: string;
+  parent_organization_id: string | null;
   contact_email: string | null;
   contact_phone: string | null;
   billing_email: string | null;
@@ -31,53 +34,69 @@ interface OrgProfile {
   updated_at: string;
 }
 
-interface ModuleRow {
-  id: string;
-  module_key: string;
-  enabled: boolean;
-}
-
-interface NoticeTemplate {
-  id: string;
-  notice_type: string;
-  version: number;
-  is_active: boolean;
-  authorising_act: string;
-}
-
-interface GeofenceConfigRow {
-  id: string;
-  config_key: string;
-  config_value: number;
-  zone_type: string | null;
-}
+interface ModuleRow { id: string; module_key: string; enabled: boolean; }
+interface BranchRow { id: string; name: string; status: string; active: boolean; contact_email: string | null; contact_phone: string | null; updated_at: string; }
+interface NoticeTemplate { id: string; notice_type: string; version: number; is_active: boolean; authorising_act: string; }
+interface GeofenceConfigRow { id: string; config_key: string; config_value: number; zone_type: string | null; }
 
 // public.get_org_geofence_config()'s own comment: zone-type override -> org-wide -> these platform defaults.
-const GEOFENCE_KEYS: { key: string; label: string; platformDefault: number }[] = [
-  { key: 'site_provisional_radius_m', label: 'Site provisional radius (m)', platformDefault: 50 },
-  { key: 'zone_provisional_radius_m', label: 'Zone provisional radius (m)', platformDefault: 100 },
-  { key: 'checkpoint_radius_m', label: 'Checkpoint radius (m)', platformDefault: 5 },
+const GEOFENCE_KEYS: { key: string; label: string; help: string; platformDefault: number }[] = [
+  { key: 'site_provisional_radius_m', label: 'On site', help: 'How close (metres) an officer must be to a site to count as on site.', platformDefault: 50 },
+  { key: 'zone_provisional_radius_m', label: 'In a zone', help: 'How close (metres) to a zone boundary counts as inside the zone.', platformDefault: 100 },
+  { key: 'checkpoint_radius_m', label: 'At a checkpoint', help: 'How close (metres) to a checkpoint counts as a verified visit.', platformDefault: 5 },
 ];
 
-const ENFORCEMENT_MODES = ['admin_first', 'officer_direct', 'hybrid'];
+const ENFORCEMENT_MODES: { value: string; label: string; help: string }[] = [
+  { value: 'officer_direct', label: 'Officers issue notices themselves', help: 'Fastest. The officer on site issues the notice and it is recorded immediately.' },
+  { value: 'admin_first', label: 'An administrator checks first', help: 'Officers submit; a supervisor reviews before anything is issued.' },
+  { value: 'hybrid', label: 'Depends on the notice type', help: 'Routine notices go out directly; serious ones wait for review.' },
+];
+
+// Catalog keys with no manifest entry still need a human label.
+const EXTRA_MODULE_LABELS: Record<string, { label: string; description: string }> = {
+  patrol: { label: 'Patrol', description: 'Patrol routes, checkpoints, visits, and run sheets' },
+  invoicing: { label: 'Invoicing', description: 'Customer invoices and payment tracking' },
+  client_reporting: { label: 'Client reporting', description: 'Monthly reports and the client portal' },
+  ems: { label: 'Enforcement management', description: 'Cases, notices, and enforcement records' },
+  ptt_radio: { label: 'Push-to-talk radio', description: 'Voice channels between officers and dispatch' },
+  access_control: { label: 'Access control', description: 'Keys, gates, and site access records' },
+  bob_assistant: { label: 'Bob assistant', description: 'The in-app AI assistant' },
+};
+
 const TERRITORIAL_AUTHORITIES = ['Auckland', 'Ashburton District', 'Buller District', 'Carterton District', 'Central Hawke\'s Bay District', 'Central Otago District', 'Chatham Islands Territory', 'Christchurch City', 'Clutha District', 'Dunedin City', 'Far North District', 'Gisborne District', 'Gore District', 'Greater Wellington', 'Grey District', 'Hamilton City', 'Hastings District', 'Hauraki District', 'Hawke\'s Bay Region', 'Horowhenua District', 'Hurunui District', 'Invercargill City', 'Kaikoura District', 'Kaipara District', 'Kapiti Coast District', 'Kawerau District', 'Mackenzie District', 'Manawatu District', 'Marlborough District', 'Masterton District', 'Matamata-Piako District', 'Napier City', 'Nelson City', 'New Plymouth District', 'Northland Region', 'Opotiki District', 'Otorohanga District', 'Palmerston North City', 'Porirua City', 'Queenstown-Lakes District', 'Rangitikei District', 'Rotorua District', 'Selwyn District', 'South Taranaki District', 'South Waikato District', 'South Wairarapa District', 'Southland District', 'Stratford District', 'Tararua District', 'Tasman District', 'Taupo District', 'Tauranga City', 'Thames-Coromandel District', 'Timaru District', 'Upper Hutt City', 'Waikato District', 'Waikato Region', 'Waimakariri District', 'Waimate District', 'Waipa District', 'Wairoa District', 'Waitaki District', 'Waitomo District', 'Wellington City', 'Western Bay of Plenty District', 'Westland District', 'Whakatane District', 'Whanganui District', 'Whangarei District'];
 
+function moduleLabel(key: string): { label: string; description: string } {
+  const manifest = PLATFORM_MODULE_BY_KEY[key as PlatformModuleKey];
+  if (manifest) return { label: manifest.label, description: manifest.description };
+  if (EXTRA_MODULE_LABELS[key]) return EXTRA_MODULE_LABELS[key];
+  const words = key.replaceAll('_', ' ');
+  return { label: words.charAt(0).toUpperCase() + words.slice(1), description: '' };
+}
+
 const OrganizationSetupPage: React.FC = () => {
-  const { profile, operatingOrganizationId } = useAuth();
+  const { profile, operatingOrganizationId, refreshOperatingOrganizations } = useAuth();
   const [org, setOrg] = useState<OrgProfile | null>(null);
   const [modules, setModules] = useState<ModuleRow[]>([]);
+  const [branches, setBranches] = useState<BranchRow[]>([]);
   const [templates, setTemplates] = useState<NoticeTemplate[]>([]);
   const [geofenceConfig, setGeofenceConfig] = useState<GeofenceConfigRow[]>([]);
   const [resolvedGeofenceDefaults, setResolvedGeofenceDefaults] = useState<Record<string, number>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [overrideForm, setOverrideForm] = useState({ config_key: GEOFENCE_KEYS[0].key, zone_type: '', config_value: '' });
+  const [branchForm, setBranchForm] = useState({ name: '', contact_email: '', contact_phone: '' });
+  const [branchRequestId, setBranchRequestId] = useState(() => crypto.randomUUID());
+  const [archivingBranchId, setArchivingBranchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [jurisdictionNames, setJurisdictionNames] = useState(['Nelson City']);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [jurisdictionNames, setJurisdictionNames] = useState<string[]>([]);
+  const [jurisdictionSearch, setJurisdictionSearch] = useState('');
   const [jurisdictionPreview, setJurisdictionPreview] = useState<GeoJSON.GeoJsonObject | null>(null);
   const [jurisdictionPreviewLoading, setJurisdictionPreviewLoading] = useState(false);
   const [jurisdictionPreviewMessage, setJurisdictionPreviewMessage] = useState<string | null>(null);
+
+  const isBranch = org?.organization_type === 'branch';
 
   // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config
   const loadAll = useCallback(async () => {
@@ -92,15 +111,16 @@ const OrganizationSetupPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [orgRes, modulesRes, templatesRes, geofenceRes] = await Promise.all([
+      const [orgRes, modulesRes, branchesRes, templatesRes, geofenceRes] = await Promise.all([
         supabase
           .from('organizations')
           .select(
-            'id, name, contact_email, contact_phone, billing_email, billing_address, enforcement_workflow_mode, jurisdiction_verification, jurisdiction_geom, status, updated_at'
+            'id, name, organization_type, parent_organization_id, contact_email, contact_phone, billing_email, billing_address, enforcement_workflow_mode, jurisdiction_verification, jurisdiction_geom, status, updated_at'
           )
           .eq('id', orgId)
           .single(),
-        supabase.from('organization_modules').select('id, module_key, enabled').eq('organization_id', orgId),
+        supabase.from('organization_modules').select('id, module_key, enabled').eq('organization_id', orgId).order('module_key'),
+        supabase.from('organizations').select('id, name, organization_type, status, active, contact_email, contact_phone, updated_at').eq('parent_organization_id', orgId).eq('organization_type', 'branch').order('name'),
         supabase
           .from('notice_templates')
           .select('id, notice_type, version, is_active, authorising_act')
@@ -113,11 +133,13 @@ const OrganizationSetupPage: React.FC = () => {
 
       if (orgRes.error) throw orgRes.error;
       if (modulesRes.error) throw modulesRes.error;
+      if (branchesRes.error) throw branchesRes.error;
       if (templatesRes.error) throw templatesRes.error;
       if (geofenceRes.error) throw geofenceRes.error;
 
       setOrg(orgRes.data as OrgProfile);
       setModules((modulesRes.data as ModuleRow[]) || []);
+      setBranches(((branchesRes.data as Array<BranchRow & { organization_type: string }>) || []).filter((row) => row.organization_type === 'branch'));
       setTemplates((templatesRes.data as NoticeTemplate[]) || []);
       setGeofenceConfig((geofenceRes.data as GeofenceConfigRow[]) || []);
       const resolvedEntries = await Promise.all(GEOFENCE_KEYS.map(async (key) => {
@@ -132,7 +154,7 @@ const OrganizationSetupPage: React.FC = () => {
       }));
       setResolvedGeofenceDefaults(Object.fromEntries(resolvedEntries));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load organisation setup');
+      setError(err instanceof Error ? err.message : 'Failed to load organisation settings');
     } finally {
       setLoading(false);
     }
@@ -142,6 +164,14 @@ const OrganizationSetupPage: React.FC = () => {
     loadAll();
   }, [loadAll]);
 
+  const enabledModuleKeys = useMemo(() => new Set(modules.filter((m) => m.enabled).map((m) => m.module_key)), [modules]);
+  const activeBranches = useMemo(() => branches.filter((b) => b.status !== 'archived'), [branches]);
+  const filteredAuthorities = useMemo(() => {
+    const q = jurisdictionSearch.trim().toLowerCase();
+    if (!q) return [];
+    return TERRITORIAL_AUTHORITIES.filter((name) => name.toLowerCase().includes(q) && !jurisdictionNames.includes(name)).slice(0, 8);
+  }, [jurisdictionNames, jurisdictionSearch]);
+
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!org) return;
@@ -149,6 +179,7 @@ const OrganizationSetupPage: React.FC = () => {
     try {
       setSaving(true);
       setError(null);
+      setNotice(null);
 
       const { data, error } = await supabase.rpc('update_operating_branch_profile', {
         p_operating_organization_id: org.id,
@@ -161,9 +192,10 @@ const OrganizationSetupPage: React.FC = () => {
       });
 
       if (error) throw error;
-      if (data) setOrg(data as OrgProfile);
+      if (data) setOrg({ ...org, ...(data as Partial<OrgProfile>) });
+      setNotice('Company details saved.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save organisation profile');
+      setError(err instanceof Error ? err.message : 'Failed to save company details');
     } finally {
       setSaving(false);
     }
@@ -171,12 +203,61 @@ const OrganizationSetupPage: React.FC = () => {
 
   const handleToggleModule = async (mod: ModuleRow) => {
     try {
+      setError(null);
+      setNotice(null);
       const { error } = await supabase.rpc('set_operating_branch_module', { p_operating_organization_id: org?.id, p_module_key: mod.module_key, p_enabled: !mod.enabled });
 
       if (error) throw error;
       setModules(modules.map((m) => (m.id === mod.id ? { ...m, enabled: !m.enabled } : m)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update module');
+    }
+  };
+
+  const handleCreateBranch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!org || !branchForm.name.trim()) return;
+    try {
+      setSaving(true);
+      setError(null);
+      setNotice(null);
+      const { data, error } = await supabase.rpc('create_provider_branch', {
+        p_client_request_id: branchRequestId,
+        p_parent_organization_id: org.id,
+        p_name: branchForm.name.trim(),
+        p_contact_email: branchForm.contact_email.trim() || null,
+        p_contact_phone: branchForm.contact_phone.trim() || null,
+      });
+      if (error) throw error;
+      const created = data as BranchRow;
+      setBranches((current) => [...current.filter((b) => b.id !== created.id), created].sort((a, b) => a.name.localeCompare(b.name)));
+      setBranchForm({ name: '', contact_email: '', contact_phone: '' });
+      setBranchRequestId(crypto.randomUUID());
+      setNotice(`${created.name} added. Pick it from "Working in" at the top to set up its staff, customers, and prices.`);
+      await refreshOperatingOrganizations();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add branch');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleArchiveBranch = async (branch: BranchRow) => {
+    if (!window.confirm(`Archive ${branch.name}? Its pages disappear for everyone. Records are kept.`)) return;
+    try {
+      setArchivingBranchId(branch.id);
+      setError(null);
+      setNotice(null);
+      const { data, error } = await supabase.rpc('archive_provider_branch', { p_branch_organization_id: branch.id, p_expected_updated_at: branch.updated_at });
+      if (error) throw error;
+      const archived = data as BranchRow;
+      setBranches((current) => current.map((b) => (b.id === archived.id ? archived : b)));
+      setNotice(`${branch.name} archived.`);
+      await refreshOperatingOrganizations();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive branch');
+    } finally {
+      setArchivingBranchId(null);
     }
   };
 
@@ -195,8 +276,9 @@ const OrganizationSetupPage: React.FC = () => {
       if (error) throw error;
       const saved = data as GeofenceConfigRow;
       setGeofenceConfig((current) => current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
+      if (zoneType === null) setResolvedGeofenceDefaults((current) => ({ ...current, [configKey]: value }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save geofence config');
+      setError(err instanceof Error ? err.message : 'Failed to save distance');
     } finally {
       setSavingKey(null);
     }
@@ -218,7 +300,7 @@ const OrganizationSetupPage: React.FC = () => {
       if (error) throw error;
       setGeofenceConfig(geofenceConfig.filter((g) => g.id !== id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove override');
+      setError(err instanceof Error ? err.message : 'Failed to remove the zone-type distance');
     }
   };
 
@@ -231,10 +313,10 @@ const OrganizationSetupPage: React.FC = () => {
     const { data, error: previewError } = await supabase.functions.invoke('bob-jurisdiction-preview', { body: { district_names: jurisdictionNames } });
     if (previewError || !data?.results?.length || data.results.some((result: { matched: boolean }) => !result.matched)) {
       const unmatched = (data?.unmatched ?? jurisdictionNames).join(', ');
-      setJurisdictionPreviewMessage(previewError?.message ?? `No verified Territorial Authority boundary matched: ${unmatched}.`);
+      setJurisdictionPreviewMessage(previewError?.message ?? `No council boundary matched: ${unmatched}.`);
     } else {
       setJurisdictionPreview({ type: 'FeatureCollection', features: data.results.map((result: { geometry: GeoJSON.GeoJsonObject; name: string }) => ({ type: 'Feature', properties: { name: result.name }, geometry: result.geometry })) } as GeoJSON.GeoJsonObject);
-      setJurisdictionPreviewMessage(`Read-only boundary preview loaded for ${jurisdictionNames.join(', ')}. Nothing has been saved.`);
+      setJurisdictionPreviewMessage(`Boundary preview loaded for ${jurisdictionNames.join(', ')}. Nothing has been saved yet — Bob sends it to Approvals when you are ready.`);
     }
     setJurisdictionPreviewLoading(false);
   };
@@ -244,7 +326,7 @@ const OrganizationSetupPage: React.FC = () => {
       <div className="page-container">
         <div className="loading-state">
           <div className="spinner"></div>
-          <p>Loading organisation setup...</p>
+          <p>Loading organisation settings...</p>
         </div>
       </div>
     );
@@ -253,256 +335,246 @@ const OrganizationSetupPage: React.FC = () => {
   if (!org) {
     return (
       <div className="page-container">
+        <header className="page-header"><div><h1>Organisation settings</h1></div></header>
         <div className="empty-state">
-          <p>Organisation profile not found.</p>
+          <p>{error ?? 'Your organisation could not be loaded. Pick an organisation or branch from "Working in" at the top.'}</p>
         </div>
       </div>
     );
   }
 
+  const detailsComplete = Boolean(org.contact_email && org.contact_phone);
+  const zoneOverrides = geofenceConfig.filter((g) => g.zone_type !== null);
+  const customDistanceCount = geofenceConfig.filter((g) => g.zone_type === null).length;
+
   return (
-    <div className="page-container">
-      <header className="page-header">
-        <h1>Organization Setup</h1>
-        <p className="subtitle">{org.name}</p>
+    <div className="page-container org-settings">
+      <header className="page-header org-settings-header">
+        <div>
+          <h1>Organisation settings</h1>
+          <p className="subtitle">{org.name} <span className={`status-badge status-${org.status === 'active' ? 'active' : 'inactive'}`}>{isBranch ? 'Branch' : 'Organisation'} · {org.status}</span></p>
+        </div>
       </header>
 
       {error && (
         <div className="alert alert-error" role="alert">
-          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
-            ×
-          </button>
+          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">×</button>
           {error}
         </div>
       )}
+      {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
-      <section className="reports-section">
-        <h2>Profile</h2>
+      <nav className="org-settings-checklist" aria-label="Setup overview">
+        <a href="#org-details" className={detailsComplete ? 'is-done' : 'is-todo'}><Building2 size={16} /><span><strong>Company details</strong><small>{detailsComplete ? 'Complete' : 'Add a contact email and phone'}</small></span></a>
+        {!isBranch && <a href="#org-branches" className={activeBranches.length ? 'is-done' : 'is-neutral'}><GitBranch size={16} /><span><strong>Branches</strong><small>{activeBranches.length ? `${activeBranches.length} active` : 'Optional'}</small></span></a>}
+        <a href="#org-modules" className={enabledModuleKeys.size ? 'is-done' : 'is-todo'}><Package size={16} /><span><strong>Modules in use</strong><small>{enabledModuleKeys.size} on · {modules.length - enabledModuleKeys.size} off</small></span></a>
+        <a href="#org-distances" className="is-neutral"><Ruler size={16} /><span><strong>Location accuracy</strong><small>{customDistanceCount ? `${customDistanceCount} custom distance${customDistanceCount === 1 ? '' : 's'}` : 'Using platform defaults'}</small></span></a>
+        <a href="#org-service-area" className={org.jurisdiction_verification === 'verified' ? 'is-done' : 'is-todo'}><MapPin size={16} /><span><strong>Service area</strong><small>{org.jurisdiction_verification === 'verified' ? 'Verified' : 'Not yet verified'}</small></span></a>
+      </nav>
+
+      <section className="reports-section org-settings-section" id="org-details" aria-labelledby="org-details-title">
+        <div className="org-settings-section-heading"><span>Who you are</span><h2 id="org-details-title">Company details</h2><p>Where customers, staff, and invoices reach you.</p></div>
         <form className="settings-form" onSubmit={handleSaveProfile}>
           <div className="form-row">
             <div className="form-group">
-              <label>Contact Email</label>
-              <input
-                type="email"
-                value={org.contact_email || ''}
-                onChange={(e) => setOrg({ ...org, contact_email: e.target.value })}
-              />
+              <label htmlFor="org-contact-email">Contact email</label>
+              <input id="org-contact-email" type="email" autoComplete="email" value={org.contact_email || ''} onChange={(e) => setOrg({ ...org, contact_email: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Contact Phone</label>
-              <input
-                type="tel"
-                value={org.contact_phone || ''}
-                onChange={(e) => setOrg({ ...org, contact_phone: e.target.value })}
-              />
+              <label htmlFor="org-contact-phone">Contact phone</label>
+              <input id="org-contact-phone" type="tel" autoComplete="tel" value={org.contact_phone || ''} onChange={(e) => setOrg({ ...org, contact_phone: e.target.value })} />
             </div>
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label>Billing Email</label>
-              <input
-                type="email"
-                value={org.billing_email || ''}
-                onChange={(e) => setOrg({ ...org, billing_email: e.target.value })}
-              />
+              <label htmlFor="org-billing-email">Email for invoices</label>
+              <input id="org-billing-email" type="email" value={org.billing_email || ''} onChange={(e) => setOrg({ ...org, billing_email: e.target.value })} />
             </div>
             <div className="form-group">
-              <label>Billing Address</label>
-              <input
-                type="text"
-                value={org.billing_address || ''}
-                onChange={(e) => setOrg({ ...org, billing_address: e.target.value })}
-              />
+              <label htmlFor="org-billing-address">Billing address</label>
+              <input id="org-billing-address" type="text" autoComplete="street-address" value={org.billing_address || ''} onChange={(e) => setOrg({ ...org, billing_address: e.target.value })} />
             </div>
           </div>
-          <div className="form-group">
-            <label>Enforcement Workflow Mode</label>
-            <select
-              value={org.enforcement_workflow_mode}
-              onChange={(e) => setOrg({ ...org, enforcement_workflow_mode: e.target.value })}
-            >
-              {ENFORCEMENT_MODES.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
+          <fieldset className="org-settings-choice">
+            <legend>How notices are issued</legend>
+            {ENFORCEMENT_MODES.map((mode) => (
+              <label key={mode.value} className={org.enforcement_workflow_mode === mode.value ? 'is-selected' : ''}>
+                <input type="radio" name="enforcement_workflow_mode" value={mode.value} checked={org.enforcement_workflow_mode === mode.value} onChange={() => setOrg({ ...org, enforcement_workflow_mode: mode.value })} />
+                <span><strong>{mode.label}</strong><small>{mode.help}</small></span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="org-settings-actions">
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save details'}</button>
+          </div>
+        </form>
+      </section>
+
+      {!isBranch && (
+        <section className="reports-section org-settings-section" id="org-branches" aria-labelledby="org-branches-title">
+          <div className="org-settings-section-heading"><span>Structure</span><h2 id="org-branches-title">Branches</h2><p>Add a branch for each region or team that runs its own roster, staff, and customers. Everything can also stay at the organisation level.</p></div>
+          {activeBranches.length === 0 ? (
+            <div className="empty-state org-settings-empty"><p>No branches yet.</p></div>
+          ) : (
+            <ul className="org-branch-list" aria-label="Branches">
+              {activeBranches.map((branch) => (
+                <li key={branch.id} className="org-branch-row">
+                  <div><strong>{branch.name}</strong><small>{[branch.contact_email, branch.contact_phone].filter(Boolean).join(' · ') || 'No contact details yet'}</small></div>
+                  <div className="org-branch-row-actions">
+                    <span className={`status-badge status-${branch.active ? 'active' : 'inactive'}`}>{branch.status}</span>
+                    <button type="button" className="btn btn-sm btn-secondary" disabled={archivingBranchId === branch.id} onClick={() => void handleArchiveBranch(branch)}>{archivingBranchId === branch.id ? 'Archiving…' : 'Archive'}</button>
+                  </div>
+                </li>
               ))}
-            </select>
-          </div>
-          <div className="form-group">
-            <label>Jurisdiction Verification</label>
-            <p className="contact-meta">
-              {org.jurisdiction_verification === 'verified' ? '✓ Verified' : 'Unverified'} (managed via Bob
-              jurisdiction review, not editable here)
-            </p>
-          </div>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : 'Save Profile'}
-          </button>
-        </form>
-      </section>
-
-      <section className="reports-section organization-jurisdiction-section">
-        <h2>Branch Jurisdiction Map</h2>
-        <p className="contact-meta">Resolve the branch Territorial Authority boundary before Bob proposes it for approval. This preview is read-only; it does not write or verify the jurisdiction.</p>
-        <form className="settings-form organization-jurisdiction-form" onSubmit={previewJurisdiction}>
-          <div className="form-row"><fieldset className="jurisdiction-checkboxes"><legend>Territorial Authorities</legend>{TERRITORIAL_AUTHORITIES.map((authority) => <label key={authority}><input type="checkbox" checked={jurisdictionNames.includes(authority)} onChange={(event) => setJurisdictionNames((current) => event.target.checked ? [...current, authority] : current.filter((selected) => selected !== authority))} /> <span>{authority}</span></label>)}</fieldset><button type="submit" className="btn btn-secondary" disabled={jurisdictionPreviewLoading || jurisdictionNames.length === 0}>{jurisdictionPreviewLoading ? 'Resolving…' : 'Preview boundaries'}</button></div>
-        </form>
-        {jurisdictionPreviewMessage && <div className={`organization-jurisdiction-message ${jurisdictionPreview ? 'is-success' : 'is-error'}`} role="status">{jurisdictionPreviewMessage}</div>}
-        <JurisdictionPreviewMap geometry={jurisdictionPreview ?? org.jurisdiction_geom} label={jurisdictionNames.join(', ')} />
-        <p className="contact-meta">Next step: Bob submits the resolved boundary to the Approvals page. A human must approve it and then visually verify it before branch routing uses it.</p>
-      </section>
-
-      <section className="reports-section">
-        <h2>Modules ({modules.length})</h2>
-        <div className="contacts-list">
-          {modules.length === 0 ? (
-            <div className="empty-state">
-              <p>No module configuration for this organisation.</p>
+            </ul>
+          )}
+          <form className="settings-form org-branch-form" onSubmit={handleCreateBranch} aria-label="Add a branch">
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="branch-name">Branch name</label>
+                <input id="branch-name" required maxLength={200} placeholder="e.g. Nelson" value={branchForm.name} onChange={(e) => setBranchForm({ ...branchForm, name: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="branch-email">Branch email (optional)</label>
+                <input id="branch-email" type="email" value={branchForm.contact_email} onChange={(e) => setBranchForm({ ...branchForm, contact_email: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="branch-phone">Branch phone (optional)</label>
+                <input id="branch-phone" type="tel" value={branchForm.contact_phone} onChange={(e) => setBranchForm({ ...branchForm, contact_phone: e.target.value })} />
+              </div>
             </div>
-          ) : (
-            modules.map((mod) => (
-              <div key={mod.id} className="contact-card">
-                <div className="contact-header">
-                  <h3>{mod.module_key}</h3>
-                  <button
-                    className={`btn btn-sm ${mod.enabled ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => handleToggleModule(mod)}
-                  >
-                    {mod.enabled ? 'Enabled' : 'Disabled'}
+            <div className="org-settings-actions">
+              <button type="submit" className="btn btn-primary" disabled={saving || !branchForm.name.trim()}>{saving ? 'Adding…' : 'Add branch'}</button>
+              <small>A new branch starts with the same modules as the organisation.</small>
+            </div>
+          </form>
+        </section>
+      )}
+
+      <section className="reports-section org-settings-section" id="org-modules" aria-labelledby="org-modules-title">
+        <div className="org-settings-section-heading"><span>What you use</span><h2 id="org-modules-title">Modules in use</h2><p>{isBranch ? 'A branch can only turn on modules the organisation has on. Turning one off hides its pages for this branch.' : 'Turning a module off hides its pages for everyone in the organisation. Your subscription is unchanged.'}</p></div>
+        {modules.length === 0 ? (
+          <div className="empty-state org-settings-empty"><p>No modules are set up for this {isBranch ? 'branch' : 'organisation'} yet.</p></div>
+        ) : (
+          <ul className="org-module-grid" aria-label="Modules">
+            {modules.map((mod) => {
+              const { label, description } = moduleLabel(mod.module_key);
+              const manifest = PLATFORM_MODULE_BY_KEY[mod.module_key as PlatformModuleKey];
+              const missing = manifest ? manifest.dependsOn.filter((dep) => !enabledModuleKeys.has(dep)) : [];
+              const blocked = !mod.enabled && missing.length > 0;
+              return (
+                <li key={mod.id} className={`org-module-card ${mod.enabled ? 'is-on' : 'is-off'}`}>
+                  <div><h3>{label}</h3>{description && <small>{description}</small>}{blocked && <small className="org-module-hint">Turn on {missing.map((dep) => moduleLabel(dep).label).join(', ')} first.</small>}</div>
+                  <button type="button" className={`btn btn-sm ${mod.enabled ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={mod.enabled} aria-label={`${label}: ${mod.enabled ? 'on' : 'off'}`} disabled={blocked} onClick={() => handleToggleModule(mod)}>
+                    {mod.enabled ? 'On' : 'Off'}
                   </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
-      <section className="reports-section">
-        <h2>Notice Templates ({templates.length})</h2>
-        <div className="contacts-list">
-          {templates.length === 0 ? (
-            <div className="empty-state">
-              <p>No notice templates configured.</p>
-            </div>
-          ) : (
-            templates.map((t) => (
-              <div key={t.id} className="contact-card">
-                <div className="contact-header">
-                  <h3>{t.notice_type}</h3>
-                  <span className={`status-badge status-${t.is_active ? 'active' : 'inactive'}`}>
-                    v{t.version} · {t.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-                <p className="contact-meta">{t.authorising_act}</p>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="reports-section">
-        <h2>Geofence Configuration</h2>
-        <p className="contact-meta">
-          Provisional detection radii, read by get_org_geofence_config() with zone-type override → org-wide → platform
-          default fallback.
-        </p>
-        <div className="contacts-list" style={{ marginTop: '8px' }}>
+      <section className="reports-section org-settings-section" id="org-distances" aria-labelledby="org-distances-title">
+        <div className="org-settings-section-heading"><span>Proof of attendance</span><h2 id="org-distances-title">Location accuracy</h2><p>How close an officer's phone must be before the app counts them as there. Smaller is stricter. Leave the defaults unless you know your sites need something different.</p></div>
+        <ul className="org-distance-list" aria-label="Distances">
           {GEOFENCE_KEYS.map((k) => {
             const existing = geofenceConfig.find((g) => g.config_key === k.key && g.zone_type === null);
             const resolvedValue = resolvedGeofenceDefaults[k.key] ?? existing?.config_value ?? k.platformDefault;
+            const inputId = `distance-${k.key}`;
             return (
-              <div key={k.key} className="contact-card">
-                <div className="contact-header">
-                  <h3>{k.label}</h3>
-                </div>
-                <div className="contact-details" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="number"
-                    min={0}
-                    defaultValue={resolvedValue}
-                    style={{ width: '100px' }}
+              <li key={k.key} className="org-distance-row">
+                <label htmlFor={inputId}><strong>{k.label}</strong><small>{k.help}</small></label>
+                <div className="org-distance-input">
+                  <input id={inputId} type="number" min={0} max={10000} defaultValue={resolvedValue}
                     onBlur={(e) => {
                       const value = Number(e.target.value);
-                      if (!Number.isNaN(value) && value !== (existing?.config_value ?? k.platformDefault)) {
-                        saveGeofenceValue(k.key, null, value);
-                      }
-                    }}
-                  />
-                  <span className="contact-meta">
-                    {existing ? 'org-wide override' : `resolved fallback (${resolvedValue})`}
-                    {savingKey === `${k.key}:` ? ' · saving…' : ''}
-                  </span>
+                      if (!Number.isNaN(value) && value !== (existing?.config_value ?? k.platformDefault)) saveGeofenceValue(k.key, null, value);
+                    }} />
+                  <span>m</span>
+                  <small>{savingKey === `${k.key}:` ? 'Saving…' : existing ? 'Custom' : `Default ${k.platformDefault} m`}</small>
                 </div>
-              </div>
+              </li>
             );
           })}
-        </div>
-
-        <h3 style={{ marginTop: '16px', fontSize: '14px' }}>Per-Zone-Type Overrides</h3>
-        <div className="contacts-list" style={{ marginTop: '8px' }}>
-          {geofenceConfig.filter((g) => g.zone_type !== null).length === 0 ? (
-            <div className="empty-state">
-              <p>No zone-type-specific overrides.</p>
-            </div>
-          ) : (
-            geofenceConfig
-              .filter((g) => g.zone_type !== null)
-              .map((g) => (
-                <div key={g.id} className="contact-card">
-                  <div className="contact-header">
-                    <h3>
-                      {g.config_key} · {g.zone_type}
-                    </h3>
-                    <button className="btn btn-sm btn-danger" onClick={() => handleDeleteOverride(g.id)}>
-                      Remove
-                    </button>
-                  </div>
-                  <p className="contact-meta">{g.config_value}m</p>
-                </div>
-              ))
+        </ul>
+        <details className="org-settings-advanced">
+          <summary>Different distance for a type of zone {zoneOverrides.length > 0 && `(${zoneOverrides.length})`}</summary>
+          {zoneOverrides.length > 0 && (
+            <ul className="org-distance-list" aria-label="Zone-type distances">
+              {zoneOverrides.map((g) => (
+                <li key={g.id} className="org-distance-row">
+                  <div><strong>{GEOFENCE_KEYS.find((k) => k.key === g.config_key)?.label ?? g.config_key}</strong><small>{g.zone_type} zones · {g.config_value} m</small></div>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleDeleteOverride(g.id)}>Remove</button>
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
+          <form className="settings-form" onSubmit={handleAddOverride}>
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="override-key">Which distance</label>
+                <select id="override-key" value={overrideForm.config_key} onChange={(e) => setOverrideForm({ ...overrideForm, config_key: e.target.value })}>
+                  {GEOFENCE_KEYS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="override-zone">Zone type</label>
+                <input id="override-zone" type="text" required placeholder="e.g. freedom_camping" value={overrideForm.zone_type} onChange={(e) => setOverrideForm({ ...overrideForm, zone_type: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="override-value">Metres</label>
+                <input id="override-value" type="number" min={0} max={10000} required value={overrideForm.config_value} onChange={(e) => setOverrideForm({ ...overrideForm, config_value: e.target.value })} />
+              </div>
+            </div>
+            <div className="org-settings-actions"><button type="submit" className="btn btn-secondary btn-sm">Add zone-type distance</button></div>
+          </form>
+        </details>
+      </section>
 
-        <form className="settings-form" onSubmit={handleAddOverride} style={{ marginTop: '12px' }}>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Config Key</label>
-              <select
-                value={overrideForm.config_key}
-                onChange={(e) => setOverrideForm({ ...overrideForm, config_key: e.target.value })}
-              >
-                {GEOFENCE_KEYS.map((k) => (
-                  <option key={k.key} value={k.key}>
-                    {k.label}
-                  </option>
+      <section className="reports-section org-settings-section" id="org-service-area" aria-labelledby="org-service-area-title">
+        <div className="org-settings-section-heading"><span>Where you work</span><h2 id="org-service-area-title">Service area</h2><p>Pick the council areas you operate in and preview the boundary. {org.jurisdiction_verification === 'verified' ? 'Your current boundary is verified.' : 'Bob sends the boundary to Approvals; a person approves it before routing uses it.'}</p></div>
+        <form className="settings-form org-service-area-form" onSubmit={previewJurisdiction}>
+          <div className="form-group">
+            <label htmlFor="service-area-search">Council area</label>
+            <input id="service-area-search" type="search" placeholder="Start typing, e.g. Nelson" value={jurisdictionSearch} onChange={(e) => setJurisdictionSearch(e.target.value)} aria-autocomplete="list" aria-controls="service-area-options" />
+            {filteredAuthorities.length > 0 && (
+              <ul id="service-area-options" className="org-service-area-options" aria-label="Matching council areas">
+                {filteredAuthorities.map((name) => (
+                  <li key={name}><button type="button" onClick={() => { setJurisdictionNames((current) => [...current, name]); setJurisdictionSearch(''); }}>{name}</button></li>
                 ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Zone Type</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. freedom_camping"
-                value={overrideForm.zone_type}
-                onChange={(e) => setOverrideForm({ ...overrideForm, zone_type: e.target.value })}
-              />
-            </div>
-            <div className="form-group">
-              <label>Value (m)</label>
-              <input
-                type="number"
-                min={0}
-                required
-                value={overrideForm.config_value}
-                onChange={(e) => setOverrideForm({ ...overrideForm, config_value: e.target.value })}
-              />
-            </div>
+              </ul>
+            )}
           </div>
-          <button type="submit" className="btn btn-secondary btn-sm">
-            Add Override
-          </button>
+          {jurisdictionNames.length > 0 && (
+            <ul className="org-service-area-chips" aria-label="Selected council areas">
+              {jurisdictionNames.map((name) => (
+                <li key={name}><span>{name}</span><button type="button" aria-label={`Remove ${name}`} onClick={() => setJurisdictionNames((current) => current.filter((selected) => selected !== name))}>×</button></li>
+              ))}
+            </ul>
+          )}
+          <div className="org-settings-actions">
+            <button type="submit" className="btn btn-secondary" disabled={jurisdictionPreviewLoading || jurisdictionNames.length === 0}>{jurisdictionPreviewLoading ? 'Loading boundary…' : 'Preview boundary'}</button>
+          </div>
         </form>
+        {jurisdictionPreviewMessage && <div className={`organization-jurisdiction-message ${jurisdictionPreview ? 'is-success' : 'is-error'}`} role="status">{jurisdictionPreviewMessage}</div>}
+        <JurisdictionPreviewMap geometry={jurisdictionPreview ?? org.jurisdiction_geom} label={jurisdictionNames.join(', ') || org.name} />
+      </section>
+
+      <section className="reports-section org-settings-section" id="org-templates" aria-labelledby="org-templates-title">
+        <div className="org-settings-section-heading"><span>Reference</span><h2 id="org-templates-title">Notice templates</h2><p>The legal notice formats this organisation can issue. They are managed with each enforcement module and shown here for reference.</p></div>
+        {templates.length === 0 ? (
+          <div className="empty-state org-settings-empty"><p>No notice templates yet. They appear once an enforcement module is set up.</p></div>
+        ) : (
+          <ul className="org-branch-list" aria-label="Notice templates">
+            {templates.map((t) => (
+              <li key={t.id} className="org-branch-row">
+                <div><strong><ScrollText size={14} /> {t.notice_type.replaceAll('_', ' ')}</strong><small>{t.authorising_act}</small></div>
+                <span className={`status-badge status-${t.is_active ? 'active' : 'inactive'}`}>v{t.version} · {t.is_active ? 'Active' : 'Inactive'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );
@@ -523,7 +595,7 @@ function JurisdictionPreviewMap({ geometry, label }: { geometry: GeoJSON.GeoJson
     const timer = window.setTimeout(() => map.invalidateSize(), 0);
     return () => { window.clearTimeout(timer); map.remove(); };
   }, [geometry, label]);
-  return geometry ? <div className="organization-jurisdiction-map" ref={containerRef} aria-label={`${label} jurisdiction preview`} /> : <div className="organization-jurisdiction-map-empty">Enter a Territorial Authority and preview its boundary here.</div>;
+  return geometry ? <div className="organization-jurisdiction-map" ref={containerRef} aria-label={`${label} service area preview`} /> : <div className="organization-jurisdiction-map-empty">Pick a council area and preview its boundary here.</div>;
 }
 
 export default OrganizationSetupPage;

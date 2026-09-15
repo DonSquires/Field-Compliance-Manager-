@@ -45,9 +45,10 @@ begin
          (v_owner_master, 'master', v_owner, v_owner, 'Oracle Owner Master'),
          (v_client_user, 'master', v_client, v_client, 'Oracle Council Master');
   update public.user_profiles set deactivated_at = now() where id = v_gm_deactivated;
-  -- Catalog rows are data (seeded by the catalog migration live), so the oracle seeds the keys it uses.
+  -- Catalog rows are data (seeded by the catalog migrations live), so the oracle seeds the keys it uses.
   insert into public.module_catalog (module_key, base_price, per_seat_price, per_site_price, billing_period, currency, active)
-  values ('patrol', 0, 0, 0, 'monthly', 'NZD', true), ('rostering', 0, 0, 0, 'monthly', 'NZD', true), ('finance', 0, 0, 0, 'monthly', 'NZD', true)
+  values ('patrol', 0, 0, 0, 'monthly', 'NZD', true), ('rostering', 0, 0, 0, 'monthly', 'NZD', true), ('finance', 0, 0, 0, 'monthly', 'NZD', true),
+         ('dispatch', 0, 0, 0, 'monthly', 'NZD', true), ('cctv', 0, 0, 0, 'monthly', 'NZD', true)
   on conflict (module_key) do nothing;
   insert into public.module_dependencies (module_key, depends_on_module_key, reason)
   values ('finance', 'rostering', 'oracle: finance derives from roster work units')

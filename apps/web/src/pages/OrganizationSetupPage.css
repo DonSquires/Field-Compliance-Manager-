@@ -1,14 +1,101 @@
-.organization-jurisdiction-section { display: grid; gap: 10px; }
-.organization-jurisdiction-form .form-row { align-items: end; }
-.organization-jurisdiction-form button { min-height: 38px; white-space: nowrap; }
-.jurisdiction-checkboxes { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: 6px 12px; min-width: 0; margin: 0; padding: 10px; border: 1px solid #2b4a59; border-radius: 6px; background: #0a1b25; }
-.jurisdiction-checkboxes legend { padding: 0 4px; color: #8fa9b5; font-size: 12px; font-weight: 800; text-transform: uppercase; }
-.jurisdiction-checkboxes label { display: flex; align-items: center; gap: 6px; min-width: 0; color: #c8d8df; font-size: 12px; }
-.jurisdiction-checkboxes input { width: auto; margin: 0; }
+/* Organisation settings — one page a subscriber's master runs their organisation from. */
+.org-settings { display: grid; gap: var(--space-lg, 20px); }
+.org-settings-header { align-items: flex-start; }
+.org-settings .subtitle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.org-settings .subtitle .status-badge { text-transform: capitalize; }
+
+/* Setup overview: where am I up to, and jump there. */
+.org-settings-checklist { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.org-settings-checklist a { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 12px 14px; border: 1px solid var(--color-border); border-left: 3px solid var(--color-border-strong); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); color: var(--color-text-primary); text-decoration: none; transition: border-color 120ms ease, background 120ms ease; }
+.org-settings-checklist a:hover, .org-settings-checklist a:focus-visible { background: var(--color-bg-hover); border-color: var(--color-border-strong); outline: none; }
+.org-settings-checklist a svg { flex: 0 0 auto; margin-top: 2px; color: var(--color-text-muted); }
+.org-settings-checklist a span { display: grid; gap: 2px; min-width: 0; }
+.org-settings-checklist a strong { font-size: 13px; font-weight: 700; }
+.org-settings-checklist a small { color: var(--color-text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-settings-checklist a.is-done { border-left-color: var(--color-success); }
+.org-settings-checklist a.is-done svg { color: var(--color-success); }
+.org-settings-checklist a.is-todo { border-left-color: var(--color-warning); }
+.org-settings-checklist a.is-todo svg { color: var(--color-warning); }
+.org-settings-checklist a.is-neutral { border-left-color: var(--color-border-strong); }
+
+/* Sections share one heading rhythm: eyebrow, title, one plain sentence. */
+.org-settings-section { display: grid; gap: 14px; scroll-margin-top: 84px; }
+.org-settings-section-heading { display: grid; gap: 4px; }
+.org-settings-section-heading span { color: var(--color-text-muted); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.org-settings-section-heading h2 { margin: 0; }
+.org-settings-section-heading p { margin: 0; max-width: 72ch; color: var(--color-text-secondary); font-size: 13px; line-height: 1.5; }
+.org-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.org-settings-actions small { color: var(--color-text-muted); font-size: 12px; }
+.org-settings-empty { padding: 18px; }
+.org-settings-empty p { margin: 0; }
+
+/* One-of choices as cards with a plain explanation, not a bare select. */
+.org-settings-choice { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.org-settings-choice legend { padding: 0; margin-bottom: 4px; color: var(--color-text-secondary); font-size: 12px; font-weight: 700; }
+.org-settings-choice label { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-bg-secondary); cursor: pointer; }
+.org-settings-choice label.is-selected { border-color: var(--color-primary); background: var(--color-bg-elevated); }
+.org-settings-choice input { width: auto; margin: 3px 0 0; flex: 0 0 auto; }
+.org-settings-choice span { display: grid; gap: 2px; min-width: 0; }
+.org-settings-choice strong { font-size: 13px; }
+.org-settings-choice small { color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
+
+/* Branches and notice templates: one row per item, name on the left, state and action on the right. */
+.org-branch-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.org-branch-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); }
+.org-branch-row > div:first-child { display: grid; gap: 2px; min-width: 0; }
+.org-branch-row strong { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; text-transform: capitalize; }
+.org-branch-row small { color: var(--color-text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.org-branch-row-actions { display: flex; align-items: center; gap: 10px; }
+.org-branch-form { padding-top: 6px; border-top: 1px dashed var(--color-border); }
+
+/* Modules: a grid of on/off cards with a plain description. */
+.org-module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.org-module-card { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); }
+.org-module-card.is-on { border-left: 3px solid var(--color-success); }
+.org-module-card.is-off { border-left: 3px solid var(--color-border-strong); }
+.org-module-card > div { display: grid; gap: 4px; min-width: 0; }
+.org-module-card h3 { margin: 0; font-size: 14px; }
+.org-module-card small { color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
+.org-module-card .org-module-hint { color: var(--color-warning); }
+.org-module-card button { flex: 0 0 auto; min-width: 52px; }
+
+/* Location accuracy: label + help on the left, number + unit + state on the right. */
+.org-distance-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.org-distance-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); }
+.org-distance-row > label, .org-distance-row > div:first-child { display: grid; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.org-distance-row strong { font-size: 13px; }
+.org-distance-row small { color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
+.org-distance-input { display: flex; align-items: center; gap: 8px; }
+.org-distance-input input { width: 96px; text-align: right; }
+.org-distance-input > span { color: var(--color-text-secondary); font-size: 13px; }
+.org-distance-input small { min-width: 84px; color: var(--color-text-muted); font-size: 12px; }
+.org-settings-advanced { display: grid; gap: 12px; padding: 10px 14px; border: 1px dashed var(--color-border); border-radius: var(--radius-md, 8px); }
+.org-settings-advanced summary { cursor: pointer; color: var(--color-text-secondary); font-size: 13px; font-weight: 600; }
+.org-settings-advanced[open] summary { margin-bottom: 4px; }
+
+/* Service area: type to find a council, chips for the picks, then the map. */
+.org-service-area-form .form-group { position: relative; }
+.org-service-area-options { position: absolute; z-index: 5; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 4px; list-style: none; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); box-shadow: var(--shadow-md); }
+.org-service-area-options button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-sm, 4px); background: transparent; color: var(--color-text-primary); font: inherit; text-align: left; cursor: pointer; }
+.org-service-area-options button:hover, .org-service-area-options button:focus-visible { background: var(--color-bg-hover); outline: none; }
+.org-service-area-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.org-service-area-chips li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-full, 999px); background: var(--color-bg-secondary); font-size: 12px; }
+.org-service-area-chips button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-full, 999px); background: transparent; color: var(--color-text-muted); font-size: 14px; line-height: 1; cursor: pointer; }
+.org-service-area-chips button:hover, .org-service-area-chips button:focus-visible { background: var(--color-bg-hover); color: var(--color-text-primary); outline: none; }
 .organization-jurisdiction-map,
-.organization-jurisdiction-map-empty { min-height: 380px; border: 1px solid #2b4a59; border-radius: 6px; overflow: hidden; background: #0a1b25; }
-.organization-jurisdiction-map-empty { display: grid; place-items: center; color: #8fa9b5; font-size: 12px; }
-.organization-jurisdiction-message { padding: 10px 12px; border-left: 3px solid #f2bf3a; color: #f2d58a; background: #30250d; font-size: 12px; }
-.organization-jurisdiction-message.is-success { border-left-color: #4cc38a; color: #c5f3df; background: #0d2b26; }
-@media (max-width: 900px) { .jurisdiction-checkboxes { grid-template-columns: repeat(2, minmax(150px, 1fr)); } }
-@media (max-width: 650px) { .organization-jurisdiction-form .form-row { display: grid; } .jurisdiction-checkboxes { grid-template-columns: 1fr; } .organization-jurisdiction-map, .organization-jurisdiction-map-empty { min-height: 300px; } }
+.organization-jurisdiction-map-empty { min-height: 380px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); overflow: hidden; background: var(--color-bg-secondary); }
+.organization-jurisdiction-map-empty { display: grid; place-items: center; padding: 20px; color: var(--color-text-muted); font-size: 13px; text-align: center; }
+.organization-jurisdiction-message { padding: 10px 12px; border-left: 3px solid var(--color-warning); border-radius: var(--radius-sm, 4px); color: var(--color-text-primary); background: var(--color-warning-bg); font-size: 13px; }
+.organization-jurisdiction-message.is-success { border-left-color: var(--color-success); background: var(--color-success-bg); }
+.organization-jurisdiction-message.is-error { border-left-color: var(--color-danger); background: var(--color-danger-bg); }
+
+@media (max-width: 720px) {
+  .org-settings-checklist { grid-template-columns: 1fr 1fr; }
+  .org-settings-checklist a small { white-space: normal; }
+  .org-branch-row-actions { width: 100%; justify-content: space-between; }
+  .org-distance-input { width: 100%; justify-content: space-between; }
+  .organization-jurisdiction-map, .organization-jurisdiction-map-empty { min-height: 300px; }
+}
+@media (max-width: 480px) {
+  .org-settings-checklist { grid-template-columns: 1fr; }
+}

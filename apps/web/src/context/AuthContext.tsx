@@ -27,7 +27,7 @@ export interface AppProfile {
 export interface OperatingOrganization {
   organizationId: string;
   organizationName: string;
-  authorityBasis: 'branch_authorisation' | 'corporate_oversight';
+  authorityBasis: 'organisation_home' | 'branch_authorisation' | 'corporate_oversight';
   roleAtBranch: string | null;
   moduleAccess: string[];
   canBeRostered: boolean;
@@ -43,6 +43,7 @@ interface AuthContextValue {
   operatingOrganizationId: string | null;
   operatingOrganizations: OperatingOrganization[];
   setOperatingOrganization: (organizationId: string) => void;
+  refreshOperatingOrganizations: () => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
   requestPasswordReset: (email: string) => Promise<{ error: string | null }>;
   updatePassword: (password: string) => Promise<{ error: string | null }>;
@@ -58,6 +59,7 @@ export const AuthContext = createContext<AuthContextValue>({
   operatingOrganizationId: null,
   operatingOrganizations: [],
   setOperatingOrganization: () => undefined,
+  refreshOperatingOrganizations: async () => undefined,
   signInWithPassword: async () => ({ error: 'Auth not initialised' }),
   requestPasswordReset: async () => ({ error: 'Auth not initialised' }),
   updatePassword: async () => ({ error: 'Auth not initialised' }),
@@ -206,8 +208,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOperatingOrganizationId(organizationId);
   };
 
+  const refreshOperatingOrganizations = async () => {
+    if (!profile) return;
+    const contexts = await loadOperatingOrganizations();
+    setOperatingOrganizations(contexts);
+    if (operatingOrganizationId && !contexts.some((context) => context.organizationId === operatingOrganizationId)) {
+      const fallback = contexts.find((context) => context.isDefault) ?? contexts[0];
+      setOperatingOrganizationId(fallback?.organizationId ?? null);
+      if (fallback) sessionStorage.setItem(`fcm:operating-organization:${profile.id}`, fallback.organizationId);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ profile, hasSession, recoveryMode, loading, error, operatingOrganizationId, operatingOrganizations, setOperatingOrganization, signInWithPassword, requestPasswordReset, updatePassword, signOut }}>
+    <AuthContext.Provider value={{ profile, hasSession, recoveryMode, loading, error, operatingOrganizationId, operatingOrganizations, setOperatingOrganization, refreshOperatingOrganizations, signInWithPassword, requestPasswordReset, updatePassword, signOut }}>
       {children}
     </AuthContext.Provider>
   );
