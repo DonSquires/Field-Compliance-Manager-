@@ -33,8 +33,8 @@ test('owner can walk finance from simple home to final review boundary', async (
   await expect(page.getByRole('heading', { name: 'What should this job cost?' })).toBeVisible();
   await page.goBack();
 
-  await page.getByRole('button', { name: /Manage prices and discounts/ }).click();
-  await expect(page.getByRole('heading', { name: 'Pricing and discounts' })).toBeVisible();
+  await page.getByRole('button', { name: /Set prices and discounts/ }).click();
+  await expect(page.getByRole('heading', { name: 'Prices and discounts' })).toBeVisible();
   await page.goBack();
 
   await page.getByRole('button', { name: /Connect ANZ or IRD/ }).click();
@@ -63,16 +63,16 @@ test('owner can enter IRD details and calculate a job cost like a human', async 
 
   await page.getByRole('main').getByRole('button', { name: 'Finance home' }).click();
   await page.getByRole('button', { name: /Work out what a job should cost/ }).click();
-  await page.getByLabel('Base hourly rate').fill('42');
-  await page.getByLabel('Asset acquisition cost').fill('12000');
+  await page.getByLabel('Hourly pay rate').fill('42');
+  await page.getByLabel('Gear purchase cost').fill('12000');
   await page.getByLabel('Equipment/evidence cost').fill('80');
-  await page.getByLabel('Other direct cost').fill('25');
-  await page.getByRole('button', { name: 'Calculate true service cost' }).click();
-  await expect(page.getByText('True cost')).toBeVisible();
+  await page.getByLabel('Other job cost').fill('25');
+  await page.getByRole('button', { name: 'Calculate job cost' }).click();
+  await expect(page.getByText('Real cost')).toBeVisible();
   await expect(page.getByText('$1,046.00')).toBeVisible();
   await expect(page).toHaveScreenshot('finance-costing-result.png');
   await page.getByRole('button', { name: 'Reset' }).click();
-  await expect(page.getByLabel('Base hourly rate')).toHaveValue('');
+  await expect(page.getByLabel('Hourly pay rate')).toHaveValue('');
   expect(errors, errors.join('\n')).toEqual([]);
 });
 

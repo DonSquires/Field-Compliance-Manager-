@@ -41,10 +41,10 @@ export const ADMIN_COMMAND_CENTRE_GROUPS: readonly CommandCentreGroup[] = [
     openLabel: 'Open Staff & People', open: 'people-hr',
   },
   {
-    key: 'pricing', label: 'Pricing & Invoicing', description: 'Per-client service rates, contracts and invoices', accent: 'amber', icon: BriefcaseBusiness, statLabel: 'active contracts', stat: null,
+    key: 'pricing', label: 'Prices & Invoices', description: 'What you charge each customer, their contracts, and invoices', accent: 'amber', icon: BriefcaseBusiness, statLabel: 'active contracts', stat: null,
     allowedRoles: ['admin', 'master', 'grand_master'],
-    links: [['Assets', 'finance-costing'], ['Service Rates', 'rate-rules'], ['Invoices', 'finance-money'], ['Contracts', 'crm'], ['Timesheets', 'people-hr']],
-    openLabel: 'Open Pricing & Invoicing', open: 'finance-bureau',
+    links: [['Job costs', 'finance-costing'], ['Pay & charge rules', 'rate-rules'], ['Invoices', 'finance-money'], ['Contracts', 'crm'], ['Timesheets', 'people-hr']],
+    openLabel: 'Open Prices & Invoices', open: 'finance-bureau',
   },
   {
     key: 'compliance', label: 'Compliance & Enforcement', description: 'Breaches, infringements, notices and disputes', accent: 'red', icon: ShieldCheck, statLabel: 'open alerts', stat: 'breaches',

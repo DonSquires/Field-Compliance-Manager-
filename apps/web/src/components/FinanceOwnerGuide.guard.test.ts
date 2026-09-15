@@ -21,7 +21,7 @@ describe('finance owner guide', () => {
 
   it('opens the existing governed Bob panel from Finance Bureau', () => {
     expect(page).toContain('<FinanceOwnerGuide onOpenBob={onOpenBob} />');
-    expect(shell).toContain("<FinanceBureauPage onOpenBob={() => setBobOpen(true)} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />");
+    expect(shell).toContain("<FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />");
   });
 
   it('starts Bob from a live read-only owner brief', () => {

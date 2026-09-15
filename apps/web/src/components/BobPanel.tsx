@@ -46,6 +46,7 @@ interface BobPanelProps {
   onClose: () => void;
   context?: Record<string, unknown>;
   mode?: 'operations' | 'builder';
+  launchPrompt?: string | null;
 }
 
 interface PendingBobFile {
@@ -154,7 +155,7 @@ function formatContextEntry(key: string, value: string): [string, string] {
   return [label, readable];
 }
 
-export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations' }) => {
+export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations', launchPrompt = null }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BobMessage[]>([]);
@@ -195,6 +196,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const audioChunksRef = useRef<BlobPart[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const appliedLaunchPromptRef = useRef<string | null>(null);
   const contextEntries = useMemo(() => Object.entries(context ?? {}).flatMap(([key, value]) => {
     if (typeof value === 'string' || typeof value === 'number') return [formatContextEntry(key, String(value))];
     if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -418,6 +420,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   useEffect(() => {
     if (open) loadConversation();
   }, [open, loadConversation]);
+
+  useEffect(() => {
+    if (!open || !launchPrompt || appliedLaunchPromptRef.current === launchPrompt) return;
+    appliedLaunchPromptRef.current = launchPrompt;
+    setWorkspaceExpanded(true);
+    setInput(launchPrompt);
+    focusComposer();
+  }, [launchPrompt, open]);
 
   useEffect(() => {
     if (!open) return;

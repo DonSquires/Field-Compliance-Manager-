@@ -32,10 +32,10 @@ const initialInputs: CostInputs = {
 type CostResult = { true_cost: number; client_charge: number; gross_margin: number; gross_margin_pct: number; breakdown: Record<string, number>; };
 
 const fields: Array<[keyof CostInputs, string]> = [
-  ['labour_hours', 'Labour hours'], ['base_hourly_rate', 'Base hourly rate'], ['labour_oncost_pct', 'Labour on-cost %'], ['leave_provision_pct', 'Leave provision %'],
-  ['vehicle_km', 'Vehicle kilometres'], ['vehicle_fixed_annual', 'Vehicle fixed annual cost'], ['vehicle_productive_hours', 'Vehicle productive hours/year'], ['vehicle_variable_per_km', 'Vehicle running cost/km'],
-  ['asset_acquisition_cost', 'Asset acquisition cost'], ['asset_setup_cost', 'Asset setup cost'], ['asset_residual_value', 'Asset residual value'], ['asset_useful_life_months', 'Asset useful life (months)'],
-  ['equipment_cost', 'Equipment/evidence cost'], ['direct_operating_cost', 'Other direct cost'], ['overhead_pct', 'Overhead allocation %'], ['target_margin_pct', 'Target margin %'], ['client_charge', 'Client charge override'],
+  ['labour_hours', 'Hours worked'], ['base_hourly_rate', 'Hourly pay rate'], ['labour_oncost_pct', 'Extra wage costs %'], ['leave_provision_pct', 'Holiday/leave allowance %'],
+  ['vehicle_km', 'Vehicle kilometres'], ['vehicle_fixed_annual', 'Yearly vehicle cost'], ['vehicle_productive_hours', 'Billable vehicle hours/year'], ['vehicle_variable_per_km', 'Fuel and running cost/km'],
+  ['asset_acquisition_cost', 'Gear purchase cost'], ['asset_setup_cost', 'Setup cost'], ['asset_residual_value', 'Expected resale value'], ['asset_useful_life_months', 'How many months it will be used'],
+  ['equipment_cost', 'Equipment/evidence cost'], ['direct_operating_cost', 'Other job cost'], ['overhead_pct', 'Shared business costs %'], ['target_margin_pct', 'Money left target %'], ['client_charge', 'Price to customer override'],
 ];
 
 const money = (value: number) => new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' }).format(value);
@@ -55,10 +55,10 @@ export function FinanceCostingPanel() {
     setSaving(false);
   };
 
-  return <section className="reports-section" aria-label="Service costing calculator">
-    <div className="crm-section-heading"><div><span>Finance foundation</span><h2><Calculator size={18} /> Cost service before quoting</h2><p className="subtitle">Enter original source facts. Server calculation includes loaded labour, vehicle depreciation, travel, direct cost, overhead, and margin.</p></div><button type="button" className="btn btn-secondary" onClick={() => { setInputs(initialInputs); setResult(null); setError(null); }}><RefreshCw size={15} /> Reset</button></div>
+  return <section className="reports-section" aria-label="Job cost calculator">
+    <div className="crm-section-heading"><div><span>Before you quote</span><h2><Calculator size={18} /> Check the real job cost</h2><p className="subtitle">Enter the source facts. The server adds wages, leave, vehicle use, gear, travel, shared business costs, and the amount you want left over.</p></div><button type="button" className="btn btn-secondary" onClick={() => { setInputs(initialInputs); setResult(null); setError(null); }}><RefreshCw size={15} /> Reset</button></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
-    <form className="assessment-form" onSubmit={calculate}><div className="form-row">{fields.map(([key, label]) => <label key={key}><span>{label}</span><input type="number" min="0" step="0.01" value={inputs[key]} onChange={(event) => setInputs((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Calculating...' : 'Calculate true service cost'}</button></form>
-    {result && <div className="crm-finance-kpis" role="status"><span>True cost <strong>{money(result.true_cost)}</strong></span><span>Client charge <strong>{money(result.client_charge)}</strong></span><span>Gross margin <strong>{money(result.gross_margin)} ({result.gross_margin_pct}%)</strong></span><span>Annual depreciation <strong>{money(result.breakdown.depreciation_annual ?? 0)}</strong></span></div>}
+    <form className="assessment-form" onSubmit={calculate}><div className="form-row">{fields.map(([key, label]) => <label key={key}><span>{label}</span><input type="number" min="0" step="0.01" value={inputs[key]} onChange={(event) => setInputs((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Calculating...' : 'Calculate job cost'}</button></form>
+    {result && <div className="crm-finance-kpis" role="status"><span>Real cost <strong>{money(result.true_cost)}</strong></span><span>Price to customer <strong>{money(result.client_charge)}</strong></span><span>Left after costs <strong>{money(result.gross_margin)} ({result.gross_margin_pct}%)</strong></span><span>Gear cost per year <strong>{money(result.breakdown.depreciation_annual ?? 0)}</strong></span></div>}
   </section>;
 }

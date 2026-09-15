@@ -14,7 +14,7 @@ describe('Finance control centre', () => {
     expect(component).toContain('p_shift_id: selectedShiftId || null');
     expect(component).toContain("['accepted', 'in_progress']");
     expect(component).toContain('labourNeedsShift');
-    expect(component).toContain('Select the active officer shift before recording labour cost.');
+    expect(component).toContain("Choose the officer's shift before saving a wage cost.");
     expect(component).toContain("supabase.rpc('record_finance_service_cost'");
     expect(component).toContain("supabase.rpc('create_finance_pl_period'");
     expect(component).toContain("supabase.rpc('create_finance_tax_period'");
@@ -23,7 +23,7 @@ describe('Finance control centre', () => {
   });
 
   it('keeps bank and IRD external linking outside the control centre', () => {
-    expect(component).toContain('No bank or IRD connection is used here');
+    expect(component).toContain('Nothing here touches your bank or IRD');
     expect(page).toContain('<FinanceControlPanel />');
   });
 });

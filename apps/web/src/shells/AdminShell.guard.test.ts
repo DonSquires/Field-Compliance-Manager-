@@ -37,6 +37,14 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('This area is not available for your current role.');
   });
 
+  it('evaluates the module gate only once the subscription state is known, so a deep link is never bounced while loading', () => {
+    const effect = source.slice(source.indexOf('// The module gate is evaluated only once'), source.indexOf("navigate('/admin/hub', { replace: true });"));
+    expect(effect).toContain("if (modulesStatus === 'loading') return;");
+    expect(source).toContain("modulesStatus === 'error'");
+    expect(source).toContain('Module subscriptions for this organisation could not be loaded');
+    expect(source).toContain('isModuleEnabled, modulesStatus]);');
+  });
+
   it('uses shared module access wording for configuration state instead of silently ignoring it', () => {
     expect(source).toContain('getModuleAccessMessage');
     expect(source).toContain('moduleAccessNotice');
@@ -81,7 +89,7 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("{ id: 'crm', label: 'Client Portfolios'");
     expect(source).toContain("{ id: 'finance-bureau', label: 'Finance home'");
     expect(source).toContain("{ id: 'finance-connections', label: 'Connect ANZ & IRD'");
-    expect(source).toContain("{ id: 'finance-money', label: 'Money check'");
+    expect(source).toContain("{ id: 'finance-money', label: 'Business money check'");
     expect(source).toContain("'Field Operations': [");
     expect(source).toContain("{ id: 'roster', label: 'Schedules & Rosters'");
     expect(source).toContain("{ id: 'field-ops', label: 'Field Operations'");

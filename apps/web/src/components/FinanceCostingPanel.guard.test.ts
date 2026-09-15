@@ -7,13 +7,13 @@ const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations
 
 describe('finance costing panel', () => {
   it('collects original cost facts and uses the governed server calculator', () => {
-    for (const label of ['Asset acquisition cost', 'Asset residual value', 'Asset useful life (months)', 'Vehicle running cost/km', 'Leave provision %']) expect(panel).toContain(label);
+    for (const label of ['Gear purchase cost', 'Expected resale value', 'How many months it will be used', 'Fuel and running cost/km', 'Holiday/leave allowance %']) expect(panel).toContain(label);
     expect(panel).toContain("supabase.rpc('calculate_finance_quote_cost'");
-    expect(panel).toContain('Calculate true service cost');
+    expect(panel).toContain('Calculate job cost');
   });
 
   it('exposes calculated cost and margin outputs', () => {
-    for (const output of ['True cost', 'Client charge', 'Gross margin', 'Annual depreciation']) expect(panel).toContain(output);
+    for (const output of ['Real cost', 'Price to customer', 'Left after costs', 'Gear cost per year']) expect(panel).toContain(output);
     expect(migration).toContain("'depreciation_annual'");
     expect(migration).toContain("'approval_required', true");
   });

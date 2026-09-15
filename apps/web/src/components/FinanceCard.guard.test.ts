@@ -22,6 +22,6 @@ describe('finance card system', () => {
     expect(home).toContain('<FinanceCard eyebrow="Daily overview"');
     expect(home).toContain('<FinanceCard eyebrow="Connections"');
     expect(home).toContain('<FinanceCard eyebrow="Before quoting"');
-    expect(home).toContain('<FinanceCard eyebrow="Commercial control"');
+    expect(home).toContain('<FinanceCard eyebrow="Prices"');
   });
 });

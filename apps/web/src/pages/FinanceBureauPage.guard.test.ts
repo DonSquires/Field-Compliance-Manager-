@@ -16,10 +16,10 @@ describe('Finance Bureau', () => {
   });
 
   it('is a dedicated provider workspace alongside the reusable rate book', () => {
-    expect(page).toContain('Provider-owned commercial schedules');
-    expect(page).toContain('Rate books remain in Rate Rules');
+    expect(page).toContain('Create the discount plans customers actually see.');
+    expect(page).toContain('Staff pay rates live in Pay and charge rules');
     expect(shell).toContain("'finance-bureau'");
     expect(shell).toContain('Finance home');
-    expect(shell).toContain("<FinanceBureauPage onOpenBob={() => setBobOpen(true)} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />");
+    expect(shell).toContain("<FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />");
   });
 });

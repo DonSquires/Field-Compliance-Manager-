@@ -16,6 +16,6 @@ describe('external finance transaction reconciliation', () => {
   it('surfaces external bank activity in the owner money check', () => {
     expect(dashboard).toContain("from('finance_external_bank_transactions')");
     expect(dashboard).toContain('unmatchedTransactions');
-    expect(dashboard).toContain('bank activity needing a match');
+    expect(dashboard).toContain('bank activity that still needs to be matched to the right job or invoice');
   });
 });

@@ -6,11 +6,11 @@ test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('20
 test('administrator creates a governed operating branch patrol rate rule', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/rate-rules');
-  await expect(page.getByRole('heading', { name: 'Rate Rules' })).toBeVisible();
-  await page.getByRole('button', { name: 'New rate rule' }).click();
+  await expect(page.getByRole('heading', { name: 'Pay and charge rules' })).toBeVisible();
+  await page.getByRole('button', { name: 'New pay or charge rule' }).click();
   const form = page.locator('form.assessment-form');
   await form.getByLabel('Name').fill('Patrol visit - branch standard');
-  await form.getByLabel('Rate type').selectOption('per_visit');
+  await form.getByLabel('How it is charged').selectOption('per_visit');
   await form.getByLabel('Amount').fill('42.50');
   await form.getByLabel('Service type').fill('patrol');
   await expect(form).toHaveScreenshot('operating-branch-rate-rule.png');

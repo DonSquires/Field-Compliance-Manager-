@@ -202,11 +202,11 @@ const NAVIGATION_MAP = {
     { id: 'onboarding', label: 'New Account Setup', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Activation Checklists', icon: ClipboardCheck },
     { id: 'finance-bureau', label: 'Finance home', icon: DollarSign },
-    { id: 'finance-money', label: 'Money check', icon: BarChart3 },
+    { id: 'finance-money', label: 'Business money check', icon: BarChart3 },
     { id: 'finance-connections', label: 'Connect ANZ & IRD', icon: Landmark },
-    { id: 'finance-costing', label: 'Job costing', icon: Calculator },
-    { id: 'finance-pricing', label: 'Pricing & discounts', icon: Tags },
-    { id: 'rate-rules', label: 'Pay & Billing Rate Rules', icon: DollarSign },
+    { id: 'finance-costing', label: 'What should a job cost?', icon: Calculator },
+    { id: 'finance-pricing', label: 'Prices & discounts', icon: Tags },
+    { id: 'rate-rules', label: 'Pay & charge rules', icon: DollarSign },
   ],
   'Reports & Analytics': [
     { id: 'reports', label: 'Reports', icon: FileBarChart },
@@ -222,7 +222,7 @@ const NAVIGATION_MAP = {
     { id: 'sites', label: 'Geofence Workbench', icon: ClipboardCheck },
     { id: 'users', label: 'People & Access', icon: Users },
     { id: 'access-control', label: 'Access Rules', icon: KeyRound },
-    { id: 'org-setup', label: 'Organization Settings', icon: Settings },
+    { id: 'org-setup', label: 'Organisation settings', icon: Settings },
     { id: 'module-subscriptions', label: 'Modules & Subscriptions', icon: Package },
     { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
     { id: 'test-data', label: 'Test Data', icon: Package },
@@ -296,6 +296,7 @@ const AdminShell: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bobOpen, setBobOpen] = useState(false);
+  const [bobLaunchPrompt, setBobLaunchPrompt] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [showDesktopDownload, setShowDesktopDownload] = useState(false);
@@ -314,12 +315,19 @@ const AdminShell: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // The module gate is evaluated only once the tenant's subscription state is known. While it is
+    // loading, isModuleEnabled() answers false, and redirecting on that answer would silently throw
+    // away every deep link / refresh on a gated page (a "loading" is not a "denied").
+    if (modulesStatus === 'loading') return;
     const page = pageFromUrl(location.pathname);
     const redirectTarget = LEGACY_REDIRECT_MAP[page];
+    const deniedNotice = modulesStatus === 'error'
+      ? 'Module subscriptions for this organisation could not be loaded, so gated areas are unavailable until they load.'
+      : 'This area is not available for your current role.';
 
     if (redirectTarget) {
       if (!canAccessAdminPage(redirectTarget.page, profile?.role, isModuleEnabled)) {
-        setAccessNotice('This area is not available for your current role.');
+        setAccessNotice(deniedNotice);
         setActivePage('hub');
         navigate('/admin/hub', { replace: true });
         return;
@@ -332,7 +340,7 @@ const AdminShell: React.FC = () => {
       const areaQuery = redirectTarget.fieldOpsSubArea ? `?area=${redirectTarget.fieldOpsSubArea}` : '';
       navigate(`/admin/${redirectTarget.page}${areaQuery}`, { replace: true });
     } else if (!canAccessAdminPage(page, profile?.role, isModuleEnabled)) {
-      setAccessNotice('This area is not available for your current role.');
+      setAccessNotice(deniedNotice);
       setActivePage('hub');
       navigate('/admin/hub', { replace: true });
     } else {
@@ -343,7 +351,7 @@ const AdminShell: React.FC = () => {
         setFieldOpsSubArea(requestedArea && FIELD_OPS_AREAS.has(requestedArea) ? requestedArea : 'landing');
       }
     }
-  }, [location.pathname, location.search, navigate, pageFromUrl, profile?.role, isModuleEnabled]);
+  }, [location.pathname, location.search, navigate, pageFromUrl, profile?.role, isModuleEnabled, modulesStatus]);
 
   useEffect(() => {
     const loadOrgName = async () => {
@@ -560,7 +568,7 @@ const AdminShell: React.FC = () => {
       case 'rate-rules':
         return <RateRulesPage />;
       case 'finance-bureau':
-        return <FinanceBureauPage onOpenBob={() => setBobOpen(true)} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+        return <FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'finance-connections':
         return <FinanceConnectionsPage onBack={() => navigateToPage('finance-bureau')} />;
       case 'finance-money':
@@ -568,7 +576,7 @@ const AdminShell: React.FC = () => {
       case 'finance-costing':
         return <FinanceCostingPage onBack={() => navigateToPage('finance-bureau')} />;
       case 'finance-pricing':
-        return <FinanceBureauPage view="pricing" onOpenBob={() => setBobOpen(true)} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+        return <FinanceBureauPage view="pricing" onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'people-hr':
         return <RosterHRPage />;
       case 'roster-targets':
@@ -626,7 +634,7 @@ const AdminShell: React.FC = () => {
               )}
             </div>
             <div className="admin-shell-tools">
-              {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'corporate_oversight' ? ' (corporate)' : ''}</option>)}</select></label>}
+              {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
               <NotificationCenter onNavigate={navigateFromNotification} />
               <HelpInstructions context={activePage} role={profile?.role} />
               <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
@@ -657,6 +665,7 @@ const AdminShell: React.FC = () => {
           open={bobOpen}
           onClose={() => setBobOpen(false)}
           context={bobContext}
+          launchPrompt={bobLaunchPrompt}
         />
         {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM desktop releases</span><h2 id="desktop-download-title">Choose your evidence workstation</h2><p>V1 is the stable production bridge. V2 is an unsigned development prototype for clone-first acquisition research.</p></div><div className="desktop-download-options"><a href={DESKTOP_V1_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V1</strong><small>Stable SD-card bridge · current production workflow</small></span><Download size={16} aria-hidden="true" /></a><a href={DESKTOP_V2_DOWNLOAD_URL} onClick={dismissDesktopDownload}><span><strong>FCM Desktop V2</strong><small>Unsigned development build · SmartScreen warning possible</small></span><Download size={16} aria-hidden="true" /></a></div><div className="desktop-download-actions"><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
 
@@ -676,7 +685,7 @@ const AdminShell: React.FC = () => {
           <strong>{orgName || 'Field Compliance Manager'}</strong>
         </div>
         <div className="admin-shell-tools">
-          {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Operating branch</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Operating branch">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}</option>)}</select></label>}
+          {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
           <NotificationCenter onNavigate={navigateFromNotification} />
           <HelpInstructions context={activePage} role={profile?.role} />
           <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
@@ -742,6 +751,7 @@ const AdminShell: React.FC = () => {
         open={bobOpen}
         onClose={() => setBobOpen(false)}
         context={bobContext}
+        launchPrompt={bobLaunchPrompt}
       />
 
     </div>
