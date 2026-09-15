@@ -95,6 +95,7 @@ const ModuleCatalogPage = React.lazy(() => import('../pages/ModuleCatalogPage'))
 const ModuleSubscriptionsPage = React.lazy(() => import('../pages/ModuleSubscriptionsPage'));
 const GrandMasterPlatformPage = React.lazy(() => import('../pages/GrandMasterPlatformPage'));
 const ProviderBillingPage = React.lazy(() => import('../pages/ProviderBillingPage'));
+const PlatformSubscribersPage = React.lazy(() => import('../pages/PlatformSubscribersPage'));
 const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlRoomPage'));
 const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 const BobDocumentStudioPage = React.lazy(() => import('../pages/BobDocumentStudioPage'));
@@ -123,7 +124,7 @@ type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
-  | 'platform-subscriptions' | 'platform-billing' | 'builder';
+  | 'platform-subscriptions' | 'platform-billing' | 'platform-subscribers' | 'builder';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
@@ -131,7 +132,7 @@ type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
-  'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing', 'builder',
+  'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing', 'platform-subscribers', 'builder',
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
@@ -228,6 +229,7 @@ const NAVIGATION_MAP = {
     { id: 'testing', label: 'E2E Testing', icon: FlaskConical },
     { id: 'test-data', label: 'Test Data', icon: Package },
     { id: 'platform', label: 'Platform Overview', icon: Shield },
+    { id: 'platform-subscribers', label: 'Subscribers', icon: Building2 },
     { id: 'builder', label: 'Builder', icon: Bot },
     { id: 'platform-catalog', label: 'Module Pricing', icon: Package },
     { id: 'platform-subscriptions', label: 'Provider Billing', icon: CreditCard },
@@ -562,6 +564,8 @@ const AdminShell: React.FC = () => {
         return <ModuleCatalogPage />;
       case 'platform-subscriptions':
         return <ProviderBillingPage />;
+      case 'platform-subscribers':
+        return <PlatformSubscribersPage />;
       case 'approvals':
         return <ApprovalsActivityPage />;
       case 'roster':

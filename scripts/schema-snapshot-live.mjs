@@ -169,7 +169,7 @@ async function main() {
 
   // Views, in dependency order. pg_get_viewdef prints public objects unqualified when they were
   // on the live session's search_path, so the block runs with search_path = public.
-  const views = await sql(`select c.oid::int as oid, c.relname, c.relkind, pg_get_viewdef(c.oid, true) as def, obj_description(c.oid, 'pg_class') as comment, (select coalesce(json_agg(distinct dep.relname), '[]'::json) from pg_rewrite r join pg_depend d on d.objid = r.oid and d.classid = 'pg_rewrite'::regclass join pg_class dep on dep.oid = d.refobjid where r.ev_class = c.oid and dep.relkind in ('v','m') and dep.oid <> c.oid) as depends_on from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('v','m') and ${NOT_EXTENSION('c.oid', 'pg_class')} order by c.relname`);
+  const views = await sql(`select c.oid::int as oid, c.relname, c.relkind, c.reloptions, pg_get_viewdef(c.oid, true) as def, obj_description(c.oid, 'pg_class') as comment, (select coalesce(json_agg(distinct dep.relname), '[]'::json) from pg_rewrite r join pg_depend d on d.objid = r.oid and d.classid = 'pg_rewrite'::regclass join pg_class dep on dep.oid = d.refobjid where r.ev_class = c.oid and dep.relkind in ('v','m') and dep.oid <> c.oid) as depends_on from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('v','m') and ${NOT_EXTENSION('c.oid', 'pg_class')} order by c.relname`);
   const ordered = []; const placed = new Set(); const names = new Set(views.map((v) => v.relname));
   while (ordered.length < views.length) {
     const ready = views.filter((v) => !placed.has(v.relname) && (v.depends_on ?? []).every((d) => placed.has(d) || !names.has(d)));
@@ -177,7 +177,10 @@ async function main() {
     for (const v of ready) { ordered.push(v); placed.add(v.relname); }
   }
   for (const v of ordered) {
-    emit(`CREATE ${v.relkind === 'm' ? 'MATERIALIZED VIEW' : 'OR REPLACE VIEW'} "public".${q(v.relname)} AS\n${v.def.trimEnd().replace(/;$/, '')};`);
+    // reloptions carry security_invoker / security_barrier; without them a view silently
+    // becomes definer-owned in the oracle database and bypasses RLS it respects live.
+    const options = Array.isArray(v.reloptions) && v.reloptions.length ? ` WITH (${v.reloptions.join(', ')})` : '';
+    emit(`CREATE ${v.relkind === 'm' ? 'MATERIALIZED VIEW' : 'OR REPLACE VIEW'} "public".${q(v.relname)}${options} AS\n${v.def.trimEnd().replace(/;$/, '')};`);
     if (v.comment) emit(`COMMENT ON ${v.relkind === 'm' ? 'MATERIALIZED VIEW' : 'VIEW'} "public".${q(v.relname)} IS ${lit(v.comment)};`);
     emit('');
   }
