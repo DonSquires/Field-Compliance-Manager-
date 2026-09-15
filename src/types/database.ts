@@ -5568,73 +5568,195 @@ export type Database = {
           },
         ]
       }
+      cctv_device_events: {
+        Row: {
+          cctv_import_id: string
+          created_at: string
+          event_end_at: string | null
+          event_start_at: string
+          id: string
+          metadata: Json
+          organization_id: string
+          severity: string
+          source: string
+          source_ref: string
+          thumbnail_path: string | null
+        }
+        Insert: {
+          cctv_import_id: string
+          created_at?: string
+          event_end_at?: string | null
+          event_start_at: string
+          id?: string
+          metadata?: Json
+          organization_id: string
+          severity?: string
+          source: string
+          source_ref: string
+          thumbnail_path?: string | null
+        }
+        Update: {
+          cctv_import_id?: string
+          created_at?: string
+          event_end_at?: string | null
+          event_start_at?: string
+          id?: string
+          metadata?: Json
+          organization_id?: string
+          severity?: string
+          source?: string
+          source_ref?: string
+          thumbnail_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_device_events_cctv_import_id_fkey"
+            columns: ["cctv_import_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_imports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_device_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_device_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_device_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cctv_entity_observations: {
         Row: {
           animal_type: string | null
+          appearance_embedding: Json | null
+          appearance_vec: string | null
+          attributes: Json
           candidate_embedding: Json | null
           candidate_label: string | null
           candidate_plate: string | null
           canonical_person_id: string | null
+          canonical_place_id: string | null
           canonical_vehicle_id: string | null
+          cctv_import_id: string | null
           created_at: string
           entity_kind: string
           evidence_item_id: string
+          face_vec: string | null
           frame_sha256: string | null
           id: string
           inference_job_id: string
+          is_pest: boolean | null
+          location_id: string | null
           model_confidence: number | null
           observed_at: string
           observed_to: string | null
           organization_id: string
+          person_record_id: string | null
+          portfolio_candidates: Json
+          portfolio_key: string | null
+          portfolio_state: string
+          quality_state: string
+          review_notes: string | null
           review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
           site_id: string | null
           source_event_id: string
+          species_confidence: number | null
           thumbnail: string | null
           zone_id: string | null
         }
         Insert: {
           animal_type?: string | null
+          appearance_embedding?: Json | null
+          appearance_vec?: string | null
+          attributes?: Json
           candidate_embedding?: Json | null
           candidate_label?: string | null
           candidate_plate?: string | null
           canonical_person_id?: string | null
+          canonical_place_id?: string | null
           canonical_vehicle_id?: string | null
+          cctv_import_id?: string | null
           created_at?: string
           entity_kind: string
           evidence_item_id: string
+          face_vec?: string | null
           frame_sha256?: string | null
           id?: string
           inference_job_id: string
+          is_pest?: boolean | null
+          location_id?: string | null
           model_confidence?: number | null
           observed_at: string
           observed_to?: string | null
           organization_id: string
+          person_record_id?: string | null
+          portfolio_candidates?: Json
+          portfolio_key?: string | null
+          portfolio_state?: string
+          quality_state?: string
+          review_notes?: string | null
           review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           site_id?: string | null
           source_event_id: string
+          species_confidence?: number | null
           thumbnail?: string | null
           zone_id?: string | null
         }
         Update: {
           animal_type?: string | null
+          appearance_embedding?: Json | null
+          appearance_vec?: string | null
+          attributes?: Json
           candidate_embedding?: Json | null
           candidate_label?: string | null
           candidate_plate?: string | null
           canonical_person_id?: string | null
+          canonical_place_id?: string | null
           canonical_vehicle_id?: string | null
+          cctv_import_id?: string | null
           created_at?: string
           entity_kind?: string
           evidence_item_id?: string
+          face_vec?: string | null
           frame_sha256?: string | null
           id?: string
           inference_job_id?: string
+          is_pest?: boolean | null
+          location_id?: string | null
           model_confidence?: number | null
           observed_at?: string
           observed_to?: string | null
           organization_id?: string
+          person_record_id?: string | null
+          portfolio_candidates?: Json
+          portfolio_key?: string | null
+          portfolio_state?: string
+          quality_state?: string
+          review_notes?: string | null
           review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           site_id?: string | null
           source_event_id?: string
+          species_confidence?: number | null
           thumbnail?: string | null
           zone_id?: string | null
         }
@@ -5643,14 +5765,28 @@ export type Database = {
             foreignKeyName: "cctv_entity_observations_canonical_person_id_fkey"
             columns: ["canonical_person_id"]
             isOneToOne: false
-            referencedRelation: "person_records"
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "cctv_entity_observations_canonical_vehicle_id_fkey"
             columns: ["canonical_vehicle_id"]
             isOneToOne: false
-            referencedRelation: "vehicles"
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_cctv_import_id_fkey"
+            columns: ["cctv_import_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_imports"
             referencedColumns: ["id"]
           },
           {
@@ -5665,6 +5801,13 @@ export type Database = {
             columns: ["inference_job_id"]
             isOneToOne: false
             referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
           {
@@ -5687,6 +5830,41 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_person_record_id_fkey"
+            columns: ["person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -5939,6 +6117,151 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "person_records"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_imports: {
+        Row: {
+          bytes_total: number
+          camera_key: string
+          camera_label: string
+          canonical_place_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          location_id: string
+          notes: string | null
+          organization_id: string
+          recorded_from: string | null
+          recorded_to: string | null
+          site_id: string | null
+          skipped_count: number
+          snapshot_count: number
+          source_device_kind: string
+          source_manifest: Json
+          source_root_label: string | null
+          source_timezone: string
+          status: string
+          updated_at: string
+          video_count: number
+          watermark_location_hint: string | null
+          zone_id: string | null
+        }
+        Insert: {
+          bytes_total?: number
+          camera_key: string
+          camera_label: string
+          canonical_place_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          location_id: string
+          notes?: string | null
+          organization_id: string
+          recorded_from?: string | null
+          recorded_to?: string | null
+          site_id?: string | null
+          skipped_count?: number
+          snapshot_count?: number
+          source_device_kind?: string
+          source_manifest?: Json
+          source_root_label?: string | null
+          source_timezone?: string
+          status?: string
+          updated_at?: string
+          video_count?: number
+          watermark_location_hint?: string | null
+          zone_id?: string | null
+        }
+        Update: {
+          bytes_total?: number
+          camera_key?: string
+          camera_label?: string
+          canonical_place_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          location_id?: string
+          notes?: string | null
+          organization_id?: string
+          recorded_from?: string | null
+          recorded_to?: string | null
+          site_id?: string | null
+          skipped_count?: number
+          snapshot_count?: number
+          source_device_kind?: string
+          source_manifest?: Json
+          source_root_label?: string | null
+          source_timezone?: string
+          status?: string
+          updated_at?: string
+          video_count?: number
+          watermark_location_hint?: string | null
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_imports_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_imports_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -10598,6 +10921,7 @@ export type Database = {
         Row: {
           captured_at: string
           captured_by_user_id: string | null
+          cctv_import_id: string | null
           evidence_kind: string
           id: string
           is_court_ready: boolean
@@ -10617,6 +10941,7 @@ export type Database = {
         Insert: {
           captured_at?: string
           captured_by_user_id?: string | null
+          cctv_import_id?: string | null
           evidence_kind: string
           id?: string
           is_court_ready?: boolean
@@ -10636,6 +10961,7 @@ export type Database = {
         Update: {
           captured_at?: string
           captured_by_user_id?: string | null
+          cctv_import_id?: string | null
           evidence_kind?: string
           id?: string
           is_court_ready?: boolean
@@ -10658,6 +10984,13 @@ export type Database = {
             columns: ["captured_by_user_id"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_items_cctv_import_id_fkey"
+            columns: ["cctv_import_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_imports"
             referencedColumns: ["id"]
           },
           {
@@ -27590,6 +27923,7 @@ export type Database = {
           id: string
           is_adhoc: boolean
           module_key: string
+          officer_instructions: string | null
           officer_notes: string | null
           organization_id: string
           patrol_config_id: string | null
@@ -27629,6 +27963,7 @@ export type Database = {
           id?: string
           is_adhoc?: boolean
           module_key: string
+          officer_instructions?: string | null
           officer_notes?: string | null
           organization_id: string
           patrol_config_id?: string | null
@@ -27668,6 +28003,7 @@ export type Database = {
           id?: string
           is_adhoc?: boolean
           module_key?: string
+          officer_instructions?: string | null
           officer_notes?: string | null
           organization_id?: string
           patrol_config_id?: string | null
@@ -28753,6 +29089,7 @@ export type Database = {
           reviewed_by: string | null
           scene_description: string | null
           severity: string | null
+          shift_id: string | null
           site_id: string | null
           smoke_ai_analysis: Json | null
           smoke_ai_analyzed_at: string | null
@@ -28798,6 +29135,7 @@ export type Database = {
           reviewed_by?: string | null
           scene_description?: string | null
           severity?: string | null
+          shift_id?: string | null
           site_id?: string | null
           smoke_ai_analysis?: Json | null
           smoke_ai_analyzed_at?: string | null
@@ -28843,6 +29181,7 @@ export type Database = {
           reviewed_by?: string | null
           scene_description?: string | null
           severity?: string | null
+          shift_id?: string | null
           site_id?: string | null
           smoke_ai_analysis?: Json | null
           smoke_ai_analyzed_at?: string | null
@@ -28906,6 +29245,13 @@ export type Database = {
             columns: ["reviewed_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smoke_assessments_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["id"]
           },
           {
@@ -35402,6 +35748,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      cctv_jsonb_to_vector: {
+        Args: { p_dims: number; p_embedding: Json }
+        Returns: string
+      }
       check_invite_rate_limit: {
         Args: { p_caller_id: string; p_target_org_id: string }
         Returns: boolean
@@ -35784,6 +36134,52 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "cctv_exports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_cctv_import: {
+        Args: {
+          p_camera_label: string
+          p_location_id: string
+          p_notes?: string
+          p_organization_id: string
+          p_site_id?: string
+          p_source_device_kind?: string
+          p_source_root_label?: string
+          p_source_timezone?: string
+          p_watermark_location_hint?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          bytes_total: number
+          camera_key: string
+          camera_label: string
+          canonical_place_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          location_id: string
+          notes: string | null
+          organization_id: string
+          recorded_from: string | null
+          recorded_to: string | null
+          site_id: string | null
+          skipped_count: number
+          snapshot_count: number
+          source_device_kind: string
+          source_manifest: Json
+          source_root_label: string | null
+          source_timezone: string
+          status: string
+          updated_at: string
+          video_count: number
+          watermark_location_hint: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_imports"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -36694,6 +37090,7 @@ export type Database = {
         Returns: {
           captured_at: string
           captured_by_user_id: string | null
+          cctv_import_id: string | null
           evidence_kind: string
           id: string
           is_court_ready: boolean
@@ -37130,6 +37527,7 @@ export type Database = {
           reviewed_by: string | null
           scene_description: string | null
           severity: string | null
+          shift_id: string | null
           site_id: string | null
           smoke_ai_analysis: Json | null
           smoke_ai_analyzed_at: string | null
@@ -37144,6 +37542,31 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      find_cctv_portfolio_matches: {
+        Args: {
+          p_appearance_embedding?: Json
+          p_entity_kind: string
+          p_exclude_observation_id?: string
+          p_face_embedding?: Json
+          p_limit?: number
+          p_organization_id: string
+          p_plate?: string
+        }
+        Returns: {
+          basis: string
+          canonical_place_id: string
+          canonical_vehicle_id: string
+          display_name: string
+          last_seen_at: string
+          match_id: string
+          match_kind: string
+          observation_id: string
+          person_record_id: string
+          plate_number: string
+          portfolio_key: string
+          score: number
+        }[]
       }
       find_crm_location_candidates: {
         Args: {
@@ -40255,6 +40678,7 @@ export type Database = {
           id: string
           is_adhoc: boolean
           module_key: string
+          officer_instructions: string | null
           officer_notes: string | null
           organization_id: string
           patrol_config_id: string | null
@@ -40370,6 +40794,7 @@ export type Database = {
           reviewed_by: string | null
           scene_description: string | null
           severity: string | null
+          shift_id: string | null
           site_id: string | null
           smoke_ai_analysis: Json | null
           smoke_ai_analyzed_at: string | null
@@ -41201,6 +41626,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_cctv_device_events: {
+        Args: { p_events: Json; p_import_id: string }
+        Returns: number
+      }
       record_cctv_entity_observations: {
         Args: {
           p_evidence_id: string
@@ -41693,6 +42122,20 @@ export type Database = {
       register_bob_video_attachment_for_review: {
         Args: { p_attachment_id: string }
         Returns: string
+      }
+      register_cctv_import_video: {
+        Args: {
+          p_content_type?: string
+          p_file_name: string
+          p_file_size_bytes: number
+          p_import_id: string
+          p_recorded_end_at?: string
+          p_recorded_start_at?: string
+          p_sha256?: string
+          p_source_ref?: string
+          p_storage_path: string
+        }
+        Returns: Json
       }
       register_edge_court_photo: {
         Args: {
@@ -42458,6 +42901,62 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_cctv_entity_observation: {
+        Args: {
+          p_action: string
+          p_display_name?: string
+          p_notes?: string
+          p_observation_id: string
+          p_plate?: string
+          p_target_id?: string
+        }
+        Returns: {
+          animal_type: string | null
+          appearance_embedding: Json | null
+          appearance_vec: string | null
+          attributes: Json
+          candidate_embedding: Json | null
+          candidate_label: string | null
+          candidate_plate: string | null
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_vehicle_id: string | null
+          cctv_import_id: string | null
+          created_at: string
+          entity_kind: string
+          evidence_item_id: string
+          face_vec: string | null
+          frame_sha256: string | null
+          id: string
+          inference_job_id: string
+          is_pest: boolean | null
+          location_id: string | null
+          model_confidence: number | null
+          observed_at: string
+          observed_to: string | null
+          organization_id: string
+          person_record_id: string | null
+          portfolio_candidates: Json
+          portfolio_key: string | null
+          portfolio_state: string
+          quality_state: string
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          site_id: string | null
+          source_event_id: string
+          species_confidence: number | null
+          thumbnail: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_entity_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       review_dispatch_job_pay_line: {
         Args: {
           p_client_request_id: string
@@ -43015,6 +43514,41 @@ export type Database = {
           p_provider_organization_id: string
         }
         Returns: Json
+      }
+      set_cctv_import_manifest: {
+        Args: { p_import_id: string; p_manifest: Json; p_status?: string }
+        Returns: {
+          bytes_total: number
+          camera_key: string
+          camera_label: string
+          canonical_place_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          location_id: string
+          notes: string | null
+          organization_id: string
+          recorded_from: string | null
+          recorded_to: string | null
+          site_id: string | null
+          skipped_count: number
+          snapshot_count: number
+          source_device_kind: string
+          source_manifest: Json
+          source_root_label: string | null
+          source_timezone: string
+          status: string
+          updated_at: string
+          video_count: number
+          watermark_location_hint: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_imports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_crm_quote_proposal_work_model: {
         Args: { p_module_key: string; p_quote_id: string; p_work_model: string }
