@@ -55,19 +55,17 @@ const UserManagementPage: React.FC = () => {
     const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
     if (!operatingBranchId || !profile?.organizationId) return;
     const operatingContext = operatingOrganizations.find((context) => context.organizationId === operatingBranchId);
-    if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
-      setError('Select a delivery branch to manage branch-scoped people.');
+    if (operatingContext && !['branch_authorisation', 'organisation_home', 'corporate_oversight'].includes(operatingContext.authorityBasis)) {
+      setError('Select an organisation or branch you can operate to manage its people.');
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
-    const canLoadBranchUsers = operatingContext?.authorityBasis === 'branch_authorisation';
+    // get_manageable_user_identities serves the organisation itself (its own people) and branches (authorised people).
     try {
       const [usersResponse, auditResponse, presetResponse, assignmentResponse, readinessResponse] = await Promise.all([
-        canLoadBranchUsers
-          ? supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId })
-          : Promise.resolve({ data: [], error: null }),
+        supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId }),
         supabase
           .from('user_management_audit')
           .select('id, target_user_id, action_type, performed_by, metadata, created_at')

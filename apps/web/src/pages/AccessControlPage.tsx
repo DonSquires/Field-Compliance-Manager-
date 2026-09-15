@@ -74,8 +74,8 @@ const AccessControlPage: React.FC = () => {
       return;
     }
     const operatingContext = operatingOrganizations.find((context) => context.organizationId === operatingBranchId);
-    if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
-      setError('Select a delivery branch to manage branch access.');
+    if (operatingContext && !['branch_authorisation', 'organisation_home', 'corporate_oversight'].includes(operatingContext.authorityBasis)) {
+      setError('Select an organisation or branch you can operate to manage access.');
       setLoading(false);
       return;
     }
@@ -83,7 +83,8 @@ const AccessControlPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const canLoadBranchAccess = operatingContext?.authorityBasis === 'branch_authorisation';
+      // Area grants are branch-scoped; the people list is served for the organisation itself and for branches.
+      const canLoadBranchAccess = operatingContext?.authorityBasis === 'branch_authorisation' || operatingContext?.authorityBasis === 'corporate_oversight';
 
       const [presetsRes, assignmentsRes, grantsRes, usersRes] = await Promise.all([
         supabase
@@ -94,9 +95,7 @@ const AccessControlPage: React.FC = () => {
         canLoadBranchAccess
           ? supabase.rpc('get_branch_area_grants', { p_operating_organization_id: operatingBranchId })
           : Promise.resolve({ data: [], error: null }),
-        canLoadBranchAccess
-          ? supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId })
-          : Promise.resolve({ data: [], error: null }),
+        supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId }),
       ]);
 
       if (presetsRes.error) throw presetsRes.error;
