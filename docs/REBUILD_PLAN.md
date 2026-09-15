@@ -174,6 +174,48 @@ source-side reader's report carries no complainant data.
    context site creates) still run their own paths.
 4. `resolution_status` audit: `process-officer-scan`, dispatch intake and the
    billing zone-tier must branch on the five outcomes; no boolean fallbacks.
+   **Scan pipeline conformed 2026-09-15 (G3, edge function not yet redeployed):**
+   `process-officer-scan` reads `resolution_status` + `governor_overlap_flag`,
+   fails closed (503) on an absent resolver row, refuses an inconsistent match,
+   records the status and a distinct loud notice per outcome on the
+   observation's `geofence_context`, and returns them to both clients, which
+   render each outcome distinctly (`test/geofence-p1-callers.test.js`). Rules
+   are applied only on `resolved`; every other outcome stays compliance-unknown.
+   Dispatch intake already requires resolved coordinates and creates a
+   provisional site through the shared seam (§3.3); a billing zone-tier
+   resolver does not exist live yet (no function matches) — it is built on the
+   status when finance lands (§8), not retrofitted.
+
+### 3a. Geofence workbench (GEOFENCE_PRINCIPLES P1/P2, Q2–Q7) — taken over 2026-09-15
+
+- **G1 engine — live** (`20260914004000`, applied by the geofence session;
+  restored verbatim into the checkout): `boundary_proposals` staging (RLS read
+  within reach, no browser writes), `propose_boundary` (measure, area gate per
+  `zone_type`, drift, supersede), `accept_boundary_proposal` (human-edited
+  shape → live entity, provenance by source, optional verify, history),
+  `reject_boundary_proposal` (reason required), `get_geofence_review_queue`
+  (sites + zones, worst first), `find_existing_site_for_address` (Q10 dedup),
+  browser boundary RPCs revoked from anon. Truth table
+  `supabase/tests/20260914004000_geofence_workbench_rls.sql` (42 checks).
+- **G1b hardening — drafted, NOT applied** (`20260914140000`): `verify_boundary`
+  refuses to certify missing/invalid geometry for all four tiers (checkpoint
+  geometry derived from point + radius; versioned), pinned `search_path`,
+  anon revoked from the verify/version/history helpers. Found by the truth
+  table against the live schema: live `verify_boundary` certifies "no geofence"
+  as verified — the exact P1 collapse.
+- **G2 workbench UI — built** (`SiteBoundaryReviewPage.tsx`): queue → LINZ map
+  inspection (current teal, proposal amber with draggable vertices) → source
+  ladder (LINZ parcel/building via `linz-lookup boundary_for_point_escalating`
+  → drawn → point + radius provisional) → accept (+ verify tick) or reject →
+  history. No direct `client_sites`/`location_zones` writes. Guard + e2e +
+  refreshed baselines.
+- **G3 P1 callers — built** (see §3.4).
+- **Remaining:** apply `20260914140000` and redeploy `process-officer-scan`
+  (owner go-ahead); Tier 1 organisation jurisdiction through the governed
+  proposal path (Q5) with map preview; checkpoint create/edit UI on the
+  workbench (Q3: direct save, still verified on the map); Q6 source registry
+  rungs (council ArcGIS / NZTA) as proposal sources; backfill of the 75
+  unverified sites through the queue (human work, not a script).
 5. `location_events`: either land the governed writer (dual-write from the
    module submit functions) or keep it out of every UI as an explicit seam.
 
