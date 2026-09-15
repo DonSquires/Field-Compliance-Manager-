@@ -174,7 +174,7 @@ source-side reader's report carries no complainant data.
    context site creates) still run their own paths.
 4. `resolution_status` audit: `process-officer-scan`, dispatch intake and the
    billing zone-tier must branch on the five outcomes; no boolean fallbacks.
-   **Scan pipeline conformed 2026-09-15 (G3, edge function not yet redeployed):**
+   **Scan pipeline conformed 2026-09-15 (G3; edge function redeployed v610):**
    `process-officer-scan` reads `resolution_status` + `governor_overlap_flag`,
    fails closed (503) on an absent resolver row, refuses an inconsistent match,
    records the status and a distinct loud notice per outcome on the
@@ -197,25 +197,28 @@ source-side reader's report carries no complainant data.
   (sites + zones, worst first), `find_existing_site_for_address` (Q10 dedup),
   browser boundary RPCs revoked from anon. Truth table
   `supabase/tests/20260914004000_geofence_workbench_rls.sql` (42 checks).
-- **G1b hardening — drafted, NOT applied** (`20260914140000`): `verify_boundary`
+- **G1b hardening — applied live 2026-09-15 (owner-authorized; ledger tip
+  `20260914140000`)**: `verify_boundary`
   refuses to certify missing/invalid geometry for all four tiers (checkpoint
   geometry derived from point + radius; versioned), pinned `search_path`,
   anon revoked from the verify/version/history helpers. Found by the truth
-  table against the live schema: live `verify_boundary` certifies "no geofence"
-  as verified — the exact P1 collapse.
+  table against the live schema: live `verify_boundary` certified "no geofence"
+  as verified — the exact P1 collapse. Verified live post-apply.
 - **G2 workbench UI — built** (`SiteBoundaryReviewPage.tsx`): queue → LINZ map
   inspection (current teal, proposal amber with draggable vertices) → source
   ladder (LINZ parcel/building via `linz-lookup boundary_for_point_escalating`
   → drawn → point + radius provisional) → accept (+ verify tick) or reject →
   history. No direct `client_sites`/`location_zones` writes. Guard + e2e +
   refreshed baselines.
-- **G3 P1 callers — built** (see §3.4).
-- **Remaining:** apply `20260914140000` and redeploy `process-officer-scan`
-  (owner go-ahead); Tier 1 organisation jurisdiction through the governed
+- **G3 P1 callers — built; `process-officer-scan` redeployed 2026-09-15
+  (v610, owner-authorized)** (see §3.4).
+- **Remaining:** Tier 1 organisation jurisdiction through the governed
   proposal path (Q5) with map preview; checkpoint create/edit UI on the
   workbench (Q3: direct save, still verified on the map); Q6 source registry
   rungs (council ArcGIS / NZTA) as proposal sources; backfill of the 75
-  unverified sites through the queue (human work, not a script).
+  unverified sites through the queue (human work, not a script); human test
+  of the workbench on the live build (propose from LINZ → edit → accept →
+  verify → scan resolves).
 5. `location_events`: either land the governed writer (dual-write from the
    module submit functions) or keep it out of every UI as an explicit seam.
 
