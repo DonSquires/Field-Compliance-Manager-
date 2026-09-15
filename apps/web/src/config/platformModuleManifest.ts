@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Activity, Briefcase, Building2, Car, HeartPulse } from 'lucide-react';
+import { Activity, Briefcase, Building2, Car, HeartPulse, Radio, Video } from 'lucide-react';
 import { SPECIALTY_MODULES } from './specialtyModules';
 
 export type PlatformModuleKey =
@@ -13,7 +13,9 @@ export type PlatformModuleKey =
   | 'rostering'
   | 'hr'
   | 'finance'
-  | 'welfare';
+  | 'welfare'
+  | 'dispatch'
+  | 'cctv';
 
 export interface PlatformModuleDefinition {
   key: PlatformModuleKey;
@@ -49,6 +51,9 @@ const PLATFORM_MODULES: PlatformModuleDefinition[] = [
   // captures into shifts/roster_work_units — it has no data model without Rostering.
   { key: 'finance', label: 'Finance', description: 'Cost capture, P&L, and invoicing', icon: Activity, standaloneSellable: false, dependsOn: ['rostering'] },
   { key: 'welfare', label: 'Welfare Monitoring', description: 'Officer safety check-ins and alerts', icon: HeartPulse, standaloneSellable: true, dependsOn: [] },
+  // Catalog rows added by 20260915120000_platform_subscriber_provisioning.sql.
+  { key: 'dispatch', label: 'Dispatch', description: 'Callouts, alarm responses, dispatch jobs, and the live map', icon: Radio, standaloneSellable: true, dependsOn: [] },
+  { key: 'cctv', label: 'CCTV', description: 'Camera footage library, review, and evidence packaging', icon: Video, standaloneSellable: true, dependsOn: [] },
 ];
 
 export const PLATFORM_MODULE_MANIFEST: readonly PlatformModuleDefinition[] = [...FIELD_OPS_MODULES, ...PLATFORM_MODULES];

@@ -27,6 +27,8 @@ const MODULE_GATED_AREAS: Record<string, string[]> = {
   rostering: ['Roster Operations', 'Roster Targets'],
   hr: ['People & HR'],
   finance: ['Finance Bureau', 'Finance Connections', 'Finance Money', 'Finance Costing', 'Finance Pricing', 'Pay & Billing Rate Rules'],
+  dispatch: ['Dispatch Console', 'Live Map'],
+  cctv: ['CCTV Library', 'CCTV Review'],
 };
 
 const ModuleSubscriptionsPage: React.FC = () => {

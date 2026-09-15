@@ -292,3 +292,40 @@ Design and build slice: `docs/canon/NOISE_CONTROL_TWO_PLACE_MODEL.md`;
 migration `20260914110000_noise_two_place_attendance_model.sql` (drafted, not
 applied); truth table `supabase/tests/20260914110000_noise_two_place_rls.sql`
 (green in the disposable database). Smoke and biosecurity take the same shape.
+
+### 2026-09-15 — Platform-owner boundary ruling (Don Squires)
+
+> "Iron Eagle is the owner of this app. R&M or any provider subscribes to the
+> app, which is owned by Iron Eagle, who receives the subscription and the
+> finances and can manage the subscription (suspending, cancelling, monitoring
+> activity) but should not have access to that org's operational or financial
+> data — but can send invites to new master users, or reset passwords if they
+> get locked out. Basically the same kind of subscription system as GitHub or
+> other SaaS apps."
+
+Recorded in `ORG_SERVICE_MODEL.md` § "Platform-owner boundary". Effect on the
+access layer: the Layer-1 **financial** agreement stops conferring
+`org_access_allowed` visibility (clause 5 becomes operational-only);
+`grand_master` reach narrows to the platform-control surface; subscriber
+provisioning moves to a governed grand_master-only RPC. Live at ruling time:
+R & M Security and Investigation (`e96d71c9-…`) is a `private_enterprise`
+CRM prospect under Iron Eagle with no dependents and must be reclassified as an
+own-rooted `service_provider` subscriber.
+
+### 2026-09-15 (later) — grand_master, Bob's reach, and the H&S exception (Don Squires)
+
+> "The only grand master is me and Bob in Iron Eagle; no other org should have
+> grand master access. Bob has full access regardless of who is talking to him,
+> but Conductor and Oracle dictate what Bob can pass on to the user, keeping in
+> line with the Privacy Act in New Zealand. The only exception is H&S: if another
+> org has flagged a H&S risk for a person, vehicle or site, it is flagged
+> globally with redacted details, again in line with the Privacy Act and the
+> H&S Act in New Zealand."
+
+Recorded in `ORG_SERVICE_MODEL.md` (three sub-sections under "Platform-owner
+boundary"). Live at ruling time: four `grand_master` profiles — Don Squires and
+Bob `…b0b0` (Iron Eagle) plus two unreferenced duplicate Bob identities created
+2026-08-21, one inside First Security Guard Services LTD; both duplicates are to
+be downgraded/deactivated. `entity_flags` is org-scoped today (Privacy Act
+comment on the table) with a `bob_full_read` policy; a redacted platform-wide
+H&S read model is not yet built.

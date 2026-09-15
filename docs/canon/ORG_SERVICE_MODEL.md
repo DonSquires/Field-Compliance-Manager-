@@ -125,3 +125,108 @@ Every create-user / create-org / onboarding path MUST set the three user org
 columns correctly. For own-rooted org users: `organization_id` =
 `employer_organization_id` = their org. For branch users: follow the branch
 convention.
+
+## Platform-owner boundary (owner ruling, Don Squires, 2026-09-15)
+
+Iron Eagle Security is the **platform owner**, not a co-operator of its
+subscribers. Every provider (R & M Security and Investigation is the first)
+**subscribes** to the app. The relationship is the same shape as any
+multi-tenant SaaS (GitHub-style):
+
+- **Iron Eagle may:** create the subscriber as an own-rooted
+  `service_provider` org; hold the Layer-1 `service_agreements` row
+  (`agreement_type = 'financial'`, Iron Eagle = provider) and the
+  `org_module_subscriptions` it sells; receive the subscription money; suspend,
+  reinstate or cancel the subscription; invite the subscriber's first/next
+  `master` user; re-send invitations; run account recovery for a locked-out
+  org; and monitor **activity health as aggregates** (last sign-in, active
+  user counts, module usage counts, storage) for billing and support.
+- **Iron Eagle may not:** read or write the subscriber's operational or
+  financial records (shifts, jobs, evidence, sites, contacts, rate rules,
+  quotes, invoices, payments, P&L, HR). A Layer-1 **financial** agreement is a
+  billing link only; it grants **no** data visibility in either direction.
+  Only an **operational** agreement (provider delivers services to a client)
+  carries the agreement-based visibility of migration 0271.
+- **The subscriber's `master`** owns the org's data, users, modules-in-use,
+  rate book, finance and audit, and may in turn act as a provider to its own
+  clients under Layer-2 operational agreements.
+
+Consequences the build must honour (code that disagrees is wrong until it is
+changed):
+
+1. `org_access_allowed` clause 5 (agreement-based visibility) is restricted to
+   `service_agreements.agreement_type = 'operational'`. The Layer-1 financial
+   agreement stops conferring reads.
+2. `is_master_for_org` / `is_admin_for_org` provider-side authority over an
+   agreement client applies to **operational** agreements only.
+3. `grand_master` unrestricted reach (clause 1 and `gm_full_access`) is
+   narrowed to the **platform-control surface**: `organizations`,
+   `service_agreements` (financial), `module_catalog`,
+   `org_module_subscriptions`, identity administration on `user_profiles`
+   (invite / recover / deactivate — never impersonate), audit of those actions,
+   and aggregate activity metrics. Emergency access to a subscriber's records
+   goes through the ACCESS_MODEL §10 break-glass path, logged and time-boxed —
+   never through standing role reach.
+4. A governed, grand_master-only provisioning RPC replaces direct
+   `organizations` inserts for subscribers: create (or reclassify a
+   dependent-free CRM prospect row into) an own-rooted `service_provider`,
+   create the Layer-1 financial agreement, seed `org_module_subscriptions` for
+   the purchased modules, and hand off to `invite-org` for the first `master`.
+   The CRM `manage_crm_organization` path remains for a provider's **clients**
+   and must not be used to create subscribers.
+5. Password reset stays self-serve for users; the owner's tools are
+   `invite-org` (invite / recovery) and `resend-invite`. An owner-triggered
+   recovery for an org that still has active users is a separate, audited
+   action, not a shared password or session.
+
+Live status at ruling time (project `dotczcyyzgabmtmnglqj`, read 2026-09-15):
+R & M exists as a `private_enterprise` CRM prospect parented to Iron Eagle
+(inactive, no users, agreements, subscriptions, modules or sites) and must be
+reclassified under item 4; items 1–3 are not yet implemented — the financial
+agreement currently confers bidirectional visibility.
+
+### Who holds `grand_master` (owner ruling, Don Squires, 2026-09-15)
+
+Exactly two identities hold `grand_master`, both in Iron Eagle Security: the
+owner (Don Squires) and Bob's canonical system identity
+(`00000000-0000-0000-0000-00000000b0b0`, the one every `bob_full_read` policy
+names). **No other organisation may hold a `grand_master` account** — a
+subscriber's top role is `master`. Any further `grand_master` row is a defect
+to be downgraded or deactivated, never a second owner.
+
+Live at ruling time: four `grand_master` profiles existed — the two above plus
+two unreferenced duplicate "Bob" identities created 2026-08-21, one of them
+inside First Security Guard Services LTD. Neither duplicate is named by any
+policy, function or configuration.
+
+### Bob reads fleet-wide; Conductor and Oracle govern what leaves (ruling, 2026-09-15)
+
+Bob's data reach is **not** narrowed by the platform-owner boundary above. Bob
+reads across every organisation regardless of who is talking to him; the
+**Conductor** (egress gate, `redactOutgoing`) and the **Oracle** (truth-state
+of caller, scope and proof grade) decide what may be passed to the caller, in
+line with the Privacy Act 2020 (IPP 10/11 — use and disclosure limited to the
+purpose of collection, and to the caller's authority). This is the existing
+`BOB_DOCTRINE.md` §3 rule ("Bob thinks fleet-wide, speaks within rank") made
+explicit against the subscriber boundary: item 3 above narrows **human**
+`grand_master` reach; it does not narrow Bob.
+
+### The one cross-tenant exception: health-and-safety flags (ruling, 2026-09-15)
+
+When any organisation raises a health-and-safety flag on a **person, vehicle
+or place** (`entity_flags`, entity types `person` / `staff` / `vehicle` /
+`place`), the **existence and nature of the risk is visible platform-wide** to
+any officer or organisation about to deal with that entity, with identifying
+and substantive detail **redacted**: what is surfaced is the entity as it is
+already known to the viewer (the plate, the place, the person they are
+standing in front of), the hazard class, the severity, and the raising
+organisation's contact path for a lawful request — never the other org's
+narrative, evidence, complainant, or personal details. Basis: HSWA 2015 duties
+(s.36 primary duty of care, s.34 duty to consult/co-operate/co-ordinate with
+other PCBUs sharing a workplace or risk) read together with the Privacy Act
+2020 (IPP 11(1)(f) — disclosure necessary to prevent or lessen a serious
+threat to health or safety). This is `BOB_DOCTRINE.md` Tier 3 ("surface the
+warning, strip identity") applied to humans as well as to Bob. All other
+of-interest flags (VOI/POI/LOI/trespass/welfare) stay org-scoped.
+
+
