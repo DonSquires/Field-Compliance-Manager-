@@ -26,11 +26,14 @@ describe('supervisor welfare response workbench', () => {
     expect(source).not.toContain(".from('welfare_alerts').update");
   });
 
-  it('avoids RLS-sensitive profile expansions while preserving actor identity IDs', () => {
+  it('names the people on the alert through a scoped profile read instead of embedded expansions, with the id as the honest fallback', () => {
     expect(source).toContain('acknowledged_by, acknowledged_at');
     expect(source).toContain('resolved_by, resolved_at');
-    expect(source).toContain('formatActor(selected.acknowledged_by,');
-    expect(source).toContain('formatActor(selected.resolved_by,');
+    expect(source).toContain('formatActor(actors, selected.officer_user_id,');
+    expect(source).toContain('formatActor(actors, selected.acknowledged_by,');
+    expect(source).toContain('formatActor(actors, selected.resolved_by,');
+    expect(source).toContain("supabase.from('user_profiles').select('id, display_name, phone').in('id', actorIds)");
+    expect(source).toContain("return actors[id]?.display_name?.trim() || `${fallback} ${id.slice(0, 8)}`;");
     expect(source).not.toContain('officer:officer_user_id(');
     expect(source).not.toContain('acknowledger:acknowledged_by(');
     expect(source).not.toContain('resolver:resolved_by(');

@@ -8,6 +8,13 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner ruling 2026-09-15: **Field Compliance Manager is the only product we are
+building.** GitLab, FreedomCamp-Manager / FreedomCamp-Manager-App, Onspace
+previews, and other historical repos are legacy/reference evidence only. Keep
+their useful requirements, patterns, samples, and lessons; do not preserve their
+architecture as a parallel target, and do not optimise this build for backward
+compatibility with those projects.
+
 ## 0. Where the good bits come from
 
 | Line | Keep | Do not port |

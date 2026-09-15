@@ -19,7 +19,7 @@ export function PlaceContextBanner() {
         : 'Resolving current location evidence';
 
   return (
-    <div className={`place-context-banner is-${locationStatus}`} role="status" data-place-context-status={locationStatus}>
+    <div className={`place-context-banner is-${locationStatus}`} role="note" aria-label={heading} data-place-context-status={locationStatus}>
       <ShieldAlert size={18} aria-hidden="true" />
       <div>
         <strong>{heading}</strong>

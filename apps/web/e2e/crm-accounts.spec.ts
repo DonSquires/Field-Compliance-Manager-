@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('20
 
 test('operating branch selector is visible and switches the session context', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
-  const selector = page.getByLabel('Operating branch');
+  const selector = page.getByLabel('Working in');
   await expect(selector).toHaveValue('41414141-4141-4141-8141-414141414141');
   await expect(selector.locator('option').nth(0)).toContainText('Northern Branch');
   await expect(selector.locator('option').nth(1)).toContainText('Southern Branch');

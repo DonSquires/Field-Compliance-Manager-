@@ -19,6 +19,15 @@ design: a change to a shared table, hook, or component can ripple across
 surfaces that were never the direct target of the edit. Treat it as a graph,
 not a flat app, and check the graph before editing shared terrain.
 
+**Single target build (owner ruling, 2026-09-15).** Field Compliance Manager is
+the only product being built in this repository. GitLab, FreedomCamp-Manager /
+FreedomCamp-Manager-App, Onspace previews, and other historical repos are
+legacy/reference evidence only: use their requirements, workflow examples,
+sample evidence, and failure lessons, but do not keep them alive as parallel
+products, do not optimise this repo for backward compatibility with them, and
+do not let their architecture overrule this repo's canon, Atlas, live schema,
+or `docs/REBUILD_PLAN.md`.
+
 ## Two separate things named "Atlas" — do not confuse them
 
 **What Atlas is for (owner ruling, 2026-09-14).** The app is not a flat set of

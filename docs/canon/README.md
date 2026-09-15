@@ -7,6 +7,13 @@ prototypes, and this repository — into one place with one order of authority.
 When two documents disagree, the higher one wins; when code disagrees with canon,
 the code is wrong **or** a ruling must be recorded here before the code stands.
 
+Owner ruling 2026-09-15: **Field Compliance Manager is the single target build.**
+GitLab, FreedomCamp-Manager / FreedomCamp-Manager-App, Onspace previews, and
+other historical repos are lineage evidence only. They may supply requirements,
+acceptance examples, sample workflows, and mistakes to avoid; they are not
+parallel products and cannot overrule this canon, Atlas, the live schema, or
+`docs/REBUILD_PLAN.md`.
+
 ## Order of authority
 
 1. [`FOUNDATION.md`](../../FOUNDATION.md) (repo root) — why the app exists:
