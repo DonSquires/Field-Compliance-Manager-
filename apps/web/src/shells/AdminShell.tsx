@@ -67,7 +67,8 @@ import './AdminShell.css';
 import AdminHubPage from '../pages/AdminHubPage';
 
 const DESKTOP_V1_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v0.1.53/FCM-SD-Card-Bridge-Setup.exe';
-const DESKTOP_V2_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v2-v0.1.2/FCM-Desktop-V2-Setup.exe';
+// Release downloads on this private repo require the user to be signed in to GitHub.
+const DESKTOP_V2_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v2-v0.1.3/FCM-Desktop-V2-Setup.exe';
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));

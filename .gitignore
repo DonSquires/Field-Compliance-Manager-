@@ -39,3 +39,8 @@ models/
 output.txt
 .vercel
 .env*
+
+# Camera SD-card samples (TAPO dump, 1.1 GB) - never commit
+apps/web/src/shells/Sample Data/
+**/Sample Data/*.mp4
+**/Sample Data/*.bin
