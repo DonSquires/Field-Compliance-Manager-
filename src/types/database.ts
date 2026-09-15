@@ -10,7 +10,32 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.5"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -326,6 +351,7 @@ export type Database = {
           service_agreement_id: string
           site_id: string | null
           sla_target_minutes: number | null
+          updated_at: string
         }
         Insert: {
           active?: boolean
@@ -342,6 +368,7 @@ export type Database = {
           service_agreement_id: string
           site_id?: string | null
           sla_target_minutes?: number | null
+          updated_at?: string
         }
         Update: {
           active?: boolean
@@ -358,6 +385,7 @@ export type Database = {
           service_agreement_id?: string
           site_id?: string | null
           sla_target_minutes?: number | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -753,19 +781,161 @@ export type Database = {
           },
         ]
       }
+      bank_accounts: {
+        Row: {
+          account_name: string
+          account_number: string
+          account_type: string
+          bank_name: string | null
+          created_at: string
+          created_by: string | null
+          currency_code: string
+          id: string
+          is_active: boolean
+          opening_balance: number
+          organization_id: string
+        }
+        Insert: {
+          account_name: string
+          account_number: string
+          account_type: string
+          bank_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency_code?: string
+          id?: string
+          is_active?: boolean
+          opening_balance?: number
+          organization_id: string
+        }
+        Update: {
+          account_name?: string
+          account_number?: string
+          account_type?: string
+          bank_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency_code?: string
+          id?: string
+          is_active?: boolean
+          opening_balance?: number
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_accounts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_accounts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "bank_accounts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_accounts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      biosecurity_assessment_evidence: {
+        Row: {
+          biosecurity_assessment_id: string
+          created_at: string
+          evidence_item_id: string
+          id: string
+          ordinal: number
+          organization_id: string
+          purpose: string
+        }
+        Insert: {
+          biosecurity_assessment_id: string
+          created_at?: string
+          evidence_item_id: string
+          id?: string
+          ordinal?: number
+          organization_id: string
+          purpose?: string
+        }
+        Update: {
+          biosecurity_assessment_id?: string
+          created_at?: string
+          evidence_item_id?: string
+          id?: string
+          ordinal?: number
+          organization_id?: string
+          purpose?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "biosecurity_assessment_evidence_biosecurity_assessment_id_fkey"
+            columns: ["biosecurity_assessment_id"]
+            isOneToOne: false
+            referencedRelation: "biosecurity_assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "biosecurity_assessment_evidence_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "biosecurity_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "biosecurity_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "biosecurity_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       biosecurity_assessments: {
         Row: {
           action: string | null
           action_taken: string | null
           assessed_at: string
+          assigned_reviewer_id: string | null
           bob_checklist: Json
+          bob_classification: string | null
           bob_confidence: number | null
           bob_recommendation: string | null
           bob_species_confirmed: boolean | null
           bob_species_id: string | null
+          client_request_id: string | null
+          confirmed_species_name: string | null
           created_at: string
           density_estimate: string | null
           dispatch_job_id: string | null
+          evidence_state: string
           follow_up_required: boolean
           id: string
           land_use_context: string | null
@@ -782,26 +952,41 @@ export type Database = {
           photo_urls: Json | null
           protected_land_address: string | null
           protected_land_site_id: string | null
+          review_due_at: string | null
+          review_notes: string | null
+          review_priority: string
+          review_state: string
+          review_status: string
+          review_version: number
+          reviewed_at: string | null
+          reviewed_by: string | null
           scene_description: string | null
           seed_head_present: boolean | null
+          shift_id: string | null
           site_id: string | null
           species_confirmed: boolean
           species_identified: string | null
           species_name: string | null
+          species_review_decision: string
           status: string
         }
         Insert: {
           action?: string | null
           action_taken?: string | null
           assessed_at?: string
+          assigned_reviewer_id?: string | null
           bob_checklist?: Json
+          bob_classification?: string | null
           bob_confidence?: number | null
           bob_recommendation?: string | null
           bob_species_confirmed?: boolean | null
           bob_species_id?: string | null
+          client_request_id?: string | null
+          confirmed_species_name?: string | null
           created_at?: string
           density_estimate?: string | null
           dispatch_job_id?: string | null
+          evidence_state?: string
           follow_up_required?: boolean
           id?: string
           land_use_context?: string | null
@@ -818,26 +1003,41 @@ export type Database = {
           photo_urls?: Json | null
           protected_land_address?: string | null
           protected_land_site_id?: string | null
+          review_due_at?: string | null
+          review_notes?: string | null
+          review_priority?: string
+          review_state?: string
+          review_status?: string
+          review_version?: number
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scene_description?: string | null
           seed_head_present?: boolean | null
+          shift_id?: string | null
           site_id?: string | null
           species_confirmed?: boolean
           species_identified?: string | null
           species_name?: string | null
+          species_review_decision?: string
           status?: string
         }
         Update: {
           action?: string | null
           action_taken?: string | null
           assessed_at?: string
+          assigned_reviewer_id?: string | null
           bob_checklist?: Json
+          bob_classification?: string | null
           bob_confidence?: number | null
           bob_recommendation?: string | null
           bob_species_confirmed?: boolean | null
           bob_species_id?: string | null
+          client_request_id?: string | null
+          confirmed_species_name?: string | null
           created_at?: string
           density_estimate?: string | null
           dispatch_job_id?: string | null
+          evidence_state?: string
           follow_up_required?: boolean
           id?: string
           land_use_context?: string | null
@@ -854,15 +1054,32 @@ export type Database = {
           photo_urls?: Json | null
           protected_land_address?: string | null
           protected_land_site_id?: string | null
+          review_due_at?: string | null
+          review_notes?: string | null
+          review_priority?: string
+          review_state?: string
+          review_status?: string
+          review_version?: number
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scene_description?: string | null
           seed_head_present?: boolean | null
+          shift_id?: string | null
           site_id?: string | null
           species_confirmed?: boolean
           species_identified?: string | null
           species_name?: string | null
+          species_review_decision?: string
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "biosecurity_assessments_assigned_reviewer_id_fkey"
+            columns: ["assigned_reviewer_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "biosecurity_assessments_dispatch_job_id_fkey"
             columns: ["dispatch_job_id"]
@@ -913,10 +1130,80 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "biosecurity_assessments_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "biosecurity_assessments_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "biosecurity_assessments_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_action_approvals: {
+        Row: {
+          approval_scope: string
+          approved_at: string | null
+          approved_by: string | null
+          conversation_id: string
+          created_at: string
+          expires_at: string | null
+          id: string
+          proposed_action: Json
+          rejected_at: string | null
+          rejected_by: string | null
+          request_id: string
+          status: string
+          tool_execution_id: string
+        }
+        Insert: {
+          approval_scope: string
+          approved_at?: string | null
+          approved_by?: string | null
+          conversation_id: string
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          proposed_action: Json
+          rejected_at?: string | null
+          rejected_by?: string | null
+          request_id: string
+          status: string
+          tool_execution_id: string
+        }
+        Update: {
+          approval_scope?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          conversation_id?: string
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          proposed_action?: Json
+          rejected_at?: string | null
+          rejected_by?: string | null
+          request_id?: string
+          status?: string
+          tool_execution_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_action_approvals_tool_execution_id_fkey"
+            columns: ["tool_execution_id"]
+            isOneToOne: false
+            referencedRelation: "bob_tool_executions"
             referencedColumns: ["id"]
           },
         ]
@@ -1153,7 +1440,6 @@ export type Database = {
           file_size_bytes: number
           file_type: string
           id: string
-            metadata: Json
           organization_id: string
           processing_state: string
           purpose: string
@@ -1174,7 +1460,6 @@ export type Database = {
           file_size_bytes: number
           file_type: string
           id?: string
-          metadata?: Json
           organization_id: string
           processing_state?: string
           purpose: string
@@ -1195,7 +1480,6 @@ export type Database = {
           file_size_bytes?: number
           file_type?: string
           id?: string
-          metadata?: Json
           organization_id?: string
           processing_state?: string
           purpose?: string
@@ -1508,7 +1792,7 @@ export type Database = {
           archived_at: string | null
           created_at: string
           id: string
-          module_key: string | null
+          module_key: string
           organization_id: string
           pinned: boolean
           title: string | null
@@ -1519,7 +1803,7 @@ export type Database = {
           archived_at?: string | null
           created_at?: string
           id?: string
-          module_key?: string | null
+          module_key?: string
           organization_id: string
           pinned?: boolean
           title?: string | null
@@ -1530,7 +1814,7 @@ export type Database = {
           archived_at?: string | null
           created_at?: string
           id?: string
-          module_key?: string | null
+          module_key?: string
           organization_id?: string
           pinned?: boolean
           title?: string | null
@@ -1726,6 +2010,122 @@ export type Database = {
           {
             foreignKeyName: "bob_friction_packets_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_generated_document_outputs: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          delivery_metadata: Json
+          document_id: string
+          document_version_id: string
+          failure_reason: string | null
+          generated_at: string | null
+          id: string
+          mime_type: string | null
+          organization_id: string
+          output_format: string
+          renderer_version: string | null
+          requested_by: string
+          sha256: string | null
+          status: string
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          delivery_metadata?: Json
+          document_id: string
+          document_version_id: string
+          failure_reason?: string | null
+          generated_at?: string | null
+          id?: string
+          mime_type?: string | null
+          organization_id: string
+          output_format: string
+          renderer_version?: string | null
+          requested_by: string
+          sha256?: string | null
+          status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          delivery_metadata?: Json
+          document_id?: string
+          document_version_id?: string
+          failure_reason?: string | null
+          generated_at?: string | null
+          id?: string
+          mime_type?: string | null
+          organization_id?: string
+          output_format?: string
+          renderer_version?: string | null
+          requested_by?: string
+          sha256?: string | null
+          status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_generated_document_outputs_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_generated_document_outputs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_generated_document_outputs_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_generated_document_outputs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "bob_generated_document_outputs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_generated_document_outputs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_generated_document_outputs_requested_by_fkey"
+            columns: ["requested_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
@@ -2007,6 +2407,7 @@ export type Database = {
           created_at: string
           embedded_at: string | null
           embedding: string | null
+          embedding_384: string | null
           embedding_model: string | null
           id: string
           is_active: boolean
@@ -2023,6 +2424,7 @@ export type Database = {
           created_at?: string
           embedded_at?: string | null
           embedding?: string | null
+          embedding_384?: string | null
           embedding_model?: string | null
           id?: string
           is_active?: boolean
@@ -2039,6 +2441,7 @@ export type Database = {
           created_at?: string
           embedded_at?: string | null
           embedding?: string | null
+          embedding_384?: string | null
           embedding_model?: string | null
           id?: string
           is_active?: boolean
@@ -2332,6 +2735,128 @@ export type Database = {
           },
         ]
       }
+      bob_nz_finance_readiness_checks: {
+        Row: {
+          bob_can_do: string
+          check_code: string
+          check_title: string
+          evidence: string
+          human_or_provider_needed: string
+          id: string
+          measured_at: string
+          organization_id: string
+          score: number
+          source_key: string
+          status: string
+        }
+        Insert: {
+          bob_can_do: string
+          check_code: string
+          check_title: string
+          evidence: string
+          human_or_provider_needed: string
+          id?: string
+          measured_at?: string
+          organization_id: string
+          score: number
+          source_key: string
+          status: string
+        }
+        Update: {
+          bob_can_do?: string
+          check_code?: string
+          check_title?: string
+          evidence?: string
+          human_or_provider_needed?: string
+          id?: string
+          measured_at?: string
+          organization_id?: string
+          score?: number
+          source_key?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_nz_finance_readiness_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "bob_nz_finance_readiness_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_nz_finance_readiness_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_nz_finance_readiness_checks_source_key_fkey"
+            columns: ["source_key"]
+            isOneToOne: false
+            referencedRelation: "bob_nz_finance_sources"
+            referencedColumns: ["source_key"]
+          },
+        ]
+      }
+      bob_nz_finance_sources: {
+        Row: {
+          authority: string
+          created_at: string
+          guidance_scope: string
+          id: string
+          jurisdiction: string
+          last_verified_on: string | null
+          limitations: string
+          review_due_on: string | null
+          source_key: string
+          source_url: string
+          status: string
+          title: string
+          topic: string
+          updated_at: string
+        }
+        Insert: {
+          authority: string
+          created_at?: string
+          guidance_scope: string
+          id?: string
+          jurisdiction?: string
+          last_verified_on?: string | null
+          limitations: string
+          review_due_on?: string | null
+          source_key: string
+          source_url: string
+          status?: string
+          title: string
+          topic: string
+          updated_at?: string
+        }
+        Update: {
+          authority?: string
+          created_at?: string
+          guidance_scope?: string
+          id?: string
+          jurisdiction?: string
+          last_verified_on?: string | null
+          limitations?: string
+          review_due_on?: string | null
+          source_key?: string
+          source_url?: string
+          status?: string
+          title?: string
+          topic?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bob_owner_rulings: {
         Row: {
           authored_by: string
@@ -2382,10 +2907,195 @@ export type Database = {
           },
         ]
       }
+      bob_repo_read_progress: {
+        Row: {
+          conversation_id: string
+          id: string
+          last_end_line: number | null
+          last_start_line: number | null
+          max_line_read: number
+          path: string
+          ref: string
+          updated_at: string
+        }
+        Insert: {
+          conversation_id: string
+          id?: string
+          last_end_line?: number | null
+          last_start_line?: number | null
+          max_line_read?: number
+          path: string
+          ref: string
+          updated_at?: string
+        }
+        Update: {
+          conversation_id?: string
+          id?: string
+          last_end_line?: number | null
+          last_start_line?: number | null
+          max_line_read?: number
+          path?: string
+          ref?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_repo_read_progress_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "bob_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_roster_plan_slots: {
+        Row: {
+          applied_at: string
+          id: string
+          plan_id: string
+          rationale: string
+          rolled_back_at: string | null
+          roster_slot_id: string
+          score: number
+          staff_id: string
+        }
+        Insert: {
+          applied_at?: string
+          id?: string
+          plan_id: string
+          rationale: string
+          rolled_back_at?: string | null
+          roster_slot_id: string
+          score: number
+          staff_id: string
+        }
+        Update: {
+          applied_at?: string
+          id?: string
+          plan_id?: string
+          rationale?: string
+          rolled_back_at?: string | null
+          roster_slot_id?: string
+          score?: number
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_roster_plan_slots_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "bob_roster_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_roster_plan_slots_roster_slot_id_fkey"
+            columns: ["roster_slot_id"]
+            isOneToOne: false
+            referencedRelation: "roster_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_roster_plan_slots_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_roster_plans: {
+        Row: {
+          action_id: string
+          applied_at: string
+          applied_by: string | null
+          created_at: string
+          id: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          rollback_reason: string | null
+          rolled_back_at: string | null
+          rolled_back_by: string | null
+          status: string
+        }
+        Insert: {
+          action_id: string
+          applied_at?: string
+          applied_by?: string | null
+          created_at?: string
+          id?: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          rollback_reason?: string | null
+          rolled_back_at?: string | null
+          rolled_back_by?: string | null
+          status?: string
+        }
+        Update: {
+          action_id?: string
+          applied_at?: string
+          applied_by?: string | null
+          created_at?: string
+          id?: string
+          organization_id?: string
+          period_end?: string
+          period_start?: string
+          rollback_reason?: string | null
+          rolled_back_at?: string | null
+          rolled_back_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_roster_plans_action_id_fkey"
+            columns: ["action_id"]
+            isOneToOne: true
+            referencedRelation: "bob_agentic_actions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_roster_plans_applied_by_fkey"
+            columns: ["applied_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_roster_plans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "bob_roster_plans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_roster_plans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_roster_plans_rolled_back_by_fkey"
+            columns: ["rolled_back_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bob_self_memory: {
         Row: {
           approved_at: string | null
           approved_by: string | null
+          content: string | null
           created_at: string
           id: string
           memory_kind: string
@@ -2397,6 +3107,7 @@ export type Database = {
         Insert: {
           approved_at?: string | null
           approved_by?: string | null
+          content?: string | null
           created_at?: string
           id?: string
           memory_kind?: string
@@ -2408,6 +3119,7 @@ export type Database = {
         Update: {
           approved_at?: string | null
           approved_by?: string | null
+          content?: string | null
           created_at?: string
           id?: string
           memory_kind?: string
@@ -2426,6 +3138,571 @@ export type Database = {
           },
           {
             foreignKeyName: "bob_self_memory_proposed_by_fkey"
+            columns: ["proposed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_signing_audit: {
+        Row: {
+          actor_user_id: string | null
+          created_at: string
+          event_payload: Json
+          event_type: string
+          id: string
+          identity_id: string
+        }
+        Insert: {
+          actor_user_id?: string | null
+          created_at?: string
+          event_payload?: Json
+          event_type: string
+          id?: string
+          identity_id: string
+        }
+        Update: {
+          actor_user_id?: string | null
+          created_at?: string
+          event_payload?: Json
+          event_type?: string
+          id?: string
+          identity_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_signing_audit_identity_id_fkey"
+            columns: ["identity_id"]
+            isOneToOne: false
+            referencedRelation: "bob_signing_identities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_signing_identities: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          enabled: boolean
+          fingerprint_sha256: string
+          id: string
+          key_name: string
+          notes: string | null
+          provider: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          fingerprint_sha256: string
+          id?: string
+          key_name: string
+          notes?: string | null
+          provider: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          fingerprint_sha256?: string
+          id?: string
+          key_name?: string
+          notes?: string | null
+          provider?: string
+        }
+        Relationships: []
+      }
+      bob_signing_nonces: {
+        Row: {
+          created_at: string
+          expires_at: string
+          nonce: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          nonce: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          nonce?: string
+        }
+        Relationships: []
+      }
+      bob_task_runs: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          current_step_index: number
+          goal: string
+          id: string
+          last_error: string | null
+          last_verified_at: string | null
+          organization_id: string | null
+          status: string
+          task_id: string
+          total_steps: number
+          updated_at: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          current_step_index?: number
+          goal: string
+          id?: string
+          last_error?: string | null
+          last_verified_at?: string | null
+          organization_id?: string | null
+          status?: string
+          task_id: string
+          total_steps?: number
+          updated_at?: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          current_step_index?: number
+          goal?: string
+          id?: string
+          last_error?: string | null
+          last_verified_at?: string | null
+          organization_id?: string | null
+          status?: string
+          task_id?: string
+          total_steps?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_task_runs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "bob_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_task_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "bob_task_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_task_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_task_steps: {
+        Row: {
+          attempt_count: number
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          evidence_refs: Json
+          id: string
+          normalized_args: Json | null
+          normalized_tool: string | null
+          ordinal_position: number
+          requested_operation: string
+          result_summary: string | null
+          retryable: boolean
+          started_at: string | null
+          status: string
+          step_id: string
+          task_id: string
+          task_run_id: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          evidence_refs?: Json
+          id?: string
+          normalized_args?: Json | null
+          normalized_tool?: string | null
+          ordinal_position?: number
+          requested_operation: string
+          result_summary?: string | null
+          retryable?: boolean
+          started_at?: string | null
+          status?: string
+          step_id: string
+          task_id: string
+          task_run_id: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          evidence_refs?: Json
+          id?: string
+          normalized_args?: Json | null
+          normalized_tool?: string | null
+          ordinal_position?: number
+          requested_operation?: string
+          result_summary?: string | null
+          retryable?: boolean
+          started_at?: string | null
+          status?: string
+          step_id?: string
+          task_id?: string
+          task_run_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_task_steps_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "bob_task_runs"
+            referencedColumns: ["task_id"]
+          },
+          {
+            foreignKeyName: "bob_task_steps_task_run_id_fkey"
+            columns: ["task_run_id"]
+            isOneToOne: false
+            referencedRelation: "bob_task_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bob_tool_contracts: {
+        Row: {
+          created_at: string
+          id: string
+          input_schema: Json
+          is_current: boolean
+          output_schema: Json
+          tool_key: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          input_schema: Json
+          is_current?: boolean
+          output_schema: Json
+          tool_key: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          input_schema?: Json
+          is_current?: boolean
+          output_schema?: Json
+          tool_key?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_tool_contracts_tool_key_fkey"
+            columns: ["tool_key"]
+            isOneToOne: false
+            referencedRelation: "bob_tool_registry"
+            referencedColumns: ["tool_key"]
+          },
+        ]
+      }
+      bob_tool_executions: {
+        Row: {
+          conversation_id: string
+          created_at: string
+          decision_reason: string
+          error_code: string | null
+          error_message: string | null
+          http_status: number | null
+          id: string
+          input_payload: Json
+          latency_ms: number | null
+          ok: boolean
+          output_payload: Json | null
+          request_id: string
+          retryable: boolean
+          step_index: number
+          tool_key: string
+        }
+        Insert: {
+          conversation_id: string
+          created_at?: string
+          decision_reason: string
+          error_code?: string | null
+          error_message?: string | null
+          http_status?: number | null
+          id?: string
+          input_payload: Json
+          latency_ms?: number | null
+          ok?: boolean
+          output_payload?: Json | null
+          request_id: string
+          retryable?: boolean
+          step_index: number
+          tool_key: string
+        }
+        Update: {
+          conversation_id?: string
+          created_at?: string
+          decision_reason?: string
+          error_code?: string | null
+          error_message?: string | null
+          http_status?: number | null
+          id?: string
+          input_payload?: Json
+          latency_ms?: number | null
+          ok?: boolean
+          output_payload?: Json | null
+          request_id?: string
+          retryable?: boolean
+          step_index?: number
+          tool_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_tool_executions_tool_key_fkey"
+            columns: ["tool_key"]
+            isOneToOne: false
+            referencedRelation: "bob_tool_registry"
+            referencedColumns: ["tool_key"]
+          },
+        ]
+      }
+      bob_tool_registry: {
+        Row: {
+          auth_mode: string
+          created_at: string
+          description: string
+          display_name: string
+          enabled: boolean
+          endpoint_url: string
+          http_method: string
+          id: string
+          requires_approval: boolean
+          retired_at: string | null
+          retry_limit: number
+          risk_level: string
+          timeout_ms: number
+          tool_key: string
+          updated_at: string
+        }
+        Insert: {
+          auth_mode: string
+          created_at?: string
+          description: string
+          display_name: string
+          enabled?: boolean
+          endpoint_url: string
+          http_method?: string
+          id?: string
+          requires_approval?: boolean
+          retired_at?: string | null
+          retry_limit?: number
+          risk_level: string
+          timeout_ms?: number
+          tool_key: string
+          updated_at?: string
+        }
+        Update: {
+          auth_mode?: string
+          created_at?: string
+          description?: string
+          display_name?: string
+          enabled?: boolean
+          endpoint_url?: string
+          http_method?: string
+          id?: string
+          requires_approval?: boolean
+          retired_at?: string | null
+          retry_limit?: number
+          risk_level?: string
+          timeout_ms?: number
+          tool_key?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bob_tool_tenant_policy: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          organization_id: string
+          requires_approval_override: boolean | null
+          tool_key: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          organization_id: string
+          requires_approval_override?: boolean | null
+          tool_key: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          organization_id?: string
+          requires_approval_override?: boolean | null
+          tool_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_tool_tenant_policy_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "bob_tool_tenant_policy_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_tool_tenant_policy_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_tool_tenant_policy_tool_key_fkey"
+            columns: ["tool_key"]
+            isOneToOne: false
+            referencedRelation: "bob_tool_registry"
+            referencedColumns: ["tool_key"]
+          },
+        ]
+      }
+      boundary_proposals: {
+        Row: {
+          address_candidate: Json | null
+          area_m2: number
+          center_point: unknown
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          drift_from_current_m: number | null
+          entity_id: string | null
+          entity_type: string
+          final_boundary: unknown
+          gate_ok: boolean
+          gate_reason: string | null
+          history_version: number | null
+          human_edited: boolean | null
+          id: string
+          organization_id: string
+          proposed_at: string
+          proposed_boundary: unknown
+          proposed_by: string | null
+          proposed_via: string
+          source: string
+          source_ref: Json
+          status: string
+          zone_type: string | null
+        }
+        Insert: {
+          address_candidate?: Json | null
+          area_m2: number
+          center_point?: unknown
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          drift_from_current_m?: number | null
+          entity_id?: string | null
+          entity_type: string
+          final_boundary?: unknown
+          gate_ok: boolean
+          gate_reason?: string | null
+          history_version?: number | null
+          human_edited?: boolean | null
+          id?: string
+          organization_id: string
+          proposed_at?: string
+          proposed_boundary: unknown
+          proposed_by?: string | null
+          proposed_via?: string
+          source: string
+          source_ref?: Json
+          status?: string
+          zone_type?: string | null
+        }
+        Update: {
+          address_candidate?: Json | null
+          area_m2?: number
+          center_point?: unknown
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          drift_from_current_m?: number | null
+          entity_id?: string | null
+          entity_type?: string
+          final_boundary?: unknown
+          gate_ok?: boolean
+          gate_reason?: string | null
+          history_version?: number | null
+          human_edited?: boolean | null
+          id?: string
+          organization_id?: string
+          proposed_at?: string
+          proposed_boundary?: unknown
+          proposed_by?: string | null
+          proposed_via?: string
+          source?: string
+          source_ref?: Json
+          status?: string
+          zone_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "boundary_proposals_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "boundary_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "boundary_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "boundary_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "boundary_proposals_proposed_by_fkey"
             columns: ["proposed_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
@@ -2559,6 +3836,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "breach_alerts_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       breach_records: {
@@ -2660,6 +3944,886 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "breach_records_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      builder_approvals: {
+        Row: {
+          approval_comment: string | null
+          approval_type: string
+          approved_by: string | null
+          created_at: string
+          decided_by: string | null
+          expires_at: string
+          id: string
+          job_id: string
+          organization_id: string
+          requested_at: string
+          requested_from_users: string[] | null
+          requested_target_sha: string | null
+          responded_at: string | null
+          reviewed_artifact_ids: string[]
+          status: string
+          triggered_at_status: string
+          updated_at: string
+        }
+        Insert: {
+          approval_comment?: string | null
+          approval_type: string
+          approved_by?: string | null
+          created_at?: string
+          decided_by?: string | null
+          expires_at?: string
+          id?: string
+          job_id: string
+          organization_id: string
+          requested_at?: string
+          requested_from_users?: string[] | null
+          requested_target_sha?: string | null
+          responded_at?: string | null
+          reviewed_artifact_ids?: string[]
+          status?: string
+          triggered_at_status: string
+          updated_at?: string
+        }
+        Update: {
+          approval_comment?: string | null
+          approval_type?: string
+          approved_by?: string | null
+          created_at?: string
+          decided_by?: string | null
+          expires_at?: string
+          id?: string
+          job_id?: string
+          organization_id?: string
+          requested_at?: string
+          requested_from_users?: string[] | null
+          requested_target_sha?: string | null
+          responded_at?: string | null
+          reviewed_artifact_ids?: string[]
+          status?: string
+          triggered_at_status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_approvals_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_approvals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "builder_approvals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_approvals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_artifacts: {
+        Row: {
+          artifact_type: string
+          checksum: string | null
+          content_preview: string | null
+          content_size_bytes: number | null
+          content_type: string | null
+          created_at: string
+          id: string
+          job_id: string
+          produced_by_model: string | null
+          produced_by_user: string | null
+          status: string
+          step_id: string | null
+          storage_location: string | null
+          updated_at: string
+          version_number: number | null
+        }
+        Insert: {
+          artifact_type: string
+          checksum?: string | null
+          content_preview?: string | null
+          content_size_bytes?: number | null
+          content_type?: string | null
+          created_at?: string
+          id?: string
+          job_id: string
+          produced_by_model?: string | null
+          produced_by_user?: string | null
+          status?: string
+          step_id?: string | null
+          storage_location?: string | null
+          updated_at?: string
+          version_number?: number | null
+        }
+        Update: {
+          artifact_type?: string
+          checksum?: string | null
+          content_preview?: string | null
+          content_size_bytes?: number | null
+          content_type?: string | null
+          created_at?: string
+          id?: string
+          job_id?: string
+          produced_by_model?: string | null
+          produced_by_user?: string | null
+          status?: string
+          step_id?: string | null
+          storage_location?: string | null
+          updated_at?: string
+          version_number?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_artifacts_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_artifacts_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "builder_job_steps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_audit_events: {
+        Row: {
+          actor_type: string | null
+          actor_user_id: string | null
+          change_summary: string | null
+          created_at: string
+          event_type: string
+          id: string
+          job_id: string
+          new_value: Json | null
+          organization_id: string
+          previous_value: Json | null
+          related_approval_id: string | null
+          related_artifact_ids: string[] | null
+        }
+        Insert: {
+          actor_type?: string | null
+          actor_user_id?: string | null
+          change_summary?: string | null
+          created_at?: string
+          event_type: string
+          id?: string
+          job_id: string
+          new_value?: Json | null
+          organization_id: string
+          previous_value?: Json | null
+          related_approval_id?: string | null
+          related_artifact_ids?: string[] | null
+        }
+        Update: {
+          actor_type?: string | null
+          actor_user_id?: string | null
+          change_summary?: string | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          job_id?: string
+          new_value?: Json | null
+          organization_id?: string
+          previous_value?: Json | null
+          related_approval_id?: string | null
+          related_artifact_ids?: string[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_audit_events_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_audit_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "builder_audit_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_audit_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_audit_events_related_approval_id_fkey"
+            columns: ["related_approval_id"]
+            isOneToOne: false
+            referencedRelation: "builder_approvals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_job_steps: {
+        Row: {
+          artifact_ids: string[] | null
+          attempt_count: number | null
+          blocked_dependencies: string[] | null
+          blocked_reason: string | null
+          builder_mode: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          evidence_refs: Json | null
+          id: string
+          input_context: Json | null
+          job_id: string
+          model_name: string | null
+          model_provider: string | null
+          ordinal_position: number
+          result_summary: string | null
+          retryable: boolean | null
+          started_at: string | null
+          status: string
+          step_id: string
+          updated_at: string
+        }
+        Insert: {
+          artifact_ids?: string[] | null
+          attempt_count?: number | null
+          blocked_dependencies?: string[] | null
+          blocked_reason?: string | null
+          builder_mode: string
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          evidence_refs?: Json | null
+          id?: string
+          input_context?: Json | null
+          job_id: string
+          model_name?: string | null
+          model_provider?: string | null
+          ordinal_position: number
+          result_summary?: string | null
+          retryable?: boolean | null
+          started_at?: string | null
+          status?: string
+          step_id: string
+          updated_at?: string
+        }
+        Update: {
+          artifact_ids?: string[] | null
+          attempt_count?: number | null
+          blocked_dependencies?: string[] | null
+          blocked_reason?: string | null
+          builder_mode?: string
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          evidence_refs?: Json | null
+          id?: string
+          input_context?: Json | null
+          job_id?: string
+          model_name?: string | null
+          model_provider?: string | null
+          ordinal_position?: number
+          result_summary?: string | null
+          retryable?: boolean | null
+          started_at?: string | null
+          status?: string
+          step_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_job_steps_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_jobs: {
+        Row: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        Insert: {
+          approval_required_at?: string[] | null
+          backend_required?: boolean
+          branch_name?: string | null
+          code_review_artifact_id?: string | null
+          code_review_mode?: string
+          code_review_status?: string
+          created_at?: string
+          created_by?: string | null
+          current_step_index?: number | null
+          current_step_name?: string | null
+          description?: string | null
+          error_count?: number | null
+          frontend_required?: boolean
+          id?: string
+          last_error?: string | null
+          organization_id: string
+          parent_job_id?: string | null
+          project_id: string
+          requested_action?: string
+          status?: string
+          target_environment?: string
+          target_sha?: string | null
+          task_description?: string | null
+          task_run_id?: string | null
+          title: string
+          total_steps?: number | null
+          updated_at?: string
+          workspace_branch?: string | null
+          workspace_created_at?: string | null
+          workspace_head_sha?: string | null
+          workspace_published_at?: string | null
+          workspace_published_head_sha?: string | null
+          workspace_pull_request_created_at?: string | null
+          workspace_pull_request_head_sha?: string | null
+          workspace_pull_request_url?: string | null
+        }
+        Update: {
+          approval_required_at?: string[] | null
+          backend_required?: boolean
+          branch_name?: string | null
+          code_review_artifact_id?: string | null
+          code_review_mode?: string
+          code_review_status?: string
+          created_at?: string
+          created_by?: string | null
+          current_step_index?: number | null
+          current_step_name?: string | null
+          description?: string | null
+          error_count?: number | null
+          frontend_required?: boolean
+          id?: string
+          last_error?: string | null
+          organization_id?: string
+          parent_job_id?: string | null
+          project_id?: string
+          requested_action?: string
+          status?: string
+          target_environment?: string
+          target_sha?: string | null
+          task_description?: string | null
+          task_run_id?: string | null
+          title?: string
+          total_steps?: number | null
+          updated_at?: string
+          workspace_branch?: string | null
+          workspace_created_at?: string | null
+          workspace_head_sha?: string | null
+          workspace_published_at?: string | null
+          workspace_published_head_sha?: string | null
+          workspace_pull_request_created_at?: string | null
+          workspace_pull_request_head_sha?: string | null
+          workspace_pull_request_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_jobs_code_review_artifact_id_fkey"
+            columns: ["code_review_artifact_id"]
+            isOneToOne: false
+            referencedRelation: "builder_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_jobs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "builder_jobs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_jobs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_jobs_parent_job_id_fkey"
+            columns: ["parent_job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_jobs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "builder_projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_jobs_task_run_id_fkey"
+            columns: ["task_run_id"]
+            isOneToOne: false
+            referencedRelation: "bob_task_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_model_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          id: string
+          idempotency_key: string
+          input_artifact_ids: string[]
+          job_id: string
+          model_name: string
+          organization_id: string
+          output_artifact_ids: string[]
+          prompt_version: string
+          provider: string
+          started_at: string | null
+          status: string
+          step_id: string | null
+          updated_at: string
+          usage_metadata: Json
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          idempotency_key: string
+          input_artifact_ids?: string[]
+          job_id: string
+          model_name: string
+          organization_id: string
+          output_artifact_ids?: string[]
+          prompt_version: string
+          provider: string
+          started_at?: string | null
+          status?: string
+          step_id?: string | null
+          updated_at?: string
+          usage_metadata?: Json
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          idempotency_key?: string
+          input_artifact_ids?: string[]
+          job_id?: string
+          model_name?: string
+          organization_id?: string
+          output_artifact_ids?: string[]
+          prompt_version?: string
+          provider?: string
+          started_at?: string | null
+          status?: string
+          step_id?: string | null
+          updated_at?: string
+          usage_metadata?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_model_runs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_model_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "builder_model_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_model_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_model_runs_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "builder_job_steps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_projects: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          gitea_clone_url: string | null
+          gitea_owner: string
+          gitea_repo: string
+          gitea_repo_id: number | null
+          id: string
+          name: string
+          organization_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          gitea_clone_url?: string | null
+          gitea_owner: string
+          gitea_repo: string
+          gitea_repo_id?: number | null
+          id?: string
+          name: string
+          organization_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          gitea_clone_url?: string | null
+          gitea_owner?: string
+          gitea_repo?: string
+          gitea_repo_id?: number | null
+          id?: string
+          name?: string
+          organization_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_projects_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "builder_projects_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_projects_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_protected_variables: {
+        Row: {
+          allowed_in_modes: string[]
+          approval_status: string | null
+          approved_by: string | null
+          created_at: string
+          created_by: string | null
+          default_value: string | null
+          description: string | null
+          id: string
+          organization_id: string
+          requires_approval: boolean | null
+          updated_at: string
+          value_is_secret: boolean
+          variable_category: string
+          variable_name: string
+        }
+        Insert: {
+          allowed_in_modes: string[]
+          approval_status?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          default_value?: string | null
+          description?: string | null
+          id?: string
+          organization_id: string
+          requires_approval?: boolean | null
+          updated_at?: string
+          value_is_secret?: boolean
+          variable_category: string
+          variable_name: string
+        }
+        Update: {
+          allowed_in_modes?: string[]
+          approval_status?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          default_value?: string | null
+          description?: string | null
+          id?: string
+          organization_id?: string
+          requires_approval?: boolean | null
+          updated_at?: string
+          value_is_secret?: boolean
+          variable_category?: string
+          variable_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_protected_variables_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "builder_protected_variables_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_protected_variables_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      builder_worker_runs: {
+        Row: {
+          command: string
+          command_args: string[] | null
+          completed_at: string | null
+          cpu_peak_percent: number | null
+          created_at: string
+          dangerous_patterns_detected: string[] | null
+          disk_usage_mb: number | null
+          environment_variables_snapshot: Json | null
+          exit_code: number | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string | null
+          job_id: string
+          lease_expires_at: string | null
+          lease_token_hash: string | null
+          log_summary: string | null
+          memory_peak_mb: number | null
+          organization_id: string
+          output_artifact_ids: string[] | null
+          patch_artifact_id: string | null
+          profile: string | null
+          review_summary: Json
+          runner_id: string | null
+          secrets_redacted_count: number | null
+          started_at: string | null
+          status: string
+          stderr_location: string | null
+          stdout_location: string | null
+          step_id: string | null
+          target_sha: string | null
+          timeout_seconds: number | null
+          updated_at: string
+          worker_container_id: string | null
+          worker_isolation_level: string
+        }
+        Insert: {
+          command: string
+          command_args?: string[] | null
+          completed_at?: string | null
+          cpu_peak_percent?: number | null
+          created_at?: string
+          dangerous_patterns_detected?: string[] | null
+          disk_usage_mb?: number | null
+          environment_variables_snapshot?: Json | null
+          exit_code?: number | null
+          heartbeat_at?: string | null
+          id?: string
+          idempotency_key?: string | null
+          job_id: string
+          lease_expires_at?: string | null
+          lease_token_hash?: string | null
+          log_summary?: string | null
+          memory_peak_mb?: number | null
+          organization_id: string
+          output_artifact_ids?: string[] | null
+          patch_artifact_id?: string | null
+          profile?: string | null
+          review_summary?: Json
+          runner_id?: string | null
+          secrets_redacted_count?: number | null
+          started_at?: string | null
+          status?: string
+          stderr_location?: string | null
+          stdout_location?: string | null
+          step_id?: string | null
+          target_sha?: string | null
+          timeout_seconds?: number | null
+          updated_at?: string
+          worker_container_id?: string | null
+          worker_isolation_level?: string
+        }
+        Update: {
+          command?: string
+          command_args?: string[] | null
+          completed_at?: string | null
+          cpu_peak_percent?: number | null
+          created_at?: string
+          dangerous_patterns_detected?: string[] | null
+          disk_usage_mb?: number | null
+          environment_variables_snapshot?: Json | null
+          exit_code?: number | null
+          heartbeat_at?: string | null
+          id?: string
+          idempotency_key?: string | null
+          job_id?: string
+          lease_expires_at?: string | null
+          lease_token_hash?: string | null
+          log_summary?: string | null
+          memory_peak_mb?: number | null
+          organization_id?: string
+          output_artifact_ids?: string[] | null
+          patch_artifact_id?: string | null
+          profile?: string | null
+          review_summary?: Json
+          runner_id?: string | null
+          secrets_redacted_count?: number | null
+          started_at?: string | null
+          status?: string
+          stderr_location?: string | null
+          stdout_location?: string | null
+          step_id?: string | null
+          target_sha?: string | null
+          timeout_seconds?: number | null
+          updated_at?: string
+          worker_container_id?: string | null
+          worker_isolation_level?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_worker_runs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_worker_runs_organization_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "builder_worker_runs_organization_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_worker_runs_organization_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_worker_runs_patch_artifact_id_fkey"
+            columns: ["patch_artifact_id"]
+            isOneToOne: false
+            referencedRelation: "builder_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_worker_runs_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "builder_job_steps"
+            referencedColumns: ["id"]
+          },
         ]
       }
       callout_shifts: {
@@ -2667,15 +4831,18 @@ export type Database = {
           after_minimum_rate: number | null
           arrived_at: string | null
           callout_received_at: string | null
+          client_request_id: string | null
           created_at: string
           departed_at: string | null
           dispatch_job_id: string | null
           id: string
           minimum_pay_hours: number
+          notes: string | null
           officer_user_id: string
           on_call_period_id: string
           organization_id: string
           returned_at: string | null
+          status: string
           work_ended_at: string | null
           work_started_at: string | null
         }
@@ -2683,15 +4850,18 @@ export type Database = {
           after_minimum_rate?: number | null
           arrived_at?: string | null
           callout_received_at?: string | null
+          client_request_id?: string | null
           created_at?: string
           departed_at?: string | null
           dispatch_job_id?: string | null
           id?: string
           minimum_pay_hours?: number
+          notes?: string | null
           officer_user_id: string
           on_call_period_id: string
           organization_id: string
           returned_at?: string | null
+          status?: string
           work_ended_at?: string | null
           work_started_at?: string | null
         }
@@ -2699,15 +4869,18 @@ export type Database = {
           after_minimum_rate?: number | null
           arrived_at?: string | null
           callout_received_at?: string | null
+          client_request_id?: string | null
           created_at?: string
           departed_at?: string | null
           dispatch_job_id?: string | null
           id?: string
           minimum_pay_hours?: number
+          notes?: string | null
           officer_user_id?: string
           on_call_period_id?: string
           organization_id?: string
           returned_at?: string | null
+          status?: string
           work_ended_at?: string | null
           work_started_at?: string | null
         }
@@ -2820,6 +4993,236 @@ export type Database = {
           },
         ]
       }
+      canonical_people: {
+        Row: {
+          canonical_key: string
+          created_at: string
+          display_name: string | null
+          id: string
+          merged_into_id: string | null
+          metadata: Json
+          normalized_name: string
+          review_state: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          canonical_key: string
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          merged_into_id?: string | null
+          metadata?: Json
+          normalized_name: string
+          review_state?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          canonical_key?: string
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          merged_into_id?: string | null
+          metadata?: Json
+          normalized_name?: string
+          review_state?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canonical_people_merged_into_id_fkey"
+            columns: ["merged_into_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      canonical_person_links: {
+        Row: {
+          canonical_person_id: string
+          created_at: string
+          id: string
+          link_kind: string
+          metadata: Json
+          organization_id: string | null
+          source_id: string
+          source_table: string
+        }
+        Insert: {
+          canonical_person_id: string
+          created_at?: string
+          id?: string
+          link_kind?: string
+          metadata?: Json
+          organization_id?: string | null
+          source_id: string
+          source_table: string
+        }
+        Update: {
+          canonical_person_id?: string
+          created_at?: string
+          id?: string
+          link_kind?: string
+          metadata?: Json
+          organization_id?: string | null
+          source_id?: string
+          source_table?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canonical_person_links_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "canonical_person_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "canonical_person_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "canonical_person_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      canonical_place_links: {
+        Row: {
+          canonical_place_id: string
+          created_at: string
+          id: string
+          link_kind: string
+          metadata: Json
+          organization_id: string | null
+          source_id: string
+          source_key: string | null
+          source_table: string
+        }
+        Insert: {
+          canonical_place_id: string
+          created_at?: string
+          id?: string
+          link_kind?: string
+          metadata?: Json
+          organization_id?: string | null
+          source_id: string
+          source_key?: string | null
+          source_table: string
+        }
+        Update: {
+          canonical_place_id?: string
+          created_at?: string
+          id?: string
+          link_kind?: string
+          metadata?: Json
+          organization_id?: string | null
+          source_id?: string
+          source_key?: string | null
+          source_table?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canonical_place_links_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "canonical_place_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "canonical_place_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "canonical_place_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      canonical_places: {
+        Row: {
+          address: string | null
+          boundary: unknown
+          canonical_key: string
+          center_point: unknown
+          created_at: string
+          display_name: string
+          id: string
+          merged_into_id: string | null
+          metadata: Json
+          normalized_name: string
+          place_kind: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          boundary?: unknown
+          canonical_key: string
+          center_point?: unknown
+          created_at?: string
+          display_name: string
+          id?: string
+          merged_into_id?: string | null
+          metadata?: Json
+          normalized_name: string
+          place_kind: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          boundary?: unknown
+          canonical_key?: string
+          center_point?: unknown
+          created_at?: string
+          display_name?: string
+          id?: string
+          merged_into_id?: string | null
+          metadata?: Json
+          normalized_name?: string
+          place_kind?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canonical_places_merged_into_id_fkey"
+            columns: ["merged_into_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       canonical_scv: {
         Row: {
           certificate_number: string | null
@@ -2880,6 +5283,44 @@ export type Database = {
         }
         Relationships: []
       }
+      canonical_scv_links: {
+        Row: {
+          canonical_scv_id: string
+          created_at: string
+          id: string
+          metadata: Json
+          source_key: string
+          source_system: string
+          source_table: string
+        }
+        Insert: {
+          canonical_scv_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          source_key: string
+          source_system: string
+          source_table: string
+        }
+        Update: {
+          canonical_scv_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          source_key?: string
+          source_system?: string
+          source_table?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canonical_scv_links_canonical_scv_id_fkey"
+            columns: ["canonical_scv_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_scv"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       canonical_ta_names: {
         Row: {
           created_at: string
@@ -2906,6 +5347,44 @@ export type Database = {
           ta_name_upper?: string
         }
         Relationships: []
+      }
+      canonical_vehicle_links: {
+        Row: {
+          canonical_vehicle_id: string
+          created_at: string
+          id: string
+          metadata: Json
+          source_key: string
+          source_system: string
+          source_table: string
+        }
+        Insert: {
+          canonical_vehicle_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          source_key: string
+          source_system: string
+          source_table: string
+        }
+        Update: {
+          canonical_vehicle_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          source_key?: string
+          source_system?: string
+          source_table?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "canonical_vehicle_links_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       canonical_vehicles: {
         Row: {
@@ -2991,6 +5470,864 @@ export type Database = {
         }
         Relationships: []
       }
+      cctv_camera_scene_profiles: {
+        Row: {
+          camera_key: string
+          evidence_count: number
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          location_id: string | null
+          organization_id: string
+          recidivism_summary: Json
+          review_state: string
+          scene_fingerprint: Json
+          scene_label: string | null
+          site_id: string | null
+          zone_id: string | null
+        }
+        Insert: {
+          camera_key: string
+          evidence_count?: number
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          location_id?: string | null
+          organization_id: string
+          recidivism_summary?: Json
+          review_state?: string
+          scene_fingerprint?: Json
+          scene_label?: string | null
+          site_id?: string | null
+          zone_id?: string | null
+        }
+        Update: {
+          camera_key?: string
+          evidence_count?: number
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          location_id?: string | null
+          organization_id?: string
+          recidivism_summary?: Json
+          review_state?: string
+          scene_fingerprint?: Json
+          scene_label?: string | null
+          site_id?: string | null
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_camera_scene_profiles_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_camera_scene_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_camera_scene_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_camera_scene_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_camera_scene_profiles_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_camera_scene_profiles_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_camera_scene_profiles_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      cctv_entity_observations: {
+        Row: {
+          animal_type: string | null
+          candidate_embedding: Json | null
+          candidate_label: string | null
+          candidate_plate: string | null
+          canonical_person_id: string | null
+          canonical_vehicle_id: string | null
+          created_at: string
+          entity_kind: string
+          evidence_item_id: string
+          frame_sha256: string | null
+          id: string
+          inference_job_id: string
+          model_confidence: number | null
+          observed_at: string
+          observed_to: string | null
+          organization_id: string
+          review_state: string
+          site_id: string | null
+          source_event_id: string
+          thumbnail: string | null
+          zone_id: string | null
+        }
+        Insert: {
+          animal_type?: string | null
+          candidate_embedding?: Json | null
+          candidate_label?: string | null
+          candidate_plate?: string | null
+          canonical_person_id?: string | null
+          canonical_vehicle_id?: string | null
+          created_at?: string
+          entity_kind: string
+          evidence_item_id: string
+          frame_sha256?: string | null
+          id?: string
+          inference_job_id: string
+          model_confidence?: number | null
+          observed_at: string
+          observed_to?: string | null
+          organization_id: string
+          review_state?: string
+          site_id?: string | null
+          source_event_id: string
+          thumbnail?: string | null
+          zone_id?: string | null
+        }
+        Update: {
+          animal_type?: string | null
+          candidate_embedding?: Json | null
+          candidate_label?: string | null
+          candidate_plate?: string | null
+          canonical_person_id?: string | null
+          canonical_vehicle_id?: string | null
+          created_at?: string
+          entity_kind?: string
+          evidence_item_id?: string
+          frame_sha256?: string | null
+          id?: string
+          inference_job_id?: string
+          model_confidence?: number | null
+          observed_at?: string
+          observed_to?: string | null
+          organization_id?: string
+          review_state?: string
+          site_id?: string | null
+          source_event_id?: string
+          thumbnail?: string | null
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_entity_observations_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_exports: {
+        Row: {
+          approval_state: string
+          approved_at: string | null
+          approved_by: string | null
+          artifact_bucket: string | null
+          artifact_path: string | null
+          evidence_item_id: string
+          generated_at: string
+          generated_by: string
+          id: string
+          inference_job_id: string
+          issued_at: string | null
+          legal_hold: boolean
+          manifest: Json
+          manifest_sha256: string
+          organization_id: string
+          purpose: string
+          recipient_scope: string
+          sealed_at: string | null
+          selected_event_ids: Json
+        }
+        Insert: {
+          approval_state?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          artifact_bucket?: string | null
+          artifact_path?: string | null
+          evidence_item_id: string
+          generated_at?: string
+          generated_by: string
+          id?: string
+          inference_job_id: string
+          issued_at?: string | null
+          legal_hold?: boolean
+          manifest: Json
+          manifest_sha256: string
+          organization_id: string
+          purpose: string
+          recipient_scope: string
+          sealed_at?: string | null
+          selected_event_ids?: Json
+        }
+        Update: {
+          approval_state?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          artifact_bucket?: string | null
+          artifact_path?: string | null
+          evidence_item_id?: string
+          generated_at?: string
+          generated_by?: string
+          id?: string
+          inference_job_id?: string
+          issued_at?: string | null
+          legal_hold?: boolean
+          manifest?: Json
+          manifest_sha256?: string
+          organization_id?: string
+          purpose?: string
+          recipient_scope?: string
+          sealed_at?: string | null
+          selected_event_ids?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_exports_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_exports_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_exports_generated_by_fkey"
+            columns: ["generated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_exports_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_exports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_exports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_exports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_identity_drafts: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          authority_level: string
+          candidate_matches: Json
+          created_at: string
+          created_by: string
+          event_id: string | null
+          event_type: string
+          evidence_item_id: string
+          final_action: string | null
+          final_person_record_id: string | null
+          id: string
+          inference_job_id: string
+          organization_id: string
+          proposed_display_name: string | null
+          proposed_person_record_id: string | null
+          reason: string | null
+          review_notes: string | null
+          status: string
+          subject_kind: string
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          authority_level?: string
+          candidate_matches?: Json
+          created_at?: string
+          created_by: string
+          event_id?: string | null
+          event_type: string
+          evidence_item_id: string
+          final_action?: string | null
+          final_person_record_id?: string | null
+          id?: string
+          inference_job_id: string
+          organization_id: string
+          proposed_display_name?: string | null
+          proposed_person_record_id?: string | null
+          reason?: string | null
+          review_notes?: string | null
+          status?: string
+          subject_kind: string
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          authority_level?: string
+          candidate_matches?: Json
+          created_at?: string
+          created_by?: string
+          event_id?: string | null
+          event_type?: string
+          evidence_item_id?: string
+          final_action?: string | null
+          final_person_record_id?: string | null
+          id?: string
+          inference_job_id?: string
+          organization_id?: string
+          proposed_display_name?: string | null
+          proposed_person_record_id?: string | null
+          reason?: string | null
+          review_notes?: string | null
+          status?: string
+          subject_kind?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_identity_drafts_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_final_person_record_id_fkey"
+            columns: ["final_person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_identity_drafts_proposed_person_record_id_fkey"
+            columns: ["proposed_person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_report_receipts: {
+        Row: {
+          batch_id: string | null
+          evidence_item_id: string
+          generated_at: string
+          generated_by: string
+          id: string
+          inference_job_id: string
+          observation_count: number
+          organization_id: string
+          payload: Json
+          sha256: string
+        }
+        Insert: {
+          batch_id?: string | null
+          evidence_item_id: string
+          generated_at?: string
+          generated_by: string
+          id?: string
+          inference_job_id: string
+          observation_count: number
+          organization_id: string
+          payload: Json
+          sha256: string
+        }
+        Update: {
+          batch_id?: string | null
+          evidence_item_id?: string
+          generated_at?: string
+          generated_by?: string
+          id?: string
+          inference_job_id?: string
+          observation_count?: number
+          organization_id?: string
+          payload?: Json
+          sha256?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_report_receipts_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_report_receipts_generated_by_fkey"
+            columns: ["generated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_report_receipts_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_report_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_report_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_report_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_review_decisions: {
+        Row: {
+          decided_at: string
+          decided_by: string
+          decision: string
+          event_id: string | null
+          event_type: string
+          evidence_item_id: string
+          id: string
+          inference_job_id: string
+          organization_id: string
+          reason: string
+        }
+        Insert: {
+          decided_at?: string
+          decided_by: string
+          decision: string
+          event_id?: string | null
+          event_type: string
+          evidence_item_id: string
+          id?: string
+          inference_job_id: string
+          organization_id: string
+          reason: string
+        }
+        Update: {
+          decided_at?: string
+          decided_by?: string
+          decision?: string
+          event_id?: string | null
+          event_type?: string
+          evidence_item_id?: string
+          id?: string
+          inference_job_id?: string
+          organization_id?: string
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_review_decisions_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_decisions_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_decisions_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_decisions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_review_decisions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_decisions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_review_event_decisions: {
+        Row: {
+          confidence_override: number | null
+          decided_at: string
+          decided_by: string
+          id: string
+          linked_incident_id: string | null
+          linked_person_record_id: string | null
+          linked_vehicle_id: string | null
+          next_state: string
+          organization_id: string
+          previous_state: string | null
+          review_event_id: string
+          reviewer_notes: string | null
+        }
+        Insert: {
+          confidence_override?: number | null
+          decided_at?: string
+          decided_by: string
+          id?: string
+          linked_incident_id?: string | null
+          linked_person_record_id?: string | null
+          linked_vehicle_id?: string | null
+          next_state: string
+          organization_id: string
+          previous_state?: string | null
+          review_event_id: string
+          reviewer_notes?: string | null
+        }
+        Update: {
+          confidence_override?: number | null
+          decided_at?: string
+          decided_by?: string
+          id?: string
+          linked_incident_id?: string | null
+          linked_person_record_id?: string | null
+          linked_vehicle_id?: string | null
+          next_state?: string
+          organization_id?: string
+          previous_state?: string | null
+          review_event_id?: string
+          reviewer_notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_review_event_decisions_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_event_decisions_linked_incident_id_fkey"
+            columns: ["linked_incident_id"]
+            isOneToOne: false
+            referencedRelation: "incidents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_event_decisions_linked_person_record_id_fkey"
+            columns: ["linked_person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_event_decisions_linked_vehicle_id_fkey"
+            columns: ["linked_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_event_decisions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_review_event_decisions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_event_decisions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_event_decisions_review_event_id_fkey"
+            columns: ["review_event_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_review_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_review_events: {
+        Row: {
+          candidate_payload: Json
+          confidence_override: number | null
+          created_at: string
+          event_type: string
+          evidence_item_id: string
+          id: string
+          inference_job_id: string
+          linked_incident_id: string | null
+          linked_person_record_id: string | null
+          linked_vehicle_id: string | null
+          model_confidence: number | null
+          observed_from_seconds: number | null
+          observed_to_seconds: number | null
+          organization_id: string
+          review_state: string
+          reviewer_notes: string | null
+          source_event_id: string
+          updated_at: string
+        }
+        Insert: {
+          candidate_payload?: Json
+          confidence_override?: number | null
+          created_at?: string
+          event_type: string
+          evidence_item_id: string
+          id?: string
+          inference_job_id: string
+          linked_incident_id?: string | null
+          linked_person_record_id?: string | null
+          linked_vehicle_id?: string | null
+          model_confidence?: number | null
+          observed_from_seconds?: number | null
+          observed_to_seconds?: number | null
+          organization_id: string
+          review_state?: string
+          reviewer_notes?: string | null
+          source_event_id: string
+          updated_at?: string
+        }
+        Update: {
+          candidate_payload?: Json
+          confidence_override?: number | null
+          created_at?: string
+          event_type?: string
+          evidence_item_id?: string
+          id?: string
+          inference_job_id?: string
+          linked_incident_id?: string | null
+          linked_person_record_id?: string | null
+          linked_vehicle_id?: string | null
+          model_confidence?: number | null
+          observed_from_seconds?: number | null
+          observed_to_seconds?: number | null
+          organization_id?: string
+          review_state?: string
+          reviewer_notes?: string | null
+          source_event_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_review_events_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_events_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_events_linked_incident_id_fkey"
+            columns: ["linked_incident_id"]
+            isOneToOne: false
+            referencedRelation: "incidents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_events_linked_person_record_id_fkey"
+            columns: ["linked_person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_events_linked_vehicle_id_fkey"
+            columns: ["linked_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_review_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_review_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_site_patrol_config: {
         Row: {
           active: boolean
@@ -3005,6 +6342,7 @@ export type Database = {
           organization_id: string
           patrol_route_id: string | null
           preferred_stop_order: number
+          proposal_scope_schedule_id: string | null
           required_actions: Json
           site_id: string | null
           sla_arrive_within_minutes: number
@@ -3031,6 +6369,7 @@ export type Database = {
           organization_id: string
           patrol_route_id?: string | null
           preferred_stop_order?: number
+          proposal_scope_schedule_id?: string | null
           required_actions?: Json
           site_id?: string | null
           sla_arrive_within_minutes?: number
@@ -3057,6 +6396,7 @@ export type Database = {
           organization_id?: string
           patrol_route_id?: string | null
           preferred_stop_order?: number
+          proposal_scope_schedule_id?: string | null
           required_actions?: Json
           site_id?: string | null
           sla_arrive_within_minutes?: number
@@ -3100,6 +6440,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "client_site_patrol_config_proposal_scope_schedule_id_fkey"
+            columns: ["proposal_scope_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "quote_proposal_scope_schedules"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "client_site_patrol_config_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
@@ -3113,71 +6460,12 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
-        ]
-      }
-      client_site_zones: {
-        Row: {
-          id: string
-          jurisdiction_rule_set_id: string | null
-          metadata: Json
-          module_key: string
-          name: string
-          organization_id: string
-          site_id: string | null
-        }
-        Insert: {
-          id?: string
-          jurisdiction_rule_set_id?: string | null
-          metadata?: Json
-          module_key: string
-          name: string
-          organization_id: string
-          site_id?: string | null
-        }
-        Update: {
-          id?: string
-          jurisdiction_rule_set_id?: string | null
-          metadata?: Json
-          module_key?: string
-          name?: string
-          organization_id?: string
-          site_id?: string | null
-        }
-        Relationships: [
           {
-            foreignKeyName: "client_site_zones_jurisdiction_rule_set_id_fkey"
-            columns: ["jurisdiction_rule_set_id"]
+            foreignKeyName: "client_site_patrol_config_zone_id_fkey"
+            columns: ["zone_id"]
             isOneToOne: false
-            referencedRelation: "jurisdiction_rule_sets"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "client_site_zones_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_health"
-            referencedColumns: ["organization_id"]
-          },
-          {
-            foreignKeyName: "client_site_zones_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_list"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "client_site_zones_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "client_site_zones_site_id_fkey"
-            columns: ["site_id"]
-            isOneToOne: false
-            referencedRelation: "client_sites"
-            referencedColumns: ["id"]
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -3194,6 +6482,8 @@ export type Database = {
           boundary_verified_by: string | null
           center_point: unknown
           client_organization_id: string
+          client_request_id: string | null
+          configuration_version: number
           created_at: string
           external_ref: string | null
           external_refs: Json
@@ -3203,11 +6493,12 @@ export type Database = {
           id: string
           internal_client_ref: string | null
           jurisdiction_config_id: string | null
-          location_id: string | null
+          location_id: string
           metadata: Json
           module_title: string | null
           name: string
           onsite_radius_meters: number
+          organization_id: string | null
           ownership_signals: Json | null
           ownership_status: string
           prompt_radius_meters: number
@@ -3230,6 +6521,8 @@ export type Database = {
           boundary_verified_by?: string | null
           center_point?: unknown
           client_organization_id: string
+          client_request_id?: string | null
+          configuration_version?: number
           created_at?: string
           external_ref?: string | null
           external_refs?: Json
@@ -3239,11 +6532,12 @@ export type Database = {
           id?: string
           internal_client_ref?: string | null
           jurisdiction_config_id?: string | null
-          location_id?: string | null
+          location_id: string
           metadata?: Json
           module_title?: string | null
           name: string
           onsite_radius_meters?: number
+          organization_id?: string | null
           ownership_signals?: Json | null
           ownership_status?: string
           prompt_radius_meters?: number
@@ -3266,6 +6560,8 @@ export type Database = {
           boundary_verified_by?: string | null
           center_point?: unknown
           client_organization_id?: string
+          client_request_id?: string | null
+          configuration_version?: number
           created_at?: string
           external_ref?: string | null
           external_refs?: Json
@@ -3275,11 +6571,12 @@ export type Database = {
           id?: string
           internal_client_ref?: string | null
           jurisdiction_config_id?: string | null
-          location_id?: string | null
+          location_id?: string
           metadata?: Json
           module_title?: string | null
           name?: string
           onsite_radius_meters?: number
+          organization_id?: string | null
           ownership_signals?: Json | null
           ownership_status?: string
           prompt_radius_meters?: number
@@ -3338,6 +6635,662 @@ export type Database = {
             columns: ["service_agreement_id"]
             isOneToOne: false
             referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      commercial_discount_schedule_rules: {
+        Row: {
+          client_organization_id: string | null
+          created_at: string
+          discount_kind: string
+          discount_value: number
+          id: string
+          minimum_subtotal: number | null
+          module_key: string | null
+          priority: number
+          schedule_id: string
+          site_id: string | null
+          updated_at: string
+          zone_id: string | null
+        }
+        Insert: {
+          client_organization_id?: string | null
+          created_at?: string
+          discount_kind: string
+          discount_value: number
+          id?: string
+          minimum_subtotal?: number | null
+          module_key?: string | null
+          priority?: number
+          schedule_id: string
+          site_id?: string | null
+          updated_at?: string
+          zone_id?: string | null
+        }
+        Update: {
+          client_organization_id?: string | null
+          created_at?: string
+          discount_kind?: string
+          discount_value?: number
+          id?: string
+          minimum_subtotal?: number | null
+          module_key?: string | null
+          priority?: number
+          schedule_id?: string
+          site_id?: string | null
+          updated_at?: string
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commercial_discount_schedule_rules_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedule_rules_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedule_rules_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedule_rules_module_key_fkey"
+            columns: ["module_key"]
+            isOneToOne: false
+            referencedRelation: "module_catalog"
+            referencedColumns: ["module_key"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedule_rules_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "commercial_discount_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedule_rules_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      commercial_discount_schedules: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          name: string
+          notes: string | null
+          provider_organization_id: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          created_by: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          provider_organization_id: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          created_by?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          provider_organization_id?: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commercial_discount_schedules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedules_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedules_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commercial_discount_schedules_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      consumed_job_tokens: {
+        Row: {
+          consumed_at: string
+          inference_job_id: string
+          jti: string
+          organization_id: string
+        }
+        Insert: {
+          consumed_at?: string
+          inference_job_id: string
+          jti: string
+          organization_id: string
+        }
+        Update: {
+          consumed_at?: string
+          inference_job_id?: string
+          jti?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consumed_job_tokens_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cost_centres: {
+        Row: {
+          active: boolean
+          code: string
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+        }
+        Insert: {
+          active?: boolean
+          code: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          organization_id: string
+        }
+        Update: {
+          active?: boolean
+          code?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cost_centres_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cost_centres_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cost_centres_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cost_centres_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      court_appearances: {
+        Row: {
+          actual_end: string | null
+          actual_start: string | null
+          appearance_type: string
+          case_reference: string | null
+          client_request_id: string
+          court_name: string
+          created_at: string
+          created_by: string | null
+          enforcement_case_id: string | null
+          estimated_hours: number
+          id: string
+          is_overtime: boolean
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          outcome: string | null
+          scheduled_at: string
+          status: string
+          subpoena_reference: string | null
+          updated_at: string
+        }
+        Insert: {
+          actual_end?: string | null
+          actual_start?: string | null
+          appearance_type: string
+          case_reference?: string | null
+          client_request_id: string
+          court_name: string
+          created_at?: string
+          created_by?: string | null
+          enforcement_case_id?: string | null
+          estimated_hours?: number
+          id?: string
+          is_overtime?: boolean
+          notes?: string | null
+          officer_user_id: string
+          organization_id: string
+          outcome?: string | null
+          scheduled_at: string
+          status?: string
+          subpoena_reference?: string | null
+          updated_at?: string
+        }
+        Update: {
+          actual_end?: string | null
+          actual_start?: string | null
+          appearance_type?: string
+          case_reference?: string | null
+          client_request_id?: string
+          court_name?: string
+          created_at?: string
+          created_by?: string | null
+          enforcement_case_id?: string | null
+          estimated_hours?: number
+          id?: string
+          is_overtime?: boolean
+          notes?: string | null
+          officer_user_id?: string
+          organization_id?: string
+          outcome?: string | null
+          scheduled_at?: string
+          status?: string
+          subpoena_reference?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "court_appearances_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "court_appearances_enforcement_case_id_fkey"
+            columns: ["enforcement_case_id"]
+            isOneToOne: false
+            referencedRelation: "enforcement_cases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "court_appearances_officer_user_id_fkey"
+            columns: ["officer_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "court_appearances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "court_appearances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "court_appearances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crm_account_activities: {
+        Row: {
+          account_organization_id: string
+          activity_type: string
+          client_request_id: string
+          completed_at: string | null
+          completed_by: string | null
+          completion_notes: string | null
+          created_at: string
+          created_by: string
+          details: string | null
+          follow_up_at: string | null
+          id: string
+          occurred_at: string
+          outcome: string | null
+          provider_organization_id: string
+          service_agreement_id: string | null
+          subject: string
+        }
+        Insert: {
+          account_organization_id: string
+          activity_type: string
+          client_request_id: string
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_notes?: string | null
+          created_at?: string
+          created_by: string
+          details?: string | null
+          follow_up_at?: string | null
+          id?: string
+          occurred_at: string
+          outcome?: string | null
+          provider_organization_id: string
+          service_agreement_id?: string | null
+          subject: string
+        }
+        Update: {
+          account_organization_id?: string
+          activity_type?: string
+          client_request_id?: string
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_notes?: string | null
+          created_at?: string
+          created_by?: string
+          details?: string | null
+          follow_up_at?: string | null
+          id?: string
+          occurred_at?: string
+          outcome?: string | null
+          provider_organization_id?: string
+          service_agreement_id?: string | null
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crm_account_activities_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_account_activities_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crm_activation_handoff_tasks: {
+        Row: {
+          completed_at: string | null
+          completed_by: string | null
+          completion_note: string | null
+          created_at: string
+          destination: string
+          handoff_id: string
+          id: string
+          status: string
+          task_key: string
+          title: string
+        }
+        Insert: {
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_note?: string | null
+          created_at?: string
+          destination: string
+          handoff_id: string
+          id?: string
+          status?: string
+          task_key: string
+          title: string
+        }
+        Update: {
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_note?: string | null
+          created_at?: string
+          destination?: string
+          handoff_id?: string
+          id?: string
+          status?: string
+          task_key?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crm_activation_handoff_tasks_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoff_tasks_handoff_id_fkey"
+            columns: ["handoff_id"]
+            isOneToOne: false
+            referencedRelation: "crm_activation_handoffs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crm_activation_handoffs: {
+        Row: {
+          account_organization_id: string
+          activated_at: string
+          agreement_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          id: string
+          onboarding_ledger_id: string
+          owner_user_id: string | null
+          provider_organization_id: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          account_organization_id: string
+          activated_at: string
+          agreement_id: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          onboarding_ledger_id: string
+          owner_user_id?: string | null
+          provider_organization_id: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          account_organization_id?: string
+          activated_at?: string
+          agreement_id?: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          onboarding_ledger_id?: string
+          owner_user_id?: string | null
+          provider_organization_id?: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crm_activation_handoffs_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_agreement_id_fkey"
+            columns: ["agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_onboarding_ledger_id_fkey"
+            columns: ["onboarding_ledger_id"]
+            isOneToOne: true
+            referencedRelation: "crm_onboarding_ledgers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_activation_handoffs_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -3468,7 +7421,10 @@ export type Database = {
       }
       crm_contacts: {
         Row: {
+          client_request_id: string | null
           created_at: string
+          deactivated_at: string | null
+          deactivated_by: string | null
           email: string | null
           first_name: string
           id: string
@@ -3480,9 +7436,13 @@ export type Database = {
           organization_id: string
           phone: string | null
           role_title: string | null
+          updated_at: string
         }
         Insert: {
+          client_request_id?: string | null
           created_at?: string
+          deactivated_at?: string | null
+          deactivated_by?: string | null
           email?: string | null
           first_name: string
           id?: string
@@ -3494,9 +7454,13 @@ export type Database = {
           organization_id: string
           phone?: string | null
           role_title?: string | null
+          updated_at?: string
         }
         Update: {
+          client_request_id?: string | null
           created_at?: string
+          deactivated_at?: string | null
+          deactivated_by?: string | null
           email?: string | null
           first_name?: string
           id?: string
@@ -3508,8 +7472,16 @@ export type Database = {
           organization_id?: string
           phone?: string | null
           role_title?: string | null
+          updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "crm_contacts_deactivated_by_fkey"
+            columns: ["deactivated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "crm_contacts_organization_id_fkey"
             columns: ["organization_id"]
@@ -3623,6 +7595,473 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crm_onboarding_events: {
+        Row: {
+          account_organization_id: string
+          actor_user_id: string | null
+          assigned_to: string | null
+          created_at: string
+          event_type: string
+          from_stage: string | null
+          id: string
+          ledger_id: string
+          ledger_status: string
+          ledger_version: number
+          note: string
+          provider_organization_id: string
+          to_stage: string
+        }
+        Insert: {
+          account_organization_id: string
+          actor_user_id?: string | null
+          assigned_to?: string | null
+          created_at?: string
+          event_type: string
+          from_stage?: string | null
+          id?: string
+          ledger_id: string
+          ledger_status: string
+          ledger_version: number
+          note: string
+          provider_organization_id: string
+          to_stage: string
+        }
+        Update: {
+          account_organization_id?: string
+          actor_user_id?: string | null
+          assigned_to?: string | null
+          created_at?: string
+          event_type?: string
+          from_stage?: string | null
+          id?: string
+          ledger_id?: string
+          ledger_status?: string
+          ledger_version?: number
+          note?: string
+          provider_organization_id?: string
+          to_stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crm_onboarding_events_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_ledger_id_fkey"
+            columns: ["ledger_id"]
+            isOneToOne: false
+            referencedRelation: "crm_onboarding_ledgers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_events_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crm_onboarding_ledgers: {
+        Row: {
+          account_organization_id: string
+          activated_at: string | null
+          activated_by: string | null
+          assigned_to: string | null
+          current_stage: string
+          id: string
+          provider_organization_id: string
+          stage_note: string | null
+          started_at: string
+          status: string
+          target_live_at: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          account_organization_id: string
+          activated_at?: string | null
+          activated_by?: string | null
+          assigned_to?: string | null
+          current_stage?: string
+          id?: string
+          provider_organization_id: string
+          stage_note?: string | null
+          started_at?: string
+          status?: string
+          target_live_at?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          account_organization_id?: string
+          activated_at?: string | null
+          activated_by?: string | null
+          assigned_to?: string | null
+          current_stage?: string
+          id?: string
+          provider_organization_id?: string
+          stage_note?: string | null
+          started_at?: string
+          status?: string
+          target_live_at?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crm_onboarding_ledgers_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_ledgers_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_ledgers_account_organization_id_fkey"
+            columns: ["account_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_ledgers_activated_by_fkey"
+            columns: ["activated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_ledgers_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_ledgers_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_ledgers_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_onboarding_ledgers_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      custodian_actions: {
+        Row: {
+          action: string
+          actor_user_id: string | null
+          created_at: string
+          id: string
+          metadata: Json
+          organization_id: string
+          reason: string
+          target_id: string | null
+          target_table: string
+        }
+        Insert: {
+          action: string
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          organization_id: string
+          reason: string
+          target_id?: string | null
+          target_table: string
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          organization_id?: string
+          reason?: string
+          target_id?: string | null
+          target_table?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custodian_actions_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "custodian_actions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "custodian_actions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "custodian_actions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      custodian_legal_holds: {
+        Row: {
+          created_at: string
+          hold_key: string
+          id: string
+          organization_id: string
+          placed_at: string
+          placed_by: string
+          reason: string
+          release_reason: string | null
+          released_at: string | null
+          released_by: string | null
+          scope: Json
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          hold_key: string
+          id?: string
+          organization_id: string
+          placed_at?: string
+          placed_by: string
+          reason: string
+          release_reason?: string | null
+          released_at?: string | null
+          released_by?: string | null
+          scope?: Json
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          hold_key?: string
+          id?: string
+          organization_id?: string
+          placed_at?: string
+          placed_by?: string
+          reason?: string
+          release_reason?: string | null
+          released_at?: string | null
+          released_by?: string | null
+          scope?: Json
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "custodian_legal_holds_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "custodian_legal_holds_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "custodian_legal_holds_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "custodian_legal_holds_placed_by_fkey"
+            columns: ["placed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "custodian_legal_holds_released_by_fkey"
+            columns: ["released_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      debrief_followups: {
+        Row: {
+          created_at: string
+          debrief_id: string
+          id: string
+          latest_note: string | null
+          officer_user_id: string
+          organization_id: string
+          owner_user_id: string | null
+          priority: string
+          resolved_at: string | null
+          shift_id: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          debrief_id: string
+          id?: string
+          latest_note?: string | null
+          officer_user_id: string
+          organization_id: string
+          owner_user_id?: string | null
+          priority?: string
+          resolved_at?: string | null
+          shift_id: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          debrief_id?: string
+          id?: string
+          latest_note?: string | null
+          officer_user_id?: string
+          organization_id?: string
+          owner_user_id?: string | null
+          priority?: string
+          resolved_at?: string | null
+          shift_id?: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "debrief_followups_debrief_id_fkey"
+            columns: ["debrief_id"]
+            isOneToOne: true
+            referencedRelation: "shift_debriefs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debrief_followups_officer_user_id_fkey"
+            columns: ["officer_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debrief_followups_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "debrief_followups_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debrief_followups_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debrief_followups_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debrief_followups_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["id"]
           },
         ]
@@ -3944,6 +8383,209 @@ export type Database = {
           },
         ]
       }
+      dispatch_job_charge_lines: {
+        Row: {
+          client_organization_id: string | null
+          created_at: string
+          day_category: string | null
+          description: string
+          distance_km: number | null
+          id: string
+          invoice_line_item_id: string | null
+          line_total: number
+          organization_id: string
+          quantity: number
+          rate_rule_id: string | null
+          rate_type: string
+          service_agreement_id: string | null
+          service_type: string | null
+          source_dispatch_id: string
+          unit_rate: number
+        }
+        Insert: {
+          client_organization_id?: string | null
+          created_at?: string
+          day_category?: string | null
+          description: string
+          distance_km?: number | null
+          id?: string
+          invoice_line_item_id?: string | null
+          line_total?: number
+          organization_id: string
+          quantity?: number
+          rate_rule_id?: string | null
+          rate_type: string
+          service_agreement_id?: string | null
+          service_type?: string | null
+          source_dispatch_id: string
+          unit_rate?: number
+        }
+        Update: {
+          client_organization_id?: string | null
+          created_at?: string
+          day_category?: string | null
+          description?: string
+          distance_km?: number | null
+          id?: string
+          invoice_line_item_id?: string | null
+          line_total?: number
+          organization_id?: string
+          quantity?: number
+          rate_rule_id?: string | null
+          rate_type?: string
+          service_agreement_id?: string | null
+          service_type?: string | null
+          source_dispatch_id?: string
+          unit_rate?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dispatch_job_charge_lines_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_rate_rule_id_fkey"
+            columns: ["rate_rule_id"]
+            isOneToOne: false
+            referencedRelation: "rate_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_charge_lines_source_dispatch_id_fkey"
+            columns: ["source_dispatch_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dispatch_job_pay_line_reviews: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          decision: string
+          id: string
+          organization_id: string
+          pay_line_id: string
+          review_notes: string | null
+          reviewed_at: string
+          reviewed_by: string
+          supersedes_review_id: string | null
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          decision: string
+          id?: string
+          organization_id: string
+          pay_line_id: string
+          review_notes?: string | null
+          reviewed_at?: string
+          reviewed_by: string
+          supersedes_review_id?: string | null
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          decision?: string
+          id?: string
+          organization_id?: string
+          pay_line_id?: string
+          review_notes?: string | null
+          reviewed_at?: string
+          reviewed_by?: string
+          supersedes_review_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dispatch_job_pay_line_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_pay_line_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_pay_line_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_pay_line_reviews_pay_line_id_fkey"
+            columns: ["pay_line_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_job_pay_lines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_pay_line_reviews_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_pay_line_reviews_supersedes_review_id_fkey"
+            columns: ["supersedes_review_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_job_pay_line_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dispatch_job_pay_lines: {
         Row: {
           created_at: string
@@ -4053,95 +8695,212 @@ export type Database = {
           },
         ]
       }
+      dispatch_job_protected_parties: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          dispatch_job_id: string
+          display_name: string | null
+          email: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          party_role: string
+          phone: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          party_role: string
+          phone?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          party_role?: string
+          phone?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dispatch_job_protected_parties_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_protected_parties_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_protected_parties_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_job_protected_parties_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dispatch_jobs: {
         Row: {
           acknowledged_at: string | null
           adhoc_inserted_at: string | null
+          assigned_officer_id: string | null
           briefing_notes: string | null
+          client_request_id: string | null
           client_site_id: string | null
           completed_at: string | null
           created_at: string
           dispatch_resource_id: string | null
           dispatched_at: string | null
           en_route_at: string | null
+          expected_dwell_minutes: number
+          harmed_party_address: string | null
+          harmed_party_site_id: string | null
           id: string
           insert_gps_lat: number | null
           insert_gps_lng: number | null
+          investigation_id: string | null
           job_type: string
           location_id: string | null
+          module_key: string | null
           on_scene_at: string | null
           organization_id: string
+          origin_reference_id: string | null
+          origin_type: string
           outcome_notes: string | null
           priority: string
           service_agreement_id: string | null
           shift_id: string | null
           shift_stop_id: string | null
           sla_breached: boolean
+          sla_delay_reason: string | null
           sla_impact_report: Json | null
           sla_impact_warning: boolean
           sla_minutes: number | null
           sla_respond_by: string | null
           status: string
+          timing_source: string
+          work_unit_id: string | null
         }
         Insert: {
           acknowledged_at?: string | null
           adhoc_inserted_at?: string | null
+          assigned_officer_id?: string | null
           briefing_notes?: string | null
+          client_request_id?: string | null
           client_site_id?: string | null
           completed_at?: string | null
           created_at?: string
           dispatch_resource_id?: string | null
           dispatched_at?: string | null
           en_route_at?: string | null
+          expected_dwell_minutes?: number
+          harmed_party_address?: string | null
+          harmed_party_site_id?: string | null
           id?: string
           insert_gps_lat?: number | null
           insert_gps_lng?: number | null
+          investigation_id?: string | null
           job_type: string
           location_id?: string | null
+          module_key?: string | null
           on_scene_at?: string | null
           organization_id: string
+          origin_reference_id?: string | null
+          origin_type?: string
           outcome_notes?: string | null
           priority?: string
           service_agreement_id?: string | null
           shift_id?: string | null
           shift_stop_id?: string | null
           sla_breached?: boolean
+          sla_delay_reason?: string | null
           sla_impact_report?: Json | null
           sla_impact_warning?: boolean
           sla_minutes?: number | null
           sla_respond_by?: string | null
           status?: string
+          timing_source?: string
+          work_unit_id?: string | null
         }
         Update: {
           acknowledged_at?: string | null
           adhoc_inserted_at?: string | null
+          assigned_officer_id?: string | null
           briefing_notes?: string | null
+          client_request_id?: string | null
           client_site_id?: string | null
           completed_at?: string | null
           created_at?: string
           dispatch_resource_id?: string | null
           dispatched_at?: string | null
           en_route_at?: string | null
+          expected_dwell_minutes?: number
+          harmed_party_address?: string | null
+          harmed_party_site_id?: string | null
           id?: string
           insert_gps_lat?: number | null
           insert_gps_lng?: number | null
+          investigation_id?: string | null
           job_type?: string
           location_id?: string | null
+          module_key?: string | null
           on_scene_at?: string | null
           organization_id?: string
+          origin_reference_id?: string | null
+          origin_type?: string
           outcome_notes?: string | null
           priority?: string
           service_agreement_id?: string | null
           shift_id?: string | null
           shift_stop_id?: string | null
           sla_breached?: boolean
+          sla_delay_reason?: string | null
           sla_impact_report?: Json | null
           sla_impact_warning?: boolean
           sla_minutes?: number | null
           sla_respond_by?: string | null
           status?: string
+          timing_source?: string
+          work_unit_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "dispatch_jobs_assigned_officer_id_fkey"
+            columns: ["assigned_officer_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "dispatch_jobs_client_site_id_fkey"
             columns: ["client_site_id"]
@@ -4154,6 +8913,20 @@ export type Database = {
             columns: ["dispatch_resource_id"]
             isOneToOne: false
             referencedRelation: "dispatch_resources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_jobs_harmed_party_site_id_fkey"
+            columns: ["harmed_party_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_jobs_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
             referencedColumns: ["id"]
           },
           {
@@ -4196,6 +8969,13 @@ export type Database = {
             columns: ["shift_stop_id"]
             isOneToOne: false
             referencedRelation: "shift_stops"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_jobs_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
             referencedColumns: ["id"]
           },
         ]
@@ -4445,6 +9225,103 @@ export type Database = {
           },
           {
             foreignKeyName: "document_classifications_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_promotion_proposals: {
+        Row: {
+          applied_at: string | null
+          applied_target_id: string | null
+          created_at: string
+          document_version_id: string
+          id: string
+          organization_id: string
+          proposed_payload: Json
+          requested_by: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_map: Json
+          status: string
+          target_type: string
+          updated_at: string
+        }
+        Insert: {
+          applied_at?: string | null
+          applied_target_id?: string | null
+          created_at?: string
+          document_version_id: string
+          id?: string
+          organization_id: string
+          proposed_payload?: Json
+          requested_by: string
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_map?: Json
+          status?: string
+          target_type: string
+          updated_at?: string
+        }
+        Update: {
+          applied_at?: string | null
+          applied_target_id?: string | null
+          created_at?: string
+          document_version_id?: string
+          id?: string
+          organization_id?: string
+          proposed_payload?: Json
+          requested_by?: string
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_map?: Json
+          status?: string
+          target_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_promotion_proposals_document_version_id_fkey"
+            columns: ["document_version_id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_promotion_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "document_promotion_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_promotion_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_promotion_proposals_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_promotion_proposals_reviewed_by_fkey"
             columns: ["reviewed_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
@@ -4767,6 +9644,165 @@ export type Database = {
             columns: ["uploaded_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      effective_rule_snapshots: {
+        Row: {
+          captured_at: string
+          created_at: string
+          effective_rules: Json
+          governing_jurisdiction_id: string | null
+          governing_jurisdiction_name: string | null
+          id: string
+          jurisdiction_rule_set_id: string | null
+          matched_location_id: string | null
+          matched_site_id: string | null
+          matched_zone_id: string | null
+          module_key: string
+          organization_id: string
+          resolution_status: string
+          rule_set_id: string | null
+          rule_set_name: string | null
+          source_event_id: string | null
+          source_event_table: string | null
+        }
+        Insert: {
+          captured_at?: string
+          created_at?: string
+          effective_rules?: Json
+          governing_jurisdiction_id?: string | null
+          governing_jurisdiction_name?: string | null
+          id?: string
+          jurisdiction_rule_set_id?: string | null
+          matched_location_id?: string | null
+          matched_site_id?: string | null
+          matched_zone_id?: string | null
+          module_key: string
+          organization_id: string
+          resolution_status?: string
+          rule_set_id?: string | null
+          rule_set_name?: string | null
+          source_event_id?: string | null
+          source_event_table?: string | null
+        }
+        Update: {
+          captured_at?: string
+          created_at?: string
+          effective_rules?: Json
+          governing_jurisdiction_id?: string | null
+          governing_jurisdiction_name?: string | null
+          id?: string
+          jurisdiction_rule_set_id?: string | null
+          matched_location_id?: string | null
+          matched_site_id?: string | null
+          matched_zone_id?: string | null
+          module_key?: string
+          organization_id?: string
+          resolution_status?: string
+          rule_set_id?: string | null
+          rule_set_name?: string | null
+          source_event_id?: string | null
+          source_event_table?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "effective_rule_snapshots_governing_jurisdiction_id_fkey"
+            columns: ["governing_jurisdiction_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_governing_jurisdiction_id_fkey"
+            columns: ["governing_jurisdiction_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_governing_jurisdiction_id_fkey"
+            columns: ["governing_jurisdiction_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "effective_rule_resolution_view"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "jurisdiction_rule_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "module_place_policy_summary"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_matched_location_id_fkey"
+            columns: ["matched_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_matched_site_id_fkey"
+            columns: ["matched_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_matched_zone_id_fkey"
+            columns: ["matched_zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_matched_zone_id_fkey"
+            columns: ["matched_zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "effective_rule_snapshots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -5201,6 +10237,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "enforcement_cases_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       entity_flags: {
@@ -5357,15 +10400,218 @@ export type Database = {
           },
         ]
       }
+      event_context_snapshots: {
+        Row: {
+          authority_snapshot: Json
+          captured_at: string
+          checkpoint_id: string | null
+          client_organization_id: string | null
+          client_site_id: string | null
+          created_at: string
+          id: string
+          jurisdiction_organization_id: string | null
+          jurisdiction_rule_set_id: string | null
+          location_id: string | null
+          module_key: string | null
+          provider_organization_id: string | null
+          service_agreement_id: string | null
+          source_event_id: string
+          source_refs: Json
+          source_table: string
+          zone_id: string | null
+        }
+        Insert: {
+          authority_snapshot?: Json
+          captured_at?: string
+          checkpoint_id?: string | null
+          client_organization_id?: string | null
+          client_site_id?: string | null
+          created_at?: string
+          id?: string
+          jurisdiction_organization_id?: string | null
+          jurisdiction_rule_set_id?: string | null
+          location_id?: string | null
+          module_key?: string | null
+          provider_organization_id?: string | null
+          service_agreement_id?: string | null
+          source_event_id: string
+          source_refs?: Json
+          source_table: string
+          zone_id?: string | null
+        }
+        Update: {
+          authority_snapshot?: Json
+          captured_at?: string
+          checkpoint_id?: string | null
+          client_organization_id?: string | null
+          client_site_id?: string | null
+          created_at?: string
+          id?: string
+          jurisdiction_organization_id?: string | null
+          jurisdiction_rule_set_id?: string | null
+          location_id?: string | null
+          module_key?: string | null
+          provider_organization_id?: string | null
+          service_agreement_id?: string | null
+          source_event_id?: string
+          source_refs?: Json
+          source_table?: string
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_context_snapshots_checkpoint_id_fkey"
+            columns: ["checkpoint_id"]
+            isOneToOne: false
+            referencedRelation: "patrol_checkpoints"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_client_site_id_fkey"
+            columns: ["client_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_jurisdiction_organization_id_fkey"
+            columns: ["jurisdiction_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_jurisdiction_organization_id_fkey"
+            columns: ["jurisdiction_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_jurisdiction_organization_id_fkey"
+            columns: ["jurisdiction_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "effective_rule_resolution_view"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "jurisdiction_rule_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "module_place_policy_summary"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_context_snapshots_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
       evidence_items: {
         Row: {
           captured_at: string
           captured_by_user_id: string | null
           evidence_kind: string
           id: string
+          is_court_ready: boolean
+          location_event_id: string | null
+          locked_at: string | null
           metadata: Json
           module_key: string
           organization_id: string
+          retention_class: string | null
+          retention_days: number | null
+          retention_hold: boolean
+          retention_reason: string | null
+          retention_until: string | null
+          sha256_hash: string | null
           storage_path: string | null
         }
         Insert: {
@@ -5373,9 +10619,18 @@ export type Database = {
           captured_by_user_id?: string | null
           evidence_kind: string
           id?: string
+          is_court_ready?: boolean
+          location_event_id?: string | null
+          locked_at?: string | null
           metadata?: Json
           module_key: string
           organization_id: string
+          retention_class?: string | null
+          retention_days?: number | null
+          retention_hold?: boolean
+          retention_reason?: string | null
+          retention_until?: string | null
+          sha256_hash?: string | null
           storage_path?: string | null
         }
         Update: {
@@ -5383,9 +10638,18 @@ export type Database = {
           captured_by_user_id?: string | null
           evidence_kind?: string
           id?: string
+          is_court_ready?: boolean
+          location_event_id?: string | null
+          locked_at?: string | null
           metadata?: Json
           module_key?: string
           organization_id?: string
+          retention_class?: string | null
+          retention_days?: number | null
+          retention_hold?: boolean
+          retention_reason?: string | null
+          retention_until?: string | null
+          sha256_hash?: string | null
           storage_path?: string | null
         }
         Relationships: [
@@ -5394,6 +10658,13 @@ export type Database = {
             columns: ["captured_by_user_id"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "evidence_items_location_event_id_fkey"
+            columns: ["location_event_id"]
+            isOneToOne: false
+            referencedRelation: "location_events"
             referencedColumns: ["id"]
           },
           {
@@ -5541,6 +10812,7 @@ export type Database = {
           created_at: string
           evidence_item_id: string | null
           id: string
+          metadata: Json
           organization_id: string
           person_record_id: string | null
           purpose: string
@@ -5551,6 +10823,7 @@ export type Database = {
           created_at?: string
           evidence_item_id?: string | null
           id?: string
+          metadata?: Json
           organization_id: string
           person_record_id?: string | null
           purpose: string
@@ -5561,6 +10834,7 @@ export type Database = {
           created_at?: string
           evidence_item_id?: string | null
           id?: string
+          metadata?: Json
           organization_id?: string
           person_record_id?: string | null
           purpose?: string
@@ -5600,6 +10874,3858 @@ export type Database = {
             columns: ["person_record_id"]
             isOneToOne: false
             referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      file_import_batches: {
+        Row: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        Insert: {
+          batch_name: string
+          created_at?: string
+          created_by: string
+          duplicate_count?: number
+          duplicate_of_batch_id?: string | null
+          id?: string
+          manifest_json?: Json
+          organization_id: string
+          parser: string
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          row_count?: number
+          schema_json?: Json
+          source_file: string
+          source_sha256?: string | null
+          status?: string
+          unresolved_count?: number
+          updated_at?: string
+        }
+        Update: {
+          batch_name?: string
+          created_at?: string
+          created_by?: string
+          duplicate_count?: number
+          duplicate_of_batch_id?: string | null
+          id?: string
+          manifest_json?: Json
+          organization_id?: string
+          parser?: string
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          row_count?: number
+          schema_json?: Json
+          source_file?: string
+          source_sha256?: string | null
+          status?: string
+          unresolved_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_import_batches_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_batches_duplicate_of_batch_id_fkey"
+            columns: ["duplicate_of_batch_id"]
+            isOneToOne: false
+            referencedRelation: "file_import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_batches_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "file_import_batches_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_batches_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_batches_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      file_import_mapping_reviews: {
+        Row: {
+          batch_id: string
+          created_at: string
+          decision: string
+          id: string
+          organization_id: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_column: string
+          target_entity: string | null
+          target_field: string | null
+          updated_at: string
+        }
+        Insert: {
+          batch_id: string
+          created_at?: string
+          decision?: string
+          id?: string
+          organization_id: string
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_column: string
+          target_entity?: string | null
+          target_field?: string | null
+          updated_at?: string
+        }
+        Update: {
+          batch_id?: string
+          created_at?: string
+          decision?: string
+          id?: string
+          organization_id?: string
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_column?: string
+          target_entity?: string | null
+          target_field?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_import_mapping_reviews_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "file_import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_mapping_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "file_import_mapping_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_mapping_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_mapping_reviews_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_akahu_apply_applications: {
+        Row: {
+          akahu_application_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          reference: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          akahu_application_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id: string
+          reference: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          akahu_application_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id?: string
+          reference?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_akahu_apply_applications_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_applications_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_applications_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_akahu_apply_reports: {
+        Row: {
+          akahu_report_id: string
+          application_id: string
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          failure_reason: Json | null
+          id: string
+          organization_id: string
+          result_summary: Json
+          source_document_ids: string[]
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          akahu_report_id: string
+          application_id: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          failure_reason?: Json | null
+          id?: string
+          organization_id: string
+          result_summary?: Json
+          source_document_ids?: string[]
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          akahu_report_id?: string
+          application_id?: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          failure_reason?: Json | null
+          id?: string
+          organization_id?: string
+          result_summary?: Json
+          source_document_ids?: string[]
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_akahu_apply_reports_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "finance_akahu_apply_applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_reports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_reports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_reports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_akahu_apply_sharing_requests: {
+        Row: {
+          akahu_sharing_request_id: string
+          application_id: string
+          created_at: string
+          created_by: string | null
+          expires_at: string
+          id: string
+          last_submitted_at: string | null
+          link: string
+          organization_id: string
+        }
+        Insert: {
+          akahu_sharing_request_id: string
+          application_id: string
+          created_at?: string
+          created_by?: string | null
+          expires_at: string
+          id?: string
+          last_submitted_at?: string | null
+          link: string
+          organization_id: string
+        }
+        Update: {
+          akahu_sharing_request_id?: string
+          application_id?: string
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string
+          id?: string
+          last_submitted_at?: string | null
+          link?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_akahu_apply_sharing_requests_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "finance_akahu_apply_applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_sharing_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_sharing_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_sharing_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_akahu_apply_transaction_reviews: {
+        Row: {
+          amount: number | null
+          created_at: string
+          currency_code: string
+          description: string | null
+          direction: string | null
+          external_transaction_id: string
+          id: string
+          organization_id: string
+          raw_summary: Json
+          report_id: string
+          review_reason: string | null
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          transaction_date: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount?: number | null
+          created_at?: string
+          currency_code?: string
+          description?: string | null
+          direction?: string | null
+          external_transaction_id: string
+          id?: string
+          organization_id: string
+          raw_summary?: Json
+          report_id: string
+          review_reason?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          transaction_date?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number | null
+          created_at?: string
+          currency_code?: string
+          description?: string | null
+          direction?: string | null
+          external_transaction_id?: string
+          id?: string
+          organization_id?: string
+          raw_summary?: Json
+          report_id?: string
+          review_reason?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          transaction_date?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_akahu_apply_transaction_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_transaction_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_transaction_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_apply_transaction_reviews_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "finance_akahu_apply_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_akahu_personal_checks: {
+        Row: {
+          account_count: number
+          app_reference: string
+          checked_at: string
+          connected_account_summary: Json
+          error_category: string | null
+          id: string
+          organization_id: string
+          requested_by: string
+          status: string
+        }
+        Insert: {
+          account_count?: number
+          app_reference: string
+          checked_at?: string
+          connected_account_summary?: Json
+          error_category?: string | null
+          id?: string
+          organization_id: string
+          requested_by: string
+          status: string
+        }
+        Update: {
+          account_count?: number
+          app_reference?: string
+          checked_at?: string
+          connected_account_summary?: Json
+          error_category?: string | null
+          id?: string
+          organization_id?: string
+          requested_by?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_akahu_personal_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_personal_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_personal_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_akahu_personal_checks_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_asset_cost_profiles: {
+        Row: {
+          acquisition_cost: number
+          approved_at: string | null
+          approved_by: string | null
+          asset_id: string
+          created_at: string
+          created_by: string | null
+          depreciation_method: string
+          id: string
+          in_service_date: string
+          organization_id: string
+          productive_hours_per_year: number | null
+          residual_value: number
+          setup_cost: number
+          source_reference: string | null
+          status: string
+          updated_at: string
+          useful_life_km: number | null
+          useful_life_months: number
+          version: number
+        }
+        Insert: {
+          acquisition_cost: number
+          approved_at?: string | null
+          approved_by?: string | null
+          asset_id: string
+          created_at?: string
+          created_by?: string | null
+          depreciation_method?: string
+          id?: string
+          in_service_date: string
+          organization_id: string
+          productive_hours_per_year?: number | null
+          residual_value?: number
+          setup_cost?: number
+          source_reference?: string | null
+          status?: string
+          updated_at?: string
+          useful_life_km?: number | null
+          useful_life_months: number
+          version?: number
+        }
+        Update: {
+          acquisition_cost?: number
+          approved_at?: string | null
+          approved_by?: string | null
+          asset_id?: string
+          created_at?: string
+          created_by?: string | null
+          depreciation_method?: string
+          id?: string
+          in_service_date?: string
+          organization_id?: string
+          productive_hours_per_year?: number | null
+          residual_value?: number
+          setup_cost?: number
+          source_reference?: string | null
+          status?: string
+          updated_at?: string
+          useful_life_km?: number | null
+          useful_life_months?: number
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_asset_cost_profiles_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_cost_profiles_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_cost_profiles_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_cost_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_asset_cost_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_cost_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_asset_depreciation_schedules: {
+        Row: {
+          accumulated_depreciation: number
+          closing_value: number
+          cost_profile_id: string
+          created_at: string
+          depreciation_amount: number
+          id: string
+          method: string
+          opening_value: number
+          organization_id: string
+          period_end: string
+          period_start: string
+          source_profile_version: number
+        }
+        Insert: {
+          accumulated_depreciation: number
+          closing_value: number
+          cost_profile_id: string
+          created_at?: string
+          depreciation_amount: number
+          id?: string
+          method: string
+          opening_value: number
+          organization_id: string
+          period_end: string
+          period_start: string
+          source_profile_version: number
+        }
+        Update: {
+          accumulated_depreciation?: number
+          closing_value?: number
+          cost_profile_id?: string
+          created_at?: string
+          depreciation_amount?: number
+          id?: string
+          method?: string
+          opening_value?: number
+          organization_id?: string
+          period_end?: string
+          period_start?: string
+          source_profile_version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_asset_depreciation_schedules_cost_profile_id_fkey"
+            columns: ["cost_profile_id"]
+            isOneToOne: false
+            referencedRelation: "finance_asset_cost_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_depreciation_schedules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_asset_depreciation_schedules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_depreciation_schedules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_asset_item_links: {
+        Row: {
+          asset_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          inventory_transaction_id: string | null
+          item_id: string
+          meter_reading: number | null
+          notes: string | null
+          organization_id: string
+          service_date: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          inventory_transaction_id?: string | null
+          item_id: string
+          meter_reading?: number | null
+          notes?: string | null
+          organization_id: string
+          service_date?: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          inventory_transaction_id?: string | null
+          item_id?: string
+          meter_reading?: number | null
+          notes?: string | null
+          organization_id?: string
+          service_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_asset_item_links_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_item_links_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_item_links_inventory_transaction_id_fkey"
+            columns: ["inventory_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "finance_inventory_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_item_links_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_item_links_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "finance_asset_item_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_asset_item_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_asset_item_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_bank_statement_lines: {
+        Row: {
+          amount: number
+          bank_statement_id: string
+          created_at: string
+          description: string
+          id: string
+          matched_payment_receipt_id: string | null
+          organization_id: string
+          reconciliation_status: string
+          reference: string | null
+          transaction_date: string
+          transaction_type: string
+        }
+        Insert: {
+          amount: number
+          bank_statement_id: string
+          created_at?: string
+          description: string
+          id?: string
+          matched_payment_receipt_id?: string | null
+          organization_id: string
+          reconciliation_status?: string
+          reference?: string | null
+          transaction_date: string
+          transaction_type: string
+        }
+        Update: {
+          amount?: number
+          bank_statement_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          matched_payment_receipt_id?: string | null
+          organization_id?: string
+          reconciliation_status?: string
+          reference?: string | null
+          transaction_date?: string
+          transaction_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_bank_statement_lines_bank_statement_id_fkey"
+            columns: ["bank_statement_id"]
+            isOneToOne: false
+            referencedRelation: "finance_bank_statements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statement_lines_matched_payment_receipt_id_fkey"
+            columns: ["matched_payment_receipt_id"]
+            isOneToOne: false
+            referencedRelation: "payment_receipts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statement_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statement_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statement_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_bank_statements: {
+        Row: {
+          bank_account_id: string
+          closing_balance: number
+          id: string
+          imported_at: string
+          imported_by: string | null
+          opening_balance: number
+          organization_id: string
+          statement_date: string
+          statement_reference: string
+        }
+        Insert: {
+          bank_account_id: string
+          closing_balance: number
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          opening_balance: number
+          organization_id: string
+          statement_date: string
+          statement_reference: string
+        }
+        Update: {
+          bank_account_id?: string
+          closing_balance?: number
+          id?: string
+          imported_at?: string
+          imported_by?: string | null
+          opening_balance?: number
+          organization_id?: string
+          statement_date?: string
+          statement_reference?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_bank_statements_bank_account_id_fkey"
+            columns: ["bank_account_id"]
+            isOneToOne: false
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statements_imported_by_fkey"
+            columns: ["imported_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_bank_statements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_budget_lines: {
+        Row: {
+          budget_amount: number
+          budget_id: string
+          cost_centre_id: string | null
+          cost_type: string
+          created_at: string
+          created_by: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id: string | null
+        }
+        Insert: {
+          budget_amount: number
+          budget_id: string
+          cost_centre_id?: string | null
+          cost_type: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id?: string | null
+        }
+        Update: {
+          budget_amount?: number
+          budget_id?: string
+          cost_centre_id?: string | null
+          cost_type?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          pl_period_id?: string
+          service_agreement_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_budget_lines_budget_id_fkey"
+            columns: ["budget_id"]
+            isOneToOne: false
+            referencedRelation: "finance_budgets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_lines_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_lines_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_budget_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_lines_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_lines_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_budget_variances: {
+        Row: {
+          actual_amount: number
+          budget_amount: number
+          budget_id: string
+          calculated_at: string
+          cost_centre_id: string | null
+          cost_type: string
+          id: string
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id: string | null
+          status: string
+          variance_amount: number
+          variance_pct: number | null
+        }
+        Insert: {
+          actual_amount?: number
+          budget_amount?: number
+          budget_id: string
+          calculated_at?: string
+          cost_centre_id?: string | null
+          cost_type: string
+          id?: string
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id?: string | null
+          status: string
+          variance_amount?: number
+          variance_pct?: number | null
+        }
+        Update: {
+          actual_amount?: number
+          budget_amount?: number
+          budget_id?: string
+          calculated_at?: string
+          cost_centre_id?: string | null
+          cost_type?: string
+          id?: string
+          organization_id?: string
+          pl_period_id?: string
+          service_agreement_id?: string | null
+          status?: string
+          variance_amount?: number
+          variance_pct?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_budget_variances_budget_id_fkey"
+            columns: ["budget_id"]
+            isOneToOne: false
+            referencedRelation: "finance_budgets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_variances_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_variances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_budget_variances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_variances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_variances_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budget_variances_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_budgets: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          created_by: string | null
+          fiscal_year: number
+          id: string
+          name: string
+          organization_id: string
+          status: string
+          supersedes_id: string | null
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          fiscal_year: number
+          id?: string
+          name: string
+          organization_id: string
+          status?: string
+          supersedes_id?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          fiscal_year?: number
+          id?: string
+          name?: string
+          organization_id?: string
+          status?: string
+          supersedes_id?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_budgets_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budgets_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budgets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_budgets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budgets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_budgets_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "finance_budgets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_cost_assumptions: {
+        Row: {
+          allocation_driver: string | null
+          amount: number
+          approved_at: string | null
+          approved_by: string | null
+          confidence: string
+          cost_category_id: string
+          created_at: string
+          created_by: string | null
+          currency: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          name: string
+          organization_id: string
+          source_reference: string | null
+          status: string
+          supersedes_id: string | null
+          unit: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          allocation_driver?: string | null
+          amount: number
+          approved_at?: string | null
+          approved_by?: string | null
+          confidence?: string
+          cost_category_id: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          source_reference?: string | null
+          status?: string
+          supersedes_id?: string | null
+          unit: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          allocation_driver?: string | null
+          amount?: number
+          approved_at?: string | null
+          approved_by?: string | null
+          confidence?: string
+          cost_category_id?: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          source_reference?: string | null
+          status?: string
+          supersedes_id?: string | null
+          unit?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_cost_assumptions_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_assumptions_cost_category_id_fkey"
+            columns: ["cost_category_id"]
+            isOneToOne: false
+            referencedRelation: "finance_cost_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_assumptions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_assumptions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_cost_assumptions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_assumptions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_assumptions_supersedes_id_fkey"
+            columns: ["supersedes_id"]
+            isOneToOne: false
+            referencedRelation: "finance_cost_assumptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_cost_categories: {
+        Row: {
+          active: boolean
+          code: string
+          created_at: string
+          created_by: string | null
+          direct_or_indirect: string
+          fixed_or_variable: string
+          id: string
+          name: string
+          organization_id: string
+          parent_id: string | null
+        }
+        Insert: {
+          active?: boolean
+          code: string
+          created_at?: string
+          created_by?: string | null
+          direct_or_indirect: string
+          fixed_or_variable: string
+          id?: string
+          name: string
+          organization_id: string
+          parent_id?: string | null
+        }
+        Update: {
+          active?: boolean
+          code?: string
+          created_at?: string
+          created_by?: string | null
+          direct_or_indirect?: string
+          fixed_or_variable?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          parent_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_cost_categories_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_categories_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_cost_categories_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_categories_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_categories_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "finance_cost_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_cost_centre_rolls: {
+        Row: {
+          attribution_count: number | null
+          cost_centre_code: string
+          cost_centre_id: string
+          cost_centre_name: string
+          created_at: string
+          id: string
+          organization_id: string
+          pl_period_id: string
+          total_cost: number
+          total_depreciation: number
+          total_equipment: number
+          total_labour: number
+          total_materials: number
+          total_overhead: number
+          total_vehicle: number
+        }
+        Insert: {
+          attribution_count?: number | null
+          cost_centre_code: string
+          cost_centre_id: string
+          cost_centre_name: string
+          created_at?: string
+          id?: string
+          organization_id: string
+          pl_period_id: string
+          total_cost?: number
+          total_depreciation?: number
+          total_equipment?: number
+          total_labour?: number
+          total_materials?: number
+          total_overhead?: number
+          total_vehicle?: number
+        }
+        Update: {
+          attribution_count?: number | null
+          cost_centre_code?: string
+          cost_centre_id?: string
+          cost_centre_name?: string
+          created_at?: string
+          id?: string
+          organization_id?: string
+          pl_period_id?: string
+          total_cost?: number
+          total_depreciation?: number
+          total_equipment?: number
+          total_labour?: number
+          total_materials?: number
+          total_overhead?: number
+          total_vehicle?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_cost_centre_rolls_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_centre_rolls_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_cost_centre_rolls_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_centre_rolls_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_centre_rolls_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_cost_variance: {
+        Row: {
+          actual_cost: number
+          cost_type: string
+          created_at: string
+          created_by: string | null
+          estimated_cost: number
+          id: string
+          notes: string | null
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id: string
+          variance_amount: number
+          variance_pct: number | null
+        }
+        Insert: {
+          actual_cost: number
+          cost_type: string
+          created_at?: string
+          created_by?: string | null
+          estimated_cost: number
+          id?: string
+          notes?: string | null
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id: string
+          variance_amount: number
+          variance_pct?: number | null
+        }
+        Update: {
+          actual_cost?: number
+          cost_type?: string
+          created_at?: string
+          created_by?: string | null
+          estimated_cost?: number
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          pl_period_id?: string
+          service_agreement_id?: string
+          variance_amount?: number
+          variance_pct?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_cost_variance_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_variance_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_cost_variance_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_variance_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_variance_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_cost_variance_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_external_bank_transactions: {
+        Row: {
+          amount: number | null
+          bank_account_id: string | null
+          connection_request_id: string
+          currency_code: string | null
+          description: string | null
+          direction: string | null
+          external_transaction_id: string
+          id: string
+          imported_at: string
+          matched_payment_receipt_id: string | null
+          organization_id: string
+          raw_summary: Json
+          reconciliation_status: string
+          transaction_date: string | null
+        }
+        Insert: {
+          amount?: number | null
+          bank_account_id?: string | null
+          connection_request_id: string
+          currency_code?: string | null
+          description?: string | null
+          direction?: string | null
+          external_transaction_id: string
+          id?: string
+          imported_at?: string
+          matched_payment_receipt_id?: string | null
+          organization_id: string
+          raw_summary?: Json
+          reconciliation_status?: string
+          transaction_date?: string | null
+        }
+        Update: {
+          amount?: number | null
+          bank_account_id?: string | null
+          connection_request_id?: string
+          currency_code?: string | null
+          description?: string | null
+          direction?: string | null
+          external_transaction_id?: string
+          id?: string
+          imported_at?: string
+          matched_payment_receipt_id?: string | null
+          organization_id?: string
+          raw_summary?: Json
+          reconciliation_status?: string
+          transaction_date?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_external_bank_transacti_matched_payment_receipt_id_fkey"
+            columns: ["matched_payment_receipt_id"]
+            isOneToOne: false
+            referencedRelation: "payment_receipts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_bank_transactions_bank_account_id_fkey"
+            columns: ["bank_account_id"]
+            isOneToOne: false
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_bank_transactions_connection_request_id_fkey"
+            columns: ["connection_request_id"]
+            isOneToOne: false
+            referencedRelation: "finance_external_connection_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_bank_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_external_bank_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_bank_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_external_connection_requests: {
+        Row: {
+          adapter_name: string | null
+          bank_account_id: string | null
+          connected_at: string | null
+          connection_mode: string
+          consent_confirmed: boolean
+          consent_confirmed_at: string | null
+          consent_confirmed_by: string | null
+          created_at: string
+          created_by: string | null
+          disconnected_at: string | null
+          external_reference: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          oauth_started_at: string | null
+          oauth_state_expires_at: string | null
+          oauth_state_hash: string | null
+          organization_id: string
+          provider_connection_reference: string | null
+          provider_name: string | null
+          provider_type: string
+          requested_scopes: string[]
+          setup_summary: Json
+          status: string
+          sync_cursor: string | null
+          updated_at: string
+        }
+        Insert: {
+          adapter_name?: string | null
+          bank_account_id?: string | null
+          connected_at?: string | null
+          connection_mode: string
+          consent_confirmed?: boolean
+          consent_confirmed_at?: string | null
+          consent_confirmed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          disconnected_at?: string | null
+          external_reference?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          oauth_started_at?: string | null
+          oauth_state_expires_at?: string | null
+          oauth_state_hash?: string | null
+          organization_id: string
+          provider_connection_reference?: string | null
+          provider_name?: string | null
+          provider_type: string
+          requested_scopes?: string[]
+          setup_summary?: Json
+          status?: string
+          sync_cursor?: string | null
+          updated_at?: string
+        }
+        Update: {
+          adapter_name?: string | null
+          bank_account_id?: string | null
+          connected_at?: string | null
+          connection_mode?: string
+          consent_confirmed?: boolean
+          consent_confirmed_at?: string | null
+          consent_confirmed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          disconnected_at?: string | null
+          external_reference?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          oauth_started_at?: string | null
+          oauth_state_expires_at?: string | null
+          oauth_state_hash?: string | null
+          organization_id?: string
+          provider_connection_reference?: string | null
+          provider_name?: string | null
+          provider_type?: string
+          requested_scopes?: string[]
+          setup_summary?: Json
+          status?: string
+          sync_cursor?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_external_connection_requests_bank_account_id_fkey"
+            columns: ["bank_account_id"]
+            isOneToOne: false
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_connection_requests_consent_confirmed_by_fkey"
+            columns: ["consent_confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_connection_requests_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_connection_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_external_connection_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_external_connection_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_inventory_balances: {
+        Row: {
+          item_id: string
+          location_id: string
+          on_hand: number
+          organization_id: string
+          reserved: number
+          updated_at: string
+        }
+        Insert: {
+          item_id: string
+          location_id: string
+          on_hand?: number
+          organization_id: string
+          reserved?: number
+          updated_at?: string
+        }
+        Update: {
+          item_id?: string
+          location_id?: string
+          on_hand?: number
+          organization_id?: string
+          reserved?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_inventory_balances_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_balances_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_balances_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "finance_inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_balances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_balances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_balances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_inventory_locations: {
+        Row: {
+          active: boolean
+          asset_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          location_type: string
+          name: string
+          organization_id: string
+        }
+        Insert: {
+          active?: boolean
+          asset_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          location_type: string
+          name: string
+          organization_id: string
+        }
+        Update: {
+          active?: boolean
+          asset_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          location_type?: string
+          name?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_inventory_locations_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_locations_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_locations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_locations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_locations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_inventory_transactions: {
+        Row: {
+          asset_id: string | null
+          created_at: string
+          created_by: string | null
+          dispatch_job_id: string | null
+          id: string
+          idempotency_key: string
+          investigation_id: string | null
+          item_id: string
+          location_id: string
+          location_id_target: string | null
+          organization_id: string
+          quantity: number
+          service_agreement_id: string | null
+          shift_id: string | null
+          source_reference: string | null
+          transaction_type: string
+          unit_cost: number
+          work_unit_id: string | null
+        }
+        Insert: {
+          asset_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
+          id?: string
+          idempotency_key: string
+          investigation_id?: string | null
+          item_id: string
+          location_id: string
+          location_id_target?: string | null
+          organization_id: string
+          quantity: number
+          service_agreement_id?: string | null
+          shift_id?: string | null
+          source_reference?: string | null
+          transaction_type: string
+          unit_cost: number
+          work_unit_id?: string | null
+        }
+        Update: {
+          asset_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
+          id?: string
+          idempotency_key?: string
+          investigation_id?: string | null
+          item_id?: string
+          location_id?: string
+          location_id_target?: string | null
+          organization_id?: string
+          quantity?: number
+          service_agreement_id?: string | null
+          shift_id?: string | null
+          source_reference?: string | null
+          transaction_type?: string
+          unit_cost?: number
+          work_unit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_inventory_transactions_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "finance_inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_location_id_target_fkey"
+            columns: ["location_id_target"]
+            isOneToOne: false
+            referencedRelation: "finance_inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_inventory_transactions_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_item_catalog: {
+        Row: {
+          active: boolean
+          controlled: boolean
+          created_at: string
+          created_by: string | null
+          hazardous: boolean
+          id: string
+          item_type: string
+          name: string
+          organization_id: string
+          reorder_point: number
+          sku: string
+          tax_code: string | null
+          unit_of_measure: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          controlled?: boolean
+          created_at?: string
+          created_by?: string | null
+          hazardous?: boolean
+          id?: string
+          item_type: string
+          name: string
+          organization_id: string
+          reorder_point?: number
+          sku: string
+          tax_code?: string | null
+          unit_of_measure: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          controlled?: boolean
+          created_at?: string
+          created_by?: string | null
+          hazardous?: boolean
+          id?: string
+          item_type?: string
+          name?: string
+          organization_id?: string
+          reorder_point?: number
+          sku?: string
+          tax_code?: string | null
+          unit_of_measure?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_item_catalog_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_item_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_item_cost_versions: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          item_id: string
+          landed_cost: number
+          organization_id: string
+          source_reference: string | null
+          status: string
+          supplier_name: string | null
+          unit_cost: number
+          version: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          item_id: string
+          landed_cost?: number
+          organization_id: string
+          source_reference?: string | null
+          status?: string
+          supplier_name?: string | null
+          unit_cost: number
+          version?: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          item_id?: string
+          landed_cost?: number
+          organization_id?: string
+          source_reference?: string | null
+          status?: string
+          supplier_name?: string | null
+          unit_cost?: number
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_item_cost_versions_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_cost_versions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_cost_versions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_cost_versions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "finance_item_cost_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_item_cost_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_cost_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_item_price_versions: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          item_id: string
+          organization_id: string
+          source_reference: string | null
+          status: string
+          unit_price: number
+          version: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          item_id: string
+          organization_id: string
+          source_reference?: string | null
+          status?: string
+          unit_price: number
+          version?: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          item_id?: string
+          organization_id?: string
+          source_reference?: string | null
+          status?: string
+          unit_price?: number
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_item_price_versions_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_price_versions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_price_versions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_price_versions_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "finance_item_price_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_item_price_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_price_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_labour_cost_postings: {
+        Row: {
+          finance_service_cost_id: string
+          hourly_rate: number
+          hours: number
+          id: string
+          organization_id: string
+          pl_period_id: string
+          posted_at: string
+          posted_by: string | null
+          rate_rule_id: string | null
+          rate_status: string
+          service_agreement_id: string
+          source_snapshot: Json
+          staff_id: string
+          timesheet_id: string
+        }
+        Insert: {
+          finance_service_cost_id: string
+          hourly_rate: number
+          hours: number
+          id?: string
+          organization_id: string
+          pl_period_id: string
+          posted_at?: string
+          posted_by?: string | null
+          rate_rule_id?: string | null
+          rate_status: string
+          service_agreement_id: string
+          source_snapshot?: Json
+          staff_id: string
+          timesheet_id: string
+        }
+        Update: {
+          finance_service_cost_id?: string
+          hourly_rate?: number
+          hours?: number
+          id?: string
+          organization_id?: string
+          pl_period_id?: string
+          posted_at?: string
+          posted_by?: string | null
+          rate_rule_id?: string | null
+          rate_status?: string
+          service_agreement_id?: string
+          source_snapshot?: Json
+          staff_id?: string
+          timesheet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_labour_cost_postings_finance_service_cost_id_fkey"
+            columns: ["finance_service_cost_id"]
+            isOneToOne: true
+            referencedRelation: "finance_service_costs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_posted_by_fkey"
+            columns: ["posted_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_rate_rule_id_fkey"
+            columns: ["rate_rule_id"]
+            isOneToOne: false
+            referencedRelation: "rate_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_labour_cost_postings_timesheet_id_fkey"
+            columns: ["timesheet_id"]
+            isOneToOne: true
+            referencedRelation: "timesheets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_payday_filing_packages: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          package_summary: Json
+          payroll_export_batch_id: string
+          period_from: string
+          period_to: string
+          provider_format: string
+          resolved_rate_count: number
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          timesheet_count: number
+          total_hours: number
+          unresolved_rate_count: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id: string
+          package_summary?: Json
+          payroll_export_batch_id: string
+          period_from: string
+          period_to: string
+          provider_format?: string
+          resolved_rate_count?: number
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          timesheet_count?: number
+          total_hours?: number
+          unresolved_rate_count?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id?: string
+          package_summary?: Json
+          payroll_export_batch_id?: string
+          period_from?: string
+          period_to?: string
+          provider_format?: string
+          resolved_rate_count?: number
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          timesheet_count?: number
+          total_hours?: number
+          unresolved_rate_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_payday_filing_packages_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_payday_filing_packages_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_payday_filing_packages_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_payday_filing_packages_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_payday_filing_packages_payroll_export_batch_id_fkey"
+            columns: ["payroll_export_batch_id"]
+            isOneToOne: true
+            referencedRelation: "payroll_export_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_payday_filing_packages_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_pl_periods: {
+        Row: {
+          closed_at: string | null
+          closed_by: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          closed_at?: string | null
+          closed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          closed_at?: string | null
+          closed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          period_end?: string
+          period_start?: string
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_pl_periods_closed_by_fkey"
+            columns: ["closed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_pl_periods_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_pl_periods_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_pl_periods_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_pl_periods_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_pl_snapshots: {
+        Row: {
+          cost_line_count: number
+          created_at: string
+          gross_margin_pct: number | null
+          gross_profit: number | null
+          id: string
+          invoice_count: number
+          organization_id: string
+          pl_period_id: string
+          snapshot_at: string
+          total_cost: number
+          total_depreciation: number
+          total_equipment: number
+          total_labour: number
+          total_materials: number
+          total_overhead: number
+          total_revenue: number
+          total_vehicle: number
+          variance_pct: number | null
+        }
+        Insert: {
+          cost_line_count?: number
+          created_at?: string
+          gross_margin_pct?: number | null
+          gross_profit?: number | null
+          id?: string
+          invoice_count?: number
+          organization_id: string
+          pl_period_id: string
+          snapshot_at?: string
+          total_cost?: number
+          total_depreciation?: number
+          total_equipment?: number
+          total_labour?: number
+          total_materials?: number
+          total_overhead?: number
+          total_revenue?: number
+          total_vehicle?: number
+          variance_pct?: number | null
+        }
+        Update: {
+          cost_line_count?: number
+          created_at?: string
+          gross_margin_pct?: number | null
+          gross_profit?: number | null
+          id?: string
+          invoice_count?: number
+          organization_id?: string
+          pl_period_id?: string
+          snapshot_at?: string
+          total_cost?: number
+          total_depreciation?: number
+          total_equipment?: number
+          total_labour?: number
+          total_materials?: number
+          total_overhead?: number
+          total_revenue?: number
+          total_vehicle?: number
+          variance_pct?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_pl_snapshots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_pl_snapshots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_pl_snapshots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_pl_snapshots_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: true
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_provisional_tax_plans: {
+        Row: {
+          accountant_notes: string | null
+          approved_at: string | null
+          approved_by: string | null
+          assumptions: Json
+          created_at: string
+          created_by: string | null
+          estimated_income_tax: number
+          estimated_provisional_amount: number
+          estimated_taxable_profit: number
+          id: string
+          method: string
+          organization_id: string
+          pl_period_id: string | null
+          source_key: string
+          status: string
+          tax_rate_pct: number
+          tax_year: number
+        }
+        Insert: {
+          accountant_notes?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          assumptions?: Json
+          created_at?: string
+          created_by?: string | null
+          estimated_income_tax: number
+          estimated_provisional_amount: number
+          estimated_taxable_profit: number
+          id?: string
+          method: string
+          organization_id: string
+          pl_period_id?: string | null
+          source_key?: string
+          status?: string
+          tax_rate_pct: number
+          tax_year: number
+        }
+        Update: {
+          accountant_notes?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          assumptions?: Json
+          created_at?: string
+          created_by?: string | null
+          estimated_income_tax?: number
+          estimated_provisional_amount?: number
+          estimated_taxable_profit?: number
+          id?: string
+          method?: string
+          organization_id?: string
+          pl_period_id?: string | null
+          source_key?: string
+          status?: string
+          tax_rate_pct?: number
+          tax_year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_provisional_tax_plans_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_provisional_tax_plans_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_provisional_tax_plans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_provisional_tax_plans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_provisional_tax_plans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_provisional_tax_plans_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_provisional_tax_plans_source_key_fkey"
+            columns: ["source_key"]
+            isOneToOne: false
+            referencedRelation: "bob_nz_finance_sources"
+            referencedColumns: ["source_key"]
+          },
+        ]
+      }
+      finance_service_costs: {
+        Row: {
+          allocation_driver: string | null
+          asset_id: string | null
+          client_organization_id: string
+          cost_centre_id: string | null
+          cost_type: string
+          created_at: string
+          created_by: string | null
+          dispatch_job_id: string | null
+          id: string
+          investigation_id: string | null
+          invoice_line_item_id: string | null
+          invoiced_at: string | null
+          organization_id: string
+          pl_period_id: string
+          quantity: number
+          service_agreement_id: string
+          shift_id: string | null
+          site_id: string | null
+          source_document_type: string
+          source_reference: string
+          total_cost: number
+          unit_cost: number
+          unit_of_measure: string | null
+          work_unit_id: string | null
+        }
+        Insert: {
+          allocation_driver?: string | null
+          asset_id?: string | null
+          client_organization_id: string
+          cost_centre_id?: string | null
+          cost_type: string
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
+          id?: string
+          investigation_id?: string | null
+          invoice_line_item_id?: string | null
+          invoiced_at?: string | null
+          organization_id: string
+          pl_period_id: string
+          quantity?: number
+          service_agreement_id: string
+          shift_id?: string | null
+          site_id?: string | null
+          source_document_type: string
+          source_reference: string
+          total_cost: number
+          unit_cost: number
+          unit_of_measure?: string | null
+          work_unit_id?: string | null
+        }
+        Update: {
+          allocation_driver?: string | null
+          asset_id?: string | null
+          client_organization_id?: string
+          cost_centre_id?: string | null
+          cost_type?: string
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
+          id?: string
+          investigation_id?: string | null
+          invoice_line_item_id?: string | null
+          invoiced_at?: string | null
+          organization_id?: string
+          pl_period_id?: string
+          quantity?: number
+          service_agreement_id?: string
+          shift_id?: string | null
+          site_id?: string | null
+          source_document_type?: string
+          source_reference?: string
+          total_cost?: number
+          unit_cost?: number
+          unit_of_measure?: string | null
+          work_unit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_service_costs_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_invoice_line_item_id_fkey"
+            columns: ["invoice_line_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_line_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_costs_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_service_item_consumption: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          dispatch_job_id: string | null
+          id: string
+          inventory_transaction_id: string
+          investigation_id: string | null
+          invoice_line_item_id: string | null
+          item_id: string
+          organization_id: string
+          quantity: number
+          quote_id: string | null
+          service_agreement_id: string | null
+          shift_id: string | null
+          site_id: string | null
+          unit_cost: number
+          work_unit_id: string | null
+          zone_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
+          id?: string
+          inventory_transaction_id: string
+          investigation_id?: string | null
+          invoice_line_item_id?: string | null
+          item_id: string
+          organization_id: string
+          quantity: number
+          quote_id?: string | null
+          service_agreement_id?: string | null
+          shift_id?: string | null
+          site_id?: string | null
+          unit_cost: number
+          work_unit_id?: string | null
+          zone_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          dispatch_job_id?: string | null
+          id?: string
+          inventory_transaction_id?: string
+          investigation_id?: string | null
+          invoice_line_item_id?: string | null
+          item_id?: string
+          organization_id?: string
+          quantity?: number
+          quote_id?: string | null
+          service_agreement_id?: string | null
+          shift_id?: string | null
+          site_id?: string | null
+          unit_cost?: number
+          work_unit_id?: string | null
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_service_item_consumption_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_inventory_transaction_id_fkey"
+            columns: ["inventory_transaction_id"]
+            isOneToOne: true
+            referencedRelation: "finance_inventory_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_invoice_line_item_id_fkey"
+            columns: ["invoice_line_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_line_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_service_profitability: {
+        Row: {
+          actual_labour: number
+          actual_margin_pct: number | null
+          actual_materials: number
+          actual_overhead: number
+          actual_total_cost: number
+          actual_vehicle: number
+          client_invoice_total: number
+          client_organization_id: string
+          created_at: string
+          created_by: string | null
+          estimated_labour: number
+          estimated_margin_pct: number | null
+          estimated_materials: number
+          estimated_overhead: number
+          estimated_total_cost: number
+          estimated_vehicle: number
+          id: string
+          invoice_count: number | null
+          labour_variance_pct: number | null
+          location_id: string | null
+          margin_impact_pct: number | null
+          materials_variance_pct: number | null
+          net_profit: number | null
+          organization_id: string
+          overhead_variance_pct: number | null
+          pl_period_id: string
+          service_agreement_id: string
+          service_type: string | null
+          total_variance_pct: number | null
+          vehicle_variance_pct: number | null
+          work_unit_count: number | null
+        }
+        Insert: {
+          actual_labour?: number
+          actual_margin_pct?: number | null
+          actual_materials?: number
+          actual_overhead?: number
+          actual_total_cost?: number
+          actual_vehicle?: number
+          client_invoice_total?: number
+          client_organization_id: string
+          created_at?: string
+          created_by?: string | null
+          estimated_labour?: number
+          estimated_margin_pct?: number | null
+          estimated_materials?: number
+          estimated_overhead?: number
+          estimated_total_cost?: number
+          estimated_vehicle?: number
+          id?: string
+          invoice_count?: number | null
+          labour_variance_pct?: number | null
+          location_id?: string | null
+          margin_impact_pct?: number | null
+          materials_variance_pct?: number | null
+          net_profit?: number | null
+          organization_id: string
+          overhead_variance_pct?: number | null
+          pl_period_id: string
+          service_agreement_id: string
+          service_type?: string | null
+          total_variance_pct?: number | null
+          vehicle_variance_pct?: number | null
+          work_unit_count?: number | null
+        }
+        Update: {
+          actual_labour?: number
+          actual_margin_pct?: number | null
+          actual_materials?: number
+          actual_overhead?: number
+          actual_total_cost?: number
+          actual_vehicle?: number
+          client_invoice_total?: number
+          client_organization_id?: string
+          created_at?: string
+          created_by?: string | null
+          estimated_labour?: number
+          estimated_margin_pct?: number | null
+          estimated_materials?: number
+          estimated_overhead?: number
+          estimated_total_cost?: number
+          estimated_vehicle?: number
+          id?: string
+          invoice_count?: number | null
+          labour_variance_pct?: number | null
+          location_id?: string | null
+          margin_impact_pct?: number | null
+          materials_variance_pct?: number | null
+          net_profit?: number | null
+          organization_id?: string
+          overhead_variance_pct?: number | null
+          pl_period_id?: string
+          service_agreement_id?: string
+          service_type?: string | null
+          total_variance_pct?: number | null
+          vehicle_variance_pct?: number | null
+          work_unit_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_service_profitability_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_profitability_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_tax_identity: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          gst_basis: string | null
+          gst_filing_frequency: string | null
+          gst_registered: boolean
+          ird_number: string
+          organization_id: string
+          setup_status: string
+          tax_agent_contact: string | null
+          tax_agent_name: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          gst_basis?: string | null
+          gst_filing_frequency?: string | null
+          gst_registered?: boolean
+          ird_number: string
+          organization_id: string
+          setup_status?: string
+          tax_agent_contact?: string | null
+          tax_agent_name?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          gst_basis?: string | null
+          gst_filing_frequency?: string | null
+          gst_registered?: boolean
+          ird_number?: string
+          organization_id?: string
+          setup_status?: string
+          tax_agent_contact?: string | null
+          tax_agent_name?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_tax_identity_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_identity_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_tax_identity_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_identity_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_identity_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_tax_periods: {
+        Row: {
+          adjustments: number
+          created_at: string
+          created_by: string | null
+          filed_at: string | null
+          filed_by: string | null
+          filing_due_date: string
+          id: string
+          input_tax: number
+          net_tax_due: number
+          organization_id: string
+          output_tax: number
+          period_end: string
+          period_start: string
+          status: string
+        }
+        Insert: {
+          adjustments?: number
+          created_at?: string
+          created_by?: string | null
+          filed_at?: string | null
+          filed_by?: string | null
+          filing_due_date: string
+          id?: string
+          input_tax?: number
+          net_tax_due?: number
+          organization_id: string
+          output_tax?: number
+          period_end: string
+          period_start: string
+          status?: string
+        }
+        Update: {
+          adjustments?: number
+          created_at?: string
+          created_by?: string | null
+          filed_at?: string | null
+          filed_by?: string | null
+          filing_due_date?: string
+          id?: string
+          input_tax?: number
+          net_tax_due?: number
+          organization_id?: string
+          output_tax?: number
+          period_end?: string
+          period_start?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_tax_periods_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_periods_filed_by_fkey"
+            columns: ["filed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_periods_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_tax_periods_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_periods_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_tax_transactions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_id: string | null
+          invoice_line_item_id: string | null
+          organization_id: string
+          source_reference: string
+          tax_amount: number
+          tax_code: string
+          tax_direction: string
+          tax_period_id: string
+          tax_rate_pct: number
+          taxable_amount: number
+          transaction_date: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          invoice_line_item_id?: string | null
+          organization_id: string
+          source_reference: string
+          tax_amount: number
+          tax_code: string
+          tax_direction: string
+          tax_period_id: string
+          tax_rate_pct?: number
+          taxable_amount: number
+          transaction_date: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id?: string | null
+          invoice_line_item_id?: string | null
+          organization_id?: string
+          source_reference?: string
+          tax_amount?: number
+          tax_code?: string
+          tax_direction?: string
+          tax_period_id?: string
+          tax_rate_pct?: number
+          taxable_amount?: number
+          transaction_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_tax_transactions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_transactions_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_transactions_invoice_line_item_id_fkey"
+            columns: ["invoice_line_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_line_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_tax_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_tax_transactions_tax_period_id_fkey"
+            columns: ["tax_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_tax_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_variance_exceptions: {
+        Row: {
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          affected_cost_type: string | null
+          created_at: string
+          description: string | null
+          exception_type: string
+          id: string
+          organization_id: string
+          pl_period_id: string
+          profitability_id: string | null
+          service_agreement_id: string | null
+          severity: string
+          threshold_pct: number | null
+          variance_amount: number | null
+          variance_pct: number | null
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          affected_cost_type?: string | null
+          created_at?: string
+          description?: string | null
+          exception_type: string
+          id?: string
+          organization_id: string
+          pl_period_id: string
+          profitability_id?: string | null
+          service_agreement_id?: string | null
+          severity?: string
+          threshold_pct?: number | null
+          variance_amount?: number | null
+          variance_pct?: number | null
+        }
+        Update: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          affected_cost_type?: string | null
+          created_at?: string
+          description?: string | null
+          exception_type?: string
+          id?: string
+          organization_id?: string
+          pl_period_id?: string
+          profitability_id?: string | null
+          service_agreement_id?: string | null
+          severity?: string
+          threshold_pct?: number | null
+          variance_amount?: number | null
+          variance_pct?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_variance_exceptions_acknowledged_by_fkey"
+            columns: ["acknowledged_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_variance_exceptions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_variance_exceptions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_variance_exceptions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_variance_exceptions_pl_period_id_fkey"
+            columns: ["pl_period_id"]
+            isOneToOne: false
+            referencedRelation: "finance_pl_periods"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_variance_exceptions_profitability_id_fkey"
+            columns: ["profitability_id"]
+            isOneToOne: false
+            referencedRelation: "finance_service_profitability"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_variance_exceptions_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
             referencedColumns: ["id"]
           },
         ]
@@ -6168,6 +15294,169 @@ export type Database = {
           },
         ]
       }
+      hr_case_events: {
+        Row: {
+          actor_user_id: string | null
+          case_id: string
+          created_at: string
+          event_type: string
+          id: string
+          note: string
+          organization_id: string
+        }
+        Insert: {
+          actor_user_id?: string | null
+          case_id: string
+          created_at?: string
+          event_type: string
+          id?: string
+          note: string
+          organization_id: string
+        }
+        Update: {
+          actor_user_id?: string | null
+          case_id?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          note?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_case_events_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_case_events_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "hr_cases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_case_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "hr_case_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_case_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_cases: {
+        Row: {
+          assigned_to: string | null
+          case_type: string
+          client_request_id: string
+          created_at: string
+          id: string
+          opened_at: string
+          opened_by: string | null
+          organization_id: string
+          resolved_at: string | null
+          severity: string
+          staff_id: string
+          status: string
+          subject: string
+          summary: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          case_type: string
+          client_request_id: string
+          created_at?: string
+          id?: string
+          opened_at?: string
+          opened_by?: string | null
+          organization_id: string
+          resolved_at?: string | null
+          severity?: string
+          staff_id: string
+          status?: string
+          subject: string
+          summary: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          case_type?: string
+          client_request_id?: string
+          created_at?: string
+          id?: string
+          opened_at?: string
+          opened_by?: string | null
+          organization_id?: string
+          resolved_at?: string | null
+          severity?: string
+          staff_id?: string
+          status?: string
+          subject?: string
+          summary?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_cases_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_cases_opened_by_fkey"
+            columns: ["opened_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_cases_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "hr_cases_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_cases_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_cases_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       import_code_reference: {
         Row: {
           code_norm: string
@@ -6414,6 +15703,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "import_place_aliases_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       incident_attachments: {
@@ -6481,12 +15777,14 @@ export type Database = {
       }
       incidents: {
         Row: {
+          canonical_place_id: string | null
           client_site_id: string | null
           created_at: string
           description: string | null
           dispatch_job_id: string | null
           id: string
           incident_type: string
+          investigation_id: string | null
           is_staff_sensitive: boolean
           location_event_id: string | null
           location_id: string | null
@@ -6500,12 +15798,14 @@ export type Database = {
           zone_id: string | null
         }
         Insert: {
+          canonical_place_id?: string | null
           client_site_id?: string | null
           created_at?: string
           description?: string | null
           dispatch_job_id?: string | null
           id?: string
           incident_type: string
+          investigation_id?: string | null
           is_staff_sensitive?: boolean
           location_event_id?: string | null
           location_id?: string | null
@@ -6519,12 +15819,14 @@ export type Database = {
           zone_id?: string | null
         }
         Update: {
+          canonical_place_id?: string | null
           client_site_id?: string | null
           created_at?: string
           description?: string | null
           dispatch_job_id?: string | null
           id?: string
           incident_type?: string
+          investigation_id?: string | null
           is_staff_sensitive?: boolean
           location_event_id?: string | null
           location_id?: string | null
@@ -6539,6 +15841,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "incidents_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "incidents_client_site_id_fkey"
             columns: ["client_site_id"]
             isOneToOne: false
@@ -6550,6 +15859,13 @@ export type Database = {
             columns: ["dispatch_job_id"]
             isOneToOne: false
             referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incidents_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
             referencedColumns: ["id"]
           },
           {
@@ -6601,37 +15917,74 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "incidents_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       inference_jobs: {
         Row: {
+          attempt_count: number
           completed_at: string | null
           created_at: string
           domain: string
+          error_message: string | null
           evidence_item_id: string | null
+          heartbeat_at: string | null
           id: string
+          lease_expires_at: string | null
+          lease_token: string | null
           organization_id: string
+          progress_current: number
+          progress_label: string | null
+          progress_percent: number
+          progress_total: number
           requested_by_user_id: string | null
+          stage: string
           status: string
         }
         Insert: {
+          attempt_count?: number
           completed_at?: string | null
           created_at?: string
           domain: string
+          error_message?: string | null
           evidence_item_id?: string | null
+          heartbeat_at?: string | null
           id?: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
           organization_id: string
+          progress_current?: number
+          progress_label?: string | null
+          progress_percent?: number
+          progress_total?: number
           requested_by_user_id?: string | null
+          stage?: string
           status?: string
         }
         Update: {
+          attempt_count?: number
           completed_at?: string | null
           created_at?: string
           domain?: string
+          error_message?: string | null
           evidence_item_id?: string | null
+          heartbeat_at?: string | null
           id?: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
           organization_id?: string
+          progress_current?: number
+          progress_label?: string | null
+          progress_percent?: number
+          progress_total?: number
           requested_by_user_id?: string | null
+          stage?: string
           status?: string
         }
         Relationships: [
@@ -6724,6 +16077,7 @@ export type Database = {
         Row: {
           id: string
           last_number: number
+          module_key: string
           organization_id: string
           prefix: string
           updated_at: string
@@ -6731,6 +16085,7 @@ export type Database = {
         Insert: {
           id?: string
           last_number?: number
+          module_key?: string
           organization_id: string
           prefix?: string
           updated_at?: string
@@ -6738,6 +16093,7 @@ export type Database = {
         Update: {
           id?: string
           last_number?: number
+          module_key?: string
           organization_id?: string
           prefix?: string
           updated_at?: string
@@ -6746,21 +16102,21 @@ export type Database = {
           {
             foreignKeyName: "infringement_notice_counters_organization_id_fkey"
             columns: ["organization_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "crm_account_health"
             referencedColumns: ["organization_id"]
           },
           {
             foreignKeyName: "infringement_notice_counters_organization_id_fkey"
             columns: ["organization_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "crm_account_list"
             referencedColumns: ["id"]
           },
           {
             foreignKeyName: "infringement_notice_counters_organization_id_fkey"
             columns: ["organization_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -6892,6 +16248,253 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "infringement_notices_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      investigation_events: {
+        Row: {
+          created_at: string
+          created_by: string
+          description: string
+          event_type: string
+          id: string
+          investigation_id: string
+          organization_id: string
+          source_id: string | null
+          source_table: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          description: string
+          event_type: string
+          id?: string
+          investigation_id: string
+          organization_id: string
+          source_id?: string | null
+          source_table?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          description?: string
+          event_type?: string
+          id?: string
+          investigation_id?: string
+          organization_id?: string
+          source_id?: string | null
+          source_table?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investigation_events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigation_events_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigation_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "investigation_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigation_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      investigation_links: {
+        Row: {
+          entity_id: string
+          entity_type: string
+          id: string
+          investigation_id: string
+          link_reason: string
+          link_role: string
+          linked_at: string
+          linked_by: string
+          organization_id: string
+        }
+        Insert: {
+          entity_id: string
+          entity_type: string
+          id?: string
+          investigation_id: string
+          link_reason: string
+          link_role?: string
+          linked_at?: string
+          linked_by: string
+          organization_id: string
+        }
+        Update: {
+          entity_id?: string
+          entity_type?: string
+          id?: string
+          investigation_id?: string
+          link_reason?: string
+          link_role?: string
+          linked_at?: string
+          linked_by?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investigation_links_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigation_links_linked_by_fkey"
+            columns: ["linked_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigation_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "investigation_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigation_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      investigations: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          created_by: string
+          id: string
+          investigation_reference: string
+          investigation_type: string
+          lead_user_id: string | null
+          legal_hold: boolean
+          opened_at: string
+          organization_id: string
+          priority: string
+          resolution_notes: string | null
+          resolved_at: string | null
+          status: string
+          summary: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          investigation_reference: string
+          investigation_type?: string
+          lead_user_id?: string | null
+          legal_hold?: boolean
+          opened_at?: string
+          organization_id: string
+          priority?: string
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          status?: string
+          summary?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          investigation_reference?: string
+          investigation_type?: string
+          lead_user_id?: string | null
+          legal_hold?: boolean
+          opened_at?: string
+          organization_id?: string
+          priority?: string
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          status?: string
+          summary?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investigations_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigations_lead_user_id_fkey"
+            columns: ["lead_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "investigations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
         ]
       }
       invite_rate_log: {
@@ -6915,44 +16518,205 @@ export type Database = {
         }
         Relationships: []
       }
-      invoice_line_items: {
+      invoice_adjustments: {
         Row: {
+          adjustment_amount: number
+          adjustment_type: string
+          approved_at: string | null
+          approved_by: string | null
           created_at: string
+          created_by: string | null
           description: string
           id: string
           invoice_id: string
-          line_number: number
-          line_total: number
-          organization_id: string | null
-          quantity: number
-          source_dispatch_id: string | null
-          unit_price: number
+          organization_id: string
+          reason: string | null
         }
         Insert: {
+          adjustment_amount: number
+          adjustment_type: string
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
+          created_by?: string | null
           description: string
           id?: string
           invoice_id: string
-          line_number: number
-          line_total: number
-          organization_id?: string | null
-          quantity?: number
-          source_dispatch_id?: string | null
-          unit_price: number
+          organization_id: string
+          reason?: string | null
         }
         Update: {
+          adjustment_amount?: number
+          adjustment_type?: string
+          approved_at?: string | null
+          approved_by?: string | null
           created_at?: string
+          created_by?: string | null
           description?: string
           id?: string
           invoice_id?: string
+          organization_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_adjustments_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_adjustments_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_adjustments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_adjustments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "invoice_adjustments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_adjustments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_line_items: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string
+          dispatch_job_id: string | null
+          finance_item_catalog_id: string | null
+          gross_margin_amount: number | null
+          gross_margin_pct: number | null
+          id: string
+          internal_cost_amount: number | null
+          invoice_id: string
+          item_type: string
+          line_number: number
+          line_order_index: number | null
+          line_total: number
+          organization_id: string | null
+          quantity: number
+          quote_id: string | null
+          service_cost_id: string | null
+          shift_id: string | null
+          source_dispatch_id: string | null
+          tax_amount: number | null
+          tax_rate_pct: number | null
+          total_line_amount: number
+          unit_of_measure: string | null
+          unit_price: number
+          work_unit_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description: string
+          dispatch_job_id?: string | null
+          finance_item_catalog_id?: string | null
+          gross_margin_amount?: number | null
+          gross_margin_pct?: number | null
+          id?: string
+          internal_cost_amount?: number | null
+          invoice_id: string
+          item_type?: string
+          line_number: number
+          line_order_index?: number | null
+          line_total: number
+          organization_id?: string | null
+          quantity?: number
+          quote_id?: string | null
+          service_cost_id?: string | null
+          shift_id?: string | null
+          source_dispatch_id?: string | null
+          tax_amount?: number | null
+          tax_rate_pct?: number | null
+          total_line_amount?: number
+          unit_of_measure?: string | null
+          unit_price: number
+          work_unit_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          dispatch_job_id?: string | null
+          finance_item_catalog_id?: string | null
+          gross_margin_amount?: number | null
+          gross_margin_pct?: number | null
+          id?: string
+          internal_cost_amount?: number | null
+          invoice_id?: string
+          item_type?: string
           line_number?: number
+          line_order_index?: number | null
           line_total?: number
           organization_id?: string | null
           quantity?: number
+          quote_id?: string | null
+          service_cost_id?: string | null
+          shift_id?: string | null
           source_dispatch_id?: string | null
+          tax_amount?: number | null
+          tax_rate_pct?: number | null
+          total_line_amount?: number
+          unit_of_measure?: string | null
           unit_price?: number
+          work_unit_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "invoice_line_items_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_items_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_items_finance_item_catalog_id_fkey"
+            columns: ["finance_item_catalog_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_items_finance_item_catalog_id_fkey"
+            columns: ["finance_item_catalog_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
           {
             foreignKeyName: "invoice_line_items_invoice_id_fkey"
             columns: ["invoice_id"]
@@ -6979,6 +16743,34 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_items_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_items_service_cost_id_fkey"
+            columns: ["service_cost_id"]
+            isOneToOne: false
+            referencedRelation: "finance_service_costs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_items_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_line_items_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
             referencedColumns: ["id"]
           },
         ]
@@ -7183,6 +16975,106 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_party_interactions: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          dispatch_job_id: string
+          gps_accuracy: number | null
+          gps_lat: number | null
+          gps_lng: number | null
+          id: string
+          mode: string
+          noise_assessment_id: string | null
+          occurred_at: string
+          officer_user_id: string
+          organization_id: string
+          party_role: string
+          protected: boolean
+          shift_stop_id: string | null
+          summary: string | null
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          dispatch_job_id: string
+          gps_accuracy?: number | null
+          gps_lat?: number | null
+          gps_lng?: number | null
+          id?: string
+          mode: string
+          noise_assessment_id?: string | null
+          occurred_at: string
+          officer_user_id: string
+          organization_id: string
+          party_role: string
+          protected?: boolean
+          shift_stop_id?: string | null
+          summary?: string | null
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          dispatch_job_id?: string
+          gps_accuracy?: number | null
+          gps_lat?: number | null
+          gps_lng?: number | null
+          id?: string
+          mode?: string
+          noise_assessment_id?: string | null
+          occurred_at?: string
+          officer_user_id?: string
+          organization_id?: string
+          party_role?: string
+          protected?: boolean
+          shift_stop_id?: string | null
+          summary?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_party_interactions_dispatch_job_id_fkey"
+            columns: ["dispatch_job_id"]
+            isOneToOne: false
+            referencedRelation: "dispatch_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_party_interactions_noise_assessment_id_fkey"
+            columns: ["noise_assessment_id"]
+            isOneToOne: false
+            referencedRelation: "noise_assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_party_interactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "job_party_interactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_party_interactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_party_interactions_shift_stop_id_fkey"
+            columns: ["shift_stop_id"]
+            isOneToOne: false
+            referencedRelation: "shift_stops"
             referencedColumns: ["id"]
           },
         ]
@@ -7425,7 +17317,13 @@ export type Database = {
         Row: {
           approved_at: string | null
           approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
           created_at: string
+          decision_notes: string | null
           ends_on: string
           id: string
           leave_type: string
@@ -7439,7 +17337,13 @@ export type Database = {
         Insert: {
           approved_at?: string | null
           approved_by?: string | null
+          branch_review_notes?: string | null
+          branch_reviewed_at?: string | null
+          branch_reviewed_by?: string | null
+          branch_reviewed_organization_id?: string | null
+          client_event_id?: string | null
           created_at?: string
+          decision_notes?: string | null
           ends_on: string
           id?: string
           leave_type: string
@@ -7453,7 +17357,13 @@ export type Database = {
         Update: {
           approved_at?: string | null
           approved_by?: string | null
+          branch_review_notes?: string | null
+          branch_reviewed_at?: string | null
+          branch_reviewed_by?: string | null
+          branch_reviewed_organization_id?: string | null
+          client_event_id?: string | null
           created_at?: string
+          decision_notes?: string | null
           ends_on?: string
           id?: string
           leave_type?: string
@@ -7470,6 +17380,34 @@ export type Database = {
             columns: ["approved_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_requests_branch_reviewed_by_fkey"
+            columns: ["branch_reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_requests_branch_reviewed_organization_id_fkey"
+            columns: ["branch_reviewed_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "leave_requests_branch_reviewed_organization_id_fkey"
+            columns: ["branch_reviewed_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_requests_branch_reviewed_organization_id_fkey"
+            columns: ["branch_reviewed_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
           {
@@ -7504,6 +17442,8 @@ export type Database = {
       }
       location_events: {
         Row: {
+          canonical_person_id: string | null
+          canonical_place_id: string | null
           checkpoint_id: string | null
           client_site_id: string | null
           created_at: string
@@ -7522,6 +17462,8 @@ export type Database = {
           zone_id: string | null
         }
         Insert: {
+          canonical_person_id?: string | null
+          canonical_place_id?: string | null
           checkpoint_id?: string | null
           client_site_id?: string | null
           created_at?: string
@@ -7540,6 +17482,8 @@ export type Database = {
           zone_id?: string | null
         }
         Update: {
+          canonical_person_id?: string | null
+          canonical_place_id?: string | null
           checkpoint_id?: string | null
           client_site_id?: string | null
           created_at?: string
@@ -7558,6 +17502,20 @@ export type Database = {
           zone_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "location_events_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_events_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "location_events_checkpoint_id_fkey"
             columns: ["checkpoint_id"]
@@ -7605,6 +17563,77 @@ export type Database = {
             columns: ["zone_id"]
             isOneToOne: false
             referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_events_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      location_module_assignments: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          effective_from: string
+          effective_to: string | null
+          enabled: boolean
+          id: string
+          location_id: string
+          module_key: string
+          rule_set_ref: string | null
+          service_agreement_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          enabled?: boolean
+          id?: string
+          location_id: string
+          module_key: string
+          rule_set_ref?: string | null
+          service_agreement_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          enabled?: boolean
+          id?: string
+          location_id?: string
+          module_key?: string
+          rule_set_ref?: string | null
+          service_agreement_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "location_module_assignments_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_module_assignments_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_module_assignments_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
             referencedColumns: ["id"]
           },
         ]
@@ -7683,15 +17712,19 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "location_notes_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       location_zones: {
         Row: {
           active_schedule: Json | null
-          address: string | null
-          address_match_key: string | null
           boundary: unknown
-          boundary_legacy: Json | null
           boundary_status: string
           boundary_verification: string
           boundary_verified_at: string | null
@@ -7699,6 +17732,7 @@ export type Database = {
           bylaw_clause: string | null
           bylaw_source_url: string | null
           center_point: unknown
+          configuration_version: number
           created_at: string
           despatch_zone_code: string | null
           enforcement_workflow_override: string | null
@@ -7708,7 +17742,7 @@ export type Database = {
           is_active: boolean
           is_adhoc: boolean
           jurisdiction_rule_set_id: string | null
-          location_id: string | null
+          location_id: string
           metadata: Json
           module_key: string
           name: string
@@ -7716,32 +17750,24 @@ export type Database = {
           nightly_limit_monthly: number | null
           onsite_profile: string
           organization_id: string
-          parent_zone_id: string | null
           parking_disabled_multiplier: number
           parking_limit_set_at: string | null
           parking_limit_set_by: string | null
           parking_limit_source: string | null
           parking_signage_photo_url: string | null
           parking_time_limit_minutes: number | null
-          postcode: string | null
           radius_meters: number | null
           repeat_stay_radius_m: number | null
-          repeat_stay_radius_meters: number | null
           repeat_stay_window_nights: number | null
           rule_overrides: Json | null
           rule_type: string
           scv_exempts_restriction: boolean
           scv_required: boolean
-          site_id: string | null
-          suburb: string | null
           zone_type: string
         }
         Insert: {
           active_schedule?: Json | null
-          address?: string | null
-          address_match_key?: string | null
           boundary?: unknown
-          boundary_legacy?: Json | null
           boundary_status?: string
           boundary_verification?: string
           boundary_verified_at?: string | null
@@ -7749,6 +17775,7 @@ export type Database = {
           bylaw_clause?: string | null
           bylaw_source_url?: string | null
           center_point?: unknown
+          configuration_version?: number
           created_at?: string
           despatch_zone_code?: string | null
           enforcement_workflow_override?: string | null
@@ -7758,7 +17785,7 @@ export type Database = {
           is_active?: boolean
           is_adhoc?: boolean
           jurisdiction_rule_set_id?: string | null
-          location_id?: string | null
+          location_id: string
           metadata?: Json
           module_key?: string
           name: string
@@ -7766,32 +17793,24 @@ export type Database = {
           nightly_limit_monthly?: number | null
           onsite_profile?: string
           organization_id: string
-          parent_zone_id?: string | null
           parking_disabled_multiplier?: number
           parking_limit_set_at?: string | null
           parking_limit_set_by?: string | null
           parking_limit_source?: string | null
           parking_signage_photo_url?: string | null
           parking_time_limit_minutes?: number | null
-          postcode?: string | null
           radius_meters?: number | null
           repeat_stay_radius_m?: number | null
-          repeat_stay_radius_meters?: number | null
           repeat_stay_window_nights?: number | null
           rule_overrides?: Json | null
           rule_type?: string
           scv_exempts_restriction?: boolean
           scv_required?: boolean
-          site_id?: string | null
-          suburb?: string | null
           zone_type?: string
         }
         Update: {
           active_schedule?: Json | null
-          address?: string | null
-          address_match_key?: string | null
           boundary?: unknown
-          boundary_legacy?: Json | null
           boundary_status?: string
           boundary_verification?: string
           boundary_verified_at?: string | null
@@ -7799,6 +17818,7 @@ export type Database = {
           bylaw_clause?: string | null
           bylaw_source_url?: string | null
           center_point?: unknown
+          configuration_version?: number
           created_at?: string
           despatch_zone_code?: string | null
           enforcement_workflow_override?: string | null
@@ -7808,7 +17828,7 @@ export type Database = {
           is_active?: boolean
           is_adhoc?: boolean
           jurisdiction_rule_set_id?: string | null
-          location_id?: string | null
+          location_id?: string
           metadata?: Json
           module_key?: string
           name?: string
@@ -7816,24 +17836,19 @@ export type Database = {
           nightly_limit_monthly?: number | null
           onsite_profile?: string
           organization_id?: string
-          parent_zone_id?: string | null
           parking_disabled_multiplier?: number
           parking_limit_set_at?: string | null
           parking_limit_set_by?: string | null
           parking_limit_source?: string | null
           parking_signage_photo_url?: string | null
           parking_time_limit_minutes?: number | null
-          postcode?: string | null
           radius_meters?: number | null
           repeat_stay_radius_m?: number | null
-          repeat_stay_radius_meters?: number | null
           repeat_stay_window_nights?: number | null
           rule_overrides?: Json | null
           rule_type?: string
           scv_exempts_restriction?: boolean
           scv_required?: boolean
-          site_id?: string | null
-          suburb?: string | null
           zone_type?: string
         }
         Relationships: [
@@ -7848,8 +17863,29 @@ export type Database = {
             foreignKeyName: "location_zones_jurisdiction_rule_set_id_fkey"
             columns: ["jurisdiction_rule_set_id"]
             isOneToOne: false
+            referencedRelation: "effective_rule_resolution_view"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "location_zones_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
             referencedRelation: "jurisdiction_rule_sets"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_zones_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "module_place_policy_summary"
+            referencedColumns: ["jurisdiction_rule_set_id"]
+          },
+          {
+            foreignKeyName: "location_zones_jurisdiction_rule_set_id_fkey"
+            columns: ["jurisdiction_rule_set_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["jurisdiction_rule_set_id"]
           },
           {
             foreignKeyName: "location_zones_location_id_fkey"
@@ -7880,24 +17916,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "location_zones_parent_zone_id_fkey"
-            columns: ["parent_zone_id"]
-            isOneToOne: false
-            referencedRelation: "location_zones"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "location_zones_parking_limit_set_by_fkey"
             columns: ["parking_limit_set_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "location_zones_site_id_fkey"
-            columns: ["site_id"]
-            isOneToOne: false
-            referencedRelation: "client_sites"
             referencedColumns: ["id"]
           },
         ]
@@ -7906,6 +17928,8 @@ export type Database = {
         Row: {
           address: string | null
           address_match_key: string | null
+          canonical_place_id: string
+          client_request_id: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -7919,6 +17943,8 @@ export type Database = {
         Insert: {
           address?: string | null
           address_match_key?: string | null
+          canonical_place_id: string
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -7932,6 +17958,8 @@ export type Database = {
         Update: {
           address?: string | null
           address_match_key?: string | null
+          canonical_place_id?: string
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -7943,6 +17971,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "locations_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "locations_created_by_fkey"
             columns: ["created_by"]
@@ -8009,6 +18044,39 @@ export type Database = {
         }
         Relationships: []
       }
+      module_dependencies: {
+        Row: {
+          depends_on_module_key: string
+          module_key: string
+          reason: string
+        }
+        Insert: {
+          depends_on_module_key: string
+          module_key: string
+          reason: string
+        }
+        Update: {
+          depends_on_module_key?: string
+          module_key?: string
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_dependencies_depends_on_module_key_fkey"
+            columns: ["depends_on_module_key"]
+            isOneToOne: false
+            referencedRelation: "module_catalog"
+            referencedColumns: ["module_key"]
+          },
+          {
+            foreignKeyName: "module_dependencies_module_key_fkey"
+            columns: ["module_key"]
+            isOneToOne: false
+            referencedRelation: "module_catalog"
+            referencedColumns: ["module_key"]
+          },
+        ]
+      }
       module_rule_sets: {
         Row: {
           approval_policy: Json
@@ -8073,7 +18141,10 @@ export type Database = {
           generated_by: string | null
           id: string
           organization_id: string
+          pdf_mime_type: string | null
           pdf_path: string | null
+          pdf_renderer_version: string | null
+          pdf_sha256: string | null
           period_end: string
           period_start: string
           sent_at: string | null
@@ -8091,7 +18162,10 @@ export type Database = {
           generated_by?: string | null
           id?: string
           organization_id: string
+          pdf_mime_type?: string | null
           pdf_path?: string | null
+          pdf_renderer_version?: string | null
+          pdf_sha256?: string | null
           period_end: string
           period_start: string
           sent_at?: string | null
@@ -8109,7 +18183,10 @@ export type Database = {
           generated_by?: string | null
           id?: string
           organization_id?: string
+          pdf_mime_type?: string | null
           pdf_path?: string | null
+          pdf_renderer_version?: string | null
+          pdf_sha256?: string | null
           period_end?: string
           period_start?: string
           sent_at?: string | null
@@ -8168,6 +18245,8 @@ export type Database = {
           arrival_gps_lng: number | null
           arrived_at: string | null
           assessed_at: string
+          assessment_distance_to_complainant_m: number | null
+          assessment_distance_to_source_m: number | null
           assessment_gps_accuracy: number | null
           assessment_gps_lat: number | null
           assessment_gps_lng: number | null
@@ -8175,14 +18254,20 @@ export type Database = {
           bob_classification: string | null
           bob_confidence: number | null
           bob_recommendation: string | null
+          client_request_id: string | null
           complainant_protected: boolean
           complainant_site_id: string | null
+          complainant_stop_id: string | null
           complaint_address: string | null
           created_at: string
           decibel_reading: number | null
           departed_at: string | null
           dispatch_job_id: string | null
+          end_expires_at: string | null
+          end_given_orally: boolean | null
           end_number: string | null
+          end_recipient_role: string | null
+          entry_notice_left: boolean | null
           evidence_package_url: string | null
           external_refs: Json
           follow_up_at: string | null
@@ -8226,9 +18311,15 @@ export type Database = {
           prior_notices: number
           received_at: string | null
           referred_animal_control: boolean
+          review_notes: string | null
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
           scene_description: string | null
+          shift_id: string | null
           site_id: string | null
           source: string | null
+          source_stop_id: string | null
           status: string
           supplementary_scores: Json | null
           time_of_day: string | null
@@ -8247,6 +18338,8 @@ export type Database = {
           arrival_gps_lng?: number | null
           arrived_at?: string | null
           assessed_at?: string
+          assessment_distance_to_complainant_m?: number | null
+          assessment_distance_to_source_m?: number | null
           assessment_gps_accuracy?: number | null
           assessment_gps_lat?: number | null
           assessment_gps_lng?: number | null
@@ -8254,14 +18347,20 @@ export type Database = {
           bob_classification?: string | null
           bob_confidence?: number | null
           bob_recommendation?: string | null
+          client_request_id?: string | null
           complainant_protected?: boolean
           complainant_site_id?: string | null
+          complainant_stop_id?: string | null
           complaint_address?: string | null
           created_at?: string
           decibel_reading?: number | null
           departed_at?: string | null
           dispatch_job_id?: string | null
+          end_expires_at?: string | null
+          end_given_orally?: boolean | null
           end_number?: string | null
+          end_recipient_role?: string | null
+          entry_notice_left?: boolean | null
           evidence_package_url?: string | null
           external_refs?: Json
           follow_up_at?: string | null
@@ -8305,9 +18404,15 @@ export type Database = {
           prior_notices?: number
           received_at?: string | null
           referred_animal_control?: boolean
+          review_notes?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scene_description?: string | null
+          shift_id?: string | null
           site_id?: string | null
           source?: string | null
+          source_stop_id?: string | null
           status?: string
           supplementary_scores?: Json | null
           time_of_day?: string | null
@@ -8326,6 +18431,8 @@ export type Database = {
           arrival_gps_lng?: number | null
           arrived_at?: string | null
           assessed_at?: string
+          assessment_distance_to_complainant_m?: number | null
+          assessment_distance_to_source_m?: number | null
           assessment_gps_accuracy?: number | null
           assessment_gps_lat?: number | null
           assessment_gps_lng?: number | null
@@ -8333,14 +18440,20 @@ export type Database = {
           bob_classification?: string | null
           bob_confidence?: number | null
           bob_recommendation?: string | null
+          client_request_id?: string | null
           complainant_protected?: boolean
           complainant_site_id?: string | null
+          complainant_stop_id?: string | null
           complaint_address?: string | null
           created_at?: string
           decibel_reading?: number | null
           departed_at?: string | null
           dispatch_job_id?: string | null
+          end_expires_at?: string | null
+          end_given_orally?: boolean | null
           end_number?: string | null
+          end_recipient_role?: string | null
+          entry_notice_left?: boolean | null
           evidence_package_url?: string | null
           external_refs?: Json
           follow_up_at?: string | null
@@ -8384,9 +18497,15 @@ export type Database = {
           prior_notices?: number
           received_at?: string | null
           referred_animal_control?: boolean
+          review_notes?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scene_description?: string | null
+          shift_id?: string | null
           site_id?: string | null
           source?: string | null
+          source_stop_id?: string | null
           status?: string
           supplementary_scores?: Json | null
           time_of_day?: string | null
@@ -8401,6 +18520,13 @@ export type Database = {
             columns: ["complainant_site_id"]
             isOneToOne: false
             referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "noise_assessments_complainant_stop_id_fkey"
+            columns: ["complainant_stop_id"]
+            isOneToOne: false
+            referencedRelation: "shift_stops"
             referencedColumns: ["id"]
           },
           {
@@ -8446,10 +18572,31 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "noise_assessments_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "noise_assessments_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "noise_assessments_site_id_fkey"
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "noise_assessments_source_stop_id_fkey"
+            columns: ["source_stop_id"]
+            isOneToOne: false
+            referencedRelation: "shift_stops"
             referencedColumns: ["id"]
           },
         ]
@@ -8457,56 +18604,84 @@ export type Database = {
       noise_module_config: {
         Row: {
           created_at: string
+          created_by: string | null
+          effective_from: string
+          effective_to: string | null
+          end_validity_hours: number
           excessive_threshold: number
           id: string
+          is_current: boolean
           legislative_text: string | null
           organization_id: string
           permanent_abatement_list: Json | null
           require_large_event_flag: boolean
           require_occupant_dob: boolean
           skip_verbal_warning: boolean
+          source_document_url: string | null
           supplementary_factor_config: Json | null
           supplementary_factors: string[]
           time_bands: Json | null
           tone_bands: Json | null
           updated_at: string
+          version: number
           volume_bands: Json | null
         }
         Insert: {
           created_at?: string
+          created_by?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          end_validity_hours?: number
           excessive_threshold?: number
           id?: string
+          is_current?: boolean
           legislative_text?: string | null
           organization_id: string
           permanent_abatement_list?: Json | null
           require_large_event_flag?: boolean
           require_occupant_dob?: boolean
           skip_verbal_warning?: boolean
+          source_document_url?: string | null
           supplementary_factor_config?: Json | null
           supplementary_factors?: string[]
           time_bands?: Json | null
           tone_bands?: Json | null
           updated_at?: string
+          version?: number
           volume_bands?: Json | null
         }
         Update: {
           created_at?: string
+          created_by?: string | null
+          effective_from?: string
+          effective_to?: string | null
+          end_validity_hours?: number
           excessive_threshold?: number
           id?: string
+          is_current?: boolean
           legislative_text?: string | null
           organization_id?: string
           permanent_abatement_list?: Json | null
           require_large_event_flag?: boolean
           require_occupant_dob?: boolean
           skip_verbal_warning?: boolean
+          source_document_url?: string | null
           supplementary_factor_config?: Json | null
           supplementary_factors?: string[]
           time_bands?: Json | null
           tone_bands?: Json | null
           updated_at?: string
+          version?: number
           volume_bands?: Json | null
         }
         Relationships: [
+          {
+            foreignKeyName: "noise_module_config_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "noise_module_config_organization_id_fkey"
             columns: ["organization_id"]
@@ -8694,6 +18869,7 @@ export type Database = {
           is_active: boolean
           issuing_authority: string | null
           logo_url: string | null
+          module_key: string
           notice_type: string
           objections_address: string | null
           objections_deadline_days: number
@@ -8721,6 +18897,7 @@ export type Database = {
           is_active?: boolean
           issuing_authority?: string | null
           logo_url?: string | null
+          module_key?: string
           notice_type: string
           objections_address?: string | null
           objections_deadline_days?: number
@@ -8748,6 +18925,7 @@ export type Database = {
           is_active?: boolean
           issuing_authority?: string | null
           logo_url?: string | null
+          module_key?: string
           notice_type?: string
           objections_address?: string | null
           objections_deadline_days?: number
@@ -9006,6 +19184,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notices_to_vacate_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -9352,6 +19537,10 @@ export type Database = {
       }
       observations: {
         Row: {
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_scv_id: string | null
+          canonical_vehicle_id: string | null
           client_org_id: string | null
           compliance_reason: string | null
           compliance_status: string | null
@@ -9368,6 +19557,7 @@ export type Database = {
           gps_lng: number | null
           gps_point: unknown
           id: string
+          incident_id: string | null
           is_compliant: boolean | null
           is_homeless: boolean
           is_scv: boolean | null
@@ -9386,6 +19576,7 @@ export type Database = {
           offline_queued: boolean
           organization_id: string
           original_photo_url: string | null
+          person_record_id: string | null
           photo_captured_at: string | null
           photo_quality: number | null
           photo_url: string | null
@@ -9412,6 +19603,10 @@ export type Database = {
           zone_id: string | null
         }
         Insert: {
+          canonical_person_id?: string | null
+          canonical_place_id?: string | null
+          canonical_scv_id?: string | null
+          canonical_vehicle_id?: string | null
           client_org_id?: string | null
           compliance_reason?: string | null
           compliance_status?: string | null
@@ -9428,6 +19623,7 @@ export type Database = {
           gps_lng?: number | null
           gps_point?: unknown
           id?: string
+          incident_id?: string | null
           is_compliant?: boolean | null
           is_homeless?: boolean
           is_scv?: boolean | null
@@ -9446,6 +19642,7 @@ export type Database = {
           offline_queued?: boolean
           organization_id: string
           original_photo_url?: string | null
+          person_record_id?: string | null
           photo_captured_at?: string | null
           photo_quality?: number | null
           photo_url?: string | null
@@ -9472,6 +19669,10 @@ export type Database = {
           zone_id?: string | null
         }
         Update: {
+          canonical_person_id?: string | null
+          canonical_place_id?: string | null
+          canonical_scv_id?: string | null
+          canonical_vehicle_id?: string | null
           client_org_id?: string | null
           compliance_reason?: string | null
           compliance_status?: string | null
@@ -9488,6 +19689,7 @@ export type Database = {
           gps_lng?: number | null
           gps_point?: unknown
           id?: string
+          incident_id?: string | null
           is_compliant?: boolean | null
           is_homeless?: boolean
           is_scv?: boolean | null
@@ -9506,6 +19708,7 @@ export type Database = {
           offline_queued?: boolean
           organization_id?: string
           original_photo_url?: string | null
+          person_record_id?: string | null
           photo_captured_at?: string | null
           photo_quality?: number | null
           photo_url?: string | null
@@ -9533,6 +19736,34 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "observations_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "observations_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "observations_canonical_scv_id_fkey"
+            columns: ["canonical_scv_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_scv"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "observations_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "observations_client_org_id_fkey"
             columns: ["client_org_id"]
             isOneToOne: false
@@ -9551,6 +19782,13 @@ export type Database = {
             columns: ["client_org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "observations_incident_id_fkey"
+            columns: ["incident_id"]
+            isOneToOne: false
+            referencedRelation: "incidents"
             referencedColumns: ["id"]
           },
           {
@@ -9582,6 +19820,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "observations_person_record_id_fkey"
+            columns: ["person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "observations_previous_observation_id_fkey"
             columns: ["previous_observation_id"]
             isOneToOne: false
@@ -9600,6 +19845,88 @@ export type Database = {
             columns: ["zone_id"]
             isOneToOne: false
             referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "observations_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      officer_activity_evidence_exports: {
+        Row: {
+          event_count: number
+          generated_at: string
+          generated_by: string
+          id: string
+          officer_user_id: string
+          organization_id: string
+          payload: Json
+          period_from: string
+          period_to: string
+          sha256: string
+        }
+        Insert: {
+          event_count: number
+          generated_at?: string
+          generated_by: string
+          id?: string
+          officer_user_id: string
+          organization_id: string
+          payload: Json
+          period_from: string
+          period_to: string
+          sha256: string
+        }
+        Update: {
+          event_count?: number
+          generated_at?: string
+          generated_by?: string
+          id?: string
+          officer_user_id?: string
+          organization_id?: string
+          payload?: Json
+          period_from?: string
+          period_to?: string
+          sha256?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "officer_activity_evidence_exports_generated_by_fkey"
+            columns: ["generated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_activity_evidence_exports_officer_user_id_fkey"
+            columns: ["officer_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_activity_evidence_exports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "officer_activity_evidence_exports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_activity_evidence_exports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -9672,9 +19999,82 @@ export type Database = {
           },
         ]
       }
+      officer_device_tokens: {
+        Row: {
+          app_version: string | null
+          created_at: string
+          device_name: string | null
+          id: string
+          is_active: boolean
+          last_seen_at: string
+          organization_id: string
+          platform: string
+          push_token: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          app_version?: string | null
+          created_at?: string
+          device_name?: string | null
+          id?: string
+          is_active?: boolean
+          last_seen_at?: string
+          organization_id: string
+          platform?: string
+          push_token: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          app_version?: string | null
+          created_at?: string
+          device_name?: string | null
+          id?: string
+          is_active?: boolean
+          last_seen_at?: string
+          organization_id?: string
+          platform?: string
+          push_token?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "officer_device_tokens_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "officer_device_tokens_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_device_tokens_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_device_tokens_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       officer_field_reports: {
         Row: {
           address: string | null
+          canonical_place_id: string | null
+          client_event_id: string | null
           created_at: string
           description: string
           follow_up_notes: string | null
@@ -9683,6 +20083,7 @@ export type Database = {
           gps_lng: number | null
           id: string
           immediate_action: string | null
+          investigation_id: string | null
           location_name: string | null
           officer_id: string
           organization_id: string
@@ -9703,6 +20104,8 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          canonical_place_id?: string | null
+          client_event_id?: string | null
           created_at?: string
           description: string
           follow_up_notes?: string | null
@@ -9711,6 +20114,7 @@ export type Database = {
           gps_lng?: number | null
           id?: string
           immediate_action?: string | null
+          investigation_id?: string | null
           location_name?: string | null
           officer_id: string
           organization_id: string
@@ -9731,6 +20135,8 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          canonical_place_id?: string | null
+          client_event_id?: string | null
           created_at?: string
           description?: string
           follow_up_notes?: string | null
@@ -9739,6 +20145,7 @@ export type Database = {
           gps_lng?: number | null
           id?: string
           immediate_action?: string | null
+          investigation_id?: string | null
           location_name?: string | null
           officer_id?: string
           organization_id?: string
@@ -9758,6 +20165,20 @@ export type Database = {
           zone_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "officer_field_reports_canonical_place_id_fkey"
+            columns: ["canonical_place_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_field_reports_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "officer_field_reports_officer_id_fkey"
             columns: ["officer_id"]
@@ -9814,12 +20235,20 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "officer_field_reports_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       officer_gps_log: {
         Row: {
           accuracy_meters: number | null
           activity_type: string
+          client_event_id: string | null
           created_at: string
           detected_zone_id: string | null
           gps_lat: number
@@ -9829,11 +20258,15 @@ export type Database = {
           id: string
           officer_id: string
           organization_id: string
+          physical_address: string | null
+          recorded_at: string
+          shift_id: string | null
           speed_kmh: number | null
         }
         Insert: {
           accuracy_meters?: number | null
           activity_type?: string
+          client_event_id?: string | null
           created_at?: string
           detected_zone_id?: string | null
           gps_lat: number
@@ -9843,11 +20276,15 @@ export type Database = {
           id?: string
           officer_id: string
           organization_id: string
+          physical_address?: string | null
+          recorded_at?: string
+          shift_id?: string | null
           speed_kmh?: number | null
         }
         Update: {
           accuracy_meters?: number | null
           activity_type?: string
+          client_event_id?: string | null
           created_at?: string
           detected_zone_id?: string | null
           gps_lat?: number
@@ -9857,6 +20294,9 @@ export type Database = {
           id?: string
           officer_id?: string
           organization_id?: string
+          physical_address?: string | null
+          recorded_at?: string
+          shift_id?: string | null
           speed_kmh?: number | null
         }
         Relationships: [
@@ -9866,6 +20306,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_gps_log_detected_zone_id_fkey"
+            columns: ["detected_zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
           {
             foreignKeyName: "officer_gps_log_officer_id_fkey"
@@ -9893,6 +20340,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_gps_log_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["id"]
           },
         ]
@@ -9997,38 +20451,50 @@ export type Database = {
       }
       on_call_periods: {
         Row: {
+          client_request_id: string | null
           created_at: string
+          decline_reason: string | null
           ends_at: string
           flat_rate: number | null
           id: string
           linked_shift_id: string | null
+          notes: string | null
           officer_user_id: string
           organization_id: string
           period_type: string
+          responded_at: string | null
           starts_at: string
           status: string
         }
         Insert: {
+          client_request_id?: string | null
           created_at?: string
+          decline_reason?: string | null
           ends_at: string
           flat_rate?: number | null
           id?: string
           linked_shift_id?: string | null
+          notes?: string | null
           officer_user_id: string
           organization_id: string
           period_type: string
+          responded_at?: string | null
           starts_at: string
           status?: string
         }
         Update: {
+          client_request_id?: string | null
           created_at?: string
+          decline_reason?: string | null
           ends_at?: string
           flat_rate?: number | null
           id?: string
           linked_shift_id?: string | null
+          notes?: string | null
           officer_user_id?: string
           organization_id?: string
           period_type?: string
+          responded_at?: string | null
           starts_at?: string
           status?: string
         }
@@ -10078,6 +20544,7 @@ export type Database = {
           email: string
           expires_at: string
           id: string
+          invite_kind: string
           invited_by: string | null
           service_agreement_id: string | null
           status: string
@@ -10091,6 +20558,7 @@ export type Database = {
           email: string
           expires_at: string
           id?: string
+          invite_kind?: string
           invited_by?: string | null
           service_agreement_id?: string | null
           status?: string
@@ -10104,6 +20572,7 @@ export type Database = {
           email?: string
           expires_at?: string
           id?: string
+          invite_kind?: string
           invited_by?: string | null
           service_agreement_id?: string | null
           status?: string
@@ -10135,6 +20604,240 @@ export type Database = {
           {
             foreignKeyName: "onboarding_invites_target_organization_id_fkey"
             columns: ["target_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operational_continuity_items: {
+        Row: {
+          action_required: string | null
+          client_site_id: string | null
+          created_at: string
+          created_by: string
+          expires_at: string
+          hazard_flags: Json
+          id: string
+          module_key: string
+          operational_status: string
+          policy_id: string
+          recipient_organization_id: string
+          safe_summary: string
+          service_agreement_id: string
+          severity: string
+          source_location_event_id: string
+          source_occurred_at: string
+          source_organization_id: string
+          zone_id: string | null
+        }
+        Insert: {
+          action_required?: string | null
+          client_site_id?: string | null
+          created_at?: string
+          created_by: string
+          expires_at: string
+          hazard_flags?: Json
+          id?: string
+          module_key: string
+          operational_status?: string
+          policy_id: string
+          recipient_organization_id: string
+          safe_summary: string
+          service_agreement_id: string
+          severity?: string
+          source_location_event_id: string
+          source_occurred_at: string
+          source_organization_id: string
+          zone_id?: string | null
+        }
+        Update: {
+          action_required?: string | null
+          client_site_id?: string | null
+          created_at?: string
+          created_by?: string
+          expires_at?: string
+          hazard_flags?: Json
+          id?: string
+          module_key?: string
+          operational_status?: string
+          policy_id?: string
+          recipient_organization_id?: string
+          safe_summary?: string
+          service_agreement_id?: string
+          severity?: string
+          source_location_event_id?: string
+          source_occurred_at?: string
+          source_organization_id?: string
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operational_continuity_items_client_site_id_fkey"
+            columns: ["client_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_policy_id_fkey"
+            columns: ["policy_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_continuity_policies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_source_location_event_id_fkey"
+            columns: ["source_location_event_id"]
+            isOneToOne: false
+            referencedRelation: "location_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_source_organization_id_fkey"
+            columns: ["source_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_source_organization_id_fkey"
+            columns: ["source_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_source_organization_id_fkey"
+            columns: ["source_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_items_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      operational_continuity_receipts: {
+        Row: {
+          acknowledged_at: string
+          acknowledged_by: string
+          acknowledgement_notes: string | null
+          client_request_id: string
+          continuation_location_event_id: string | null
+          continuity_item_id: string
+          created_at: string
+          id: string
+          recipient_organization_id: string
+        }
+        Insert: {
+          acknowledged_at?: string
+          acknowledged_by: string
+          acknowledgement_notes?: string | null
+          client_request_id: string
+          continuation_location_event_id?: string | null
+          continuity_item_id: string
+          created_at?: string
+          id?: string
+          recipient_organization_id: string
+        }
+        Update: {
+          acknowledged_at?: string
+          acknowledged_by?: string
+          acknowledgement_notes?: string | null
+          client_request_id?: string
+          continuation_location_event_id?: string | null
+          continuity_item_id?: string
+          created_at?: string
+          id?: string
+          recipient_organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operational_continuity_receip_continuation_location_event__fkey"
+            columns: ["continuation_location_event_id"]
+            isOneToOne: false
+            referencedRelation: "location_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_receipts_acknowledged_by_fkey"
+            columns: ["acknowledged_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_receipts_continuity_item_id_fkey"
+            columns: ["continuity_item_id"]
+            isOneToOne: false
+            referencedRelation: "operational_continuity_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_receipts_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_receipts_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operational_continuity_receipts_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
@@ -10475,6 +21178,59 @@ export type Database = {
           },
         ]
       }
+      org_printer_settings: {
+        Row: {
+          connection_type: string
+          organization_id: string
+          paper_width: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          connection_type?: string
+          organization_id: string
+          paper_width?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          connection_type?: string
+          organization_id?: string
+          paper_width?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_printer_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "org_printer_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_printer_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_printer_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       org_rate_settings: {
         Row: {
           created_at: string
@@ -10545,6 +21301,210 @@ export type Database = {
           },
         ]
       }
+      organization_brand_assets: {
+        Row: {
+          alt_text: string | null
+          approved_at: string | null
+          approved_by: string | null
+          asset_kind: string
+          asset_url: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string
+          mime_type: string | null
+          organization_id: string
+          sha256: string | null
+          status: string
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+          usage_scope: string
+          variant: string
+          version: number
+        }
+        Insert: {
+          alt_text?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          asset_kind: string
+          asset_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label: string
+          mime_type?: string | null
+          organization_id: string
+          sha256?: string | null
+          status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+          usage_scope?: string
+          variant?: string
+          version?: number
+        }
+        Update: {
+          alt_text?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          asset_kind?: string
+          asset_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          label?: string
+          mime_type?: string | null
+          organization_id?: string
+          sha256?: string | null
+          status?: string
+          storage_bucket?: string | null
+          storage_path?: string | null
+          updated_at?: string
+          usage_scope?: string
+          variant?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_brand_assets_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_brand_assets_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_brand_assets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_brand_assets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_brand_assets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_calendar_settings: {
+        Row: {
+          country_code: string
+          organization_id: string
+          region_code: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          country_code?: string
+          organization_id: string
+          region_code?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          country_code?: string
+          organization_id?: string
+          region_code?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_calendar_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_calendar_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_calendar_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_calendar_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_fatigue_rules: {
+        Row: {
+          enforced: boolean
+          max_consecutive_days: number
+          max_hours_per_week: number
+          min_rest_hours_between_shifts: number
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          enforced?: boolean
+          max_consecutive_days?: number
+          max_hours_per_week?: number
+          min_rest_hours_between_shifts?: number
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          enforced?: boolean
+          max_consecutive_days?: number
+          max_hours_per_week?: number
+          min_rest_hours_between_shifts?: number
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_fatigue_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_fatigue_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_fatigue_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_modules: {
         Row: {
           enabled: boolean
@@ -10591,12 +21551,73 @@ export type Database = {
           },
         ]
       }
+      organization_workplaces: {
+        Row: {
+          active: boolean
+          address: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+        }
+        Insert: {
+          active?: boolean
+          address?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          organization_id: string
+        }
+        Update: {
+          active?: boolean
+          address?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_workplaces_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_workplaces_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_workplaces_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_workplaces_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           account_notes: string | null
+          account_owner_user_id: string | null
           active: boolean
           billing_address: string | null
           billing_email: string | null
+          client_request_id: string | null
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
@@ -10621,12 +21642,15 @@ export type Database = {
           organization_type: string
           parent_organization_id: string | null
           status: string
+          updated_at: string
         }
         Insert: {
           account_notes?: string | null
+          account_owner_user_id?: string | null
           active?: boolean
           billing_address?: string | null
           billing_email?: string | null
+          client_request_id?: string | null
           company_registration_number?: string | null
           contact_email?: string | null
           contact_phone?: string | null
@@ -10651,12 +21675,15 @@ export type Database = {
           organization_type: string
           parent_organization_id?: string | null
           status?: string
+          updated_at?: string
         }
         Update: {
           account_notes?: string | null
+          account_owner_user_id?: string | null
           active?: boolean
           billing_address?: string | null
           billing_email?: string | null
+          client_request_id?: string | null
           company_registration_number?: string | null
           contact_email?: string | null
           contact_phone?: string | null
@@ -10681,8 +21708,16 @@ export type Database = {
           organization_type?: string
           parent_organization_id?: string | null
           status?: string
+          updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "organizations_account_owner_user_id_fkey"
+            columns: ["account_owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "organizations_corporate_profile_verified_by_fkey"
             columns: ["corporate_profile_verified_by"]
@@ -10720,10 +21755,102 @@ export type Database = {
           },
         ]
       }
+      overtime_offers: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          decline_reason: string | null
+          expires_at: string
+          id: string
+          offer_round: number
+          organization_id: string
+          responded_at: string | null
+          roster_slot_id: string
+          seniority_position: number
+          staff_id: string
+          status: string
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          created_by?: string | null
+          decline_reason?: string | null
+          expires_at: string
+          id?: string
+          offer_round?: number
+          organization_id: string
+          responded_at?: string | null
+          roster_slot_id: string
+          seniority_position: number
+          staff_id: string
+          status?: string
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          created_by?: string | null
+          decline_reason?: string | null
+          expires_at?: string
+          id?: string
+          offer_round?: number
+          organization_id?: string
+          responded_at?: string | null
+          roster_slot_id?: string
+          seniority_position?: number
+          staff_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "overtime_offers_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "overtime_offers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "overtime_offers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "overtime_offers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "overtime_offers_roster_slot_id_fkey"
+            columns: ["roster_slot_id"]
+            isOneToOne: false
+            referencedRelation: "roster_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "overtime_offers_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       parking_chalk_records: {
         Row: {
           bob_classification: string | null
           bob_confidence: number | null
+          canonical_vehicle_id: string | null
           chalked_at: string
           client_site_id: string | null
           cof_expiry: string | null
@@ -10768,6 +21895,7 @@ export type Database = {
         Insert: {
           bob_classification?: string | null
           bob_confidence?: number | null
+          canonical_vehicle_id?: string | null
           chalked_at?: string
           client_site_id?: string | null
           cof_expiry?: string | null
@@ -10812,6 +21940,7 @@ export type Database = {
         Update: {
           bob_classification?: string | null
           bob_confidence?: number | null
+          canonical_vehicle_id?: string | null
           chalked_at?: string
           client_site_id?: string | null
           cof_expiry?: string | null
@@ -10854,6 +21983,13 @@ export type Database = {
           zone_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "parking_chalk_records_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "parking_chalk_records_client_site_id_fkey"
             columns: ["client_site_id"]
@@ -10902,6 +22038,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "parking_chalk_records_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -11016,6 +22159,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "parking_infringement_notices_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       parking_module_config: {
@@ -11073,6 +22223,109 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      parking_rule_matrix: {
+        Row: {
+          auto_escalate_overstay: boolean
+          created_at: string
+          created_by: string | null
+          disabled_multiplier: number
+          effective_from: string
+          effective_to: string | null
+          grace_period_minutes: number
+          id: string
+          infringement_fee: number | null
+          is_current: boolean
+          legislative_text: string | null
+          notes: string | null
+          organization_id: string
+          require_photo_evidence: boolean
+          time_limit_minutes: number
+          version: number
+          zone_id: string | null
+        }
+        Insert: {
+          auto_escalate_overstay?: boolean
+          created_at?: string
+          created_by?: string | null
+          disabled_multiplier?: number
+          effective_from?: string
+          effective_to?: string | null
+          grace_period_minutes?: number
+          id?: string
+          infringement_fee?: number | null
+          is_current?: boolean
+          legislative_text?: string | null
+          notes?: string | null
+          organization_id: string
+          require_photo_evidence?: boolean
+          time_limit_minutes: number
+          version?: number
+          zone_id?: string | null
+        }
+        Update: {
+          auto_escalate_overstay?: boolean
+          created_at?: string
+          created_by?: string | null
+          disabled_multiplier?: number
+          effective_from?: string
+          effective_to?: string | null
+          grace_period_minutes?: number
+          id?: string
+          infringement_fee?: number | null
+          is_current?: boolean
+          legislative_text?: string | null
+          notes?: string | null
+          organization_id?: string
+          require_photo_evidence?: boolean
+          time_limit_minutes?: number
+          version?: number
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "parking_rule_matrix_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "parking_rule_matrix_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "parking_rule_matrix_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "parking_rule_matrix_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "parking_rule_matrix_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "parking_rule_matrix_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -11188,11 +22441,20 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "parking_sessions_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       patrol_checkpoint_visits: {
         Row: {
-          checkpoint_id: string
+          checkpoint_id: string | null
+          checkpoint_verification_at_visit: string | null
+          client_request_id: string | null
           gps_accuracy: number | null
           gps_distance_from_checkpoint: number | null
           gps_lat: number | null
@@ -11202,13 +22464,16 @@ export type Database = {
           officer_user_id: string | null
           organization_id: string
           patrol_id: string
+          route_checkpoint_id: string | null
           scan_method: string
           shift_stop_id: string | null
           visited_at: string
           within_radius: boolean | null
         }
         Insert: {
-          checkpoint_id: string
+          checkpoint_id?: string | null
+          checkpoint_verification_at_visit?: string | null
+          client_request_id?: string | null
           gps_accuracy?: number | null
           gps_distance_from_checkpoint?: number | null
           gps_lat?: number | null
@@ -11218,13 +22483,16 @@ export type Database = {
           officer_user_id?: string | null
           organization_id: string
           patrol_id: string
+          route_checkpoint_id?: string | null
           scan_method?: string
           shift_stop_id?: string | null
           visited_at?: string
           within_radius?: boolean | null
         }
         Update: {
-          checkpoint_id?: string
+          checkpoint_id?: string | null
+          checkpoint_verification_at_visit?: string | null
+          client_request_id?: string | null
           gps_accuracy?: number | null
           gps_distance_from_checkpoint?: number | null
           gps_lat?: number | null
@@ -11234,6 +22502,7 @@ export type Database = {
           officer_user_id?: string | null
           organization_id?: string
           patrol_id?: string
+          route_checkpoint_id?: string | null
           scan_method?: string
           shift_stop_id?: string | null
           visited_at?: string
@@ -11283,6 +22552,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "patrol_checkpoint_visits_route_checkpoint_id_fkey"
+            columns: ["route_checkpoint_id"]
+            isOneToOne: false
+            referencedRelation: "patrol_route_checkpoints"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "patrol_checkpoint_visits_shift_stop_id_fkey"
             columns: ["shift_stop_id"]
             isOneToOne: false
@@ -11297,6 +22573,7 @@ export type Database = {
           checkpoint_verification: string
           checkpoint_verified_at: string | null
           checkpoint_verified_by: string | null
+          client_request_id: string | null
           client_site_id: string | null
           created_at: string
           description: string | null
@@ -11315,6 +22592,7 @@ export type Database = {
           checkpoint_verification?: string
           checkpoint_verified_at?: string | null
           checkpoint_verified_by?: string | null
+          client_request_id?: string | null
           client_site_id?: string | null
           created_at?: string
           description?: string | null
@@ -11333,6 +22611,7 @@ export type Database = {
           checkpoint_verification?: string
           checkpoint_verified_at?: string | null
           checkpoint_verified_by?: string | null
+          client_request_id?: string | null
           client_site_id?: string | null
           created_at?: string
           description?: string | null
@@ -11388,6 +22667,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_checkpoints_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -11650,6 +22936,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_route_zones_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -11927,6 +23220,117 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "patrols_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      payment_receipts: {
+        Row: {
+          bank_account_id: string | null
+          bank_statement_reference: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_id: string
+          notes: string | null
+          organization_id: string
+          payment_amount: number
+          payment_date: string
+          payment_method: string
+          reconciled_at: string | null
+          reconciled_by: string | null
+          reconciliation_status: string
+          transaction_reference: string | null
+        }
+        Insert: {
+          bank_account_id?: string | null
+          bank_statement_reference?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id: string
+          notes?: string | null
+          organization_id: string
+          payment_amount: number
+          payment_date: string
+          payment_method: string
+          reconciled_at?: string | null
+          reconciled_by?: string | null
+          reconciliation_status?: string
+          transaction_reference?: string | null
+        }
+        Update: {
+          bank_account_id?: string | null
+          bank_statement_reference?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          invoice_id?: string
+          notes?: string | null
+          organization_id?: string
+          payment_amount?: number
+          payment_date?: string
+          payment_method?: string
+          reconciled_at?: string | null
+          reconciled_by?: string | null
+          reconciliation_status?: string
+          transaction_reference?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_receipts_bank_account_id_fkey"
+            columns: ["bank_account_id"]
+            isOneToOne: false
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_receipts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_receipts_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "payment_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_receipts_reconciled_by_fkey"
+            columns: ["reconciled_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
       payroll_export_batches: {
@@ -11993,6 +23397,168 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      performance_review_cycles: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          due_date: string
+          id: string
+          name: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          due_date: string
+          id?: string
+          name: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          due_date?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          period_end?: string
+          period_start?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "performance_review_cycles_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_review_cycles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "performance_review_cycles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_review_cycles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      performance_reviews: {
+        Row: {
+          client_request_id: string
+          completed_at: string | null
+          created_at: string
+          cycle_id: string
+          development_goals: string | null
+          employee_comments: string | null
+          id: string
+          organization_id: string
+          rating: number | null
+          reviewer_user_id: string
+          staff_id: string
+          status: string
+          strengths: string | null
+          updated_at: string
+        }
+        Insert: {
+          client_request_id: string
+          completed_at?: string | null
+          created_at?: string
+          cycle_id: string
+          development_goals?: string | null
+          employee_comments?: string | null
+          id?: string
+          organization_id: string
+          rating?: number | null
+          reviewer_user_id: string
+          staff_id: string
+          status?: string
+          strengths?: string | null
+          updated_at?: string
+        }
+        Update: {
+          client_request_id?: string
+          completed_at?: string | null
+          created_at?: string
+          cycle_id?: string
+          development_goals?: string | null
+          employee_comments?: string | null
+          id?: string
+          organization_id?: string
+          rating?: number | null
+          reviewer_user_id?: string
+          staff_id?: string
+          status?: string
+          strengths?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "performance_reviews_cycle_id_fkey"
+            columns: ["cycle_id"]
+            isOneToOne: false
+            referencedRelation: "performance_review_cycles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "performance_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_reviews_reviewer_user_id_fkey"
+            columns: ["reviewer_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "performance_reviews_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -12148,6 +23714,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_interactions_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -12627,8 +24200,140 @@ export type Database = {
           },
         ]
       }
+      quote_commercial_snapshots: {
+        Row: {
+          accepted_at: string
+          accepted_by: string
+          client_organization_id: string
+          currency: string
+          discount_amount: number
+          discount_pct: number
+          discount_schedule_id: string | null
+          gst_amount: number
+          gst_rate: number
+          id: string
+          pricing_detail: Json
+          provider_organization_id: string
+          quote_id: string
+          subtotal_charge: number
+          tender_id: string | null
+          total_charge: number
+          total_cost: number
+        }
+        Insert: {
+          accepted_at?: string
+          accepted_by: string
+          client_organization_id: string
+          currency: string
+          discount_amount: number
+          discount_pct: number
+          discount_schedule_id?: string | null
+          gst_amount: number
+          gst_rate: number
+          id?: string
+          pricing_detail?: Json
+          provider_organization_id: string
+          quote_id: string
+          subtotal_charge: number
+          tender_id?: string | null
+          total_charge: number
+          total_cost: number
+        }
+        Update: {
+          accepted_at?: string
+          accepted_by?: string
+          client_organization_id?: string
+          currency?: string
+          discount_amount?: number
+          discount_pct?: number
+          discount_schedule_id?: string | null
+          gst_amount?: number
+          gst_rate?: number
+          id?: string
+          pricing_detail?: Json
+          provider_organization_id?: string
+          quote_id?: string
+          subtotal_charge?: number
+          tender_id?: string | null
+          total_charge?: number
+          total_cost?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_commercial_snapshots_accepted_by_fkey"
+            columns: ["accepted_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_discount_schedule_id_fkey"
+            columns: ["discount_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "commercial_discount_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: true
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_commercial_snapshots_tender_id_fkey"
+            columns: ["tender_id"]
+            isOneToOne: false
+            referencedRelation: "tenders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_lines: {
         Row: {
+          client_request_id: string | null
           created_at: string
           description: string
           id: string
@@ -12643,6 +24348,7 @@ export type Database = {
           unit_cost: number
         }
         Insert: {
+          client_request_id?: string | null
           created_at?: string
           description: string
           id?: string
@@ -12657,6 +24363,7 @@ export type Database = {
           unit_cost?: number
         }
         Update: {
+          client_request_id?: string | null
           created_at?: string
           description?: string
           id?: string
@@ -12680,17 +24387,392 @@ export type Database = {
           },
         ]
       }
+      quote_proposal_modules: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          id: string
+          module_key: string
+          pricing_basis: string
+          quote_id: string
+          rate_rule_id: string | null
+          service_window: Json
+          sla_minutes: number | null
+          work_model: string
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          created_by: string
+          id?: string
+          module_key: string
+          pricing_basis?: string
+          quote_id: string
+          rate_rule_id?: string | null
+          service_window?: Json
+          sla_minutes?: number | null
+          work_model?: string
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          module_key?: string
+          pricing_basis?: string
+          quote_id?: string
+          rate_rule_id?: string | null
+          service_window?: Json
+          sla_minutes?: number | null
+          work_model?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_proposal_modules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_modules_module_key_fkey"
+            columns: ["module_key"]
+            isOneToOne: false
+            referencedRelation: "module_catalog"
+            referencedColumns: ["module_key"]
+          },
+          {
+            foreignKeyName: "quote_proposal_modules_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_modules_rate_rule_id_fkey"
+            columns: ["rate_rule_id"]
+            isOneToOne: false
+            referencedRelation: "rate_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_proposal_places: {
+        Row: {
+          address: string
+          candidate_site_id: string | null
+          candidate_zone_id: string | null
+          client_request_id: string
+          converted_at: string | null
+          converted_site_id: string | null
+          converted_zone_id: string | null
+          created_at: string
+          created_by: string
+          geometry_source: string
+          id: string
+          module_key: string
+          name: string
+          place_kind: string
+          proposed_geometry: Json | null
+          quote_id: string
+          resolution: string
+          site_type: string | null
+          zone_type: string | null
+        }
+        Insert: {
+          address: string
+          candidate_site_id?: string | null
+          candidate_zone_id?: string | null
+          client_request_id: string
+          converted_at?: string | null
+          converted_site_id?: string | null
+          converted_zone_id?: string | null
+          created_at?: string
+          created_by: string
+          geometry_source?: string
+          id?: string
+          module_key: string
+          name: string
+          place_kind: string
+          proposed_geometry?: Json | null
+          quote_id: string
+          resolution: string
+          site_type?: string | null
+          zone_type?: string | null
+        }
+        Update: {
+          address?: string
+          candidate_site_id?: string | null
+          candidate_zone_id?: string | null
+          client_request_id?: string
+          converted_at?: string | null
+          converted_site_id?: string | null
+          converted_zone_id?: string | null
+          created_at?: string
+          created_by?: string
+          geometry_source?: string
+          id?: string
+          module_key?: string
+          name?: string
+          place_kind?: string
+          proposed_geometry?: Json | null
+          quote_id?: string
+          resolution?: string
+          site_type?: string | null
+          zone_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_proposal_places_candidate_site_id_fkey"
+            columns: ["candidate_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_candidate_zone_id_fkey"
+            columns: ["candidate_zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_candidate_zone_id_fkey"
+            columns: ["candidate_zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_converted_site_id_fkey"
+            columns: ["converted_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_converted_zone_id_fkey"
+            columns: ["converted_zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_converted_zone_id_fkey"
+            columns: ["converted_zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_module_key_fkey"
+            columns: ["module_key"]
+            isOneToOne: false
+            referencedRelation: "module_catalog"
+            referencedColumns: ["module_key"]
+          },
+          {
+            foreignKeyName: "quote_proposal_places_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_proposal_scope_schedules: {
+        Row: {
+          active_days: number[]
+          active_months: number[]
+          capability_key: string
+          chargeable_conditions: Json
+          client_request_id: string
+          created_at: string
+          created_by: string
+          depart_sla_minutes: number | null
+          dwell_minutes: number
+          id: string
+          min_gap_between_visits_minutes: number
+          notes: string | null
+          officer_instructions: string | null
+          preferred_stop_order: number
+          pricing_basis: string
+          proposal_scope_id: string
+          rate_rule_id: string | null
+          response_sla_minutes: number | null
+          updated_at: string
+          visits_per_shift: number
+          window_end: string | null
+          window_start: string | null
+          work_model: string
+        }
+        Insert: {
+          active_days?: number[]
+          active_months?: number[]
+          capability_key: string
+          chargeable_conditions?: Json
+          client_request_id: string
+          created_at?: string
+          created_by: string
+          depart_sla_minutes?: number | null
+          dwell_minutes?: number
+          id?: string
+          min_gap_between_visits_minutes?: number
+          notes?: string | null
+          officer_instructions?: string | null
+          preferred_stop_order?: number
+          pricing_basis?: string
+          proposal_scope_id: string
+          rate_rule_id?: string | null
+          response_sla_minutes?: number | null
+          updated_at?: string
+          visits_per_shift?: number
+          window_end?: string | null
+          window_start?: string | null
+          work_model: string
+        }
+        Update: {
+          active_days?: number[]
+          active_months?: number[]
+          capability_key?: string
+          chargeable_conditions?: Json
+          client_request_id?: string
+          created_at?: string
+          created_by?: string
+          depart_sla_minutes?: number | null
+          dwell_minutes?: number
+          id?: string
+          min_gap_between_visits_minutes?: number
+          notes?: string | null
+          officer_instructions?: string | null
+          preferred_stop_order?: number
+          pricing_basis?: string
+          proposal_scope_id?: string
+          rate_rule_id?: string | null
+          response_sla_minutes?: number | null
+          updated_at?: string
+          visits_per_shift?: number
+          window_end?: string | null
+          window_start?: string | null
+          work_model?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_proposal_scope_schedules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_scope_schedules_proposal_scope_id_fkey"
+            columns: ["proposal_scope_id"]
+            isOneToOne: false
+            referencedRelation: "quote_proposal_service_scopes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_scope_schedules_rate_rule_id_fkey"
+            columns: ["rate_rule_id"]
+            isOneToOne: false
+            referencedRelation: "rate_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_proposal_service_scopes: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          id: string
+          module_key: string
+          proposed_place_id: string | null
+          quote_id: string
+          site_id: string | null
+          zone_id: string | null
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          created_by: string
+          id?: string
+          module_key: string
+          proposed_place_id?: string | null
+          quote_id: string
+          site_id?: string | null
+          zone_id?: string | null
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          module_key?: string
+          proposed_place_id?: string | null
+          quote_id?: string
+          site_id?: string | null
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_proposal_service_scopes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_service_scopes_module_key_fkey"
+            columns: ["module_key"]
+            isOneToOne: false
+            referencedRelation: "module_catalog"
+            referencedColumns: ["module_key"]
+          },
+          {
+            foreignKeyName: "quote_proposal_service_scopes_proposed_place_id_fkey"
+            columns: ["proposed_place_id"]
+            isOneToOne: false
+            referencedRelation: "quote_proposal_places"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_service_scopes_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_proposal_service_scopes_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quotes: {
         Row: {
           accepted_at: string | null
           accepted_by: string | null
           client_name: string | null
           client_org_id: string | null
+          client_request_id: string | null
           created_at: string
           created_by: string | null
           currency: string
           discount_amount: number
           discount_pct: number
+          discount_schedule_id: string | null
           gst_amount: number
           gst_rate: number
           id: string
@@ -12701,6 +24783,7 @@ export type Database = {
           status: string
           subtotal_charge: number
           target_margin_pct: number
+          tender_id: string | null
           title: string
           total_charge: number
           total_cost: number
@@ -12713,11 +24796,13 @@ export type Database = {
           accepted_by?: string | null
           client_name?: string | null
           client_org_id?: string | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string
           discount_amount?: number
           discount_pct?: number
+          discount_schedule_id?: string | null
           gst_amount?: number
           gst_rate?: number
           id?: string
@@ -12728,6 +24813,7 @@ export type Database = {
           status?: string
           subtotal_charge?: number
           target_margin_pct?: number
+          tender_id?: string | null
           title?: string
           total_charge?: number
           total_cost?: number
@@ -12740,11 +24826,13 @@ export type Database = {
           accepted_by?: string | null
           client_name?: string | null
           client_org_id?: string | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           currency?: string
           discount_amount?: number
           discount_pct?: number
+          discount_schedule_id?: string | null
           gst_amount?: number
           gst_rate?: number
           id?: string
@@ -12755,6 +24843,7 @@ export type Database = {
           status?: string
           subtotal_charge?: number
           target_margin_pct?: number
+          tender_id?: string | null
           title?: string
           total_charge?: number
           total_cost?: number
@@ -12799,6 +24888,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "quotes_discount_schedule_id_fkey"
+            columns: ["discount_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "commercial_discount_schedules"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "quotes_provider_org_id_fkey"
             columns: ["provider_org_id"]
             isOneToOne: false
@@ -12824,6 +24920,13 @@ export type Database = {
             columns: ["service_agreement_id"]
             isOneToOne: false
             referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_tender_id_fkey"
+            columns: ["tender_id"]
+            isOneToOne: false
+            referencedRelation: "tenders"
             referencedColumns: ["id"]
           },
           {
@@ -13020,6 +25123,7 @@ export type Database = {
           active: boolean
           amount: number
           client_org_id: string | null
+          client_request_id: string | null
           created_at: string
           created_by: string | null
           day_category: string | null
@@ -13052,6 +25156,7 @@ export type Database = {
           active?: boolean
           amount?: number
           client_org_id?: string | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           day_category?: string | null
@@ -13084,6 +25189,7 @@ export type Database = {
           active?: boolean
           amount?: number
           client_org_id?: string | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           day_category?: string | null
@@ -13167,6 +25273,280 @@ export type Database = {
             columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recruitment_candidate_events: {
+        Row: {
+          actor_user_id: string | null
+          candidate_id: string
+          created_at: string
+          from_stage: string | null
+          id: string
+          note: string
+          organization_id: string
+          to_stage: string
+        }
+        Insert: {
+          actor_user_id?: string | null
+          candidate_id: string
+          created_at?: string
+          from_stage?: string | null
+          id?: string
+          note: string
+          organization_id: string
+          to_stage: string
+        }
+        Update: {
+          actor_user_id?: string | null
+          candidate_id?: string
+          created_at?: string
+          from_stage?: string | null
+          id?: string
+          note?: string
+          organization_id?: string
+          to_stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recruitment_candidate_events_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidate_events_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "recruitment_candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidate_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidate_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidate_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recruitment_candidates: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          email: string
+          first_name: string
+          id: string
+          last_name: string
+          notes: string | null
+          offer_accepted_at: string | null
+          offer_employment_type: string | null
+          offer_role: string | null
+          offer_sent_at: string | null
+          offer_start_date: string | null
+          organization_id: string
+          phone: string | null
+          provisioned_staff_id: string | null
+          provisioned_user_id: string | null
+          resume_storage_path: string | null
+          source: string | null
+          stage: string
+          status: string
+          updated_at: string
+          vacancy_id: string
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          created_by?: string | null
+          email: string
+          first_name: string
+          id?: string
+          last_name: string
+          notes?: string | null
+          offer_accepted_at?: string | null
+          offer_employment_type?: string | null
+          offer_role?: string | null
+          offer_sent_at?: string | null
+          offer_start_date?: string | null
+          organization_id: string
+          phone?: string | null
+          provisioned_staff_id?: string | null
+          provisioned_user_id?: string | null
+          resume_storage_path?: string | null
+          source?: string | null
+          stage?: string
+          status?: string
+          updated_at?: string
+          vacancy_id: string
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          created_by?: string | null
+          email?: string
+          first_name?: string
+          id?: string
+          last_name?: string
+          notes?: string | null
+          offer_accepted_at?: string | null
+          offer_employment_type?: string | null
+          offer_role?: string | null
+          offer_sent_at?: string | null
+          offer_start_date?: string | null
+          organization_id?: string
+          phone?: string | null
+          provisioned_staff_id?: string | null
+          provisioned_user_id?: string | null
+          resume_storage_path?: string | null
+          source?: string | null
+          stage?: string
+          status?: string
+          updated_at?: string
+          vacancy_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recruitment_candidates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidates_provisioned_staff_id_fkey"
+            columns: ["provisioned_staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidates_provisioned_user_id_fkey"
+            columns: ["provisioned_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_candidates_vacancy_id_fkey"
+            columns: ["vacancy_id"]
+            isOneToOne: false
+            referencedRelation: "recruitment_vacancies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recruitment_vacancies: {
+        Row: {
+          closes_on: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          employment_type: string
+          id: string
+          location_summary: string | null
+          opens_on: string | null
+          organization_id: string
+          required_skills: string[]
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          closes_on?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          employment_type: string
+          id?: string
+          location_summary?: string | null
+          opens_on?: string | null
+          organization_id: string
+          required_skills?: string[]
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          closes_on?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          employment_type?: string
+          id?: string
+          location_summary?: string | null
+          opens_on?: string | null
+          organization_id?: string
+          required_skills?: string[]
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recruitment_vacancies_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_vacancies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "recruitment_vacancies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitment_vacancies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -13423,10 +25803,11 @@ export type Database = {
           effective_from: string
           id: string
           is_active: boolean
+          is_permanent: boolean
           legal_basis: string | null
           module_key: string | null
           organization_id: string | null
-          retention_days: number
+          retention_days: number | null
           updated_at: string
         }
         Insert: {
@@ -13436,10 +25817,11 @@ export type Database = {
           effective_from?: string
           id?: string
           is_active?: boolean
+          is_permanent?: boolean
           legal_basis?: string | null
           module_key?: string | null
           organization_id?: string | null
-          retention_days: number
+          retention_days?: number | null
           updated_at?: string
         }
         Update: {
@@ -13449,10 +25831,11 @@ export type Database = {
           effective_from?: string
           id?: string
           is_active?: boolean
+          is_permanent?: boolean
           legal_basis?: string | null
           module_key?: string | null
           organization_id?: string | null
-          retention_days?: number
+          retention_days?: number | null
           updated_at?: string
         }
         Relationships: [
@@ -13622,6 +26005,166 @@ export type Database = {
           },
         ]
       }
+      roster_skill_catalog: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          skill_category: string | null
+          skill_key: string
+          skill_name: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id: string
+          skill_category?: string | null
+          skill_key: string
+          skill_name: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id?: string
+          skill_category?: string | null
+          skill_key?: string
+          skill_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roster_skill_catalog_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_skill_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "roster_skill_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_skill_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      roster_slots: {
+        Row: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        Insert: {
+          client_request_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          linked_shift_id?: string | null
+          notes?: string | null
+          organization_id: string
+          scheduled_end: string
+          scheduled_start: string
+          staff_id?: string | null
+          status?: string
+          updated_at?: string
+          work_unit_id: string
+        }
+        Update: {
+          client_request_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          linked_shift_id?: string | null
+          notes?: string | null
+          organization_id?: string
+          scheduled_end?: string
+          scheduled_start?: string
+          staff_id?: string | null
+          status?: string
+          updated_at?: string
+          work_unit_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roster_slots_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_slots_linked_shift_id_fkey"
+            columns: ["linked_shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_slots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "roster_slots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_slots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_slots_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_slots_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       roster_templates: {
         Row: {
           created_at: string
@@ -13676,6 +26219,144 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      roster_work_units: {
+        Row: {
+          active: boolean
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          patrol_route_id: string | null
+          required_skill_ids: string[]
+          required_skill_names: string[]
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          team_id: string | null
+          updated_at: string
+          work_unit_type: string
+          workplace_id: string | null
+        }
+        Insert: {
+          active?: boolean
+          cost_centre_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          patrol_route_id?: string | null
+          required_skill_ids?: string[]
+          required_skill_names?: string[]
+          service_agreement_location_id?: string | null
+          service_agreement_module_id?: string | null
+          service_type: string
+          team_id?: string | null
+          updated_at?: string
+          work_unit_type: string
+          workplace_id?: string | null
+        }
+        Update: {
+          active?: boolean
+          cost_centre_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          patrol_route_id?: string | null
+          required_skill_ids?: string[]
+          required_skill_names?: string[]
+          service_agreement_location_id?: string | null
+          service_agreement_module_id?: string | null
+          service_type?: string
+          team_id?: string | null
+          updated_at?: string
+          work_unit_type?: string
+          workplace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "roster_work_units_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_patrol_route_id_fkey"
+            columns: ["patrol_route_id"]
+            isOneToOne: false
+            referencedRelation: "patrol_routes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_service_agreement_location_id_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "location_visibility_for_viewer"
+            referencedColumns: ["sal_id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_service_agreement_location_id_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_service_agreement_module_id_fkey"
+            columns: ["service_agreement_module_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "roster_work_units_workplace_id_fkey"
+            columns: ["workplace_id"]
+            isOneToOne: false
+            referencedRelation: "organization_workplaces"
             referencedColumns: ["id"]
           },
         ]
@@ -13831,6 +26512,221 @@ export type Database = {
           },
         ]
       }
+      service_agreement_continuity_policies: {
+        Row: {
+          client_coverage_end: string | null
+          client_coverage_start: string | null
+          continuity_mode: string
+          continuity_retention_hours: number
+          created_at: string
+          created_by: string
+          id: string
+          provider_coverage_end: string | null
+          provider_coverage_start: string | null
+          require_handoff_ack: boolean
+          service_agreement_location_id: string
+          service_agreement_module_id: string
+          share_active_cases: boolean
+          share_attachments_mode: string
+          share_open_tasks: boolean
+          share_presence_mode: string
+          share_recent_history_hours: number
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          client_coverage_end?: string | null
+          client_coverage_start?: string | null
+          continuity_mode?: string
+          continuity_retention_hours?: number
+          created_at?: string
+          created_by: string
+          id?: string
+          provider_coverage_end?: string | null
+          provider_coverage_start?: string | null
+          require_handoff_ack?: boolean
+          service_agreement_location_id: string
+          service_agreement_module_id: string
+          share_active_cases?: boolean
+          share_attachments_mode?: string
+          share_open_tasks?: boolean
+          share_presence_mode?: string
+          share_recent_history_hours?: number
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          client_coverage_end?: string | null
+          client_coverage_start?: string | null
+          continuity_mode?: string
+          continuity_retention_hours?: number
+          created_at?: string
+          created_by?: string
+          id?: string
+          provider_coverage_end?: string | null
+          provider_coverage_start?: string | null
+          require_handoff_ack?: boolean
+          service_agreement_location_id?: string
+          service_agreement_module_id?: string
+          share_active_cases?: boolean
+          share_attachments_mode?: string
+          share_open_tasks?: boolean
+          share_presence_mode?: string
+          share_recent_history_hours?: number
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_agreement_continuity__service_agreement_location_i_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "location_visibility_for_viewer"
+            referencedColumns: ["sal_id"]
+          },
+          {
+            foreignKeyName: "service_agreement_continuity__service_agreement_location_i_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_continuity_p_service_agreement_module_id_fkey"
+            columns: ["service_agreement_module_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_continuity_policies_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_continuity_policies_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_agreement_delivery_schedules: {
+        Row: {
+          active: boolean
+          active_days: number[]
+          active_months: number[]
+          capability_key: string
+          chargeable_conditions: Json
+          created_at: string
+          depart_sla_minutes: number | null
+          dwell_minutes: number
+          id: string
+          min_gap_between_visits_minutes: number
+          module_key: string
+          notes: string | null
+          officer_instructions: string | null
+          preferred_stop_order: number
+          pricing_basis: string
+          proposal_scope_schedule_id: string | null
+          rate_rule_id: string | null
+          response_sla_minutes: number | null
+          service_agreement_id: string
+          site_id: string | null
+          visits_per_shift: number
+          window_end: string | null
+          window_start: string | null
+          work_model: string
+          zone_id: string | null
+        }
+        Insert: {
+          active?: boolean
+          active_days: number[]
+          active_months?: number[]
+          capability_key: string
+          chargeable_conditions?: Json
+          created_at?: string
+          depart_sla_minutes?: number | null
+          dwell_minutes?: number
+          id?: string
+          min_gap_between_visits_minutes: number
+          module_key: string
+          notes?: string | null
+          officer_instructions?: string | null
+          preferred_stop_order?: number
+          pricing_basis: string
+          proposal_scope_schedule_id?: string | null
+          rate_rule_id?: string | null
+          response_sla_minutes?: number | null
+          service_agreement_id: string
+          site_id?: string | null
+          visits_per_shift: number
+          window_end?: string | null
+          window_start?: string | null
+          work_model: string
+          zone_id?: string | null
+        }
+        Update: {
+          active?: boolean
+          active_days?: number[]
+          active_months?: number[]
+          capability_key?: string
+          chargeable_conditions?: Json
+          created_at?: string
+          depart_sla_minutes?: number | null
+          dwell_minutes?: number
+          id?: string
+          min_gap_between_visits_minutes?: number
+          module_key?: string
+          notes?: string | null
+          officer_instructions?: string | null
+          preferred_stop_order?: number
+          pricing_basis?: string
+          proposal_scope_schedule_id?: string | null
+          rate_rule_id?: string | null
+          response_sla_minutes?: number | null
+          service_agreement_id?: string
+          site_id?: string | null
+          visits_per_shift?: number
+          window_end?: string | null
+          window_start?: string | null
+          work_model?: string
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_agreement_delivery_sche_proposal_scope_schedule_id_fkey"
+            columns: ["proposal_scope_schedule_id"]
+            isOneToOne: true
+            referencedRelation: "quote_proposal_scope_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_delivery_schedules_rate_rule_id_fkey"
+            columns: ["rate_rule_id"]
+            isOneToOne: false
+            referencedRelation: "rate_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_delivery_schedules_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_delivery_schedules_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_agreement_locations: {
         Row: {
           created_at: string
@@ -13926,6 +26822,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_locations_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -14091,6 +26994,160 @@ export type Database = {
           },
         ]
       }
+      shift_assets: {
+        Row: {
+          asset_id: string
+          assigned_at: string
+          assigned_by: string | null
+          client_request_id: string
+          id: string
+          organization_id: string
+          returned_at: string | null
+          shift_id: string
+        }
+        Insert: {
+          asset_id: string
+          assigned_at?: string
+          assigned_by?: string | null
+          client_request_id: string
+          id?: string
+          organization_id: string
+          returned_at?: string | null
+          shift_id: string
+        }
+        Update: {
+          asset_id?: string
+          assigned_at?: string
+          assigned_by?: string | null
+          client_request_id?: string
+          id?: string
+          organization_id?: string
+          returned_at?: string | null
+          shift_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_assets_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_assets_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_assets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "shift_assets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_assets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_assets_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shift_breaks: {
+        Row: {
+          break_type: string
+          client_request_id: string
+          created_at: string
+          ended_at: string | null
+          id: string
+          is_paid: boolean
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          shift_id: string
+          started_at: string
+        }
+        Insert: {
+          break_type: string
+          client_request_id: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          is_paid: boolean
+          notes?: string | null
+          officer_user_id: string
+          organization_id: string
+          shift_id: string
+          started_at: string
+        }
+        Update: {
+          break_type?: string
+          client_request_id?: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          is_paid?: boolean
+          notes?: string | null
+          officer_user_id?: string
+          organization_id?: string
+          shift_id?: string
+          started_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_breaks_officer_user_id_fkey"
+            columns: ["officer_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_breaks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "shift_breaks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_breaks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_breaks_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shift_coverage_requests: {
         Row: {
           claimed_at: string | null
@@ -14105,6 +27162,7 @@ export type Database = {
           patrol_route_id: string | null
           required_credentials: string[]
           required_staff_count: number
+          roster_slot_id: string | null
           shift_date: string
           shift_template_id: string | null
           site_id: string | null
@@ -14125,6 +27183,7 @@ export type Database = {
           patrol_route_id?: string | null
           required_credentials?: string[]
           required_staff_count?: number
+          roster_slot_id?: string | null
           shift_date: string
           shift_template_id?: string | null
           site_id?: string | null
@@ -14145,6 +27204,7 @@ export type Database = {
           patrol_route_id?: string | null
           required_credentials?: string[]
           required_staff_count?: number
+          roster_slot_id?: string | null
           shift_date?: string
           shift_template_id?: string | null
           site_id?: string | null
@@ -14196,6 +27256,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "shift_coverage_requests_roster_slot_id_fkey"
+            columns: ["roster_slot_id"]
+            isOneToOne: false
+            referencedRelation: "roster_slots"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "shift_coverage_requests_shift_template_id_fkey"
             columns: ["shift_template_id"]
             isOneToOne: false
@@ -14211,10 +27278,94 @@ export type Database = {
           },
         ]
       }
+      shift_debriefs: {
+        Row: {
+          client_event_id: string
+          created_at: string
+          equipment_issue_reported: boolean
+          follow_up_notes: string | null
+          follow_up_required: boolean
+          id: string
+          officer_user_id: string
+          organization_id: string
+          safety_incident_reported: boolean
+          shift_id: string
+          submitted_at: string
+          summary: string
+        }
+        Insert: {
+          client_event_id: string
+          created_at?: string
+          equipment_issue_reported?: boolean
+          follow_up_notes?: string | null
+          follow_up_required?: boolean
+          id?: string
+          officer_user_id: string
+          organization_id: string
+          safety_incident_reported?: boolean
+          shift_id: string
+          submitted_at?: string
+          summary: string
+        }
+        Update: {
+          client_event_id?: string
+          created_at?: string
+          equipment_issue_reported?: boolean
+          follow_up_notes?: string | null
+          follow_up_required?: boolean
+          id?: string
+          officer_user_id?: string
+          organization_id?: string
+          safety_incident_reported?: boolean
+          shift_id?: string
+          submitted_at?: string
+          summary?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_debriefs_officer_user_id_fkey"
+            columns: ["officer_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_debriefs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "shift_debriefs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_debriefs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_debriefs_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: true
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shift_stop_actions: {
         Row: {
           action_type: string
+          client_request_id: string | null
           created_at: string
+          evidence_metadata: Json
+          gps_accuracy_metres: number | null
           gps_lat: number | null
           gps_lng: number | null
           id: string
@@ -14222,6 +27373,7 @@ export type Database = {
           organization_id: string
           outcome: string | null
           performed_at: string
+          receipt: Json | null
           result_record_id: string | null
           result_table: string | null
           shift_id: string
@@ -14230,7 +27382,10 @@ export type Database = {
         }
         Insert: {
           action_type: string
+          client_request_id?: string | null
           created_at?: string
+          evidence_metadata?: Json
+          gps_accuracy_metres?: number | null
           gps_lat?: number | null
           gps_lng?: number | null
           id?: string
@@ -14238,6 +27393,7 @@ export type Database = {
           organization_id: string
           outcome?: string | null
           performed_at?: string
+          receipt?: Json | null
           result_record_id?: string | null
           result_table?: string | null
           shift_id: string
@@ -14246,7 +27402,10 @@ export type Database = {
         }
         Update: {
           action_type?: string
+          client_request_id?: string | null
           created_at?: string
+          evidence_metadata?: Json
+          gps_accuracy_metres?: number | null
           gps_lat?: number | null
           gps_lng?: number | null
           id?: string
@@ -14254,6 +27413,7 @@ export type Database = {
           organization_id?: string
           outcome?: string | null
           performed_at?: string
+          receipt?: Json | null
           result_record_id?: string | null
           result_table?: string | null
           shift_id?: string
@@ -14413,9 +27573,15 @@ export type Database = {
         Row: {
           actual_arrived_at: string | null
           actual_departed_at: string | null
+          arrival_distance_m: number | null
+          arrival_verification: string | null
+          arrived_gps_accuracy: number | null
           arrived_gps_lat: number | null
           arrived_gps_lng: number | null
+          bwc_reference: string | null
           created_at: string
+          departed_gps_lat: number | null
+          departed_gps_lng: number | null
           dispatch_job_id: string | null
           estimated_arrival_at: string | null
           estimated_departure_at: string | null
@@ -14427,6 +27593,7 @@ export type Database = {
           officer_notes: string | null
           organization_id: string
           patrol_config_id: string | null
+          place_role: string
           required_dwell_minutes: number
           shift_id: string
           site_id: string | null
@@ -14445,9 +27612,15 @@ export type Database = {
         Insert: {
           actual_arrived_at?: string | null
           actual_departed_at?: string | null
+          arrival_distance_m?: number | null
+          arrival_verification?: string | null
+          arrived_gps_accuracy?: number | null
           arrived_gps_lat?: number | null
           arrived_gps_lng?: number | null
+          bwc_reference?: string | null
           created_at?: string
+          departed_gps_lat?: number | null
+          departed_gps_lng?: number | null
           dispatch_job_id?: string | null
           estimated_arrival_at?: string | null
           estimated_departure_at?: string | null
@@ -14459,6 +27632,7 @@ export type Database = {
           officer_notes?: string | null
           organization_id: string
           patrol_config_id?: string | null
+          place_role?: string
           required_dwell_minutes?: number
           shift_id: string
           site_id?: string | null
@@ -14477,9 +27651,15 @@ export type Database = {
         Update: {
           actual_arrived_at?: string | null
           actual_departed_at?: string | null
+          arrival_distance_m?: number | null
+          arrival_verification?: string | null
+          arrived_gps_accuracy?: number | null
           arrived_gps_lat?: number | null
           arrived_gps_lng?: number | null
+          bwc_reference?: string | null
           created_at?: string
+          departed_gps_lat?: number | null
+          departed_gps_lng?: number | null
           dispatch_job_id?: string | null
           estimated_arrival_at?: string | null
           estimated_departure_at?: string | null
@@ -14491,6 +27671,7 @@ export type Database = {
           officer_notes?: string | null
           organization_id?: string
           patrol_config_id?: string | null
+          place_role?: string
           required_dwell_minutes?: number
           shift_id?: string
           site_id?: string | null
@@ -14562,6 +27743,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_stops_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -14791,17 +27979,24 @@ export type Database = {
           generated_at: string | null
           id: string
           location_id: string | null
+          module_key: string | null
           notes: string | null
           officer_user_id: string
           organization_id: string
           osrm_matrix_cached_at: string | null
           patrol_route_id: string | null
+          roster_slot_id: string | null
           scheduled_end: string
           scheduled_start: string
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
           service_type: string
           shift_health: string | null
+          shift_origin: string
           status: string
           total_stops: number
+          updated_at: string
+          work_unit_id: string | null
           zone_id: string | null
         }
         Insert: {
@@ -14813,17 +28008,24 @@ export type Database = {
           generated_at?: string | null
           id?: string
           location_id?: string | null
+          module_key?: string | null
           notes?: string | null
           officer_user_id: string
           organization_id: string
           osrm_matrix_cached_at?: string | null
           patrol_route_id?: string | null
+          roster_slot_id?: string | null
           scheduled_end: string
           scheduled_start: string
+          service_agreement_location_id?: string | null
+          service_agreement_module_id?: string | null
           service_type: string
           shift_health?: string | null
+          shift_origin?: string
           status?: string
           total_stops?: number
+          updated_at?: string
+          work_unit_id?: string | null
           zone_id?: string | null
         }
         Update: {
@@ -14835,17 +28037,24 @@ export type Database = {
           generated_at?: string | null
           id?: string
           location_id?: string | null
+          module_key?: string | null
           notes?: string | null
           officer_user_id?: string
           organization_id?: string
           osrm_matrix_cached_at?: string | null
           patrol_route_id?: string | null
+          roster_slot_id?: string | null
           scheduled_end?: string
           scheduled_start?: string
+          service_agreement_location_id?: string | null
+          service_agreement_module_id?: string | null
           service_type?: string
           shift_health?: string | null
+          shift_origin?: string
           status?: string
           total_stops?: number
+          updated_at?: string
+          work_unit_id?: string | null
           zone_id?: string | null
         }
         Relationships: [
@@ -14885,11 +28094,53 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "shifts_roster_slot_id_fkey"
+            columns: ["roster_slot_id"]
+            isOneToOne: false
+            referencedRelation: "roster_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shifts_service_agreement_location_id_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "location_visibility_for_viewer"
+            referencedColumns: ["sal_id"]
+          },
+          {
+            foreignKeyName: "shifts_service_agreement_location_id_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shifts_service_agreement_module_id_fkey"
+            columns: ["service_agreement_module_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shifts_work_unit_id_fkey"
+            columns: ["work_unit_id"]
+            isOneToOne: false
+            referencedRelation: "roster_work_units"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "shifts_zone_id_fkey"
             columns: ["zone_id"]
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shifts_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -15009,6 +28260,122 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "site_financial_config_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      site_induction_requirements: {
+        Row: {
+          active: boolean
+          client_site_id: string | null
+          created_at: string
+          created_by: string | null
+          expires_after_days: number | null
+          id: string
+          induction_name: string
+          organization_id: string
+          required: boolean
+          service_agreement_location_id: string | null
+          version: string | null
+          zone_id: string | null
+        }
+        Insert: {
+          active?: boolean
+          client_site_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          expires_after_days?: number | null
+          id?: string
+          induction_name: string
+          organization_id: string
+          required?: boolean
+          service_agreement_location_id?: string | null
+          version?: string | null
+          zone_id?: string | null
+        }
+        Update: {
+          active?: boolean
+          client_site_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          expires_after_days?: number | null
+          id?: string
+          induction_name?: string
+          organization_id?: string
+          required?: boolean
+          service_agreement_location_id?: string | null
+          version?: string | null
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_induction_requirements_client_site_id_fkey"
+            columns: ["client_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_service_agreement_location_id_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "location_visibility_for_viewer"
+            referencedColumns: ["sal_id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_service_agreement_location_id_fkey"
+            columns: ["service_agreement_location_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_induction_requirements_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       site_services: {
@@ -15109,6 +28476,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_services_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -15275,6 +28649,72 @@ export type Database = {
           },
         ]
       }
+      smoke_assessment_evidence: {
+        Row: {
+          created_at: string
+          evidence_item_id: string
+          id: string
+          ordinal: number
+          organization_id: string
+          purpose: string
+          smoke_assessment_id: string
+        }
+        Insert: {
+          created_at?: string
+          evidence_item_id: string
+          id?: string
+          ordinal?: number
+          organization_id: string
+          purpose?: string
+          smoke_assessment_id: string
+        }
+        Update: {
+          created_at?: string
+          evidence_item_id?: string
+          id?: string
+          ordinal?: number
+          organization_id?: string
+          purpose?: string
+          smoke_assessment_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smoke_assessment_evidence_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smoke_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "smoke_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smoke_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smoke_assessment_evidence_smoke_assessment_id_fkey"
+            columns: ["smoke_assessment_id"]
+            isOneToOne: false
+            referencedRelation: "smoke_assessments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       smoke_assessments: {
         Row: {
           action: string | null
@@ -15285,12 +28725,17 @@ export type Database = {
           bob_confidence: number | null
           bob_recommendation: string | null
           checklist: Json
+          client_request_id: string | null
           complainant_site_id: string | null
           complaint_address: string | null
           complaint_source: string | null
           created_at: string
           dispatch_job_id: string | null
+          evidence_state: string
           follow_up_required: boolean
+          gps_accuracy: number | null
+          gps_lat: number | null
+          gps_lng: number | null
           id: string
           is_out_of_hours: boolean
           legal_basis: string | null
@@ -15302,9 +28747,15 @@ export type Database = {
           officer_user_id: string | null
           organization_id: string
           photo_urls: Json | null
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
           scene_description: string | null
           severity: string | null
           site_id: string | null
+          smoke_ai_analysis: Json | null
+          smoke_ai_analyzed_at: string | null
           smoke_source: string | null
           smoke_source_type: string | null
           source_confirmed: boolean
@@ -15319,12 +28770,17 @@ export type Database = {
           bob_confidence?: number | null
           bob_recommendation?: string | null
           checklist?: Json
+          client_request_id?: string | null
           complainant_site_id?: string | null
           complaint_address?: string | null
           complaint_source?: string | null
           created_at?: string
           dispatch_job_id?: string | null
+          evidence_state?: string
           follow_up_required?: boolean
+          gps_accuracy?: number | null
+          gps_lat?: number | null
+          gps_lng?: number | null
           id?: string
           is_out_of_hours?: boolean
           legal_basis?: string | null
@@ -15336,9 +28792,15 @@ export type Database = {
           officer_user_id?: string | null
           organization_id: string
           photo_urls?: Json | null
+          review_notes?: string | null
+          review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scene_description?: string | null
           severity?: string | null
           site_id?: string | null
+          smoke_ai_analysis?: Json | null
+          smoke_ai_analyzed_at?: string | null
           smoke_source?: string | null
           smoke_source_type?: string | null
           source_confirmed?: boolean
@@ -15353,12 +28815,17 @@ export type Database = {
           bob_confidence?: number | null
           bob_recommendation?: string | null
           checklist?: Json
+          client_request_id?: string | null
           complainant_site_id?: string | null
           complaint_address?: string | null
           complaint_source?: string | null
           created_at?: string
           dispatch_job_id?: string | null
+          evidence_state?: string
           follow_up_required?: boolean
+          gps_accuracy?: number | null
+          gps_lat?: number | null
+          gps_lng?: number | null
           id?: string
           is_out_of_hours?: boolean
           legal_basis?: string | null
@@ -15370,9 +28837,15 @@ export type Database = {
           officer_user_id?: string | null
           organization_id?: string
           photo_urls?: Json | null
+          review_notes?: string | null
+          review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scene_description?: string | null
           severity?: string | null
           site_id?: string | null
+          smoke_ai_analysis?: Json | null
+          smoke_ai_analyzed_at?: string | null
           smoke_source?: string | null
           smoke_source_type?: string | null
           source_confirmed?: boolean
@@ -15426,6 +28899,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "smoke_assessments_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
           {
@@ -15694,6 +29174,7 @@ export type Database = {
           role_at_branch: string
           starts_on: string | null
           status: string
+          updated_at: string
           user_id: string
         }
         Insert: {
@@ -15707,6 +29188,7 @@ export type Database = {
           role_at_branch?: string
           starts_on?: string | null
           status?: string
+          updated_at?: string
           user_id: string
         }
         Update: {
@@ -15720,6 +29202,7 @@ export type Database = {
           role_at_branch?: string
           starts_on?: string | null
           status?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: [
@@ -15763,6 +29246,7 @@ export type Database = {
       staff_credentials: {
         Row: {
           authorized_activities: string[]
+          client_request_id: string | null
           created_at: string
           credential_number: string | null
           credential_type: string
@@ -15773,6 +29257,7 @@ export type Database = {
           issuing_authority: string | null
           notes: string | null
           organization_id: string
+          replaces_credential_id: string | null
           staff_id: string
           verified: boolean
           verified_at: string | null
@@ -15780,6 +29265,7 @@ export type Database = {
         }
         Insert: {
           authorized_activities?: string[]
+          client_request_id?: string | null
           created_at?: string
           credential_number?: string | null
           credential_type: string
@@ -15790,6 +29276,7 @@ export type Database = {
           issuing_authority?: string | null
           notes?: string | null
           organization_id: string
+          replaces_credential_id?: string | null
           staff_id: string
           verified?: boolean
           verified_at?: string | null
@@ -15797,6 +29284,7 @@ export type Database = {
         }
         Update: {
           authorized_activities?: string[]
+          client_request_id?: string | null
           created_at?: string
           credential_number?: string | null
           credential_type?: string
@@ -15807,6 +29295,7 @@ export type Database = {
           issuing_authority?: string | null
           notes?: string | null
           organization_id?: string
+          replaces_credential_id?: string | null
           staff_id?: string
           verified?: boolean
           verified_at?: string | null
@@ -15832,6 +29321,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_credentials_replaces_credential_id_fkey"
+            columns: ["replaces_credential_id"]
+            isOneToOne: false
+            referencedRelation: "staff_credentials"
             referencedColumns: ["id"]
           },
           {
@@ -15947,6 +29443,162 @@ export type Database = {
           },
         ]
       }
+      staff_onboarding_events: {
+        Row: {
+          actor_user_id: string | null
+          created_at: string
+          from_stage: string | null
+          from_status: string | null
+          id: string
+          ledger_id: string
+          note: string
+          organization_id: string
+          to_stage: string
+          to_status: string
+          version: number
+        }
+        Insert: {
+          actor_user_id?: string | null
+          created_at?: string
+          from_stage?: string | null
+          from_status?: string | null
+          id?: string
+          ledger_id: string
+          note: string
+          organization_id: string
+          to_stage: string
+          to_status: string
+          version: number
+        }
+        Update: {
+          actor_user_id?: string | null
+          created_at?: string
+          from_stage?: string | null
+          from_status?: string | null
+          id?: string
+          ledger_id?: string
+          note?: string
+          organization_id?: string
+          to_stage?: string
+          to_status?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_onboarding_events_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_events_ledger_id_fkey"
+            columns: ["ledger_id"]
+            isOneToOne: false
+            referencedRelation: "staff_onboarding_ledgers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_onboarding_ledgers: {
+        Row: {
+          assigned_to: string | null
+          created_at: string
+          current_stage: string
+          id: string
+          organization_id: string
+          staff_id: string
+          stage_note: string | null
+          status: string
+          target_start: string | null
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          assigned_to?: string | null
+          created_at?: string
+          current_stage?: string
+          id?: string
+          organization_id: string
+          staff_id: string
+          stage_note?: string | null
+          status?: string
+          target_start?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          assigned_to?: string | null
+          created_at?: string
+          current_stage?: string
+          id?: string
+          organization_id?: string
+          staff_id?: string
+          stage_note?: string | null
+          status?: string
+          target_start?: string | null
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_onboarding_ledgers_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_ledgers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_ledgers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_ledgers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_onboarding_ledgers_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: true
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_profiles: {
         Row: {
           bank_account: string | null
@@ -15962,12 +29614,18 @@ export type Database = {
           id: string
           notes: string | null
           organization_id: string
+          overtime_eligible: boolean
           payroll_id: string | null
+          role_code: string | null
+          seniority_date: string | null
           start_date: string | null
           tax_code: string | null
           uniform_size: string | null
           user_id: string | null
           work_ready: boolean
+          work_ready_review_notes: string | null
+          work_ready_reviewed_at: string | null
+          work_ready_reviewed_by: string | null
         }
         Insert: {
           bank_account?: string | null
@@ -15983,12 +29641,18 @@ export type Database = {
           id: string
           notes?: string | null
           organization_id: string
+          overtime_eligible?: boolean
           payroll_id?: string | null
+          role_code?: string | null
+          seniority_date?: string | null
           start_date?: string | null
           tax_code?: string | null
           uniform_size?: string | null
           user_id?: string | null
           work_ready?: boolean
+          work_ready_review_notes?: string | null
+          work_ready_reviewed_at?: string | null
+          work_ready_reviewed_by?: string | null
         }
         Update: {
           bank_account?: string | null
@@ -16004,12 +29668,18 @@ export type Database = {
           id?: string
           notes?: string | null
           organization_id?: string
+          overtime_eligible?: boolean
           payroll_id?: string | null
+          role_code?: string | null
+          seniority_date?: string | null
           start_date?: string | null
           tax_code?: string | null
           uniform_size?: string | null
           user_id?: string | null
           work_ready?: boolean
+          work_ready_review_notes?: string | null
+          work_ready_reviewed_at?: string | null
+          work_ready_reviewed_by?: string | null
         }
         Relationships: [
           {
@@ -16043,6 +29713,13 @@ export type Database = {
           {
             foreignKeyName: "staff_profiles_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_profiles_work_ready_reviewed_by_fkey"
+            columns: ["work_ready_reviewed_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
@@ -16134,6 +29811,85 @@ export type Database = {
           },
         ]
       }
+      staff_site_inductions: {
+        Row: {
+          completed_at: string
+          created_at: string
+          evidence_notes: string | null
+          expires_at: string | null
+          id: string
+          organization_id: string
+          requirement_id: string
+          staff_id: string
+          verified_by: string | null
+        }
+        Insert: {
+          completed_at?: string
+          created_at?: string
+          evidence_notes?: string | null
+          expires_at?: string | null
+          id?: string
+          organization_id: string
+          requirement_id: string
+          staff_id: string
+          verified_by?: string | null
+        }
+        Update: {
+          completed_at?: string
+          created_at?: string
+          evidence_notes?: string | null
+          expires_at?: string | null
+          id?: string
+          organization_id?: string
+          requirement_id?: string
+          staff_id?: string
+          verified_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_site_inductions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "staff_site_inductions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_site_inductions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_site_inductions_requirement_id_fkey"
+            columns: ["requirement_id"]
+            isOneToOne: false
+            referencedRelation: "site_induction_requirements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_site_inductions_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_site_inductions_verified_by_fkey"
+            columns: ["verified_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_skills: {
         Row: {
           certification_expiry: string | null
@@ -16144,6 +29900,7 @@ export type Database = {
           organization_id: string
           proficiency_level: string | null
           skill_category: string | null
+          skill_id: string | null
           skill_name: string
           staff_id: string
         }
@@ -16156,6 +29913,7 @@ export type Database = {
           organization_id: string
           proficiency_level?: string | null
           skill_category?: string | null
+          skill_id?: string | null
           skill_name: string
           staff_id: string
         }
@@ -16168,6 +29926,7 @@ export type Database = {
           organization_id?: string
           proficiency_level?: string | null
           skill_category?: string | null
+          skill_id?: string | null
           skill_name?: string
           staff_id?: string
         }
@@ -16191,6 +29950,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_skills_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "roster_skill_catalog"
             referencedColumns: ["id"]
           },
           {
@@ -16745,11 +30511,88 @@ export type Database = {
           },
         ]
       }
+      timesheet_work_entries: {
+        Row: {
+          calculated_minutes: number
+          created_at: string
+          ended_at: string | null
+          id: string
+          metadata: Json
+          organization_id: string
+          source_id: string
+          source_type: string
+          started_at: string | null
+          timesheet_id: string
+          work_status: string
+        }
+        Insert: {
+          calculated_minutes?: number
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          metadata?: Json
+          organization_id: string
+          source_id: string
+          source_type: string
+          started_at?: string | null
+          timesheet_id: string
+          work_status: string
+        }
+        Update: {
+          calculated_minutes?: number
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          metadata?: Json
+          organization_id?: string
+          source_id?: string
+          source_type?: string
+          started_at?: string | null
+          timesheet_id?: string
+          work_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "timesheet_work_entries_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "timesheet_work_entries_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timesheet_work_entries_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timesheet_work_entries_timesheet_id_fkey"
+            columns: ["timesheet_id"]
+            isOneToOne: false
+            referencedRelation: "timesheets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       timesheets: {
         Row: {
           actual_hours: number | null
+          adjustment_hours: number
           approved_at: string | null
           approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
           created_at: string
           id: string
           notes: string | null
@@ -16758,16 +30601,25 @@ export type Database = {
           payroll_export_batch_id: string | null
           period_end: string
           period_start: string
+          review_notes: string | null
           scheduled_hours: number | null
           shift_id: string | null
           staff_id: string
           status: string
           submitted_at: string | null
+          work_derived_hours: number | null
+          work_summary: Json
         }
         Insert: {
           actual_hours?: number | null
+          adjustment_hours?: number
           approved_at?: string | null
           approved_by?: string | null
+          branch_review_notes?: string | null
+          branch_reviewed_at?: string | null
+          branch_reviewed_by?: string | null
+          branch_reviewed_organization_id?: string | null
+          client_event_id?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -16776,16 +30628,25 @@ export type Database = {
           payroll_export_batch_id?: string | null
           period_end: string
           period_start: string
+          review_notes?: string | null
           scheduled_hours?: number | null
           shift_id?: string | null
           staff_id: string
           status?: string
           submitted_at?: string | null
+          work_derived_hours?: number | null
+          work_summary?: Json
         }
         Update: {
           actual_hours?: number | null
+          adjustment_hours?: number
           approved_at?: string | null
           approved_by?: string | null
+          branch_review_notes?: string | null
+          branch_reviewed_at?: string | null
+          branch_reviewed_by?: string | null
+          branch_reviewed_organization_id?: string | null
+          client_event_id?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -16794,11 +30655,14 @@ export type Database = {
           payroll_export_batch_id?: string | null
           period_end?: string
           period_start?: string
+          review_notes?: string | null
           scheduled_hours?: number | null
           shift_id?: string | null
           staff_id?: string
           status?: string
           submitted_at?: string | null
+          work_derived_hours?: number | null
+          work_summary?: Json
         }
         Relationships: [
           {
@@ -16806,6 +30670,34 @@ export type Database = {
             columns: ["approved_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timesheets_branch_reviewed_by_fkey"
+            columns: ["branch_reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timesheets_branch_reviewed_organization_id_fkey"
+            columns: ["branch_reviewed_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "timesheets_branch_reviewed_organization_id_fkey"
+            columns: ["branch_reviewed_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timesheets_branch_reviewed_organization_id_fkey"
+            columns: ["branch_reviewed_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
           {
@@ -16979,6 +30871,7 @@ export type Database = {
           phone: string | null
           photo_url: string | null
           role: string
+          updated_at: string
         }
         Insert: {
           address?: string | null
@@ -16995,6 +30888,7 @@ export type Database = {
           phone?: string | null
           photo_url?: string | null
           role: string
+          updated_at?: string
         }
         Update: {
           address?: string | null
@@ -17011,6 +30905,7 @@ export type Database = {
           phone?: string | null
           photo_url?: string | null
           role?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -17366,6 +31261,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "vehicle_overnight_sessions_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       vehicles: {
@@ -17456,6 +31358,7 @@ export type Database = {
           acknowledged_by: string | null
           acknowledgement_notes: string | null
           alert_type: string
+          client_request_id: string | null
           escalated_at: string | null
           escalation_level: number
           gps_accuracy: number | null
@@ -17479,6 +31382,7 @@ export type Database = {
           acknowledged_by?: string | null
           acknowledgement_notes?: string | null
           alert_type: string
+          client_request_id?: string | null
           escalated_at?: string | null
           escalation_level?: number
           gps_accuracy?: number | null
@@ -17502,6 +31406,7 @@ export type Database = {
           acknowledged_by?: string | null
           acknowledgement_notes?: string | null
           alert_type?: string
+          client_request_id?: string | null
           escalated_at?: string | null
           escalation_level?: number
           gps_accuracy?: number | null
@@ -17575,6 +31480,7 @@ export type Database = {
       welfare_checks: {
         Row: {
           checked_in_at: string
+          client_request_id: string | null
           gps_lat: number | null
           gps_lng: number | null
           id: string
@@ -17586,6 +31492,7 @@ export type Database = {
         }
         Insert: {
           checked_in_at?: string
+          client_request_id?: string | null
           gps_lat?: number | null
           gps_lng?: number | null
           id?: string
@@ -17597,6 +31504,7 @@ export type Database = {
         }
         Update: {
           checked_in_at?: string
+          client_request_id?: string | null
           gps_lat?: number | null
           gps_lng?: number | null
           id?: string
@@ -17779,8 +31687,11 @@ export type Database = {
         Row: {
           created_at: string
           finished_at: string | null
+          heartbeat_at: string | null
           id: string
           job_id: string
+          lease_expires_at: string | null
+          lease_token: string | null
           picked_up_at: string | null
           result_summary: Json | null
           runner_id: string
@@ -17789,8 +31700,11 @@ export type Database = {
         Insert: {
           created_at?: string
           finished_at?: string | null
+          heartbeat_at?: string | null
           id?: string
           job_id: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
           picked_up_at?: string | null
           result_summary?: Json | null
           runner_id: string
@@ -17799,8 +31713,11 @@ export type Database = {
         Update: {
           created_at?: string
           finished_at?: string | null
+          heartbeat_at?: string | null
           id?: string
           job_id?: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
           picked_up_at?: string | null
           result_summary?: Json | null
           runner_id?: string
@@ -17970,6 +31887,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "zone_closures_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       zone_compliance_matrix: {
@@ -18078,6 +32002,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "zone_compliance_matrix_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       zone_legal_config: {
@@ -18164,6 +32095,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "zone_legal_config_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: true
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
       zone_signage_evidence: {
@@ -18239,6 +32177,13 @@ export type Database = {
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "zone_signage_evidence_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
         ]
       }
     }
@@ -18291,6 +32236,88 @@ export type Database = {
           },
         ]
       }
+      effective_rule_resolution_view: {
+        Row: {
+          approval_policy: Json | null
+          dominant_anchor_kind: string | null
+          effective_policy_status: string | null
+          enabled: boolean | null
+          evidence_requirements: Json | null
+          jurisdiction_name: string | null
+          jurisdiction_rule_set_id: string | null
+          jurisdiction_rule_set_name: string | null
+          jurisdiction_rules: Json | null
+          module_key: string | null
+          module_rule_set_id: string | null
+          module_rule_set_name: string | null
+          organization_id: string | null
+          report_template_code: string | null
+          total_event_count: number | null
+          unresolved_event_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_price_book: {
+        Row: {
+          active: boolean | null
+          item_id: string | null
+          item_type: string | null
+          margin_pct: number | null
+          name: string | null
+          organization_id: string | null
+          sku: string | null
+          supplier_name: string | null
+          unit_cost: number | null
+          unit_of_measure: string | null
+          unit_price: number | null
+          updated_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_item_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "finance_item_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_item_catalog_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       geography_columns: {
         Row: {
           coord_dimension: number | null
@@ -18333,6 +32360,42 @@ export type Database = {
         }
         Relationships: []
       }
+      house_event_anchor_projection: {
+        Row: {
+          anchor_kind: string | null
+          checkpoint_id: string | null
+          client_site_id: string | null
+          event_id: string | null
+          event_type: string | null
+          location_id: string | null
+          module_key: string | null
+          occurred_at: string | null
+          organization_id: string | null
+          source_table: string | null
+          unresolved_reason: string | null
+          zone_id: string | null
+        }
+        Relationships: []
+      }
+      house_event_anchor_reconciliation: {
+        Row: {
+          anchor_kind: string | null
+          checkpoint_consistency: string | null
+          checkpoint_id: string | null
+          client_site_id: string | null
+          event_id: string | null
+          event_type: string | null
+          location_id: string | null
+          module_key: string | null
+          occurred_at: string | null
+          organization_id: string | null
+          reconciliation_reason: string | null
+          source_table: string | null
+          unresolved_reason: string | null
+          zone_id: string | null
+        }
+        Relationships: []
+      }
       location_visibility_for_viewer: {
         Row: {
           client_organization_id: string | null
@@ -18366,6 +32429,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "location_zones"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreement_locations_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
           {
             foreignKeyName: "service_agreements_client_organization_id_fkey"
@@ -18411,6 +32481,210 @@ export type Database = {
           },
         ]
       }
+      module_context_contract: {
+        Row: {
+          active_location_id: string | null
+          active_site_id: string | null
+          active_zone_id: string | null
+          approval_policy: Json | null
+          dominant_anchor_kind: string | null
+          effective_rules: Json | null
+          enabled: boolean | null
+          evidence_requirements: Json | null
+          governing_jurisdiction_id: string | null
+          governing_jurisdiction_name: string | null
+          jurisdiction_name: string | null
+          jurisdiction_rule_set_id: string | null
+          jurisdiction_rule_set_name: string | null
+          jurisdiction_rules: Json | null
+          module_key: string | null
+          module_rule_set_id: string | null
+          module_rule_set_name: string | null
+          organization_id: string | null
+          policy_status: string | null
+          report_template_code: string | null
+          resolution_status: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_event_place_matrix: {
+        Row: {
+          checkpoint_event_count: number | null
+          dominant_anchor_kind: string | null
+          enabled: boolean | null
+          jurisdiction_rule_set_name: string | null
+          module_key: string | null
+          organization_id: string | null
+          rule_set_name: string | null
+          site_event_count: number | null
+          total_event_count: number | null
+          unresolved_event_count: number | null
+          zone_event_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_place_policy_summary: {
+        Row: {
+          approval_policy: Json | null
+          checkpoint_event_count: number | null
+          dominant_anchor_kind: string | null
+          enabled: boolean | null
+          evidence_requirements: Json | null
+          jurisdiction_name: string | null
+          jurisdiction_rule_set_id: string | null
+          jurisdiction_rule_set_name: string | null
+          jurisdiction_rules: Json | null
+          module_key: string | null
+          module_rule_set_id: string | null
+          module_rule_set_name: string | null
+          organization_id: string | null
+          policy_status: string | null
+          report_template_code: string | null
+          site_event_count: number | null
+          total_event_count: number | null
+          unresolved_event_count: number | null
+          zone_event_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_rule_index_view: {
+        Row: {
+          active_rule_set_id: string | null
+          approval_policy: Json | null
+          enabled: boolean | null
+          evidence_requirements: Json | null
+          jurisdiction_name: string | null
+          jurisdiction_rule_set_id: string | null
+          jurisdiction_rule_set_name: string | null
+          jurisdiction_rules: Json | null
+          location_id: string | null
+          module_key: string | null
+          module_rule_set_id: string | null
+          module_rule_set_name: string | null
+          organization_id: string | null
+          place_scope: string | null
+          report_template_code: string | null
+          zone_id: string | null
+          zone_organization_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "location_zones_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_zones_organization_id_fkey"
+            columns: ["zone_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "location_zones_organization_id_fkey"
+            columns: ["zone_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_zones_organization_id_fkey"
+            columns: ["zone_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_modules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_tree: {
         Row: {
           depth: number | null
@@ -18422,6 +32696,43 @@ export type Database = {
           root_id: string | null
         }
         Relationships: []
+      }
+      v_service_agreement_readiness: {
+        Row: {
+          agreement_locations: number | null
+          agreements: number | null
+          client_org_id: string | null
+          client_org_name: string | null
+          financial_configs: number | null
+          first_agreement_start: string | null
+          latest_agreement_start: string | null
+          readiness_status: string | null
+          sites: number | null
+          sites_linked: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_agreements_client_organization_id_fkey"
+            columns: ["client_org_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "service_agreements_client_organization_id_fkey"
+            columns: ["client_org_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_agreements_client_organization_id_fkey"
+            columns: ["client_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Functions: {
@@ -18523,7 +32834,211 @@ export type Database = {
         Returns: unknown
       }
       _st_within: { Args: { geom1: unknown; geom2: unknown }; Returns: boolean }
+      accept_boundary_proposal: {
+        Args: {
+          p_final_geojson?: Json
+          p_note?: string
+          p_proposal_id: string
+          p_verify?: boolean
+        }
+        Returns: {
+          area_m2: number
+          entity_id: string
+          entity_type: string
+          history_version: number
+          human_edited: boolean
+          verified: boolean
+        }[]
+      }
+      accept_client_capability_share: {
+        Args: { p_token: string }
+        Returns: {
+          agreement_type: string
+          allows_auto_dispatch: boolean
+          allows_client_submission: boolean
+          client_organization_id: string
+          client_portal_access_mode: string | null
+          client_portal_finance_enabled: boolean
+          client_portal_reports_enabled: boolean
+          created_at: string
+          default_share_actual_cost: boolean
+          default_share_contract_price: boolean
+          enabled_modules: string[] | null
+          ends_on: string | null
+          external_refs: Json
+          id: string
+          invitation_status: string
+          monthly_report_template_code: string | null
+          name: string
+          provider_organization_id: string
+          starts_on: string | null
+          visibility_policy: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "service_agreements"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       accept_quote: { Args: { p_quote_id: string }; Returns: string }
+      acknowledge_operational_continuity_item: {
+        Args: {
+          p_acknowledgement_notes?: string
+          p_client_request_id: string
+          p_continuation_location_event_id?: string
+          p_continuity_item_id: string
+        }
+        Returns: {
+          acknowledged_at: string
+          acknowledged_by: string
+          acknowledgement_notes: string | null
+          client_request_id: string
+          continuation_location_event_id: string | null
+          continuity_item_id: string
+          created_at: string
+          id: string
+          recipient_organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "operational_continuity_receipts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      acknowledge_roster_attendance_exception: {
+        Args: { p_exception_type: string; p_notes: string; p_shift_id: string }
+        Returns: {
+          acknowledged_at: string
+          shift_id: string
+        }[]
+      }
+      activate_crm_account: {
+        Args: {
+          p_account_organization_id: string
+          p_agreement_id: string
+          p_expected_ledger_version: number
+          p_expected_organization_updated_at: string
+        }
+        Returns: Json
+      }
+      activate_provider_branch: {
+        Args: {
+          p_branch_organization_id: string
+          p_expected_updated_at: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      add_crm_invoice_line: {
+        Args: {
+          p_client_request_id: string
+          p_description: string
+          p_invoice_id: string
+          p_quantity: number
+          p_unit_price: number
+        }
+        Returns: {
+          created: boolean
+          gst_amount: number
+          invoice_id: string
+          line_id: string
+          subtotal: number
+          total_amount: number
+        }[]
+      }
+      add_crm_quote_line: {
+        Args: {
+          p_client_request_id: string
+          p_description: string
+          p_expected_status: string
+          p_kind: string
+          p_module_key?: string
+          p_quantity: number
+          p_quote_id: string
+          p_site_id?: string
+          p_unit_charge: number
+          p_unit_cost: number
+        }
+        Returns: {
+          created: boolean
+          discount_amount: number
+          gst_amount: number
+          line_id: string
+          quote_id: string
+          subtotal_charge: number
+          total_charge: number
+          total_cost: number
+        }[]
+      }
+      add_finance_budget_line: {
+        Args: {
+          p_budget_amount: number
+          p_budget_id: string
+          p_cost_centre_id?: string
+          p_cost_type: string
+          p_notes?: string
+          p_pl_period_id: string
+          p_service_agreement_id?: string
+        }
+        Returns: {
+          budget_amount: number
+          budget_id: string
+          cost_centre_id: string | null
+          cost_type: string
+          created_at: string
+          created_by: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_budget_lines"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       addauth: { Args: { "": string }; Returns: boolean }
       addgeometrycolumn:
         | {
@@ -18562,6 +33077,498 @@ export type Database = {
             }
             Returns: string
           }
+      address_match_key: { Args: { p_address: string }; Returns: string }
+      advance_dispatch_job_status: {
+        Args: {
+          p_expected_status: string
+          p_job_id: string
+          p_next_status: string
+          p_outcome_notes?: string
+        }
+        Returns: {
+          completed_at: string
+          id: string
+          shift_id: string
+          status: string
+        }[]
+      }
+      apply_bob_rate_rule_proposal: {
+        Args: { p_action_id: string }
+        Returns: string
+      }
+      apply_bob_roster_fill_plan: {
+        Args: { p_action_id: string }
+        Returns: {
+          assignments_applied: number
+          plan_id: string
+        }[]
+      }
+      apply_bob_staff_onboarding_proposal: {
+        Args: { p_action_id: string }
+        Returns: string
+      }
+      apply_credential_promotion_proposal: {
+        Args: {
+          p_authorized_activities?: string[]
+          p_credential_number?: string
+          p_credential_type: string
+          p_expiry_date?: string
+          p_issued_date?: string
+          p_issuing_authority?: string
+          p_proposal_id: string
+          p_staff_id: string
+        }
+        Returns: {
+          created: boolean
+          credential_id: string
+          proposal_id: string
+        }[]
+      }
+      apply_crm_agreement_promotion_proposal: {
+        Args: {
+          p_client_organization_id: string
+          p_enabled_modules?: string[]
+          p_ends_on?: string
+          p_name: string
+          p_proposal_id: string
+          p_provider_organization_id: string
+          p_starts_on?: string
+        }
+        Returns: {
+          agreement_id: string
+          created: boolean
+          proposal_id: string
+        }[]
+      }
+      apply_finance_reconciliation_proposal: {
+        Args: {
+          p_client_organization_id: string
+          p_due_date?: string
+          p_gst_amount?: number
+          p_invoice_date?: string
+          p_invoice_number?: string
+          p_notes?: string
+          p_proposal_id: string
+          p_service_agreement_id?: string
+          p_subtotal?: number
+          p_total_amount?: number
+        }
+        Returns: {
+          created: boolean
+          invoice_id: string
+          proposal_id: string
+        }[]
+      }
+      apply_hr_document_promotion_proposal: {
+        Args: {
+          p_document_type: string
+          p_expiry_date?: string
+          p_file_name: string
+          p_notes?: string
+          p_proposal_id: string
+          p_staff_id: string
+          p_storage_path: string
+        }
+        Returns: {
+          created: boolean
+          proposal_id: string
+          staff_document_id: string
+        }[]
+      }
+      apply_investigation_link_promotion_proposal: {
+        Args: {
+          p_entity_id: string
+          p_entity_type: string
+          p_investigation_id: string
+          p_link_reason?: string
+          p_link_role?: string
+          p_proposal_id: string
+        }
+        Returns: {
+          created: boolean
+          link_id: string
+          proposal_id: string
+        }[]
+      }
+      apply_site_brief_promotion_proposal: {
+        Args: {
+          p_cost_centre_id?: string
+          p_name: string
+          p_patrol_route_id?: string
+          p_proposal_id: string
+          p_service_agreement_location_id?: string
+          p_service_agreement_module_id?: string
+          p_service_type: string
+          p_team_id?: string
+          p_work_unit_type: string
+          p_workplace_id?: string
+        }
+        Returns: {
+          created: boolean
+          proposal_id: string
+          work_unit_id: string
+        }[]
+      }
+      approve_cctv_export: {
+        Args: { p_approval_state: string; p_export_id: string }
+        Returns: {
+          approval_state: string
+          approved_at: string | null
+          approved_by: string | null
+          artifact_bucket: string | null
+          artifact_path: string | null
+          evidence_item_id: string
+          generated_at: string
+          generated_by: string
+          id: string
+          inference_job_id: string
+          issued_at: string | null
+          legal_hold: boolean
+          manifest: Json
+          manifest_sha256: string
+          organization_id: string
+          purpose: string
+          recipient_scope: string
+          sealed_at: string | null
+          selected_event_ids: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_exports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      approve_cctv_identity_draft: {
+        Args: {
+          p_draft_id: string
+          p_final_action: string
+          p_final_person_record_id?: string
+          p_review_notes?: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          authority_level: string
+          candidate_matches: Json
+          created_at: string
+          created_by: string
+          event_id: string | null
+          event_type: string
+          evidence_item_id: string
+          final_action: string | null
+          final_person_record_id: string | null
+          id: string
+          inference_job_id: string
+          organization_id: string
+          proposed_display_name: string | null
+          proposed_person_record_id: string | null
+          reason: string | null
+          review_notes: string | null
+          status: string
+          subject_kind: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_identity_drafts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      approve_finance_budget: {
+        Args: { p_budget_id: string }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          created_by: string | null
+          fiscal_year: number
+          id: string
+          name: string
+          organization_id: string
+          status: string
+          supersedes_id: string | null
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_budgets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      archive_provider_branch: {
+        Args: {
+          p_branch_organization_id: string
+          p_expected_updated_at: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      arrive_at_dispatch_place: {
+        Args: {
+          p_bwc_reference?: string
+          p_client_request_id: string
+          p_dispatch_job_id: string
+          p_gps_accuracy?: number
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_place_role?: string
+        }
+        Returns: {
+          arrival_distance_m: number
+          arrival_verification: string
+          arrived_at: string
+          created: boolean
+          stop_id: string
+          visit_number: number
+        }[]
+      }
+      assess_bob_nz_finance_readiness: { Args: never; Returns: Json }
+      assign_dispatch_job_to_officer: {
+        Args: { p_job_id: string; p_officer_user_id: string }
+        Returns: {
+          acknowledged_at: string | null
+          adhoc_inserted_at: string | null
+          assigned_officer_id: string | null
+          briefing_notes: string | null
+          client_request_id: string | null
+          client_site_id: string | null
+          completed_at: string | null
+          created_at: string
+          dispatch_resource_id: string | null
+          dispatched_at: string | null
+          en_route_at: string | null
+          expected_dwell_minutes: number
+          harmed_party_address: string | null
+          harmed_party_site_id: string | null
+          id: string
+          insert_gps_lat: number | null
+          insert_gps_lng: number | null
+          investigation_id: string | null
+          job_type: string
+          location_id: string | null
+          module_key: string | null
+          on_scene_at: string | null
+          organization_id: string
+          origin_reference_id: string | null
+          origin_type: string
+          outcome_notes: string | null
+          priority: string
+          service_agreement_id: string | null
+          shift_id: string | null
+          shift_stop_id: string | null
+          sla_breached: boolean
+          sla_delay_reason: string | null
+          sla_impact_report: Json | null
+          sla_impact_warning: boolean
+          sla_minutes: number | null
+          sla_respond_by: string | null
+          status: string
+          timing_source: string
+          work_unit_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "dispatch_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      assign_face_observation_person: {
+        Args: {
+          p_display_name?: string
+          p_observation_id: string
+          p_person_record_id: string
+        }
+        Returns: {
+          confidence: number | null
+          created_at: string
+          evidence_item_id: string | null
+          id: string
+          metadata: Json
+          organization_id: string
+          person_record_id: string | null
+          purpose: string
+          review_state: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "face_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      assign_roster_skill_to_staff: {
+        Args: {
+          p_certification_expiry?: string
+          p_certified?: boolean
+          p_notes?: string
+          p_proficiency_level: string
+          p_skill_id: string
+          p_staff_id: string
+        }
+        Returns: {
+          certification_expiry: string | null
+          certified: boolean
+          created_at: string
+          id: string
+          notes: string | null
+          organization_id: string
+          proficiency_level: string | null
+          skill_category: string | null
+          skill_id: string | null
+          skill_name: string
+          staff_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_skills"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      assign_shift_asset: {
+        Args: {
+          p_asset_id: string
+          p_client_request_id: string
+          p_shift_id: string
+        }
+        Returns: {
+          asset_id: string
+          assigned_at: string
+          assigned_by: string | null
+          client_request_id: string
+          id: string
+          organization_id: string
+          returned_at: string | null
+          shift_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_assets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      attach_crm_site_to_location: {
+        Args: { p_location_id: string; p_site_id: string }
+        Returns: {
+          access_instructions: string | null
+          active: boolean
+          address: string | null
+          address_match_key: string | null
+          boundary: unknown
+          boundary_status: string
+          boundary_verification: string
+          boundary_verified_at: string | null
+          boundary_verified_by: string | null
+          center_point: unknown
+          client_organization_id: string
+          client_request_id: string | null
+          configuration_version: number
+          created_at: string
+          external_ref: string | null
+          external_refs: Json
+          gps_lat: number | null
+          gps_lng: number | null
+          hs_notes: string | null
+          id: string
+          internal_client_ref: string | null
+          jurisdiction_config_id: string | null
+          location_id: string
+          metadata: Json
+          module_title: string | null
+          name: string
+          onsite_radius_meters: number
+          organization_id: string | null
+          ownership_signals: Json | null
+          ownership_status: string
+          prompt_radius_meters: number
+          risk_level: string | null
+          service_agreement_id: string | null
+          site_brief: string | null
+          site_code: string | null
+          site_origin: string
+          site_type: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "client_sites"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      batch_publish_roster_slots: {
+        Args: {
+          p_client_request_id: string
+          p_from: string
+          p_organization_id: string
+          p_to: string
+        }
+        Returns: {
+          conflict_count: number
+          materialized_count: number
+          published_count: number
+        }[]
+      }
+      bob_atlas_expectation_report: {
+        Args: { p_limit?: number; p_offset?: number }
+        Returns: {
+          assertion_kind: string
+          expectation_id: string
+          expectation_status: string
+          from_name: string
+          from_type: string
+          gap_kind: string
+          rationale: string
+          signal_weight: number
+          spine: string
+          to_name: string
+          to_type: string
+          via_name: string
+          via_type: string
+        }[]
+      }
       bob_atlas_fk_reach: {
         Args: { p_from_name: string; p_from_type: string; p_max_depth?: number }
         Returns: {
@@ -18590,35 +33597,22 @@ export type Database = {
         }[]
       }
       bob_atlas_gap_report: {
-        Args: { p_include_columns?: boolean; p_include_unknown_exercise?: boolean; p_limit?: number; p_offset?: number }
+        Args: {
+          p_include_columns?: boolean
+          p_include_unknown_exercise?: boolean
+          p_limit?: number
+          p_offset?: number
+        }
         Returns: {
-          caller_summary: string | null
+          caller_summary: string
           entity_name: string
           entity_type: string
-          exercised: boolean | null
+          exercised: boolean
           gap_kind: string
-          notes: string | null
+          notes: string
           present: boolean
           retirement_status: string
           wired: boolean
-        }[]
-      }
-      bob_atlas_expectation_report: {
-        Args: { p_limit?: number; p_offset?: number }
-        Returns: {
-          assertion_kind: string
-          expectation_id: string
-          expectation_status: string
-          from_name: string
-          from_type: string
-          gap_kind: string | null
-          rationale: string | null
-          signal_weight: number
-          spine: string
-          to_name: string
-          to_type: string
-          via_name: string | null
-          via_type: string | null
         }[]
       }
       bob_cards_needing_embedding: {
@@ -18638,6 +33632,20 @@ export type Database = {
         Args: { query_text: string; row_limit?: number; timeout_ms?: number }
         Returns: Json
       }
+      bob_ingest_knowledge_card_384: {
+        Args: {
+          in_category: string
+          in_content: string
+          in_embedding_384: string
+          in_is_active?: boolean
+          in_key: string
+          in_organization_id: string
+          in_source?: string
+          in_tags?: string[]
+          in_title: string
+        }
+        Returns: string
+      }
       bob_inspect_schema: {
         Args: { include_fks?: boolean; table_names?: string[] }
         Returns: Json
@@ -18654,6 +33662,25 @@ export type Database = {
           id: string
           key: string
           similarity: number
+          tags: string[]
+          title: string
+        }[]
+      }
+      bob_match_knowledge_for_assistant_384: {
+        Args: {
+          in_match_count?: number
+          in_match_threshold?: number
+          in_org_id?: string
+          in_query_embedding: string
+        }
+        Returns: {
+          category: string
+          content: string
+          id: string
+          key: string
+          organization_id: string
+          similarity: number
+          source: string
           tags: string[]
           title: string
         }[]
@@ -18689,6 +33716,1603 @@ export type Database = {
         }
         Returns: Json
       }
+      builder_abort_independent_code_review: {
+        Args: { _job_id: string; _reason: string; _step_id: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_abort_release_preparation: {
+        Args: { _job_id: string; _reason: string; _step_id: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_abort_security_review: {
+        Args: { _lease_token: string; _reason: string; _run_id: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_authorize_frontend_repair: {
+        Args: {
+          _failed_patch_artifact_id: string
+          _failed_worker_run_id: string
+          _failure_artifact_id: string
+          _job_id: string
+          _step_id: string
+        }
+        Returns: Json
+      }
+      builder_bind_workspace: {
+        Args: {
+          _job_id: string
+          _workspace_branch: string
+          _workspace_head_sha: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_claim_aggregate_security_review: {
+        Args: {
+          _expected_target_sha: string
+          _implementation_worker_run_ids: string[]
+          _job_id: string
+          _runner_id: string
+          _security_step_id: string
+          _timeout_seconds?: number
+        }
+        Returns: Json
+      }
+      builder_claim_backend_worker: {
+        Args: {
+          _expected_target_sha: string
+          _job_id: string
+          _patch_artifact_id: string
+          _runner_id: string
+          _step_id: string
+          _timeout_seconds?: number
+        }
+        Returns: Json
+      }
+      builder_claim_frontend_worker: {
+        Args: {
+          _expected_target_sha: string
+          _job_id: string
+          _patch_artifact_id: string
+          _runner_id: string
+          _step_id: string
+          _timeout_seconds?: number
+        }
+        Returns: Json
+      }
+      builder_claim_security_review: {
+        Args: {
+          _expected_target_sha: string
+          _frontend_worker_run_id: string
+          _job_id: string
+          _runner_id: string
+          _security_step_id: string
+          _timeout_seconds?: number
+        }
+        Returns: Json
+      }
+      builder_complete_independent_code_review: {
+        Args: {
+          _job_id: string
+          _review_artifact_id: string
+          _reviewer_model_run_id: string
+          _step_id: string
+          _verdict: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_complete_product_analysis: {
+        Args: {
+          _artifact_id: string
+          _job_id: string
+          _requested_from_users?: string[]
+          _result_summary: string
+          _step_id: string
+        }
+        Returns: {
+          approval_comment: string | null
+          approval_type: string
+          approved_by: string | null
+          created_at: string
+          decided_by: string | null
+          expires_at: string
+          id: string
+          job_id: string
+          organization_id: string
+          requested_at: string
+          requested_from_users: string[] | null
+          requested_target_sha: string | null
+          responded_at: string | null
+          reviewed_artifact_ids: string[]
+          status: string
+          triggered_at_status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_approvals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_complete_release_preparation: {
+        Args: {
+          _deployment_manifest_id: string
+          _job_id: string
+          _release_notes_id: string
+          _requested_from_users?: string[]
+          _reviewed_artifact_ids: string[]
+          _rollback_plan_id: string
+          _step_id: string
+        }
+        Returns: {
+          approval_comment: string | null
+          approval_type: string
+          approved_by: string | null
+          created_at: string
+          decided_by: string | null
+          expires_at: string
+          id: string
+          job_id: string
+          organization_id: string
+          requested_at: string
+          requested_from_users: string[] | null
+          requested_target_sha: string | null
+          responded_at: string | null
+          reviewed_artifact_ids: string[]
+          status: string
+          triggered_at_status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_approvals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_complete_ux_design: {
+        Args: {
+          _artifact_id: string
+          _job_id: string
+          _result_summary: string
+          _step_id: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_continue_backend_only_job: {
+        Args: { _job_id: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_create_followup_job: {
+        Args: {
+          _backend_required?: boolean
+          _code_review_mode?: string
+          _frontend_required?: boolean
+          _parent_job_id: string
+          _task_description: string
+          _title: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_create_job: {
+        Args: {
+          _backend_required?: boolean
+          _branch_name?: string
+          _code_review_mode?: string
+          _description?: string
+          _frontend_required?: boolean
+          _organization_id: string
+          _project_id: string
+          _target_sha: string
+          _task_description: string
+          _task_run_id?: string
+          _title: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_create_job_v2: {
+        Args: {
+          _backend_required?: boolean
+          _branch_name?: string
+          _code_review_mode?: string
+          _description?: string
+          _frontend_required?: boolean
+          _organization_id: string
+          _project_id: string
+          _requested_action?: string
+          _target_environment?: string
+          _target_sha: string
+          _task_description: string
+          _task_run_id?: string
+          _title: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_decide_approval: {
+        Args: { _approval_id: string; _comment?: string; _decision: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_decide_human_code_review: {
+        Args: { _approval_id: string; _comment?: string; _decision: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_finalize_model_artifact: {
+        Args: {
+          _artifact_type: string
+          _content_type: string
+          _model_name: string
+          _model_run_id: string
+          _object_path: string
+          _sha256: string
+          _size_bytes: number
+          _usage_metadata?: Json
+        }
+        Returns: {
+          artifact_type: string
+          checksum: string | null
+          content_preview: string | null
+          content_size_bytes: number | null
+          content_type: string | null
+          created_at: string
+          id: string
+          job_id: string
+          produced_by_model: string | null
+          produced_by_user: string | null
+          status: string
+          step_id: string | null
+          storage_location: string | null
+          updated_at: string
+          version_number: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_artifacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_finish_backend_worker: {
+        Args: {
+          _exit_code: number
+          _lease_token: string
+          _log_summary?: string
+          _run_id: string
+          _succeeded: boolean
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_finish_frontend_worker: {
+        Args: {
+          _exit_code: number
+          _lease_token: string
+          _log_summary?: string
+          _run_id: string
+          _succeeded: boolean
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_finish_security_review: {
+        Args: {
+          _critical_count: number
+          _high_count: number
+          _lease_token: string
+          _low_count: number
+          _medium_count: number
+          _run_id: string
+          _security_artifact_id: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_heartbeat_backend_worker: {
+        Args: { _lease_token: string; _run_id: string }
+        Returns: Json
+      }
+      builder_heartbeat_frontend_worker: {
+        Args: { _lease_token: string; _run_id: string }
+        Returns: Json
+      }
+      builder_record_workspace_commit: {
+        Args: {
+          _commit_sha: string
+          _expected_head_sha: string
+          _job_id: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_record_workspace_publication: {
+        Args: { _expected_head_sha: string; _job_id: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_record_workspace_pull_request: {
+        Args: {
+          _expected_head_sha: string
+          _job_id: string
+          _pull_request_url: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_recover_expired_security_review: { Args: never; Returns: number }
+      builder_register_release_artifact: {
+        Args: {
+          _artifact_type: string
+          _job_id: string
+          _object_path: string
+          _sha256: string
+          _size_bytes: number
+          _step_id: string
+        }
+        Returns: {
+          artifact_type: string
+          checksum: string | null
+          content_preview: string | null
+          content_size_bytes: number | null
+          content_type: string | null
+          created_at: string
+          id: string
+          job_id: string
+          produced_by_model: string | null
+          produced_by_user: string | null
+          status: string
+          step_id: string | null
+          storage_location: string | null
+          updated_at: string
+          version_number: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_artifacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_register_security_review: {
+        Args: {
+          _lease_token: string
+          _object_path: string
+          _run_id: string
+          _sha256: string
+          _size_bytes: number
+        }
+        Returns: {
+          artifact_type: string
+          checksum: string | null
+          content_preview: string | null
+          content_size_bytes: number | null
+          content_type: string | null
+          created_at: string
+          id: string
+          job_id: string
+          produced_by_model: string | null
+          produced_by_user: string | null
+          status: string
+          step_id: string | null
+          storage_location: string | null
+          updated_at: string
+          version_number: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_artifacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_register_worker_artifact: {
+        Args: {
+          _artifact_type: string
+          _content_type: string
+          _lease_token: string
+          _object_path: string
+          _run_id: string
+          _sha256: string
+          _size_bytes: number
+        }
+        Returns: {
+          artifact_type: string
+          checksum: string | null
+          content_preview: string | null
+          content_size_bytes: number | null
+          content_type: string | null
+          created_at: string
+          id: string
+          job_id: string
+          produced_by_model: string | null
+          produced_by_user: string | null
+          status: string
+          step_id: string | null
+          storage_location: string | null
+          updated_at: string
+          version_number: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_artifacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_request_approval: {
+        Args: {
+          _approval_type: string
+          _artifact_ids: string[]
+          _job_id: string
+          _requested_from_users?: string[]
+        }
+        Returns: {
+          approval_comment: string | null
+          approval_type: string
+          approved_by: string | null
+          created_at: string
+          decided_by: string | null
+          expires_at: string
+          id: string
+          job_id: string
+          organization_id: string
+          requested_at: string
+          requested_from_users: string[] | null
+          requested_target_sha: string | null
+          responded_at: string | null
+          reviewed_artifact_ids: string[]
+          status: string
+          triggered_at_status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_approvals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_reset_backend_worker_retry: {
+        Args: { _run_id: string }
+        Returns: {
+          command: string
+          command_args: string[] | null
+          completed_at: string | null
+          cpu_peak_percent: number | null
+          created_at: string
+          dangerous_patterns_detected: string[] | null
+          disk_usage_mb: number | null
+          environment_variables_snapshot: Json | null
+          exit_code: number | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string | null
+          job_id: string
+          lease_expires_at: string | null
+          lease_token_hash: string | null
+          log_summary: string | null
+          memory_peak_mb: number | null
+          organization_id: string
+          output_artifact_ids: string[] | null
+          patch_artifact_id: string | null
+          profile: string | null
+          review_summary: Json
+          runner_id: string | null
+          secrets_redacted_count: number | null
+          started_at: string | null
+          status: string
+          stderr_location: string | null
+          stdout_location: string | null
+          step_id: string | null
+          target_sha: string | null
+          timeout_seconds: number | null
+          updated_at: string
+          worker_container_id: string | null
+          worker_isolation_level: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_worker_runs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_reset_frontend_worker_retry: {
+        Args: { _run_id: string }
+        Returns: {
+          command: string
+          command_args: string[] | null
+          completed_at: string | null
+          cpu_peak_percent: number | null
+          created_at: string
+          dangerous_patterns_detected: string[] | null
+          disk_usage_mb: number | null
+          environment_variables_snapshot: Json | null
+          exit_code: number | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string | null
+          job_id: string
+          lease_expires_at: string | null
+          lease_token_hash: string | null
+          log_summary: string | null
+          memory_peak_mb: number | null
+          organization_id: string
+          output_artifact_ids: string[] | null
+          patch_artifact_id: string | null
+          profile: string | null
+          review_summary: Json
+          runner_id: string | null
+          secrets_redacted_count: number | null
+          started_at: string | null
+          status: string
+          stderr_location: string | null
+          stdout_location: string | null
+          step_id: string | null
+          target_sha: string | null
+          timeout_seconds: number | null
+          updated_at: string
+          worker_container_id: string | null
+          worker_isolation_level: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_worker_runs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_set_code_review_policy: {
+        Args: { _job_id: string; _mode: string }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_skip_implementation_step: {
+        Args: {
+          _builder_mode: string
+          _job_id: string
+          _reason: string
+          _step_id: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          requested_action: string
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_start_code_review: {
+        Args: {
+          _job_id: string
+          _requested_from_users?: string[]
+          _reviewed_artifact_ids: string[]
+          _step_id: string
+        }
+        Returns: Json
+      }
+      builder_start_product_analysis: {
+        Args: { _job_id: string; _step_id: string }
+        Returns: {
+          artifact_ids: string[] | null
+          attempt_count: number | null
+          blocked_dependencies: string[] | null
+          blocked_reason: string | null
+          builder_mode: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          evidence_refs: Json | null
+          id: string
+          input_context: Json | null
+          job_id: string
+          model_name: string | null
+          model_provider: string | null
+          ordinal_position: number
+          result_summary: string | null
+          retryable: boolean | null
+          started_at: string | null
+          status: string
+          step_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_job_steps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_start_release_preparation: {
+        Args: {
+          _job_id: string
+          _security_worker_run_id: string
+          _step_id: string
+        }
+        Returns: {
+          artifact_ids: string[] | null
+          attempt_count: number | null
+          blocked_dependencies: string[] | null
+          blocked_reason: string | null
+          builder_mode: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          evidence_refs: Json | null
+          id: string
+          input_context: Json | null
+          job_id: string
+          model_name: string | null
+          model_provider: string | null
+          ordinal_position: number
+          result_summary: string | null
+          retryable: boolean | null
+          started_at: string | null
+          status: string
+          step_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_job_steps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_start_ux_design: {
+        Args: {
+          _job_id: string
+          _specification_artifact_id: string
+          _step_id: string
+        }
+        Returns: {
+          artifact_ids: string[] | null
+          attempt_count: number | null
+          blocked_dependencies: string[] | null
+          blocked_reason: string | null
+          builder_mode: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          evidence_refs: Json | null
+          id: string
+          input_context: Json | null
+          job_id: string
+          model_name: string | null
+          model_provider: string | null
+          ordinal_position: number
+          result_summary: string | null
+          retryable: boolean | null
+          started_at: string | null
+          status: string
+          step_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_job_steps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      calculate_cost_centre_roll: {
+        Args: { p_pl_period_id: string }
+        Returns: {
+          attribution_count: number | null
+          cost_centre_code: string
+          cost_centre_id: string
+          cost_centre_name: string
+          created_at: string
+          id: string
+          organization_id: string
+          pl_period_id: string
+          total_cost: number
+          total_depreciation: number
+          total_equipment: number
+          total_labour: number
+          total_materials: number
+          total_overhead: number
+          total_vehicle: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "finance_cost_centre_rolls"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      calculate_finance_budget_variance: {
+        Args: { p_budget_id: string; p_pl_period_id: string }
+        Returns: {
+          actual_amount: number
+          budget_amount: number
+          budget_id: string
+          calculated_at: string
+          cost_centre_id: string | null
+          cost_type: string
+          id: string
+          organization_id: string
+          pl_period_id: string
+          service_agreement_id: string | null
+          status: string
+          variance_amount: number
+          variance_pct: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "finance_budget_variances"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      calculate_finance_quote_cost: { Args: { p_inputs: Json }; Returns: Json }
+      calculate_service_profitability_snapshot: {
+        Args: { p_pl_period_id: string }
+        Returns: {
+          actual_labour: number
+          actual_margin_pct: number | null
+          actual_materials: number
+          actual_overhead: number
+          actual_total_cost: number
+          actual_vehicle: number
+          client_invoice_total: number
+          client_organization_id: string
+          created_at: string
+          created_by: string | null
+          estimated_labour: number
+          estimated_margin_pct: number | null
+          estimated_materials: number
+          estimated_overhead: number
+          estimated_total_cost: number
+          estimated_vehicle: number
+          id: string
+          invoice_count: number | null
+          labour_variance_pct: number | null
+          location_id: string | null
+          margin_impact_pct: number | null
+          materials_variance_pct: number | null
+          net_profit: number | null
+          organization_id: string
+          overhead_variance_pct: number | null
+          pl_period_id: string
+          service_agreement_id: string
+          service_type: string | null
+          total_variance_pct: number | null
+          vehicle_variance_pct: number | null
+          work_unit_count: number | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "finance_service_profitability"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       calculate_vehicle_compliance: {
         Args: { p_org_id: string; p_plate: string; p_zone_id: string }
         Returns: Json
@@ -18696,6 +35320,87 @@ export type Database = {
       can_approve_action: {
         Args: { p_action_org_id: string; p_user_id: string }
         Returns: boolean
+      }
+      cancel_shift_swap: {
+        Args: { p_expected_status: string; p_reason: string; p_swap_id: string }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          completed_at: string | null
+          created_at: string
+          declined_reason: string | null
+          id: string
+          organization_id: string
+          original_shift_id: string
+          original_staff_id: string
+          reason: string | null
+          requested_at: string
+          requested_by: string
+          status: string
+          swap_type: string
+          swap_with_staff_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_swaps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      canonical_place_for_house: {
+        Args: {
+          p_address: string
+          p_key: string
+          p_kind_hint?: string
+          p_location_id: string
+          p_name: string
+          p_org: string
+        }
+        Returns: string
+      }
+      capture_effective_rule_snapshot: {
+        Args: {
+          p_captured_at?: string
+          p_effective_rules?: Json
+          p_governing_jurisdiction_id?: string
+          p_governing_jurisdiction_name?: string
+          p_jurisdiction_rule_set_id?: string
+          p_matched_location_id?: string
+          p_matched_site_id?: string
+          p_matched_zone_id?: string
+          p_module_key: string
+          p_organization_id: string
+          p_resolution_status?: string
+          p_rule_set_id?: string
+          p_rule_set_name?: string
+          p_source_event_id?: string
+          p_source_event_table?: string
+        }
+        Returns: {
+          captured_at: string
+          created_at: string
+          effective_rules: Json
+          governing_jurisdiction_id: string | null
+          governing_jurisdiction_name: string | null
+          id: string
+          jurisdiction_rule_set_id: string | null
+          matched_location_id: string | null
+          matched_site_id: string | null
+          matched_zone_id: string | null
+          module_key: string
+          organization_id: string
+          resolution_status: string
+          rule_set_id: string | null
+          rule_set_name: string | null
+          source_event_id: string | null
+          source_event_table: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "effective_rule_snapshots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       check_invite_rate_limit: {
         Args: { p_caller_id: string; p_target_org_id: string }
@@ -18713,6 +35418,21 @@ export type Database = {
         }
         Returns: Json
       }
+      claim_cctv_inference_job: {
+        Args: {
+          p_job_id: string
+          p_lease_seconds?: number
+          p_lease_token: string
+        }
+        Returns: {
+          domain: string
+          evidence_item_id: string
+          id: string
+          lease_token: string
+          organization_id: string
+          status: string
+        }[]
+      }
       claim_first_org_user: {
         Args: {
           p_display_name: string
@@ -18723,11 +35443,72 @@ export type Database = {
         }
         Returns: undefined
       }
+      claim_shift_coverage: {
+        Args: { p_expected_status?: string; p_request_id: string }
+        Returns: {
+          claimed_at: string | null
+          claimed_by: string | null
+          created_at: string
+          created_by: string
+          end_time: string
+          filled_at: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          patrol_route_id: string | null
+          required_credentials: string[]
+          required_staff_count: number
+          roster_slot_id: string | null
+          shift_date: string
+          shift_template_id: string | null
+          site_id: string | null
+          start_time: string
+          status: string
+          urgency: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_coverage_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       classify_fc_overnight_window: {
         Args: { p_observed_at: string; p_timezone?: string }
         Returns: {
           overnight_date: string
           scan_window: string
+        }[]
+      }
+      close_finance_pl_period: {
+        Args: { p_pl_period_id: string }
+        Returns: {
+          closed_at: string | null
+          closed_by: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_pl_periods"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      close_ptt_transmission: {
+        Args: { p_metadata?: Json; p_state?: string; p_transmission_id: string }
+        Returns: {
+          ended_at: string
+          state: string
+          transmission_id: string
         }[]
       }
       closure_at_point: {
@@ -18743,6 +35524,132 @@ export type Database = {
         Args: { p_geojson_a: string; p_geojson_b: string }
         Returns: number
       }
+      complete_crm_follow_up: {
+        Args: {
+          p_activity_id: string
+          p_client_request_id: string
+          p_completion_notes?: string
+        }
+        Returns: {
+          activity_id: string
+          completed: boolean
+          completed_at: string
+          completed_by: string
+        }[]
+      }
+      complete_finance_external_connection: {
+        Args: {
+          p_adapter_name: string
+          p_granted_scopes?: string[]
+          p_provider_connection_reference: string
+          p_request_id: string
+        }
+        Returns: {
+          adapter_name: string | null
+          bank_account_id: string | null
+          connected_at: string | null
+          connection_mode: string
+          consent_confirmed: boolean
+          consent_confirmed_at: string | null
+          consent_confirmed_by: string | null
+          created_at: string
+          created_by: string | null
+          disconnected_at: string | null
+          external_reference: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          oauth_started_at: string | null
+          oauth_state_expires_at: string | null
+          oauth_state_hash: string | null
+          organization_id: string
+          provider_connection_reference: string | null
+          provider_name: string | null
+          provider_type: string
+          requested_scopes: string[]
+          setup_summary: Json
+          status: string
+          sync_cursor: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_external_connection_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      complete_motion_inference: {
+        Args: {
+          p_evidence_id: string
+          p_job_id: string
+          p_motion_result: Json
+          p_org_id: string
+        }
+        Returns: string
+      }
+      complete_officer_shift: {
+        Args: { p_expected_status: string; p_shift_id: string }
+        Returns: {
+          completed_at: string
+          shift_id: string
+          shift_status: string
+        }[]
+      }
+      complete_patrol_session: {
+        Args: { p_notes?: string; p_patrol_id: string }
+        Returns: {
+          created_at: string
+          ended_at: string | null
+          id: string
+          location_id: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          shift_id: string | null
+          started_at: string
+          status: string
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "patrols"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      complete_performance_review: {
+        Args: {
+          p_development_goals: string
+          p_employee_comments?: string
+          p_expected_status: string
+          p_rating: number
+          p_review_id: string
+          p_strengths: string
+        }
+        Returns: {
+          client_request_id: string
+          completed_at: string | null
+          created_at: string
+          cycle_id: string
+          development_goals: string | null
+          employee_comments: string | null
+          id: string
+          organization_id: string
+          rating: number | null
+          reviewer_user_id: string
+          staff_id: string
+          status: string
+          strengths: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "performance_reviews"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       complete_shift_stop: {
         Args: {
           p_gps_lat?: number
@@ -18756,8 +35663,1200 @@ export type Database = {
         Args: { lat1: number; lat2: number; lng1: number; lng2: number }
         Returns: number
       }
+      compute_travel_distance_km: {
+        Args: {
+          p_from_lat: number
+          p_from_lng: number
+          p_to_lat: number
+          p_to_lng: number
+        }
+        Returns: number
+      }
+      consume_bob_signing_nonce: {
+        Args: { p_expires_at: string; p_nonce: string }
+        Returns: boolean
+      }
+      consume_workload_token: {
+        Args: { p_job_id: string; p_jti: string; p_org_id: string }
+        Returns: boolean
+      }
+      continuity_party_on_duty: {
+        Args: { p_at: string; p_end: string; p_start: string }
+        Returns: boolean
+      }
+      convert_recruitment_candidate_to_staff: {
+        Args: {
+          p_candidate_id: string
+          p_note: string
+          p_staff_id: string
+          p_user_id: string
+        }
+        Returns: {
+          candidate_id: string
+          onboarding_ledger_id: string
+        }[]
+      }
+      correct_timesheet_hours: {
+        Args: {
+          p_actual_hours: number
+          p_expected_status: string
+          p_overtime_hours: number
+          p_reason: string
+          p_timesheet_id: string
+        }
+        Returns: {
+          actual_hours: number | null
+          adjustment_hours: number
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_hours: number
+          payroll_export_batch_id: string | null
+          period_end: string
+          period_start: string
+          review_notes: string | null
+          scheduled_hours: number | null
+          shift_id: string | null
+          staff_id: string
+          status: string
+          submitted_at: string | null
+          work_derived_hours: number | null
+          work_summary: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "timesheets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_bob_document_draft: {
+        Args: {
+          p_authored_html: string
+          p_authored_text: string
+          p_document_type: string
+          p_reference_handles?: Json
+          p_reference_metadata?: Json
+          p_title: string
+        }
+        Returns: Json
+      }
+      create_cctv_export_draft: {
+        Args: {
+          p_evidence_id: string
+          p_job_id: string
+          p_legal_hold: boolean
+          p_manifest: Json
+          p_organization_id: string
+          p_purpose: string
+          p_recipient_scope: string
+          p_selected_event_ids: Json
+        }
+        Returns: {
+          approval_state: string
+          approved_at: string | null
+          approved_by: string | null
+          artifact_bucket: string | null
+          artifact_path: string | null
+          evidence_item_id: string
+          generated_at: string
+          generated_by: string
+          id: string
+          inference_job_id: string
+          issued_at: string | null
+          legal_hold: boolean
+          manifest: Json
+          manifest_sha256: string
+          organization_id: string
+          purpose: string
+          recipient_scope: string
+          sealed_at: string | null
+          selected_event_ids: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_exports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_cost_centre: {
+        Args: { p_code: string; p_name: string }
+        Returns: {
+          active: boolean
+          code: string
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cost_centres"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_crm_account_activity: {
+        Args: {
+          p_account_organization_id: string
+          p_activity_type: string
+          p_client_request_id: string
+          p_details: string
+          p_follow_up_at?: string
+          p_occurred_at: string
+          p_outcome: string
+          p_service_agreement_id: string
+          p_subject: string
+        }
+        Returns: {
+          account_organization_id: string
+          activity_type: string
+          client_request_id: string
+          completed_at: string | null
+          completed_by: string | null
+          completion_notes: string | null
+          created_at: string
+          created_by: string
+          details: string | null
+          follow_up_at: string | null
+          id: string
+          occurred_at: string
+          outcome: string | null
+          provider_organization_id: string
+          service_agreement_id: string | null
+          subject: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "crm_account_activities"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_crm_draft_quote: {
+        Args: {
+          p_client_org_id: string
+          p_client_request_id: string
+          p_notes?: string
+          p_target_margin_pct?: number
+          p_title: string
+          p_valid_until?: string
+        }
+        Returns: {
+          accepted_at: string | null
+          accepted_by: string | null
+          client_name: string | null
+          client_org_id: string | null
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          discount_amount: number
+          discount_pct: number
+          discount_schedule_id: string | null
+          gst_amount: number
+          gst_rate: number
+          id: string
+          notes: string | null
+          platform_fee_treatment: string
+          provider_org_id: string
+          service_agreement_id: string | null
+          status: string
+          subtotal_charge: number
+          target_margin_pct: number
+          tender_id: string | null
+          title: string
+          total_charge: number
+          total_cost: number
+          updated_at: string
+          updated_by: string | null
+          valid_until: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quotes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_crm_draft_quote_for_provider: {
+        Args: {
+          p_client_org_id: string
+          p_client_request_id: string
+          p_notes?: string
+          p_operating_provider_organization_id: string
+          p_target_margin_pct?: number
+          p_title: string
+          p_valid_until?: string
+        }
+        Returns: {
+          accepted_at: string | null
+          accepted_by: string | null
+          client_name: string | null
+          client_org_id: string | null
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          discount_amount: number
+          discount_pct: number
+          discount_schedule_id: string | null
+          gst_amount: number
+          gst_rate: number
+          id: string
+          notes: string | null
+          platform_fee_treatment: string
+          provider_org_id: string
+          service_agreement_id: string | null
+          status: string
+          subtotal_charge: number
+          target_margin_pct: number
+          tender_id: string | null
+          title: string
+          total_charge: number
+          total_cost: number
+          updated_at: string
+          updated_by: string | null
+          valid_until: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quotes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_crm_site: {
+        Args: {
+          p_account_organization_id: string
+          p_address: string
+          p_center_lat?: number
+          p_center_lng?: number
+          p_client_request_id: string
+          p_location_id?: string
+          p_name: string
+          p_site_type?: string
+        }
+        Returns: {
+          active: boolean
+          address: string
+          boundary_status: string
+          boundary_verification: string
+          created: boolean
+          id: string
+          name: string
+          site_type: string
+        }[]
+      }
+      create_dispatch_intake_job: {
+        Args: {
+          p_briefing_notes?: string
+          p_client_request_id: string
+          p_dispatch_resource_id?: string
+          p_job_type: string
+          p_location_address: string
+          p_location_lat: number
+          p_location_lng: number
+          p_location_name: string
+          p_organization_id: string
+          p_priority: string
+          p_service_agreement_id: string
+          p_shift_id?: string
+          p_sla_minutes: number
+        }
+        Returns: {
+          client_site_id: string
+          created: boolean
+          id: string
+          sla_respond_by: string
+          status: string
+        }[]
+      }
+      create_dispatch_job: {
+        Args: {
+          p_briefing_notes?: string
+          p_client_request_id: string
+          p_client_site_id: string
+          p_dispatch_resource_id?: string
+          p_job_type: string
+          p_organization_id: string
+          p_priority: string
+          p_service_agreement_id: string
+          p_shift_id?: string
+          p_sla_minutes: number
+        }
+        Returns: {
+          created: boolean
+          id: string
+          sla_respond_by: string
+          status: string
+        }[]
+      }
+      create_event_context_snapshot: {
+        Args: {
+          p_authority_snapshot?: Json
+          p_captured_at?: string
+          p_checkpoint_id?: string
+          p_client_organization_id?: string
+          p_client_site_id?: string
+          p_jurisdiction_organization_id?: string
+          p_jurisdiction_rule_set_id?: string
+          p_location_id?: string
+          p_module_key?: string
+          p_provider_organization_id?: string
+          p_service_agreement_id?: string
+          p_source_event_id: string
+          p_source_refs?: Json
+          p_source_table: string
+          p_zone_id?: string
+        }
+        Returns: {
+          authority_snapshot: Json
+          captured_at: string
+          checkpoint_id: string | null
+          client_organization_id: string | null
+          client_site_id: string | null
+          created_at: string
+          id: string
+          jurisdiction_organization_id: string | null
+          jurisdiction_rule_set_id: string | null
+          location_id: string | null
+          module_key: string | null
+          provider_organization_id: string | null
+          service_agreement_id: string | null
+          source_event_id: string
+          source_refs: Json
+          source_table: string
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "event_context_snapshots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_file_import_batch: {
+        Args: {
+          p_batch_name: string
+          p_duplicate_count?: number
+          p_manifest_json?: Json
+          p_organization_id?: string
+          p_parser: string
+          p_row_count?: number
+          p_schema_json?: Json
+          p_source_file: string
+          p_source_sha256: string
+          p_unresolved_count?: number
+        }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_finance_budget: {
+        Args: { p_fiscal_year: number; p_name: string }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          created_by: string | null
+          fiscal_year: number
+          id: string
+          name: string
+          organization_id: string
+          status: string
+          supersedes_id: string | null
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_budgets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_finance_pl_period: {
+        Args: { p_name: string; p_period_end: string; p_period_start: string }
+        Returns: {
+          closed_at: string | null
+          closed_by: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_pl_periods"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_finance_tax_period: {
+        Args: {
+          p_filing_due_date: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: {
+          adjustments: number
+          created_at: string
+          created_by: string | null
+          filed_at: string | null
+          filed_by: string | null
+          filing_due_date: string
+          id: string
+          input_tax: number
+          net_tax_due: number
+          organization_id: string
+          output_tax: number
+          period_end: string
+          period_start: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_tax_periods"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_investigation: {
+        Args: {
+          p_client_request_id: string
+          p_investigation_type?: string
+          p_lead_user_id?: string
+          p_organization_id: string
+          p_priority?: string
+          p_reference: string
+          p_summary?: string
+          p_title: string
+        }
+        Returns: {
+          closed_at: string | null
+          created_at: string
+          created_by: string
+          id: string
+          investigation_reference: string
+          investigation_type: string
+          lead_user_id: string | null
+          legal_hold: boolean
+          opened_at: string
+          organization_id: string
+          priority: string
+          resolution_notes: string | null
+          resolved_at: string | null
+          status: string
+          summary: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "investigations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_investigation_follow_up_job: {
+        Args: {
+          p_briefing_notes: string
+          p_client_request_id: string
+          p_client_site_id: string
+          p_dispatch_resource_id?: string
+          p_investigation_id: string
+          p_job_type: string
+          p_priority: string
+          p_service_agreement_id: string
+          p_shift_id?: string
+          p_sla_minutes: number
+        }
+        Returns: {
+          created: boolean
+          id: string
+          sla_respond_by: string
+          status: string
+        }[]
+      }
+      create_location_event: {
+        Args: {
+          p_authority_snapshot?: Json
+          p_checkpoint_id?: string
+          p_client_organization_id?: string
+          p_client_site_id?: string
+          p_event_type: string
+          p_external_ref?: string
+          p_jurisdiction_organization_id?: string
+          p_jurisdiction_rule_set_id?: string
+          p_location_id?: string
+          p_module_key?: string
+          p_observed_entity_id?: string
+          p_observed_entity_type?: string
+          p_occurred_at?: string
+          p_organization_id: string
+          p_payload?: Json
+          p_provider_organization_id?: string
+          p_service_agreement_id?: string
+          p_source?: string
+          p_source_refs?: Json
+          p_status?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          context_id: string
+          event_id: string
+        }[]
+      }
+      create_on_call_period: {
+        Args: {
+          p_client_request_id: string
+          p_ends_at: string
+          p_flat_rate?: number
+          p_linked_shift_id?: string
+          p_notes?: string
+          p_officer_user_id: string
+          p_period_type: string
+          p_starts_at: string
+        }
+        Returns: {
+          client_request_id: string | null
+          created_at: string
+          decline_reason: string | null
+          ends_at: string
+          flat_rate: number | null
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          period_type: string
+          responded_at: string | null
+          starts_at: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "on_call_periods"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_operating_cost_centre: {
+        Args: {
+          p_code: string
+          p_name: string
+          p_operating_organization_id: string
+        }
+        Returns: {
+          active: boolean
+          code: string
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cost_centres"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_operating_organization_workplace: {
+        Args: {
+          p_address?: string
+          p_name: string
+          p_operating_organization_id: string
+        }
+        Returns: {
+          active: boolean
+          address: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_workplaces"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_operating_roster_work_unit: {
+        Args: {
+          p_cost_centre_id?: string
+          p_name: string
+          p_operating_organization_id: string
+          p_patrol_route_id?: string
+          p_service_agreement_location_id?: string
+          p_service_agreement_module_id?: string
+          p_service_type: string
+          p_team_id?: string
+          p_work_unit_type: string
+          p_workplace_id?: string
+        }
+        Returns: {
+          active: boolean
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          patrol_route_id: string | null
+          required_skill_ids: string[]
+          required_skill_names: string[]
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          team_id: string | null
+          updated_at: string
+          work_unit_type: string
+          workplace_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_work_units"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_organization_workplace: {
+        Args: { p_address?: string; p_name: string }
+        Returns: {
+          active: boolean
+          address: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_workplaces"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_payroll_export_batch: {
+        Args: {
+          p_client_request_id: string
+          p_format?: string
+          p_notes?: string
+          p_organization_id: string
+          p_period_from: string
+          p_period_to: string
+        }
+        Returns: {
+          batch_id: string
+          timesheet_count: number
+          total_hours: number
+        }[]
+      }
+      create_performance_review: {
+        Args: {
+          p_client_request_id: string
+          p_cycle_id: string
+          p_reviewer_user_id: string
+          p_staff_id: string
+        }
+        Returns: {
+          client_request_id: string
+          completed_at: string | null
+          created_at: string
+          cycle_id: string
+          development_goals: string | null
+          employee_comments: string | null
+          id: string
+          organization_id: string
+          rating: number | null
+          reviewer_user_id: string
+          staff_id: string
+          status: string
+          strengths: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "performance_reviews"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_provider_branch: {
+        Args: {
+          p_client_request_id: string
+          p_contact_email?: string
+          p_contact_phone?: string
+          p_name: string
+          p_parent_organization_id: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_recruitment_candidate: {
+        Args: {
+          p_client_request_id: string
+          p_email: string
+          p_first_name: string
+          p_last_name: string
+          p_notes?: string
+          p_phone?: string
+          p_resume_storage_path?: string
+          p_source?: string
+          p_vacancy_id: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          email: string
+          first_name: string
+          id: string
+          last_name: string
+          notes: string | null
+          offer_accepted_at: string | null
+          offer_employment_type: string | null
+          offer_role: string | null
+          offer_sent_at: string | null
+          offer_start_date: string | null
+          organization_id: string
+          phone: string | null
+          provisioned_staff_id: string | null
+          provisioned_user_id: string | null
+          resume_storage_path: string | null
+          source: string | null
+          stage: string
+          status: string
+          updated_at: string
+          vacancy_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "recruitment_candidates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_roster_shift: {
+        Args: {
+          p_location_id?: string
+          p_notes?: string
+          p_officer_user_id: string
+          p_patrol_route_id?: string
+          p_publish?: boolean
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_service_type: string
+          p_zone_id?: string
+        }
+        Returns: {
+          actual_end: string | null
+          actual_start: string | null
+          completed_stops: number
+          created_at: string
+          external_refs: Json
+          generated_at: string | null
+          id: string
+          location_id: string | null
+          module_key: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          osrm_matrix_cached_at: string | null
+          patrol_route_id: string | null
+          roster_slot_id: string | null
+          scheduled_end: string
+          scheduled_start: string
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          shift_health: string | null
+          shift_origin: string
+          status: string
+          total_stops: number
+          updated_at: string
+          work_unit_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shifts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_roster_slot: {
+        Args: {
+          p_client_request_id: string
+          p_notes?: string
+          p_publish?: boolean
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+          p_work_unit_id: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_roster_work_unit: {
+        Args: {
+          p_cost_centre_id?: string
+          p_name: string
+          p_patrol_route_id?: string
+          p_service_agreement_location_id?: string
+          p_service_agreement_module_id?: string
+          p_service_type: string
+          p_team_id?: string
+          p_work_unit_type: string
+          p_workplace_id?: string
+        }
+        Returns: {
+          active: boolean
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          patrol_route_id: string | null
+          required_skill_ids: string[]
+          required_skill_names: string[]
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          team_id: string | null
+          updated_at: string
+          work_unit_type: string
+          workplace_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_work_units"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_shift_coverage_request: {
+        Args: {
+          p_end_time: string
+          p_notes?: string
+          p_organization_id: string
+          p_required_staff_count?: number
+          p_shift_date: string
+          p_start_time: string
+          p_urgency?: string
+        }
+        Returns: {
+          claimed_at: string | null
+          claimed_by: string | null
+          created_at: string
+          created_by: string
+          end_time: string
+          filled_at: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          patrol_route_id: string | null
+          required_credentials: string[]
+          required_staff_count: number
+          roster_slot_id: string | null
+          shift_date: string
+          shift_template_id: string | null
+          site_id: string | null
+          start_time: string
+          status: string
+          urgency: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_coverage_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      crm_actor_can_manage_account: {
+        Args: { p_account_organization_id: string }
+        Returns: boolean
+      }
+      crm_actor_can_manage_location: {
+        Args: { p_location_id: string }
+        Returns: boolean
+      }
       current_user_role: { Args: never; Returns: string }
+      custodian_classify_evidence: {
+        Args: {
+          p_evidence_id: string
+          p_reason: string
+          p_retention_class: string
+        }
+        Returns: {
+          captured_at: string
+          captured_by_user_id: string | null
+          evidence_kind: string
+          id: string
+          is_court_ready: boolean
+          location_event_id: string | null
+          locked_at: string | null
+          metadata: Json
+          module_key: string
+          organization_id: string
+          retention_class: string | null
+          retention_days: number | null
+          retention_hold: boolean
+          retention_reason: string | null
+          retention_until: string | null
+          sha256_hash: string | null
+          storage_path: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "evidence_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      custodian_classify_observation: {
+        Args: {
+          p_observation_id: string
+          p_reason: string
+          p_retention_class: string
+        }
+        Returns: {
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_scv_id: string | null
+          canonical_vehicle_id: string | null
+          client_org_id: string | null
+          compliance_reason: string | null
+          compliance_status: string | null
+          created_at: string
+          detection_bbox: Json | null
+          detection_confidence: number | null
+          embedding: Json | null
+          embedding_quality: number | null
+          enforcement_exempt: boolean
+          exemption_reason: string | null
+          external_refs: Json
+          geofence_context: Json
+          gps_lat: number | null
+          gps_lng: number | null
+          gps_point: unknown
+          id: string
+          incident_id: string | null
+          is_compliant: boolean | null
+          is_homeless: boolean
+          is_scv: boolean | null
+          location_id: string | null
+          locked_at: string | null
+          module_key: string
+          movement_decision: string | null
+          movement_moved: boolean | null
+          movement_similarity: number | null
+          nights_this_month: number | null
+          nights_this_zone: number | null
+          observed_at: string
+          officer_id: string
+          officer_notes: string | null
+          officer_notes_updated_at: string | null
+          offline_queued: boolean
+          organization_id: string
+          original_photo_url: string | null
+          person_record_id: string | null
+          photo_captured_at: string | null
+          photo_quality: number | null
+          photo_url: string | null
+          photo_watermark_text: string | null
+          plate_confidence: number | null
+          plate_number: string
+          plate_source: string | null
+          previous_observation_id: string | null
+          retention_hold: boolean
+          retention_hold_days: number | null
+          retention_reason: string | null
+          retention_until: string | null
+          scv_certificate_number: string | null
+          site_id: string | null
+          sticker_color: string | null
+          sticker_detection_confidence: number | null
+          sticker_presence: boolean | null
+          synced_at: string | null
+          vehicle_colour: string | null
+          vehicle_make: string | null
+          vehicle_model: string | null
+          vehicle_year: number | null
+          watermarked_photo_url: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      custodian_manage_legal_hold: {
+        Args: {
+          p_action: string
+          p_hold_id?: string
+          p_hold_key?: string
+          p_reason?: string
+          p_release_reason?: string
+          p_scope?: Json
+          p_title?: string
+        }
+        Returns: {
+          created_at: string
+          hold_key: string
+          id: string
+          organization_id: string
+          placed_at: string
+          placed_by: string
+          reason: string
+          release_reason: string | null
+          released_at: string | null
+          released_by: string | null
+          scope: Json
+          status: string
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "custodian_legal_holds"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      custodian_retention_candidates: {
+        Args: { p_limit?: number; p_organization_id?: string }
+        Returns: {
+          blocked_by_hold: boolean
+          organization_id: string
+          retention_class: string
+          retention_reason: string
+          retention_until: string
+          target_id: string
+          target_table: string
+        }[]
+      }
       daitch_mokotoff: { Args: { "": string }; Returns: string[] }
+      depart_dispatch_place: {
+        Args: {
+          p_client_request_id: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_officer_notes?: string
+          p_sla_delay_reason?: string
+          p_stop_id: string
+        }
+        Returns: {
+          departed_at: string
+          sla_status: string
+          stop_id: string
+        }[]
+      }
       disablelongtransactions: { Args: never; Returns: string }
       dmetaphone: { Args: { "": string }; Returns: string }
       dmetaphone_alt: { Args: { "": string }; Returns: string }
@@ -18792,6 +36891,53 @@ export type Database = {
         | { Args: { schema_name: string; table_name: string }; Returns: string }
         | { Args: { table_name: string }; Returns: string }
       enablelongtransactions: { Args: never; Returns: string }
+      end_branch_area_grant: {
+        Args: {
+          p_expected_updated_at: string
+          p_grant_id: string
+          p_reason: string
+        }
+        Returns: {
+          area: string
+          created_at: string
+          granted_by: string | null
+          id: string
+          level: string
+          scope_org_id: string
+          source_preset: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_area_grants"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      end_shift_break: {
+        Args: { p_break_id: string; p_notes?: string }
+        Returns: {
+          break_type: string
+          client_request_id: string
+          created_at: string
+          ended_at: string | null
+          id: string
+          is_paid: boolean
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          shift_id: string
+          started_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_breaks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       enqueue_notification: {
         Args: {
           p_body?: string
@@ -18807,6 +36953,40 @@ export type Database = {
         }
         Returns: string
       }
+      ensure_canonical_person_for_record: {
+        Args: { p_person_record_id: string }
+        Returns: string
+      }
+      ensure_canonical_place: {
+        Args: {
+          p_address: string
+          p_key: string
+          p_kind: string
+          p_meta?: Json
+          p_name: string
+        }
+        Returns: string
+      }
+      ensure_canonical_place_for_house: {
+        Args: { p_location_id: string }
+        Returns: string
+      }
+      ensure_canonical_place_for_projection: {
+        Args: { p_source_id: string; p_source_table: string }
+        Returns: string
+      }
+      ensure_canonical_vehicle: {
+        Args: {
+          p_colour: string
+          p_make: string
+          p_model: string
+          p_observed_at: string
+          p_plate: string
+          p_source_key: string
+          p_source_table: string
+        }
+        Returns: string
+      }
       equals: { Args: { geom1: unknown; geom2: unknown }; Returns: boolean }
       evaluate_parking_compliance: {
         Args: {
@@ -18818,18 +36998,303 @@ export type Database = {
         }
         Returns: Json
       }
+      face_embedding_cosine: {
+        Args: { p_left: Json; p_right: Json }
+        Returns: number
+      }
+      finalize_biosecurity_photo_inference: {
+        Args: {
+          p_actor_user_id: string
+          p_assessment_id: string
+          p_checklist: Json
+          p_confidence: number
+          p_photo: Json
+          p_recommendation: string
+          p_species_id: string
+        }
+        Returns: {
+          action: string | null
+          action_taken: string | null
+          assessed_at: string
+          assigned_reviewer_id: string | null
+          bob_checklist: Json
+          bob_classification: string | null
+          bob_confidence: number | null
+          bob_recommendation: string | null
+          bob_species_confirmed: boolean | null
+          bob_species_id: string | null
+          client_request_id: string | null
+          confirmed_species_name: string | null
+          created_at: string
+          density_estimate: string | null
+          dispatch_job_id: string | null
+          evidence_state: string
+          follow_up_required: boolean
+          id: string
+          land_use_context: string | null
+          location_id: string | null
+          location_name: string | null
+          mpi_referral_number: string | null
+          notes: string | null
+          notice_number: string | null
+          officer_id: string | null
+          officer_name: string | null
+          officer_user_id: string | null
+          organization_id: string
+          photo_url: string | null
+          photo_urls: Json | null
+          protected_land_address: string | null
+          protected_land_site_id: string | null
+          review_due_at: string | null
+          review_notes: string | null
+          review_priority: string
+          review_state: string
+          review_status: string
+          review_version: number
+          reviewed_at: string | null
+          reviewed_by: string | null
+          scene_description: string | null
+          seed_head_present: boolean | null
+          shift_id: string | null
+          site_id: string | null
+          species_confirmed: boolean
+          species_identified: string | null
+          species_name: string | null
+          species_review_decision: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "biosecurity_assessments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      finalize_shift_coverage: {
+        Args: {
+          p_expected_status: string
+          p_notes?: string
+          p_request_id: string
+          p_work_unit_id: string
+        }
+        Returns: {
+          request_id: string
+          request_status: string
+          roster_slot_id: string
+          shift_id: string
+        }[]
+      }
+      finalize_smoke_photo_inference: {
+        Args: {
+          p_actor_user_id: string
+          p_analysis: Json
+          p_assessment_id: string
+          p_confidence: number
+          p_recommendation: string
+          p_summary: string
+        }
+        Returns: {
+          action: string | null
+          action_taken: string | null
+          address: string | null
+          assessed_at: string
+          bob_classification: string | null
+          bob_confidence: number | null
+          bob_recommendation: string | null
+          checklist: Json
+          client_request_id: string | null
+          complainant_site_id: string | null
+          complaint_address: string | null
+          complaint_source: string | null
+          created_at: string
+          dispatch_job_id: string | null
+          evidence_state: string
+          follow_up_required: boolean
+          gps_accuracy: number | null
+          gps_lat: number | null
+          gps_lng: number | null
+          id: string
+          is_out_of_hours: boolean
+          legal_basis: string | null
+          location_id: string | null
+          notes: string | null
+          notice_number: string | null
+          officer_id: string | null
+          officer_name: string | null
+          officer_user_id: string | null
+          organization_id: string
+          photo_urls: Json | null
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          scene_description: string | null
+          severity: string | null
+          site_id: string | null
+          smoke_ai_analysis: Json | null
+          smoke_ai_analyzed_at: string | null
+          smoke_source: string | null
+          smoke_source_type: string | null
+          source_confirmed: boolean
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "smoke_assessments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      find_crm_location_candidates: {
+        Args: {
+          p_account_organization_id: string
+          p_address?: string
+          p_query?: string
+        }
+        Returns: {
+          address: string
+          belongs_to_account: boolean
+          boundary_state: string
+          location_id: string
+          match_reason: string
+          name: string
+          postcode: string
+          site_count: number
+          suburb: string
+          zone_count: number
+        }[]
+      }
+      find_crm_organization_candidates: {
+        Args: { p_nzbn?: string; p_query: string }
+        Returns: {
+          id: string
+          manageable: boolean
+          match_reason: string
+          name: string
+          nzbn: string
+          organization_type: string
+          parent_organization_id: string
+          status: string
+        }[]
+      }
+      find_crm_site_candidates: {
+        Args: {
+          p_account_organization_id: string
+          p_address?: string
+          p_query?: string
+        }
+        Returns: {
+          active: boolean
+          address: string
+          boundary_status: string
+          boundary_verification: string
+          id: string
+          match_reason: string
+          name: string
+          site_type: string
+        }[]
+      }
+      find_existing_site_for_address: {
+        Args: {
+          p_address: string
+          p_lat: number
+          p_lng: number
+          p_organization_id: string
+        }
+        Returns: {
+          address: string
+          boundary_verification: string
+          client_organization_id: string
+          distance_m: number
+          has_boundary: boolean
+          match_reason: string
+          site_id: string
+          site_name: string
+        }[]
+      }
+      generate_crm_invoice_from_agreement: {
+        Args: {
+          p_client_request_id: string
+          p_service_agreement_id: string
+          p_service_period_end: string
+          p_service_period_start: string
+        }
+        Returns: {
+          client_organization_id: string
+          gst_amount: number
+          invoice_id: string
+          invoice_number: string
+          line_item_count: number
+          subtotal: number
+          total_amount: number
+        }[]
+      }
       generate_due_report_packs: {
         Args: { p_period_end: string; p_period_start: string }
         Returns: number
       }
       generate_noise_job_number: { Args: never; Returns: string }
+      generate_officer_activity_evidence_export: {
+        Args: {
+          p_from: string
+          p_limit?: number
+          p_officer_id: string
+          p_to: string
+        }
+        Returns: {
+          event_count: number
+          export_id: string
+          generated_at: string
+          package_text: string
+          sha256: string
+        }[]
+      }
       generate_parking_notice_number: {
         Args: { p_org_id: string }
         Returns: string
       }
+      generate_pl_financial_statement: {
+        Args: { p_pl_period_id: string }
+        Returns: {
+          cost_breakdown: Json
+          gross_margin_pct: number
+          gross_profit: number
+          period_end: string
+          period_start: string
+          report_name: string
+          total_depreciation_cost: number
+          total_equipment_cost: number
+          total_labour_cost: number
+          total_materials_cost: number
+          total_operating_cost: number
+          total_overhead_cost: number
+          total_revenue: number
+          total_vehicle_cost: number
+        }[]
+      }
+      generate_roster_from_templates: {
+        Args: {
+          p_client_request_id: string
+          p_from_date: string
+          p_organization_id: string
+          p_to_date: string
+        }
+        Returns: {
+          slots_generated: number
+          templates_applied: number
+          templates_skipped: number
+        }[]
+      }
       generate_shift_stops: {
         Args: { p_shift_date: string; p_shift_id: string }
         Returns: number
+      }
+      geofence_area_gate: {
+        Args: { p_area_m2: number; p_zone_type: string }
+        Returns: {
+          ok: boolean
+          reason: string
+        }[]
       }
       geometry: { Args: { "": string }; Returns: unknown }
       geometry_above: {
@@ -18945,6 +37410,7 @@ export type Database = {
           approved_by: string
           approved_by_name: string
           assigned_approver_id: string
+          assigned_approver_name: string
           bob_reasoning: string
           can_decide: boolean
           confidence_score: number
@@ -18966,6 +37432,34 @@ export type Database = {
           user_name: string
         }[]
       }
+      get_bob_active_signing_identity: { Args: never; Returns: Json }
+      get_bob_nz_finance_sources: {
+        Args: { p_topic?: string }
+        Returns: {
+          authority: string
+          guidance_scope: string
+          last_verified_on: string
+          limitations: string
+          review_due_on: string
+          source_key: string
+          source_url: string
+          status: string
+          title: string
+          topic: string
+        }[]
+      }
+      get_bob_roster_fill_candidates: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          rationale: string
+          roster_slot_id: string
+          scheduled_end: string
+          scheduled_start: string
+          score: number
+          staff_id: string
+          work_unit_id: string
+        }[]
+      }
       get_boundary_history: {
         Args: { p_entity_id: string; p_entity_type: string }
         Returns: {
@@ -18984,9 +37478,321 @@ export type Database = {
           version: number
         }[]
       }
+      get_branch_area_grants: {
+        Args: { p_operating_organization_id: string }
+        Returns: {
+          area: string
+          id: string
+          level: string
+          source_preset: string
+          status: string
+          updated_at: string
+          user_id: string
+        }[]
+      }
+      get_branch_leave_queue: {
+        Args: { p_operating_organization_id: string }
+        Returns: {
+          branch_review_notes: string
+          branch_reviewed_by: string
+          ends_on: string
+          id: string
+          leave_type: string
+          reason: string
+          staff_id: string
+          starts_on: string
+          status: string
+        }[]
+      }
+      get_branch_timesheet_queue: {
+        Args: { p_operating_organization_id: string }
+        Returns: {
+          actual_hours: number
+          adjustment_hours: number
+          branch_review_notes: string
+          branch_reviewed_by: string
+          id: string
+          period_end: string
+          period_start: string
+          scheduled_hours: number
+          staff_id: string
+          status: string
+          work_derived_hours: number
+          work_summary: Json
+        }[]
+      }
+      get_builder_approvals_activity: {
+        Args: {
+          p_approval_types?: string[]
+          p_limit?: number
+          p_offset?: number
+          p_statuses?: string[]
+        }
+        Returns: {
+          approval_comment: string
+          approval_type: string
+          can_decide: boolean
+          decided_by: string
+          decided_by_name: string
+          id: string
+          job_id: string
+          job_title: string
+          org_name: string
+          organization_id: string
+          project_name: string
+          repository: string
+          requested_at: string
+          responded_at: string
+          reviewed_artifacts: Json
+          status: string
+          target_sha: string
+        }[]
+      }
+      get_callout_pay_summary: {
+        Args: { p_callout_id: string }
+        Returns: {
+          callout_id: string
+          minimum_applied: boolean
+          minimum_pay_hours: number
+          payable_hours: number
+          response_minutes: number
+          worked_hours: number
+        }[]
+      }
+      get_cctv_batch_report_data: {
+        Args: { p_batch_id: string; p_organization_id: string }
+        Returns: Json
+      }
+      get_consolidated_commercial_overview: {
+        Args: { p_from?: string; p_root_organization_id: string; p_to?: string }
+        Returns: {
+          accepted_agreement_count: number
+          invoice_count: number
+          invoice_total: number
+          open_receivables: number
+          overdue_receivables: number
+          quote_count: number
+          report_pack_count: number
+          source_organization_id: string
+          source_organization_name: string
+        }[]
+      }
+      get_consolidated_reporting_overview: {
+        Args: { p_from?: string; p_root_organization_id: string; p_to?: string }
+        Returns: {
+          breach_count: number
+          non_compliant_observation_count: number
+          observation_count: number
+          report_pack_count: number
+          source_organization_id: string
+          source_organization_name: string
+        }[]
+      }
+      get_crm_activation_handoffs: {
+        Args: never
+        Returns: {
+          account_name: string
+          account_organization_id: string
+          activated_at: string
+          agreement_id: string
+          agreement_name: string
+          completed_at: string
+          first_roster_at: string
+          handoff_id: string
+          handoff_status: string
+          owner_name: string
+          owner_user_id: string
+          sites: Json
+          tasks: Json
+          version: number
+          work_units: Json
+        }[]
+      }
+      get_crm_agreement_setup: {
+        Args: { p_agreement_id: string }
+        Returns: Json
+      }
+      get_crm_enterprise_readiness: {
+        Args: { p_agreement_id: string }
+        Returns: Json
+      }
+      get_crm_onboarding_assignees: {
+        Args: never
+        Returns: {
+          display_name: string
+          role: string
+          user_id: string
+        }[]
+      }
+      get_crm_onboarding_history: {
+        Args: { p_account_organization_id: string }
+        Returns: {
+          actor_name: string
+          actor_user_id: string
+          assigned_name: string
+          assigned_to: string
+          created_at: string
+          event_id: string
+          event_type: string
+          from_stage: string
+          ledger_status: string
+          ledger_version: number
+          note: string
+          to_stage: string
+        }[]
+      }
+      get_crm_onboarding_queue: {
+        Args: never
+        Returns: {
+          account_name: string
+          account_organization_id: string
+          agreement_id: string
+          agreement_name: string
+          current_stage: string
+          days_open: number
+          has_primary_contact: boolean
+          ledger_id: string
+          ledger_status: string
+          organization_status: string
+          organization_updated_at: string
+          overdue: boolean
+          readiness: Json
+          started_at: string
+          target_live_at: string
+          version: number
+        }[]
+      }
+      get_crm_onboarding_workspace: {
+        Args: never
+        Returns: {
+          account_name: string
+          account_organization_id: string
+          agreement_id: string
+          agreement_name: string
+          assigned_name: string
+          assigned_to: string
+          current_stage: string
+          days_open: number
+          has_primary_contact: boolean
+          invitation_status: string
+          ledger_id: string
+          ledger_status: string
+          organization_status: string
+          organization_updated_at: string
+          overdue: boolean
+          readiness: Json
+          stage_note: string
+          started_at: string
+          target_live_at: string
+          version: number
+        }[]
+      }
+      get_crm_operational_geography: { Args: never; Returns: Json }
+      get_crm_operational_place_editor: {
+        Args: { p_location_id: string }
+        Returns: Json
+      }
+      get_crm_operational_readiness: {
+        Args: { p_agreement_id: string }
+        Returns: Json
+      }
+      get_crm_organization_readiness: {
+        Args: { p_organization_ids?: string[] }
+        Returns: {
+          agreement_status: string
+          billing_status: string
+          blockers: string[]
+          contact_status: string
+          identity_status: string
+          location_status: string
+          module_status: string
+          next_action: string
+          operations_status: string
+          organization_id: string
+          organization_status: string
+        }[]
+      }
+      get_crm_provider_portfolio: {
+        Args: { p_operating_provider_organization_id?: string }
+        Returns: {
+          operating_provider_name: string
+          operating_provider_organization_id: string
+          organization_id: string
+          organization_name: string
+          organization_status: string
+          organization_type: string
+        }[]
+      }
+      get_crm_site_boundary_queue: {
+        Args: never
+        Returns: {
+          account_name: string
+          account_organization_id: string
+          active: boolean
+          address: string
+          boundary_geojson: Json
+          boundary_status: string
+          boundary_verification: string
+          boundary_verified_at: string
+          gps_lat: number
+          gps_lng: number
+          has_boundary: boolean
+          site_id: string
+          site_name: string
+          site_type: string
+        }[]
+      }
       get_descendant_organizations: {
         Args: { org_id: string }
         Returns: string[]
+      }
+      get_dispatch_job_protected_party: {
+        Args: { p_dispatch_job_id: string; p_party_role?: string }
+        Returns: Json
+      }
+      get_finance_owner_brief: { Args: never; Returns: Json }
+      get_finance_tax_identity_summary: { Args: never; Returns: Json }
+      get_geofence_review_queue: {
+        Args: { p_organization_id?: string }
+        Returns: {
+          active_agreements: number
+          address: string
+          boundary_geojson: Json
+          boundary_state: string
+          boundary_status: string
+          boundary_verification: string
+          center_lat: number
+          center_lng: number
+          configuration_version: number
+          entity_id: string
+          entity_type: string
+          has_boundary: boolean
+          module_key: string
+          name: string
+          open_proposal_area_m2: number
+          open_proposal_drift_m: number
+          open_proposal_gate_ok: boolean
+          open_proposal_geojson: Json
+          open_proposal_id: string
+          open_proposal_source: string
+          organization_id: string
+          organization_name: string
+          priority: number
+          zone_type: string
+        }[]
+      }
+      get_manageable_user_identities: {
+        Args: { p_operating_organization_id: string }
+        Returns: {
+          deactivated_at: string
+          display_name: string
+          email: string
+          id: string
+          module_access: string[]
+          phone: string
+          role: string
+          updated_at: string
+        }[]
       }
       get_my_pending_proposals: {
         Args: { p_limit?: number }
@@ -19005,6 +37811,110 @@ export type Database = {
           user_id: string
         }[]
       }
+      get_noise_attendance_report: {
+        Args: { p_dispatch_job_id: string }
+        Returns: Json
+      }
+      get_officer_activity_timeline: {
+        Args: {
+          p_from: string
+          p_limit?: number
+          p_officer_id: string
+          p_to: string
+        }
+        Returns: {
+          details: Json
+          event_at: string
+          event_key: string
+          event_type: string
+          gps_lat: number
+          gps_lng: number
+          received_at: string
+          shift_id: string
+          site_id: string
+          source_id: string
+          source_table: string
+          summary: string
+          zone_id: string
+        }[]
+      }
+      get_officer_activity_timeline_unlogged: {
+        Args: {
+          p_from: string
+          p_limit?: number
+          p_officer_id: string
+          p_to: string
+        }
+        Returns: {
+          details: Json
+          event_at: string
+          event_key: string
+          event_type: string
+          gps_lat: number
+          gps_lng: number
+          received_at: string
+          shift_id: string
+          site_id: string
+          source_id: string
+          source_table: string
+          summary: string
+          zone_id: string
+        }[]
+      }
+      get_officer_data_package: { Args: { p_shift_id?: string }; Returns: Json }
+      get_officer_static_post: { Args: { p_shift_id?: string }; Returns: Json }
+      get_officer_timesheet_work: {
+        Args: { p_period_end: string; p_period_start: string }
+        Returns: {
+          calculated_minutes: number
+          ended_at: string
+          label: string
+          metadata: Json
+          source_id: string
+          source_type: string
+          started_at: string
+          work_status: string
+        }[]
+      }
+      get_open_jobs: {
+        Args: { p_limit?: number; p_offset?: number }
+        Returns: {
+          created_at: string
+          job_id: string
+          organization_id: string
+          payload: Json
+          priority: string
+          source: string
+          starts_at: string
+          status: string
+          title: string
+        }[]
+      }
+      get_operating_branch_roster_staff: {
+        Args: { p_operating_organization_id: string }
+        Returns: {
+          credential_expiry: string
+          credential_verified: boolean
+          display_name: string
+          email: string
+          employment_type: string
+          staff_id: string
+          user_id: string
+          work_ready: boolean
+        }[]
+      }
+      get_operating_organization_contexts: {
+        Args: never
+        Returns: {
+          authority_basis: string
+          can_be_rostered: boolean
+          is_default: boolean
+          module_access: string[]
+          organization_id: string
+          organization_name: string
+          role_at_branch: string
+        }[]
+      }
       get_org_geofence_config: {
         Args: {
           p_config_key: string
@@ -19021,22 +37931,187 @@ export type Database = {
           name: string
         }[]
       }
-      get_zone_for_gps: {
-        Args: { p_lat: number; p_lng: number; p_org_id: string }
+      get_roster_attendance_exceptions: {
+        Args: {
+          p_from?: string
+          p_grace_minutes?: number
+          p_organization_id: string
+          p_to?: string
+        }
         Returns: {
-          closure_active: boolean
-          compliance_rules: Json
-          parent_zone_id: string
-          site_id: string
-          site_name: string
-          zone_id: string
-          zone_name: string
+          exception_type: string
+          minutes_overdue: number
+          officer_user_id: string
+          scheduled_end: string
+          scheduled_start: string
+          service_type: string
+          shift_id: string
+          status: string
+        }[]
+      }
+      get_roster_batch_publish_failures: {
+        Args: { p_client_request_id: string }
+        Returns: {
+          reason: string
+          slot_id: string
+          work_unit_id: string
+        }[]
+      }
+      get_roster_commercial_readiness: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          billing_status: string
+          cost_centre_status: string
+          geofence_status: string
+          pay_status: string
+          quote_status: string
+          slot_id: string
+        }[]
+      }
+      get_roster_labour_cost: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          billable: number
+          charge_rate: number
+          margin: number
+          pay_cost: number
+          pay_rate: number
+          rate_status: string
+          scheduled_hours: number
+          slot_id: string
+          staff_id: string
+          work_unit_name: string
+        }[]
+      }
+      get_shift_break_entitlement: {
+        Args: { p_shift_id: string }
+        Returns: {
+          compliant: boolean
+          meal_breaks_required: number
+          meal_breaks_taken: number
+          rest_breaks_required: number
+          rest_breaks_taken: number
+          worked_hours: number
+        }[]
+      }
+      get_site_induction_state: {
+        Args: { p_service_agreement_location_id: string; p_staff_id: string }
+        Returns: {
+          completed: boolean
+          expires_at: string
+          induction_name: string
+          required: boolean
+          requirement_id: string
+        }[]
+      }
+      get_staff_branch_authorisations: {
+        Args: { p_user_id: string }
+        Returns: {
+          authorised_by: string
+          branch_name: string
+          branch_organization_id: string
+          can_be_rostered: boolean
+          ends_on: string
+          id: string
+          module_access: string[]
+          role_at_branch: string
+          starts_on: string
+          status: string
+          updated_at: string
+        }[]
+      }
+      get_staff_onboarding_readiness: {
+        Args: { p_organization_id: string }
+        Returns: {
+          blockers: string[]
+          current_stage: string
+          display_name: string
+          employment_status: string
+          evidence_status: string
+          identity_status: string
+          induction_status: string
+          ledger_id: string
+          next_action: string
+          staff_id: string
+          status: string
+          supervision_status: string
+          target_start: string
+          user_id: string
+          version: number
+          work_status: string
+        }[]
+      }
+      get_staff_readiness_assessment: {
+        Args: { p_organization_id: string }
+        Returns: {
+          blockers: string[]
+          credential_status: string
+          employment_status: string
+          identity_status: string
+          staff_id: string
+          training_status: string
+          user_id: string
+          work_ready: boolean
+        }[]
+      }
+      get_user_spine_readiness: {
+        Args: { p_organization_id: string }
+        Returns: {
+          access_status: string
+          blockers: string[]
+          credential_status: string
+          employment_status: string
+          identity_status: string
+          next_action: string
+          user_id: string
+          work_status: string
         }[]
       }
       gettransactionid: { Args: never; Returns: unknown }
+      grant_branch_area_access: {
+        Args: {
+          p_area: string
+          p_level: string
+          p_operating_organization_id: string
+          p_reason: string
+          p_user_id: string
+        }
+        Returns: {
+          area: string
+          created_at: string
+          granted_by: string | null
+          id: string
+          level: string
+          scope_org_id: string
+          source_preset: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_area_grants"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       has_location_access: {
         Args: { p_direction?: string; p_site_id: string; p_zone_id: string }
         Returns: boolean
+      }
+      heartbeat_cctv_inference_job: {
+        Args: {
+          p_job_id: string
+          p_lease_seconds?: number
+          p_lease_token: string
+          p_stage: string
+        }
+        Returns: boolean
+      }
+      identity_role_level: { Args: { p_role: string }; Returns: number }
+      import_approved_freedom_places: {
+        Args: { p_places: Json }
+        Returns: Json
       }
       insert_adhoc_stop: {
         Args: {
@@ -19050,7 +38125,38 @@ export type Database = {
         }
         Returns: string
       }
+      invite_client_capability_share: {
+        Args: {
+          p_capability: string
+          p_email: string
+          p_service_agreement_id: string
+        }
+        Returns: {
+          accepted_at: string | null
+          created_at: string
+          declined_at: string | null
+          email: string
+          expires_at: string
+          id: string
+          invite_kind: string
+          invited_by: string | null
+          service_agreement_id: string | null
+          status: string
+          target_organization_id: string
+          token_hash: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "onboarding_invites"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       is_admin_for_org: { Args: { target_org_id: string }; Returns: boolean }
+      is_enforcement_operator_for_org: {
+        Args: { target_org_id: string }
+        Returns: boolean
+      }
       is_grand_master: { Args: never; Returns: boolean }
       is_master_for_org: { Args: { p_org_id: string }; Returns: boolean }
       is_master_or_above: { Args: never; Returns: boolean }
@@ -19059,11 +38165,2508 @@ export type Database = {
         Args: { p_at?: string; p_zone_id: string }
         Returns: Json
       }
+      issue_cctv_export: {
+        Args: {
+          p_artifact_bucket: string
+          p_artifact_path: string
+          p_export_id: string
+        }
+        Returns: {
+          approval_state: string
+          approved_at: string | null
+          approved_by: string | null
+          artifact_bucket: string | null
+          artifact_path: string | null
+          evidence_item_id: string
+          generated_at: string
+          generated_by: string
+          id: string
+          inference_job_id: string
+          issued_at: string | null
+          legal_hold: boolean
+          manifest: Json
+          manifest_sha256: string
+          organization_id: string
+          purpose: string
+          recipient_scope: string
+          sealed_at: string | null
+          selected_event_ids: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_exports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      issue_cctv_report_receipt: {
+        Args: {
+          p_batch_id: string
+          p_evidence_id: string
+          p_job_id: string
+          p_organization_id: string
+          p_payload: Json
+        }
+        Returns: {
+          generated_at: string
+          observation_count: number
+          report_id: string
+          sha256: string
+        }[]
+      }
+      link_investigation_entity: {
+        Args: {
+          p_entity_id: string
+          p_entity_type: string
+          p_investigation_id: string
+          p_link_reason: string
+          p_link_role: string
+        }
+        Returns: {
+          entity_id: string
+          entity_type: string
+          id: string
+          investigation_id: string
+          link_reason: string
+          link_role: string
+          linked_at: string
+          linked_by: string
+          organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "investigation_links"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      link_observation_entities: {
+        Args: {
+          p_canonical_vehicle_id?: string
+          p_incident_id?: string
+          p_location_id?: string
+          p_observation_id: string
+          p_organization_id: string
+          p_person_record_id?: string
+          p_site_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_scv_id: string | null
+          canonical_vehicle_id: string | null
+          client_org_id: string | null
+          compliance_reason: string | null
+          compliance_status: string | null
+          created_at: string
+          detection_bbox: Json | null
+          detection_confidence: number | null
+          embedding: Json | null
+          embedding_quality: number | null
+          enforcement_exempt: boolean
+          exemption_reason: string | null
+          external_refs: Json
+          geofence_context: Json
+          gps_lat: number | null
+          gps_lng: number | null
+          gps_point: unknown
+          id: string
+          incident_id: string | null
+          is_compliant: boolean | null
+          is_homeless: boolean
+          is_scv: boolean | null
+          location_id: string | null
+          locked_at: string | null
+          module_key: string
+          movement_decision: string | null
+          movement_moved: boolean | null
+          movement_similarity: number | null
+          nights_this_month: number | null
+          nights_this_zone: number | null
+          observed_at: string
+          officer_id: string
+          officer_notes: string | null
+          officer_notes_updated_at: string | null
+          offline_queued: boolean
+          organization_id: string
+          original_photo_url: string | null
+          person_record_id: string | null
+          photo_captured_at: string | null
+          photo_quality: number | null
+          photo_url: string | null
+          photo_watermark_text: string | null
+          plate_confidence: number | null
+          plate_number: string
+          plate_source: string | null
+          previous_observation_id: string | null
+          retention_hold: boolean
+          retention_hold_days: number | null
+          retention_reason: string | null
+          retention_until: string | null
+          scv_certificate_number: string | null
+          site_id: string | null
+          sticker_color: string | null
+          sticker_detection_confidence: number | null
+          sticker_presence: boolean | null
+          synced_at: string | null
+          vehicle_colour: string | null
+          vehicle_make: string | null
+          vehicle_model: string | null
+          vehicle_year: number | null
+          watermarked_photo_url: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      list_dispatch_target_officers: {
+        Args: { p_service_agreement_id: string }
+        Returns: {
+          display_name: string
+          email: string
+          id: string
+          organization_id: string
+          role: string
+        }[]
+      }
+      log_bob_signing_event: {
+        Args: {
+          p_event_type: string
+          p_fingerprint_sha256: string
+          p_reason?: string
+          p_request_id?: string
+          p_success: boolean
+        }
+        Returns: string
+      }
+      log_user_management_action: {
+        Args: {
+          p_action_type: string
+          p_metadata?: Json
+          p_new_value?: Json
+          p_old_value?: Json
+          p_organization_id: string
+          p_performed_by: string
+          p_target_user_id: string
+        }
+        Returns: string
+      }
       longtransactionsenabled: { Args: never; Returns: boolean }
+      manage_active_shift: {
+        Args: {
+          p_action: string
+          p_expected_status: string
+          p_notes?: string
+          p_reason?: string
+          p_shift_id: string
+        }
+        Returns: {
+          actual_end: string | null
+          actual_start: string | null
+          completed_stops: number
+          created_at: string
+          external_refs: Json
+          generated_at: string | null
+          id: string
+          location_id: string | null
+          module_key: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          osrm_matrix_cached_at: string | null
+          patrol_route_id: string | null
+          roster_slot_id: string | null
+          scheduled_end: string
+          scheduled_start: string
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          shift_health: string | null
+          shift_origin: string
+          status: string
+          total_stops: number
+          updated_at: string
+          work_unit_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shifts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_asset: {
+        Args: {
+          p_action: string
+          p_asset_id?: string
+          p_asset_type?: string
+          p_client_request_id: string
+          p_make?: string
+          p_model?: string
+          p_name?: string
+          p_next_inspection_date?: string
+          p_notes?: string
+          p_registration?: string
+          p_serial_number?: string
+          p_status?: string
+          p_year?: number
+        }
+        Returns: {
+          asset_type: string
+          assigned_site_id: string | null
+          assigned_to: string | null
+          created_at: string
+          id: string
+          last_inspection_date: string | null
+          make: string | null
+          model: string | null
+          name: string
+          next_inspection_date: string | null
+          notes: string | null
+          organization_id: string
+          registration: string | null
+          serial_number: string | null
+          status: string
+          year: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "assets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_biosecurity_assessment_review:
+        | {
+            Args: {
+              p_action: string
+              p_assessment_id: string
+              p_expected_review_state: string
+              p_notes: string
+            }
+            Returns: {
+              assessment_id: string
+              follow_up_required: boolean
+              review_state: string
+              reviewed_at: string
+              reviewed_by: string
+            }[]
+          }
+        | {
+            Args: {
+              p_action: string
+              p_assessment_id: string
+              p_assigned_reviewer_id: string
+              p_confirmed_species_name: string
+              p_expected_review_version: number
+              p_notes: string
+              p_priority: string
+              p_review_due_at: string
+              p_species_decision: string
+            }
+            Returns: {
+              assessment_id: string
+              assigned_reviewer_id: string
+              confirmed_species_name: string
+              follow_up_required: boolean
+              review_due_at: string
+              review_priority: string
+              review_status: string
+              review_version: number
+              reviewed_at: string
+              species_confirmed: boolean
+              species_review_decision: string
+            }[]
+          }
+      manage_breach_alert: {
+        Args: {
+          p_action: string
+          p_alert_id: string
+          p_expected_status: string
+          p_notes: string
+        }
+        Returns: {
+          action_type: string
+          actioned_at: string
+          alert_id: string
+          alert_status: string
+          source_officer_id: string
+        }[]
+      }
+      manage_cctv_inference_job: {
+        Args: { p_action: string; p_job_id: string; p_organization_id: string }
+        Returns: {
+          action: string
+          job_id: string
+          new_status: string
+        }[]
+      }
+      manage_commercial_discount_schedule: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_effective_from?: string
+          p_effective_to?: string
+          p_name?: string
+          p_notes?: string
+          p_schedule_id?: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          name: string
+          notes: string | null
+          provider_organization_id: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "commercial_discount_schedules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_commercial_discount_schedule_rule: {
+        Args: {
+          p_client_organization_id?: string
+          p_discount_kind?: string
+          p_discount_value?: number
+          p_minimum_subtotal?: number
+          p_module_key?: string
+          p_priority?: number
+          p_schedule_id: string
+          p_site_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          client_organization_id: string | null
+          created_at: string
+          discount_kind: string
+          discount_value: number
+          id: string
+          minimum_subtotal: number | null
+          module_key: string | null
+          priority: number
+          schedule_id: string
+          site_id: string | null
+          updated_at: string
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "commercial_discount_schedule_rules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_activation_handoff_task: {
+        Args: {
+          p_complete: boolean
+          p_expected_version: number
+          p_handoff_id: string
+          p_note: string
+          p_task_id: string
+        }
+        Returns: {
+          account_organization_id: string
+          activated_at: string
+          agreement_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          id: string
+          onboarding_ledger_id: string
+          owner_user_id: string | null
+          provider_organization_id: string
+          status: string
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "crm_activation_handoffs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_agreement_finance: {
+        Args: {
+          p_agreement_id: string
+          p_client_portal_finance_enabled: boolean
+          p_expected_invitation_status: string
+        }
+        Returns: Json
+      }
+      manage_crm_agreement_obligation: {
+        Args: {
+          p_action: string
+          p_agreement_id: string
+          p_description?: string
+          p_escalation_contact?: string
+          p_escalation_minutes?: number
+          p_expected_updated_at?: string
+          p_frequency_rule?: Json
+          p_obligation_code?: string
+          p_obligation_id?: string
+          p_obligation_type?: string
+          p_proof_artifact_type?: string
+          p_requires_proof?: boolean
+          p_site_id?: string
+          p_sla_target_minutes?: number
+        }
+        Returns: Json
+      }
+      manage_crm_agreement_reporting: {
+        Args: {
+          p_agreement_id: string
+          p_client_portal_reports_enabled: boolean
+          p_expected_invitation_status: string
+          p_monthly_report_template_code?: string
+        }
+        Returns: Json
+      }
+      manage_crm_agreement_setup: {
+        Args: {
+          p_action: string
+          p_agreement_id: string
+          p_allows_auto_dispatch?: boolean
+          p_allows_client_submission?: boolean
+          p_enabled?: boolean
+          p_expected_invitation_status: string
+          p_module_key?: string
+          p_site_id?: string
+          p_sla_minutes?: number
+        }
+        Returns: Json
+      }
+      manage_crm_agreement_zone_coverage: {
+        Args: {
+          p_action: string
+          p_agreement_id: string
+          p_expected_invitation_status: string
+          p_zone_id: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          head_contractor_org_id: string | null
+          id: string
+          service_agreement_id: string
+          share_actual_cost: boolean | null
+          share_contract_price: boolean | null
+          site_id: string | null
+          standalone_scan_enabled: boolean
+          status: string
+          subcontract_attribution_mode: string
+          updated_at: string
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "service_agreement_locations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_contact: {
+        Args: {
+          p_account_organization_id: string
+          p_action: string
+          p_client_request_id: string
+          p_contact_id: string
+          p_email?: string
+          p_expected_updated_at: string
+          p_first_name: string
+          p_is_emergency?: boolean
+          p_is_primary?: boolean
+          p_last_name: string
+          p_mobile?: string
+          p_notes?: string
+          p_phone?: string
+          p_role_title?: string
+        }
+        Returns: {
+          client_request_id: string | null
+          created_at: string
+          deactivated_at: string | null
+          deactivated_by: string | null
+          email: string | null
+          first_name: string
+          id: string
+          is_emergency: boolean
+          is_primary: boolean
+          last_name: string
+          mobile: string | null
+          notes: string | null
+          organization_id: string
+          phone: string | null
+          role_title: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "crm_contacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_invoice: {
+        Args: {
+          p_action: string
+          p_expected_status: string
+          p_invoice_id: string
+          p_reason?: string
+        }
+        Returns: {
+          client_organization_id: string
+          created_at: string
+          created_by: string | null
+          currency: string
+          due_date: string
+          gst_amount: number
+          id: string
+          invoice_date: string
+          invoice_number: string
+          notes: string | null
+          organization_id: string
+          paid_at: string | null
+          sent_at: string | null
+          service_agreement_id: string | null
+          service_period_end: string | null
+          service_period_start: string | null
+          site_id: string | null
+          status: string
+          subtotal: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "invoices"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_location: {
+        Args: {
+          p_action: string
+          p_address?: string
+          p_client_request_id: string
+          p_name: string
+          p_notes?: string
+          p_organization_id: string
+          p_postcode?: string
+          p_suburb?: string
+        }
+        Returns: {
+          address: string | null
+          address_match_key: string | null
+          canonical_place_id: string
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          notes: string | null
+          organization_id: string
+          postcode: string | null
+          suburb: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "locations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_onboarding_stage: {
+        Args: {
+          p_account_organization_id: string
+          p_expected_version: number
+          p_stage: string
+          p_target_live_at?: string
+        }
+        Returns: {
+          account_organization_id: string
+          activated_at: string | null
+          activated_by: string | null
+          assigned_to: string | null
+          current_stage: string
+          id: string
+          provider_organization_id: string
+          stage_note: string | null
+          started_at: string
+          status: string
+          target_live_at: string
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "crm_onboarding_ledgers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_onboarding_workflow: {
+        Args: {
+          p_account_organization_id: string
+          p_assigned_to: string
+          p_expected_version: number
+          p_note: string
+          p_stage: string
+          p_target_live_at: string
+        }
+        Returns: {
+          account_organization_id: string
+          activated_at: string | null
+          activated_by: string | null
+          assigned_to: string | null
+          current_stage: string
+          id: string
+          provider_organization_id: string
+          stage_note: string | null
+          started_at: string
+          status: string
+          target_live_at: string
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "crm_onboarding_ledgers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_organization: {
+        Args: {
+          p_account_notes?: string
+          p_account_owner_user_id?: string
+          p_action: string
+          p_billing_address?: string
+          p_billing_email?: string
+          p_client_request_id: string
+          p_company_registration_number?: string
+          p_contact_email?: string
+          p_contact_phone?: string
+          p_expected_updated_at: string
+          p_name: string
+          p_nzbn?: string
+          p_organization_id: string
+          p_organization_type: string
+          p_status?: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_organization_child: {
+        Args: {
+          p_client_request_id: string
+          p_name: string
+          p_notes?: string
+          p_nzbn?: string
+          p_organization_type: string
+          p_parent_organization_id: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_place_boundary: {
+        Args: {
+          p_entity_id: string
+          p_entity_type: string
+          p_expected_version: number
+          p_geojson: Json
+          p_source: string
+          p_verify?: boolean
+        }
+        Returns: Json
+      }
+      manage_crm_quote: {
+        Args: {
+          p_action: string
+          p_expected_status: string
+          p_quote_id: string
+          p_reason?: string
+        }
+        Returns: {
+          quote_id: string
+          quote_status: string
+          service_agreement_id: string
+        }[]
+      }
+      manage_crm_quote_commercial_source: {
+        Args: {
+          p_discount_schedule_id?: string
+          p_quote_id: string
+          p_tender_id?: string
+        }
+        Returns: {
+          accepted_at: string | null
+          accepted_by: string | null
+          client_name: string | null
+          client_org_id: string | null
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          discount_amount: number
+          discount_pct: number
+          discount_schedule_id: string | null
+          gst_amount: number
+          gst_rate: number
+          id: string
+          notes: string | null
+          platform_fee_treatment: string
+          provider_org_id: string
+          service_agreement_id: string | null
+          status: string
+          subtotal_charge: number
+          target_margin_pct: number
+          tender_id: string | null
+          title: string
+          total_charge: number
+          total_cost: number
+          updated_at: string
+          updated_by: string | null
+          valid_until: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quotes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_quote_proposal_module: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_module_key: string
+          p_pricing_basis?: string
+          p_quote_id: string
+          p_rate_rule_id?: string
+          p_service_window?: Json
+          p_sla_minutes?: number
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          id: string
+          module_key: string
+          pricing_basis: string
+          quote_id: string
+          rate_rule_id: string | null
+          service_window: Json
+          sla_minutes: number | null
+          work_model: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quote_proposal_modules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_quote_proposal_place: {
+        Args: {
+          p_action: string
+          p_address?: string
+          p_candidate_site_id?: string
+          p_candidate_zone_id?: string
+          p_client_request_id: string
+          p_geometry_source?: string
+          p_module_key?: string
+          p_name?: string
+          p_place_id?: string
+          p_place_kind?: string
+          p_proposed_geometry?: Json
+          p_quote_id: string
+          p_resolution?: string
+          p_site_type?: string
+          p_zone_type?: string
+        }
+        Returns: {
+          address: string
+          candidate_site_id: string | null
+          candidate_zone_id: string | null
+          client_request_id: string
+          converted_at: string | null
+          converted_site_id: string | null
+          converted_zone_id: string | null
+          created_at: string
+          created_by: string
+          geometry_source: string
+          id: string
+          module_key: string
+          name: string
+          place_kind: string
+          proposed_geometry: Json | null
+          quote_id: string
+          resolution: string
+          site_type: string | null
+          zone_type: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quote_proposal_places"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_quote_proposal_scope_schedule: {
+        Args: {
+          p_action: string
+          p_active_days?: number[]
+          p_capability_key?: string
+          p_chargeable_conditions?: Json
+          p_client_request_id: string
+          p_expected_updated_at?: string
+          p_min_gap_between_visits_minutes?: number
+          p_notes?: string
+          p_pricing_basis?: string
+          p_proposal_scope_id?: string
+          p_quote_id: string
+          p_rate_rule_id?: string
+          p_response_sla_minutes?: number
+          p_schedule_id?: string
+          p_visits_per_shift?: number
+          p_window_end?: string
+          p_window_start?: string
+          p_work_model?: string
+        }
+        Returns: {
+          active_days: number[]
+          active_months: number[]
+          capability_key: string
+          chargeable_conditions: Json
+          client_request_id: string
+          created_at: string
+          created_by: string
+          depart_sla_minutes: number | null
+          dwell_minutes: number
+          id: string
+          min_gap_between_visits_minutes: number
+          notes: string | null
+          officer_instructions: string | null
+          preferred_stop_order: number
+          pricing_basis: string
+          proposal_scope_id: string
+          rate_rule_id: string | null
+          response_sla_minutes: number | null
+          updated_at: string
+          visits_per_shift: number
+          window_end: string | null
+          window_start: string | null
+          work_model: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quote_proposal_scope_schedules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_quote_proposal_scope_schedule_details: {
+        Args: {
+          p_action: string
+          p_active_days?: number[]
+          p_active_months?: number[]
+          p_capability_key?: string
+          p_client_request_id: string
+          p_depart_sla_minutes?: number
+          p_dwell_minutes?: number
+          p_expected_updated_at?: string
+          p_min_gap_between_visits_minutes?: number
+          p_notes?: string
+          p_officer_instructions?: string
+          p_preferred_stop_order?: number
+          p_proposal_scope_id?: string
+          p_quote_id: string
+          p_rate_rule_id?: string
+          p_response_sla_minutes?: number
+          p_schedule_id?: string
+          p_visits_per_shift?: number
+          p_window_end?: string
+          p_window_start?: string
+          p_work_model?: string
+        }
+        Returns: {
+          active_days: number[]
+          active_months: number[]
+          capability_key: string
+          chargeable_conditions: Json
+          client_request_id: string
+          created_at: string
+          created_by: string
+          depart_sla_minutes: number | null
+          dwell_minutes: number
+          id: string
+          min_gap_between_visits_minutes: number
+          notes: string | null
+          officer_instructions: string | null
+          preferred_stop_order: number
+          pricing_basis: string
+          proposal_scope_id: string
+          rate_rule_id: string | null
+          response_sla_minutes: number | null
+          updated_at: string
+          visits_per_shift: number
+          window_end: string | null
+          window_start: string | null
+          work_model: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quote_proposal_scope_schedules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_quote_proposal_service_scope: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_module_key: string
+          p_proposed_place_id?: string
+          p_quote_id: string
+          p_site_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          id: string
+          module_key: string
+          proposed_place_id: string | null
+          quote_id: string
+          site_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quote_proposal_service_scopes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_site_boundary: {
+        Args: {
+          p_action: string
+          p_center_lat?: number
+          p_center_lng?: number
+          p_expected_verification: string
+          p_radius_m?: number
+          p_site_id: string
+        }
+        Returns: {
+          area_m2: number
+          boundary_status: string
+          boundary_verification: string
+          boundary_verified_at: string
+          gps_lat: number
+          gps_lng: number
+          site_id: string
+        }[]
+      }
+      manage_crm_site_profile: {
+        Args: {
+          p_access_instructions: string
+          p_active: boolean
+          p_expected_version: number
+          p_hs_notes: string
+          p_risk_level: string
+          p_site_brief: string
+          p_site_id: string
+        }
+        Returns: {
+          access_instructions: string | null
+          active: boolean
+          address: string | null
+          address_match_key: string | null
+          boundary: unknown
+          boundary_status: string
+          boundary_verification: string
+          boundary_verified_at: string | null
+          boundary_verified_by: string | null
+          center_point: unknown
+          client_organization_id: string
+          client_request_id: string | null
+          configuration_version: number
+          created_at: string
+          external_ref: string | null
+          external_refs: Json
+          gps_lat: number | null
+          gps_lng: number | null
+          hs_notes: string | null
+          id: string
+          internal_client_ref: string | null
+          jurisdiction_config_id: string | null
+          location_id: string
+          metadata: Json
+          module_title: string | null
+          name: string
+          onsite_radius_meters: number
+          organization_id: string | null
+          ownership_signals: Json | null
+          ownership_status: string
+          prompt_radius_meters: number
+          risk_level: string | null
+          service_agreement_id: string | null
+          site_brief: string | null
+          site_code: string | null
+          site_origin: string
+          site_type: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "client_sites"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_zone: {
+        Args: {
+          p_action: string
+          p_enforcement_workflow_override: string
+          p_expected_version: number
+          p_is_active: boolean
+          p_location_id: string
+          p_module_key: string
+          p_name: string
+          p_nightly_limit_consecutive: number
+          p_nightly_limit_monthly: number
+          p_rule_type: string
+          p_scv_required: boolean
+          p_zone_id: string
+          p_zone_type: string
+        }
+        Returns: {
+          active_schedule: Json | null
+          boundary: unknown
+          boundary_status: string
+          boundary_verification: string
+          boundary_verified_at: string | null
+          boundary_verified_by: string | null
+          bylaw_clause: string | null
+          bylaw_source_url: string | null
+          center_point: unknown
+          configuration_version: number
+          created_at: string
+          despatch_zone_code: string | null
+          enforcement_workflow_override: string | null
+          external_ref: string | null
+          id: string
+          internal_client_ref: string | null
+          is_active: boolean
+          is_adhoc: boolean
+          jurisdiction_rule_set_id: string | null
+          location_id: string
+          metadata: Json
+          module_key: string
+          name: string
+          nightly_limit_consecutive: number | null
+          nightly_limit_monthly: number | null
+          onsite_profile: string
+          organization_id: string
+          parking_disabled_multiplier: number
+          parking_limit_set_at: string | null
+          parking_limit_set_by: string | null
+          parking_limit_source: string | null
+          parking_signage_photo_url: string | null
+          parking_time_limit_minutes: number | null
+          radius_meters: number | null
+          repeat_stay_radius_m: number | null
+          repeat_stay_window_nights: number | null
+          rule_overrides: Json | null
+          rule_type: string
+          scv_exempts_restriction: boolean
+          scv_required: boolean
+          zone_type: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "location_zones"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_crm_zone_closure: {
+        Args: {
+          p_action: string
+          p_closure_id: string
+          p_closure_type: string
+          p_effective_from: string
+          p_effective_to: string
+          p_reason: string
+          p_zone_id: string
+        }
+        Returns: {
+          closure_type: string
+          created_at: string
+          created_by: string | null
+          effective_from: string
+          effective_to: string | null
+          id: string
+          lifted_at: string | null
+          lifted_by: string | null
+          notice_bundle_url: string | null
+          organization_id: string
+          reason: string | null
+          resolution_notes: string | null
+          status: string
+          updated_at: string
+          zone_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "zone_closures"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_debrief_followup: {
+        Args: {
+          p_action: string
+          p_expected_version: number
+          p_followup_id: string
+          p_note: string
+        }
+        Returns: {
+          acted_at: string
+          followup_id: string
+          followup_status: string
+          followup_version: number
+          owner_user_id: string
+        }[]
+      }
+      manage_dispatch_job: {
+        Args: {
+          p_action: string
+          p_briefing_notes?: string
+          p_dispatch_resource_id?: string
+          p_expected_status: string
+          p_job_id: string
+          p_priority?: string
+          p_reason?: string
+        }
+        Returns: {
+          acknowledged_at: string | null
+          adhoc_inserted_at: string | null
+          assigned_officer_id: string | null
+          briefing_notes: string | null
+          client_request_id: string | null
+          client_site_id: string | null
+          completed_at: string | null
+          created_at: string
+          dispatch_resource_id: string | null
+          dispatched_at: string | null
+          en_route_at: string | null
+          expected_dwell_minutes: number
+          harmed_party_address: string | null
+          harmed_party_site_id: string | null
+          id: string
+          insert_gps_lat: number | null
+          insert_gps_lng: number | null
+          investigation_id: string | null
+          job_type: string
+          location_id: string | null
+          module_key: string | null
+          on_scene_at: string | null
+          organization_id: string
+          origin_reference_id: string | null
+          origin_type: string
+          outcome_notes: string | null
+          priority: string
+          service_agreement_id: string | null
+          shift_id: string | null
+          shift_stop_id: string | null
+          sla_breached: boolean
+          sla_delay_reason: string | null
+          sla_impact_report: Json | null
+          sla_impact_warning: boolean
+          sla_minutes: number | null
+          sla_respond_by: string | null
+          status: string
+          timing_source: string
+          work_unit_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "dispatch_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_dispatch_job_timing: {
+        Args: {
+          p_expected_dwell_minutes: number
+          p_expected_status: string
+          p_job_id: string
+          p_reason?: string
+          p_sla_minutes: number
+          p_timing_source?: string
+        }
+        Returns: {
+          expected_dwell_minutes: number
+          id: string
+          sla_minutes: number
+          sla_respond_by: string
+          status: string
+          timing_source: string
+        }[]
+      }
+      manage_finance_item: {
+        Args: {
+          p_action: string
+          p_effective_from?: string
+          p_item_id: string
+          p_item_type: string
+          p_name: string
+          p_organization_id: string
+          p_sku: string
+          p_source_reference?: string
+          p_supplier_name?: string
+          p_unit_cost: number
+          p_unit_of_measure: string
+          p_unit_price: number
+        }
+        Returns: Json
+      }
+      manage_finance_item_internal: {
+        Args: {
+          p_action: string
+          p_actor: string
+          p_effective_from?: string
+          p_item_id: string
+          p_item_type: string
+          p_name: string
+          p_organization_id: string
+          p_sku: string
+          p_source_reference?: string
+          p_supplier_name?: string
+          p_unit_cost: number
+          p_unit_of_measure: string
+          p_unit_price: number
+        }
+        Returns: Json
+      }
+      manage_hr_case: {
+        Args: {
+          p_action: string
+          p_assigned_to?: string
+          p_case_id?: string
+          p_case_type?: string
+          p_client_request_id: string
+          p_note?: string
+          p_severity?: string
+          p_staff_id?: string
+          p_subject?: string
+          p_summary?: string
+        }
+        Returns: {
+          assigned_to: string | null
+          case_type: string
+          client_request_id: string
+          created_at: string
+          id: string
+          opened_at: string
+          opened_by: string | null
+          organization_id: string
+          resolved_at: string | null
+          severity: string
+          staff_id: string
+          status: string
+          subject: string
+          summary: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "hr_cases"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_location_module_assignment: {
+        Args: {
+          p_effective_from?: string
+          p_effective_to?: string
+          p_enabled?: boolean
+          p_location_id: string
+          p_module_key: string
+          p_service_agreement_id: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          effective_from: string
+          effective_to: string | null
+          enabled: boolean
+          id: string
+          location_id: string
+          module_key: string
+          rule_set_ref: string | null
+          service_agreement_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "location_module_assignments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_noise_assessment_review: {
+        Args: {
+          p_action: string
+          p_assessment_id: string
+          p_expected_review_status: string
+          p_notes: string
+        }
+        Returns: {
+          assessment_id: string
+          follow_up_required: boolean
+          review_status: string
+          reviewed_at: string
+          reviewed_by: string
+        }[]
+      }
+      manage_notice_template: {
+        Args: {
+          p_authorising_act?: string
+          p_authorising_section?: string
+          p_bob_extracted?: boolean
+          p_body_html: string
+          p_bylaw_reference?: string
+          p_fine_amount?: number
+          p_footer_text?: string
+          p_issuing_authority?: string
+          p_module_key: string
+          p_notice_type: string
+          p_organization_id: string
+          p_payment_url?: string
+          p_source_document_url?: string
+        }
+        Returns: Json
+      }
+      manage_officer_static_post: {
+        Args: {
+          p_action: string
+          p_expected_status: string
+          p_gps_accuracy_metres?: number
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_notes?: string
+          p_request_id: string
+          p_stop_id: string
+        }
+        Returns: Json
+      }
+      manage_operating_branch_geofence_config: {
+        Args: {
+          p_action: string
+          p_config_id?: string
+          p_config_key?: string
+          p_config_value?: number
+          p_operating_organization_id: string
+          p_zone_type?: string
+        }
+        Returns: {
+          config_key: string
+          config_value: number
+          created_at: string
+          id: string
+          organization_id: string
+          updated_at: string
+          zone_type: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "org_geofence_config"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_operating_branch_rate_rule: {
+        Args: {
+          p_action: string
+          p_amount?: number
+          p_client_org_id?: string
+          p_client_request_id: string
+          p_day_category?: string
+          p_effective_from?: string
+          p_effective_to?: string
+          p_expected_updated_at?: string
+          p_job_type?: string
+          p_name?: string
+          p_operating_organization_id: string
+          p_pay_code?: string
+          p_priority?: number
+          p_rate_rule_id?: string
+          p_rate_type?: string
+          p_rule_kind?: string
+          p_service_type?: string
+          p_site_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          active: boolean
+          amount: number
+          client_org_id: string | null
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          day_category: string | null
+          distance_max_km: number | null
+          distance_min_km: number | null
+          effective_from: string | null
+          effective_to: string | null
+          gl_account: string | null
+          id: string
+          job_code: string | null
+          job_type: string | null
+          module_key: string | null
+          name: string
+          organization_id: string
+          outside_area: boolean | null
+          pay_code: string | null
+          priority: number
+          rate_type: string
+          region_code: string | null
+          role_code: string | null
+          rule_kind: string
+          service_type: string | null
+          site_id: string | null
+          updated_at: string
+          updated_by: string | null
+          vehicle_type: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "rate_rules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_org_printer_settings: {
+        Args: {
+          p_connection_type: string
+          p_organization_id: string
+          p_paper_width: string
+        }
+        Returns: Json
+      }
+      manage_parking_zone_rule: {
+        Args: {
+          p_disabled_multiplier: number
+          p_expected_version: number
+          p_limit_source: string
+          p_signage_photo_path?: string
+          p_time_limit_minutes: number
+          p_zone_id: string
+        }
+        Returns: {
+          active_schedule: Json | null
+          boundary: unknown
+          boundary_status: string
+          boundary_verification: string
+          boundary_verified_at: string | null
+          boundary_verified_by: string | null
+          bylaw_clause: string | null
+          bylaw_source_url: string | null
+          center_point: unknown
+          configuration_version: number
+          created_at: string
+          despatch_zone_code: string | null
+          enforcement_workflow_override: string | null
+          external_ref: string | null
+          id: string
+          internal_client_ref: string | null
+          is_active: boolean
+          is_adhoc: boolean
+          jurisdiction_rule_set_id: string | null
+          location_id: string
+          metadata: Json
+          module_key: string
+          name: string
+          nightly_limit_consecutive: number | null
+          nightly_limit_monthly: number | null
+          onsite_profile: string
+          organization_id: string
+          parking_disabled_multiplier: number
+          parking_limit_set_at: string | null
+          parking_limit_set_by: string | null
+          parking_limit_source: string | null
+          parking_signage_photo_url: string | null
+          parking_time_limit_minutes: number | null
+          radius_meters: number | null
+          repeat_stay_radius_m: number | null
+          repeat_stay_window_nights: number | null
+          rule_overrides: Json | null
+          rule_type: string
+          scv_exempts_restriction: boolean
+          scv_required: boolean
+          zone_type: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "location_zones"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_patrol_checkpoint: {
+        Args: {
+          p_action: string
+          p_checkpoint_id?: string
+          p_client_request_id: string
+          p_client_site_id?: string
+          p_description?: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_name?: string
+          p_organization_id: string
+          p_qr_code?: string
+          p_radius_meters?: number
+        }
+        Returns: {
+          active: boolean
+          checkpoint_verification: string
+          client_site_id: string
+          created: boolean
+          geometry_changed: boolean
+          gps_lat: number
+          gps_lng: number
+          history_version: number
+          id: string
+          name: string
+          radius_meters: number
+        }[]
+      }
+      manage_performance_review_cycle: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_cycle_id?: string
+          p_due_date?: string
+          p_name?: string
+          p_period_end?: string
+          p_period_start?: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          due_date: string
+          id: string
+          name: string
+          organization_id: string
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "performance_review_cycles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_provider_module_subscription_status: {
+        Args: {
+          p_expected_updated_at: string
+          p_status: string
+          p_subscription_id: string
+        }
+        Returns: {
+          base_price: number | null
+          billing_period: string | null
+          created_at: string
+          created_by: string | null
+          currency: string | null
+          discount_pct: number
+          effective_from: string | null
+          effective_to: string | null
+          ended_at: string | null
+          id: string
+          module_key: string
+          notes: string | null
+          organization_id: string
+          per_seat_price: number | null
+          per_site_price: number | null
+          started_at: string
+          status: string
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "org_module_subscriptions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_provider_module_subscription_terms: {
+        Args: {
+          p_base_price?: number
+          p_billing_period?: string
+          p_currency?: string
+          p_discount_pct?: number
+          p_effective_from?: string
+          p_effective_to?: string
+          p_expected_updated_at: string
+          p_notes?: string
+          p_per_seat_price?: number
+          p_per_site_price?: number
+          p_subscription_id: string
+        }
+        Returns: {
+          base_price: number | null
+          billing_period: string | null
+          created_at: string
+          created_by: string | null
+          currency: string | null
+          discount_pct: number
+          effective_from: string | null
+          effective_to: string | null
+          ended_at: string | null
+          id: string
+          module_key: string
+          notes: string | null
+          organization_id: string
+          per_seat_price: number | null
+          per_site_price: number | null
+          started_at: string
+          status: string
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "org_module_subscriptions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_rate_rule: {
+        Args: {
+          p_action: string
+          p_amount?: number
+          p_client_org_id?: string
+          p_client_request_id: string
+          p_day_category?: string
+          p_effective_from?: string
+          p_effective_to?: string
+          p_expected_updated_at?: string
+          p_job_type?: string
+          p_name?: string
+          p_pay_code?: string
+          p_priority?: number
+          p_rate_rule_id?: string
+          p_rate_type?: string
+          p_rule_kind?: string
+          p_service_type?: string
+          p_site_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          active: boolean
+          amount: number
+          client_org_id: string | null
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          day_category: string | null
+          distance_max_km: number | null
+          distance_min_km: number | null
+          effective_from: string | null
+          effective_to: string | null
+          gl_account: string | null
+          id: string
+          job_code: string | null
+          job_type: string | null
+          module_key: string | null
+          name: string
+          organization_id: string
+          outside_area: boolean | null
+          pay_code: string | null
+          priority: number
+          rate_type: string
+          region_code: string | null
+          role_code: string | null
+          rule_kind: string
+          service_type: string | null
+          site_id: string | null
+          updated_at: string
+          updated_by: string | null
+          vehicle_type: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "rate_rules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_recruitment_candidate: {
+        Args: {
+          p_candidate_id: string
+          p_expected_stage: string
+          p_next_stage: string
+          p_note: string
+          p_offer_employment_type?: string
+          p_offer_role?: string
+          p_offer_start_date?: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          email: string
+          first_name: string
+          id: string
+          last_name: string
+          notes: string | null
+          offer_accepted_at: string | null
+          offer_employment_type: string | null
+          offer_role: string | null
+          offer_sent_at: string | null
+          offer_start_date: string | null
+          organization_id: string
+          phone: string | null
+          provisioned_staff_id: string | null
+          provisioned_user_id: string | null
+          resume_storage_path: string | null
+          source: string | null
+          stage: string
+          status: string
+          updated_at: string
+          vacancy_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "recruitment_candidates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_recruitment_vacancy: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_closes_on?: string
+          p_description?: string
+          p_employment_type?: string
+          p_location_summary?: string
+          p_opens_on?: string
+          p_required_skills?: string[]
+          p_title?: string
+          p_vacancy_id?: string
+        }
+        Returns: {
+          closes_on: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          employment_type: string
+          id: string
+          location_summary: string | null
+          opens_on: string | null
+          organization_id: string
+          required_skills: string[]
+          status: string
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "recruitment_vacancies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_report_template: {
+        Args: {
+          p_agreement_id: string
+          p_module_key: string
+          p_name: string
+          p_output_policy?: Json
+          p_template_code: string
+        }
+        Returns: Json
+      }
+      manage_roster_skill_catalog: {
+        Args: {
+          p_action?: string
+          p_skill_category?: string
+          p_skill_id?: string
+          p_skill_name?: string
+        }
+        Returns: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          skill_category: string | null
+          skill_key: string
+          skill_name: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_skill_catalog"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_roster_slot: {
+        Args: {
+          p_action: string
+          p_expected_status: string
+          p_reason?: string
+          p_slot_id: string
+        }
+        Returns: {
+          shift_id: string
+          shift_status: string
+          slot_id: string
+          slot_status: string
+        }[]
+      }
+      manage_roster_work_unit_skill_ids: {
+        Args: { p_required_skill_ids: string[]; p_work_unit_id: string }
+        Returns: {
+          active: boolean
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          patrol_route_id: string | null
+          required_skill_ids: string[]
+          required_skill_names: string[]
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          team_id: string | null
+          updated_at: string
+          work_unit_type: string
+          workplace_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_work_units"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_roster_work_unit_skill_requirements: {
+        Args: { p_required_skill_names: string[]; p_work_unit_id: string }
+        Returns: {
+          active: boolean
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          organization_id: string
+          patrol_route_id: string | null
+          required_skill_ids: string[]
+          required_skill_names: string[]
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          team_id: string | null
+          updated_at: string
+          work_unit_type: string
+          workplace_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_work_units"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_service_agreement_continuity_policy: {
+        Args: {
+          p_client_coverage_end?: string
+          p_client_coverage_start?: string
+          p_continuity_mode: string
+          p_continuity_retention_hours?: number
+          p_provider_coverage_end?: string
+          p_provider_coverage_start?: string
+          p_require_handoff_ack?: boolean
+          p_service_agreement_location_id: string
+          p_service_agreement_module_id: string
+          p_share_active_cases?: boolean
+          p_share_attachments_mode?: string
+          p_share_open_tasks?: boolean
+          p_share_presence_mode?: string
+          p_share_recent_history_hours?: number
+        }
+        Returns: {
+          client_coverage_end: string | null
+          client_coverage_start: string | null
+          continuity_mode: string
+          continuity_retention_hours: number
+          created_at: string
+          created_by: string
+          id: string
+          provider_coverage_end: string | null
+          provider_coverage_start: string | null
+          require_handoff_ack: boolean
+          service_agreement_location_id: string
+          service_agreement_module_id: string
+          share_active_cases: boolean
+          share_attachments_mode: string
+          share_open_tasks: boolean
+          share_presence_mode: string
+          share_recent_history_hours: number
+          updated_at: string
+          updated_by: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "service_agreement_continuity_policies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_shift_stop: {
+        Args: {
+          p_action: string
+          p_expected_status: string
+          p_new_order?: number
+          p_reason?: string
+          p_stop_id: string
+        }
+        Returns: {
+          actual_arrived_at: string | null
+          actual_departed_at: string | null
+          arrival_distance_m: number | null
+          arrival_verification: string | null
+          arrived_gps_accuracy: number | null
+          arrived_gps_lat: number | null
+          arrived_gps_lng: number | null
+          bwc_reference: string | null
+          created_at: string
+          departed_gps_lat: number | null
+          departed_gps_lng: number | null
+          dispatch_job_id: string | null
+          estimated_arrival_at: string | null
+          estimated_departure_at: string | null
+          external_dispatch_id: string | null
+          external_refs: Json
+          id: string
+          is_adhoc: boolean
+          module_key: string
+          officer_notes: string | null
+          organization_id: string
+          patrol_config_id: string | null
+          place_role: string
+          required_dwell_minutes: number
+          shift_id: string
+          site_id: string | null
+          sla_arrive_by: string
+          sla_depart_by: string | null
+          sla_status: string
+          sla_window_open: string | null
+          status: string
+          stop_order: number
+          travel_distance_metres: number | null
+          travel_time_seconds: number | null
+          updated_at: string
+          visit_number: number
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_stops"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_shift_template: {
+        Args: {
+          p_action?: string
+          p_active_days?: number[]
+          p_client_request_id: string
+          p_end_time?: string
+          p_name?: string
+          p_notes?: string
+          p_recurrence_type?: string
+          p_required_staff_count?: number
+          p_shift_type?: string
+          p_start_time?: string
+          p_template_id?: string
+        }
+        Returns: {
+          active_days: number[]
+          color: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          effective_from: string | null
+          effective_to: string | null
+          end_time: string
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          organization_id: string
+          patrol_route_id: string | null
+          recurrence_type: string
+          required_credentials: string[]
+          required_staff_count: number
+          shift_type: string
+          site_id: string | null
+          start_time: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_templates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_smoke_assessment: {
+        Args: {
+          p_action: string
+          p_assessment_id: string
+          p_expected_status: string
+          p_follow_up_required: boolean
+          p_legal_basis: string
+          p_notes: string
+        }
+        Returns: {
+          action: string | null
+          action_taken: string | null
+          address: string | null
+          assessed_at: string
+          bob_classification: string | null
+          bob_confidence: number | null
+          bob_recommendation: string | null
+          checklist: Json
+          client_request_id: string | null
+          complainant_site_id: string | null
+          complaint_address: string | null
+          complaint_source: string | null
+          created_at: string
+          dispatch_job_id: string | null
+          evidence_state: string
+          follow_up_required: boolean
+          gps_accuracy: number | null
+          gps_lat: number | null
+          gps_lng: number | null
+          id: string
+          is_out_of_hours: boolean
+          legal_basis: string | null
+          location_id: string | null
+          notes: string | null
+          notice_number: string | null
+          officer_id: string | null
+          officer_name: string | null
+          officer_user_id: string | null
+          organization_id: string
+          photo_urls: Json | null
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          scene_description: string | null
+          severity: string | null
+          site_id: string | null
+          smoke_ai_analysis: Json | null
+          smoke_ai_analyzed_at: string | null
+          smoke_source: string | null
+          smoke_source_type: string | null
+          source_confirmed: boolean
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "smoke_assessments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_smoke_assessment_review: {
+        Args: {
+          p_action: string
+          p_assessment_id: string
+          p_expected_review_state: string
+          p_notes: string
+        }
+        Returns: {
+          assessment_id: string
+          follow_up_required: boolean
+          review_state: string
+          reviewed_at: string
+          reviewed_by: string
+        }[]
+      }
+      manage_staff_availability: {
+        Args: {
+          p_action: string
+          p_all_day?: boolean
+          p_availability_id?: string
+          p_available_from?: string
+          p_available_to?: string
+          p_client_request_id: string
+          p_day_of_week?: number
+          p_notes?: string
+          p_specific_date?: string
+          p_staff_id: string
+          p_type?: string
+        }
+        Returns: {
+          all_day: boolean
+          availability_type: string
+          available_from: string | null
+          available_to: string | null
+          created_at: string
+          day_of_week: number | null
+          id: string
+          notes: string | null
+          organization_id: string
+          specific_date: string | null
+          staff_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_availability"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_staff_branch_authorisation: {
+        Args: {
+          p_action: string
+          p_branch_organization_id: string
+          p_can_be_rostered?: boolean
+          p_ends_on?: string
+          p_expected_updated_at?: string
+          p_module_access?: string[]
+          p_reason?: string
+          p_role_at_branch?: string
+          p_starts_on?: string
+          p_user_id: string
+        }
+        Returns: {
+          authorised_by: string | null
+          branch_org_id: string
+          can_be_rostered: boolean
+          created_at: string
+          ends_on: string | null
+          id: string
+          module_access: string[]
+          role_at_branch: string
+          starts_on: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_branch_authorisations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_staff_onboarding: {
+        Args: {
+          p_action: string
+          p_assigned_to?: string
+          p_expected_version: number
+          p_ledger_id: string
+          p_note?: string
+          p_stage?: string
+          p_target_start?: string
+        }
+        Returns: {
+          assigned_to: string | null
+          created_at: string
+          current_stage: string
+          id: string
+          organization_id: string
+          staff_id: string
+          stage_note: string | null
+          status: string
+          target_start: string | null
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_onboarding_ledgers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_staff_onboarding_evidence: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_document_type?: string
+          p_file_name?: string
+          p_notes?: string
+          p_proficiency_level?: string
+          p_reports_to_user_id?: string
+          p_skill_category?: string
+          p_skill_name?: string
+          p_staff_id: string
+          p_storage_path?: string
+          p_training_name?: string
+        }
+        Returns: Json
+      }
+      manage_user_identity_access: {
+        Args: {
+          p_action: string
+          p_assignment_id?: string
+          p_display_name?: string
+          p_expected_updated_at: string
+          p_grant_id?: string
+          p_phone?: string
+          p_preset_id?: string
+          p_reason?: string
+          p_role?: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      manage_welfare_alert: {
+        Args: {
+          p_action: string
+          p_alert_id: string
+          p_expected_status: string
+          p_notes: string
+        }
+        Returns: {
+          acted_at: string
+          alert_id: string
+          alert_status: string
+        }[]
+      }
+      match_finance_bank_statement_line: {
+        Args: { p_payment_receipt_id: string; p_statement_line_id: string }
+        Returns: {
+          amount: number
+          bank_statement_id: string
+          created_at: string
+          description: string
+          id: string
+          matched_payment_receipt_id: string | null
+          organization_id: string
+          reconciliation_status: string
+          reference: string | null
+          transaction_date: string
+          transaction_type: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_bank_statement_lines"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      match_finance_external_bank_transaction: {
+        Args: { p_payment_receipt_id: string; p_transaction_id: string }
+        Returns: {
+          amount: number | null
+          bank_account_id: string | null
+          connection_request_id: string
+          currency_code: string | null
+          description: string | null
+          direction: string | null
+          external_transaction_id: string
+          id: string
+          imported_at: string
+          matched_payment_receipt_id: string | null
+          organization_id: string
+          raw_summary: Json
+          reconciliation_status: string
+          transaction_date: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_external_bank_transactions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      materialize_roster_slot: {
+        Args: { p_expected_status?: string; p_slot_id: string }
+        Returns: {
+          created: boolean
+          shift_id: string
+          slot_id: string
+        }[]
+      }
+      merge_canonical_place: {
+        Args: { p_from: string; p_into: string }
+        Returns: undefined
+      }
       my_entitled_org_ids: { Args: never; Returns: string[] }
       my_entitled_org_ids_for_user: {
         Args: { p_user_id: string }
         Returns: string[]
+      }
+      normalize_plate_number: { Args: { p_plate: string }; Returns: string }
+      offer_overtime_by_seniority: {
+        Args: {
+          p_client_request_id: string
+          p_expires_in_minutes?: number
+          p_offer_count?: number
+          p_roster_slot_id: string
+        }
+        Returns: {
+          offer_round: number
+          offers_created: number
+        }[]
+      }
+      open_callout: {
+        Args: {
+          p_after_minimum_rate?: number
+          p_client_request_id: string
+          p_dispatch_job_id?: string
+          p_minimum_pay_hours?: number
+          p_notes?: string
+          p_on_call_period_id: string
+        }
+        Returns: {
+          after_minimum_rate: number | null
+          arrived_at: string | null
+          callout_received_at: string | null
+          client_request_id: string | null
+          created_at: string
+          departed_at: string | null
+          dispatch_job_id: string | null
+          id: string
+          minimum_pay_hours: number
+          notes: string | null
+          officer_user_id: string
+          on_call_period_id: string
+          organization_id: string
+          returned_at: string | null
+          status: string
+          work_ended_at: string | null
+          work_started_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "callout_shifts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      open_ptt_transmission: {
+        Args: {
+          p_channel_id?: string
+          p_emergency?: boolean
+          p_metadata?: Json
+        }
+        Returns: {
+          organization_id: string
+          started_at: string
+          state: string
+          transmission_id: string
+        }[]
       }
       org_access_allowed: { Args: { target_org_id: string }; Returns: boolean }
       org_default_level: { Args: { p_type: string }; Returns: number }
@@ -19082,6 +40685,59 @@ export type Database = {
         Args: { p_stop_id: string }
         Returns: string[]
       }
+      platform_list_subscribers: {
+        Args: never
+        Returns: {
+          active: boolean
+          active_module_count: number
+          active_user_count: number
+          agreement_ends_on: string
+          agreement_id: string
+          agreement_starts_on: string
+          branches: number
+          cancelled_module_count: number
+          contact_email: string
+          created_at: string
+          jobs_30d: number
+          last_sign_in_at: string
+          master_count: number
+          module_keys: string[]
+          name: string
+          organization_id: string
+          organization_type: string
+          shifts_30d: number
+          sites: number
+          status: string
+          suspended_module_count: number
+          updated_at: string
+          user_count: number
+        }[]
+      }
+      platform_provision_subscriber: {
+        Args: {
+          p_client_request_id: string
+          p_module_keys: string[]
+          p_name: string
+          p_organization_id: string
+          p_starts_on?: string
+        }
+        Returns: Json
+      }
+      platform_provision_subscriber_internal: {
+        Args: {
+          p_actor: string
+          p_client_request_id: string
+          p_module_keys: string[]
+          p_name: string
+          p_organization_id: string
+          p_starts_on?: string
+        }
+        Returns: Json
+      }
+      platform_set_subscriber_status: {
+        Args: { p_organization_id: string; p_reason?: string; p_status: string }
+        Returns: Json
+      }
       point_in_zone: {
         Args: { p_lat: number; p_lng: number; p_zone_id: string }
         Returns: boolean
@@ -19089,6 +40745,38 @@ export type Database = {
       populate_geometry_columns:
         | { Args: { tbl_oid: unknown; use_typmod?: boolean }; Returns: number }
         | { Args: { use_typmod?: boolean }; Returns: string }
+      post_finance_timesheet_labour_cost: {
+        Args: {
+          p_cost_centre_id?: string
+          p_pl_period_id: string
+          p_service_agreement_id: string
+          p_service_type?: string
+          p_timesheet_id: string
+          p_work_unit_id?: string
+        }
+        Returns: {
+          finance_service_cost_id: string
+          hourly_rate: number
+          hours: number
+          id: string
+          organization_id: string
+          pl_period_id: string
+          posted_at: string
+          posted_by: string | null
+          rate_rule_id: string | null
+          rate_status: string
+          service_agreement_id: string
+          source_snapshot: Json
+          staff_id: string
+          timesheet_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_labour_cost_postings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       postgis_constraint_dims: {
         Args: { geomcolumn: string; geomschema: string; geomtable: string }
         Returns: number
@@ -19126,6 +40814,118 @@ export type Database = {
       }
       postgis_version: { Args: never; Returns: string }
       postgis_wagyu_version: { Args: never; Returns: string }
+      prepare_crm_client_invitation: {
+        Args: { p_account_organization_id: string }
+        Returns: Json
+      }
+      prepare_finance_tax_period: {
+        Args: { p_tax_period_id: string }
+        Returns: {
+          adjustments: number
+          created_at: string
+          created_by: string | null
+          filed_at: string | null
+          filed_by: string | null
+          filing_due_date: string
+          id: string
+          input_tax: number
+          net_tax_due: number
+          organization_id: string
+          output_tax: number
+          period_end: string
+          period_start: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_tax_periods"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      prepare_nz_payday_filing_package: {
+        Args: { p_payroll_export_batch_id: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          package_summary: Json
+          payroll_export_batch_id: string
+          period_from: string
+          period_to: string
+          provider_format: string
+          resolved_rate_count: number
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          timesheet_count: number
+          total_hours: number
+          unresolved_rate_count: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_payday_filing_packages"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      prepare_provisional_tax_scenario: {
+        Args: {
+          p_estimated_taxable_profit: number
+          p_method?: string
+          p_pl_period_id: string
+          p_tax_rate_pct: number
+          p_tax_year: number
+        }
+        Returns: {
+          accountant_notes: string | null
+          approved_at: string | null
+          approved_by: string | null
+          assumptions: Json
+          created_at: string
+          created_by: string | null
+          estimated_income_tax: number
+          estimated_provisional_amount: number
+          estimated_taxable_profit: number
+          id: string
+          method: string
+          organization_id: string
+          pl_period_id: string | null
+          source_key: string
+          status: string
+          tax_rate_pct: number
+          tax_year: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_provisional_tax_plans"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      preview_batch_publish_roster_slots: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          draft_count: number
+          field_shift_count: number
+          leave_conflict_count: number
+          unassigned_count: number
+        }[]
+      }
+      preview_roster_from_templates: {
+        Args: {
+          p_from_date: string
+          p_organization_id: string
+          p_to_date: string
+        }
+        Returns: {
+          candidate_slots: number
+          existing_slots: number
+          new_slots: number
+          templates_applied: number
+        }[]
+      }
       promote_document_to_reference_library: {
         Args: {
           p_approver_id: string
@@ -19135,13 +40935,1078 @@ export type Database = {
         }
         Returns: Json
       }
+      propose_boundary: {
+        Args: {
+          p_address_candidate?: Json
+          p_entity_id: string
+          p_entity_type: string
+          p_geojson: Json
+          p_organization_id: string
+          p_proposed_via?: string
+          p_source: string
+          p_source_ref?: Json
+          p_zone_type?: string
+        }
+        Returns: {
+          area_m2: number
+          current_has_boundary: boolean
+          drift_from_current_m: number
+          gate_ok: boolean
+          gate_reason: string
+          proposal_id: string
+          proposed_geojson: Json
+        }[]
+      }
+      propose_document_promotion: {
+        Args: {
+          p_document_version_id: string
+          p_proposed_payload?: Json
+          p_source_map?: Json
+          p_target_type: string
+        }
+        Returns: {
+          applied_at: string | null
+          applied_target_id: string | null
+          created_at: string
+          document_version_id: string
+          id: string
+          organization_id: string
+          proposed_payload: Json
+          requested_by: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_map: Json
+          status: string
+          target_type: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_promotion_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      publish_location_event_continuity: {
+        Args: {
+          p_action_required?: string
+          p_client_request_id: string
+          p_hazard_flags?: Json
+          p_location_event_id: string
+          p_safe_summary: string
+          p_severity?: string
+        }
+        Returns: {
+          action_required: string | null
+          client_site_id: string | null
+          created_at: string
+          created_by: string
+          expires_at: string
+          hazard_flags: Json
+          id: string
+          module_key: string
+          operational_status: string
+          policy_id: string
+          recipient_organization_id: string
+          safe_summary: string
+          service_agreement_id: string
+          severity: string
+          source_location_event_id: string
+          source_occurred_at: string
+          source_organization_id: string
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "operational_continuity_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      purge_aam_e2e_dataset: {
+        Args: { p_provider_organization_id: string }
+        Returns: Json
+      }
+      queue_dispatch_job_for_officer: {
+        Args: {
+          p_briefing_notes?: string
+          p_client_request_id: string
+          p_client_site_id: string
+          p_job_type: string
+          p_module_key: string
+          p_officer_user_id: string
+          p_organization_id: string
+          p_priority: string
+          p_service_agreement_id: string
+          p_sla_minutes: number
+          p_work_unit_id: string
+        }
+        Returns: {
+          assigned_officer_id: string
+          created: boolean
+          id: string
+          status: string
+          work_unit_id: string
+        }[]
+      }
+      raise_officer_sos: {
+        Args: {
+          p_client_request_id: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_notes?: string
+          p_shift_id?: string
+        }
+        Returns: {
+          alert_id: string
+          created: boolean
+          triggered_at: string
+        }[]
+      }
+      raise_officer_welfare_alert: {
+        Args: {
+          p_alert_type: string
+          p_client_request_id: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_notes?: string
+          p_shift_id?: string
+        }
+        Returns: {
+          alert_id: string
+          created: boolean
+          triggered_at: string
+        }[]
+      }
+      reassign_roster_slot: {
+        Args: {
+          p_expected_status: string
+          p_new_staff_id: string
+          p_reason: string
+          p_slot_id: string
+        }
+        Returns: {
+          shift_id: string
+          shift_status: string
+          slot_id: string
+          slot_status: string
+          staff_id: string
+        }[]
+      }
+      reconcile_downer_linz_vehicle_log: {
+        Args: { p_limit?: number }
+        Returns: {
+          linked_rows: number
+          scanned_rows: number
+          unresolved_rows: number
+        }[]
+      }
+      record_akahu_import: {
+        Args: {
+          p_accounts?: Json
+          p_provider_reference: string
+          p_request_id: string
+          p_transactions?: Json
+        }
+        Returns: Json
+      }
+      record_akahu_personal_check: {
+        Args: {
+          p_account_count: number
+          p_account_summary: Json
+          p_actor_user_id: string
+          p_app_reference: string
+          p_error_category?: string
+          p_status: string
+        }
+        Returns: {
+          account_count: number
+          app_reference: string
+          checked_at: string
+          connected_account_summary: Json
+          error_category: string | null
+          id: string
+          organization_id: string
+          requested_by: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_akahu_personal_checks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_asset_check: {
+        Args: {
+          p_action_required?: string
+          p_asset_id: string
+          p_check_type: string
+          p_client_request_id: string
+          p_condition: string
+          p_defects_noted?: string
+          p_fuel_level?: string
+          p_odometer_reading?: number
+        }
+        Returns: {
+          action_required: string | null
+          asset_id: string
+          check_type: string
+          checked_at: string
+          checked_by: string | null
+          condition: string
+          defects_noted: string | null
+          fuel_level: string | null
+          id: string
+          odometer_reading: number | null
+          organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "asset_checks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_callout_milestone: {
+        Args: {
+          p_callout_id: string
+          p_expected_status: string
+          p_milestone: string
+        }
+        Returns: {
+          after_minimum_rate: number | null
+          arrived_at: string | null
+          callout_received_at: string | null
+          client_request_id: string | null
+          created_at: string
+          departed_at: string | null
+          dispatch_job_id: string | null
+          id: string
+          minimum_pay_hours: number
+          notes: string | null
+          officer_user_id: string
+          on_call_period_id: string
+          organization_id: string
+          returned_at: string | null
+          status: string
+          work_ended_at: string | null
+          work_started_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "callout_shifts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_cctv_entity_observations: {
+        Args: {
+          p_evidence_id: string
+          p_job_id: string
+          p_observations: Json
+          p_organization_id: string
+        }
+        Returns: number
+      }
+      record_cctv_identity_draft: {
+        Args: {
+          p_candidate_matches?: Json
+          p_event_id: string
+          p_event_type: string
+          p_evidence_id: string
+          p_job_id: string
+          p_organization_id: string
+          p_proposed_display_name: string
+          p_proposed_person_record_id: string
+          p_reason?: string
+          p_subject_kind: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          authority_level: string
+          candidate_matches: Json
+          created_at: string
+          created_by: string
+          event_id: string | null
+          event_type: string
+          evidence_item_id: string
+          final_action: string | null
+          final_person_record_id: string | null
+          id: string
+          inference_job_id: string
+          organization_id: string
+          proposed_display_name: string | null
+          proposed_person_record_id: string | null
+          reason: string | null
+          review_notes: string | null
+          status: string
+          subject_kind: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_identity_drafts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_cctv_review_decision: {
+        Args: {
+          p_decision: string
+          p_event_id: string
+          p_event_type: string
+          p_evidence_id: string
+          p_job_id: string
+          p_organization_id: string
+          p_reason: string
+        }
+        Returns: {
+          decided_at: string
+          decided_by: string
+          decision: string
+          event_id: string | null
+          event_type: string
+          evidence_item_id: string
+          id: string
+          inference_job_id: string
+          organization_id: string
+          reason: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_review_decisions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_cctv_review_event: {
+        Args: {
+          p_confidence_override?: number
+          p_event_type: string
+          p_evidence_id: string
+          p_incident_id?: string
+          p_job_id: string
+          p_organization_id: string
+          p_person_record_id?: string
+          p_review_state: string
+          p_reviewer_notes?: string
+          p_source_event_id: string
+          p_vehicle_id?: string
+        }
+        Returns: {
+          candidate_payload: Json
+          confidence_override: number | null
+          created_at: string
+          event_type: string
+          evidence_item_id: string
+          id: string
+          inference_job_id: string
+          linked_incident_id: string | null
+          linked_person_record_id: string | null
+          linked_vehicle_id: string | null
+          model_confidence: number | null
+          observed_from_seconds: number | null
+          observed_to_seconds: number | null
+          organization_id: string
+          review_state: string
+          reviewer_notes: string | null
+          source_event_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_review_events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_cctv_scene_observation: {
+        Args: {
+          p_camera_key: string
+          p_evidence_id: string
+          p_inference_job_id: string
+          p_location_id?: string
+          p_organization_id: string
+          p_scene_fingerprint: Json
+          p_site_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          camera_key: string
+          evidence_count: number
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          location_id: string | null
+          organization_id: string
+          recidivism_summary: Json
+          review_state: string
+          scene_fingerprint: Json
+          scene_label: string | null
+          site_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_camera_scene_profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_court_appearance_outcome: {
+        Args: {
+          p_actual_end?: string
+          p_actual_start?: string
+          p_appearance_id: string
+          p_expected_status: string
+          p_outcome?: string
+          p_status: string
+        }
+        Returns: {
+          actual_end: string | null
+          actual_start: string | null
+          appearance_type: string
+          case_reference: string | null
+          client_request_id: string
+          court_name: string
+          created_at: string
+          created_by: string | null
+          enforcement_case_id: string | null
+          estimated_hours: number
+          id: string
+          is_overtime: boolean
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          outcome: string | null
+          scheduled_at: string
+          status: string
+          subpoena_reference: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "court_appearances"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_finance_external_sync: {
+        Args: { p_error?: string; p_request_id: string; p_sync_cursor?: string }
+        Returns: {
+          adapter_name: string | null
+          bank_account_id: string | null
+          connected_at: string | null
+          connection_mode: string
+          consent_confirmed: boolean
+          consent_confirmed_at: string | null
+          consent_confirmed_by: string | null
+          created_at: string
+          created_by: string | null
+          disconnected_at: string | null
+          external_reference: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          oauth_started_at: string | null
+          oauth_state_expires_at: string | null
+          oauth_state_hash: string | null
+          organization_id: string
+          provider_connection_reference: string | null
+          provider_name: string | null
+          provider_type: string
+          requested_scopes: string[]
+          setup_summary: Json
+          status: string
+          sync_cursor: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_external_connection_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_finance_inventory_transaction: {
+        Args: {
+          p_asset_id?: string
+          p_dispatch_job_id?: string
+          p_idempotency_key: string
+          p_investigation_id?: string
+          p_item_id: string
+          p_location_id: string
+          p_quantity: number
+          p_source_reference?: string
+          p_target_location_id?: string
+          p_transaction_type: string
+          p_unit_cost: number
+        }
+        Returns: {
+          asset_id: string | null
+          created_at: string
+          created_by: string | null
+          dispatch_job_id: string | null
+          id: string
+          idempotency_key: string
+          investigation_id: string | null
+          item_id: string
+          location_id: string
+          location_id_target: string | null
+          organization_id: string
+          quantity: number
+          service_agreement_id: string | null
+          shift_id: string | null
+          source_reference: string | null
+          transaction_type: string
+          unit_cost: number
+          work_unit_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_inventory_transactions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_finance_service_cost: {
+        Args: {
+          p_asset_id?: string
+          p_cost_type: string
+          p_dispatch_job_id?: string
+          p_investigation_id?: string
+          p_pl_period_id: string
+          p_quantity: number
+          p_service_agreement_id: string
+          p_shift_id?: string
+          p_source_document_type: string
+          p_source_reference: string
+          p_unit_cost: number
+          p_work_unit_id?: string
+        }
+        Returns: {
+          allocation_driver: string | null
+          asset_id: string | null
+          client_organization_id: string
+          cost_centre_id: string | null
+          cost_type: string
+          created_at: string
+          created_by: string | null
+          dispatch_job_id: string | null
+          id: string
+          investigation_id: string | null
+          invoice_line_item_id: string | null
+          invoiced_at: string | null
+          organization_id: string
+          pl_period_id: string
+          quantity: number
+          service_agreement_id: string
+          shift_id: string | null
+          site_id: string | null
+          source_document_type: string
+          source_reference: string
+          total_cost: number
+          unit_cost: number
+          unit_of_measure: string | null
+          work_unit_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_service_costs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_job_party_interaction: {
+        Args: {
+          p_client_request_id: string
+          p_dispatch_job_id: string
+          p_gps_accuracy?: number
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_mode: string
+          p_noise_assessment_id?: string
+          p_occurred_at?: string
+          p_party_role: string
+          p_shift_stop_id?: string
+          p_summary?: string
+        }
+        Returns: {
+          created: boolean
+          id: string
+          occurred_at: string
+        }[]
+      }
+      record_noise_direction_particulars: {
+        Args: {
+          p_assessment_id: string
+          p_client_request_id: string
+          p_entry_notice_left?: boolean
+          p_given_orally: boolean
+          p_period_hours?: number
+          p_recipient_role: string
+        }
+        Returns: {
+          assessment_id: string
+          end_expires_at: string
+          end_given_orally: boolean
+          end_recipient_role: string
+          entry_notice_left: boolean
+        }[]
+      }
+      record_officer_breadcrumb: {
+        Args: {
+          p_accuracy_meters?: number
+          p_activity_type?: string
+          p_client_event_id: string
+          p_gps_lat: number
+          p_gps_lng: number
+          p_heading?: number
+          p_physical_address?: string
+          p_recorded_at: string
+          p_shift_id?: string
+          p_speed_kmh?: number
+        }
+        Returns: {
+          created: boolean
+          id: string
+          received_at: string
+        }[]
+      }
+      record_officer_checkpoint_visit: {
+        Args: {
+          p_checkpoint_id: string
+          p_client_request_id: string
+          p_gps_accuracy?: number
+          p_gps_distance_from_checkpoint?: number
+          p_gps_lat: number
+          p_gps_lng: number
+          p_shift_id: string
+          p_within_radius?: boolean
+        }
+        Returns: {
+          created: boolean
+          patrol_id: string
+          visit_id: string
+          visited_at: string
+        }[]
+      }
+      record_officer_welfare_checkin: {
+        Args: {
+          p_client_request_id: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_notes?: string
+          p_shift_id?: string
+        }
+        Returns: {
+          check_id: string
+          checked_in_at: string
+          created: boolean
+        }[]
+      }
+      record_patrol_checkpoint_visit: {
+        Args: {
+          p_checkpoint_id: string
+          p_checkpoint_kind: string
+          p_gps_accuracy: number
+          p_gps_lat: number
+          p_gps_lng: number
+          p_notes?: string
+          p_patrol_id: string
+        }
+        Returns: {
+          created: boolean
+          notes: string
+          scan_method: string
+          visit_id: string
+          visited_at: string
+        }[]
+      }
+      record_payment_receipt: {
+        Args: {
+          p_bank_account_id?: string
+          p_invoice_id: string
+          p_payment_amount: number
+          p_payment_date: string
+          p_payment_method: string
+          p_transaction_reference?: string
+        }
+        Returns: {
+          bank_account_id: string | null
+          bank_statement_reference: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          invoice_id: string
+          notes: string | null
+          organization_id: string
+          payment_amount: number
+          payment_date: string
+          payment_method: string
+          reconciled_at: string | null
+          reconciled_by: string | null
+          reconciliation_status: string
+          transaction_reference: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "payment_receipts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_radio_transcript_segment: {
+        Args: {
+          p_confidence?: number
+          p_is_final?: boolean
+          p_sequence: number
+          p_text: string
+          p_transmission_id: string
+        }
+        Returns: {
+          created_at: string
+          segment_id: string
+          sequence: number
+          transmission_id: string
+        }[]
+      }
       record_sla_arrival: {
         Args: { p_arrived_at?: string; p_clock_id: string }
         Returns: string
       }
+      recover_stale_cctv_inference_jobs: { Args: never; Returns: number }
       refresh_canonical_ta_names: {
         Args: { p_names: string[]; p_source?: string }
         Returns: Json
+      }
+      refresh_fs_nelson_clients_clean: {
+        Args: never
+        Returns: {
+          clean_rows: number
+          raw_rows: number
+        }[]
+      }
+      register_bob_video_attachment_for_review: {
+        Args: { p_attachment_id: string }
+        Returns: string
+      }
+      register_edge_court_photo: {
+        Args: {
+          p_captured_at: string
+          p_metadata: Json
+          p_module_key: string
+          p_organization_id: string
+          p_storage_path: string
+        }
+        Returns: string
+      }
+      register_evidence_media_item: {
+        Args: {
+          p_evidence_kind: string
+          p_is_court_ready?: boolean
+          p_metadata?: Json
+          p_module_key: string
+          p_retention_days?: number
+          p_sha256_hash?: string
+          p_storage_path: string
+        }
+        Returns: {
+          captured_at: string
+          evidence_kind: string
+          id: string
+          is_court_ready: boolean
+          module_key: string
+          organization_id: string
+          retention_days: number
+          sha256_hash: string
+          storage_path: string
+        }[]
+      }
+      register_officer_device_token: {
+        Args: {
+          p_app_version?: string
+          p_device_name?: string
+          p_platform?: string
+          p_push_token: string
+        }
+        Returns: {
+          id: string
+          is_active: boolean
+          last_seen_at: string
+          platform: string
+          push_token: string
+        }[]
+      }
+      register_organization_brand_asset: {
+        Args: {
+          p_alt_text?: string
+          p_asset_kind: string
+          p_asset_url?: string
+          p_label: string
+          p_mime_type?: string
+          p_organization_id: string
+          p_sha256?: string
+          p_storage_bucket?: string
+          p_storage_path?: string
+          p_usage_scope?: string
+          p_variant: string
+        }
+        Returns: {
+          alt_text: string | null
+          approved_at: string | null
+          approved_by: string | null
+          asset_kind: string
+          asset_url: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string
+          mime_type: string | null
+          organization_id: string
+          sha256: string | null
+          status: string
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+          usage_scope: string
+          variant: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_brand_assets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      reject_boundary_proposal: {
+        Args: { p_note: string; p_proposal_id: string }
+        Returns: boolean
+      }
+      remove_crm_invoice_line: {
+        Args: {
+          p_client_request_id: string
+          p_invoice_id: string
+          p_line_id: string
+        }
+        Returns: {
+          gst_amount: number
+          invoice_id: string
+          removed: boolean
+          subtotal: number
+          total_amount: number
+        }[]
+      }
+      remove_crm_quote_line: {
+        Args: {
+          p_client_request_id: string
+          p_expected_status: string
+          p_line_id: string
+          p_quote_id: string
+        }
+        Returns: {
+          discount_amount: number
+          gst_amount: number
+          quote_id: string
+          removed: boolean
+          subtotal_charge: number
+          total_charge: number
+          total_cost: number
+        }[]
+      }
+      renew_staff_credential: {
+        Args: {
+          p_client_request_id: string
+          p_credential_number: string
+          p_evidence_notes: string
+          p_expected_expiry_date: string
+          p_expiry_date: string
+          p_issued_date: string
+          p_issuing_authority: string
+          p_source_credential_id: string
+        }
+        Returns: {
+          created: boolean
+          credential_id: string
+          staff_id: string
+          verified: boolean
+          verified_at: string
+        }[]
+      }
+      repeat_roster_slot_range: {
+        Args: {
+          p_from_date: string
+          p_source_slot_id: string
+          p_to_date: string
+        }
+        Returns: {
+          created_count: number
+          leave_conflict_count: number
+          skipped_conflict_count: number
+        }[]
+      }
+      request_anz_bank_connection: {
+        Args: {
+          p_bank_account_id: string
+          p_connection_mode?: string
+          p_consent_confirmed?: boolean
+          p_requested_scopes?: string[]
+        }
+        Returns: {
+          adapter_name: string | null
+          bank_account_id: string | null
+          connected_at: string | null
+          connection_mode: string
+          consent_confirmed: boolean
+          consent_confirmed_at: string | null
+          consent_confirmed_by: string | null
+          created_at: string
+          created_by: string | null
+          disconnected_at: string | null
+          external_reference: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          oauth_started_at: string | null
+          oauth_state_expires_at: string | null
+          oauth_state_hash: string | null
+          organization_id: string
+          provider_connection_reference: string | null
+          provider_name: string | null
+          provider_type: string
+          requested_scopes: string[]
+          setup_summary: Json
+          status: string
+          sync_cursor: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_external_connection_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      request_bob_document_output: {
+        Args: {
+          p_document_id: string
+          p_document_version_id: string
+          p_output_format: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          delivery_metadata: Json
+          document_id: string
+          document_version_id: string
+          failure_reason: string | null
+          generated_at: string | null
+          id: string
+          mime_type: string | null
+          organization_id: string
+          output_format: string
+          renderer_version: string | null
+          requested_by: string
+          sha256: string | null
+          status: string
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "bob_generated_document_outputs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      request_finance_external_connection: {
+        Args: {
+          p_bank_account_id?: string
+          p_connection_mode: string
+          p_consent_confirmed?: boolean
+          p_provider_type: string
+          p_requested_scopes?: string[]
+        }
+        Returns: {
+          adapter_name: string | null
+          bank_account_id: string | null
+          connected_at: string | null
+          connection_mode: string
+          consent_confirmed: boolean
+          consent_confirmed_at: string | null
+          consent_confirmed_by: string | null
+          created_at: string
+          created_by: string | null
+          disconnected_at: string | null
+          external_reference: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          oauth_started_at: string | null
+          oauth_state_expires_at: string | null
+          oauth_state_hash: string | null
+          organization_id: string
+          provider_connection_reference: string | null
+          provider_name: string | null
+          provider_type: string
+          requested_scopes: string[]
+          setup_summary: Json
+          status: string
+          sync_cursor: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_external_connection_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      request_shift_swap: {
+        Args: {
+          p_client_request_id: string
+          p_reason?: string
+          p_shift_id: string
+          p_swap_type?: string
+          p_swap_with_staff_id?: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          completed_at: string | null
+          created_at: string
+          declined_reason: string | null
+          id: string
+          organization_id: string
+          original_shift_id: string
+          original_staff_id: string
+          reason: string | null
+          requested_at: string
+          requested_by: string
+          status: string
+          swap_type: string
+          swap_with_staff_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_swaps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      reserve_infringement_notice_number: {
+        Args: {
+          p_module_key: string
+          p_organization_id: string
+          p_prefix?: string
+        }
+        Returns: string
       }
       resolve_access_basis: {
         Args: {
@@ -19171,6 +42036,41 @@ export type Database = {
         Returns: {
           area: string
           level: string
+        }[]
+      }
+      resolve_active_rules: {
+        Args: {
+          p_at?: string
+          p_lat?: number
+          p_lng?: number
+          p_location_id?: string
+          p_module_key: string
+          p_organization_id: string
+          p_site_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          active_location_id: string
+          active_site_id: string
+          active_zone_id: string
+          approval_policy: Json
+          dominant_anchor_kind: string
+          effective_rules: Json
+          enabled: boolean
+          evidence_requirements: Json
+          governing_jurisdiction_id: string
+          governing_jurisdiction_name: string
+          jurisdiction_name: string
+          jurisdiction_rule_set_id: string
+          jurisdiction_rule_set_name: string
+          jurisdiction_rules: Json
+          module_key: string
+          module_rule_set_id: string
+          module_rule_set_name: string
+          organization_id: string
+          policy_status: string
+          report_template_code: string
+          resolution_status: string
         }[]
       }
       resolve_context: {
@@ -19219,18 +42119,31 @@ export type Database = {
           site_id: string
         }[]
       }
-      resolve_verified_site_context: {
+      resolve_dispatch_job_financials_internal: {
         Args: {
-          p_client_org_ids: string[]
-          p_lat: number
-          p_lng: number
+          p_actor: string
+          p_client_request_id: string
+          p_day_category?: string
+          p_dispatch_job_id: string
         }
         Returns: {
-          client_organization_id: string
-          location_id: string | null
-          match_kind: string
-          site_id: string
-          site_name: string
+          charge_lines_written: number
+          lines_written: number
+          total_charge: number
+          total_pay: number
+          unresolved_count: number
+        }[]
+      }
+      resolve_dispatch_job_pay_lines: {
+        Args: {
+          p_client_request_id: string
+          p_day_category?: string
+          p_dispatch_job_id: string
+        }
+        Returns: {
+          lines_written: number
+          total_pay: number
+          unresolved_count: number
         }[]
       }
       resolve_enforcement_mode: { Args: { p_zone_id: string }; Returns: string }
@@ -19250,9 +42163,708 @@ export type Database = {
           resolution_source: string
         }[]
       }
+      resolve_operational_context: {
+        Args: {
+          p_at?: string
+          p_lat: number
+          p_lng: number
+          p_module_key?: string
+          p_org_id: string
+        }
+        Returns: {
+          client_org_id: string
+          effective_rules: Json
+          governing_jurisdiction_id: string
+          governing_jurisdiction_name: string
+          governor_overlap_flag: boolean
+          in_operating_bounds: boolean
+          matched_module_key: string
+          matched_zone_id: string
+          on_site: boolean
+          out_of_bounds_district: string
+          resolution_status: string
+          site_id: string
+        }[]
+      }
+      resolve_or_create_dispatch_place_site: {
+        Args: {
+          p_actor?: string
+          p_address: string
+          p_client_organization_id: string
+          p_lat: number
+          p_lng: number
+          p_name: string
+          p_provider_organization_id: string
+        }
+        Returns: {
+          house_action: string
+          location_id: string
+          site_created: boolean
+          site_id: string
+        }[]
+      }
+      resolve_rate_rule: {
+        Args: {
+          p_client_org_id?: string
+          p_day_category?: string
+          p_distance_km?: number
+          p_job_type?: string
+          p_module_key?: string
+          p_organization_id: string
+          p_rate_type?: string
+          p_role_code?: string
+          p_rule_kind: string
+          p_service_type?: string
+          p_site_id?: string
+          p_when: string
+          p_zone_id?: string
+        }
+        Returns: {
+          amount: number
+          day_category: string
+          pay_code: string
+          rate_rule_id: string
+          rate_type: string
+          region_code: string
+          role_code: string
+          specificity: number
+        }[]
+      }
       resolve_retention_days: {
         Args: { p_category: string; p_module_key: string; p_org_id: string }
         Returns: number
+      }
+      resolve_verified_site_context:
+        | {
+            Args: { p_client_org_ids: string[]; p_lat: number; p_lng: number }
+            Returns: {
+              client_organization_id: string
+              location_id: string
+              match_kind: string
+              site_id: string
+              site_name: string
+            }[]
+          }
+        | {
+            Args: {
+              p_client_org_ids: string[]
+              p_lat: number
+              p_lng: number
+              p_module_key?: string
+              p_provider_org_id?: string
+            }
+            Returns: {
+              client_organization_id: string
+              location_id: string
+              match_kind: string
+              site_id: string
+              site_name: string
+            }[]
+          }
+      respond_to_on_call_period: {
+        Args: {
+          p_decline_reason?: string
+          p_expected_status: string
+          p_period_id: string
+          p_response: string
+        }
+        Returns: {
+          client_request_id: string | null
+          created_at: string
+          decline_reason: string | null
+          ends_at: string
+          flat_rate: number | null
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          period_type: string
+          responded_at: string | null
+          starts_at: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "on_call_periods"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      respond_to_overtime_offer: {
+        Args: {
+          p_decline_reason?: string
+          p_expected_status: string
+          p_offer_id: string
+          p_response: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          decline_reason: string | null
+          expires_at: string
+          id: string
+          offer_round: number
+          organization_id: string
+          responded_at: string | null
+          roster_slot_id: string
+          seniority_position: number
+          staff_id: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "overtime_offers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      respond_to_roster_slot: {
+        Args: {
+          p_decline_reason?: string
+          p_expected_status: string
+          p_response: string
+          p_slot_id: string
+        }
+        Returns: {
+          shift_id: string
+          shift_status: string
+          slot_id: string
+          slot_status: string
+        }[]
+      }
+      resubmit_rejected_timesheet_from_work: {
+        Args: {
+          p_adjustment_hours?: number
+          p_notes?: string
+          p_timesheet_id: string
+        }
+        Returns: {
+          actual_hours: number
+          id: string
+          source_count: number
+          submitted_at: string
+        }[]
+      }
+      return_shift_asset: {
+        Args: {
+          p_condition?: string
+          p_defects_noted?: string
+          p_fuel_level?: string
+          p_link_id: string
+          p_odometer_reading?: number
+        }
+        Returns: {
+          asset_id: string
+          assigned_at: string
+          assigned_by: string | null
+          client_request_id: string
+          id: string
+          organization_id: string
+          returned_at: string | null
+          shift_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_assets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_bob_document_draft: {
+        Args: {
+          p_decision: string
+          p_document_id: string
+          p_document_version_id: string
+          p_review_reason: string
+        }
+        Returns: Json
+      }
+      review_branch_leave_request: {
+        Args: {
+          p_decision: string
+          p_expected_status: string
+          p_operating_organization_id: string
+          p_request_id: string
+          p_review_notes?: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          decision_notes: string | null
+          ends_on: string
+          id: string
+          leave_type: string
+          notes: string | null
+          organization_id: string
+          reason: string | null
+          staff_id: string
+          starts_on: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "leave_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_branch_timesheet: {
+        Args: {
+          p_decision: string
+          p_expected_status: string
+          p_operating_organization_id: string
+          p_review_notes?: string
+          p_timesheet_id: string
+        }
+        Returns: {
+          actual_hours: number | null
+          adjustment_hours: number
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_hours: number
+          payroll_export_batch_id: string | null
+          period_end: string
+          period_start: string
+          review_notes: string | null
+          scheduled_hours: number | null
+          shift_id: string | null
+          staff_id: string
+          status: string
+          submitted_at: string | null
+          work_derived_hours: number | null
+          work_summary: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "timesheets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_dispatch_job_pay_line: {
+        Args: {
+          p_client_request_id: string
+          p_decision: string
+          p_expected_review_id: string
+          p_pay_line_id: string
+          p_review_notes?: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          decision: string
+          id: string
+          organization_id: string
+          pay_line_id: string
+          review_notes: string | null
+          reviewed_at: string
+          reviewed_by: string
+          supersedes_review_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "dispatch_job_pay_line_reviews"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_document_classification: {
+        Args: {
+          p_contains_financial_data: boolean
+          p_contains_legal_privilege: boolean
+          p_contains_operational_security: boolean
+          p_contains_pii: boolean
+          p_document_version_id: string
+          p_privacy_class: string
+          p_reason: string
+        }
+        Returns: {
+          classifier_source: string
+          confidence: number | null
+          contains_financial_data: boolean
+          contains_legal_privilege: boolean
+          contains_operational_security: boolean
+          contains_pii: boolean
+          created_at: string
+          document_version_id: string
+          id: string
+          privacy_class: string
+          rationale: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_classifications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_document_promotion_proposal: {
+        Args: { p_decision: string; p_proposal_id: string; p_reason: string }
+        Returns: {
+          applied_at: string | null
+          applied_target_id: string | null
+          created_at: string
+          document_version_id: string
+          id: string
+          organization_id: string
+          proposed_payload: Json
+          requested_by: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_map: Json
+          status: string
+          target_type: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_promotion_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_file_import_batch: {
+        Args: { p_batch_id: string; p_decision: string; p_reason: string }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_file_import_mapping: {
+        Args: {
+          p_batch_id: string
+          p_decision: string
+          p_review_reason: string
+          p_source_column: string
+          p_target_entity: string
+          p_target_field: string
+        }
+        Returns: {
+          batch_id: string
+          created_at: string
+          decision: string
+          id: string
+          organization_id: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_column: string
+          target_entity: string | null
+          target_field: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_mapping_reviews"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_leave_request: {
+        Args: {
+          p_decision: string
+          p_expected_status: string
+          p_request_id: string
+          p_review_notes?: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          decision_notes: string | null
+          ends_on: string
+          id: string
+          leave_type: string
+          notes: string | null
+          organization_id: string
+          reason: string | null
+          staff_id: string
+          starts_on: string
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "leave_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_officer_field_report: {
+        Args: {
+          p_expected_status: Database["public"]["Enums"]["report_status"]
+          p_report_id: string
+          p_review_notes: string
+        }
+        Returns: {
+          address: string | null
+          canonical_place_id: string | null
+          client_event_id: string | null
+          created_at: string
+          description: string
+          follow_up_notes: string | null
+          follow_up_required: boolean
+          gps_lat: number | null
+          gps_lng: number | null
+          id: string
+          immediate_action: string | null
+          investigation_id: string | null
+          location_name: string | null
+          officer_id: string
+          organization_id: string
+          persons_involved: Json | null
+          photo_urls: string[] | null
+          report_type: Database["public"]["Enums"]["report_type"]
+          reported_at: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          severity: Database["public"]["Enums"]["report_severity"]
+          shift_id: string | null
+          site_id: string | null
+          status: Database["public"]["Enums"]["report_status"]
+          title: string
+          updated_at: string
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "officer_field_reports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_organization_brand_asset: {
+        Args: { p_asset_id: string; p_decision: string; p_reason: string }
+        Returns: {
+          alt_text: string | null
+          approved_at: string | null
+          approved_by: string | null
+          asset_kind: string
+          asset_url: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          label: string
+          mime_type: string | null
+          organization_id: string
+          sha256: string | null
+          status: string
+          storage_bucket: string | null
+          storage_path: string | null
+          updated_at: string
+          usage_scope: string
+          variant: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_brand_assets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_shift_swap: {
+        Args: {
+          p_client_request_id: string
+          p_decision: string
+          p_expected_status: string
+          p_review_notes?: string
+          p_swap_id: string
+        }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          completed_at: string | null
+          created_at: string
+          declined_reason: string | null
+          id: string
+          organization_id: string
+          original_shift_id: string
+          original_staff_id: string
+          reason: string | null
+          requested_at: string
+          requested_by: string
+          status: string
+          swap_type: string
+          swap_with_staff_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_swaps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_timesheet: {
+        Args: {
+          p_decision: string
+          p_expected_status: string
+          p_review_notes?: string
+          p_timesheet_id: string
+        }
+        Returns: {
+          actual_hours: number | null
+          adjustment_hours: number
+          approved_at: string | null
+          approved_by: string | null
+          branch_review_notes: string | null
+          branch_reviewed_at: string | null
+          branch_reviewed_by: string | null
+          branch_reviewed_organization_id: string | null
+          client_event_id: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_hours: number
+          payroll_export_batch_id: string | null
+          period_end: string
+          period_start: string
+          review_notes: string | null
+          scheduled_hours: number | null
+          shift_id: string | null
+          staff_id: string
+          status: string
+          submitted_at: string | null
+          work_derived_hours: number | null
+          work_summary: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "timesheets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      rollback_bob_roster_fill_plan: {
+        Args: { p_action_id: string }
+        Returns: {
+          assignments_rolled_back: number
+          plan_id: string
+        }[]
+      }
+      roster_agreement_billing_ready: {
+        Args: { p_agreement_id: string; p_site_id: string; p_zone_id: string }
+        Returns: boolean
+      }
+      roster_place_geofence_state: {
+        Args: { p_site_id: string; p_zone_id: string }
+        Returns: string
+      }
+      safe_healthcheck: { Args: never; Returns: Json }
+      save_bob_document_revision: {
+        Args: {
+          p_authored_html: string
+          p_authored_text: string
+          p_document_id: string
+          p_document_type: string
+          p_reference_handles?: Json
+          p_reference_metadata?: Json
+          p_supersedes_version_id: string
+          p_title: string
+        }
+        Returns: Json
+      }
+      save_discovered_org_as_client: {
+        Args: { p_client_request_id: string; p_source_organization_id: string }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      save_finance_tax_identity: {
+        Args: {
+          p_gst_basis: string
+          p_gst_filing_frequency: string
+          p_gst_registered: boolean
+          p_ird_number: string
+          p_tax_agent_contact?: string
+          p_tax_agent_name?: string
+        }
+        Returns: Json
       }
       save_site_boundary: {
         Args: {
@@ -19274,6 +42886,200 @@ export type Database = {
         }
         Returns: number
       }
+      schedule_court_appearance: {
+        Args: {
+          p_appearance_type: string
+          p_case_reference?: string
+          p_client_request_id: string
+          p_court_name: string
+          p_enforcement_case_id?: string
+          p_estimated_hours?: number
+          p_notes?: string
+          p_officer_user_id: string
+          p_scheduled_at: string
+          p_subpoena_reference?: string
+        }
+        Returns: {
+          actual_end: string | null
+          actual_start: string | null
+          appearance_type: string
+          case_reference: string | null
+          client_request_id: string
+          court_name: string
+          created_at: string
+          created_by: string | null
+          enforcement_case_id: string | null
+          estimated_hours: number
+          id: string
+          is_overtime: boolean
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          outcome: string | null
+          scheduled_at: string
+          status: string
+          subpoena_reference: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "court_appearances"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      seal_cctv_export: {
+        Args: { p_export_id: string }
+        Returns: {
+          approval_state: string
+          approved_at: string | null
+          approved_by: string | null
+          artifact_bucket: string | null
+          artifact_path: string | null
+          evidence_item_id: string
+          generated_at: string
+          generated_by: string
+          id: string
+          inference_job_id: string
+          issued_at: string | null
+          legal_hold: boolean
+          manifest: Json
+          manifest_sha256: string
+          organization_id: string
+          purpose: string
+          recipient_scope: string
+          sealed_at: string | null
+          selected_event_ids: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_exports"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      seal_court_ready_evidence: {
+        Args: { p_evidence_id: string; p_notes?: string; p_sha256_hash: string }
+        Returns: {
+          evidence_id: string
+          is_court_ready: boolean
+          locked_at: string
+          sha256_hash: string
+        }[]
+      }
+      search_observations: {
+        Args: {
+          p_incident_id?: string
+          p_limit?: number
+          p_location_id?: string
+          p_loi?: boolean
+          p_organization_id: string
+          p_person_id?: string
+          p_poi?: boolean
+          p_search?: string
+          p_site_id?: string
+          p_vehicle_id?: string
+          p_zone_id?: string
+        }
+        Returns: {
+          compliance_status: string
+          incident_id: string
+          incident_label: string
+          location_id: string
+          location_name: string
+          loi: boolean
+          observation_id: string
+          observed_at: string
+          officer_notes: string
+          organization_id: string
+          person_id: string
+          person_label: string
+          photo_url: string
+          plate_number: string
+          poi: boolean
+          site_id: string
+          site_name: string
+          vehicle_id: string
+          vehicle_label: string
+          zone_id: string
+          zone_name: string
+        }[]
+      }
+      seed_aam_e2e_dataset: {
+        Args: {
+          p_admin_email: string
+          p_admin_user_id: string
+          p_officer_emails: string[]
+          p_officer_user_ids: string[]
+          p_owner_user_id: string
+          p_provider_organization_id: string
+        }
+        Returns: Json
+      }
+      set_crm_quote_proposal_work_model: {
+        Args: { p_module_key: string; p_quote_id: string; p_work_model: string }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string
+          id: string
+          module_key: string
+          pricing_basis: string
+          quote_id: string
+          rate_rule_id: string | null
+          service_window: Json
+          sla_minutes: number | null
+          work_model: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quote_proposal_modules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_dispatch_job_harmed_party: {
+        Args: {
+          p_client_request_id: string
+          p_dispatch_job_id: string
+          p_display_name?: string
+          p_email?: string
+          p_harmed_party_address?: string
+          p_harmed_party_lat?: number
+          p_harmed_party_lng?: number
+          p_harmed_party_site_id?: string
+          p_notes?: string
+          p_party_role?: string
+          p_phone?: string
+        }
+        Returns: {
+          house_action: string
+          out_dispatch_job_id: string
+          out_harmed_party_site_id: string
+          place_created: boolean
+          protected_party_recorded: boolean
+        }[]
+      }
+      set_operating_branch_module: {
+        Args: {
+          p_enabled: boolean
+          p_module_key: string
+          p_operating_organization_id: string
+        }
+        Returns: {
+          enabled: boolean
+          id: string
+          module_key: string
+          organization_id: string
+          settings: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_modules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       set_org_jurisdiction_geom: {
         Args: {
           p_boundary_source?: string
@@ -19283,6 +43089,42 @@ export type Database = {
           p_polygons: Json
         }
         Returns: number
+      }
+      set_organization_calendar_region: {
+        Args: { p_organization_id: string; p_region_code: string }
+        Returns: {
+          country_code: string
+          organization_id: string
+          region_code: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_calendar_settings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_organization_module_subscription: {
+        Args: {
+          p_enabled: boolean
+          p_module_key: string
+          p_organization_id: string
+        }
+        Returns: {
+          enabled: boolean
+          id: string
+          module_key: string
+          organization_id: string
+          settings: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_modules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_site_geometry: {
         Args: {
@@ -19296,6 +43138,87 @@ export type Database = {
           p_site_id: string
         }
         Returns: number
+      }
+      set_staff_pay_role_code: {
+        Args: {
+          p_expected_role_code: string
+          p_role_code?: string
+          p_staff_id: string
+        }
+        Returns: {
+          bank_account: string | null
+          created_at: string
+          date_of_birth: string | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
+          emergency_contact_relation: string | null
+          employee_number: string | null
+          employment_type: string
+          end_date: string | null
+          external_refs: Json
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_eligible: boolean
+          payroll_id: string | null
+          role_code: string | null
+          seniority_date: string | null
+          start_date: string | null
+          tax_code: string | null
+          uniform_size: string | null
+          user_id: string | null
+          work_ready: boolean
+          work_ready_review_notes: string | null
+          work_ready_reviewed_at: string | null
+          work_ready_reviewed_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_staff_work_readiness: {
+        Args: {
+          p_expected_work_ready: boolean
+          p_review_notes: string
+          p_staff_id: string
+          p_work_ready: boolean
+        }
+        Returns: {
+          bank_account: string | null
+          created_at: string
+          date_of_birth: string | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
+          emergency_contact_relation: string | null
+          employee_number: string | null
+          employment_type: string
+          end_date: string | null
+          external_refs: Json
+          id: string
+          notes: string | null
+          organization_id: string
+          overtime_eligible: boolean
+          payroll_id: string | null
+          role_code: string | null
+          seniority_date: string | null
+          start_date: string | null
+          tax_code: string | null
+          uniform_size: string | null
+          user_id: string | null
+          work_ready: boolean
+          work_ready_review_notes: string | null
+          work_ready_reviewed_at: string | null
+          work_ready_reviewed_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_zone_geometry:
         | {
@@ -19902,8 +43825,624 @@ export type Database = {
         Args: { geom: unknown; move: number; wrap: number }
         Returns: unknown
       }
+      staff_branch_authorisation_manager_can_manage: {
+        Args: {
+          p_actor_id: string
+          p_branch_organization_id: string
+          p_target_user_id: string
+        }
+        Returns: boolean
+      }
+      staff_fatigue_conflict: {
+        Args: {
+          p_exclude_slot_id?: string
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+        }
+        Returns: string
+      }
+      staff_has_roster_availability_conflict: {
+        Args: {
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+        }
+        Returns: boolean
+      }
+      start_ad_hoc_officer_shift: {
+        Args: {
+          p_location_id?: string
+          p_module_key: string
+          p_notes?: string
+          p_work_unit_id: string
+          p_zone_id?: string
+        }
+        Returns: {
+          actual_end: string | null
+          actual_start: string | null
+          completed_stops: number
+          created_at: string
+          external_refs: Json
+          generated_at: string | null
+          id: string
+          location_id: string | null
+          module_key: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          osrm_matrix_cached_at: string | null
+          patrol_route_id: string | null
+          roster_slot_id: string | null
+          scheduled_end: string
+          scheduled_start: string
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          shift_health: string | null
+          shift_origin: string
+          status: string
+          total_stops: number
+          updated_at: string
+          work_unit_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shifts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      start_finance_external_oauth: {
+        Args: {
+          p_adapter_name: string
+          p_request_id: string
+          p_state_expires_at: string
+          p_state_hash: string
+        }
+        Returns: {
+          adapter_name: string | null
+          bank_account_id: string | null
+          connected_at: string | null
+          connection_mode: string
+          consent_confirmed: boolean
+          consent_confirmed_at: string | null
+          consent_confirmed_by: string | null
+          created_at: string
+          created_by: string | null
+          disconnected_at: string | null
+          external_reference: string | null
+          id: string
+          last_error: string | null
+          last_sync_at: string | null
+          oauth_started_at: string | null
+          oauth_state_expires_at: string | null
+          oauth_state_hash: string | null
+          organization_id: string
+          provider_connection_reference: string | null
+          provider_name: string | null
+          provider_type: string
+          requested_scopes: string[]
+          setup_summary: Json
+          status: string
+          sync_cursor: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_external_connection_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      start_officer_shift: {
+        Args: {
+          p_client_request_id: string
+          p_expected_status: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_shift_id: string
+        }
+        Returns: {
+          created: boolean
+          shift_id: string
+          shift_status: string
+          started_at: string
+        }[]
+      }
+      start_patrol_session: {
+        Args: { p_shift_id: string }
+        Returns: {
+          created_at: string
+          ended_at: string | null
+          id: string
+          location_id: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          shift_id: string | null
+          started_at: string
+          status: string
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "patrols"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      start_shift_break: {
+        Args: {
+          p_break_type: string
+          p_client_request_id: string
+          p_shift_id: string
+        }
+        Returns: {
+          break_type: string
+          client_request_id: string
+          created_at: string
+          ended_at: string | null
+          id: string
+          is_paid: boolean
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          shift_id: string
+          started_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shift_breaks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      start_staff_onboarding: {
+        Args: {
+          p_assigned_to?: string
+          p_client_request_id: string
+          p_note?: string
+          p_staff_id: string
+          p_target_start?: string
+        }
+        Returns: {
+          assigned_to: string | null
+          created_at: string
+          current_stage: string
+          id: string
+          organization_id: string
+          staff_id: string
+          stage_note: string | null
+          status: string
+          target_start: string | null
+          updated_at: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_onboarding_ledgers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      stop_officer_shift: {
+        Args: { p_notes?: string; p_shift_id: string }
+        Returns: {
+          actual_end: string | null
+          actual_start: string | null
+          completed_stops: number
+          created_at: string
+          external_refs: Json
+          generated_at: string | null
+          id: string
+          location_id: string | null
+          module_key: string | null
+          notes: string | null
+          officer_user_id: string
+          organization_id: string
+          osrm_matrix_cached_at: string | null
+          patrol_route_id: string | null
+          roster_slot_id: string | null
+          scheduled_end: string
+          scheduled_start: string
+          service_agreement_location_id: string | null
+          service_agreement_module_id: string | null
+          service_type: string
+          shift_health: string | null
+          shift_origin: string
+          status: string
+          total_stops: number
+          updated_at: string
+          work_unit_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "shifts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      submit_biosecurity_assessment_receipt: {
+        Args: {
+          p_action_taken?: string
+          p_assessed_at: string
+          p_classification?: Json
+          p_client_request_id: string
+          p_density_estimate?: string
+          p_dispatch_job_id?: string
+          p_evidence_items?: Json
+          p_follow_up_required?: boolean
+          p_location_name?: string
+          p_mpi_referral_number?: string
+          p_notice_number?: string
+          p_protected_land_address?: string
+          p_protected_land_site_id?: string
+          p_scene_description?: string
+          p_shift_id?: string
+          p_species_name?: string
+        }
+        Returns: {
+          created: boolean
+          evidence_state: string
+          id: string
+          received_at: string
+          review_state: string
+        }[]
+      }
+      submit_bob_document_for_review: {
+        Args: {
+          p_document_id: string
+          p_document_version_id: string
+          p_review_reason: string
+        }
+        Returns: Json
+      }
+      submit_noise_assessment: {
+        Args: { p_client_request_id: string; p_payload: Json }
+        Returns: {
+          assessed_at: string
+          assessment_id: string
+          created: boolean
+        }[]
+      }
+      submit_officer_field_report: {
+        Args: {
+          p_address?: string
+          p_client_event_id: string
+          p_description: string
+          p_follow_up_notes?: string
+          p_follow_up_required?: boolean
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_immediate_action?: string
+          p_location_name?: string
+          p_report_type: Database["public"]["Enums"]["report_type"]
+          p_reported_at: string
+          p_severity: Database["public"]["Enums"]["report_severity"]
+          p_shift_id?: string
+          p_title: string
+        }
+        Returns: {
+          created: boolean
+          id: string
+          received_at: string
+          shift_id: string
+        }[]
+      }
+      submit_officer_leave_request: {
+        Args: {
+          p_client_event_id: string
+          p_ends_on: string
+          p_leave_type: string
+          p_reason?: string
+          p_starts_on: string
+        }
+        Returns: {
+          created: boolean
+          id: string
+          status: string
+        }[]
+      }
+      submit_officer_noise_assessment: {
+        Args: {
+          p_action_taken?: string
+          p_assessed_at: string
+          p_client_request_id: string
+          p_complainant_site_id?: string
+          p_complaint_address?: string
+          p_dispatch_job_id?: string
+          p_end_number?: string
+          p_follow_up_required?: boolean
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_incident_report_text?: string
+          p_is_large_event_or_commercial?: boolean
+          p_noise_source: string
+          p_noise_source_address: string
+          p_notice_number?: string
+          p_occupant_dob?: string
+          p_occupant_name?: string
+          p_police_present?: boolean
+          p_police_requested?: boolean
+          p_scene_description?: string
+          p_shift_id?: string
+          p_time_score?: number
+          p_tone_score?: number
+          p_volume_score?: number
+        }
+        Returns: {
+          created: boolean
+          id: string
+          matrix_total: number
+          received_at: string
+          review_status: string
+        }[]
+      }
+      submit_officer_timesheet: {
+        Args: {
+          p_actual_hours: number
+          p_client_event_id: string
+          p_notes?: string
+          p_overtime_hours?: number
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: {
+          created: boolean
+          id: string
+          submitted_at: string
+        }[]
+      }
+      submit_officer_timesheet_from_work: {
+        Args: {
+          p_adjustment_hours?: number
+          p_client_event_id: string
+          p_notes?: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: {
+          actual_hours: number
+          created: boolean
+          id: string
+          source_count: number
+          submitted_at: string
+          work_derived_hours: number
+        }[]
+      }
+      submit_shift_debrief: {
+        Args: {
+          p_client_event_id: string
+          p_equipment_issue_reported?: boolean
+          p_follow_up_notes?: string
+          p_follow_up_required?: boolean
+          p_safety_incident_reported?: boolean
+          p_shift_id: string
+          p_summary: string
+        }
+        Returns: {
+          created: boolean
+          id: string
+          submitted_at: string
+        }[]
+      }
+      submit_smoke_assessment: {
+        Args: { p_client_request_id: string; p_payload: Json }
+        Returns: {
+          assessed_at: string
+          assessment_id: string
+          created: boolean
+        }[]
+      }
+      submit_smoke_assessment_receipt: {
+        Args: {
+          p_action_taken?: string
+          p_address?: string
+          p_assessed_at: string
+          p_classification?: Json
+          p_client_request_id: string
+          p_complainant_site_id?: string
+          p_complaint_address?: string
+          p_complaint_source?: string
+          p_dispatch_job_id?: string
+          p_evidence_items?: Json
+          p_follow_up_required?: boolean
+          p_is_out_of_hours?: boolean
+          p_legal_basis?: string
+          p_notice_number?: string
+          p_scene_description?: string
+          p_severity?: string
+          p_shift_id?: string
+          p_site_id?: string
+          p_smoke_source_type?: string
+        }
+        Returns: {
+          created: boolean
+          evidence_state: string
+          id: string
+          received_at: string
+          review_state: string
+        }[]
+      }
+      test_bob_signing_config: { Args: never; Returns: Json }
       text_soundex: { Args: { "": string }; Returns: string }
+      timesheet_dispatch_pay_review_blocker: {
+        Args: { p_timesheet_id: string }
+        Returns: string
+      }
       unlockrows: { Args: { "": string }; Returns: number }
+      unpublish_roster_slot: {
+        Args: {
+          p_client_request_id: string
+          p_expected_status: string
+          p_reason?: string
+          p_slot_id: string
+        }
+        Returns: {
+          shift_cancelled: boolean
+          slot_id: string
+          slot_status: string
+        }[]
+      }
+      unregister_officer_device_token: {
+        Args: { p_push_token: string }
+        Returns: boolean
+      }
+      update_crm_quote_line: {
+        Args: {
+          p_client_request_id: string
+          p_description: string
+          p_expected_status: string
+          p_line_id: string
+          p_quantity: number
+          p_quote_id: string
+          p_unit_charge: number
+          p_unit_cost: number
+        }
+        Returns: {
+          discount_amount: number
+          gst_amount: number
+          line_id: string
+          quote_id: string
+          subtotal_charge: number
+          total_charge: number
+          total_cost: number
+          updated: boolean
+        }[]
+      }
+      update_operating_branch_profile: {
+        Args: {
+          p_billing_address: string
+          p_billing_email: string
+          p_contact_email: string
+          p_contact_phone: string
+          p_enforcement_workflow_mode: string
+          p_expected_updated_at: string
+          p_operating_organization_id: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_organization_profile: {
+        Args: {
+          p_billing_address: string
+          p_billing_email: string
+          p_contact_email: string
+          p_contact_phone: string
+          p_enforcement_workflow_mode: string
+          p_expected_updated_at: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_roster_slot: {
+        Args: {
+          p_expected_status: string
+          p_notes?: string
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_slot_id: string
+          p_staff_id: string
+        }
+        Returns: {
+          client_request_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          linked_shift_id: string | null
+          notes: string | null
+          organization_id: string
+          scheduled_end: string
+          scheduled_start: string
+          staff_id: string | null
+          status: string
+          updated_at: string
+          work_unit_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "roster_slots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       updategeometrysrid: {
         Args: {
           catalogn_name: string
@@ -19915,6 +44454,19 @@ export type Database = {
         Returns: string
       }
       user_authorised_branch_ids: { Args: never; Returns: string[] }
+      user_can_exercise_branch_authority: {
+        Args: {
+          p_area: string
+          p_branch_organization_id: string
+          p_minimum_level?: string
+          p_target_user_id: string
+        }
+        Returns: boolean
+      }
+      user_can_operate_organization: {
+        Args: { p_organization_id: string }
+        Returns: boolean
+      }
       user_has_task_entitlement: {
         Args: {
           p_biosecurity_assessment_id?: string
@@ -19985,13 +44537,38 @@ export type Database = {
         Args: { _role: Database["public"]["Enums"]["wf_app_role"] }
         Returns: boolean
       }
+      wf_heartbeat_run: {
+        Args: { _lease_token: string; _run_id: string }
+        Returns: {
+          created_at: string
+          finished_at: string | null
+          heartbeat_at: string | null
+          id: string
+          job_id: string
+          lease_expires_at: string | null
+          lease_token: string | null
+          picked_up_at: string | null
+          result_summary: Json | null
+          runner_id: string
+          status: Database["public"]["Enums"]["wf_run_status"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "wf_runs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       wf_pickup_run: {
         Args: { _job_id: string; _runner_id: string }
         Returns: {
           created_at: string
           finished_at: string | null
+          heartbeat_at: string | null
           id: string
           job_id: string
+          lease_expires_at: string | null
+          lease_token: string | null
           picked_up_at: string | null
           result_summary: Json | null
           runner_id: string
@@ -20030,6 +44607,59 @@ export type Database = {
           _bucket_id: string
           _job_id: string
           _kind: Database["public"]["Enums"]["wf_artifact_kind"]
+          _lease_token?: string
+          _object_path: string
+          _run_id: string
+          _sha256?: string
+          _size_bytes?: number
+        }
+        Returns: {
+          bucket_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          job_id: string
+          kind: Database["public"]["Enums"]["wf_artifact_kind"]
+          object_path: string
+          run_id: string | null
+          sha256: string | null
+          size_bytes: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "wf_artifacts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      wf_service_pickup_run: {
+        Args: { _job_id: string; _runner_id: string }
+        Returns: {
+          created_at: string
+          finished_at: string | null
+          heartbeat_at: string | null
+          id: string
+          job_id: string
+          lease_expires_at: string | null
+          lease_token: string | null
+          picked_up_at: string | null
+          result_summary: Json | null
+          runner_id: string
+          status: Database["public"]["Enums"]["wf_run_status"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "wf_runs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      wf_service_return_artifact: {
+        Args: {
+          _bucket_id: string
+          _job_id: string
+          _kind: Database["public"]["Enums"]["wf_artifact_kind"]
+          _lease_token?: string
           _object_path: string
           _run_id: string
           _sha256?: string
@@ -20084,40 +44714,9 @@ export type Database = {
         Args: { p_site_id: string }
         Returns: {
           boundary: unknown
-          parent_zone_id: string
           zone_id: string
           zone_name: string
         }[]
-      }
-    }
-      link_observation_entities: {
-        Args: {
-          p_canonical_vehicle_id?: string | null
-          p_incident_id?: string | null
-          p_location_id?: string | null
-          p_observation_id: string
-          p_organization_id: string
-          p_person_record_id?: string | null
-          p_site_id?: string | null
-          p_zone_id?: string | null
-        }
-        Returns: Json
-      }
-      search_observations: {
-        Args: {
-          p_incident_id?: string | null
-          p_limit?: number
-          p_location_id?: string | null
-          p_loi?: boolean | null
-          p_person_id?: string | null
-          p_poi?: boolean | null
-          p_search?: string | null
-          p_site_id?: string | null
-          p_vehicle_id?: string | null
-          p_zone_id?: string | null
-          p_organization_id: string
-        }
-        Returns: Json[]
       }
     }
     Enums: {
@@ -20171,12 +44770,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -20200,11 +44799,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -20225,11 +44824,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -20250,11 +44849,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -20267,11 +44866,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -20281,6 +44880,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       report_severity: ["low", "medium", "high", "critical"],

@@ -1,41 +1,16 @@
 /**
- * houseResolve.ts — edge-native house (locations) resolve-or-create +
- * tri-state cross-org conflict guard for Deno edge functions.
+ * houseResolve.ts — edge-native house (locations) resolve-or-create for Deno
+ * edge functions.
  *
- * Convergence Step 2, Slice 2d. GENERIC SEAM, NARROW DELIVERY (owner + Bob
- * ruling 2026-08-07, option B): this is the reusable edge analogue of the web
- * `apps/web/src/lib/resolveOrCreateHouse.ts` M3 path. Edge functions run on
- * Deno and CANNOT import the web module, so the resolve-or-create + conflict
- * logic is provided here for edge consumers.
+ * Owner ruling 2026-09-15 (docs/canon/LOCATION_HOUSE_MODEL.md): a house is an
+ * organisation's link to ONE registry place (canonical_places). The same
+ * address held by another organisation is the same place, not a conflict —
+ * the database assigns both houses the same canonical_place_id. So this seam
+ * only dedups inside the owner organisation and creates the house when none
+ * exists; the old tri-state cross-org hard stop is gone. HouseConflictError is
+ * kept only so existing callers keep compiling; it is no longer thrown here.
  *
- *   FIRST consumer: `create_freedom_camping_zone` in bob-proposal-execute (2d).
- *   LATER consumers: the site-side enforcement writer (2f) and other
- *   org/site onboarding writers — a FOLLOW-ON slice wires those; do NOT
- *   broaden 2d to them.
- *
- * TRI-STATE (amendment !1328, Slice 2a-ter — the deployed
- * `check-house-conflict-any-org` returns `false | true | 'review'`):
- *   - false    -> no conflict; proceed (resolve/create the house).
- *   - true     -> CONFIRMED cross-org conflict; hard stop
- *                 (dormant today — requires same-parcel corroboration that
- *                 `locations` cannot yet supply; kept for when 2e lands).
- *   - 'review' -> UNCONFIRMED cross-org signal; hard stop, distinct
- *                 'needs human confirmation' message. NOT a proven conflict,
- *                 NOT auto-cleared.
- * Branch EXPLICITLY on === true / === 'review' — never a truthy check (owner
- * §4 ruling: a truthy check would collapse 'review' into the confirmed path
- * and let a default branch make a policy decision nobody made).
- *
- * FAIL-CLOSED (F2 discipline): if the conflict invoke errors, is unavailable,
- * or returns an invalid verdict, THROW — never proceed as if no conflict.
- *
- * #297 (Model-A): the org passed in is the OWNER org (own-rooted). This seam
- * does NOT reason about the contractual-client role — that is the
- * service_agreement/module layer, out of scope here. Carries no legacy
- * "owning client organisation" framing.
- *
- * NOTE: like 2a-bis, this is a check-then-create guard, NOT a race-safe
- * uniqueness invariant (Slice 2e owns the hard constraint).
+ * #297 (Model-A): the org passed in is the OWNER org (own-rooted).
  */ import { computeEffectiveDedupKey } from './addressKey.ts';
 /**
  * Distinguishes the two hard-stop states so the caller can record a distinct
@@ -70,33 +45,24 @@
   return result;
 }
 /**
- * Resolve-or-create the house (locations) row for a place, applying the
- * tri-state cross-org guard on enforcement origins.
+ * Resolve-or-create the house (locations) row for a place.
  *
  * Steps:
- *   1. If addressMatchKey present: dedup within the OWNER org
+ *   1. If an address key can be derived: dedup within the OWNER org
  *      (locations by (organization_id, address_match_key)). Hit => return existing.
- *   2. ENFORCEMENT origin only: invoke the tri-state conflict guard.
- *        false -> continue; true -> throw HouseConflictError('conflict');
- *        'review' -> throw HouseConflictError('review').
- *   3. Insert the locations row (organization_id = owner org) and return created.
+ *   2. Insert the locations row (organization_id = owner org) and return created.
+ *      The database trigger assigns its canonical_place_id (shared across
+ *      organisations for the same address).
  *
  * The caller writes the returned locationId onto its facet row
  * (e.g. location_zones.location_id).
  */ export async function resolveOrCreateHouseEdge(admin, input) {
-  const { orgId, addressMatchKey, origin } = input;
-  // ── Central identity reconciliation (Duo review 3 / owner ruling Option 1) ──
-  // The invariant "a place with an address has a dedup key, and any resolvable
-  // identity is guarded" lives HERE, in the seam — NOT in each caller. A
-  // reusable seam that trusts callers to keep address+key in sync is fragile
-  // (documentation is not a security control). We derive ONE canonical key:
-  //   supplied addressMatchKey, else computeEffectiveDedupKey(null, address).
-  // computeEffectiveDedupKey normalises (trim/collapse/lowercase), so the same
-  // canonical address string feeds BOTH the key and the stored address.
-  const suppliedKey = (addressMatchKey ?? '').trim();
+  const { orgId, addressMatchKey } = input;
+  // One key, derived with the same rule the database applies on write, so the
+  // dedup query and the stored key never disagree.
   const rawAddress = (input.address ?? '').trim();
   const hasResolvedAddress = !!rawAddress;
-  const effectiveKey = (suppliedKey || computeEffectiveDedupKey(null, rawAddress || null) || '').trim();
+  const effectiveKey = computeEffectiveDedupKey(addressMatchKey ?? null, rawAddress || null) ?? '';
   // Ruling B: no key AND no address => no defensible house identity => skip
   // (no synthetic house; caller leaves location_id null by design).
   if (!effectiveKey && !hasResolvedAddress) {
@@ -104,20 +70,6 @@
       locationId: null,
       action: 'skipped'
     };
-  }
-  // Fail-closed backstop (Option 1, DEFENCE-IN-DEPTH): an address that yields
-  // NO derivable key after normalisation is a half-identified place; for an
-  // ENFORCEMENT origin we must NOT create it un-guarded — hard stop.
-  //
-  // HONESTY: with the CURRENT normaliseAddress (trim/collapse/lowercase, no
-  // punctuation strip), a non-empty trimmed rawAddress always yields a non-empty
-  // key, so hasResolvedAddress <=> effectiveKey!=='' — this branch is currently
-  // UNREACHABLE by construction. It is kept deliberately: if normaliseAddress
-  // ever changes to strip characters that .trim() does not, this prevents an
-  // un-guardable enforcement house from being created. Not falsely unit-tested
-  // (it cannot be reached with the current normaliser); documented instead.
-  if (!effectiveKey && hasResolvedAddress && origin === 'enforcement') {
-    throw new Error('resolveOrCreateHouseEdge: enforcement place has an address but no derivable ' + 'dedup key after normalisation — refusing to create an un-guardable house (fail-closed).');
   }
   const key = effectiveKey;
   // Step 1: own-org dedup (only meaningful with a key).
@@ -133,32 +85,8 @@
       };
     }
   }
-  // Step 2: ENFORCEMENT cross-org guard (tri-state). Runs whenever we have a
-  // canonical key — which, after central reconciliation above, is present for
-  // ANY resolvable identity (supplied key OR derived-from-address). The old
-  // `origin==='enforcement' && key` gate keyed only on a SUPPLIED key, which
-  // let an address-without-key enforcement place skip the guard (Duo review 3).
-  if (origin === 'enforcement' && key) {
-    const verdict = await checkHouseConflictEdge(admin, key, orgId);
-    // EXPLICIT tri-state branching — never a truthy check (owner §4 ruling).
-    if (verdict.conflict === true) {
-      // CONFIRMED cross-org conflict (dormant until 2e supplies parcel corroboration).
-      // REDACTION (Bob attack #5): do NOT include conflict_org_id / any other-org
-      // identifier in this message — it is written verbatim into the owner-org-
-      // readable bob_agentic_actions.error_message by the caller's failFc, which
-      // would route the edge fn's redacted-out cross-tenant id back to the owner
-      // and bypass check-house-conflict-any-org's role-tiering. Refusal does not
-      // need the other org's identity (existence-not-identity, per 2a-ter).
-      throw new HouseConflictError('conflict', `Cross-org conflict: a house with this address already exists under a different ` + `organisation than the resolved owner '${orgId}'. Silent reuse would preserve bad ` + `ownership; silent recreate would fork anchors. Manual resolution required.`);
-    }
-    if (verdict.conflict === 'review') {
-      // UNCONFIRMED weak signal — hard stop, distinct 'needs human confirmation'.
-      // REDACTION (Bob attack #5): no conflict_org_id / other-org identifier in
-      // the message (see the `true` branch above — same audit-row leak reason).
-      throw new HouseConflictError('review', `Cross-org signal requires human confirmation (UNCONFIRMED, not a proven conflict): ` + `a house with this address may exist under a different organisation than the resolved ` + `owner '${orgId}'. No parcel corroboration is available, so this is neither ` + `auto-confirmed nor auto-cleared. A human must confirm or clear it before the house is created.`);
-    }
-  // verdict.conflict === false -> fall through to create.
-  }
+  // Step 2 (removed 2026-09-15): no cross-org guard — the registry gives both
+  // organisations' houses the same canonical place.
   // (Skip / fail-closed decisions were made up-front during central identity
   // reconciliation — by this point we have a resolvable identity and, for
   // enforcement, the guard has run.)

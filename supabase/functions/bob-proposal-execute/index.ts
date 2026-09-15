@@ -1017,11 +1017,12 @@ serve(async (req)=>{
       // Confirm the client org exists (no dangling FK / cross-org mistake).
       const { data: clientOrg } = await admin.from('organizations').select('id').eq('id', clientOrgId).maybeSingle();
       if (!clientOrg) return await failSite(`client_organization_id ${clientOrgId} does not exist`);
-      // Dedupe by address_match_key (keeps shared officer-safety history; same as
-      // SiteQuickCreate). Only when a key is present.
-      const matchKey = sp.address_match_key ? String(sp.address_match_key).trim() : '';
+      // Dedupe by address key inside the owner organisation (the DB trigger stores the
+      // same key shape; another organisation's site at this address is its own facet
+      // on the shared registry place, not a duplicate).
+      const matchKey = computeEffectiveDedupKey(sp.address_match_key ?? null, sp.address ?? null) ?? '';
       if (matchKey) {
-        const { data: existingSite } = await admin.from('client_sites').select('id').eq('address_match_key', matchKey).limit(1).maybeSingle();
+        const { data: existingSite } = await admin.from('client_sites').select('id').eq('client_organization_id', clientOrgId).eq('address_match_key', matchKey).limit(1).maybeSingle();
         if (existingSite?.id) {
           await admin.from('bob_agentic_actions').update({
             status: 'applied',
@@ -1694,9 +1695,15 @@ serve(async (req)=>{
           });
         }
       } else {
+        // A zone linked to a site shares the site's house; dedupe on (org, name, house).
+        let siteHouseId = null;
+        if (siteId) {
+          const { data: siteHouse } = await admin.from('client_sites').select('location_id').eq('id', siteId).maybeSingle();
+          siteHouseId = siteHouse?.location_id ?? null;
+        }
         let dq = admin.from('location_zones').select('id').eq('organization_id', orgId).ilike('name', zoneName);
-        dq = siteId ? dq.eq('site_id', siteId) : dq.is('site_id', null);
-        const { data: existingByName } = await dq.maybeSingle();
+        if (siteHouseId) dq = dq.eq('location_id', siteHouseId);
+        const { data: existingByName } = await dq.limit(1).maybeSingle();
         if (existingByName?.id) {
           await admin.from('bob_agentic_actions').update({
             status: 'applied',
@@ -1801,6 +1808,11 @@ serve(async (req)=>{
       // 2d: location_id is populated when a house is MEANINGFULLY resolved;
       // null by design for an address-less zone (owner ruling B — no synthetic
       // house). The column is nullable (0111); a null here is intended state.
+      // A zone linked to a site is on that site's house unless the address resolved a different one.
+      if (!resolvedLocationId && siteId) {
+        const { data: linkedSite } = await admin.from('client_sites').select('location_id').eq('id', siteId).maybeSingle();
+        resolvedLocationId = linkedSite?.location_id ?? null;
+      }
       const zoneRow = {
         organization_id: orgId,
         location_id: resolvedLocationId,
@@ -1809,20 +1821,13 @@ serve(async (req)=>{
         module_key: 'freedom_camping',
         boundary_status: provisional ? 'provisional' : 'authoritative'
       };
-      if (siteId) zoneRow.site_id = siteId;
       if (typeof zp.nightly_limit_consecutive === 'number') zoneRow.nightly_limit_consecutive = zp.nightly_limit_consecutive;
       if (typeof zp.nightly_limit_monthly === 'number') zoneRow.nightly_limit_monthly = zp.nightly_limit_monthly;
       if (typeof zp.scv_required === 'boolean') zoneRow.scv_required = zp.scv_required;
       if (typeof zp.bylaw_clause === 'string' && zp.bylaw_clause.trim()) zoneRow.bylaw_clause = zp.bylaw_clause.trim();
       if (typeof zp.bylaw_source_url === 'string' && zp.bylaw_source_url.trim()) zoneRow.bylaw_source_url = zp.bylaw_source_url.trim();
       if (despatchZoneCode) zoneRow.despatch_zone_code = despatchZoneCode;
-      for (const k of [
-        'address',
-        'suburb',
-        'postcode'
-      ]){
-        if (typeof zp[k] === 'string' && String(zp[k]).trim()) zoneRow[k] = String(zp[k]).trim();
-      }
+      // address/suburb/postcode live on the house (locations), never on the zone.
       const { data: createdZone, error: zoneErr } = await admin.from('location_zones').insert(zoneRow).select('id').single();
       if (zoneErr || !createdZone) {
         // Orphan-house guard (Bob attack #5): the zone insert is the very failure

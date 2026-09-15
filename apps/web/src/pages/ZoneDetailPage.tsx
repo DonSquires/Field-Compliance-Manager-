@@ -16,7 +16,6 @@ import "./ZoneDetailPage.css";
 interface ZoneRow extends HouseMapZone {
   organization_id: string;
   location_id: string | null;
-  site_id: string | null;
   zone_type: string;
   module_key: string;
   rule_type: string;
@@ -24,6 +23,7 @@ interface ZoneRow extends HouseMapZone {
   active_schedule: Record<string, unknown> | null;
   onsite_profile: string;
   enforcement_workflow_override: string | null;
+  /** The house address (zones carry no address of their own). */
   address: string | null;
   bylaw_clause: string | null;
   bylaw_source_url: string | null;
@@ -169,11 +169,7 @@ export default function ZoneDetailPage() {
         : { name: zone.name, address: zone.address },
     );
     setSites(
-      availableSites.filter((site) =>
-        zone.location_id
-          ? site.location_id === zone.location_id
-          : site.id === zone.site_id,
-      ),
+      availableSites.filter((site) => site.location_id === zone.location_id),
     );
     setClosures((closuresRes.data as ClosureRow[]) ?? []);
     setBoundaryHistory((historyRes.data as BoundaryEvent[]) ?? []);

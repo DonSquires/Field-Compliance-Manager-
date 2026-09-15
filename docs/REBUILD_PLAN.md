@@ -166,19 +166,34 @@ source-side reader's report carries no complainant data.
 
 ## 3. Place convergence (LOCATION_HOUSE_MODEL, GEOFENCE_PRINCIPLES)
 
-1. Every site/zone create path resolves-or-creates the house first; port
-   `resolveOrCreateHouse` with its ownership-jump guard and tests from
-   `docs/canon/reference/recovered/`.
-2. Back-fill houses for the 69 sites and 1 zone without `location_id`
-   (data migration with provenance, reviewed).
+**Applied live 2026-09-15 (owner ruling; `20260915170000_place_model_convergence.sql`,
+truth table `supabase/tests/20260915170000_place_model_convergence.sql`, guard
+`test/place-model-convergence.test.js`):** `canonical_places` is the permanent
+place registry (kind `site` keyed by address, `zone` keyed by house); every
+house carries `canonical_place_id`; every site and zone has a house in its own
+organisation, resolved-or-created by trigger on write (items 1 and 2 below are
+done: 70 houses back-filled, identity preserved, 3,113 observations still on the
+Lowburn registry row); places cannot be deleted (trigger + revoked grants;
+`merge_canonical_place` converges duplicates); one SQL address key rule mirrored
+by `_shared/addressKey.ts`; the zone→site link, zone nesting, zone address
+columns, `client_site_zones` and `get_zone_for_gps` are removed as duplicates.
+`resolve_context` now takes the site and owner from the matched zone's house.
+
+1. ~~Every site/zone create path resolves-or-creates the house first~~ — done
+   structurally: `zz_client_sites_place_house` / `zz_location_zones_place_house`
+   triggers, with the ownership-jump guard, run for every writer.
+2. ~~Back-fill houses for the 69 sites and 1 zone without `location_id`~~ — done
+   (`location_id` is now `NOT NULL` on both facets).
 3. Canonical site-entry pipeline (Q10): inventory every address entry point in
    `apps/web` and route all of them through LINZ autocomplete → dedup → create.
    Dispatch included. **Dispatch slice applied live 2026-09-14** (see §2b item 4):
    both dispatch place writers now share `resolve_or_create_dispatch_place_site`,
-   which resolves-or-creates the house first (§3.1 shape, SQL). Remaining entry
-   points (CRM `create_crm_site`/`manage_crm_location`, the edge
-   `houseResolve.ts` with its differently-normalised key, investigation and
-   context site creates) still run their own paths.
+   which resolves-or-creates the house first (§3.1 shape, SQL). The edge
+   `houseResolve.ts` key now matches the SQL rule and its cross-org hard stop is
+   gone (same address in another organisation = same registry place). Remaining
+   entry points (CRM `create_crm_site`, investigation and context site creates)
+   still take free-text addresses; the key is exact, so they must move to LINZ
+   canonical strings or they will create precision duplicates.
 4. `resolution_status` audit: `process-officer-scan`, dispatch intake and the
    billing zone-tier must branch on the five outcomes; no boolean fallbacks.
    **Scan pipeline conformed 2026-09-15 (G3; edge function redeployed v610):**

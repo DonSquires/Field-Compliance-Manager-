@@ -892,7 +892,7 @@ serve(async (req)=>{
     if (zoneId) {
       // Lightweight fetch for the zone name (used in the evidence watermark) and
       // location_id; site_id already came from resolve_context.
-      let zoneQuery = supabase.from('location_zones').select('id, name, location_id, site_id, module_key, active_schedule, boundary_verification').eq('id', zoneId).eq('is_active', true);
+      let zoneQuery = supabase.from('location_zones').select('id, name, location_id, module_key, active_schedule, boundary_verification').eq('id', zoneId).eq('is_active', true);
       if (manualZoneId) zoneQuery = zoneQuery.eq('organization_id', orgId);
       const { data: zoneData, error: zoneError } = await zoneQuery.maybeSingle();
       if (zoneError) return json({ error: 'Zone context could not be loaded', detail: zoneError.message }, 503);
@@ -905,7 +905,11 @@ serve(async (req)=>{
       }
       zoneName = zoneData.name;
       locationId = zoneData.location_id;
-      if (!siteId) siteId = zoneData.site_id;
+      if (!siteId && locationId) {
+        // Manual zone selection skipped the resolver: the site is the zone's sibling on the same house.
+        const { data: siblingSite } = await supabase.from('client_sites').select('id').eq('location_id', locationId).eq('active', true).order('created_at').limit(1).maybeSingle();
+        siteId = siblingSite?.id ?? null;
+      }
       const { data: closureData, error: closureError } = await supabase.rpc('is_zone_closed', {
         p_zone_id: zoneId,
         p_at: capturedDate.toISOString()

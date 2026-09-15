@@ -102,11 +102,10 @@ serve(async (req)=>{
         headers: corsHeaders
       });
     }
-    // Bug C fix: load breach alert + zone (location_zones has its own address
-    // column since 0108; the old `locations` table was retired in 0126).
+    // The zone's address is its house's address (locations); zones carry no address of their own.
     const { data: alert, error: alertErr } = await supabase.from('breach_alerts').select(`
         id, plate_number, breach_type, created_at, zone_id, organization_id,
-        location_zones(name, address)
+        location_zones(name, locations(address))
       `).eq('id', breach_alert_id).single();
     if (alertErr || !alert) {
       return new Response(JSON.stringify({
@@ -137,7 +136,7 @@ serve(async (req)=>{
     const plate = alert.plate_number ?? 'UNKNOWN';
     const zone = alert.location_zones;
     const zoneName = zone?.name ?? location_name ?? 'Unknown location';
-    const siteAddress = zone?.address ?? '';
+    const siteAddress = zone?.locations?.address ?? '';
     const orgName = org?.name ?? 'Field Compliance Manager';
     const noticeDate = new Date().toLocaleDateString('en-NZ', {
       dateStyle: 'long',

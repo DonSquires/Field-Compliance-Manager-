@@ -885,13 +885,16 @@ serve(async (req)=>{
     const siteName = String(data.name ?? '').trim();
     const address = String(data.address ?? '').trim();
     const clientOrgId = data.client_organization_id ? String(data.client_organization_id) : null;
-    const addressMatchKey = String(data.address_match_key ?? '').trim() || (address ? address.toLowerCase().replace(/\s+/g, ' ').trim() : '');
+    // Same key rule as public.address_match_key(text); the DB trigger re-derives it on write.
+    const addressMatchKey = (String(data.address_match_key ?? '').trim() || address).toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (mode === 'create') {
       if (!siteName && !address) return json({
         error: 'data.name or data.address is required to create a site'
       }, 400);
-      if (addressMatchKey) {
-        const { data: existing } = await admin.from('client_sites').select('id, name, address_match_key').eq('address_match_key', addressMatchKey).maybeSingle();
+      if (addressMatchKey && clientOrgId) {
+        // A duplicate is the same address inside the same owner organisation; another
+        // organisation's site at this address is its own facet on the shared registry place.
+        const { data: existing } = await admin.from('client_sites').select('id, name, address_match_key').eq('client_organization_id', clientOrgId).eq('address_match_key', addressMatchKey).limit(1).maybeSingle();
         if (existing) {
           return json({
             success: false,

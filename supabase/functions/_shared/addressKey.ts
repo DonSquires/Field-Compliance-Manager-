@@ -1,43 +1,31 @@
 /**
- * addressKey.ts — SHARED pure address dedup-key derivation for edge functions.
+ * addressKey.ts — SHARED address dedup-key derivation for edge functions.
  *
- * Convergence Step 2, Slice 2d (Bob attack #4: dedup-key parity). This is a
- * FAITHFUL PORT of the web `apps/web/src/lib` logic:
- *   - `normaliseAddress`        (from siteAnchorAddress.ts)
- *   - `computeEffectiveDedupKey` (from resolveOrCreateHouse.ts)
- * The bodies are intentionally IDENTICAL. Edge (Deno) code cannot import the
- * web module, so the SAME pure logic lives here for edge consumers.
- *
- * WHY THIS MATTERS (not a tidy-up): the dedup key IS part of the enforcement
- * decision. If web and edge normalise addresses differently, the same physical
- * address can produce different keys → different cross-org conflict verdicts
- * depending on which path created the row. Parity must hold.
- *
- * LOCKSTEP: if the web `normaliseAddress` / `computeEffectiveDedupKey` change,
- * update these to match (and vice versa). A later slice may re-point the web
- * path at this shared module to make the lockstep structural rather than
- * by-discipline; for now the bodies are kept identical and pinned by tests.
+ * The key rule lives in the database as public.address_match_key(text)
+ * (migration 20260915170000): lowercase the address and remove every run of
+ * non-alphanumeric characters. Triggers on locations/client_sites re-derive the
+ * stored key with that rule on every write, so edge code MUST look rows up with
+ * the same shape or it will miss them and create duplicates. Pinned by
+ * test/place-model-convergence.test.js against the SQL definition.
  *
  * PURE: no imports, no framework deps — just string logic.
  */ /**
- * Normalise an address string for comparison/keying: trim, collapse internal
- * whitespace to single spaces, lowercase. IDENTICAL to web
- * siteAnchorAddress.ts::normaliseAddress.
+ * Normalise an address string for display comparison: trim, collapse internal
+ * whitespace to single spaces, lowercase.
  */ export function normaliseAddress(addr) {
   return addr.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 /**
- * Compute the effective dedup key for a house. IDENTICAL to web
- * resolveOrCreateHouse.ts::computeEffectiveDedupKey.
- *
- *   - LINZ matchKey present  → use it VERBATIM (label ignored).
- *   - else label present     → normaliseAddress(label).
- *   - else                   → null (no key; cannot dedup / cross-org match).
- *
- * Computed ONCE and used for BOTH the dedup query AND the written
- * address_match_key, so a synthesized key dedups identically to a real LINZ key.
+ * The single address key rule — identical to public.address_match_key(text).
+ * Returns null when nothing alphanumeric remains.
+ */ export function addressMatchKey(addr) {
+  if (addr == null) return null;
+  const key = String(addr).trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return key || null;
+}
+/**
+ * Compute the effective dedup key for a house: a supplied key (e.g. a LINZ
+ * canonical address) or the address label, both passed through the one rule.
  */ export function computeEffectiveDedupKey(matchKey, label) {
-  if (matchKey) return matchKey;
-  if (label) return normaliseAddress(label);
-  return null;
+  return addressMatchKey(matchKey) ?? addressMatchKey(label);
 }

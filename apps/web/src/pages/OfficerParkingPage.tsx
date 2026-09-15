@@ -91,14 +91,15 @@ const OfficerParkingPage: React.FC = () => {
               .eq('officer_id', profile.id))
           .order('chalked_at', { ascending: false }),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('location_zones').select('id, name, address').in('id', activeZoneIds).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name')
-          : supabase.from('location_zones').select('id, name, address').eq('organization_id', profile.organizationId).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
+          ? supabase.from('location_zones').select('id, name, locations(address)').in('id', activeZoneIds).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name')
+          : supabase.from('location_zones').select('id, name, locations(address)').eq('organization_id', profile.organizationId).eq('module_key', 'parking_enforcement').eq('is_active', true).eq('boundary_verification', 'verified').order('name'),
       ]);
 
       if (err) throw err;
       if (zoneError) throw zoneError;
       setRecords((data as ChalkRecord[]) || []);
-      setZones((zoneData as ParkingZone[]) || []);
+      // A zone's address is its house's address.
+      setZones(((zoneData as unknown as Array<{ id: string; name: string; locations: { address: string | null } | null }>) || []).map((zone) => ({ id: zone.id, name: zone.name, address: zone.locations?.address ?? null })));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load parking records');
     } finally {
