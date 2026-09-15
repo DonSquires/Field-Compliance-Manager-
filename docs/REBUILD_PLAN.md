@@ -212,7 +212,8 @@ source-side reader's report carries no complainant data.
   refreshed baselines.
 - **G3 P1 callers — built; `process-officer-scan` redeployed 2026-09-15
   (v610, owner-authorized)** (see §3.4).
-- **G4 Tier 4 checkpoints — drafted 2026-09-15, NOT YET APPLIED** —
+- **G4 Tier 4 checkpoints — applied live 2026-09-15 (owner-authorized;
+  ledger tip `20260915100000`)** —
   `20260915100000_checkpoint_tier_workbench.sql`: `manage_patrol_checkpoint`
   (Q3 direct save at a site within reach, map position required, radius from
   `org_geofence_config.checkpoint_radius_m` else 5 m (Q8), idempotent create,
@@ -224,9 +225,9 @@ source-side reader's report carries no complainant data.
   visit's distance and `within_radius` are measured by the server from the
   recorded point (the officer client's claim is audited, not stored) and the
   checkpoint's verification state is recorded on the visit
-  (`checkpoint_verification_at_visit`). Live today there is no checkpoint
-  create path at all (0 rows), no P2 reset, and the visit writer stores what
-  the client asserts. Truth table extended to 58 checks; guard
+  (`checkpoint_verification_at_visit`). Before this, live had no checkpoint
+  create path at all (0 rows), no P2 reset, and the visit writer stored what
+  the client asserted. Truth table extended to 58 checks; guard
   `test/checkpoint-tier-workbench.test.js`. Workbench UI: a "Checkpoints
   (Tier 4)" panel on every selected site — list with state, place by picking
   a point on the map or typing coordinates, move/resize, (de)activate, and
@@ -236,7 +237,7 @@ source-side reader's report carries no complainant data.
   PUBLIC, anon, authenticated, service_role` before each function's grants
   (same fidelity gap as the table fix: default privileges in a fresh database
   had widened `_gbh_next_version` to anon/authenticated in the oracle only).
-- **Remaining:** apply `20260915100000` (owner go-ahead); Tier 1 organisation
+- **Remaining:** Tier 1 organisation
   jurisdiction through the governed proposal path (Q5) with map preview; Q6
   source registry rungs (council ArcGIS / NZTA) as proposal sources; backfill
   of the 75 unverified sites through the queue (human work, not a script);
