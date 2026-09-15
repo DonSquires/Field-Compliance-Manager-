@@ -36,6 +36,8 @@ declare
   v_site uuid := gen_random_uuid();         -- council-owned, no boundary yet, centre only
   v_site2 uuid := gen_random_uuid();        -- council-owned, centre 30 m away, used for dedup + verify-nothing
   v_zone uuid := gen_random_uuid();         -- provider-owned freedom camping zone, no boundary
+  v_cp_nopoint uuid := gen_random_uuid();   -- provider checkpoint with no coordinates
+  v_cp uuid := gen_random_uuid();           -- provider checkpoint with a point + 5 m radius
   v_p1 record; v_p2 record; v_tiny record; v_pz record; v_porg record; v_pmulti record; v_acc record; v_accz record;
   v_cs public.client_sites%rowtype; v_z public.location_zones%rowtype; v_bp public.boundary_proposals%rowtype;
   v_row record; v_count int; v_err text; v_ok boolean;
@@ -53,6 +55,8 @@ begin
   insert into public.service_agreement_locations (service_agreement_id, site_id, status) values (v_agreement, v_site, 'active'), (v_agreement, v_site2, 'active') on conflict do nothing;
   insert into public.location_zones (id, organization_id, name, zone_type, module_key, is_active, boundary_verification)
     values (v_zone, v_provider, 'T_ZONE', 'freedom_camping', 'freedom_camping', true, 'unverified');
+  insert into public.patrol_checkpoints (id, organization_id, client_site_id, name, gps_lat, gps_lng, radius_meters)
+    values (v_cp_nopoint, v_provider, v_site, 'T_CP_NOPOINT', null, null, 5), (v_cp, v_provider, v_site, 'T_CP', -41.2706, 173.2840, 5);
 
   -- ── staging table: readable within reach, never writable from the browser ──
   perform pg_temp.as_user(v_admin);
@@ -144,6 +148,25 @@ begin
     and not has_function_privilege('anon', 'public._gbh_next_version(text, uuid)', 'EXECUTE')
     and not has_function_privilege('authenticated', 'public._gbh_next_version(text, uuid)', 'EXECUTE')
     and not has_function_privilege('anon', 'public.get_boundary_history(text, uuid)', 'EXECUTE'));
+  -- Tier 4: a checkpoint is a point + radius; the same rule applies and it is versioned (Q3, Q4)
+  perform pg_temp.as_user(v_admin);
+  begin
+    perform public.verify_boundary('patrol_checkpoint', v_cp_nopoint);
+    perform pg_temp.check('a checkpoint with no point cannot be verified', false);
+  exception when others then
+    get stacked diagnostics v_err = message_text;
+    perform pg_temp.check('a checkpoint with no point cannot be verified', v_err like '%patrol_checkpoint%no boundary geometry to verify%');
+  end;
+  v_ok := public.verify_boundary('patrol_checkpoint', v_cp);
+  perform pg_temp.as_admin();
+  perform pg_temp.check('a checkpoint with a point is verified and versioned',
+    v_ok and (select checkpoint_verification from public.patrol_checkpoints where id = v_cp) = 'verified'
+    and (select checkpoint_verified_by from public.patrol_checkpoints where id = v_cp) = v_admin
+    and exists (select 1 from public.geofence_boundary_history h where h.entity_type = 'patrol_checkpoint' and h.entity_id = v_cp and h.verification_state = 'verified' and h.version = 1
+                and st_area(h.boundary::geography) between 70 and 90));
+  perform pg_temp.check('the pointless checkpoint stayed unverified with no history',
+    (select checkpoint_verification from public.patrol_checkpoints where id = v_cp_nopoint) = 'unverified'
+    and not exists (select 1 from public.geofence_boundary_history where entity_type = 'patrol_checkpoint' and entity_id = v_cp_nopoint));
 
   -- ── accept: the human's (edited) shape becomes the live boundary, unverified ──
   perform pg_temp.as_user(v_admin);

@@ -27,4 +27,12 @@ describe('ScanShell standalone contract', () => {
     expect(source).toContain('result.zone_closure?.closure_type');
     expect(source).toContain('Verdict remains rule-derived.');
   });
+
+  it('renders each geofence resolution outcome distinctly (GEOFENCE_PRINCIPLES P1)', () => {
+    for (const outcome of ['resolved', 'outside_all_geofences', 'unresolved_no_geofence', 'unresolved_unverified', 'unresolved_invalid', 'not_evaluated']) expect(source).toContain(`${outcome}:`);
+    expect(source).toContain("RESOLUTION_LABEL[result.resolution_status ?? '']");
+    expect(source).toContain('result.geofence_notice &&');
+    expect(source).toContain('result.governor_overlap_flag &&');
+    expect(source).not.toContain('No configured zone');
+  });
 });

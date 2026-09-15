@@ -345,7 +345,8 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         const siteId = row?.site_id ?? null;
         const matchedAgreementZone = zoneId && selectedAgreementZones.some((zone) => zone.id === zoneId);
         const matchedAgreementSite = siteId && selectedAgreementSites.some((site) => site.id === siteId);
-        setGeofenceResolution({ resolutionStatus: row?.resolution_status ?? 'outside_all_geofences', siteId, zoneId });
+        // P1: an absent resolver row is 'unavailable', never a fabricated "outside all geofences".
+        setGeofenceResolution({ resolutionStatus: row?.resolution_status ?? 'unavailable', siteId, zoneId });
         if (matchedAgreementZone) {
           setSelectedZoneId(zoneId);
           setSelectedSiteId(null);

@@ -36,14 +36,15 @@ BEGIN
     IF NOT public.org_access_allowed(v_org_id) THEN RAISE EXCEPTION 'verify_boundary: access denied for client_site %', p_entity_id; END IF;
     v_et := 'client_site';
   ELSIF p_entity_type = 'patrol_checkpoint' THEN
-    -- Point geometry; verification state only, no polygon history (unchanged).
-    SELECT organization_id INTO v_org_id FROM public.patrol_checkpoints WHERE id = p_entity_id;
+    -- Tier 4 is a point + radius. Same P1 rule: nothing is certified without geometry (Q4: versioned too).
+    SELECT organization_id,
+           CASE WHEN gps_lat IS NOT NULL AND gps_lng IS NOT NULL AND coalesce(radius_meters, 0) > 0
+                THEN ST_Buffer(ST_SetSRID(ST_MakePoint(gps_lng, gps_lat), 4326)::geography, radius_meters)::geometry END
+      INTO v_org_id, v_boundary
+      FROM public.patrol_checkpoints WHERE id = p_entity_id;
     IF NOT FOUND THEN RETURN false; END IF;
     IF NOT public.is_admin_for_org(v_org_id) THEN RAISE EXCEPTION 'verify_boundary: access denied for patrol_checkpoint %', p_entity_id; END IF;
-    UPDATE public.patrol_checkpoints
-       SET checkpoint_verification = 'verified', checkpoint_verified_by = v_uid, checkpoint_verified_at = now()
-     WHERE id = p_entity_id;
-    RETURN true;
+    v_et := 'patrol_checkpoint';
   ELSE
     RAISE EXCEPTION 'verify_boundary: unknown entity_type "%"', p_entity_type;
   END IF;
@@ -60,6 +61,8 @@ BEGIN
     UPDATE public.organizations SET jurisdiction_verification = 'verified', jurisdiction_verified_by = v_uid, jurisdiction_verified_at = now() WHERE id = p_entity_id;
   ELSIF v_et = 'location_zone' THEN
     UPDATE public.location_zones SET boundary_verification = 'verified', boundary_verified_by = v_uid, boundary_verified_at = now() WHERE id = p_entity_id;
+  ELSIF v_et = 'patrol_checkpoint' THEN
+    UPDATE public.patrol_checkpoints SET checkpoint_verification = 'verified', checkpoint_verified_by = v_uid, checkpoint_verified_at = now() WHERE id = p_entity_id;
   ELSE
     UPDATE public.client_sites SET boundary_verification = 'verified', boundary_verified_by = v_uid, boundary_verified_at = now() WHERE id = p_entity_id;
   END IF;

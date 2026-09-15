@@ -31,11 +31,14 @@ test('the hardened verify_boundary refuses to certify missing or invalid geometr
   assert.match(hardening, /LANGUAGE plpgsql SECURITY DEFINER SET search_path = public/);
   assert.match(hardening, /IF v_boundary IS NULL OR ST_IsEmpty\(v_boundary\) THEN\s+RAISE EXCEPTION 'verify_boundary: % % has no boundary geometry to verify \(unresolved_no_geofence\)'/);
   assert.match(hardening, /IF NOT ST_IsValid\(v_boundary\) THEN\s+RAISE EXCEPTION 'verify_boundary: % % boundary geometry is invalid[^']*\(unresolved_invalid\)'/);
-  // The geometry checks run before any state write for the three polygon entities.
+  // The geometry checks run before any state write for all four entity tiers.
   const checks = hardening.indexOf('unresolved_no_geofence');
-  for (const write of ["SET jurisdiction_verification = 'verified'", "UPDATE public.location_zones SET boundary_verification = 'verified'", "UPDATE public.client_sites SET boundary_verification = 'verified'"]) {
+  for (const write of ["SET jurisdiction_verification = 'verified'", "UPDATE public.location_zones SET boundary_verification = 'verified'", "UPDATE public.client_sites SET boundary_verification = 'verified'", "UPDATE public.patrol_checkpoints SET checkpoint_verification = 'verified'"]) {
     assert.ok(hardening.indexOf(write) > checks, `${write} must follow the geometry checks`);
   }
+  // Tier 4 derives its geometry from the point + radius so the same rule applies (Q3) and it is versioned (Q4).
+  assert.match(hardening, /gps_lat IS NOT NULL AND gps_lng IS NOT NULL AND coalesce\(radius_meters, 0\) > 0\s+THEN ST_Buffer\(ST_SetSRID\(ST_MakePoint\(gps_lng, gps_lat\), 4326\)::geography, radius_meters\)::geometry END/);
+  assert.doesNotMatch(hardening, /patrol_checkpoints[\s\S]{0,400}RETURN true;\s+ELSE/, 'the checkpoint branch must not short-circuit past the geometry checks');
   assert.match(hardening, /'Boundary verified via visual map confirmation', public\._gbh_next_version\(v_et, p_entity_id\)/, 'history discipline unchanged');
   assert.match(hardening, /REVOKE ALL ON FUNCTION public\.verify_boundary\(text, uuid\) FROM PUBLIC, anon;/);
   assert.match(hardening, /REVOKE ALL ON FUNCTION public\._gbh_next_version\(text, uuid\) FROM PUBLIC, anon, authenticated;/);
@@ -61,6 +64,8 @@ test('the disposable-database truth table exercises every rule the engine and th
     'a stranger cannot propose for another org',
     'a site with no geometry cannot be verified',
     'anon can no longer execute the verification or version helpers',
+    'a checkpoint with no point cannot be verified',
+    'a checkpoint with a point is verified and versioned',
     'accepted with a human edit recorded',
     'live site boundary is the final polygon, authoritative provenance, still unverified',
     'visual verification flips the state and writes version 2',

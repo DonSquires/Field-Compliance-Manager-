@@ -29,6 +29,8 @@ export type OfficerScanResult = {
   compliance_reason: string | null;
   zone_name: string | null;
   breach_alert_id: string | null;
+  resolution_status?: string | null;
+  geofence_notice?: string | null;
 };
 
 export type QueuedOfficerScan = { id: string; attempts: number; payload: OfficerScanPayload };

@@ -38,7 +38,20 @@ interface ScanResult {
   breach_write_error?: string;
   zone_closed?: boolean;
   zone_closure?: { closure_type: string; reason: string | null } | null;
+  resolution_status?: string | null;
+  governor_overlap_flag?: boolean;
+  geofence_notice?: string | null;
 }
+
+// GEOFENCE_PRINCIPLES P1: each resolver outcome reads differently; none of them is "no zone".
+const RESOLUTION_LABEL: Record<string, string> = {
+  resolved: 'Verified geofence matched',
+  outside_all_geofences: 'Outside all verified geofences',
+  unresolved_no_geofence: 'No geofence configured here',
+  unresolved_unverified: 'Boundary exists but is not verified',
+  unresolved_invalid: 'Boundary geometry is invalid',
+  not_evaluated: 'No GPS fix — geofence not evaluated',
+};
 
 const MODULE_LABEL: Record<ScanModuleKey, string> = {
   freedom_camping: 'Freedom camping',
@@ -307,9 +320,11 @@ function ScanResultView({ result }: { result: ScanResult }) {
       <p>{result.module_key === 'parking_enforcement' ? (result.recommended_action ?? 'Parking assessment recorded').replace(/_/g, ' ') : formatComplianceReason(result.compliance_reason) || 'Compliance result recorded'}</p>
       <dl>
         <div><dt>Module</dt><dd>{MODULE_LABEL[result.module_key]}</dd></div>
-        <div><dt>Zone</dt><dd>{result.zone_name ?? 'No configured zone'}</dd></div>
+        <div><dt>Zone</dt><dd>{result.zone_name ?? RESOLUTION_LABEL[result.resolution_status ?? ''] ?? 'Geofence outcome not reported'}</dd></div>
         {result.module_key === 'parking_enforcement' ? <div><dt>Time limit</dt><dd>{result.effective_limit_minutes ?? '—'} min</dd></div> : <div><dt>Night count</dt><dd>{result.nights_this_zone ?? 0} current · {result.nights_this_month ?? 0} month</dd></div>}
       </dl>
+      {result.geofence_notice && <div className={`scan-error ${result.resolution_status === 'outside_all_geofences' ? 'is-informational' : ''}`} role="alert"><AlertTriangle size={18} /> {result.geofence_notice}</div>}
+      {result.governor_overlap_flag && <div className="scan-error is-informational" role="status"><AlertTriangle size={18} /> More than one governing jurisdiction covers this point; the smallest was applied. Confirm the council rule set before serving any notice.</div>}
       {result.zone_closed && <div className="scan-error" role="alert"><AlertTriangle size={18} /> Zone closure in force: {result.zone_closure?.closure_type.replaceAll('_', ' ') ?? 'closure'}{result.zone_closure?.reason ? ` · ${result.zone_closure.reason}` : ''}. Verdict remains rule-derived.</div>}
       {result.breach_write_error && <div className="scan-error" role="alert"><AlertTriangle size={18} /> Record saved, but the breach alert was not confirmed.</div>}
     </div>

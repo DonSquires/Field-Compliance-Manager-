@@ -61,6 +61,15 @@ const PLATE_RECOGNIZER_TIMEOUT_MS = 20_000;
 const INFER_TIMEOUT_MS = 30_000;
 const MIN_ALPR_CONFIDENCE = 0.75;
 const SCAN_BUCKET = 'scans';
+// GEOFENCE_PRINCIPLES P1: one distinct, loud message per resolver outcome. 'resolved' carries none.
+const GEOFENCE_NOTICE = {
+  resolved: null,
+  outside_all_geofences: 'Outside all verified geofences for this organisation. Evidence recorded; no zone rules were applied.',
+  unresolved_no_geofence: 'No geofence is configured where this scan was taken. Evidence recorded; no zone rules were applied. An administrator must configure and verify the boundary in the Geofence workbench before enforcement can rely on it.',
+  unresolved_unverified: 'A boundary exists here but has not been visually verified on the map. Evidence recorded; no zone rules were applied until it is verified in the Geofence workbench.',
+  unresolved_invalid: 'The boundary here has invalid geometry. Evidence recorded; no zone rules were applied until it is redrawn or re-imported in the Geofence workbench.',
+  not_evaluated: 'No GPS fix was supplied, so no geofence could be evaluated. Evidence recorded without place resolution.'
+};
 function normalizePlateNumber(value) {
   return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
 }
@@ -843,6 +852,11 @@ serve(async (req)=>{
     let outOfBoundsDistrict = null;
     let effectiveRules = null;
     let zoneClosure = null;
+    // GEOFENCE_PRINCIPLES P1: the five resolver outcomes are distinct answers and are
+    // never collapsed into "no zone". Rules apply only when 'resolved'; every other
+    // outcome is recorded on the observation and said loudly to the officer.
+    let resolutionStatus = manualZoneId ? 'resolved' : hasLatitude && hasLongitude ? null : 'not_evaluated';
+    let governorOverlapFlag = false;
     if (!zoneId && hasLatitude && hasLongitude) {
       const { data: ctxRows, error: contextError } = await supabase.rpc('resolve_operational_context', {
         p_lat: Number(gpsLat),
@@ -855,17 +869,26 @@ serve(async (req)=>{
         detail: contextError.message
       }, 503);
       const ctx = Array.isArray(ctxRows) ? ctxRows[0] : ctxRows;
-      if (ctx) {
-        zoneId = ctx.matched_zone_id ?? null;
-        siteId = ctx.site_id ?? null;
-        clientOrgId = ctx.client_org_id ?? null;
-        onSite = ctx.on_site === true;
-        inOperatingBounds = ctx.in_operating_bounds !== false;
-        outOfBoundsDistrict = ctx.out_of_bounds_district ?? null;
-        effectiveRules = ctx.effective_rules ?? null;
+      // Fail closed: an absent row is an infrastructure fault, not "outside all geofences".
+      if (!ctx) return json({ error: 'Geofence context could not be resolved', detail: 'resolver returned no row' }, 503);
+      zoneId = ctx.matched_zone_id ?? null;
+      siteId = ctx.site_id ?? null;
+      clientOrgId = ctx.client_org_id ?? null;
+      onSite = ctx.on_site === true;
+      inOperatingBounds = ctx.in_operating_bounds !== false;
+      outOfBoundsDistrict = ctx.out_of_bounds_district ?? null;
+      effectiveRules = ctx.effective_rules ?? null;
+      resolutionStatus = typeof ctx.resolution_status === 'string' && ctx.resolution_status ? ctx.resolution_status : 'unresolved_no_geofence';
+      governorOverlapFlag = ctx.governor_overlap_flag === true;
+      if (resolutionStatus !== 'resolved' && (zoneId || siteId)) {
+        // The resolver only matches verified geometry; a match with a non-resolved status would be a contract break.
+        console.error(`[scan] resolver contract break: status=${resolutionStatus} with zone=${zoneId ?? 'none'} site=${siteId ?? 'none'}`);
+        return json({ error: 'Geofence context could not be resolved', detail: `inconsistent resolution (${resolutionStatus})` }, 503);
       }
-      console.log(`[scan] resolve_operational_context zone=${zoneId ?? 'none'} on_site=${onSite} in_bounds=${inOperatingBounds}`);
+      console.log(`[scan] resolve_operational_context status=${resolutionStatus} zone=${zoneId ?? 'none'} on_site=${onSite} in_bounds=${inOperatingBounds} governor_overlap=${governorOverlapFlag}`);
     }
+    const geofenceNotice = GEOFENCE_NOTICE[resolutionStatus ?? 'unresolved_no_geofence'] ?? null;
+    if (geofenceNotice) console.warn(`[scan] geofence ${resolutionStatus}: ${geofenceNotice}`);
     if (zoneId) {
       // Lightweight fetch for the zone name (used in the evidence watermark) and
       // location_id; site_id already came from resolve_context.
@@ -897,6 +920,9 @@ serve(async (req)=>{
       resolved_at: capturedDate.toISOString(),
       resolution_source: manualZoneId ? 'manual_zone' : 'resolve_operational_context',
       spatial_resolution_evaluated: !manualZoneId && hasLatitude && hasLongitude,
+      resolution_status: resolutionStatus,
+      governor_overlap_flag: governorOverlapFlag,
+      geofence_notice: geofenceNotice,
       zone_id: zoneId,
       site_id: siteId,
       location_id: locationId,
@@ -1258,6 +1284,9 @@ serve(async (req)=>{
         in_operating_bounds: inOperatingBounds,
         out_of_bounds_district: outOfBoundsDistrict,
         effective_rules: effectiveRules,
+        resolution_status: resolutionStatus,
+        governor_overlap_flag: governorOverlapFlag,
+        geofence_notice: geofenceNotice,
         zone_closed: zoneClosure?.closed === true,
         zone_closure: zoneClosure,
         // Record IDs
@@ -1680,6 +1709,9 @@ serve(async (req)=>{
       in_operating_bounds: inOperatingBounds,
       out_of_bounds_district: outOfBoundsDistrict,
       effective_rules: effectiveRules,
+      resolution_status: resolutionStatus,
+      governor_overlap_flag: governorOverlapFlag,
+      geofence_notice: geofenceNotice,
       zone_closed: zoneClosure?.closed === true,
       zone_closure: zoneClosure,
       vehicle_make: vehicleMake,
