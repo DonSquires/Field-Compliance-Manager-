@@ -23,6 +23,7 @@ import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNa
 import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
+import { PriceListPicker } from '../components/PriceListPicker';
 import './PageStyles.css';
 import './CRMPage.css';
 
@@ -220,6 +221,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     moduleKey: '',
     siteId: '',
   });
+  const [linePick, setLinePick] = useState('');
   const [pricingReceipt, setPricingReceipt] = useState<{
     totalCost: number;
     totalCharge: number;
@@ -773,6 +775,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         totalCharge: Number(receipt.total_charge),
       });
       setNotice(`Pricing line added to ${pricingQuote.title}.`);
+      setLinePick('');
       lineRequestId.current = crypto.randomUUID();
       await loadQuoteLines(pricingQuote.id);
       await loadCrm();
@@ -875,6 +878,18 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             ))}
           </div>
         )}
+        <div className="crm-quote-full">
+          <PriceListPicker
+            id="quote-line-price-list"
+            organizationIds={[quoteOperatingProviderId, state.ownOrg?.id ?? ''].filter(Boolean)}
+            value={linePick}
+            onSelect={(selection, token) => {
+              setLinePick(token);
+              if (!selection) return;
+              setLineForm((current) => ({ ...current, kind: selection.kind, description: selection.description, unitCharge: selection.unitCharge === null ? current.unitCharge : selection.unitCharge.toFixed(2), unitCost: selection.unitCost === null ? current.unitCost : selection.unitCost.toFixed(2), moduleKey: '' }));
+            }}
+          />
+        </div>
         <div>
           <label>
             <span>Line kind</span>
@@ -886,6 +901,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             >
               <option value="labour">Labour</option>
               <option value="travel">Travel</option>
+              <option value="materials">Materials</option>
+              <option value="equipment">Equipment</option>
               <option value="overhead">Overhead</option>
               <option value="module">Module</option>
               <option value="custom">Custom</option>

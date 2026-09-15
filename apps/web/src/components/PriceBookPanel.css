@@ -1,0 +1,17 @@
+.price-book { display: grid; gap: 12px; }
+.price-book .page-header { margin: 0; padding: 0; border: 0; }
+.price-book-form h3 { margin: 0 0 6px; }
+.price-book-form-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.price-book-form-footer small { color: var(--color-text-muted); font-size: 12px; }
+.price-book-form-footer > div { display: flex; gap: 8px; }
+.price-book-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.price-book-toolbar > label:first-child { flex: 1 1 240px; }
+.price-book-toolbar input[type="search"] { width: 100%; min-height: 36px; }
+.price-book-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-secondary); font-size: 13px; white-space: nowrap; }
+.price-book-toggle input { width: auto; margin: 0; }
+.price-book-toolbar > span { color: var(--color-text-muted); font-size: 12px; }
+.price-book-table td small { display: block; color: var(--color-text-muted); font-size: 12px; }
+.price-book-table tr.is-inactive td { opacity: 0.55; }
+.price-book-actions { white-space: nowrap; }
+.price-book-actions .btn + .btn { margin-left: 6px; }
+@media (max-width: 720px) { .price-book-form-footer > div { width: 100%; } .price-book-form-footer .btn { flex: 1; } }

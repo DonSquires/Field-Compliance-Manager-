@@ -21,7 +21,7 @@ describe('governed rate rule management', () => {
     expect(page).toContain('p_expected_updated_at: editingRule.updated_at');
     expect(page).toContain('Edit rule');
     expect(page).toContain("supabase.rpc('resolve_dispatch_job_pay_lines'");
-    expect(page).toContain('Finished jobs that still need pay and charge checked');
+    expect(page).toContain('Finished jobs that still need a pay or charge rule');
     expect(page).not.toContain(".from('rate_rules').insert");
     expect(page).not.toContain(".from('rate_rules').update");
   });
