@@ -6,34 +6,42 @@ test.beforeEach(async ({ page }) => {
   await installSupabaseFixtures(page);
 });
 
-test('operations triages and establishes provisional site boundary evidence', async ({ page }) => {
+test('operations proposes, inspects and verifies a site boundary through the geofence workbench', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/sites');
+  const notice = page.locator('.boundary-message.is-success');
 
-  await expect(page.getByRole('heading', { name: 'Boundary review' })).toBeVisible();
-  await expect(page.getByText('Awaiting review').locator('..').getByText('1')).toBeVisible();
-  await expect(page.getByText('No geometry').locator('..').getByText('1')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Geofence workbench' })).toBeVisible();
+  await expect(page.getByText('No geometry', { exact: true }).locator('..').getByText('1')).toBeVisible();
+  await expect(page.getByText('Open proposals').locator('..').getByText('0')).toBeVisible();
 
   await page.getByRole('button', { name: /North Pavilion/ }).click();
   await expect(page.getByText('Geometry required')).toBeVisible();
-  await expect(page.getByText('No boundary to inspect')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Verify boundary' })).toBeDisabled();
+  await expect(page.getByText('unresolved_no_geofence')).toBeVisible();
+  await expect(page.getByLabel('Boundary map for North Pavilion')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Suggest boundary from LINZ' })).toBeEnabled();
 
+  await page.getByRole('tab', { name: 'Point + radius' }).click();
   await page.getByLabel('Latitude').fill('-41.2762');
   await page.getByLabel('Longitude').fill('173.2817');
   await page.getByLabel('Radius in metres').fill('75');
-  await page.getByRole('button', { name: 'Establish provisional boundary' }).click();
+  await page.getByRole('button', { name: 'Propose point-radius boundary' }).click();
 
-  await expect(page.getByRole('status')).toContainText('provisional point-radius boundary');
-  await expect(page.getByText('Visual review required')).toBeVisible();
-  await expect(page.getByText('Site geometry set via set_site_geometry')).toBeVisible();
-  await expect(page.getByLabel('Boundary map for North Pavilion')).toBeVisible();
+  await expect(notice).toContainText('Point + radius (provisional) proposed for North Pavilion');
+  await expect(page.getByText('Proposal awaiting decision')).toBeVisible();
+  await expect(page.getByText('Open proposals').locator('..').getByText('1')).toBeVisible();
+  await expect(page.getByText('Within band')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reject proposal' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Accept boundary' })).toBeEnabled();
+
   await page.getByText('I inspected the full boundary against the site address.').click();
-  await page.getByRole('button', { name: 'Verify boundary' }).click();
-  await expect(page.getByRole('status')).toContainText('boundary verified from visual map review');
+  await page.getByRole('button', { name: 'Accept and verify boundary' }).click();
+  await expect(notice).toContainText('verified from visual map review');
   await expect(page.getByText('Verified boundary')).toBeVisible();
+  await expect(page.getByText('provisional provenance')).toBeVisible();
   await expect(page.getByText('Boundary verified via visual map confirmation')).toBeVisible();
-  await page.getByRole('heading', { name: 'Boundary review' }).scrollIntoViewIfNeeded();
+  await expect(page.getByText(/Accepted boundary proposal .* \(google_point_radius\)/)).toBeVisible();
+  await page.getByRole('heading', { name: 'Geofence workbench' }).scrollIntoViewIfNeeded();
   await expect(page).toHaveScreenshot('site-boundary-review.png', { fullPage: true });
   expect(errors, errors.join('\n')).toEqual([]);
 });

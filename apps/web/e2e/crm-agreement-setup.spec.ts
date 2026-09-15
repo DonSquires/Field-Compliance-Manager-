@@ -50,6 +50,6 @@ test('provider reviews evidence-backed readiness and opens the owning workflow',
   await expect(dialog).toHaveScreenshot('crm-operational-readiness.png');
 
   await dialog.getByRole('article', { name: 'Boundary evidence blocked' }).getByRole('button', { name: 'Open owner' }).click();
-  await expect(page.getByRole('heading', { name: 'Boundary review' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Geofence workbench' })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
