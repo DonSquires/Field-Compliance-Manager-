@@ -513,11 +513,21 @@ async function consolidateVehicles(frames, options = {}) {
       ? Number((tr.speedSamples.reduce((sum, value) => sum + value, 0) / tr.speedSamples.length).toFixed(2))
       : null;
     const vehicleData = tr.bestFrame?.inference?.data || tr.bestFrame?.runpod?.vehicle || {};
+    const alprData = tr.bestFrame?.alpr || {};
+    const alprBest = Array.isArray(alprData.results) ? alprData.results.find((item) => item?.plate === tr.bestPlate) || alprData.results[0] : null;
     events.push({
       event_id: `vehicle-${tr.bestPlate}-${tr.trackIndex}`,
       event_type: 'vehicle',
       plate: tr.bestPlate,
       confidence: Number(tr.bestConfidence.toFixed(2)),
+      alpr_provider: alprData.alpr_provider ?? null,
+      alpr_models: alprData.alpr_models ?? null,
+      alpr_evidence_quality: alprData.evidence_quality ?? null,
+      plate_raw_text: alprBest?.raw_text ?? null,
+      plate_corrections: Array.isArray(alprBest?.corrections) && alprBest.corrections.length ? alprBest.corrections : null,
+      plate_char_confidence_min: alprBest?.char_confidence_min ?? null,
+      plate_width_px: alprBest?.plate_width_px ?? null,
+      detector_provider: tr.bestFrame?.runpod?.detector_provider ?? tr.bestFrame?.detect?.detector_provider ?? null,
       is_return: tr.isReturn,
       first_seen_seconds: Number(tr.firstSeen.toFixed(2)),
       last_seen_seconds: Number(tr.lastSeen.toFixed(2)),
@@ -659,6 +669,10 @@ function buildEntityObservations(summary, context = {}) {
         attribute_confidence: event.vehicle_attribute_confidence, plate_confidence: plated ? event.confidence : null,
         bbox: event.best_bbox, frame_count: event.frame_count, visit_count: event.visit_count, temporal_consensus: event.temporal_consensus,
         speed_kmh: event.speed_kmh, inference_provider: event.inference_provider, appearance_embedding_model: event.appearance_embedding_model,
+        alpr_provider: plated ? event.alpr_provider : null, alpr_models: plated ? event.alpr_models : null, alpr_evidence_quality: plated ? event.alpr_evidence_quality : null,
+        plate_raw_text: plated ? event.plate_raw_text : null, plate_corrections: plated ? event.plate_corrections : null,
+        plate_char_confidence_min: plated ? event.plate_char_confidence_min : null, plate_width_px: plated ? event.plate_width_px : null,
+        detector_provider: event.detector_provider,
         candidate_state: event.candidate_state, review_candidate_basis: reviewCandidateBasis(event),
       }),
       frame_sha256: event.best_frame_hash || null,

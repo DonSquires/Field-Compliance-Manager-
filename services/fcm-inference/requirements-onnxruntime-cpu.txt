@@ -1,0 +1,2 @@
+# CPU tier (VPS, developer machines, tests). Plain onnxruntime; no NVIDIA libraries.
+onnxruntime>=1.22,<2.0

@@ -57,6 +57,18 @@ test('watcher skips the full-frame vehicle pass when a detector covered vehicles
   assert.match(watcherSource, /classifyLocally\(INFERENCE_SERVICE_URL, '\/infer\/detect', headers, buildForm\)/);
 });
 
+test('watcher takes ALPR and faces from the GPU answer and only asks the VPS for what is missing', () => {
+  // GPU infer_batch carries alpr + face; the VPS ALPR route is skipped when either the GPU or /infer/detect answered.
+  assert.match(watcherSource, /const runpodAlpr = runpodResult\?\.alpr\?\.success \? runpodResult\.alpr : null;/);
+  assert.match(watcherSource, /const runpodFace = runpodResult\?\.face\?\.success && Array\.isArray\(runpodResult\.face\.faces\) \? runpodResult\.face : null;/);
+  assert.match(watcherSource, /runpodAlpr \|\| needLocalDetect\s*\?\s*Promise\.resolve\(null\)/);
+  assert.match(watcherSource, /frame\.alpr = \{ \.\.\.runpodAlpr, provider: 'runpod' \};/);
+  assert.match(watcherSource, /else if \(frame\.detect\?\.alpr\?\.success\) \{\s*frame\.alpr = \{ \.\.\.frame\.detect\.alpr, provider: 'local_detect' \};/);
+  // the VPS ALPR is anchored on the vehicle boxes the detector already found
+  assert.match(watcherSource, /vehicle_bboxes: runpodVehicleBoxes\.length \? runpodVehicleBoxes : null/);
+  assert.match(watcherSource, /vehicle_bboxes: localVehicleBoxes\.length \? localVehicleBoxes : null/);
+});
+
 test('watcher opens a bounded local-fallback circuit after an unavailable RunPod batch', () => {
   assert.match(watcherSource, /const RUNPOD_BACKOFF_MS = Number\.isFinite\(configuredRunpodBackoff\) \? Math\.max\(0, configuredRunpodBackoff\) : 5 \* 60_000;/);
   assert.match(watcherSource, /if \(Date\.now\(\) < runpodUnavailableUntil\) \{/);

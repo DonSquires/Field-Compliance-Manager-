@@ -1,5 +1,0 @@
-# Detector tier for services/fcm-inference (installed when the image is built with WITH_DETECTOR=1).
-# MegaDetector v5a / v6 and any COCO detector run through Ultralytics; SpeciesNet is Google's camera-trap
-# species classifier (weights are fetched from Kaggle on first use and need Kaggle credentials).
-ultralytics>=8.3,<9.0
-speciesnet>=5.0,<6.0

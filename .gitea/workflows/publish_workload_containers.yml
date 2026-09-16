@@ -48,16 +48,18 @@ jobs:
           short_sha="${SOURCE_SHA:0:7}"
           test "${#short_sha}" -eq 7 || { echo "Invalid source SHA" >&2; exit 1; }
 
-          while IFS='|' read -r service context; do
+          while IFS='|' read -r service context build_args; do
             image="${registry_host}/${owner}/${service}"
-            echo "Building ${image}:${short_sha} from ${context}"
-            docker build --pull -t "${image}:${short_sha}" -t "${image}:latest" "${context}"
+            echo "Building ${image}:${short_sha} from ${context} ${build_args}"
+            # shellcheck disable=SC2086  # build_args is a deliberate word list of --build-arg flags
+            docker build --pull ${build_args} -t "${image}:${short_sha}" -t "${image}:latest" "${context}"
             docker push "${image}:${short_sha}"
             docker push "${image}:latest"
           done <<'IMAGES'
-          fcm-api|services/fcm-api
-          fcm-inference|services/fcm-inference
-          fcm-voice|services/fcm-voice
-          fcm-planner|services/fcm-planner
-          fcm-solver|services/fcm-solver
+          fcm-api|services/fcm-api|
+          fcm-inference|services/fcm-inference|
+          fcm-inference-gpu|services/fcm-inference|--build-arg GPU=1
+          fcm-voice|services/fcm-voice|
+          fcm-planner|services/fcm-planner|
+          fcm-solver|services/fcm-solver|
           IMAGES

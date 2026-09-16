@@ -8,13 +8,9 @@ import numpy as np
 import runpod
 
 from app import (
-    MODELS_DIR,
-    PERSON_MODEL_PATH,
-    SFACE_MODEL_PATH,
-    VEHICLE_MODEL_PATH,
-    YUNET_MODEL_PATH,
     _detect_people,
     _face_models,
+    _health_payload,
     _infer_plate_from_image,
     _infer_vehicle_attributes,
     _triage_with_attributes,
@@ -58,20 +54,6 @@ def _image_from_input(value: str) -> np.ndarray:
     return image
 
 
-def _health_payload() -> dict[str, str]:
-    detector_state = entity_detector.detector_status()
-    return {
-        "status": "ok",
-        "service": "fcm-inference",
-        "models_dir": str(MODELS_DIR),
-        "face_models": "ready" if entity_detector.path_is_file(YUNET_MODEL_PATH) and entity_detector.path_is_file(SFACE_MODEL_PATH) else "not_staged",
-        "vehicle_model": "ready" if entity_detector.path_is_file(VEHICLE_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_MODEL_PATH.with_suffix('.bin')) else "not_staged",
-        "person_model": "ready" if entity_detector.path_is_file(PERSON_MODEL_PATH) and entity_detector.path_is_file(PERSON_MODEL_PATH.with_suffix('.bin')) else "not_staged",
-        "detector_model": detector_state["detector"],
-        "species_model": detector_state["species"],
-    }
-
-
 def handler(job: dict[str, Any]) -> dict[str, Any]:
     payload = job.get("input") or {}
     if payload.get("action") == "ping":
@@ -110,13 +92,17 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
 def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
     """One frame, every requested task. Detector triage (person / vehicle / animal + species) when staged;
-    the legacy `vehicle` key stays populated so older workers keep working."""
+    the legacy `vehicle` key stays populated so older workers keep working. Plates are read on the vehicle
+    boxes the detector found; faces come from YuNet/SFace. Each block reports its own provider."""
     result: dict[str, Any] = {"success": True}
-    triage = _triage_with_attributes(image) if tasks & {"person", "vehicle", "animal", "detect"} else None
+    triage = _triage_with_attributes(image) if tasks & {"person", "vehicle", "animal", "detect", "plate"} else None
     coverage = set((triage or {}).get("detector_coverage") or [])
     if triage is not None:
         result["detector_status"] = triage["detector_status"]
         result["detector_provider"] = triage.get("detector_provider")
+        result["detector_model"] = triage.get("detector_model")
+        result["detector_execution_provider"] = triage.get("detector_execution_provider")
+        result["detector_passes"] = triage.get("detector_passes")
         result["detector_coverage"] = sorted(coverage)
         result["species_status"] = triage["species_status"]
         if triage.get("detector_error"):
@@ -130,6 +116,11 @@ def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
             result["vehicles"] = []
             # No vehicle tier, or nothing detected: the full-frame attribute pass is the review-only fallback.
             result["vehicle"] = _infer_vehicle_attributes(image) if "vehicle" not in coverage else None
+    if "plate" in tasks or "alpr" in tasks:
+        try:
+            result["alpr"] = _infer_plate_from_image(image, [vehicle["bbox"] for vehicle in (triage or {}).get("vehicles") or []])
+        except Exception as error:
+            result["alpr"] = {"success": False, "error": str(error)[:300], "review_required": True}
     if "person" in tasks:
         result["people"] = (triage or {}).get("people") if triage is not None else _detect_people(image)
         result["people_provider"] = (triage or {}).get("people_provider") or (triage or {}).get("detector_provider")
@@ -140,7 +131,12 @@ def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
         else ("ready" if triage["species_status"] == "ready" else "detector_only_species_not_staged")
     )
     if "face" in tasks:
-        result["faces"] = []
+        face = _infer_face_if_requested(image)
+        if face.get("state") == "candidate":
+            result["face"] = face["result"]
+        else:
+            result["face"] = {"success": False, "error": face.get("reason"), "faces": []}
+        result["faces"] = result["face"].get("faces", [])
         result["face_review_required"] = True
     return result
 

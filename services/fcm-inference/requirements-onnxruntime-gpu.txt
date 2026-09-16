@@ -1,0 +1,5 @@
+# GPU tier (RunPod serverless workers). onnxruntime-gpu 1.26 is the last line built against CUDA 12 / cuDNN 9;
+# 1.27+ moves to CUDA 13, which the RunPod driver fleet does not uniformly provide yet. The [cuda,cudnn] extras
+# pull the NVIDIA runtime libraries as pip packages so the image can stay on python:3.12-slim; onnxruntime
+# loads them through preload_dlls() before the CUDA execution provider is created.
+onnxruntime-gpu[cuda,cudnn]==1.26.0

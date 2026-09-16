@@ -6,7 +6,6 @@ import json
 import math
 import os
 from pathlib import Path
-import re
 from typing import Annotated, Any
 
 import cv2
@@ -18,6 +17,7 @@ from pydantic import BaseModel, Field
 from openvino import Core
 
 import detector as entity_detector
+import plates as plate_reader
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
@@ -489,20 +489,7 @@ def _infer_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
 
 
 def _normalize_nz_plate(raw: str) -> tuple[str, str] | None:
-    value = re.sub(r"[^A-Z0-9]", "", raw.upper())
-    if not 3 <= len(value) <= 7:
-        return None
-    if not any(ch.isalpha() for ch in value):
-        return None
-    if not any(ch.isdigit() for ch in value):
-        return None
-    if re.fullmatch(r"[A-Z]{3}[0-9]{3}", value):
-        return value, "standard_modern"
-    if re.fullmatch(r"[A-Z]{2}[0-9]{4}", value):
-        return value, "standard_older"
-    if re.fullmatch(r"[A-Z0-9]{4,7}", value):
-        return value, "personalised"
-    return None
+    return plate_reader.normalize_nz_plate(raw)
 
 
 def _face_models() -> tuple[Any, Any]:
@@ -539,6 +526,7 @@ def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
     if triage["detector_status"] == "ready" and "person" in coverage:
         for person in triage["people"]:
             person["attributes"] = _person_appearance_attributes(image, person["bbox"])
+        triage["people_provider"] = triage.get("detector_provider")
     else:
         try:
             triage["people"] = _detect_people(image)
@@ -559,20 +547,38 @@ def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
     return triage
 
 
-@app.get("/health")
-async def health() -> dict[str, str]:
+def _health_payload() -> dict[str, Any]:
+    """Which tiers are staged and which execution provider they run on. Shared by /health and the RunPod ping."""
     detector_state = entity_detector.detector_status()
+    plate_state = plate_reader.status()
     return {
         "status": "ok",
         "service": "fcm-inference",
+        "models_dir": str(MODELS_DIR),
         "face_models": "ready" if entity_detector.path_is_file(YUNET_MODEL_PATH) and entity_detector.path_is_file(SFACE_MODEL_PATH) else "not_staged",
         "vehicle_model": "ready" if entity_detector.path_is_file(VEHICLE_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "person_model": "ready" if entity_detector.path_is_file(PERSON_MODEL_PATH) and entity_detector.path_is_file(PERSON_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "person_reidentification_model": "ready" if entity_detector.path_is_file(PERSON_REID_MODEL_PATH) and entity_detector.path_is_file(PERSON_REID_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "vehicle_reidentification_model": "ready" if entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "detector_model": detector_state["detector"],
+        "detector_name": detector_state.get("detector_model"),
+        "detector_kind": detector_state.get("detector_kind"),
+        "detector_provider": detector_state.get("detector_provider"),
+        "detector_coverage": detector_state.get("coverage", []),
+        "detector_tiles": detector_state.get("detector_tiles"),
         "species_model": detector_state["species"],
+        "species_provider": detector_state.get("species_provider"),
+        "alpr": plate_state["alpr"],
+        "alpr_provider": plate_state["alpr_provider"],
+        "plate_detector_model": plate_state["plate_detector_model"],
+        "plate_ocr_model": plate_state["plate_ocr_model"],
+        "cuda": entity_detector.cuda_available(),
     }
+
+
+@app.get("/health")
+async def health() -> dict[str, Any]:
+    return _health_payload()
 
 
 @app.post("/infer/detect")
@@ -581,10 +587,16 @@ async def detect_entities(
     authorization: Annotated[str | None, Header()] = None,
     x_inference_api_key: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
-    """Person / vehicle / animal triage with species. Advisory: a human confirms every identity."""
+    """Person / vehicle / animal triage with species, plus plate reading anchored on the detected vehicles when
+    the trained ALPR tier is staged. Advisory: a human confirms every identity."""
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
     triage = _triage_with_attributes(image)
+    if plate_reader.staged():
+        try:
+            triage["alpr"] = plate_reader.read_plates(image, [vehicle["bbox"] for vehicle in triage.get("vehicles") or []])
+        except Exception as error:  # ALPR failing must not hide the triage
+            triage["alpr"] = {"success": False, "error": str(error)[:300], "alpr_provider": plate_reader.PLATE_PROVIDER}
     return JSONResponse({"success": True, "review_required": True, **triage})
 
 
@@ -704,12 +716,19 @@ def _read_plate_candidates(gray_image: np.ndarray, psm: int) -> list[tuple[str, 
     return list(zip(data.get("text", []), data.get("conf", [])))
 
 
-def _infer_plate_from_image(image: np.ndarray) -> dict[str, Any]:
-    """Return ALPR only when OCR is anchored to a plausible plate region.
+def _infer_plate_from_image(image: np.ndarray, vehicles: list[dict[str, int]] | None = None) -> dict[str, Any]:
+    """ALPR for one frame. The trained plate detector + OCR pair when staged (anchored on the detector's
+    vehicle boxes when they are known); the classical tesseract heuristic only as the not-staged fallback.
 
     A missing plate is a valid result. Full-frame OCR is deliberately excluded:
     timestamps, road signs, and watermarks are not registration evidence.
     """
+    if plate_reader.staged():
+        return plate_reader.read_plates(image, vehicles)
+    return _infer_plate_legacy(image)
+
+
+def _infer_plate_legacy(image: np.ndarray) -> dict[str, Any]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     candidates: dict[str, dict[str, Any]] = {}
 
@@ -767,14 +786,22 @@ def _infer_plate_from_image(image: np.ndarray) -> dict[str, Any]:
 @app.post("/infer/alpr")
 async def alpr(
     photo: Annotated[UploadFile, File()],
+    vehicle_bboxes: Annotated[str | None, Form()] = None,
     authorization: Annotated[str | None, Header()] = None,
     x_inference_api_key: Annotated[str | None, Header()] = None,
 ) -> JSONResponse:
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
+    vehicles = None
+    if vehicle_bboxes:
+        try:
+            parsed = json.loads(vehicle_bboxes)
+            vehicles = [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else None
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=422, detail="vehicle_bboxes must be valid JSON")
     try:
-        result = _infer_plate_from_image(image)
-    except (pytesseract.TesseractError, OSError) as error:
+        result = _infer_plate_from_image(image, vehicles)
+    except (pytesseract.TesseractError, OSError, RuntimeError, cv2.error) as error:
         raise HTTPException(status_code=503, detail=f"ALPR unavailable: {error}") from error
     return JSONResponse(result)
 

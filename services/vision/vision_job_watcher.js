@@ -308,24 +308,39 @@ async function classifyFrames(summary, job) {
           human_review_required: true,
         };
       }
-      const buildForm = (vehicleBbox = null) => {
+      const buildForm = (vehicleBbox = null, extraFields = null) => {
         const form = new FormData();
         form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);
         if (vehicleBbox) form.append('vehicle_bbox', JSON.stringify(vehicleBbox));
+        for (const [key, value] of Object.entries(extraFields || {})) {
+          if (value !== null && value !== undefined) form.append(key, typeof value === 'string' ? value : JSON.stringify(value));
+        }
         return form;
       };
       const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
       const runpodResult = runpodResults.get(frame.sha256_hash);
       if (runpodResult) frame.runpod = runpodResult;
-      // Detector triage: RunPod first; the VPS /infer/detect route (people + vehicles + animals in one call)
-      // when the batch had no GPU answer. /infer/people alone is only needed when RunPod answered without people.
+      // GPU first: infer_batch now carries ALPR (plate detector + OCR anchored on the detected vehicles) and
+      // faces alongside the triage. The VPS is asked only for what the GPU answer lacks.
+      const runpodAlpr = runpodResult?.alpr?.success ? runpodResult.alpr : null;
+      const runpodFace = runpodResult?.face?.success && Array.isArray(runpodResult.face.faces) ? runpodResult.face : null;
+      const runpodVehicleBoxes = Array.isArray(runpodResult?.vehicles)
+        ? runpodResult.vehicles.map((vehicle) => vehicle?.bbox || vehicle?.attributes?.detection?.bbox).filter(Boolean)
+        : [];
+      const needLocalDetect = !runpodResult && LOCAL_DETECT_INFERENCE;
+      // Detector triage: RunPod first; the VPS /infer/detect route (people + vehicles + animals + ALPR in one
+      // call) when the batch had no GPU answer. /infer/people alone is only needed when RunPod answered without people.
       const localRequests = [
-        fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
-        fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
+        runpodAlpr || needLocalDetect
+          ? Promise.resolve(null)
+          : fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(null, { vehicle_bboxes: runpodVehicleBoxes.length ? runpodVehicleBoxes : null }), signal: AbortSignal.timeout(30_000) }),
+        runpodFace
+          ? Promise.resolve(null)
+          : fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
         LOCAL_PEOPLE_INFERENCE && runpodResult && !Array.isArray(runpodResult.people)
           ? fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) })
           : Promise.resolve(null),
-        !runpodResult && LOCAL_DETECT_INFERENCE ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, buildForm) : Promise.resolve(null),
+        needLocalDetect ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, buildForm) : Promise.resolve(null),
       ];
       const [alprResponse, faceResponse, peopleResponse, localDetect] = await Promise.all(localRequests);
       await updateProgress(job, 'running_alpr', {
@@ -334,9 +349,25 @@ async function classifyFrames(summary, job) {
         percent: ((batchStart + batchIndex + 1) / Math.max(1, selectedFrames.length)) * 100,
         label: `Running ALPR and face checks, frame ${batchStart + batchIndex + 1} of ${selectedFrames.length}`,
       });
-      frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
-      frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
       if (localDetect) frame.detect = localDetect;
+      if (runpodAlpr) {
+        frame.alpr = { ...runpodAlpr, provider: 'runpod' };
+      } else if (frame.detect?.alpr?.success) {
+        frame.alpr = { ...frame.detect.alpr, provider: 'local_detect' };
+      } else if (alprResponse) {
+        frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
+      } else {
+        // /infer/detect ran without a staged ALPR tier: ask the VPS ALPR route with the boxes it found.
+        const localVehicleBoxes = Array.isArray(frame.detect?.vehicles) ? frame.detect.vehicles.map((vehicle) => vehicle?.bbox).filter(Boolean) : [];
+        frame.alpr = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/alpr', headers, () => buildForm(null, { vehicle_bboxes: localVehicleBoxes.length ? localVehicleBoxes : null }));
+      }
+      if (runpodFace) {
+        frame.face = { ...runpodFace, provider: 'runpod' };
+      } else if (faceResponse) {
+        frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
+      } else {
+        frame.face = { success: false, error: 'face_unavailable' };
+      }
       const detectorCoverage = new Set([
         ...(Array.isArray(runpodResult?.detector_coverage) ? runpodResult.detector_coverage : []),
         ...(Array.isArray(frame.detect?.detector_coverage) ? frame.detect.detector_coverage : []),

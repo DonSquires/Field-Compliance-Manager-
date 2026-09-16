@@ -64,9 +64,15 @@ services:
       PORT: "3000"
       VEHICLE_ATTRS_PROVIDER: "basic"
       MODELS_DIR: /app/models
+      # CPU tier: RF-DETR small-512 with the 2x2 far-field tile pass; the GPU tier on RunPod runs large-704.
+      DETECTOR_MODEL: rf-detr-small-512-coco
+      DETECTOR_TILES: auto
+      INFERENCE_DEVICE: cpu
     # Models come from the host, not the image: stage new tiers with
     #   MODELS_DIR=/opt/fcm/models python3 services/fcm-inference/download_models.py
-    # (vehicle-detection-0200 is required for vehicle triage; WITH_DETECTOR=1 adds MegaDetector v5a).
+    # or, without a host python:  docker compose -p fcm ... run --rm -v /opt/fcm/models:/app/models -u root fcm-inference python download_models.py
+    # (RF-DETR *.onnx + the plate detector/OCR pair are what the entity and ALPR tiers look for; vehicle-detection-0200
+    # is only the vehicle-only fallback when no RF-DETR export is present).
     volumes:
       - /opt/fcm/models:/app/models:ro
     healthcheck:
