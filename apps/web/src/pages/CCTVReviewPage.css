@@ -13,6 +13,7 @@
 }
 
 .cctv-review-header { margin-bottom: 24px; }
+.cctv-review-header-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .cctv-review-header span,
 .cctv-section-title span,
 .cctv-detail-heading span,

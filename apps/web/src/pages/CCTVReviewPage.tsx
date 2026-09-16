@@ -1006,15 +1006,22 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
           <h1>{libraryMode ? 'Completed video library' : 'CCTV review'}</h1>
           <p>{libraryMode ? 'Review completed camera footage, keyframes, and governed observations.' : 'Review camera evidence, consolidated AI observations, and evidential findings.'}</p>
         </div>
-        <button
-          type="button"
-          className="page-action"
-          onClick={() => void loadJobs()}
-          disabled={loading}
-          title="Refresh CCTV review"
-        >
-          <RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh
-        </button>
+        <div className="cctv-review-header-actions">
+          {!libraryMode && (
+            <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-import')} title="Import an SD card or camera folder">
+              <Archive size={17} /> Import camera footage
+            </button>
+          )}
+          <button
+            type="button"
+            className="page-action"
+            onClick={() => void loadJobs()}
+            disabled={loading}
+            title="Refresh CCTV review"
+          >
+            <RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh
+          </button>
+        </div>
       </header>
 
       <div className="cctv-review-layout">
