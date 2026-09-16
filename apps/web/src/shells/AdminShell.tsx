@@ -603,6 +603,20 @@ const AdminShell: React.FC = () => {
     }
   }, [activePage, fieldOpsSubArea, navigateFromHub, navigateToFieldOps, setBobOpen]);
 
+  // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
+  const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
+  if (isVideoWall) {
+    return (
+      <div className="admin-shell admin-shell-video-wall">
+        <main data-app-content className="admin-shell-main is-video-wall">
+          <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
+            <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
+          </LazyPageRecovery>
+        </main>
+      </div>
+    );
+  }
+
   if (!isMobile) {
     return (
       <div className="admin-shell admin-shell-desktop">

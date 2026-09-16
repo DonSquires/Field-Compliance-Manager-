@@ -206,6 +206,14 @@ test('watcher records observations and timeline marks through the P2 RPCs before
   const persistIndex = watcherSource.indexOf('await recordEntityObservations(job, evidence, summary);');
   const ingestIndex = watcherSource.indexOf('await ingest(job, summary);');
   assert.ok(persistIndex > 0 && persistIndex < ingestIndex, 'observations are written while the job is still processing');
-  assert.match(watcherSource, /select\('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id'\)/);
+  assert.match(watcherSource, /select\('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id, locked_at'\)/);
   assert.match(watcherSource, /recordedStartAt: evidence\.metadata\?\.recorded_start_at \|\| null, capturedAt: evidence\.captured_at \|\| null/);
+});
+
+test('watcher records the source file hash once, before playback conversion, and never over a lock', () => {
+  assert.match(watcherSource, /supabase\.rpc\('record_cctv_source_hash', \{ p_evidence_id: evidence\.id, p_sha256: sha256, p_size_bytes: size \}\)/);
+  assert.match(watcherSource, /if \(evidence\.metadata\?\.source_sha256 \|\| evidence\.locked_at\) return null;/);
+  const hashIndex = watcherSource.indexOf('await recordSourceHash(job, evidence, videoPath);');
+  const playbackIndex = watcherSource.indexOf('await ensurePlaybackCopy(job, evidence, videoPath);');
+  assert.ok(hashIndex > 0 && hashIndex < playbackIndex, 'the source is hashed before any derivative is made');
 });

@@ -22,6 +22,12 @@ export type ConsoleClip = {
   playbackPath: string | null;
   sourcePath: string;
   fileType: string;
+  sizeBytes: number | null;
+  /** Integrity hash of the stored source, recorded by the analysis worker; required for an evidence lock. */
+  sha256: string | null;
+  courtReady: boolean;
+  lockedAt: string | null;
+  retentionHold: boolean;
 };
 
 export type MarkSeverity = 'motion' | 'detection' | 'alert' | 'quality';
@@ -101,6 +107,95 @@ export type TimeView = { startMs: number; endMs: number };
 export const PLAYBACK_RATES = [0.5, 1, 2, 4, 8, 16] as const;
 export type GridLayout = 1 | 2 | 4 | 9;
 export const GRID_LAYOUTS: GridLayout[] = [1, 2, 4, 9];
+
+/** What a grid tile shows: a camera following the shared clock, or one recording playing on its own clock. */
+export type ViewItem =
+  | { id: string; kind: 'camera'; importId: string }
+  | { id: string; kind: 'clip'; importId: string; evidenceId: string };
+
+export function cameraItem(importId: string): ViewItem {
+  return { id: `camera:${importId}`, kind: 'camera', importId };
+}
+
+export function clipItem(clip: Pick<ConsoleClip, 'importId' | 'evidenceId'>): ViewItem {
+  return { id: `clip:${clip.evidenceId}`, kind: 'clip', importId: clip.importId, evidenceId: clip.evidenceId };
+}
+
+export function layoutForCount(count: number): GridLayout {
+  if (count <= 1) return 1;
+  if (count === 2) return 2;
+  return count <= 4 ? 4 : 9;
+}
+
+export function importIdsOf(items: Array<ViewItem | null>): string[] {
+  const seen: string[] = [];
+  for (const item of items) if (item && !seen.includes(item.importId)) seen.push(item.importId);
+  return seen;
+}
+
+/** Place items into a grid of `layout` slots, keeping order and dropping overflow. */
+export function fitTiles(items: Array<ViewItem | null>, layout: GridLayout): Array<ViewItem | null> {
+  const tiles: Array<ViewItem | null> = items.slice(0, layout);
+  while (tiles.length < layout) tiles.push(null);
+  return tiles;
+}
+
+export function durationLabel(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return seconds % 60 && minutes < 10 ? `${minutes} min ${seconds % 60} s` : `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
+}
+
+export function bytesLabel(bytes: number | null): string {
+  if (bytes === null || !Number.isFinite(bytes)) return '—';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+export type ClipDayGroup = { day: string; dayMs: number; clips: ConsoleClip[] };
+
+/** Recordings in start order, grouped by calendar day in the camera's zone. */
+export function groupClipsByDay(clips: ConsoleClip[], timeZone: string): ClipDayGroup[] {
+  const groups: ClipDayGroup[] = [];
+  for (const clip of [...clips].sort((a, b) => a.startMs - b.startMs)) {
+    const day = formatDate(clip.startMs, timeZone);
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.clips.push(clip);
+    else groups.push({ day, dayMs: clip.startMs, clips: [clip] });
+  }
+  return groups;
+}
+
+export type EvidenceCounts = { total: number; pending: number; alerts: number };
+
+export function observationCountsByEvidence(observations: ConsoleObservation[]): Record<string, EvidenceCounts> {
+  const counts: Record<string, EvidenceCounts> = {};
+  for (const observation of observations) {
+    const entry = counts[observation.evidenceId] ?? (counts[observation.evidenceId] = { total: 0, pending: 0, alerts: 0 });
+    entry.total += 1;
+    if (!isReviewed(observation)) entry.pending += 1;
+    if ((observation.kind === 'vehicle' && observation.plate) || (observation.kind === 'animal' && observation.isPest)) entry.alerts += 1;
+  }
+  return counts;
+}
+
+export function clipStatusLabel(status: ClipJobStatus): string {
+  switch (status) {
+    case 'queued': return 'Queued for analysis';
+    case 'processing': return 'Analysing';
+    case 'complete': return 'Analysed';
+    case 'failed': return 'Analysis failed';
+    case 'inconclusive': return 'Inconclusive';
+    case 'manual_review_required': return 'Needs review';
+    case 'cancelled': return 'Cancelled';
+    case 'archived': return 'Archived';
+    default: return 'Not analysed';
+  }
+}
 
 export type EnhanceMode = 'auto' | 'on' | 'off';
 
@@ -306,9 +401,12 @@ export type ConsoleKeyAction =
   | { type: 'layout'; layout: GridLayout }
   | { type: 'fullscreen' }
   | { type: 'mute' }
-  | { type: 'escape' };
+  | { type: 'escape' }
+  | { type: 'frame'; direction: 1 | -1 }
+  | { type: 'bookmark' }
+  | { type: 'snapshot' };
 
-/** Keyboard map: Space play/pause, ←/→ ±10 s, ↑/↓ ±1 s, [ ] speed, 1/2/4/9 grid, f fullscreen, m mute. */
+/** Keyboard map: Space play/pause, ←/→ ±10 s, ↑/↓ ±1 s, , . one frame, [ ] speed, 1/2/4/9 grid, f fullscreen, m mute, b bookmark, s snapshot. */
 export function keyboardAction(event: { key: string; targetTag?: string | null; isEditable?: boolean; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean }): ConsoleKeyAction | null {
   const tag = (event.targetTag || '').toLowerCase();
   if (event.isEditable || tag === 'input' || tag === 'textarea' || tag === 'select' || event.metaKey || event.ctrlKey || event.altKey) return null;
@@ -320,6 +418,8 @@ export function keyboardAction(event: { key: string; targetTag?: string | null; 
     case 'ArrowDown': return { type: 'seek', deltaMs: -1_000 };
     case 'j': return { type: 'seek', deltaMs: -10_000 };
     case 'l': return { type: 'seek', deltaMs: 10_000 };
+    case ',': return { type: 'frame', direction: -1 };
+    case '.': return { type: 'frame', direction: 1 };
     case ']': case '>': return { type: 'rate', direction: 1 };
     case '[': case '<': return { type: 'rate', direction: -1 };
     case '1': return { type: 'layout', layout: 1 };
@@ -328,6 +428,8 @@ export function keyboardAction(event: { key: string; targetTag?: string | null; 
     case '9': return { type: 'layout', layout: 9 };
     case 'f': return { type: 'fullscreen' };
     case 'm': return { type: 'mute' };
+    case 'b': return { type: 'bookmark' };
+    case 's': return { type: 'snapshot' };
     case 'Escape': return { type: 'escape' };
     default: return null;
   }

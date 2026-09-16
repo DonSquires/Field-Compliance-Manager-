@@ -1,22 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bytesLabel,
+  cameraItem,
   candidateAction,
   clipAtTime,
+  clipItem,
+  clipStatusLabel,
   clusterMarks,
   DEFAULT_CCTV_INSPECTION,
+  durationLabel,
   entityTitle,
+  fitTiles,
   followClock,
   gridColumns,
+  groupClipsByDay,
+  importIdsOf,
   inferenceReviewLabel,
   initialView,
   isDefaultCCTVInspection,
   isEnhancementActive,
   isWeakInferenceCandidate,
   keyboardAction,
+  layoutForCount,
   nextClipAfter,
   nextInspectionZoom,
   nextRate,
   normalizeCCTVInspection,
+  observationCountsByEvidence,
   observationsToPins,
   panView,
   tickIntervalMs,
@@ -34,6 +44,7 @@ const T0 = Date.parse('2026-09-15T02:18:19.000Z');
 const clip = (start: number, end: number, id = `c${start}`): ConsoleClip => ({
   evidenceId: id, importId: 'imp', jobId: null, jobStatus: 'complete', fileName: id, startMs: T0 + start * 1000, endMs: T0 + end * 1000,
   bucket: 'bob-uploads', playbackPath: null, sourcePath: `org/x/cctv/imp/${id}.mp4`, fileType: 'video/mp4',
+  sizeBytes: null, sha256: null, courtReady: false, lockedAt: null, retentionHold: false,
 });
 const mark = (start: number, end: number, severity: ConsoleMark['severity'], id = `m${start}`): ConsoleMark => ({
   id, startMs: T0 + start * 1000, endMs: T0 + end * 1000, severity, source: 'device_snapshot', kind: 'motion', thumbnailPath: null, label: id,
@@ -72,6 +83,58 @@ describe('shared clock and clips', () => {
 
   it('maps grid layouts to columns', () => {
     expect([1, 2, 4, 9].map((layout) => gridColumns(layout as 1 | 2 | 4 | 9))).toEqual([1, 2, 2, 3]);
+  });
+
+  it('picks the smallest grid that holds the wall and pads or trims tiles to it', () => {
+    expect([0, 1, 2, 3, 4, 5, 9, 12].map(layoutForCount)).toEqual([1, 1, 2, 4, 4, 9, 9, 9]);
+    const items = [cameraItem('a'), clipItem(clip(0, 10)), null, cameraItem('b')];
+    expect(fitTiles(items, 2)).toEqual([items[0], items[1]]);
+    expect(fitTiles([items[0]], 4)).toEqual([items[0], null, null, null]);
+  });
+
+  it('gives wall items stable ids and lists each camera once however many of its recordings are pinned', () => {
+    expect(cameraItem('imp')).toEqual({ id: 'camera:imp', kind: 'camera', importId: 'imp' });
+    expect(clipItem(clip(0, 10))).toEqual({ id: 'clip:c0', kind: 'clip', importId: 'imp', evidenceId: 'c0' });
+    expect(importIdsOf([cameraItem('imp'), clipItem(clip(0, 10)), clipItem(clip(20, 30)), null, cameraItem('other')])).toEqual(['imp', 'other']);
+  });
+});
+
+describe('recordings browser', () => {
+  it('groups recordings by calendar day in the camera zone, in start order', () => {
+    // 02:18 UTC on 15 Sep is 14:18 NZST on 15 Sep; 12 h later is 02:18 NZST on 16 Sep.
+    const groups = groupClipsByDay([clip(12 * 3600, 12 * 3600 + 150, 'late'), clip(0, 150, 'early'), clip(150, 300, 'second')], 'Pacific/Auckland');
+    expect(groups.map((group) => group.clips.map((item) => item.evidenceId))).toEqual([['early', 'second'], ['late']]);
+    expect(groups[0].day).not.toBe(groups[1].day);
+    expect(groups[0].dayMs).toBe(T0);
+    expect(groupClipsByDay([], 'Pacific/Auckland')).toEqual([]);
+  });
+
+  it('counts sightings per recording, separating what is still to review and what raised an alert', () => {
+    const counts = observationCountsByEvidence([
+      observation({ id: 'a', evidenceId: 'c0', plate: 'ABC123' }),
+      observation({ id: 'b', evidenceId: 'c0', reviewState: 'accepted', reviewedAt: '2026-09-15T03:00:00Z' }),
+      observation({ id: 'c', evidenceId: 'c149', kind: 'animal', species: 'possum', isPest: true }),
+      observation({ id: 'd', evidenceId: 'c149', kind: 'person' }),
+    ]);
+    expect(counts.c0).toEqual({ total: 2, pending: 1, alerts: 1 });
+    expect(counts.c149).toEqual({ total: 2, pending: 2, alerts: 1 });
+    expect(counts.c400).toBeUndefined();
+  });
+
+  it('labels durations, sizes and analysis states in plain words', () => {
+    expect(durationLabel(45_000)).toBe('45 s');
+    expect(durationLabel(150_000)).toBe('2 min 30 s');
+    expect(durationLabel(25 * 60_000 + 5_000)).toBe('25 min');
+    expect(durationLabel(90 * 60_000)).toBe('1 h 30 min');
+    expect(durationLabel(-5)).toBe('0 s');
+    expect(bytesLabel(null)).toBe('—');
+    expect(bytesLabel(512)).toBe('1 KB');
+    expect(bytesLabel(2.5 * 1024 * 1024)).toBe('2.5 MB');
+    expect(bytesLabel(250 * 1024 * 1024)).toBe('250 MB');
+    expect(bytesLabel(3 * 1024 * 1024 * 1024)).toBe('3.00 GB');
+    expect(clipStatusLabel('complete')).toBe('Analysed');
+    expect(clipStatusLabel('processing')).toBe('Analysing');
+    expect(clipStatusLabel('none')).toBe('Not analysed');
   });
 
   it('keeps inspection adjustments bounded and zoom steps stable', () => {
@@ -165,6 +228,11 @@ describe('keyboard', () => {
     expect(keyboardAction({ key: '4' })).toEqual({ type: 'layout', layout: 4 });
     expect(keyboardAction({ key: 'f' })).toEqual({ type: 'fullscreen' });
     expect(keyboardAction({ key: 'm' })).toEqual({ type: 'mute' });
+    expect(keyboardAction({ key: ',' })).toEqual({ type: 'frame', direction: -1 });
+    expect(keyboardAction({ key: '.' })).toEqual({ type: 'frame', direction: 1 });
+    expect(keyboardAction({ key: 'b' })).toEqual({ type: 'bookmark' });
+    expect(keyboardAction({ key: 's' })).toEqual({ type: 'snapshot' });
+    expect(keyboardAction({ key: 'b', targetTag: 'textarea' })).toBeNull();
     expect(keyboardAction({ key: ' ', targetTag: 'input' })).toBeNull();
     expect(keyboardAction({ key: 'f', isEditable: true })).toBeNull();
     expect(keyboardAction({ key: 'f', ctrlKey: true })).toBeNull();

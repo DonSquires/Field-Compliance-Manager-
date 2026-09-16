@@ -36895,6 +36895,19 @@ export type Database = {
         }
         Returns: Json
       }
+      create_cctv_bookmark: {
+        Args: {
+          p_at: string
+          p_client_request_id?: string
+          p_evidence_id: string
+          p_notes?: string
+          p_observation_id?: string
+          p_severity?: string
+          p_title: string
+          p_until?: string
+        }
+        Returns: Json
+      }
       create_cctv_export_draft: {
         Args: {
           p_evidence_id: string
@@ -39673,6 +39686,10 @@ export type Database = {
           organization_id: string
           role: string
         }[]
+      }
+      lock_cctv_evidence: {
+        Args: { p_evidence_id: string; p_reason: string }
+        Returns: Json
       }
       log_bob_signing_event: {
         Args: {
@@ -42790,6 +42807,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      record_cctv_source_hash: {
+        Args: { p_evidence_id: string; p_sha256: string; p_size_bytes?: number }
+        Returns: boolean
       }
       record_court_appearance_outcome: {
         Args: {

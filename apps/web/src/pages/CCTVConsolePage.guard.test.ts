@@ -52,7 +52,8 @@ describe('CCTV console', () => {
 
   it('plays every camera on one shared clock with NVR controls and keyboard shortcuts', () => {
     expect(page).toContain('clockMs');
-    expect(page).toContain('isMaster={row.id === masterImportId}');
+    expect(page).toContain('isMaster={isCameraMaster}');
+    expect(page).toContain("const isCameraMaster = item.kind === 'camera' && masterItem?.id === item.id;");
     expect(page).toContain('onTick={handleTick}');
     expect(page).toContain('PLAYBACK_RATES.map');
     expect(page).toContain('GRID_LAYOUTS.map');
@@ -66,8 +67,62 @@ describe('CCTV console', () => {
     expect(tile).toContain('No footage at');
   });
 
-  it('gives reviewers non-destructive zoom and image adjustments on the active camera', () => {
-    expect(page).toContain('Active camera image inspection');
+  it('lists every recording individually, by day, and lets a reviewer play one alone or several at once on their own clocks', () => {
+    expect(page).toContain('groupClipsByDay(selectedClips, timeZone)');
+    expect(page).toContain('aria-label={`Recordings from ${selectedImport.camera_label}`}');
+    expect(page).toContain('const showRecordingAlone = (clip: ConsoleClip) => replaceWall([clipItem(clip)]);');
+    expect(page).toContain('const addRecordingToWall = (clip: ConsoleClip) => placeTile(clipItem(clip));');
+    expect(page).toContain('const openDayOnWall = (clips: ConsoleClip[]) => replaceWall(clips.slice(0, 9).map(clipItem));');
+    expect(page).toContain("const pinnedClip = item.kind === 'clip' ? clipsById.get(item.evidenceId) ?? null : null;");
+    expect(page).toContain('pinnedClip={pinnedClip}');
+    expect(page).toContain('clipStatusLabel(clip.jobStatus)');
+    expect(page).toContain('bytesLabel(clip.sizeBytes)');
+    expect(page).toContain('Recordings on the wall play on their own clocks. Add a camera to drive the shared timeline.');
+    expect(tile).toContain('const pinned = Boolean(pinnedClip);');
+    expect(tile).toContain('const effectivePlaying = pinned ? localPlaying : playing;');
+    expect(tile).toContain('own clock');
+    expect(tile).toContain('React.forwardRef<CCTVPlayerTileHandle');
+  });
+
+  it('pops the wall out for a second monitor and offers full screen', () => {
+    expect(page).toContain("const popout = search.get('popout') === '1';");
+    expect(page).toContain("new URLSearchParams({ area: 'cctv-console', popout: '1' })");
+    expect(page).toContain('window.open(popoutUrl, `fcm-cctv-wall-${selectedImportId ?? \'wall\'}`');
+    expect(page).toContain('Pop out wall');
+    expect(page).toContain("{!popout ? (\n          <aside className=\"cctv-console__entities\"");
+    expect(styles).toContain('.cctv-console.is-popout');
+    // The popped-out wall is a second-monitor surface: the shell drops its own chrome and the grid fills the window.
+    expect(shell).toContain("fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1'");
+    expect(shell).toContain('className="admin-shell admin-shell-video-wall"');
+    expect(styles).toContain('.cctv-console.is-popout { display: flex; flex-direction: column; height: 100vh;');
+    expect(styles).toContain('.cctv-console.is-popout .cctv-console__grid-wrap { display: grid; flex: 1; min-height: 0; }');
+  });
+
+  it('steps single frames, saves labelled stills and records bookmarks as incidents through the governed RPC', () => {
+    expect(page).toContain("case 'frame': stepFrame(action.direction); break;");
+    expect(page).toContain('handle.stepFrame(direction)');
+    expect(page).toContain('await handle.captureFrame()');
+    expect(page).toContain("snapshot.enhanced ? '_ENHANCED-DISPLAY-ONLY' : ''");
+    expect(page).toContain("supabase.rpc('create_cctv_bookmark'");
+    expect(page).toContain('p_client_request_id: crypto.randomUUID()');
+    expect(page).toContain('p_observation_id: bookmarkDraft.observationId');
+    expect(page).not.toMatch(/from\('incidents'\)/);
+    expect(tile).toContain('FRAME_STEP_SECONDS');
+    expect(tile).toContain('captureFrame');
+  });
+
+  it('lets only administrators apply an evidence lock, and only over a hashed original, through the governed RPC', () => {
+    expect(page).toContain("const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');");
+    expect(page).toContain("supabase.rpc('lock_cctv_evidence'");
+    expect(page).toContain('disabled={!activeClip || Boolean(activeClip.lockedAt) || !activeClip.sha256}');
+    expect(page).toContain('lockDraft.reason.trim().length < 5');
+    expect(page).toContain('sha256_hash, is_court_ready, locked_at, retention_hold');
+    expect(page).toContain('retention cannot purge it · cannot be undone here');
+    expect(page).not.toMatch(/from\('evidence_items'\)[\s\S]{0,400}\.(update|insert|delete)\(/);
+  });
+
+  it('gives reviewers non-destructive zoom and image adjustments on the active tile', () => {
+    expect(page).toContain('Active tile image inspection');
     expect(page).toContain('cctv-image-adjustments');
     expect(page).toContain('Brightness');
     expect(page).toContain('Contrast');
@@ -117,7 +172,15 @@ describe('CCTV console', () => {
   });
 
   it('truncates long camera names within the fixed camera rail', () => {
-    expect(styles).toContain('.cctv-console__camera-label { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }');
+    expect(styles).toContain('.cctv-console__camera-label { color: var(--cc-text); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }');
+  });
+
+  it('sits on the dark administration shell instead of floating light panels inside it', () => {
+    expect(styles).toContain('--cc-surface: #0c202b;');
+    expect(styles).toContain('--cc-brand: #14c8d4;');
+    expect(styles).toContain('.cctv-console__cameras, .cctv-console__entities { background: var(--cc-surface);');
+    expect(styles).toContain('.cctv-console__controls { align-items: center; background: var(--cc-surface);');
+    expect(styles).not.toMatch(/background: #fff;/);
   });
 
   it('refreshes an active job when Realtime table publication is unavailable', () => {
@@ -134,7 +197,7 @@ describe('CCTV console', () => {
     expect(fieldOps).toContain("area: 'cctv-console', label: 'CCTV review'");
     expect(fieldOps).toContain("area: 'cctv-review', label: 'CCTV job queue & exports'");
     expect(importPage).toContain('/admin/field-ops?area=cctv-console&import=${importRow.id}');
-    expect(page).toContain("new URLSearchParams(location.search).get('import')");
+    expect(page).toContain("const requestedImportId = search.get('import');");
     expect(page).toContain("navigate('/admin/field-ops?area=cctv-review')");
     expect(page).toContain("navigate('/admin/field-ops?area=cctv-import')");
   });

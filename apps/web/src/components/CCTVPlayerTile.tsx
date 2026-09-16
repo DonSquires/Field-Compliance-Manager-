@@ -1,8 +1,18 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Sparkles, VideoOff } from 'lucide-react';
+import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Loader2, Pause, Play, Sparkles, VideoOff } from 'lucide-react';
 import { clipAtTime, formatClock, nextClipAfter, type CCTVInspection, type ConsoleClip } from '../lib/cctvConsole';
 import { analyseFramePixels, cssFilterFor, estimateNoiseFloor, panBy, planEnhancement, roiFor, zoomAt, type EnhancementPlan, type ZoomState } from '../lib/cctvEnhance';
 import { createEnhancementRenderer, type EnhancementRenderer } from '../lib/cctvEnhanceRenderer';
+
+export type TileSnapshot = { blob: Blob; width: number; height: number; atMs: number; enhanced: boolean };
+
+export type CCTVPlayerTileHandle = {
+  /** Move one frame (≈ 1/25 s) in either direction while paused; returns the new instant. */
+  stepFrame: (direction: 1 | -1) => number | null;
+  /** Rasterise the picture currently on screen (enhanced view when active) for a still export. */
+  captureFrame: () => Promise<TileSnapshot | null>;
+  currentMs: () => number | null;
+};
 
 type CCTVPlayerTileProps = {
   label: string;
@@ -15,6 +25,8 @@ type CCTVPlayerTileProps = {
   isMaster: boolean;
   active: boolean;
   timeZone: string;
+  /** When set, the tile plays only this recording on its own clock instead of following the shared clock. */
+  pinnedClip?: ConsoleClip | null;
   resolveUrl: (clip: ConsoleClip) => Promise<string | null>;
   onTick: (ms: number) => void;
   onClipEnded: (clip: ConsoleClip) => void;
@@ -27,6 +39,7 @@ type CCTVPlayerTileProps = {
 };
 
 const DRIFT_TOLERANCE_SECONDS = 0.75;
+const FRAME_STEP_SECONDS = 1 / 25;
 const ANALYSIS_WIDTH = 96;
 const NOISE_PATCH = 128;
 const ANALYSIS_INTERVAL_MS = 120;
@@ -38,11 +51,12 @@ type VideoFrameCapable = HTMLVideoElement & {
 };
 
 /**
- * One camera in the grid. The tile shows whichever clip of its camera covers the shared clock and switches
- * clips as the clock crosses ring-slot boundaries. The master tile's playback drives the clock; every
- * other tile seeks to it, so all cameras stay on the same instant.
+ * One tile in the grid. In camera mode it shows whichever clip of its camera covers the shared clock and
+ * switches clips as the clock crosses ring-slot boundaries; the master tile's playback drives the clock and
+ * every other tile seeks to it. In pinned mode it plays exactly one recording on its own clock, independent
+ * of the wall, so a reviewer can open several recordings side by side.
  */
-export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabel, clips, clockMs, playing, rate, muted, isMaster, active, timeZone, resolveUrl, onTick, onClipEnded, onDurationKnown, onActivate, inspection, onInspectionChange, onEnhancementPlan, onRemove }) => {
+export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerTileProps>(function CCTVPlayerTile({ label, placeLabel, clips, clockMs, playing, rate, muted, isMaster, active, timeZone, pinnedClip = null, resolveUrl, onTick, onClipEnded, onDurationKnown, onActivate, inspection, onInspectionChange, onEnhancementPlan, onRemove }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -57,13 +71,17 @@ export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabe
   const [error, setError] = useState<string | null>(null);
   const [gpuUnavailable, setGpuUnavailable] = useState<string | null>(null);
   const [cssFilter, setCssFilter] = useState<string | null>(null);
+  const [localPlaying, setLocalPlaying] = useState(false);
+  const [localMs, setLocalMs] = useState<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const openingRef = useRef<string | null>(null);
 
   const enhanceRequested = Boolean(inspection && inspection.enhance !== 'off' && (inspection.enhance === 'on' || inspection.zoom > 1));
   const gpuActive = enhanceRequested && !gpuUnavailable;
 
-  const targetClip = clipAtTime(clips, clockMs);
+  const pinned = Boolean(pinnedClip);
+  const targetClip = pinnedClip ?? clipAtTime(clips, clockMs);
+  const effectivePlaying = pinned ? localPlaying : playing;
   const converting = Boolean(targetClip && !targetClip.playbackPath && /^video\/h26[45]$/.test(targetClip.fileType));
 
   // Keyed on the clip id held in a ref, not on state, so the re-render caused by setClip does not cancel
@@ -93,11 +111,11 @@ export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabe
 
   const seekToClock = useCallback((force = false) => {
     const video = videoRef.current;
-    if (!video || !clip || !Number.isFinite(video.duration)) return;
+    if (pinned || !video || !clip || !Number.isFinite(video.duration)) return;
     const target = Math.max(0, (clockMs - clip.startMs) / 1000);
     if (target > video.duration) return;
     if (force || Math.abs(video.currentTime - target) > DRIFT_TOLERANCE_SECONDS) video.currentTime = target;
-  }, [clip, clockMs]);
+  }, [clip, clockMs, pinned]);
 
   // Followers chase the shared clock. The master's own ticks never drift past the tolerance, so this only
   // moves it when the clock was set from outside (scrub, pin click, keyboard).
@@ -113,23 +131,29 @@ export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabe
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
-    if (playing) {
+    if (effectivePlaying) {
       void video.play().catch(() => { /* autoplay blocked until the user interacts; the play button retries */ });
     } else {
       video.pause();
     }
-  }, [playing, src]);
+  }, [effectivePlaying, src]);
 
   useEffect(() => {
-    if (!isMaster || !playing || !src) return;
+    if ((!isMaster && !pinned) || !effectivePlaying || !src) return;
     const step = () => {
       const video = videoRef.current;
-      if (video && clip && !video.paused && !video.seeking) onTick(clip.startMs + video.currentTime * 1000);
+      if (video && clip && !video.paused && !video.seeking) {
+        const at = clip.startMs + video.currentTime * 1000;
+        if (pinned) setLocalMs(at);
+        else onTick(at);
+      }
       frameRef.current = requestAnimationFrame(step);
     };
     frameRef.current = requestAnimationFrame(step);
     return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current); };
-  }, [isMaster, playing, src, clip, onTick]);
+  }, [isMaster, pinned, effectivePlaying, src, clip, onTick]);
+
+  useEffect(() => { setLocalPlaying(false); setLocalMs(pinnedClip ? pinnedClip.startMs : null); }, [pinnedClip?.evidenceId]);
 
   const handleLoadedMetadata = () => {
     const video = videoRef.current;
@@ -138,10 +162,48 @@ export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabe
     seekToClock(true);
     video.playbackRate = rate;
     video.muted = muted;
-    if (playing) void video.play().catch(() => undefined);
+    if (effectivePlaying) void video.play().catch(() => undefined);
   };
 
-  const nextClip = !targetClip ? nextClipAfter(clips, clockMs) : null;
+  useImperativeHandle(ref, () => ({
+    stepFrame: (direction) => {
+      const video = videoRef.current;
+      if (!video || !clip || !Number.isFinite(video.duration)) return null;
+      video.pause();
+      if (pinned) setLocalPlaying(false);
+      const next = Math.min(video.duration, Math.max(0, video.currentTime + direction * FRAME_STEP_SECONDS));
+      video.currentTime = next;
+      const at = clip.startMs + next * 1000;
+      if (pinned) setLocalMs(at); else onTick(at);
+      return at;
+    },
+    captureFrame: async () => {
+      const video = videoRef.current;
+      if (!video || !clip || video.readyState < 2) return null;
+      const source: HTMLCanvasElement | HTMLVideoElement = gpuActive && canvasRef.current ? canvasRef.current : video;
+      const width = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
+      const height = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+      if (!width || !height) return null;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      try {
+        context.drawImage(source, 0, 0, width, height);
+      } catch {
+        return null;
+      }
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      return blob ? { blob, width, height, atMs: clip.startMs + video.currentTime * 1000, enhanced: gpuActive } : null;
+    },
+    currentMs: () => {
+      const video = videoRef.current;
+      return video && clip ? clip.startMs + video.currentTime * 1000 : null;
+    },
+  }), [clip, pinned, gpuActive, onTick]);
+
+  const nextClip = !targetClip && !pinned ? nextClipAfter(clips, clockMs) : null;
 
   // The enhanced view is drawn on a canvas over the video; the picture underneath keeps decoding and
   // remains the untouched source. A clip that cannot be read cross-origin falls back to CSS filters.
@@ -324,12 +386,12 @@ export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabe
     : undefined;
 
   return (
-    <div className={`cctv-tile${active ? ' is-active' : ''}${isMaster ? ' is-master' : ''}`} onClick={onActivate} role="button" tabIndex={0}
-      onKeyDown={(event) => { if (event.key === 'Enter') onActivate(); }} aria-label={`${label} camera view`} aria-pressed={active}>
+    <div className={`cctv-tile${active ? ' is-active' : ''}${isMaster && !pinned ? ' is-master' : ''}${pinned ? ' is-pinned' : ''}`} onClick={onActivate} role="button" tabIndex={0}
+      onKeyDown={(event) => { if (event.key === 'Enter') onActivate(); }} aria-label={pinned && pinnedClip ? `${label} recording ${pinnedClip.fileName}` : `${label} camera view`} aria-pressed={active}>
       <div className="cctv-tile__header">
         <span className="cctv-tile__label">{label}</span>
         {placeLabel ? <span className="cctv-tile__place">{placeLabel}</span> : null}
-        {isMaster ? <span className="cctv-tile__badge">clock</span> : null}
+        {pinned ? <span className="cctv-tile__badge is-pinned">own clock</span> : isMaster ? <span className="cctv-tile__badge">clock</span> : null}
         {onRemove ? <button type="button" className="cctv-tile__remove" onClick={(event) => { event.stopPropagation(); onRemove(); }} aria-label={`Remove ${label} from the view`}>×</button> : null}
       </div>
       <div ref={bodyRef} className={`cctv-tile__body${inspection && inspection.zoom > 1 ? ' is-zoomed' : ''}${gpuActive ? ' is-enhanced' : ''}`}
@@ -339,7 +401,7 @@ export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabe
           <video ref={videoRef} src={src ?? undefined} className="cctv-tile__video" playsInline preload="auto" crossOrigin="anonymous"
             style={videoStyle}
             onLoadedMetadata={handleLoadedMetadata}
-            onEnded={() => { if (isMaster && clip) onClipEnded(clip); }}
+            onEnded={() => { if (pinned) setLocalPlaying(false); else if (isMaster && clip) onClipEnded(clip); }}
             onError={() => setError('This clip could not be played in the browser.')} />
         ) : null}
         {targetClip && !converting && enhanceRequested ? <canvas ref={canvasRef} className={`cctv-tile__enhanced${gpuActive ? ' is-live' : ''}`} aria-hidden="true" /> : null}
@@ -358,10 +420,20 @@ export const CCTVPlayerTile: React.FC<CCTVPlayerTileProps> = ({ label, placeLabe
             {nextClip ? <small>Next clip starts {formatClock(nextClip.startMs, timeZone)}</small> : <small>Nothing later from this camera</small>}
           </div>
         ) : null}
-        {targetClip ? <span className="cctv-tile__clip">{targetClip.fileName}</span> : null}
+        {targetClip ? (
+          <div className="cctv-tile__footer">
+            {pinned ? (
+              <button type="button" className="cctv-tile__transport" onClick={(event) => { event.stopPropagation(); setLocalPlaying((current) => !current); }} aria-label={localPlaying ? 'Pause this recording' : 'Play this recording'}>
+                {localPlaying ? <Pause size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
+              </button>
+            ) : null}
+            <span className="cctv-tile__clip">{targetClip.fileName}</span>
+            <span className="cctv-tile__time">{formatClock(pinned ? (localMs ?? targetClip.startMs) : clockMs, timeZone)}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
-};
+});
 
 export default CCTVPlayerTile;

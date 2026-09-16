@@ -655,6 +655,29 @@ async function recordInferenceDeviceEvents(job, evidence, summary) {
   return data;
 }
 
+async function hashFile(filePath) {
+  const hash = crypto.createHash('sha256');
+  let size = 0;
+  for await (const chunk of (await fs.open(filePath)).createReadStream()) { hash.update(chunk); size += chunk.length; }
+  return { sha256: hash.digest('hex'), size };
+}
+
+// The stored source bytes are hashed once so a reviewer can lock the recording against retention with an
+// integrity anchor. Never overwrites a hash the intake already recorded; skipped once the item is locked.
+async function recordSourceHash(job, evidence, videoPath) {
+  if (evidence.metadata?.source_sha256 || evidence.locked_at) return null;
+  try {
+    const { sha256, size } = await hashFile(videoPath);
+    const { error } = await supabase.rpc('record_cctv_source_hash', { p_evidence_id: evidence.id, p_sha256: sha256, p_size_bytes: size });
+    if (error) throw new Error(error.message);
+    log('source_hash_recorded', { job_id: job.id, evidence_item_id: evidence.id, bytes: size });
+    return sha256;
+  } catch (error) {
+    log('source_hash_failed', { job_id: job.id, evidence_item_id: evidence.id, error: error.message });
+    return null;
+  }
+}
+
 async function processOne() {
   if (!INGESTION_URL || !WORKLOAD_SIGNING_SECRET) return;
   let currentJobId = null;
@@ -676,7 +699,7 @@ async function processOne() {
     await updateProgress(job, 'loading_evidence', { label: 'Loading evidence file' });
     const { data: evidence, error: evidenceError } = await supabase
       .from('evidence_items')
-      .select('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id')
+      .select('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id, locked_at')
       .eq('id', job.evidence_item_id)
       .eq('organization_id', job.organization_id)
       .maybeSingle();
@@ -684,6 +707,7 @@ async function processOne() {
     if (evidence.evidence_kind !== 'video') throw new Error('evidence item is not video');
     await updateProgress(job, 'converting', { label: 'Preparing video for analysis' });
     const videoPath = await ensureVideoPath(evidence);
+    await recordSourceHash(job, evidence, videoPath);
     try {
       await ensurePlaybackCopy(job, evidence, videoPath);
     } catch (playbackError) {
@@ -738,4 +762,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash };

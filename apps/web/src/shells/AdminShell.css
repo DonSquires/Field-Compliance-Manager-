@@ -194,6 +194,15 @@
   padding: 0;
 }
 
+.admin-shell-video-wall {
+  display: flex;
+}
+
+.admin-shell-main.is-video-wall {
+  padding: 0;
+  background: #07131b;
+}
+
 .desktop-download-overlay {
   position: fixed;
   z-index: 200;
