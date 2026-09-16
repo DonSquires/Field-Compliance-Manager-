@@ -5319,6 +5319,13 @@ export type Database = {
             referencedRelation: "canonical_scv"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "canonical_scv_links_canonical_scv_id_fkey"
+            columns: ["canonical_scv_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_scv_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       canonical_ta_names: {
@@ -5377,6 +5384,13 @@ export type Database = {
           source_table?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "canonical_vehicle_links_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "canonical_vehicle_links_canonical_vehicle_id_fkey"
             columns: ["canonical_vehicle_id"]
@@ -5773,6 +5787,13 @@ export type Database = {
             columns: ["canonical_place_id"]
             isOneToOne: false
             referencedRelation: "canonical_places"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
             referencedColumns: ["id"]
           },
           {
@@ -10573,44 +10594,53 @@ export type Database = {
         Row: {
           active: boolean
           alert_level: string | null
+          client_request_id: string | null
           created_at: string
           entity_id: string
           entity_type: string
           flag_type: string
+          hazard_class: string | null
           id: string
           organization_id: string
           raised_at: string
           raised_by: string | null
           reason: string | null
           resolved_at: string | null
+          resolved_by: string | null
         }
         Insert: {
           active?: boolean
           alert_level?: string | null
+          client_request_id?: string | null
           created_at?: string
           entity_id: string
           entity_type: string
           flag_type: string
+          hazard_class?: string | null
           id?: string
           organization_id: string
           raised_at?: string
           raised_by?: string | null
           reason?: string | null
           resolved_at?: string | null
+          resolved_by?: string | null
         }
         Update: {
           active?: boolean
           alert_level?: string | null
+          client_request_id?: string | null
           created_at?: string
           entity_id?: string
           entity_type?: string
           flag_type?: string
+          hazard_class?: string | null
           id?: string
           organization_id?: string
           raised_at?: string
           raised_by?: string | null
           reason?: string | null
           resolved_at?: string | null
+          resolved_by?: string | null
         }
         Relationships: [
           {
@@ -10637,6 +10667,13 @@ export type Database = {
           {
             foreignKeyName: "entity_flags_raised_by_fkey"
             columns: ["raised_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_flags_resolved_by_fkey"
+            columns: ["resolved_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
@@ -20090,6 +20127,20 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "observations_canonical_scv_id_fkey"
+            columns: ["canonical_scv_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_scv_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "observations_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "observations_canonical_vehicle_id_fkey"
             columns: ["canonical_vehicle_id"]
             isOneToOne: false
@@ -22316,6 +22367,13 @@ export type Database = {
           zone_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "parking_chalk_records_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "parking_chalk_records_canonical_vehicle_id_fkey"
             columns: ["canonical_vehicle_id"]
@@ -32138,6 +32196,461 @@ export type Database = {
         }
         Relationships: []
       }
+      workshop_bom_template_lines: {
+        Row: {
+          description: string
+          id: string
+          item_id: string | null
+          line_kind: string
+          organization_id: string
+          position: number
+          quantity: number
+          template_id: string
+          unit_of_measure: string | null
+        }
+        Insert: {
+          description: string
+          id?: string
+          item_id?: string | null
+          line_kind: string
+          organization_id: string
+          position?: number
+          quantity: number
+          template_id: string
+          unit_of_measure?: string | null
+        }
+        Update: {
+          description?: string
+          id?: string
+          item_id?: string | null
+          line_kind?: string
+          organization_id?: string
+          position?: number
+          quantity?: number
+          template_id?: string
+          unit_of_measure?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_bom_template_lines_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_template_lines_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_template_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_template_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_template_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_template_lines_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_bom_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workshop_bom_templates: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          kind: string
+          name: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          kind?: string
+          name: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_bom_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_bom_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workshop_work_order_lines: {
+        Row: {
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          description: string
+          id: string
+          inventory_transaction_id: string | null
+          invoice_line_item_id: string | null
+          item_id: string | null
+          line_kind: string
+          line_total: number | null
+          organization_id: string
+          position: number
+          quantity: number
+          unit_cost: number
+          unit_of_measure: string | null
+          unit_price: number
+          work_order_id: string
+        }
+        Insert: {
+          client_request_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          description: string
+          id?: string
+          inventory_transaction_id?: string | null
+          invoice_line_item_id?: string | null
+          item_id?: string | null
+          line_kind: string
+          line_total?: number | null
+          organization_id: string
+          position?: number
+          quantity: number
+          unit_cost?: number
+          unit_of_measure?: string | null
+          unit_price?: number
+          work_order_id: string
+        }
+        Update: {
+          client_request_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          id?: string
+          inventory_transaction_id?: string | null
+          invoice_line_item_id?: string | null
+          item_id?: string | null
+          line_kind?: string
+          line_total?: number | null
+          organization_id?: string
+          position?: number
+          quantity?: number
+          unit_cost?: number
+          unit_of_measure?: string | null
+          unit_price?: number
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_work_order_lines_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_inventory_transaction_id_fkey"
+            columns: ["inventory_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "finance_inventory_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_invoice_line_item_id_fkey"
+            columns: ["invoice_line_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_line_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_item_catalog"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "finance_price_book"
+            referencedColumns: ["item_id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_work_order_summary"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_order_lines_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workshop_work_orders: {
+        Row: {
+          asset_id: string | null
+          assigned_user_id: string | null
+          bom_template_id: string | null
+          cancelled_at: string | null
+          client_organization_id: string | null
+          client_request_id: string
+          client_site_id: string | null
+          completed_at: string | null
+          completion_note: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          inventory_location_id: string | null
+          kind: string
+          order_number: string
+          organization_id: string
+          scheduled_for: string | null
+          service_agreement_id: string | null
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          asset_id?: string | null
+          assigned_user_id?: string | null
+          bom_template_id?: string | null
+          cancelled_at?: string | null
+          client_organization_id?: string | null
+          client_request_id: string
+          client_site_id?: string | null
+          completed_at?: string | null
+          completion_note?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          inventory_location_id?: string | null
+          kind: string
+          order_number: string
+          organization_id: string
+          scheduled_for?: string | null
+          service_agreement_id?: string | null
+          started_at?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          asset_id?: string | null
+          assigned_user_id?: string | null
+          bom_template_id?: string | null
+          cancelled_at?: string | null
+          client_organization_id?: string | null
+          client_request_id?: string
+          client_site_id?: string | null
+          completed_at?: string | null
+          completion_note?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          inventory_location_id?: string | null
+          kind?: string
+          order_number?: string
+          organization_id?: string
+          scheduled_for?: string | null
+          service_agreement_id?: string | null
+          started_at?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_work_orders_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_bom_template_id_fkey"
+            columns: ["bom_template_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_bom_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_site_id_fkey"
+            columns: ["client_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_inventory_location_id_fkey"
+            columns: ["inventory_location_id"]
+            isOneToOne: false
+            referencedRelation: "finance_inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       zone_closures: {
         Row: {
           closure_type: string
@@ -32534,6 +33047,96 @@ export type Database = {
       }
     }
     Views: {
+      canonical_scv_public: {
+        Row: {
+          certificate_number: string | null
+          certificate_status: string | null
+          expiry_date: string | null
+          id: string | null
+          issued_date: string | null
+          plate_number: string | null
+        }
+        Insert: {
+          certificate_number?: string | null
+          certificate_status?: string | null
+          expiry_date?: string | null
+          id?: string | null
+          issued_date?: string | null
+          plate_number?: string | null
+        }
+        Update: {
+          certificate_number?: string | null
+          certificate_status?: string | null
+          expiry_date?: string | null
+          id?: string | null
+          issued_date?: string | null
+          plate_number?: string | null
+        }
+        Relationships: []
+      }
+      canonical_vehicle_public: {
+        Row: {
+          body_type: string | null
+          cof_expiry: string | null
+          cof_status: string | null
+          colour: string | null
+          created_at: string | null
+          fuel_type: string | null
+          homeless_status: string | null
+          id: string | null
+          last_seen_at: string | null
+          make: string | null
+          model: string | null
+          plate_number: string | null
+          rego_expiry: string | null
+          rego_status: string | null
+          updated_at: string | null
+          wof_expiry: string | null
+          wof_status: string | null
+          year: number | null
+        }
+        Insert: {
+          body_type?: string | null
+          cof_expiry?: string | null
+          cof_status?: string | null
+          colour?: string | null
+          created_at?: string | null
+          fuel_type?: string | null
+          homeless_status?: string | null
+          id?: string | null
+          last_seen_at?: string | null
+          make?: string | null
+          model?: string | null
+          plate_number?: string | null
+          rego_expiry?: string | null
+          rego_status?: string | null
+          updated_at?: string | null
+          wof_expiry?: string | null
+          wof_status?: string | null
+          year?: number | null
+        }
+        Update: {
+          body_type?: string | null
+          cof_expiry?: string | null
+          cof_status?: string | null
+          colour?: string | null
+          created_at?: string | null
+          fuel_type?: string | null
+          homeless_status?: string | null
+          id?: string | null
+          last_seen_at?: string | null
+          make?: string | null
+          model?: string | null
+          plate_number?: string | null
+          rego_expiry?: string | null
+          rego_status?: string | null
+          updated_at?: string | null
+          wof_expiry?: string | null
+          wof_status?: string | null
+          year?: number | null
+        }
+        Relationships: []
+      }
       crm_account_health: {
         Row: {
           active_breaches: number | null
@@ -33080,6 +33683,127 @@ export type Database = {
           },
         ]
       }
+      workshop_work_order_summary: {
+        Row: {
+          asset_id: string | null
+          asset_name: string | null
+          assigned_name: string | null
+          assigned_user_id: string | null
+          bom_template_id: string | null
+          cancelled_at: string | null
+          charge_total: number | null
+          client_name: string | null
+          client_organization_id: string | null
+          client_site_id: string | null
+          completed_at: string | null
+          completion_note: string | null
+          cost_total: number | null
+          created_at: string | null
+          description: string | null
+          id: string | null
+          inventory_location_id: string | null
+          kind: string | null
+          line_count: number | null
+          order_number: string | null
+          organization_id: string | null
+          scheduled_for: string | null
+          service_agreement_id: string | null
+          site_name: string | null
+          started_at: string | null
+          status: string | null
+          stock_location_name: string | null
+          template_name: string | null
+          title: string | null
+          uninvoiced_total: number | null
+          updated_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workshop_work_orders_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_bom_template_id_fkey"
+            columns: ["bom_template_id"]
+            isOneToOne: false
+            referencedRelation: "workshop_bom_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_client_site_id_fkey"
+            columns: ["client_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_inventory_location_id_fkey"
+            columns: ["inventory_location_id"]
+            isOneToOne: false
+            referencedRelation: "finance_inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       _entitled_org_ids_for: { Args: { p_user_id: string }; Returns: string[] }
@@ -33385,6 +34109,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      add_workshop_work_order_line: {
+        Args: {
+          p_client_request_id: string
+          p_description?: string
+          p_item_id?: string
+          p_line_kind: string
+          p_quantity?: number
+          p_unit_cost?: number
+          p_unit_price?: number
+          p_work_order_id: string
+        }
+        Returns: {
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          description: string
+          id: string
+          inventory_transaction_id: string | null
+          invoice_line_item_id: string | null
+          item_id: string | null
+          line_kind: string
+          line_total: number | null
+          organization_id: string
+          position: number
+          quantity: number
+          unit_cost: number
+          unit_of_measure: string | null
+          unit_price: number
+          work_order_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workshop_work_order_lines"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       addauth: { Args: { "": string }; Returns: boolean }
       addgeometrycolumn:
         | {
@@ -33437,6 +34198,41 @@ export type Database = {
           shift_id: string
           status: string
         }[]
+      }
+      advance_workshop_work_order_status: {
+        Args: { p_note?: string; p_status: string; p_work_order_id: string }
+        Returns: {
+          asset_id: string | null
+          assigned_user_id: string | null
+          bom_template_id: string | null
+          cancelled_at: string | null
+          client_organization_id: string | null
+          client_request_id: string
+          client_site_id: string | null
+          completed_at: string | null
+          completion_note: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          inventory_location_id: string | null
+          kind: string
+          order_number: string
+          organization_id: string
+          scheduled_for: string | null
+          service_agreement_id: string | null
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workshop_work_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       apply_bob_rate_rule_proposal: {
         Args: { p_action_id: string }
@@ -37072,6 +37868,55 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_workshop_work_order: {
+        Args: {
+          p_asset_id?: string
+          p_assigned_user_id?: string
+          p_bom_template_id?: string
+          p_client_organization_id?: string
+          p_client_request_id: string
+          p_client_site_id?: string
+          p_description?: string
+          p_inventory_location_id?: string
+          p_kind: string
+          p_organization_id: string
+          p_scheduled_for?: string
+          p_service_agreement_id?: string
+          p_title: string
+        }
+        Returns: {
+          asset_id: string | null
+          assigned_user_id: string | null
+          bom_template_id: string | null
+          cancelled_at: string | null
+          client_organization_id: string | null
+          client_request_id: string
+          client_site_id: string | null
+          completed_at: string | null
+          completion_note: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          inventory_location_id: string | null
+          kind: string
+          order_number: string
+          organization_id: string
+          scheduled_for: string | null
+          service_agreement_id: string | null
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workshop_work_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       crm_actor_can_manage_account: {
         Args: { p_account_organization_id: string }
         Returns: boolean
@@ -37651,6 +38496,45 @@ export type Database = {
           subtotal: number
           total_amount: number
         }[]
+      }
+      generate_crm_invoice_from_completed_work: {
+        Args: {
+          p_client_organization_id: string
+          p_client_request_id: string
+          p_organization_id: string
+          p_period_end?: string
+          p_period_start?: string
+          p_service_agreement_id?: string
+        }
+        Returns: {
+          client_organization_id: string
+          created_at: string
+          created_by: string | null
+          currency: string
+          due_date: string
+          gst_amount: number
+          id: string
+          invoice_date: string
+          invoice_number: string
+          notes: string | null
+          organization_id: string
+          paid_at: string | null
+          sent_at: string | null
+          service_agreement_id: string | null
+          service_period_end: string | null
+          service_period_start: string | null
+          site_id: string | null
+          status: string
+          subtotal: number
+          total_amount: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "invoices"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       generate_due_report_packs: {
         Args: { p_period_end: string; p_period_start: string }
@@ -38404,6 +39288,24 @@ export type Database = {
           slot_id: string
           staff_id: string
           work_unit_name: string
+        }[]
+      }
+      get_safety_warnings: {
+        Args: { p_entity_ids: string[]; p_entity_type: string }
+        Returns: {
+          alert_level: string
+          contact_email: string
+          contact_phone: string
+          entity_id: string
+          entity_type: string
+          hazard_class: string
+          id: string
+          is_own_organization: boolean
+          organization_id: string
+          organization_name: string
+          raised_at: string
+          reason: string
+          requested_id: string
         }[]
       }
       get_shift_break_entitlement: {
@@ -39929,6 +40831,32 @@ export type Database = {
           timing_source: string
         }[]
       }
+      manage_finance_inventory_location: {
+        Args: {
+          p_action: string
+          p_asset_id?: string
+          p_location_id?: string
+          p_location_type?: string
+          p_name?: string
+          p_organization_id: string
+        }
+        Returns: {
+          active: boolean
+          asset_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          location_type: string
+          name: string
+          organization_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "finance_inventory_locations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       manage_finance_item: {
         Args: {
           p_action: string
@@ -40968,6 +41896,35 @@ export type Database = {
           alert_status: string
         }[]
       }
+      manage_workshop_bom_template: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_description?: string
+          p_kind?: string
+          p_lines?: Json
+          p_name?: string
+          p_organization_id: string
+          p_template_id?: string
+        }
+        Returns: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          kind: string
+          name: string
+          organization_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workshop_bom_templates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       match_finance_bank_statement_line: {
         Args: { p_payment_receipt_id: string; p_statement_line_id: string }
         Returns: {
@@ -41474,6 +42431,40 @@ export type Database = {
           status: string
           work_unit_id: string
         }[]
+      }
+      raise_entity_flag: {
+        Args: {
+          p_alert_level: string
+          p_client_request_id: string
+          p_entity_id: string
+          p_entity_type: string
+          p_flag_type: string
+          p_hazard_class?: string
+          p_reason: string
+        }
+        Returns: {
+          active: boolean
+          alert_level: string | null
+          client_request_id: string | null
+          created_at: string
+          entity_id: string
+          entity_type: string
+          flag_type: string
+          hazard_class: string | null
+          id: string
+          organization_id: string
+          raised_at: string
+          raised_by: string | null
+          reason: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "entity_flags"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       raise_officer_sos: {
         Args: {
@@ -42261,6 +43252,10 @@ export type Database = {
           total_cost: number
         }[]
       }
+      remove_workshop_work_order_line: {
+        Args: { p_line_id: string; p_work_order_id: string }
+        Returns: undefined
+      }
       renew_staff_credential: {
         Args: {
           p_client_request_id: string
@@ -42590,6 +43585,36 @@ export type Database = {
         }[]
       }
       resolve_enforcement_mode: { Args: { p_zone_id: string }; Returns: string }
+      resolve_entity_flag: {
+        Args: { p_flag_id: string; p_note?: string }
+        Returns: {
+          active: boolean
+          alert_level: string | null
+          client_request_id: string | null
+          created_at: string
+          entity_id: string
+          entity_type: string
+          flag_type: string
+          hazard_class: string | null
+          id: string
+          organization_id: string
+          raised_at: string
+          raised_by: string | null
+          reason: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "entity_flags"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      resolve_flag_entity: {
+        Args: { p_entity_id: string; p_entity_type: string }
+        Returns: Record<string, unknown>
+      }
       resolve_location_visibility: {
         Args: { p_sal_id: string; p_viewing_org_id: string }
         Returns: {
@@ -45243,6 +46268,20 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      workshop_actor_org: {
+        Args: { p_organization_id: string }
+        Returns: string
+      }
+      workshop_current_prices: {
+        Args: { p_item_id: string }
+        Returns: Record<string, unknown>
+      }
+      workshop_line_actor_role: {
+        Args: {
+          p_work_order: Database["public"]["Tables"]["workshop_work_orders"]["Row"]
+        }
+        Returns: string
       }
       zones_for_site: {
         Args: { p_site_id: string }

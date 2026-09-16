@@ -1,8 +1,8 @@
 /* CCTV console — a review console: camera list, synchronised player grid, severity timeline, entity queue. */
 .cctv-console { padding: 22px clamp(16px, 2.5vw, 36px) 36px; color: #18212b; }
 .cctv-console__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
-.cctv-console__header .page-title { align-items: center; color: #18212b; display: inline-flex; font-size: 26px; gap: 10px; margin: 0; }
-.cctv-console__header .page-subtitle { color: #5d6b75; margin: 6px 0 0; }
+.cctv-console__header .page-title { align-items: center; color: #edf4f5; display: inline-flex; font-size: 26px; gap: 10px; margin: 0; }
+.cctv-console__header .page-subtitle { color: #b6c9d0; margin: 6px 0 0; }
 .cctv-console__header-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .cctv-console .page-action { align-items: center; display: inline-flex; gap: 6px; }
 .cctv-console .page-action.is-danger { border-color: #c9857f; color: #8b2f2a; }

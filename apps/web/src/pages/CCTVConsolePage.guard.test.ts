@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/CCTVConsolePage.tsx'), 'utf8');
+const styles = readFileSync(resolve(process.cwd(), 'src/pages/CCTVConsolePage.css'), 'utf8');
 const tile = readFileSync(resolve(process.cwd(), 'src/components/CCTVPlayerTile.tsx'), 'utf8');
 const timeline = readFileSync(resolve(process.cwd(), 'src/components/CCTVTimeline.tsx'), 'utf8');
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
@@ -68,6 +69,19 @@ describe('CCTV console', () => {
     expect(page).toContain("createSignedUrl(path, SIGNED_URL_TTL_SECONDS)");
     expect(page).toContain("createSignedUrl(mark.thumbnailPath as string, SIGNED_URL_TTL_SECONDS)");
     expect(page).toContain('clip.playbackPath ?? clip.sourcePath');
+  });
+
+  it('keeps the header readable against the dark administration workspace', () => {
+    expect(styles).toContain('.cctv-console__header .page-title { align-items: center; color: #edf4f5;');
+    expect(styles).toContain('.cctv-console__header .page-subtitle { color: #b6c9d0;');
+  });
+
+  it('refreshes an active job when Realtime table publication is unavailable', () => {
+    expect(page).toContain('const DETAIL_POLL_INTERVAL_MS = 10_000;');
+    expect(page).toContain("clip.jobStatus === 'queued' || clip.jobStatus === 'processing'");
+    expect(page).toContain('window.setInterval(() => {');
+    expect(page).toContain('void loadImportDetail(importId);');
+    expect(page).toContain('window.clearInterval(timer)');
   });
 
   it('is wired as the CCTV review surface, with the job queue kept for exports', () => {

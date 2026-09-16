@@ -28,11 +28,14 @@ const EXTRACTOR_TIMEOUT_MS = Number(process.env.VISION_EXTRACTOR_TIMEOUT_MS || 3
 const MAX_SUMMARY_BYTES = Number(process.env.VISION_MAX_SUMMARY_BYTES || 2 * 1024 * 1024);
 const MAX_CLASSIFICATION_FRAMES = Number(process.env.VISION_MAX_CLASSIFICATION_FRAMES || 120);
 const RUNPOD_BATCH_SIZE = Number(process.env.VISION_RUNPOD_BATCH_SIZE || 6);
+const configuredRunpodBackoff = Number(process.env.VISION_RUNPOD_BACKOFF_MS);
+const RUNPOD_BACKOFF_MS = Number.isFinite(configuredRunpodBackoff) ? Math.max(0, configuredRunpodBackoff) : 5 * 60_000;
 const STORAGE_DOWNLOAD_TIMEOUT_MS = Number(process.env.VISION_STORAGE_DOWNLOAD_TIMEOUT_MS || 120_000);
 const LOCAL_VEHICLE_INFERENCE = process.env.VISION_LOCAL_VEHICLE_INFERENCE !== 'false';
 const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'false';
 // /infer/detect on the VPS (person + vehicle + animal triage in one call) when RunPod returned nothing for a frame.
 const LOCAL_DETECT_INFERENCE = process.env.VISION_LOCAL_DETECT_INFERENCE !== 'false';
+let runpodUnavailableUntil = 0;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
@@ -420,7 +423,11 @@ function normaliseAnimals(runpodResult, localDetect) {
 }
 
 async function classifyWithRunpodBatch(batch) {
-  if (!RUNPOD_API_KEY) return new Map();
+  if (!RUNPOD_API_KEY || batch.length === 0) return new Map();
+  if (Date.now() < runpodUnavailableUntil) {
+    log('runpod_inference_circuit_open', { retry_after_ms: runpodUnavailableUntil - Date.now(), batch_size: batch.length });
+    return new Map();
+  }
   try {
     const response = await fetch(`${RUNPOD_API_URL}/runsync`, {
       method: 'POST',
@@ -435,18 +442,22 @@ async function classifyWithRunpodBatch(batch) {
       signal: AbortSignal.timeout(45_000),
     });
     if (!response.ok) {
-      log('runpod_inference_degraded', { status: response.status });
+      runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
+      log('runpod_inference_degraded', { status: response.status, retry_after_ms: RUNPOD_BACKOFF_MS });
       return new Map();
     }
     const payload = await response.json();
     if (payload.status && payload.status !== 'COMPLETED') {
-      log('runpod_inference_deferred', { status: payload.status, job_id: payload.id });
+      runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
+      log('runpod_inference_deferred', { status: payload.status, job_id: payload.id, retry_after_ms: RUNPOD_BACKOFF_MS });
       return new Map();
     }
     const results = payload.output?.results || payload.results;
+    runpodUnavailableUntil = 0;
     return new Map(Array.isArray(results) ? results.filter((item) => item?.frame_id).map((item) => [item.frame_id, item.result || item]) : []);
   } catch (error) {
-    log('runpod_inference_unavailable', { error: error.message });
+    runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
+    log('runpod_inference_unavailable', { error: error.message, retry_after_ms: RUNPOD_BACKOFF_MS });
     return new Map();
   }
 }

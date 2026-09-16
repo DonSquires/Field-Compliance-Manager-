@@ -57,6 +57,14 @@ test('watcher skips the full-frame vehicle pass when a detector covered vehicles
   assert.match(watcherSource, /classifyLocally\(INFERENCE_SERVICE_URL, '\/infer\/detect', headers, buildForm\)/);
 });
 
+test('watcher opens a bounded local-fallback circuit after an unavailable RunPod batch', () => {
+  assert.match(watcherSource, /const RUNPOD_BACKOFF_MS = Number\.isFinite\(configuredRunpodBackoff\) \? Math\.max\(0, configuredRunpodBackoff\) : 5 \* 60_000;/);
+  assert.match(watcherSource, /if \(Date\.now\(\) < runpodUnavailableUntil\) \{/);
+  assert.match(watcherSource, /runpod_inference_circuit_open/);
+  assert.match(watcherSource, /runpodUnavailableUntil = Date\.now\(\) \+ RUNPOD_BACKOFF_MS;/);
+  assert.match(watcherSource, /runpodUnavailableUntil = 0;/);
+});
+
 function animalFrame(seconds, bbox, species, speciesConfidence, extra = {}) {
   return {
     frame_index: Math.round(seconds * 15), relative_timestamp_seconds: seconds, sha256_hash: `a-${seconds}`, quality_state: 'clear',

@@ -83,6 +83,7 @@ type ImportRow = {
 type KindFilter = 'all' | EntityKind;
 
 const SIGNED_URL_TTL_SECONDS = 3600;
+const DETAIL_POLL_INTERVAL_MS = 10_000;
 const KIND_ICON: Record<EntityKind, React.ReactNode> = {
   person: <UserRound size={14} aria-hidden="true" />,
   vehicle: <Car size={14} aria-hidden="true" />,
@@ -291,6 +292,20 @@ const CCTVConsolePage: React.FC = () => {
   useEffect(() => {
     for (const id of activeImportIds) if (!clipsByImport[id]) void loadImportDetail(id);
   }, [activeImportIds, clipsByImport, loadImportDetail]);
+
+  const hasActiveJob = useMemo(
+    () => activeImportIds.some((importId) => (clipsByImport[importId] ?? []).some((clip) => clip.jobStatus === 'queued' || clip.jobStatus === 'processing')),
+    [activeImportIds, clipsByImport],
+  );
+
+  // Realtime is a prompt refresh; active jobs also poll so a missing table publication cannot leave a reviewer stale.
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    const timer = window.setInterval(() => {
+      for (const importId of activeImportIds) void loadImportDetail(importId);
+    }, DETAIL_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [hasActiveJob, activeImportIds, loadImportDetail]);
 
   useEffect(() => {
     if (!organizationId) return;
