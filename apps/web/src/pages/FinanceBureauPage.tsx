@@ -7,6 +7,7 @@ import './FinanceHome.css';
 import { FinanceOwnerGuide } from '../components/FinanceOwnerGuide';
 import { FinanceCard } from '../components/FinanceCard';
 import { PriceBookPanel } from '../components/PriceBookPanel';
+import { CompletedWorkToInvoicePanel } from '../components/CompletedWorkToInvoicePanel';
 
 interface Schedule { id: string; name: string; status: 'draft' | 'active' | 'retired'; effective_from: string; effective_to: string | null; version: number; }
 interface DiscountRule { id: string; schedule_id: string; module_key: string | null; discount_kind: 'percentage' | 'fixed_amount'; discount_value: number; minimum_subtotal: number | null; priority: number; }
@@ -16,9 +17,11 @@ type FinanceDestination = 'finance-connections' | 'finance-money' | 'finance-cos
 type FinanceBobLauncher = (prompt: string) => void;
 
 function FinanceHomeCards({ onOpenBob, onNavigate }: { onOpenBob?: FinanceBobLauncher; onNavigate?: (destination: FinanceDestination) => void }) {
+  const { profile, operatingOrganizationId } = useAuth();
   const openPlainLanguageCheck = () => onOpenBob?.('Check the finance records and guide me through the next useful action in plain language. Do the record-checking first, explain what matters, and ask me only for missing decisions.');
   return <div className="page-container finance-home-page">
     <header className="page-header"><div><p className="finance-owner-eyebrow">Finance, made simple</p><h1>What would you like to do?</h1><p className="subtitle">Bob checks the records and prepares the work. You review the important decisions.</p></div></header>
+    <CompletedWorkToInvoicePanel organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} onOpenInvoices={onNavigate ? () => onNavigate('finance-money') : undefined} />
     <FinanceOwnerGuide onOpenBob={onOpenBob} />
     <section className="finance-task-grid" aria-label="Finance tasks">
       <FinanceCard eyebrow="Daily overview" title="See how the business is doing" description="Money earned, money left after costs, tax to plan for, and payments to sort." action="Open money check" tone="primary" onClick={() => onNavigate?.('finance-money')} />

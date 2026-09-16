@@ -94,3 +94,26 @@ test('global help explains the current workflow and can collapse its steps', asy
   await page.getByRole('button', { name: 'Close instructions' }).click();
   await expect(page.getByRole('button', { name: /Open instructions for Using Finance/ })).toBeVisible();
 });
+
+test('finished work waiting to be billed becomes a draft invoice per client in one click', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  let invoiced: Record<string, unknown> | null = null;
+  let swept = false;
+  await page.route('**/rest/v1/workshop_work_order_summary*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify(swept ? [] : [
+    { client_organization_id: '40404040-4040-4040-8040-404040404040', client_name: 'Civic Events Ltd', order_number: 'WO-202609-0003', uninvoiced_total: 440, completed_at: '2026-09-10T02:00:00.000Z' },
+    { client_organization_id: '40404040-4040-4040-8040-404040404040', client_name: 'Civic Events Ltd', order_number: 'WO-202609-0004', uninvoiced_total: 142.5, completed_at: '2026-09-11T02:00:00.000Z' },
+  ]) }));
+  await page.route('**/rest/v1/dispatch_job_charge_lines*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify(swept ? [] : [
+    { client_organization_id: '40404040-4040-4040-8040-404040404040', source_dispatch_id: 'job-1', line_total: 38.87, created_at: '2026-09-09T20:00:00.000Z', client: { name: 'Civic Events Ltd' } },
+  ]) }));
+  await page.route('**/rest/v1/rpc/generate_crm_invoice_from_completed_work', async (route) => { invoiced = JSON.parse(route.request().postData() ?? '{}'); swept = true; await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'inv-1', invoice_number: 'INV-20260912-7C1D', total_amount: 714.58 }) }); });
+
+  await signInAsAdmin(page, '/admin/finance-bureau');
+  await expect(page.getByRole('heading', { name: '$621.37 waiting to be invoiced' })).toBeVisible();
+  await expect(page.getByText('2 workshop jobs and 1 callout finished and not yet billed', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Create draft invoice' }).click();
+  await expect(page.getByText(/Draft invoice INV-20260912-7C1D for Civic Events Ltd — \$714\.58 including GST/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Everything finished has been billed' })).toBeVisible();
+  expect(invoiced).toMatchObject({ p_organization_id: '41414141-4141-4141-8141-414141414141', p_client_organization_id: '40404040-4040-4040-8040-404040404040', p_service_agreement_id: null });
+  expect(errors, errors.join('\n')).toEqual([]);
+});
