@@ -166,6 +166,7 @@
 .cctv-import-progress span { color: #53616b; font-size: 13px; }
 .cctv-import-status { color: #53616b; font-size: 13px; line-height: 1.45; margin: 0 0 12px; }
 .cctv-import-status.is-done { color: #11675f; font-weight: 700; }
+.cctv-import-run { position: relative; }
 .cctv-import-run-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .cctv-import-table { border-collapse: collapse; font-size: 13px; width: 100%; }

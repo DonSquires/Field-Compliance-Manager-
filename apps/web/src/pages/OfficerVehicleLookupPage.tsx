@@ -2,14 +2,20 @@
  * OfficerVehicleLookupPage.tsx (Officer module: 'vehicle_lookup')
  *
  * Canonical schema:
- * - canonical_vehicles (plate registry, rego/wof/cof status, homeless_status)
- * - canonical_scv (NZSCV self-containment warrant records & expiry)
- * - entity_flags (active vehicle safety/warning alerts)
+ * - canonical_vehicle_public (plate registry projection: rego/wof/cof status,
+ *   homeless_status signal; the canonical_vehicles table itself stays Bob-only
+ *   and its owner name / welfare notes are never sent to the field)
+ * - canonical_scv_public (NZSCV self-containment certificate status & expiry)
+ * - get_safety_warnings / raise_entity_flag (platform-wide, redacted H&S
+ *   warnings — every organisation's hazards, hazard class + severity + contact
+ *   path only)
+ * - entity_flags (this organisation's own of-interest flags, RLS-scoped)
  * - observations (recent scan/observation history with zone context)
  * - breach_alerts (compliance breaches recorded for this vehicle)
  */
 
 import React, { useState } from 'react';
+import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { supabase } from '../lib/supabase';
@@ -30,7 +36,6 @@ interface Vehicle {
   cof_status: string | null;
   cof_expiry: string | null;
   homeless_status: string;
-  homeless_notes: string | null;
 }
 
 interface ScvRecord {
@@ -96,19 +101,19 @@ const OfficerVehicleLookupPage: React.FC = () => {
       setBreaches([]);
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
-      // ATLAS READS: canonical_vehicles, canonical_scv, observations, breach_alerts
+      // ATLAS READS: canonical_vehicle_public, canonical_scv_public, observations, breach_alerts
       // Resolve the canonical vehicle first so observation history follows the
       // global identity link, not only the plate text recorded at scan time.
       const [vehRes, scvRes] = await Promise.all([
         supabase
-          .from('canonical_vehicles')
+          .from('canonical_vehicle_public')
           .select(
-            'id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, homeless_notes'
+            'id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status'
           )
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
         supabase
-          .from('canonical_scv')
+          .from('canonical_scv_public')
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
@@ -176,13 +181,16 @@ const OfficerVehicleLookupPage: React.FC = () => {
       );
 
       if (vehData) {
-        // ATLAS READS: entity_flags
+        // ATLAS READS: entity_flags — this organisation's own of-interest flags only.
+        // Safety warnings (hazard_class set) come through SafetyWarningsPanel so
+        // every organisation's hazards are shown, redacted.
         const { data: flagData, error: flagErr } = await supabase
           .from('entity_flags')
           .select('id, flag_type, alert_level, reason, active')
           .eq('entity_type', 'vehicle')
           .eq('entity_id', vehData.id)
-          .eq('active', true);
+          .eq('active', true)
+          .is('hazard_class', null);
 
         if (flagErr) throw flagErr;
         setFlags((flagData as EntityFlag[]) || []);
@@ -278,14 +286,14 @@ const OfficerVehicleLookupPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Homeless notes callout */}
-                {vehicle?.homeless_notes && (
+                {/* Welfare signal: status only — the welfare notes stay with the organisation that holds them */}
+                {vehicle?.homeless_status && vehicle.homeless_status !== 'none' && (
                   <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', borderRadius: '6px', fontSize: '13px' }}>
-                    <strong>Vulnerability Notes:</strong> {vehicle.homeless_notes}
+                    <strong>Welfare:</strong> someone may be living in this vehicle ({vehicle.homeless_status}). Approach with care and follow your welfare procedure.
                   </div>
                 )}
 
-                {/* Active Safety Flags */}
+                {/* This organisation's own of-interest flags */}
                 {flags.length > 0 && (
                   <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {flags.map((f) => (
@@ -300,6 +308,9 @@ const OfficerVehicleLookupPage: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Platform-wide H&S warnings (redacted across organisations) */}
+              <SafetyWarningsPanel entityType="vehicle" entityId={vehicle?.id ?? null} entityLabel="this vehicle" />
 
               {/* Compliance & Registration Specs */}
               <div className="contact-card">

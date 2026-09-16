@@ -329,3 +329,28 @@ Bob `…b0b0` (Iron Eagle) plus two unreferenced duplicate Bob identities create
 be downgraded/deactivated. `entity_flags` is org-scoped today (Privacy Act
 comment on the table) with a `bob_full_read` policy; a redacted platform-wide
 H&S read model is not yet built.
+
+**Live status (2026-09-16, migration `20260916100000`, applied to
+`dotczcyyzgabmtmnglqj`).** The H&S read model is built. `entity_flags` gained
+`hazard_class` (violence_or_aggression, weapons, dangerous_dog,
+hazardous_substances, unsafe_structure_or_ground, vehicle_defect,
+medical_or_welfare, other), `resolved_by` and an idempotency key.
+`get_safety_warnings(p_entity_type, p_entity_ids)` returns every organisation's
+*active* hazard-classed flags on a vehicle, person or place (sites and zones
+resolve to their house's canonical place) redacted to hazard class, severity,
+the raising organisation and its contact path; the narrative (`reason`) and the
+raiser are returned only to the raising organisation. `raise_entity_flag` /
+`resolve_entity_flag` are the governed, audited write paths (a safety warning
+must carry a short note; resolve is raiser-or-org-admin). Table RLS on
+`entity_flags` is unchanged — no organisation can read another's flags
+directly. Truth table: `supabase/tests/20260916100000_safety_warnings_rls.sql`
+(21 checks). Surfaces: officer Vehicle Lookup, admin Vehicle Search, Site
+overview (`SafetyWarningsPanel`).
+
+Same migration, plate registry: `canonical_vehicles` / `canonical_scv` carried
+only a `bob_full_read` policy, so real users saw **0 of 8,975** plates. Two
+definer projections — `canonical_vehicle_public` (identity, make/model,
+rego/WoF/CoF status, `homeless_status`; no `registered_owner_name`, no
+`homeless_notes`) and `canonical_scv_public` — are now the read path for the
+field and admin vehicle pages and observation search. Verified live as the R&M
+master: 8,975 rows through the projection, 0 through the base table.

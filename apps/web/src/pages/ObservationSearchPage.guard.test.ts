@@ -20,9 +20,11 @@ describe('Observation Search canonical entity contract', () => {
   });
 
   it('loads canonical places and entities for authorised organisation context', () => {
-    for (const table of ['client_sites', 'location_zones', 'locations', 'canonical_vehicles', 'person_records', 'incidents']) {
+    for (const table of ['client_sites', 'location_zones', 'locations', 'canonical_vehicle_public', 'person_records', 'incidents']) {
       expect(source).toContain(`from('${table}')`);
     }
+    // The plate registry table itself is Bob-only; pages read the projection.
+    expect(source).not.toContain("from('canonical_vehicles')");
     expect(source).toContain(".eq('organization_id', profile.organizationId)");
   });
 

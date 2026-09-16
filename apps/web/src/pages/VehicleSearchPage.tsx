@@ -2,14 +2,18 @@
  * VehicleSearchPage.tsx (Admin field-ops sub-area: 'vehicle-search')
  *
  * Canonical schema:
- * - canonical_vehicles (plate registry, rego/wof/cof status, homeless_status)
- * - canonical_scv (NZSCV certification status)
- * - entity_flags (entity_type='vehicle' - raise & resolve flags)
+ * - canonical_vehicle_public (plate registry projection: rego/wof/cof status,
+ *   homeless_status signal; canonical_vehicles itself stays Bob-only)
+ * - canonical_scv_public (NZSCV certification status)
+ * - entity_flags (this organisation's own of-interest flags, RLS-scoped) via
+ *   raise_entity_flag / resolve_entity_flag (governed, audited)
+ * - get_safety_warnings (platform-wide, redacted H&S warnings)
  * - observations (scan/observation history with zone context)
  * - breach_alerts (compliance breaches recorded for this vehicle)
  */
 
 import React, { useState } from 'react';
+import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { supabase } from '../lib/supabase';
@@ -30,7 +34,6 @@ interface Vehicle {
   cof_status: string | null;
   cof_expiry: string | null;
   homeless_status: string;
-  homeless_notes: string | null;
 }
 
 interface ScvRecord {
@@ -93,19 +96,19 @@ const VehicleSearchPage: React.FC = () => {
       setError(null);
       setSearched(true);
 
-      // ATLAS READS: canonical_vehicles, canonical_scv, observations, breach_alerts
+      // ATLAS READS: canonical_vehicle_public, canonical_scv_public, observations, breach_alerts
       // Resolve the canonical vehicle first so observation history follows the
       // global identity link, not only the plate text recorded at scan time.
       const [vehRes, scvRes] = await Promise.all([
         supabase
-          .from('canonical_vehicles')
+          .from('canonical_vehicle_public')
           .select(
-            'id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, homeless_notes'
+            'id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status'
           )
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
         supabase
-          .from('canonical_scv')
+          .from('canonical_scv_public')
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
@@ -156,12 +159,13 @@ const VehicleSearchPage: React.FC = () => {
       );
 
       if (vehData) {
-        // ATLAS READS: entity_flags
+        // ATLAS READS: entity_flags — this organisation's own of-interest flags (safety warnings are shown by SafetyWarningsPanel)
         const { data: flagData, error: flagErr } = await supabase
           .from('entity_flags')
           .select('id, flag_type, alert_level, reason, active, raised_at')
           .eq('entity_type', 'vehicle')
           .eq('entity_id', vehData.id)
+          .is('hazard_class', null)
           .order('raised_at', { ascending: false });
 
         if (flagErr) throw flagErr;
@@ -181,22 +185,16 @@ const VehicleSearchPage: React.FC = () => {
     if (!vehicle || !profile?.organizationId || !profile?.id) return;
 
     try {
-      // ATLAS WRITES: entity_flags
-      const { data, error } = await supabase
-        .from('entity_flags')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            entity_type: 'vehicle',
-            entity_id: vehicle.id,
-            flag_type: flagForm.flag_type,
-            alert_level: flagForm.alert_level,
-            reason: flagForm.reason || null,
-            raised_by: profile.id,
-          },
-        ])
-        .select('id, flag_type, alert_level, reason, active, raised_at')
-        .single();
+      // ATLAS CALLS: raise_entity_flag (governed write, idempotent, audited; no hazard class = of-interest flag)
+      const { data, error } = await supabase.rpc('raise_entity_flag', {
+        p_client_request_id: crypto.randomUUID(),
+        p_entity_type: 'vehicle',
+        p_entity_id: vehicle.id,
+        p_flag_type: flagForm.flag_type,
+        p_alert_level: flagForm.alert_level,
+        p_reason: flagForm.reason || null,
+        p_hazard_class: null,
+      });
 
       if (error) throw error;
       setFlags([data as EntityFlag, ...flags]);
@@ -209,11 +207,8 @@ const VehicleSearchPage: React.FC = () => {
 
   const handleResolveFlag = async (flag: EntityFlag) => {
     try {
-      // ATLAS WRITES: entity_flags
-      const { error } = await supabase
-        .from('entity_flags')
-        .update({ active: false, resolved_at: new Date().toISOString() })
-        .eq('id', flag.id);
+      // ATLAS CALLS: resolve_entity_flag (raiser or organisation admin; audited)
+      const { error } = await supabase.rpc('resolve_entity_flag', { p_flag_id: flag.id, p_note: null });
       if (error) throw error;
       setFlags(flags.map((f) => (f.id === flag.id ? { ...f, active: false } : f)));
     } catch (err) {
@@ -287,17 +282,16 @@ const VehicleSearchPage: React.FC = () => {
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     {vehicle && (
                       <button className="btn btn-sm btn-secondary" onClick={() => setShowFlagForm(!showFlagForm)}>
-                        {showFlagForm ? 'Cancel' : '+ Raise Flag'}
+                        {showFlagForm ? 'Cancel' : '+ Raise of-interest flag'}
                       </button>
                     )}
                   </div>
                 </div>
 
-                {/* Homeless status note */}
+                {/* Welfare signal: status only — welfare notes stay with the organisation that holds them */}
                 {vehicle?.homeless_status && vehicle.homeless_status !== 'none' && (
                   <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', borderRadius: '6px', fontSize: '13px' }}>
-                    <strong>Homeless / Vulnerable Status:</strong> {vehicle.homeless_status.toUpperCase()}
-                    {vehicle.homeless_notes ? ` — ${vehicle.homeless_notes}` : ''}
+                    <strong>Welfare:</strong> someone may be living in this vehicle ({vehicle.homeless_status.toUpperCase()}). Approach with care and follow your welfare procedure.
                   </div>
                 )}
 
@@ -348,7 +342,7 @@ const VehicleSearchPage: React.FC = () => {
                 {flags.length > 0 && (
                   <div style={{ marginTop: '14px' }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
-                      Entity Flags & Safety Alerts ({flags.length})
+                      Your organisation's of-interest flags ({flags.length})
                     </div>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       {flags.map((f) => (
@@ -383,6 +377,9 @@ const VehicleSearchPage: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Platform-wide H&S warnings (redacted across organisations) */}
+              <SafetyWarningsPanel entityType="vehicle" entityId={vehicle?.id ?? null} entityLabel="this vehicle" />
 
               {/* Warrant & Certification Status */}
               <div className="contact-card">

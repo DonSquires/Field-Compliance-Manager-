@@ -64,7 +64,7 @@ export default function ObservationSearchPage() {
     const [siteResult, zoneResult, vehicleResult, peopleResult, locationResult, incidentResult] = await Promise.all([
       supabase.from('client_sites').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
       supabase.from('location_zones').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
-      supabase.from('canonical_vehicles').select('id, plate_number, make, model').order('plate_number').limit(200),
+      supabase.from('canonical_vehicle_public').select('id, plate_number, make, model').order('plate_number').limit(200),
       supabase.from('person_records').select('id, display_name').eq('organization_id', profile.organizationId).order('display_name').limit(200),
       supabase.from('locations').select('id, name, address').eq('organization_id', profile.organizationId).order('name').limit(200),
       supabase.from('incidents').select('id, incident_type, description').eq('organization_id', profile.organizationId).order('created_at', { ascending: false }).limit(200),
