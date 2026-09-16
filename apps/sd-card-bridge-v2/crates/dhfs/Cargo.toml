@@ -1,0 +1,11 @@
+[package]
+name = "fcm-dhfs"
+version = "0.1.0"
+edition = "2021"
+description = "Read-only DHFS4.1 (Dahua) volume reader: locate the hidden partition, list recordings, extract clips"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"

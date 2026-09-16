@@ -1,0 +1,3 @@
+# Rust build output for the DHFS reader crate. Cargo.lock stays untracked to match src-tauri.
+target/
+Cargo.lock
