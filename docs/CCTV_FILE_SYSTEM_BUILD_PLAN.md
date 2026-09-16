@@ -113,9 +113,9 @@ All tables must be organisation-scoped, RLS-protected, append-only where decisio
 3. **Validate** MIME, size, path ownership, tenant, source user, and duplicate hash.
 4. **Remux/transcode** unsupported elementary streams into a playback derivative.
 5. **Queue** bounded inference jobs for motion, vehicle, face, OCR, or other approved domains.
-6. **Produce** results, keyframes, thumbnails, and hashes with no automatic identity assignment.
+6. **Produce** results, keyframes, thumbnails, hashes, and provisional face/body portfolio profiles. An unrecognised person receives a canonical `Unknown Person #N` profile; the model does not verify a name or make a consequential identity decision.
 7. **Review** machine candidates in the CCTV workspace.
-8. **Link** human-confirmed observations to canonical vehicle/person/incident/investigation entities.
+8. **Name or enrich** the existing provisional person profile after human review; link or merge it with other canonical person records only with human evidence.
 9. **Package** selected media and decisions into a manifest-hashed evidence export.
 10. **Seal** only after required human/legal approvals; lock before release.
 
@@ -124,9 +124,9 @@ All tables must be organisation-scoped, RLS-protected, append-only where decisio
 - Never expose storage service-role credentials in the browser.
 - Use short-lived signed URLs and do not place raw storage paths in public links.
 - Enforce tenant and operating-branch scope at every query and signed URL request.
-- Face candidates remain manual-review-only; no automatic identity assignment.
+- Face/body inference may create or reuse a provisional canonical person profile (`Unknown Person #N`) and attach its observations to that profile. It remains `manual_review_required`; no model supplies a verified name.
 - ALPR candidates retain confidence and review-required state; low-confidence text is not a confirmed plate.
-- No model output may create an enforcement case, notice, disciplinary action, or person link without approval.
+- No model output may create an enforcement case, notice, disciplinary action, or a verified/named person identity without approval.
 - Face/vehicle exports require explicit purpose, recipient, retention, and approval.
 - Support legal holds and prevent deletion of sealed source or derived evidence.
 - Redact or restrict thumbnails when the viewer lacks face/vehicle evidence permission.

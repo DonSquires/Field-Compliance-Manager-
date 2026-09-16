@@ -30,7 +30,7 @@
 .cctv-console__camera.is-in-view { border-left-color: #b8d8d4; }
 .cctv-console__camera.is-selected { background: #e8f3f2; border-left-color: #16847a; }
 .cctv-console__camera-main { background: transparent; border: 0; color: inherit; cursor: pointer; display: grid; flex: 1; font: inherit; gap: 2px; min-width: 0; padding: 8px 6px; text-align: left; }
-.cctv-console__camera-label { font-weight: 700; }
+.cctv-console__camera-label { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-console__camera-place, .cctv-console__camera-meta { color: #65727c; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-console__status { text-transform: capitalize; }
 .cctv-console__status.is-review_ready, .cctv-console__status.is-registered { color: #16847a; }
@@ -130,7 +130,9 @@
 .cctv-entity__candidate > span { display: grid; min-width: 0; }
 .cctv-entity__candidate small { color: #65727c; font-size: 11px; }
 .cctv-entity__field { display: grid; font-size: 12px; gap: 3px; color: #53616b; }
-.cctv-entity__field input { border: 1px solid #d6dee2; border-radius: 4px; font: inherit; padding: 6px 8px; }
+.cctv-entity__field input, .cctv-entity__field textarea { border: 1px solid #d6dee2; border-radius: 4px; font: inherit; padding: 6px 8px; }
+.cctv-entity__field textarea { min-height: 52px; resize: vertical; }
+.cctv-entity__profile-editor { border-top: 1px solid #edf1f3; display: grid; gap: 8px; padding-top: 10px; }
 .cctv-entity__actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 @media (max-width: 1280px) {

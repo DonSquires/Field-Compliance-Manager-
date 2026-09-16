@@ -38229,6 +38229,21 @@ export type Database = {
         }
         Returns: string
       }
+      ensure_cctv_person_profile: {
+        Args: {
+          p_evidence_item_id?: string
+          p_observation_id?: string
+          p_observed_at?: string
+          p_organization_id: string
+          p_portfolio_key: string
+        }
+        Returns: {
+          canonical_person_id: string
+          created: boolean
+          display_name: string
+          person_record_id: string
+        }[]
+      }
       equals: { Args: { geom1: unknown; geom2: unknown }; Returns: boolean }
       evaluate_parking_compliance: {
         Args: {
@@ -45849,6 +45864,60 @@ export type Database = {
       unregister_officer_device_token: {
         Args: { p_push_token: string }
         Returns: boolean
+      }
+      update_cctv_person_profile: {
+        Args: {
+          p_display_name: string
+          p_notes?: string
+          p_observation_id: string
+          p_profile_details?: Json
+        }
+        Returns: {
+          animal_type: string | null
+          appearance_embedding: Json | null
+          appearance_vec: string | null
+          attributes: Json
+          candidate_embedding: Json | null
+          candidate_label: string | null
+          candidate_plate: string | null
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_vehicle_id: string | null
+          cctv_import_id: string | null
+          created_at: string
+          entity_kind: string
+          evidence_item_id: string
+          face_vec: string | null
+          frame_sha256: string | null
+          id: string
+          inference_job_id: string
+          is_pest: boolean | null
+          location_id: string | null
+          model_confidence: number | null
+          observed_at: string
+          observed_to: string | null
+          organization_id: string
+          person_record_id: string | null
+          portfolio_candidates: Json
+          portfolio_key: string | null
+          portfolio_state: string
+          quality_state: string
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          site_id: string | null
+          source_event_id: string
+          species_confidence: number | null
+          thumbnail: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_entity_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       update_crm_quote_line: {
         Args: {

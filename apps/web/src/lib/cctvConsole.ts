@@ -75,6 +75,9 @@ export type ConsoleObservation = {
   portfolioState: string;
   candidates: PortfolioCandidate[];
   personRecordId: string | null;
+  canonicalPersonId: string | null;
+  profileName: string | null;
+  profileDetails: Record<string, unknown>;
   canonicalVehicleId: string | null;
   reviewedAt: string | null;
   reviewNotes: string | null;

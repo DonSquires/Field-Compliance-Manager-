@@ -38,7 +38,7 @@ test('entity observations sit on the canonical spine, not the tenant vehicles ta
   assert.match(migration, /is_pest boolean/);
 });
 
-test('the worker write never sets identity; portfolios cluster provisionally and review decides', () => {
+test('the P2 worker baseline did not accept an identity; later profile projection remains provisional until review', () => {
   const worker = section('CREATE OR REPLACE FUNCTION public.record_cctv_entity_observations', 'CREATE OR REPLACE FUNCTION public.review_cctv_entity_observation');
   assert.doesNotMatch(worker, /canonical_vehicle_id\s*=|canonical_person_id\s*=|person_record_id\s*=/);
   assert.match(worker, /portfolio_key = coalesce\(portfolio_key, v_key\)/);

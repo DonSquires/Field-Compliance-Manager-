@@ -23,6 +23,7 @@ describe('CCTV console', () => {
 
   it('records every identity decision through the governed review RPC and never writes the table directly', () => {
     expect(page).toContain("supabase.rpc('review_cctv_entity_observation'");
+    expect(page).toContain("supabase.rpc('update_cctv_person_profile'");
     expect(page).toContain('p_observation_id: observation.id');
     expect(page).toContain('p_action: action');
     expect(page).not.toMatch(/from\('cctv_entity_observations'\)[\s\S]{0,400}\.(update|insert|delete)\(/);
@@ -38,6 +39,15 @@ describe('CCTV console', () => {
     expect(page).toContain('observation.candidates');
     expect(page).toContain('candidateAction(observation, candidate)');
     expect(page).toContain('Same or similar on record');
+  });
+
+  it('shows the inferred person profile and lets a reviewer name and enrich it', () => {
+    expect(page).toContain('person_records(display_name, metadata)');
+    expect(page).toContain("label: kind === 'person' && profileName ? profileName");
+    expect(page).toContain('Person name');
+    expect(page).toContain('Profile details');
+    expect(page).toContain('Save person profile');
+    expect(page).toContain('p_profile_details: personDetails.trim() ? { notes: personDetails.trim() } : {}');
   });
 
   it('plays every camera on one shared clock with NVR controls and keyboard shortcuts', () => {
@@ -74,6 +84,10 @@ describe('CCTV console', () => {
   it('keeps the header readable against the dark administration workspace', () => {
     expect(styles).toContain('.cctv-console__header .page-title { align-items: center; color: #edf4f5;');
     expect(styles).toContain('.cctv-console__header .page-subtitle { color: #b6c9d0;');
+  });
+
+  it('truncates long camera names within the fixed camera rail', () => {
+    expect(styles).toContain('.cctv-console__camera-label { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }');
   });
 
   it('refreshes an active job when Realtime table publication is unavailable', () => {

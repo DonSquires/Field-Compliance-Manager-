@@ -93,6 +93,15 @@ tools, each anchored to shift + stop + place + GPS + officer + time:
 Suspicious vehicle / person can **promote** into canonical entity intelligence
 (VOI / POI / LOI flags) — the seam into the vehicle-compliance family.
 
+> **Owner ruling 2026-09-16 — provisional CCTV person profiles.** CCTV inference
+> creates or reuses a canonical profile for each credible face/body portfolio.
+> An unidentified profile is named `Unknown Person #N` within the operating
+> organisation and carries its source observations, embeddings and provenance.
+> This is a growing profile, not verified identity: it remains
+> `manual_review_required` until a human reviews the footage and names or merges
+> the existing profile. A model never asserts a known name, marks a profile
+> verified, or creates an enforcement consequence.
+
 ### Specialty tools (plug-ins)
 
 Activated by place-capability ∩ assignment-grant. Two verdict styles + static:

@@ -100,11 +100,18 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function singleRecord(value: unknown): Record<string, unknown> {
+  return asRecord(Array.isArray(value) ? value[0] : value);
+}
+
 function toObservation(row: Record<string, unknown>): ConsoleObservation | null {
   const observedAtMs = parseMs(typeof row.observed_at === 'string' ? row.observed_at : null);
   if (observedAtMs === null || typeof row.id !== 'string') return null;
   const kind = row.entity_kind === 'person' || row.entity_kind === 'vehicle' || row.entity_kind === 'animal' ? row.entity_kind : null;
   if (!kind) return null;
+  const personProfile = singleRecord(row.person_records);
+  const profileName = typeof personProfile.display_name === 'string' ? personProfile.display_name : null;
+  const profileMetadata = asRecord(personProfile.metadata);
   return {
     id: row.id,
     evidenceId: String(row.evidence_item_id ?? ''),
@@ -113,7 +120,7 @@ function toObservation(row: Record<string, unknown>): ConsoleObservation | null 
     kind,
     observedAtMs,
     observedToMs: parseMs(typeof row.observed_to === 'string' ? row.observed_to : null),
-    label: typeof row.candidate_label === 'string' ? row.candidate_label : null,
+    label: kind === 'person' && profileName ? profileName : typeof row.candidate_label === 'string' ? row.candidate_label : null,
     plate: typeof row.candidate_plate === 'string' ? row.candidate_plate : null,
     species: typeof row.animal_type === 'string' ? row.animal_type : null,
     speciesConfidence: typeof row.species_confidence === 'number' ? row.species_confidence : null,
@@ -127,6 +134,9 @@ function toObservation(row: Record<string, unknown>): ConsoleObservation | null 
     portfolioState: typeof row.portfolio_state === 'string' ? row.portfolio_state : 'unmatched',
     candidates: Array.isArray(row.portfolio_candidates) ? row.portfolio_candidates as PortfolioCandidate[] : [],
     personRecordId: typeof row.person_record_id === 'string' ? row.person_record_id : null,
+    canonicalPersonId: typeof row.canonical_person_id === 'string' ? row.canonical_person_id : null,
+    profileName,
+    profileDetails: asRecord(profileMetadata.profile_details),
     canonicalVehicleId: typeof row.canonical_vehicle_id === 'string' ? row.canonical_vehicle_id : null,
     reviewedAt: typeof row.reviewed_at === 'string' ? row.reviewed_at : null,
     reviewNotes: typeof row.review_notes === 'string' ? row.review_notes : null,
@@ -170,6 +180,7 @@ const CCTVConsolePage: React.FC = () => {
   const [reviewBusy, setReviewBusy] = useState<string | null>(null);
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  const [personDetails, setPersonDetails] = useState('');
   const [newPlate, setNewPlate] = useState('');
   const [notes, setNotes] = useState('');
   const [showKeys, setShowKeys] = useState(false);
@@ -221,7 +232,7 @@ const CCTVConsolePage: React.FC = () => {
     const [evidenceRes, marksRes, observationsRes] = await Promise.all([
       supabase.from('evidence_items').select('id, storage_path, captured_at, metadata').eq('organization_id', organizationId).eq('cctv_import_id', importId).order('captured_at'),
       supabase.from('cctv_device_events').select('id, source, source_ref, event_start_at, event_end_at, severity, thumbnail_path, metadata').eq('cctv_import_id', importId).order('event_start_at').limit(5000),
-      supabase.from('cctv_entity_observations').select('id, evidence_item_id, cctv_import_id, source_event_id, entity_kind, observed_at, observed_to, candidate_label, candidate_plate, animal_type, species_confidence, is_pest, model_confidence, quality_state, attributes, thumbnail, review_state, portfolio_key, portfolio_state, portfolio_candidates, person_record_id, canonical_vehicle_id, reviewed_at, review_notes').eq('organization_id', organizationId).eq('cctv_import_id', importId).order('observed_at').limit(2000),
+      supabase.from('cctv_entity_observations').select('id, evidence_item_id, cctv_import_id, source_event_id, entity_kind, observed_at, observed_to, candidate_label, candidate_plate, animal_type, species_confidence, is_pest, model_confidence, quality_state, attributes, thumbnail, review_state, portfolio_key, portfolio_state, portfolio_candidates, person_record_id, canonical_person_id, canonical_vehicle_id, reviewed_at, review_notes, person_records(display_name, metadata)').eq('organization_id', organizationId).eq('cctv_import_id', importId).order('observed_at').limit(2000),
     ]);
     const failure = evidenceRes.error ?? marksRes.error ?? observationsRes.error;
     if (failure) setError(failure.message);
@@ -474,7 +485,13 @@ const CCTVConsolePage: React.FC = () => {
   );
   const selectedObservation = visibleObservations.find((observation) => observation.id === selectedObservationId) ?? null;
 
-  useEffect(() => { setNewName(''); setNewPlate(''); setNotes(''); setReviewMessage(null); }, [selectedObservationId]);
+  useEffect(() => {
+    setNewName(selectedObservation?.kind === 'person' ? selectedObservation.profileName ?? '' : '');
+    setPersonDetails(selectedObservation?.kind === 'person' && typeof selectedObservation.profileDetails.notes === 'string' ? selectedObservation.profileDetails.notes : '');
+    setNewPlate('');
+    setNotes('');
+    setReviewMessage(null);
+  }, [selectedObservationId]);
 
   const selectObservation = (observation: ConsoleObservation) => {
     setSelectedObservationId(observation.id);
@@ -506,6 +523,22 @@ const CCTVConsolePage: React.FC = () => {
     // Move on to the next unreviewed entity so review flows like a queue.
     const next = pendingObservations.find((item) => item.id !== observation.id && item.observedAtMs >= observation.observedAtMs) ?? pendingObservations.find((item) => item.id !== observation.id) ?? null;
     if (next && action !== 'merge_portfolio') selectObservation(next);
+  };
+
+  const updatePersonProfile = async (observation: ConsoleObservation) => {
+    if (!newName.trim()) return;
+    setReviewBusy(`${observation.id}:profile`);
+    setReviewMessage(null);
+    const { error: profileError } = await supabase.rpc('update_cctv_person_profile', {
+      p_observation_id: observation.id,
+      p_display_name: newName.trim(),
+      p_profile_details: personDetails.trim() ? { notes: personDetails.trim() } : {},
+      p_notes: notes.trim() || null,
+    });
+    setReviewBusy(null);
+    if (profileError) { setReviewMessage(profileError.message); return; }
+    if (observation.importId) void loadImportDetail(observation.importId);
+    setReviewMessage('Person profile updated.');
   };
 
   const addCamera = (importId: string) => {
@@ -697,6 +730,7 @@ const CCTVConsolePage: React.FC = () => {
                       ) : null}
                       {observation.kind === 'person' ? (
                         <dl className="cctv-entity__facts">
+                          <div><dt>profile</dt><dd>{observation.profileName || 'Unknown person'}</dd></div>
                           {['upper_body_colour', 'lower_body_colour'].filter((key) => observation.attributes[key]).map((key) => <div key={key}><dt>{key.replace(/_/g, ' ')}</dt><dd>{String(observation.attributes[key])}</dd></div>)}
                           <div><dt>face</dt><dd>{observation.attributes.face_event_id ? 'captured' : 'not captured'}</dd></div>
                         </dl>
@@ -723,7 +757,7 @@ const CCTVConsolePage: React.FC = () => {
                       {!isReviewed(observation) ? (
                         <>
                           <label className="cctv-entity__field">Notes <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional reviewer note" /></label>
-                          {observation.kind === 'person' ? (
+                          {observation.kind === 'person' && !observation.personRecordId ? (
                             <label className="cctv-entity__field">New person <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Display name, e.g. Unknown male, red jacket" /></label>
                           ) : null}
                           {observation.kind === 'vehicle' && !observation.plate ? (
@@ -731,7 +765,7 @@ const CCTVConsolePage: React.FC = () => {
                           ) : null}
                           <div className="cctv-entity__actions">
                             <button type="button" className="page-action is-primary" disabled={reviewBusy !== null} onClick={() => void runReview(observation, 'accept')}><Check size={14} aria-hidden="true" /> {observation.kind === 'vehicle' && (observation.plate || newPlate.trim()) ? 'Accept · record vehicle' : 'Accept'}</button>
-                            {observation.kind === 'person' ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void runReview(observation, 'new_person')}><UserRound size={14} aria-hidden="true" /> New person</button> : null}
+                            {observation.kind === 'person' && !observation.personRecordId ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void runReview(observation, 'new_person')}><UserRound size={14} aria-hidden="true" /> New person</button> : null}
                             {observation.kind === 'vehicle' && !observation.plate ? <button type="button" className="page-action" disabled={reviewBusy !== null || !newPlate.trim()} onClick={() => void runReview(observation, 'new_vehicle')}><Car size={14} aria-hidden="true" /> Record vehicle</button> : null}
                             <button type="button" className="page-action is-danger" disabled={reviewBusy !== null} onClick={() => void runReview(observation, 'reject')}><X size={14} aria-hidden="true" /> Not a {observation.kind}</button>
                           </div>
@@ -742,6 +776,13 @@ const CCTVConsolePage: React.FC = () => {
                           {observation.reviewNotes ? <p className="cctv-console__muted">{observation.reviewNotes}</p> : null}
                         </div>
                       )}
+                      {observation.kind === 'person' && observation.personRecordId ? (
+                        <div className="cctv-entity__profile-editor">
+                          <label className="cctv-entity__field">Person name <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Unknown Person #1" /></label>
+                          <label className="cctv-entity__field">Profile details <textarea value={personDetails} onChange={(event) => setPersonDetails(event.target.value)} placeholder="Optional details confirmed by the reviewer" rows={2} /></label>
+                          <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void updatePersonProfile(observation)}><UserRound size={14} aria-hidden="true" /> Save person profile</button>
+                        </div>
+                      ) : null}
                       {reviewBusy?.startsWith(observation.id) ? <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Saving…</p> : null}
                       {reviewMessage ? <p className="cctv-console__muted" role="status">{reviewMessage}</p> : null}
                     </div>
