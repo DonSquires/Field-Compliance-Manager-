@@ -63,6 +63,9 @@ services:
       PORT: "3000"
       VEHICLE_ATTRS_PROVIDER: "basic"
       MODELS_DIR: /app/models
+    # Models come from the host, not the image: stage new tiers with
+    #   MODELS_DIR=/opt/fcm/models python3 services/fcm-inference/download_models.py
+    # (vehicle-detection-0200 is required for vehicle triage; WITH_DETECTOR=1 adds MegaDetector v5a).
     volumes:
       - /opt/fcm/models:/app/models:ro
     healthcheck:
@@ -204,6 +207,8 @@ services:
       VISION_WORKER_CONCURRENCY: ${VISION_WORKER_CONCURRENCY:-3}
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
+      # Local person/vehicle/animal triage for frames RunPod did not answer (needs vehicle-detection-0200 staged).
+      VISION_LOCAL_DETECT_INFERENCE: ${VISION_LOCAL_DETECT_INFERENCE:-true}
       # Set per camera after calibration; without this, CCTV reports px/s only.
       VISION_METERS_PER_PIXEL: ${VISION_METERS_PER_PIXEL:-}
       VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}

@@ -1,0 +1,190 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+process.env.SUPABASE_URL ||= 'https://example.invalid';
+process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
+
+const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals } = require('../services/vision/vision_job_watcher');
+const { consolidateAnimals, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents } = require('../services/vision/motion_consolidator');
+
+const watcherSource = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
+
+test('an H.264 MP4 source (TAPO) is copy-remuxed with faststart instead of re-encoded', () => {
+  assert.equal(choosePlaybackStrategy({ codec_name: 'h264', pix_fmt: 'yuv420p', format_name: 'mov,mp4,m4a,3gp,3g2,mj2' }), 'copy');
+  assert.equal(choosePlaybackStrategy({ codec_name: 'h264', pix_fmt: 'yuvj420p', format_name: 'mov,mp4,m4a,3gp,3g2,mj2' }), 'copy');
+  const args = ffmpegArgsFor('copy', '/in.mp4', '/out.mp4');
+  assert.deepEqual(args.slice(args.indexOf('-c:v'), args.indexOf('-c:v') + 2), ['-c:v', 'copy']);
+  assert.ok(args.includes('+faststart'));
+  assert.ok(!args.includes('libx264'));
+  assert.equal(PLAYBACK_PROFILES.copy, 'h264-copy-faststart');
+});
+
+test('anything that is not browser-safe H.264 in an MP4 family container is transcoded', () => {
+  assert.equal(choosePlaybackStrategy({ codec_name: 'hevc', pix_fmt: 'yuv420p', format_name: 'mov,mp4,m4a,3gp,3g2,mj2' }), 'transcode');
+  assert.equal(choosePlaybackStrategy({ codec_name: 'h264', pix_fmt: 'yuv420p', format_name: 'h264' }), 'transcode', 'raw elementary stream has no container to copy into');
+  assert.equal(choosePlaybackStrategy({ codec_name: 'h264', pix_fmt: 'yuv444p', format_name: 'mov,mp4' }), 'transcode', '4:4:4 does not play in browsers');
+  assert.equal(choosePlaybackStrategy(null), 'transcode', 'no probe -> safe path');
+  const args = ffmpegArgsFor('transcode', '/in.h265', '/out.mp4');
+  assert.ok(args.includes('libx264') && args.includes('+faststart'));
+  assert.equal(PLAYBACK_PROFILES.transcode, 'h264-slow-crf18');
+});
+
+test('watcher probes before remuxing, falls back to transcode on a failed copy, and skips work already done under either profile', () => {
+  assert.match(watcherSource, /const probe = await probeVideo\(videoPath\);\s*let strategy = choosePlaybackStrategy\(probe\);/);
+  assert.match(watcherSource, /playback_copy_fallback_transcode/);
+  assert.match(watcherSource, /Object\.values\(PLAYBACK_PROFILES\)\.includes\(evidence\.metadata\?\.playback_transcode_profile\)/);
+  assert.match(watcherSource, /playback_transcode_profile: PLAYBACK_PROFILES\[strategy\]/);
+});
+
+test('normaliseAnimals distinguishes "none seen" from "no model could look"', () => {
+  assert.deepEqual(normaliseAnimals({ animals: [], animal_detection_status: 'model_not_staged', detector_provider: null }, null), { success: true, animals: [], status: 'model_not_staged', provider: 'runpod' });
+  const seen = normaliseAnimals({ animals: [{ kind: 'animal', species: 'possum', bbox: { x: 1, y: 1, width: 10, height: 10 } }], animal_detection_status: 'ready', detector_provider: 'megadetector:md_v5a.0.0.pt' }, null);
+  assert.equal(seen.animals.length, 1);
+  assert.equal(seen.status, 'ready');
+  const local = normaliseAnimals(null, { success: true, detector_coverage: ['vehicle'], animals: [], species_status: 'model_not_staged', detector_provider: 'openvino:vehicle-detection-0200.xml' });
+  assert.equal(local.status, 'model_not_staged', 'a vehicle-only tier cannot claim there were no animals');
+  const localFull = normaliseAnimals(null, { success: true, detector_coverage: ['person', 'vehicle', 'animal'], animals: [], species_status: 'model_not_staged', detector_provider: 'megadetector:md_v5a.0.0.pt' });
+  assert.equal(localFull.status, 'detector_only_species_not_staged');
+  assert.equal(normaliseAnimals(null, { success: false }).success, false);
+});
+
+test('watcher skips the full-frame vehicle pass when a detector covered vehicles and found none', () => {
+  assert.match(watcherSource, /const vehicleCovered = detectorCoverage\.has\('vehicle'\);/);
+  assert.match(watcherSource, /!runpodResult\?\.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE/);
+  assert.match(watcherSource, /error: 'no_vehicle_detected', review_required: false/);
+  assert.match(watcherSource, /classifyLocally\(INFERENCE_SERVICE_URL, '\/infer\/detect', headers, buildForm\)/);
+});
+
+function animalFrame(seconds, bbox, species, speciesConfidence, extra = {}) {
+  return {
+    frame_index: Math.round(seconds * 15), relative_timestamp_seconds: seconds, sha256_hash: `a-${seconds}`, quality_state: 'clear',
+    animals: { success: true, status: 'ready', animals: [{ kind: 'animal', confidence: 0.8, bbox, species, common_name: species === 'possum' ? 'Brushtail possum' : species, is_pest: species === 'possum', species_confidence: speciesConfidence, species_status: 'candidate', species_provider: 'speciesnet:test', ...extra }] },
+  };
+}
+
+test('consolidateAnimals tracks one animal through frames and votes the species across the track', async () => {
+  const frames = [
+    animalFrame(1.0, { x: 100, y: 100, width: 60, height: 40 }, 'possum', 0.9),
+    animalFrame(1.5, { x: 110, y: 102, width: 60, height: 40 }, 'possum', 0.85),
+    animalFrame(2.0, { x: 120, y: 104, width: 62, height: 40 }, 'cat', 0.4),
+    animalFrame(2.5, { x: 130, y: 104, width: 62, height: 42 }, 'possum', 0.88),
+    // a second, distant animal 40 s later
+    animalFrame(42.0, { x: 900, y: 500, width: 30, height: 20 }, 'rat', 0.7),
+    // degraded frame must be ignored
+    { ...animalFrame(43.0, { x: 900, y: 500, width: 30, height: 20 }, 'rat', 0.7), visual_quality: 'degraded' },
+  ];
+  const { events, detectionStatus } = await consolidateAnimals(frames, { maxGapSeconds: 15 });
+  assert.equal(events.length, 2);
+  assert.equal(events[0].species, 'possum');
+  assert.equal(events[0].is_pest, true);
+  assert.equal(events[0].frame_count, 4);
+  assert.deepEqual(events[0].species_votes, { possum: 3, cat: 1 });
+  assert.equal(events[0].first_seen_seconds, 1);
+  assert.equal(events[0].last_seen_seconds, 2.5);
+  assert.equal(events[1].species, 'rat');
+  assert.equal(events[1].frame_count, 1, 'the degraded frame is excluded');
+  assert.equal(detectionStatus, 'ready');
+});
+
+async function summaryFixture() {
+  const frames = [
+    { frame_index: 15, relative_timestamp_seconds: 1.0, sha256_hash: 'v1', quality_state: 'clear',
+      alpr: { success: true, plate: 'ABC123', confidence: 0.9, plate_bbox: { x: 10, y: 10, width: 40, height: 12 } },
+      runpod: { vehicle: { detection: { bbox: { x: 100, y: 100, width: 300, height: 180 }, confidence: 0.98 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1', inference_provider: 'test' } },
+      people: { success: true, people: [{ bbox: { x: 600, y: 150, width: 60, height: 190 }, confidence: 0.95, attributes: { appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'person-reidentification-retail-0288.xml', upper_body_colour: 'blue' } }] },
+      face: { success: true, faces: [{ embedding: Array(128).fill(0.088), bbox: { x: 610, y: 150, width: 30, height: 30 } }] } },
+    { frame_index: 30, relative_timestamp_seconds: 2.0, sha256_hash: 'v2', quality_state: 'clear',
+      alpr: { success: true, plate: 'ABC123', confidence: 0.92 },
+      runpod: { vehicle: { detection: { bbox: { x: 130, y: 100, width: 300, height: 180 }, confidence: 0.97 }, vehicle_colour: 'white', vehicle_type: 'truck', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
+    { frame_index: 45, relative_timestamp_seconds: 3.0, sha256_hash: 'v3', quality_state: 'clear',
+      runpod: { vehicle: { detection: { bbox: { x: 700, y: 300, width: 200, height: 120 }, confidence: 0.7 }, vehicle_colour: 'red', appearance_embedding: Array(256).fill(0.0625), appearance_embedding_model: 'deterministic_hsv_layout_v1' } } },
+    animalFrame(40.0, { x: 100, y: 500, width: 60, height: 40 }, 'possum', 0.9),
+    { frame_index: 900, relative_timestamp_seconds: 60.0, sha256_hash: 'g1', quality_state: 'glitch', visual_quality: 'degraded',
+      people: { success: true, people: [{ bbox: { x: 1, y: 1, width: 500, height: 500 }, confidence: 0.3 }] } },
+  ];
+  const summary = {
+    total_frames_parsed: 1000,
+    motion_segments: [
+      { start_time_seconds: 0.5, end_time_seconds: 4.0, frames: frames.slice(0, 3) },
+      { start_time_seconds: 38.0, end_time_seconds: 44.0, frames: [frames[3]] },
+      { start_time_seconds: 59.0, end_time_seconds: 61.0, frames: [frames[4]] },
+    ],
+    quality_events: [{ kind: 'ir_switch', start_time_seconds: 20.0, end_time_seconds: 20.2, frame_start: 300, frame_end: 303 }],
+  };
+  return consolidateMotionSummary(summary, { maxGapSeconds: 15 });
+}
+
+test('buildEntityObservations emits one observation per tracked entity with absolute times, embeddings and no identity', async () => {
+  const summary = await summaryFixture();
+  const observations = buildEntityObservations(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
+  const byKind = observations.reduce((counts, item) => ({ ...counts, [item.entity_kind]: (counts[item.entity_kind] || 0) + 1 }), {});
+  assert.deepEqual(byKind, { vehicle: 2, person: 1, animal: 1 });
+
+  const plated = observations.find((item) => item.candidate_plate === 'ABC123');
+  assert.ok(plated, 'plated vehicle observation');
+  assert.equal(plated.observed_at, '2026-09-10T08:15:01.000Z');
+  assert.equal(plated.observed_to, '2026-09-10T08:15:02.000Z');
+  assert.equal(plated.appearance_embedding.length, 256);
+  assert.equal(plated.attributes.colour, 'white');
+  assert.equal(plated.attributes.body_type, 'truck');
+  assert.equal(plated.attributes.plate_confidence, 0.92);
+
+  const unplated = observations.find((item) => item.entity_kind === 'vehicle' && !item.candidate_plate);
+  assert.ok(unplated, 'plate-less vehicle still becomes an observation (appearance portfolio)');
+  assert.equal(unplated.candidate_label, 'red');
+  assert.equal(unplated.appearance_embedding.length, 256);
+  assert.equal(unplated.attributes.candidate_state, 'unconfirmed_vehicle_without_plate');
+
+  const person = observations.find((item) => item.entity_kind === 'person');
+  assert.equal(person.candidate_embedding.length, 128, 'the face seen during the body track rides on the person observation');
+  assert.equal(person.appearance_embedding.length, 256);
+  assert.equal(person.attributes.upper_body_colour, 'blue');
+  assert.equal(person.attributes.face_event_id, summary.consolidated_events.face_events[0].event_id);
+
+  const animal = observations.find((item) => item.entity_kind === 'animal');
+  assert.equal(animal.animal_type, 'possum');
+  assert.equal(animal.is_pest, true);
+  assert.equal(animal.species_confidence, 0.9);
+  assert.equal(animal.observed_at, '2026-09-10T08:15:40.000Z');
+
+  for (const item of observations) {
+    assert.ok(!('canonical_vehicle_id' in item) && !('canonical_person_id' in item) && !('person_record_id' in item), 'the worker never asserts identity');
+    assert.ok(['clear', 'glitch', 'flare', 'ir_switch', 'degraded', 'occluded'].includes(item.quality_state));
+    assert.equal(item.quality_state, 'clear', 'entities whose best frame is a glitch are not emitted');
+  }
+});
+
+test('buildEntityObservations returns nothing without a time base and uses captured_at as the fallback', async () => {
+  const summary = await summaryFixture();
+  assert.deepEqual(buildEntityObservations(summary, {}), []);
+  const fallback = buildEntityObservations(summary, { capturedAt: '2026-09-10T09:00:00.000Z' });
+  assert.equal(fallback.find((item) => item.candidate_plate === 'ABC123').observed_at, '2026-09-10T09:00:01.000Z');
+});
+
+test('buildInferenceDeviceEvents grades each motion window and marks camera disturbances', async () => {
+  const summary = await summaryFixture();
+  const marks = buildInferenceDeviceEvents(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
+  const windows = marks.filter((mark) => mark.metadata.kind === 'motion_window');
+  assert.equal(windows.length, 3);
+  assert.equal(windows[0].severity, 'alert', 'a plated vehicle is an alert');
+  assert.equal(windows[0].event_start_at, '2026-09-10T08:15:00.500Z');
+  assert.deepEqual(windows[0].metadata.entity_counts, { vehicle: 2, person: 1 });
+  assert.equal(windows[1].severity, 'alert', 'a pest animal is an alert');
+  assert.equal(windows[2].severity, 'motion', 'a window with only a glitch frame is motion only');
+  const quality = marks.find((mark) => mark.metadata.kind === 'quality_event');
+  assert.equal(quality.metadata.quality_kind, 'ir_switch');
+  assert.equal(quality.source_ref, 'quality-ir_switch-300');
+  assert.ok(marks.every((mark) => mark.source === 'inference' && ['motion', 'detection', 'alert'].includes(mark.severity)));
+});
+
+test('watcher records observations and timeline marks through the P2 RPCs before completing the job', () => {
+  assert.match(watcherSource, /supabase\.rpc\('record_cctv_entity_observations', \{\s*p_job_id: job\.id,\s*p_evidence_id: job\.evidence_item_id,\s*p_organization_id: job\.organization_id,\s*p_observations: observations,/);
+  assert.match(watcherSource, /supabase\.rpc\('record_cctv_device_events', \{ p_import_id: evidence\.cctv_import_id, p_events: marks \}\)/);
+  const persistIndex = watcherSource.indexOf('await recordEntityObservations(job, evidence, summary);');
+  const ingestIndex = watcherSource.indexOf('await ingest(job, summary);');
+  assert.ok(persistIndex > 0 && persistIndex < ingestIndex, 'observations are written while the job is still processing');
+  assert.match(watcherSource, /select\('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id'\)/);
+  assert.match(watcherSource, /recordedStartAt: evidence\.metadata\?\.recorded_start_at \|\| null, capturedAt: evidence\.captured_at \|\| null/);
+});

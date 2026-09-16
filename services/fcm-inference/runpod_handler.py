@@ -17,7 +17,9 @@ from app import (
     _face_models,
     _infer_plate_from_image,
     _infer_vehicle_attributes,
+    _triage_with_attributes,
 )
+import detector as entity_detector
 
 MAX_IMAGE_PIXELS = 20_000_000
 
@@ -57,6 +59,7 @@ def _image_from_input(value: str) -> np.ndarray:
 
 
 def _health_payload() -> dict[str, str]:
+    detector_state = entity_detector.detector_status()
     return {
         "status": "ok",
         "service": "fcm-inference",
@@ -64,6 +67,8 @@ def _health_payload() -> dict[str, str]:
         "face_models": "ready" if YUNET_MODEL_PATH.is_file() and SFACE_MODEL_PATH.is_file() else "not_staged",
         "vehicle_model": "ready" if VEHICLE_MODEL_PATH.is_file() and VEHICLE_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
         "person_model": "ready" if PERSON_MODEL_PATH.is_file() and PERSON_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
+        "detector_model": detector_state["detector"],
+        "species_model": detector_state["species"],
     }
 
 
@@ -92,7 +97,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "alpr": {"state": "candidate", "result": _infer_alpr_if_requested(enhanced) if "alpr" in tasks else None, "review_required": True},
             "face": {"state": "candidate", "result": _infer_face_if_requested(enhanced) if "face_embedding" in tasks else None, "review_required": True},
             "vehicle": {"state": "ready" if "vehicle_attributes" in tasks else "not_requested", "result": _infer_vehicle_attributes(enhanced) if "vehicle_attributes" in tasks else None, "review_required": True},
-            "animals": {"state": "unavailable", "reason": "animal_model_not_staged", "detections": [], "review_required": True} if "animal_detection" in tasks else {"state": "not_requested"},
+            "animals": _animals_if_requested(enhanced) if "animal_detection" in tasks else {"state": "not_requested"},
         }
         return result
     if payload.get("action") != "infer":
@@ -104,17 +109,47 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
+    """One frame, every requested task. Detector triage (person / vehicle / animal + species) when staged;
+    the legacy `vehicle` key stays populated so older workers keep working."""
     result: dict[str, Any] = {"success": True}
+    triage = _triage_with_attributes(image) if tasks & {"person", "vehicle", "animal", "detect"} else None
+    coverage = set((triage or {}).get("detector_coverage") or [])
+    if triage is not None:
+        result["detector_status"] = triage["detector_status"]
+        result["detector_provider"] = triage.get("detector_provider")
+        result["detector_coverage"] = sorted(coverage)
+        result["species_status"] = triage["species_status"]
+        if triage.get("detector_error"):
+            result["detector_error"] = triage["detector_error"]
     if "vehicle" in tasks or "plate" in tasks:
-        result["vehicle"] = _infer_vehicle_attributes(image)
+        vehicles = (triage or {}).get("vehicles") or []
+        if vehicles:
+            result["vehicles"] = vehicles
+            result["vehicle"] = vehicles[0]["attributes"]
+        else:
+            result["vehicles"] = []
+            # No vehicle tier, or nothing detected: the full-frame attribute pass is the review-only fallback.
+            result["vehicle"] = _infer_vehicle_attributes(image) if "vehicle" not in coverage else None
     if "person" in tasks:
-        result["people"] = _detect_people(image)
-    result["animals"] = []
-    result["animal_detection_status"] = "model_not_staged"
+        result["people"] = (triage or {}).get("people") if triage is not None else _detect_people(image)
+        result["people_provider"] = (triage or {}).get("people_provider") or (triage or {}).get("detector_provider")
+    animals = (triage or {}).get("animals") or []
+    result["animals"] = animals
+    result["animal_detection_status"] = (
+        "model_not_staged" if "animal" not in coverage
+        else ("ready" if triage["species_status"] == "ready" else "detector_only_species_not_staged")
+    )
     if "face" in tasks:
         result["faces"] = []
         result["face_review_required"] = True
     return result
+
+
+def _animals_if_requested(image: np.ndarray) -> dict[str, Any]:
+    triage = entity_detector.triage_frame(image)
+    if triage["detector_status"] != "ready" or "animal" not in (triage.get("detector_coverage") or []):
+        return {"state": "unavailable", "reason": "animal_detector_not_staged" if triage["detector_status"] == "ready" else f"detector_{triage['detector_status']}", "detections": [], "review_required": True}
+    return {"state": "candidate", "species_status": triage["species_status"], "detections": triage["animals"], "review_required": True}
 
 
 def _infer_alpr_if_requested(image: np.ndarray) -> dict[str, Any]:

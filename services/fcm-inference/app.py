@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from openvino import Core
 
+import detector as entity_detector
+
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
 MIN_PLATE_REGION_WIDTH = 24
@@ -33,12 +35,15 @@ SFACE_MODEL_PATH = Path(os.getenv("SFACE_MODEL_PATH", MODELS_DIR / "face_recogni
 VEHICLE_MODEL_PATH = Path(os.getenv("VEHICLE_MODEL_PATH", MODELS_DIR / "vehicle-attributes-recognition-barrier-0039.xml"))
 PERSON_MODEL_PATH = Path(os.getenv("PERSON_MODEL_PATH", MODELS_DIR / "person-detection-retail-0013.xml"))
 PERSON_REID_MODEL_PATH = Path(os.getenv("PERSON_REID_MODEL_PATH", MODELS_DIR / "person-reidentification-retail-0288.xml"))
+VEHICLE_REID_MODEL_PATH = Path(os.getenv("VEHICLE_REID_MODEL_PATH", MODELS_DIR / "vehicle-reid-0001.xml"))
+APPEARANCE_EMBEDDING_DIMENSION = 256
 _face_detector: cv2.FaceDetectorYN | None = None
 _face_recognizer: cv2.FaceRecognizerSF | None = None
 _vehicle_model: Any = None
 _vehicle_compiled: Any = None
 _person_compiled: Any = None
 _person_reid_compiled: Any = None
+_vehicle_reid_compiled: Any = None
 VEHICLE_COLOURS = ("white", "gray", "yellow", "red", "green", "blue", "black")
 VEHICLE_TYPES = ("car", "van", "truck", "bus")
 
@@ -112,6 +117,77 @@ def _vehicle_embedding(image: np.ndarray) -> list[float]:
     if math.isclose(norm, 0.0):
         return [0.0] * 384
     return [round(float(value / norm), 7) for value in vector]
+
+
+def _vehicle_reid_runtime() -> Any:
+    global _vehicle_reid_compiled
+    if _vehicle_reid_compiled is not None:
+        return _vehicle_reid_compiled
+    if not VEHICLE_REID_MODEL_PATH.is_file() or not VEHICLE_REID_MODEL_PATH.with_suffix('.bin').is_file():
+        raise FileNotFoundError("vehicle re-identification model is not staged")
+    core = Core()
+    _vehicle_reid_compiled = core.compile_model(core.read_model(str(VEHICLE_REID_MODEL_PATH)), "CPU")
+    return _vehicle_reid_compiled
+
+
+def _hsv_layout_embedding(crop: np.ndarray) -> list[float]:
+    """Deterministic 256-d appearance descriptor used when no re-identification model is staged.
+
+    Centre-weighted chroma histogram (12 hue x 4 saturation, chromatic pixels only) + achromatic value
+    histogram (8) + normalised 8x8 grey layout (64) + gradient-orientation histogram (4x4 cells x 8 bins).
+    On real trail-camera footage the same vehicle across frames scores 0.84-0.98 cosine, unrelated crops
+    0.44-0.67, which sits either side of the portfolio thresholds. It is a hint for review, not identity.
+    """
+    if crop.size == 0 or crop.shape[0] < 4 or crop.shape[1] < 4:
+        return [0.0] * APPEARANCE_EMBEDDING_DIMENSION
+    square = cv2.resize(crop, (96, 96), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(square, cv2.COLOR_BGR2HSV).astype(np.float32)
+    rows, cols = np.mgrid[0:96, 0:96]
+    weight = np.exp(-(((cols - 47.5) / 34.0) ** 2 + ((rows - 47.5) / 34.0) ** 2) / 2.0).astype(np.float32)
+    hue, saturation, value = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    chromatic = (saturation > 40) & (value > 40)
+    hue_sat = np.zeros((12, 4), dtype=np.float32)
+    hue_bins = np.clip((hue / 180.0 * 12).astype(int), 0, 11)
+    sat_bins = np.clip(((saturation - 40.0) / 216.0 * 4).astype(int), 0, 3)
+    np.add.at(hue_sat, (hue_bins[chromatic], sat_bins[chromatic]), weight[chromatic])
+    value_hist = np.zeros(8, dtype=np.float32)
+    value_bins = np.clip((value / 256.0 * 8).astype(int), 0, 7)
+    np.add.at(value_hist, value_bins[~chromatic], weight[~chromatic])
+    colour = np.concatenate([hue_sat.reshape(-1), value_hist])
+    colour = np.sqrt(colour / max(float(colour.sum()), 1e-6))
+    grey = cv2.cvtColor(square, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    layout = cv2.resize(grey, (8, 8), interpolation=cv2.INTER_AREA).reshape(-1)
+    layout = (layout - layout.mean()) / (layout.std() + 1e-6) / 8.0
+    gradient_x = cv2.Sobel(grey, cv2.CV_32F, 1, 0)
+    gradient_y = cv2.Sobel(grey, cv2.CV_32F, 0, 1)
+    magnitude = np.hypot(gradient_x, gradient_y)
+    orientation = np.clip(((np.arctan2(gradient_y, gradient_x) + np.pi) % np.pi / np.pi * 8).astype(int), 0, 7)
+    orientations = np.zeros((4, 4, 8), dtype=np.float32)
+    for cell_row in range(4):
+        for cell_col in range(4):
+            window = (slice(cell_row * 24, (cell_row + 1) * 24), slice(cell_col * 24, (cell_col + 1) * 24))
+            np.add.at(orientations[cell_row, cell_col], orientation[window].reshape(-1), magnitude[window].reshape(-1))
+    orientations = orientations.reshape(-1)
+    orientations = np.sqrt(orientations / max(float(orientations.sum()), 1e-6))
+    vector = np.concatenate([colour * 1.2, layout, orientations, np.zeros(APPEARANCE_EMBEDDING_DIMENSION - 56 - 64 - 128, dtype=np.float32)])
+    norm = float(np.linalg.norm(vector))
+    return [round(float(component / norm), 7) for component in vector] if norm > 0 else [0.0] * APPEARANCE_EMBEDDING_DIMENSION
+
+
+def _vehicle_appearance_embedding(crop: np.ndarray) -> tuple[list[float], str]:
+    """256-d vehicle appearance vector for same-or-similar search when no plate can be read."""
+    if crop.size == 0:
+        return [], "insufficient_crop"
+    try:
+        runtime = _vehicle_reid_runtime()
+        blob = cv2.dnn.blobFromImage(crop, 1.0, (208, 208), swapRB=False)
+        vector = np.asarray(runtime([blob])[runtime.outputs[0]], dtype=np.float32).reshape(-1)
+        norm = float(np.linalg.norm(vector))
+        if vector.shape[0] == APPEARANCE_EMBEDDING_DIMENSION and np.isfinite(vector).all() and norm > 0:
+            return [round(float(value / norm), 7) for value in vector], VEHICLE_REID_MODEL_PATH.name
+    except (FileNotFoundError, RuntimeError, cv2.error):
+        pass
+    return _hsv_layout_embedding(crop), "deterministic_hsv_layout_v1"
 
 
 def _vehicle_runtime() -> Any:
@@ -266,11 +342,9 @@ def _person_appearance_attributes(image: np.ndarray, bbox: dict[str, int]) -> di
         embedding = _person_reid_embedding(crop)
         embedding_model = PERSON_REID_MODEL_PATH.name
     except (FileNotFoundError, RuntimeError, cv2.error):
-        resized = cv2.resize(crop, (16, 32), interpolation=cv2.INTER_AREA).astype(np.float32) / 255.0
-        fallback = resized.reshape(-1)
-        norm = float(np.linalg.norm(fallback))
-        embedding = [round(float(value / norm), 7) for value in fallback] if norm > 0 else []
-        embedding_model = "deterministic_colour_fallback"
+        # Same 256-d shape as the re-ID model so portfolio search still works, labelled as the fallback.
+        embedding = _hsv_layout_embedding(crop)
+        embedding_model = "deterministic_hsv_layout_v1"
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     midpoint = max(1, hsv.shape[0] // 2)
     upper = hsv[:midpoint]
@@ -336,6 +410,8 @@ def _detect_people(image: np.ndarray) -> list[dict[str, Any]]:
         if x1 <= x0 or y1 <= y0:
             continue
         person_bbox = {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+        if not entity_detector.plausible_box("person", person_bbox, width, height):
+            continue
         people.append({
             "bbox": person_bbox,
             "confidence": round(confidence, 3),
@@ -385,9 +461,12 @@ def _infer_vehicle_attributes(image: np.ndarray) -> dict[str, Any]:
     if trained["vehicle_colour"] is None and colour is not None:
         trained["vehicle_colour"] = colour
         trained["vehicle_colour_confidence"] = round(heuristic_confidence, 3)
+    appearance_embedding, appearance_model = _vehicle_appearance_embedding(image)
     return {
         "embedding": _vehicle_embedding(image),
         "embedding_quality": round(min(1.0, max(0.0, (width * height) / (1280 * 720))), 3),
+        "appearance_embedding": appearance_embedding,
+        "appearance_embedding_model": appearance_model,
         "detection": {
             "bbox": {"x": 0, "y": 0, "width": width, "height": height},
             "confidence": 0.25,
@@ -439,8 +518,50 @@ def _face_models() -> tuple[Any, Any]:
     return _face_detector, _face_recognizer
 
 
+def _crop_to_bbox(image: np.ndarray, bbox: dict[str, Any], padding: float = 0.1) -> np.ndarray:
+    try:
+        x, y, width, height = (int(bbox[key]) for key in ('x', 'y', 'width', 'height'))
+    except (KeyError, TypeError, ValueError):
+        return image
+    pad_x, pad_y = int(width * padding), int(height * padding)
+    x0, y0 = max(0, x - pad_x), max(0, y - pad_y)
+    x1, y1 = min(image.shape[1], x + width + pad_x), min(image.shape[0], y + height + pad_y)
+    crop = image[y0:y1, x0:x1]
+    return crop if crop.size else image
+
+
+def _triage_with_attributes(image: np.ndarray) -> dict[str, Any]:
+    """Detector triage enriched with the staged attribute models: re-ID embeddings for people, colour/type
+    and appearance embeddings for vehicles, species for animals. Falls back to the OpenVINO person detector
+    when no general detector is staged so people are never silently dropped."""
+    triage = entity_detector.triage_frame(image)
+    coverage = set(triage.get("detector_coverage") or [])
+    if triage["detector_status"] == "ready" and "person" in coverage:
+        for person in triage["people"]:
+            person["attributes"] = _person_appearance_attributes(image, person["bbox"])
+    else:
+        try:
+            triage["people"] = _detect_people(image)
+            triage["people_provider"] = "openvino_person_detection_0013"
+        except (FileNotFoundError, RuntimeError, cv2.error):
+            triage["people"] = []
+            triage["people_provider"] = None
+    for vehicle in triage["vehicles"]:
+        crop = _crop_to_bbox(image, vehicle["bbox"])
+        try:
+            attributes = _infer_vehicle_attributes(crop)
+        except (FileNotFoundError, RuntimeError, cv2.error):
+            embedding, model_name = _vehicle_appearance_embedding(crop)
+            attributes = {"appearance_embedding": embedding, "appearance_embedding_model": model_name, "attribute_status": "vehicle_attribute_model_not_staged"}
+        attributes["detection"] = {"bbox": vehicle["bbox"], "confidence": vehicle["confidence"]}
+        attributes["vehicle_crop_status"] = "detector_crop"
+        vehicle["attributes"] = attributes
+    return triage
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
+    detector_state = entity_detector.detector_status()
     return {
         "status": "ok",
         "service": "fcm-inference",
@@ -448,7 +569,23 @@ async def health() -> dict[str, str]:
         "vehicle_model": "ready" if VEHICLE_MODEL_PATH.is_file() and VEHICLE_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
         "person_model": "ready" if PERSON_MODEL_PATH.is_file() and PERSON_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
         "person_reidentification_model": "ready" if PERSON_REID_MODEL_PATH.is_file() and PERSON_REID_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
+        "vehicle_reidentification_model": "ready" if VEHICLE_REID_MODEL_PATH.is_file() and VEHICLE_REID_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
+        "detector_model": detector_state["detector"],
+        "species_model": detector_state["species"],
     }
+
+
+@app.post("/infer/detect")
+async def detect_entities(
+    photo: Annotated[UploadFile, File()],
+    authorization: Annotated[str | None, Header()] = None,
+    x_inference_api_key: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    """Person / vehicle / animal triage with species. Advisory: a human confirms every identity."""
+    _authorize(authorization, x_inference_api_key)
+    image = await _read_image(photo)
+    triage = _triage_with_attributes(image)
+    return JSONResponse({"success": True, "review_required": True, **triage})
 
 
 @app.post("/infer/compare")

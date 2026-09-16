@@ -32,6 +32,7 @@ class FrameArtifact:
     file_path: str
     visual_quality: str = "usable"
     visual_quality_reason: str | None = None
+    quality_state: str = "clear"
 
 
 @dataclass
@@ -40,6 +41,15 @@ class MotionSegment:
     end_time_seconds: float
     frames: list[FrameArtifact] = field(default_factory=list)
     frames_truncated: bool = False
+
+
+@dataclass
+class QualityEvent:
+    kind: str
+    start_time_seconds: float
+    end_time_seconds: float
+    frame_start: int
+    frame_end: int
 
 
 @dataclass
@@ -54,9 +64,117 @@ class MotionSummary:
     frame_width: int = 0
     frame_height: int = 0
     frames_per_second: float = 0.0
+    quality_events: list[QualityEvent] = field(default_factory=list)
+    quality_counts: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"), sort_keys=True)
+
+
+QUALITY_STATES = ("clear", "glitch", "flare", "ir_switch", "degraded")
+# Whole-frame change thresholds on a 64x36 grey thumbnail (0-255): a walking person moves a few
+# percent of pixels (mean delta well under 5); a corrupt frame or a day/night switch moves most of them.
+SPIKE_DELTA = 24.0
+SATURATION_FLIP = 15.0
+PERSIST_FRAMES = 3
+IR_COOLDOWN_SECONDS = 2.0
+
+
+@dataclass(frozen=True)
+class FrameStats:
+    brightness: float
+    saturation: float
+    contrast: float
+    colour_cast: float
+
+
+def _frame_stats(frame: np.ndarray) -> tuple[FrameStats, np.ndarray]:
+    small = cv2.resize(frame, (64, 36), interpolation=cv2.INTER_AREA)
+    grey = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+    means = small.reshape(-1, 3).mean(axis=0)
+    dominant = max(float(means.max()), 1.0)
+    others = max(float(np.delete(means, int(means.argmax())).mean()), 1.0)
+    return FrameStats(float(grey.mean()), float(hsv[:, :, 1].mean()), float(grey.std()), dominant / others), grey
+
+
+def static_quality_state(stats: FrameStats) -> tuple[str, str | None]:
+    """Quality visible in one frame on its own: blackout/occlusion, overexposure, colour cast."""
+    if stats.contrast < 5:
+        return "degraded", "near_uniform_frame_possible_occlusion_or_blackout"
+    if stats.brightness > 235 and stats.saturation < 25:
+        return "flare", "overexposed_low_information_frame_possible_glare"
+    if stats.colour_cast >= 1.8:
+        return "flare", "dominant_colour_cast_possible_glare_or_ir_filter_artifact"
+    return "clear", None
+
+
+class TemporalQualityGate:
+    """Online detector for whole-frame disturbances the background model must not learn or report.
+
+    A one- or two-frame whole-frame change that snaps back is a decode glitch. A change that persists
+    with a colour<->monochrome flip is an IR (day/night) switch: the background model is reset and motion
+    is ignored while it re-learns. Any other persistent change is a scene change (camera handled or moved,
+    lights): it is recorded, its frames are marked degraded so nothing is inferred from them, and motion
+    counting resumes once the picture holds still again.
+    """
+
+    def __init__(self, fps: float):
+        self.cooldown_frames = max(1, round(IR_COOLDOWN_SECONDS * fps))
+        self.reference_grey: np.ndarray | None = None
+        self.reference_saturation: float | None = None
+        self.pending: list[int] = []
+        self.cooldown = 0
+        self.states: dict[int, str] = {}
+        self.events: list[QualityEvent] = []
+
+    def observe(self, frame_index: int, stats: FrameStats, grey: np.ndarray, fps: float) -> tuple[str, bool, bool]:
+        """Return (quality_state, learn_background, count_motion) for this frame."""
+        delta = float(np.abs(grey - self.reference_grey).mean()) if self.reference_grey is not None else 0.0
+        saturation_jump = abs(stats.saturation - self.reference_saturation) if self.reference_saturation is not None else 0.0
+        if self.reference_grey is not None and (delta >= SPIKE_DELTA or saturation_jump >= SATURATION_FLIP):
+            self.pending.append(frame_index)
+            if len(self.pending) >= PERSIST_FRAMES:
+                flipped = min(stats.saturation, self.reference_saturation or 0.0) < SATURATION_FLIP <= max(stats.saturation, self.reference_saturation or 0.0)
+                kind = "ir_switch" if flipped else "scene_change"
+                state = "ir_switch" if flipped else "degraded"
+                for index in self.pending:
+                    self.states[index] = state
+                self.events.append(QualityEvent(kind, round(self.pending[0] / fps, 3), round(frame_index / fps, 3), self.pending[0], frame_index))
+                self.pending = []
+                self.reference_grey, self.reference_saturation = grey, stats.saturation
+                if flipped:
+                    self.cooldown = self.cooldown_frames
+                    return "ir_switch", False, False
+                return "degraded", True, False
+            return "clear", False, False
+        if self.pending:
+            for index in self.pending:
+                self.states[index] = "glitch"
+            self.events.append(QualityEvent("glitch", round(self.pending[0] / fps, 3), round(self.pending[-1] / fps, 3), self.pending[0], self.pending[-1]))
+            self.pending = []
+        self.reference_grey, self.reference_saturation = grey, stats.saturation
+        state, _reason = static_quality_state(stats)
+        if self.cooldown > 0:
+            self.cooldown -= 1
+            return state, True, False
+        return state, True, state == "clear"
+
+    def finish(self, fps: float) -> None:
+        if self.pending:
+            for index in self.pending:
+                self.states[index] = "glitch"
+            self.events.append(QualityEvent("glitch", round(self.pending[0] / fps, 3), round(self.pending[-1] / fps, 3), self.pending[0], self.pending[-1]))
+            self.pending = []
+        # A camera being handled yields a run of three-frame bursts; report it as one disturbance.
+        merged: list[QualityEvent] = []
+        for event in sorted(self.events, key=lambda item: item.frame_start):
+            last = merged[-1] if merged else None
+            if last and last.kind == event.kind and event.start_time_seconds - last.end_time_seconds <= 1.0:
+                merged[-1] = QualityEvent(last.kind, last.start_time_seconds, max(last.end_time_seconds, event.end_time_seconds), last.frame_start, max(last.frame_end, event.frame_end))
+            else:
+                merged.append(event)
+        self.events = merged
 
 
 def _validate_input(video_path: Path, max_input_bytes: int) -> None:
@@ -116,7 +234,8 @@ def _write_frame(
     quality: int,
     width: int | None,
     height: int | None,
-) -> tuple[str, str, str, str | None]:
+    scan_quality_state: str | None = None,
+) -> tuple[str, str, str, str | None, str]:
     if not 1 <= quality <= 100:
         raise ValueError("output_quality must be between 1 and 100")
     rendered = frame
@@ -128,22 +247,14 @@ def _write_frame(
         rendered = cv2.resize(
             frame, (target_width, target_height), interpolation=cv2.INTER_AREA
         )
-    mean_channels = rendered.mean(axis=(0, 1))
-    brightness = float(rendered.mean())
-    contrast = float(rendered.std())
-    channel_mean = max(float(mean_channels.max()), 1.0)
-    other_channels = max(float(np.delete(mean_channels, int(mean_channels.argmax())).mean()), 1.0)
-    dominant_channel_ratio = channel_mean / other_channels
-    hsv = cv2.cvtColor(rendered, cv2.COLOR_BGR2HSV)
-    saturation = float(hsv[:, :, 1].mean())
-    if dominant_channel_ratio >= 1.8:
-        visual_quality, visual_quality_reason = "degraded", "dominant_colour_cast_possible_glare_or_camera_artifact"
-    elif contrast < 5:
-        visual_quality, visual_quality_reason = "degraded", "near_uniform_frame_possible_occlusion_or_blackout"
-    elif brightness > 250 and saturation < 20:
-        visual_quality, visual_quality_reason = "degraded", "overexposed_low_information_frame_possible_glare"
-    else:
-        visual_quality, visual_quality_reason = "usable", None
+    stats, _grey = _frame_stats(rendered)
+    quality_state, visual_quality_reason = static_quality_state(stats)
+    # The scan saw this frame in sequence; a glitch, IR switch or scene-change burst it found there outranks the still test.
+    if scan_quality_state in ("glitch", "ir_switch"):
+        quality_state, visual_quality_reason = scan_quality_state, f"temporal_{scan_quality_state}"
+    elif scan_quality_state == "degraded" and quality_state == "clear":
+        quality_state, visual_quality_reason = "degraded", "temporal_scene_change"
+    visual_quality = "usable" if quality_state == "clear" else "degraded"
     encoded, jpeg = cv2.imencode(".jpg", rendered, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not encoded:
         raise VideoExtractionError("failed to encode extracted frame")
@@ -157,7 +268,7 @@ def _write_frame(
         temporary = destination.with_suffix(".jpg.tmp")
         temporary.write_bytes(content)
         os.replace(temporary, destination)
-    return digest, str(destination), visual_quality, visual_quality_reason
+    return digest, str(destination), visual_quality, visual_quality_reason, quality_state
 
 
 def extract_motion_summary(
@@ -202,6 +313,8 @@ def extract_motion_summary(
     subtractor = cv2.createBackgroundSubtractorMOG2(
         history=300, varThreshold=24, detectShadows=False
     )
+    gate = TemporalQualityGate(fps)
+    frame_states: list[str] = []
     moving: list[int] = []
     frame_index = 0
     last_timestamp = 0.0
@@ -218,14 +331,30 @@ def extract_motion_summary(
                 break
             timestamp = max(last_timestamp, _timestamp_seconds(capture, frame_index, fps))
             last_timestamp = timestamp
-            mask = subtractor.apply(frame)
-            if frame_index >= warmup_frames and cv2.countNonZero(mask) / mask.size >= motion_pixel_ratio:
+            stats, grey = _frame_stats(frame)
+            state, learn, count_motion = gate.observe(frame_index, stats, grey, fps)
+            if state == "ir_switch":
+                # Day/night switch: the learned background is now wrong; start over.
+                subtractor = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=24, detectShadows=False)
+            mask = subtractor.apply(frame) if learn else subtractor.apply(frame, learningRate=0)
+            while len(frame_states) < frame_index:
+                frame_states.append("clear")
+            frame_states.append(state)
+            if count_motion and frame_index >= warmup_frames and cv2.countNonZero(mask) / mask.size >= motion_pixel_ratio:
                 moving.append(frame_index)
             frame_index += 1
     except (cv2.error, MemoryError, OSError) as error:
         raise VideoExtractionError(f"Failed while decoding {video_path}: {error}") from error
     finally:
         capture.release()
+    gate.finish(fps)
+    # Spike frames are labelled only once the gate knows whether they snapped back.
+    for index, state in gate.states.items():
+        if index < len(frame_states):
+            frame_states[index] = state
+    quality_counts = {state: 0 for state in QUALITY_STATES}
+    for state in frame_states:
+        quality_counts[state] = quality_counts.get(state, 0) + 1
 
     if frame_index == 0:
         raise VideoExtractionError(f"No decodable frames found in video: {video_path}")
@@ -276,11 +405,12 @@ def extract_motion_summary(
                         target_index += 1
                     if decoded_frame is None:
                         continue
-                    digest, file_path, visual_quality, visual_quality_reason = _write_frame(
-                        decoded_frame, artifacts_dir, output_quality, scale_width, scale_height
+                    digest, file_path, visual_quality, visual_quality_reason, quality_state = _write_frame(
+                        decoded_frame, artifacts_dir, output_quality, scale_width, scale_height,
+                        gate.states.get(index),
                     )
                     segment.frames.append(
-                        FrameArtifact(index, round(index / fps, 3), digest, file_path, visual_quality, visual_quality_reason)
+                        FrameArtifact(index, round(index / fps, 3), digest, file_path, visual_quality, visual_quality_reason, quality_state)
                     )
                     job_frames += 1
                 if job_frames >= max_job_frames:
@@ -303,6 +433,8 @@ def extract_motion_summary(
         frame_width=frame_width,
         frame_height=frame_height,
         frames_per_second=round(float(fps), 6),
+        quality_events=gate.events,
+        quality_counts=quality_counts,
     )
 
 

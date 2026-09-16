@@ -23,6 +23,22 @@ FILES = {
     'vehicle-attributes-recognition-barrier-0039.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/vehicle-attributes-recognition-barrier-0039/FP32/vehicle-attributes-recognition-barrier-0039.xml',
     'vehicle-attributes-recognition-barrier-0039.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/1/vehicle-attributes-recognition-barrier-0039/FP32/vehicle-attributes-recognition-barrier-0039.bin',
 }
+# Optional tiers (WITH_DETECTOR=1 / STAGE_OPTIONAL_MODELS=1). A failed optional download is reported, not fatal.
+#  - MegaDetector v5a: person / vehicle / animal triage trained on camera-trap and trail-camera footage
+#    (MIT, https://github.com/agentmorris/MegaDetector). Needs requirements-detector.txt (ultralytics + torch).
+#  - vehicle-detection-0200: CPU OpenVINO vehicle detector (vehicles only) used when MegaDetector is absent.
+#  - Open Model Zoo has no vehicle re-identification model; the service uses a deterministic 256-d appearance
+#    descriptor unless VEHICLE_REID_MODEL_PATH points at an IR with a 256-d output.
+#  - SpeciesNet weights are distributed through Kaggle and cannot be fetched anonymously; install the
+#    `speciesnet` package (requirements-detector.txt) and set SPECIES_PROVIDER=speciesnet to use them.
+OPTIONAL_FILES = {
+    'md_v5a.0.0.pt': 'https://github.com/agentmorris/MegaDetector/releases/download/v5.0/md_v5a.0.0.pt',
+}
+# Always staged: small, CPU-only, verified against the model.yml of Open Model Zoo 2021.4.
+FILES.update({
+    'vehicle-detection-0200.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/3/vehicle-detection-0200/FP16/vehicle-detection-0200.xml',
+    'vehicle-detection-0200.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/3/vehicle-detection-0200/FP16/vehicle-detection-0200.bin',
+})
 
 
 def download_file(url: str, destination: Path) -> None:
@@ -44,3 +60,14 @@ if __name__ == '__main__':
             print(f'skipping {filename} (already present)')
             continue
         download_file(url, destination)
+    if os.getenv('WITH_DETECTOR') == '1' or os.getenv('STAGE_OPTIONAL_MODELS') == '1':
+        for filename, url in OPTIONAL_FILES.items():
+            destination = MODELS_DIR / filename
+            if destination.exists():
+                print(f'skipping {filename} (already present)')
+                continue
+            try:
+                download_file(url, destination)
+            except Exception as error:  # optional tier: report and continue; the service says not_staged
+                destination.unlink(missing_ok=True)
+                print(f'optional model {filename} not staged: {error}')

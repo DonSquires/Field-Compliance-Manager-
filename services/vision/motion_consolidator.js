@@ -4,6 +4,12 @@ const path = require('node:path');
 const DEFAULT_FACE_SIMILARITY_THRESHOLD = 0.65;
 const DEFAULT_MAX_GAP_SECONDS = 15.0;
 const DEFAULT_KEYFRAME_COUNT = 6;
+// Classified frames are sampled sparsely (a 300-frame cap over a long motion window can mean one frame every
+// few seconds), so an entity travels further than its own size between samples. The spatial gate grows
+// with the time gap; appearance similarity (256-d re-ID or descriptor) confirms or rescues the match.
+const APPEARANCE_CONFIRM_THRESHOLD = 0.6;
+const APPEARANCE_RESCUE_THRESHOLD = 0.85;
+const GATE_GROWTH_PER_SECOND = 1.5;
 
 function cosineSimilarity(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) return 0;
@@ -39,6 +45,26 @@ async function loadBase64Thumbnail(filePath, maxBytes = 250_000) {
   } catch {
     return null;
   }
+}
+
+// Does a detection at (center, bbox, timestamp, embedding) continue an existing track?
+function continuesTrack(track, { center, bbox, timestamp, embedding }, maxGap) {
+  const gap = timestamp - track.lastSeen;
+  if (gap < 0 || gap > maxGap) return false;
+  const size = Math.max(Number(bbox.width) || 0, Number(bbox.height) || 0, Number(track.bestBbox?.width) || 0, Number(track.bestBbox?.height) || 0);
+  const distance = Math.hypot(center.x - track.center.x, center.y - track.center.y);
+  const spatial = distance < size * (1 + Math.min(gap, maxGap) * GATE_GROWTH_PER_SECOND);
+  const trackEmbedding = track.embedding;
+  if (!Array.isArray(embedding) || !Array.isArray(trackEmbedding) || embedding.length !== trackEmbedding.length) return spatial;
+  const similarity = cosineSimilarity(embedding, trackEmbedding);
+  if (spatial) return similarity >= APPEARANCE_CONFIRM_THRESHOLD;
+  return similarity >= APPEARANCE_RESCUE_THRESHOLD;
+}
+
+function bestTrackFor(tracks, detection, maxGap) {
+  const candidates = tracks.filter((track) => continuesTrack(track, detection, maxGap));
+  if (!candidates.length) return null;
+  return candidates.sort((a, b) => Math.hypot(detection.center.x - a.center.x, detection.center.y - a.center.y) - Math.hypot(detection.center.x - b.center.x, detection.center.y - b.center.y))[0];
 }
 
 async function consolidateFaces(frames, options = {}) {
@@ -200,9 +226,10 @@ async function consolidatePeople(frames, options = {}) {
       const bbox = detection.bbox;
       if (!bbox) continue;
       const center = { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
-      let track = tracks.find((candidate) => timestamp - candidate.lastSeen <= maxGap && Math.hypot(center.x - candidate.center.x, center.y - candidate.center.y) < Math.max(bbox.width, bbox.height));
+      const embedding = Array.isArray(detection.attributes?.appearance_embedding) ? detection.attributes.appearance_embedding : null;
+      let track = bestTrackFor(tracks, { center, bbox, timestamp, embedding }, maxGap);
       if (!track) {
-        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, bestAttributes: detection.attributes || null, center, gaitSamples: [] };
+        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, bestAttributes: detection.attributes || null, center, embedding, gaitSamples: [] };
         tracks.push(track);
       }
       track.lastSeen = timestamp;
@@ -214,6 +241,7 @@ async function consolidatePeople(frames, options = {}) {
         track.bestBbox = bbox;
         track.bestFrame = frame;
         track.bestAttributes = detection.attributes || track.bestAttributes;
+        if (embedding) track.embedding = embedding;
       }
     }
   }
@@ -228,6 +256,9 @@ async function consolidatePeople(frames, options = {}) {
     best_frame_hash: track.bestFrame?.sha256_hash || null,
     best_bbox: track.bestBbox,
     attributes: track.bestAttributes,
+    appearance_embedding: Array.isArray(track.bestAttributes?.appearance_embedding) ? track.bestAttributes.appearance_embedding : null,
+    appearance_embedding_model: track.bestAttributes?.appearance_embedding_model || null,
+    quality_state: track.bestFrame?.quality_state || (track.bestFrame?.visual_quality === 'degraded' ? 'degraded' : 'clear'),
     gait_signature: buildGaitSignature(track.gaitSamples),
     thumbnail: await loadBase64Thumbnail(track.bestFrame?.file_path),
     review_required: true,
@@ -239,6 +270,73 @@ async function consolidatePeople(frames, options = {}) {
     excluded_degraded_frame_count: 0,
     degraded_frame_count: excludedQualityFrames,
   }));
+}
+
+// Animal detections (detector triage + species) tracked by position and time; the species is voted across
+// the track so one blurry frame cannot rename a possum. Nothing here decides identity or action.
+async function consolidateAnimals(frames, options = {}) {
+  const maxGap = options.maxGapSeconds ?? DEFAULT_MAX_GAP_SECONDS;
+  const tracks = [];
+  const statuses = new Set();
+  for (const frame of frames) {
+    if (!frame || frame.visual_quality === 'degraded') continue;
+    const container = frame.animals;
+    const detections = Array.isArray(container) ? container : Array.isArray(container?.animals) ? container.animals : [];
+    if (container && !Array.isArray(container) && container.status) statuses.add(container.status);
+    const timestamp = Number(frame.relative_timestamp_seconds) || 0;
+    for (const detection of detections) {
+      const bbox = detection?.bbox;
+      if (!bbox || !(Number(bbox.width) > 0) || !(Number(bbox.height) > 0)) continue;
+      const center = { x: Number(bbox.x) + Number(bbox.width) / 2, y: Number(bbox.y) + Number(bbox.height) / 2 };
+      let track = bestTrackFor(tracks, { center, bbox, timestamp, embedding: null }, maxGap);
+      if (!track) {
+        track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, bestDetection: detection, center, embedding: null, speciesVotes: new Map() };
+        tracks.push(track);
+      }
+      track.lastSeen = timestamp;
+      track.frameCount += 1;
+      track.confidence = Math.max(track.confidence, Number(detection.confidence) || 0);
+      track.center = center;
+      const species = detection.species || detection.coarse_label || 'other';
+      const vote = track.speciesVotes.get(species) || { weight: 0, count: 0, detection };
+      vote.weight += Number(detection.species_confidence) || Number(detection.confidence) * 0.5 || 0.1;
+      vote.count += 1;
+      if ((Number(detection.species_confidence) || 0) >= (Number(vote.detection.species_confidence) || 0)) vote.detection = detection;
+      track.speciesVotes.set(species, vote);
+      if ((Number(bbox.width) * Number(bbox.height)) > (Number(track.bestBbox.width) * Number(track.bestBbox.height))) {
+        track.bestBbox = bbox;
+        track.bestFrame = frame;
+        track.bestDetection = detection;
+      }
+    }
+  }
+  const events = [];
+  for (const [index, track] of tracks.entries()) {
+    const [species, vote] = [...track.speciesVotes.entries()].sort((a, b) => b[1].weight - a[1].weight)[0] || ['other', { count: 0, detection: track.bestDetection }];
+    const winner = vote.detection || track.bestDetection || {};
+    events.push({
+      event_id: `animal-${index + 1}`,
+      event_type: 'animal',
+      species,
+      common_name: winner.common_name || null,
+      is_pest: typeof winner.is_pest === 'boolean' ? winner.is_pest : null,
+      species_confidence: Number.isFinite(Number(winner.species_confidence)) ? Number(Number(winner.species_confidence).toFixed(3)) : null,
+      species_status: winner.species_status || 'model_not_staged',
+      species_provider: winner.species_provider || null,
+      species_votes: Object.fromEntries([...track.speciesVotes.entries()].map(([key, value]) => [key, value.count])),
+      confidence: Number(track.confidence.toFixed(2)),
+      first_seen_seconds: Number(track.firstSeen.toFixed(2)),
+      last_seen_seconds: Number(track.lastSeen.toFixed(2)),
+      duration_seconds: Number(Math.max(0, track.lastSeen - track.firstSeen).toFixed(2)),
+      frame_count: track.frameCount,
+      best_frame_hash: track.bestFrame?.sha256_hash || null,
+      best_bbox: track.bestBbox,
+      quality_state: track.bestFrame?.quality_state || 'clear',
+      thumbnail: await loadBase64Thumbnail(track.bestFrame?.file_path),
+      review_required: true,
+    });
+  }
+  return { events, detectionStatus: statuses.size ? [...statuses].join(',') : 'not_reported' };
 }
 
 function buildGaitSignature(samples) {
@@ -411,6 +509,7 @@ async function consolidateVehicles(frames, options = {}) {
     const speedPxPerSecond = tr.speedSamples.length
       ? Number((tr.speedSamples.reduce((sum, value) => sum + value, 0) / tr.speedSamples.length).toFixed(2))
       : null;
+    const vehicleData = tr.bestFrame?.inference?.data || tr.bestFrame?.runpod?.vehicle || {};
     events.push({
       event_id: `vehicle-${tr.bestPlate}-${tr.trackIndex}`,
       event_type: 'vehicle',
@@ -424,14 +523,18 @@ async function consolidateVehicles(frames, options = {}) {
       visit_count: tr.visitCount,
       temporal_consensus: tr.temporalConsensus,
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
+      best_bbox: vehicleData.detection?.bbox ?? tr.bestFrame?.alpr?.plate_bbox ?? null,
       thumbnail,
-      vehicle_make: tr.bestFrame?.inference?.data?.vehicle_make ?? null,
-      vehicle_model: tr.bestFrame?.inference?.data?.vehicle_model ?? null,
-      vehicle_year: tr.bestFrame?.inference?.data?.vehicle_year ?? null,
-      vehicle_colour: tr.bestFrame?.inference?.data?.vehicle_colour ?? tr.bestFrame?.inference?.data?.vehicle_color ?? null,
-      vehicle_type: tr.bestFrame?.inference?.data?.vehicle_type ?? null,
-      vehicle_attribute_confidence: tr.bestFrame?.inference?.data?.vehicle_attribute_confidence ?? null,
-      inference_provider: tr.bestFrame?.inference?.data?.inference_provider ?? null,
+      vehicle_make: vehicleData.vehicle_make ?? null,
+      vehicle_model: vehicleData.vehicle_model ?? null,
+      vehicle_year: vehicleData.vehicle_year ?? null,
+      vehicle_colour: vehicleData.vehicle_colour ?? vehicleData.vehicle_color ?? null,
+      vehicle_type: vehicleData.vehicle_type ?? null,
+      vehicle_attribute_confidence: vehicleData.vehicle_attribute_confidence ?? null,
+      inference_provider: vehicleData.inference_provider ?? null,
+      appearance_embedding: Array.isArray(vehicleData.appearance_embedding) ? vehicleData.appearance_embedding : null,
+      appearance_embedding_model: vehicleData.appearance_embedding_model ?? null,
+      quality_state: tr.bestFrame?.quality_state || 'clear',
       speed_px_per_second: speedPxPerSecond,
       speed_kmh: speedPxPerSecond !== null && metersPerPixel !== null
         ? Number((speedPxPerSecond * metersPerPixel * 3.6).toFixed(2))
@@ -447,9 +550,10 @@ async function consolidateVehicles(frames, options = {}) {
     const timestamp = Number(frame.relative_timestamp_seconds) || 0;
     const bbox = detection.bbox;
     const center = { x: Number(bbox.x) + Number(bbox.width) / 2, y: Number(bbox.y) + Number(bbox.height) / 2 };
-    let track = genericTracks.find((candidate) => timestamp - candidate.lastSeen <= maxGap && Math.hypot(center.x - candidate.center.x, center.y - candidate.center.y) < Math.max(Number(bbox.width), Number(bbox.height)));
+    const embedding = Array.isArray(frame.runpod.vehicle.appearance_embedding) ? frame.runpod.vehicle.appearance_embedding : null;
+    let track = bestTrackFor(genericTracks, { center, bbox, timestamp, embedding }, maxGap);
     if (!track) {
-      track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, center };
+      track = { firstSeen: timestamp, lastSeen: timestamp, frameCount: 0, confidence: 0, bestFrame: frame, bestBbox: bbox, center, embedding };
       genericTracks.push(track);
     }
     track.lastSeen = timestamp;
@@ -459,10 +563,12 @@ async function consolidateVehicles(frames, options = {}) {
     if ((Number(bbox.width) * Number(bbox.height)) > (Number(track.bestBbox.width) * Number(track.bestBbox.height))) {
       track.bestBbox = bbox;
       track.bestFrame = frame;
+      if (embedding) track.embedding = embedding;
     }
   }
   for (const [index, track] of genericTracks.entries()) {
     const thumbnail = await loadBase64Thumbnail(track.bestFrame?.file_path);
+    const vehicleData = track.bestFrame?.runpod?.vehicle || {};
     events.push({
       event_id: `vehicle-unconfirmed-${index + 1}`,
       event_type: 'vehicle',
@@ -474,13 +580,183 @@ async function consolidateVehicles(frames, options = {}) {
       duration_seconds: Number(Math.max(0, track.lastSeen - track.firstSeen).toFixed(2)),
       frame_count: track.frameCount,
       visit_count: 1,
+      best_frame_hash: track.bestFrame?.sha256_hash || null,
+      best_bbox: track.bestBbox,
       thumbnail,
+      vehicle_make: vehicleData.vehicle_make ?? null,
+      vehicle_model: vehicleData.vehicle_model ?? null,
+      vehicle_colour: vehicleData.vehicle_colour ?? null,
+      vehicle_type: vehicleData.vehicle_type ?? null,
+      vehicle_attribute_confidence: vehicleData.vehicle_attribute_confidence ?? null,
+      inference_provider: vehicleData.inference_provider ?? null,
+      appearance_embedding: Array.isArray(vehicleData.appearance_embedding) ? vehicleData.appearance_embedding : null,
+      appearance_embedding_model: vehicleData.appearance_embedding_model ?? null,
+      quality_state: track.bestFrame?.quality_state || 'clear',
       review_required: true,
       temporal_consensus: track.frameCount >= 2,
       candidate_state: 'unconfirmed_vehicle_without_plate',
     });
   }
   return { events, uniqueVehiclesCount: vehicleTracks.length + genericTracks.length };
+}
+
+function isoAt(baseMillis, seconds) {
+  if (!Number.isFinite(baseMillis)) return null;
+  return new Date(baseMillis + Math.max(0, Number(seconds) || 0) * 1000).toISOString();
+}
+
+function overlapSeconds(a, b) {
+  return Math.min(a.last_seen_seconds, b.last_seen_seconds) - Math.max(a.first_seen_seconds, b.first_seen_seconds);
+}
+
+function isUsableQuality(state) {
+  return !['glitch', 'ir_switch'].includes(state);
+}
+
+// One observation per tracked entity, in the shape record_cctv_entity_observations() accepts. Absolute
+// times come from the recording start the intake recorded (TAPO file name) or the evidence capture time.
+// Identity fields are never set here: the reviewer decides, and the database clusters portfolios.
+function buildEntityObservations(summary, context = {}) {
+  const events = summary?.consolidated_events;
+  if (!events) return [];
+  const base = Date.parse(context.recordedStartAt || context.capturedAt || '');
+  if (!Number.isFinite(base)) return [];
+  const observations = [];
+  for (const event of events.vehicle_events || []) {
+    if (!isUsableQuality(event.quality_state)) continue;
+    const plated = event.plate && event.plate !== 'Unconfirmed vehicle';
+    observations.push({
+      source_event_id: event.event_id,
+      entity_kind: 'vehicle',
+      observed_at: isoAt(base, event.first_seen_seconds),
+      observed_to: isoAt(base, event.last_seen_seconds),
+      candidate_label: plated ? event.plate : (event.vehicle_colour || event.vehicle_type ? [event.vehicle_colour, event.vehicle_type].filter(Boolean).join(' ') : null),
+      candidate_plate: plated ? event.plate : null,
+      appearance_embedding: event.appearance_embedding || null,
+      model_confidence: clamp01(event.confidence),
+      quality_state: event.quality_state || 'clear',
+      attributes: stripNulls({
+        make: event.vehicle_make, model: event.vehicle_model, colour: event.vehicle_colour, body_type: event.vehicle_type, year: event.vehicle_year,
+        attribute_confidence: event.vehicle_attribute_confidence, plate_confidence: plated ? event.confidence : null,
+        bbox: event.best_bbox, frame_count: event.frame_count, visit_count: event.visit_count, temporal_consensus: event.temporal_consensus,
+        speed_kmh: event.speed_kmh, inference_provider: event.inference_provider, appearance_embedding_model: event.appearance_embedding_model,
+        candidate_state: event.candidate_state,
+      }),
+      frame_sha256: event.best_frame_hash || null,
+      thumbnail: event.thumbnail || null,
+    });
+  }
+  const faceEvents = (events.face_events || []).filter((event) => Array.isArray(event.face_embedding) && event.face_embedding.length);
+  const claimedFaces = new Set();
+  for (const event of events.person_events || []) {
+    if (!isUsableQuality(event.quality_state)) continue;
+    // A face seen during the same body track belongs to that person; the best temporal overlap wins.
+    const face = faceEvents
+      .filter((candidate) => !claimedFaces.has(candidate.event_id) && overlapSeconds(candidate, event) >= 0)
+      .sort((a, b) => overlapSeconds(b, event) - overlapSeconds(a, event))[0] || null;
+    if (face) claimedFaces.add(face.event_id);
+    observations.push({
+      source_event_id: event.event_id,
+      entity_kind: 'person',
+      observed_at: isoAt(base, event.first_seen_seconds),
+      observed_to: isoAt(base, event.last_seen_seconds),
+      candidate_label: face?.subject_label || null,
+      candidate_embedding: face?.face_embedding || null,
+      appearance_embedding: event.appearance_embedding || null,
+      model_confidence: clamp01(event.confidence),
+      quality_state: event.quality_state || 'clear',
+      attributes: stripNulls({
+        bbox: event.best_bbox, frame_count: event.frame_count, upper_body_colour: event.attributes?.upper_body_colour, lower_body_colour: event.attributes?.lower_body_colour,
+        visible_head_region: event.attributes?.visible_head_region?.colour, gait: event.gait_signature?.state === 'provisional_motion_signature' ? event.gait_signature : null,
+        face_event_id: face?.event_id, face_visit_count: face?.visit_count, appearance_embedding_model: event.appearance_embedding_model,
+      }),
+      frame_sha256: event.best_frame_hash || null,
+      thumbnail: event.thumbnail || face?.thumbnail || null,
+    });
+  }
+  for (const face of faceEvents) {
+    if (claimedFaces.has(face.event_id)) continue;
+    observations.push({
+      source_event_id: face.event_id,
+      entity_kind: 'person',
+      observed_at: isoAt(base, face.first_seen_seconds),
+      observed_to: isoAt(base, face.last_seen_seconds),
+      candidate_label: face.subject_label || null,
+      candidate_embedding: face.face_embedding,
+      model_confidence: null,
+      quality_state: 'clear',
+      attributes: stripNulls({ bbox: face.best_bbox, frame_count: face.frame_count, visit_count: face.visit_count, face_only: true }),
+      frame_sha256: face.best_frame_hash || null,
+      thumbnail: face.thumbnail || null,
+    });
+  }
+  for (const event of events.animal_events || []) {
+    if (!isUsableQuality(event.quality_state)) continue;
+    observations.push({
+      source_event_id: event.event_id,
+      entity_kind: 'animal',
+      observed_at: isoAt(base, event.first_seen_seconds),
+      observed_to: isoAt(base, event.last_seen_seconds),
+      candidate_label: event.common_name || event.species || null,
+      animal_type: event.species || null,
+      species_confidence: clamp01(event.species_confidence),
+      is_pest: typeof event.is_pest === 'boolean' ? event.is_pest : undefined,
+      model_confidence: clamp01(event.confidence),
+      quality_state: event.quality_state || 'clear',
+      attributes: stripNulls({ bbox: event.best_bbox, frame_count: event.frame_count, species_status: event.species_status, species_provider: event.species_provider, species_votes: event.species_votes }),
+      frame_sha256: event.best_frame_hash || null,
+      thumbnail: event.thumbnail || null,
+    });
+  }
+  return observations.map((observation) => stripNulls(observation));
+}
+
+// Timeline marks for the review console (cctv_device_events, source 'inference'): one per motion window,
+// graded by what was in it, plus the camera disturbances the extractor found.
+// alert = a plated vehicle or a pest animal; detection = any other entity; motion = movement only.
+function buildInferenceDeviceEvents(summary, context = {}) {
+  const base = Date.parse(context.recordedStartAt || context.capturedAt || '');
+  if (!Number.isFinite(base) || !summary) return [];
+  const events = summary.consolidated_events || {};
+  const entities = [
+    ...(events.vehicle_events || []).map((event) => ({ ...event, kind: 'vehicle', alert: Boolean(event.plate && event.plate !== 'Unconfirmed vehicle') })),
+    ...(events.person_events || []).map((event) => ({ ...event, kind: 'person', alert: false })),
+    ...(events.animal_events || []).map((event) => ({ ...event, kind: 'animal', alert: event.is_pest === true })),
+  ].filter((entity) => isUsableQuality(entity.quality_state));
+  const marks = (summary.motion_segments || []).map((segment, index) => {
+    const window = { first_seen_seconds: segment.start_time_seconds, last_seen_seconds: segment.end_time_seconds };
+    const inside = entities.filter((entity) => overlapSeconds(entity, window) >= 0);
+    const counts = inside.reduce((totals, entity) => ({ ...totals, [entity.kind]: (totals[entity.kind] || 0) + 1 }), {});
+    return {
+      source: 'inference',
+      source_ref: `segment-${index + 1}`,
+      event_start_at: isoAt(base, segment.start_time_seconds),
+      event_end_at: isoAt(base, segment.end_time_seconds),
+      severity: inside.some((entity) => entity.alert) ? 'alert' : inside.length ? 'detection' : 'motion',
+      metadata: { kind: 'motion_window', entity_counts: counts, entity_event_ids: inside.map((entity) => entity.event_id), frames: segment.frames?.length || 0 },
+    };
+  });
+  for (const quality of summary.quality_events || []) {
+    marks.push({
+      source: 'inference',
+      source_ref: `quality-${quality.kind}-${quality.frame_start}`,
+      event_start_at: isoAt(base, quality.start_time_seconds),
+      event_end_at: isoAt(base, Math.max(quality.end_time_seconds, quality.start_time_seconds + 0.2)),
+      severity: 'motion',
+      metadata: { kind: 'quality_event', quality_kind: quality.kind, frame_start: quality.frame_start, frame_end: quality.frame_end },
+    });
+  }
+  return marks;
+}
+
+function clamp01(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Number(Math.min(1, Math.max(0, number)).toFixed(3));
+}
+
+function stripNulls(object) {
+  return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== null && value !== undefined));
 }
 
 async function extractKeyframes(frames, count = DEFAULT_KEYFRAME_COUNT) {
@@ -504,23 +780,32 @@ async function consolidateMotionSummary(summary, options = {}) {
   if (!summary || !Array.isArray(summary.motion_segments)) return summary;
   const allFrames = summary.motion_segments.flatMap((s) => s.frames || []);
   
-  const [faceResult, personEvents, vehicleResult, keyframes] = await Promise.all([
+  const [faceResult, personEvents, vehicleResult, animalResult, keyframes] = await Promise.all([
     consolidateFaces(allFrames, options),
     consolidatePeople(allFrames, options),
     consolidateVehicles(allFrames, options),
+    consolidateAnimals(allFrames, options),
     extractKeyframes(allFrames, options.keyframeCount ?? DEFAULT_KEYFRAME_COUNT),
   ]);
+  const qualityCounts = allFrames.reduce((counts, frame) => {
+    const state = frame.quality_state || (frame.visual_quality === 'degraded' ? 'degraded' : 'clear');
+    counts[state] = (counts[state] || 0) + 1;
+    return counts;
+  }, {});
 
   summary.consolidated_events = {
     vehicle_events: vehicleResult.events,
     person_events: personEvents,
     face_events: faceResult.events,
+    animal_events: animalResult.events,
     keyframes,
     summary_counts: {
       vehicle_events: vehicleResult.events.length,
       unique_vehicles: vehicleResult.uniqueVehiclesCount,
       face_events: faceResult.events.length,
       person_events: personEvents.length,
+      animal_events: animalResult.events.length,
+      pest_animal_events: animalResult.events.filter((event) => event.is_pest === true).length,
       unique_faces: faceResult.uniqueSubjectsCount,
       total_frames_with_motion: allFrames.length,
       total_frames_parsed: summary.total_frames_parsed || allFrames.length,
@@ -530,6 +815,7 @@ async function consolidateMotionSummary(summary, options = {}) {
         ...vehicleResult.events,
         ...personEvents,
         ...faceResult.events,
+        ...animalResult.events,
       ].filter((event) => event.review_required !== false).length,
       single_frame_vehicle_count: vehicleResult.events.filter((event) => event.temporal_consensus !== true).length,
       provider_counts: vehicleResult.events.reduce((counts, event) => {
@@ -537,7 +823,9 @@ async function consolidateMotionSummary(summary, options = {}) {
         counts[provider] = (counts[provider] || 0) + 1;
         return counts;
       }, {}),
-      animal_detection_status: 'model_not_staged',
+      animal_detection_status: animalResult.detectionStatus,
+      frame_quality_counts: qualityCounts,
+      camera_quality_events: Array.isArray(summary.quality_events) ? summary.quality_events.length : 0,
       policy: 'AI output is advisory and requires human confirmation before enforcement or identity commitment.',
     },
   };
@@ -549,8 +837,11 @@ module.exports = {
   cosineSimilarity,
   consolidateFaces,
   consolidatePeople,
+  consolidateAnimals,
   buildGaitSignature,
   consolidateVehicles,
   extractKeyframes,
   consolidateMotionSummary,
+  buildEntityObservations,
+  buildInferenceDeviceEvents,
 };

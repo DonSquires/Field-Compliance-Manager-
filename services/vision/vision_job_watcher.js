@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { createClient } = require('@supabase/supabase-js');
 const { signJobToken } = require('./local_jwt_signer');
-const { consolidateMotionSummary } = require('./motion_consolidator');
+const { consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents } = require('./motion_consolidator');
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -31,6 +31,8 @@ const RUNPOD_BATCH_SIZE = Number(process.env.VISION_RUNPOD_BATCH_SIZE || 6);
 const STORAGE_DOWNLOAD_TIMEOUT_MS = Number(process.env.VISION_STORAGE_DOWNLOAD_TIMEOUT_MS || 120_000);
 const LOCAL_VEHICLE_INFERENCE = process.env.VISION_LOCAL_VEHICLE_INFERENCE !== 'false';
 const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'false';
+// /infer/detect on the VPS (person + vehicle + animal triage in one call) when RunPod returned nothing for a frame.
+const LOCAL_DETECT_INFERENCE = process.env.VISION_LOCAL_DETECT_INFERENCE !== 'false';
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
@@ -310,12 +312,19 @@ async function classifyFrames(summary, job) {
         return form;
       };
       const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
+      const runpodResult = runpodResults.get(frame.sha256_hash);
+      if (runpodResult) frame.runpod = runpodResult;
+      // Detector triage: RunPod first; the VPS /infer/detect route (people + vehicles + animals in one call)
+      // when the batch had no GPU answer. /infer/people alone is only needed when RunPod answered without people.
       const localRequests = [
         fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
         fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
-        LOCAL_PEOPLE_INFERENCE ? fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }) : Promise.resolve(null),
+        LOCAL_PEOPLE_INFERENCE && runpodResult && !Array.isArray(runpodResult.people)
+          ? fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) })
+          : Promise.resolve(null),
+        !runpodResult && LOCAL_DETECT_INFERENCE ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, buildForm) : Promise.resolve(null),
       ];
-      const [alprResponse, faceResponse, peopleResponse] = await Promise.all(localRequests);
+      const [alprResponse, faceResponse, peopleResponse, localDetect] = await Promise.all(localRequests);
       await updateProgress(job, 'running_alpr', {
         current: batchStart + batchIndex + 1,
         total: selectedFrames.length,
@@ -324,8 +333,13 @@ async function classifyFrames(summary, job) {
       });
       frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
       frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
-      const runpodResult = runpodResults.get(frame.sha256_hash);
-      const inferenceResponse = !runpodResult?.vehicle && LOCAL_VEHICLE_INFERENCE
+      if (localDetect) frame.detect = localDetect;
+      const detectorCoverage = new Set([
+        ...(Array.isArray(runpodResult?.detector_coverage) ? runpodResult.detector_coverage : []),
+        ...(Array.isArray(frame.detect?.detector_coverage) ? frame.detect.detector_coverage : []),
+      ]);
+      const vehicleCovered = detectorCoverage.has('vehicle');
+      const inferenceResponse = !runpodResult?.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE
         ? await fetch(`${INFERENCE_SERVICE_URL}/infer`, {
           method: 'POST',
           headers,
@@ -333,23 +347,29 @@ async function classifyFrames(summary, job) {
           signal: AbortSignal.timeout(30_000),
         })
         : null;
-      if (runpodResult) frame.runpod = runpodResult;
       frame.capture_recognition = await runCaptureRecognition(frame, image, job);
 
       // RunPod is primary for vehicle and people work. The VPS is called only
       // when the batch missed that capability or the GPU request failed.
       if (runpodResult?.people && Array.isArray(runpodResult.people)) {
-        frame.people = { success: true, people: runpodResult.people, provider: 'runpod' };
+        frame.people = { success: true, people: runpodResult.people, provider: runpodResult.people_provider || 'runpod' };
+      } else if (frame.detect?.success && Array.isArray(frame.detect.people) && (frame.detect.people.length || frame.detect.people_provider || detectorCoverage.has('person'))) {
+        // /infer/detect already ran a person detector; an empty list means nobody was seen, not "not checked".
+        frame.people = { success: true, people: frame.detect.people, provider: frame.detect.people_provider || frame.detect.detector_provider || 'local_detect' };
       } else if (peopleResponse) {
         frame.people = peopleResponse.ok ? await peopleResponse.json() : { success: false, error: `people_http_${peopleResponse.status}` };
       } else {
         frame.people = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm);
       }
-      frame.animals = runpodResult?.animals || runpodResult?.animal || { success: false, error: 'animal_inference_unavailable', review_required: true };
-      if (runpodResult?.vehicle) {
-        frame.inference = { success: true, data: runpodResult.vehicle, provider: 'runpod' };
+      frame.animals = normaliseAnimals(runpodResult, frame.detect);
+      const detectedVehicle = runpodResult?.vehicle || frame.detect?.vehicles?.[0]?.attributes || null;
+      if (detectedVehicle) {
+        frame.inference = { success: true, data: detectedVehicle, provider: runpodResult?.vehicle ? 'runpod' : 'local_detect' };
+        if (!frame.runpod?.vehicle) frame.runpod = { ...(frame.runpod || {}), vehicle: detectedVehicle };
       } else if (inferenceResponse) {
         frame.inference = inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` };
+      } else if (vehicleCovered) {
+        frame.inference = { success: false, error: 'no_vehicle_detected', review_required: false };
       } else {
         frame.inference = { success: false, error: 'vehicle_crop_unavailable', review_required: true };
       }
@@ -358,6 +378,7 @@ async function classifyFrames(summary, job) {
         face: frame.face,
         people: frame.people,
         animals: frame.animals,
+        detect: frame.detect,
         capture_recognition: frame.capture_recognition,
         inference: frame.inference,
         runpod: frame.runpod,
@@ -376,6 +397,26 @@ async function classifyLocally(baseUrl, route, headers, buildForm) {
   } catch (error) {
     return { success: false, error: `${route}_unavailable`, detail: error.message };
   }
+}
+
+// Animal detections arrive as a list (RunPod infer_batch) or under a triage object (/infer/detect). The
+// consolidator reads { animals: [...], status }; status says whether an empty list means "none seen" or
+// "no model could look".
+function normaliseAnimals(runpodResult, localDetect) {
+  if (runpodResult) {
+    const list = Array.isArray(runpodResult.animals) ? runpodResult.animals : Array.isArray(runpodResult.animals?.detections) ? runpodResult.animals.detections : [];
+    return { success: true, animals: list, status: runpodResult.animal_detection_status || 'unknown', provider: runpodResult.detector_provider || 'runpod' };
+  }
+  if (localDetect?.success) {
+    const covered = Array.isArray(localDetect.detector_coverage) && localDetect.detector_coverage.includes('animal');
+    return {
+      success: true,
+      animals: Array.isArray(localDetect.animals) ? localDetect.animals : [],
+      status: !covered ? 'model_not_staged' : localDetect.species_status === 'ready' ? 'ready' : 'detector_only_species_not_staged',
+      provider: localDetect.detector_provider || 'local_detect',
+    };
+  }
+  return { success: false, animals: [], status: 'animal_inference_unavailable', review_required: true };
 }
 
 async function classifyWithRunpodBatch(batch) {
@@ -452,14 +493,59 @@ function playbackStoragePath(sourceStoragePath) {
   return `${withoutExtension}.playback.mp4`;
 }
 
-function runFfmpegRemux(sourcePath, outputPath) {
+const PLAYBACK_PROFILES = { copy: 'h264-copy-faststart', transcode: 'h264-slow-crf18' };
+
+// ffprobe the first video stream; null when ffprobe is missing or the file cannot be read.
+function probeVideo(sourcePath) {
+  return new Promise((resolve) => {
+    const child = spawn('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', '-select_streams', 'v:0', sourcePath], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let output = '';
+    const timeout = setTimeout(() => { child.kill('SIGKILL'); resolve(null); }, 60_000);
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.once('error', () => { clearTimeout(timeout); resolve(null); });
+    child.once('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) return resolve(null);
+      try {
+        const parsed = JSON.parse(output);
+        const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : null;
+        resolve(stream ? { codec_name: stream.codec_name, pix_fmt: stream.pix_fmt, profile: stream.profile, format_name: parsed.format?.format_name || '' } : null);
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Browsers play H.264 in an MP4/MOV container natively; such sources (TAPO, most IP cameras) only need
+// the moov atom moved to the front ("faststart") so playback and seeking start before the whole file
+// downloads. Re-encoding them costs minutes per file and loses quality for nothing. Anything else
+// (H.265, raw elementary streams, DVR containers) is transcoded to browser-safe H.264.
+function choosePlaybackStrategy(probe) {
+  if (!probe) return 'transcode';
+  const codec = String(probe.codec_name || '').toLowerCase();
+  const pixelFormat = String(probe.pix_fmt || '').toLowerCase();
+  const format = String(probe.format_name || '').toLowerCase();
+  const isMp4Family = /\b(mov|mp4|m4a|3gp|3g2|mj2)\b/.test(format);
+  const browserSafePixels = !pixelFormat || /^yuv420p$|^yuvj420p$/.test(pixelFormat);
+  return codec === 'h264' && isMp4Family && browserSafePixels ? 'copy' : 'transcode';
+}
+
+function ffmpegArgsFor(strategy, sourcePath, outputPath) {
+  if (strategy === 'copy') {
+    return ['-y', '-fflags', '+genpts', '-i', sourcePath, '-map', '0:v:0', '-c:v', 'copy', '-movflags', '+faststart', outputPath];
+  }
+  return [
+    '-y', '-fflags', '+genpts', '-i', sourcePath,
+    '-map', '0:v:0', '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+    '-profile:v', 'high', '-level:v', '4.2', '-pix_fmt', 'yuv420p',
+    '-movflags', '+faststart', outputPath
+  ];
+}
+
+function runFfmpegRemux(sourcePath, outputPath, strategy = 'transcode') {
   return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', [
-      '-y', '-fflags', '+genpts', '-i', sourcePath,
-      '-map', '0:v:0', '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
-      '-profile:v', 'high', '-level:v', '4.2', '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart', outputPath
-    ], {
+    const child = spawn('ffmpeg', ffmpegArgsFor(strategy, sourcePath, outputPath), {
       stdio: ['ignore', 'ignore', 'pipe']
     });
     let errorOutput = '';
@@ -484,11 +570,21 @@ function runFfmpegRemux(sourcePath, outputPath) {
 // browser support because native HEVC playback is platform-dependent.
 async function ensurePlaybackCopy(job, evidence, videoPath) {
   if (evidence.metadata?.playback_storage_path
-    && evidence.metadata?.playback_transcode_profile === 'h264-slow-crf18') return;
+    && Object.values(PLAYBACK_PROFILES).includes(evidence.metadata?.playback_transcode_profile)) return;
   const outputDir = path.join(DERIVED_ROOT, job.id);
   await fs.mkdir(outputDir, { recursive: true });
   const outputPath = path.join(outputDir, 'playback.mp4');
-  await runFfmpegRemux(videoPath, outputPath);
+  const probe = await probeVideo(videoPath);
+  let strategy = choosePlaybackStrategy(probe);
+  try {
+    await runFfmpegRemux(videoPath, outputPath, strategy);
+  } catch (error) {
+    if (strategy !== 'copy') throw error;
+    // A stream that probed as H.264 but will not copy cleanly (damaged ring-slot tail) still gets a playable derivative.
+    log('playback_copy_fallback_transcode', { job_id: job.id, error: error.message });
+    strategy = 'transcode';
+    await runFfmpegRemux(videoPath, outputPath, strategy);
+  }
 
   const bucket = evidence.metadata?.storage_bucket || 'bob-uploads';
   const destinationPath = playbackStoragePath(evidence.storage_path);
@@ -504,12 +600,48 @@ async function ensurePlaybackCopy(job, evidence, videoPath) {
       ...(evidence.metadata || {}),
       playback_storage_path: destinationPath,
       playback_content_type: 'video/mp4',
-      playback_transcode_profile: 'h264-slow-crf18',
+      playback_transcode_profile: PLAYBACK_PROFILES[strategy],
+      playback_source_codec: probe?.codec_name || null,
       playback_source_preserved: true,
     } })
     .eq('id', evidence.id);
   if (updateError) throw new Error(`evidence playback metadata update failed: ${updateError.message}`);
-  log('playback_copy_ready', { job_id: job.id, evidence_item_id: evidence.id, destination_path: destinationPath });
+  log('playback_copy_ready', { job_id: job.id, evidence_item_id: evidence.id, destination_path: destinationPath, strategy, source_codec: probe?.codec_name || null });
+}
+
+// One row per tracked person / vehicle / animal, place inherited from the import behind the evidence.
+// The RPC clusters portfolios and stores candidates; identity stays with the reviewer.
+async function recordEntityObservations(job, evidence, summary) {
+  const context = { recordedStartAt: evidence.metadata?.recorded_start_at || null, capturedAt: evidence.captured_at || null };
+  const observations = buildEntityObservations(summary, context);
+  if (!observations.length) {
+    log('entity_observations_none', { job_id: job.id, has_time_base: Boolean(context.recordedStartAt || context.capturedAt) });
+    return 0;
+  }
+  const { data, error } = await supabase.rpc('record_cctv_entity_observations', {
+    p_job_id: job.id,
+    p_evidence_id: job.evidence_item_id,
+    p_organization_id: job.organization_id,
+    p_observations: observations,
+  });
+  if (error) throw new Error(`entity observation persistence failed: ${error.message}`);
+  log('entity_observations_recorded', { job_id: job.id, submitted: observations.length, saved: data, kinds: observations.reduce((counts, item) => ({ ...counts, [item.entity_kind]: (counts[item.entity_kind] || 0) + 1 }), {}) });
+  return data;
+}
+
+// Timeline marks for the review console; only imports carry a device timeline, so legacy evidence is skipped.
+async function recordInferenceDeviceEvents(job, evidence, summary) {
+  if (!evidence.cctv_import_id) return 0;
+  const marks = buildInferenceDeviceEvents(summary, { recordedStartAt: evidence.metadata?.recorded_start_at || null, capturedAt: evidence.captured_at || null })
+    .map((mark) => ({ ...mark, source_ref: `${job.evidence_item_id}:${mark.source_ref}` }));
+  if (!marks.length) return 0;
+  const { data, error } = await supabase.rpc('record_cctv_device_events', { p_import_id: evidence.cctv_import_id, p_events: marks });
+  if (error) {
+    log('inference_device_events_failed', { job_id: job.id, error: error.message });
+    return 0;
+  }
+  log('inference_device_events_recorded', { job_id: job.id, submitted: marks.length, saved: data });
+  return data;
 }
 
 async function processOne() {
@@ -533,7 +665,7 @@ async function processOne() {
     await updateProgress(job, 'loading_evidence', { label: 'Loading evidence file' });
     const { data: evidence, error: evidenceError } = await supabase
       .from('evidence_items')
-      .select('id, organization_id, evidence_kind, storage_path, metadata')
+      .select('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id')
       .eq('id', job.evidence_item_id)
       .eq('organization_id', job.organization_id)
       .maybeSingle();
@@ -558,7 +690,10 @@ async function processOne() {
     await consolidateMotionSummary(summary, {
       metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null,
     });
-    await updateProgress(job, 'persisting_result', { label: 'Saving results and evidence links' });
+    await updateProgress(job, 'persisting_result', { label: 'Saving observations, timeline and evidence links' });
+    // Observations first: a failure here fails the job while it is still 'processing', so a re-run can repair it.
+    await recordEntityObservations(job, evidence, summary);
+    await recordInferenceDeviceEvents(job, evidence, summary);
     await ingest(job, summary);
     await recordSceneMemory(job, evidence, summary);
     await fs.rm(classificationCheckpointPath(job.id), { force: true });
@@ -566,7 +701,10 @@ async function processOne() {
       job_id: job.id,
       total_frames_parsed: summary.total_frames_parsed,
       face_events: summary.consolidated_events?.summary_counts?.face_events || 0,
-      vehicle_events: summary.consolidated_events?.summary_counts?.vehicle_events || 0
+      vehicle_events: summary.consolidated_events?.summary_counts?.vehicle_events || 0,
+      person_events: summary.consolidated_events?.summary_counts?.person_events || 0,
+      animal_events: summary.consolidated_events?.summary_counts?.animal_events || 0,
+      quality_events: summary.quality_events?.length || 0,
     });
   } catch (error) {
     log('watcher_error', { error: error.message });
@@ -589,4 +727,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents };
