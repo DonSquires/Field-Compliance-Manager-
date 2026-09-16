@@ -64,3 +64,41 @@ describe('workshop module contract (20260916110000)', () => {
     expect(page).toContain('setLoading(false);');
   });
 });
+
+describe('officer workshop surface (20260916120000)', () => {
+  const officerPage = read('src/pages/OfficerWorkshopPage.tsx');
+  const officerShell = read('src/shells/OfficerShell.tsx');
+  const workerMigration = readFileSync(resolve(repoRoot, 'supabase/migrations/20260916120000_workshop_worker_lines.sql'), 'utf8');
+
+  it('is a granted (non-core) officer module', () => {
+    expect(officerShell).toContain("workshop: { label: 'Workshop'");
+    expect(officerShell).toContain("case 'workshop':");
+    expect(officerShell).not.toMatch(/CORE_OFFICER_MODULES = new Set<ActiveModule>\(\[[^\]]*'workshop'/);
+  });
+
+  it('shows only the jobs assigned to the signed-in worker', () => {
+    expect(officerPage).toContain("from('workshop_work_order_summary')");
+    expect(officerPage).toContain(".eq('assigned_user_id', profile.id)");
+  });
+
+  it('a worker never types a price: lines are price-book items and the RPC enforces it', () => {
+    expect(officerPage).toContain('p_unit_price: null');
+    expect(officerPage).toContain('p_unit_cost: null');
+    expect(officerPage).toContain('includeRates={false}');
+    expect(workerMigration).toContain("if v_role = 'worker' and p_item_id is null then");
+    expect(workerMigration).toContain("case when v_role = 'admin' then coalesce(p_unit_price, v_price, 0) else coalesce(v_price, 0) end");
+    expect(workerMigration).toContain("raise exception 'You can only remove lines you added yourself'");
+  });
+
+  it('brings the place brief and platform-wide safety warnings to the worker before they attend', () => {
+    expect(officerPage).toContain("from('client_sites').select('id,name,address,hs_notes,access_instructions')");
+    expect(officerPage).toContain('<SafetyWarningsPanel entityType="site"');
+  });
+
+  it('only start and complete are offered; stock-drawing orders are handed to the office', () => {
+    expect(officerPage).toContain("advance('in_progress')");
+    expect(officerPage).toContain("advance('completed')");
+    expect(officerPage).not.toContain("'cancelled'");
+    expect(officerPage).toContain('so a workshop administrator completes it');
+  });
+});

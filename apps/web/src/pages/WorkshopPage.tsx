@@ -510,7 +510,7 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
                   {selected.status === 'completed' && <div><span>Still to invoice</span><strong>{money(selected.uninvoiced_total)}</strong></div>}
                 </div>
 
-                <table className="workshop-lines">
+                <table className="workshop-lines workshop-lines--priced">
                   <thead><tr><th>Kind</th><th>Description</th><th>Qty</th><th>Unit price</th><th>Total</th><th aria-label="Actions"></th></tr></thead>
                   <tbody>
                     {lines.length === 0 ? (

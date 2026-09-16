@@ -58,6 +58,8 @@ export interface WorkOrderLine {
   inventory_transaction_id: string | null;
   invoice_line_item_id: string | null;
   position: number;
+  /** Set from 20260916120000; older lines are null. */
+  created_by?: string | null;
 }
 
 export interface BomTemplateLineInput {

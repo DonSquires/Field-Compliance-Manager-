@@ -41,6 +41,7 @@ import {
   Route,
   Siren,
   UserRound,
+  Wrench,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -73,6 +74,7 @@ const OfficerLeavePage = React.lazy(() => import('../pages/OfficerLeavePage'));
 const OfficerTimesheetPage = React.lazy(() => import('../pages/OfficerTimesheetPage'));
 const OfficerCredentialsPage = React.lazy(() => import('../pages/OfficerCredentialsPage'));
 const OfficerVehicleLookupPage = React.lazy(() => import('../pages/OfficerVehicleLookupPage'));
+const OfficerWorkshopPage = React.lazy(() => import('../pages/OfficerWorkshopPage'));
 const OfficerNoiseControlPage = React.lazy(() => import('../pages/OfficerNoiseControlPage'));
 const OfficerParkingPage = React.lazy(() => import('../pages/OfficerParkingPage'));
 const OfficerDispatchPage = React.lazy(() => import('../pages/OfficerDispatchPage'));
@@ -91,7 +93,7 @@ type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
   | 'site_guard' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
   | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
-  | 'vehicle_lookup' | 'credentials' | 'bob' | 'modules' | null;
+  | 'vehicle_lookup' | 'credentials' | 'bob' | 'modules' | 'workshop' | null;
 
 type WelfareStatus = 'ok' | 'due' | 'overdue' | 'man_down' | 'sos';
 
@@ -118,6 +120,7 @@ const MODULE_METADATA: Record<string, { label: string; description: string; icon
   debrief: { label: 'Debrief', description: 'Close the shift and follow up', icon: MessageSquare },
   vehicle_lookup: { label: 'Vehicle', description: 'Search vehicle history', icon: Car },
   credentials: { label: 'Credentials', description: 'View capability and expiry', icon: BadgeCheck },
+  workshop: { label: 'Workshop', description: 'Your builds and maintenance visits', icon: Wrench },
 };
 
 const CORE_OFFICER_MODULES = new Set<ActiveModule>(['report', 'leave', 'timesheet', 'schedule', 'dispatch', 'debrief', 'vehicle_lookup', 'credentials', 'map', 'bob']);
@@ -431,6 +434,8 @@ const OfficerShell: React.FC = () => {
         return <OfficerCredentialsPage />;
       case 'vehicle_lookup':
         return <OfficerVehicleLookupPage />;
+      case 'workshop':
+        return <OfficerWorkshopPage />;
       case 'noise_control':
         return <OfficerNoiseControlPage />;
       case 'parking':

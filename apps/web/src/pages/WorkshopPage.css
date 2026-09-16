@@ -296,8 +296,8 @@
     width: 100%;
   }
 
-  .workshop-lines th:nth-child(4),
-  .workshop-lines td:nth-child(4) {
+  .workshop-lines--priced th:nth-child(4),
+  .workshop-lines--priced td:nth-child(4) {
     display: none;
   }
 }
