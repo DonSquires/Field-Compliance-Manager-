@@ -12,7 +12,7 @@ const test = require('node:test');
 test('every notification category produced in the schema is accepted by notifications_category_check', () => {
   const schema = fs.readFileSync(path.resolve(__dirname, '../supabase/schema.sql'), 'utf8');
 
-  const constraint = schema.match(/ADD CONSTRAINT "notifications_category_check" CHECK \(\(category = ANY \(ARRAY\[([^\]]+)\]\)\)\)/);
+  const constraint = schema.match(/ADD CONSTRAINT "notifications_category_check" CHECK \(\(?category = ANY \(ARRAY\[([^\]]+)\]\)\)?\)/);
   assert.ok(constraint, 'notifications_category_check should exist in the snapshot');
   const allowed = new Set([...constraint[1].matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]));
 
@@ -29,6 +29,6 @@ test('every notification category produced in the schema is accepted by notifica
 test('the recorded category list is fully present in the snapshot', () => {
   const schema = fs.readFileSync(path.resolve(__dirname, '../supabase/schema.sql'), 'utf8');
   for (const category of ['leave_decision', 'timesheet_decision', 'breach_decision', 'debrief_followup', 'noise_review', 'video_review', 'bob_conversation', 'bob_self_memory']) {
-    assert.match(schema, new RegExp(`"notifications_category_check" CHECK \\(\\(category = ANY \\(ARRAY\\[[^\\]]*'${category}'::text`), category);
+    assert.match(schema, new RegExp(`"notifications_category_check" CHECK \\(\\(?category = ANY \\(ARRAY\\[[^\\]]*'${category}'::text`), category);
   }
 });
