@@ -1008,6 +1008,11 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         </div>
         <div className="cctv-review-header-actions">
           {!libraryMode && (
+            <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-console')} title="Open the CCTV console: synchronised playback, timeline and entity review">
+              <Eye size={17} /> CCTV console
+            </button>
+          )}
+          {!libraryMode && (
             <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-import')} title="Import an SD card or camera folder">
               <Archive size={17} /> Import camera footage
             </button>

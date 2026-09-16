@@ -53,6 +53,6 @@ describe('CCTV import — the place comes first, files are classified locally, w
     expect(shell).toContain("'cctv-import'");
     expect(fieldOps).toContain("area: 'cctv-import'");
     expect(review).toContain("navigate('/admin/field-ops?area=cctv-import')");
-    expect(page).toContain('navigate(`/admin/field-ops?area=cctv-review&import=${importRow.id}`)');
+    expect(page).toContain('navigate(`/admin/field-ops?area=cctv-console&import=${importRow.id}`)');
   });
 });

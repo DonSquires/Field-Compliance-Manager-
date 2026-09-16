@@ -414,7 +414,7 @@ const CCTVImportPage: React.FC = () => {
           <h1>Import camera footage</h1>
           <p>Bring an SD card or a camera folder into review. The camera’s place comes first — SD cards carry no GPS, and a burnt-in watermark is only a hint.</p>
         </div>
-        <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-review')}>
+        <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-console')}>
           <Camera size={17} /> Open CCTV review
         </button>
       </header>
@@ -627,7 +627,7 @@ const CCTVImportPage: React.FC = () => {
               <button type="button" className="page-action" onClick={pauseImport}><XCircle size={16} /> Pause</button>
             )}
             {phase === 'done' && importRow && (
-              <button type="button" className="page-action is-primary" onClick={() => navigate(`/admin/field-ops?area=cctv-review&import=${importRow.id}`)}>
+              <button type="button" className="page-action is-primary" onClick={() => navigate(`/admin/field-ops?area=cctv-console&import=${importRow.id}`)}>
                 <Camera size={16} /> Review this import
               </button>
             )}
@@ -658,7 +658,7 @@ const CCTVImportPage: React.FC = () => {
                   <td>{row.video_count}{row.skipped_count ? ` (+${row.skipped_count} empty)` : ''}</td>
                   <td><span className={`cctv-import-badge is-${row.status}`}>{row.status.replace(/_/g, ' ')}</span></td>
                   <td>
-                    <button type="button" className="cctv-import-link" onClick={() => navigate(`/admin/field-ops?area=cctv-review&import=${row.id}`)}>Open</button>
+                    <button type="button" className="cctv-import-link" onClick={() => navigate(`/admin/field-ops?area=cctv-console&import=${row.id}`)}>Open</button>
                   </td>
                 </tr>
               ))}

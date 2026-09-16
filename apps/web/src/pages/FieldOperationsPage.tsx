@@ -24,7 +24,7 @@ import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-console' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;
@@ -56,8 +56,9 @@ const WORKFLOWS: Array<{ area: FieldOpsArea; label: string; detail: string; icon
   { area: 'welfare-alerts', label: 'Welfare response', detail: 'Acknowledge, investigate, and resolve active alerts', icon: HeartPulse, tone: 'red' },
   { area: 'patrol', label: 'Patrol operations', detail: 'Manage routes, checkpoints, visits, and exceptions', icon: Route, tone: 'green' },
   { area: 'field-reports', label: 'Field reports', detail: 'Triage submitted reports and required follow-up', icon: FileWarning, tone: 'amber' },
-  { area: 'cctv-review', label: 'CCTV review', detail: 'Review camera footage, snapshots, plates, and faces', icon: Camera, tone: 'slate' },
+  { area: 'cctv-console', label: 'CCTV review', detail: 'Watch imported cameras on one clock, work the timeline, and confirm who and what was seen', icon: Camera, tone: 'slate' },
   { area: 'cctv-import', label: 'Import camera footage', detail: 'Bring an SD card or camera folder in, anchored to the place it watched', icon: Camera, tone: 'teal' },
+  { area: 'cctv-review', label: 'CCTV job queue & exports', detail: 'Inference jobs, retries, evidence exports, and report receipts', icon: Camera, tone: 'slate' },
   { area: 'cctv-library', label: 'Completed videos', detail: 'Browse completed footage like an operational video archive', icon: Camera, tone: 'blue' },
   { area: 'debrief-followup', label: 'Debrief follow-up', detail: 'Own safety, equipment, and handover actions', icon: FileWarning, tone: 'amber' },
   { area: 'breach-review', label: 'Breach review', detail: 'Assess compliance alerts and record governed outcomes', icon: ShieldAlert, tone: 'red' },

@@ -121,6 +121,7 @@ const DebriefFollowupPage = React.lazy(() => import('../pages/DebriefFollowupPag
 const CCTVReviewPage = React.lazy(() => import('../pages/CCTVReviewPage'));
 const CCTVVideoLibraryPage = React.lazy(() => import('../pages/CCTVVideoLibraryPage'));
 const CCTVImportPage = React.lazy(() => import('../pages/CCTVImportPage'));
+const CCTVConsolePage = React.lazy(() => import('../pages/CCTVConsolePage'));
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
@@ -131,7 +132,7 @@ type AdminPage =
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
-type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-console' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
@@ -144,7 +145,7 @@ const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
-  'field-reports', 'observation-search', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
+  'field-reports', 'observation-search', 'cctv-console', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
   'debrief-followup',
 ]);
 
@@ -530,6 +531,8 @@ const AdminShell: React.FC = () => {
             return <ObservationSearchPage />;
           case 'field-reports':
             return <FieldReportsPage />;
+          case 'cctv-console':
+            return <CCTVConsolePage />;
           case 'cctv-review':
             return <CCTVReviewPage />;
           case 'cctv-library':
