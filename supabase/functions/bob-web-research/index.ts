@@ -52,6 +52,34 @@ const TRUSTED_DOMAINS = [
   'digitalnz.org',
   'gazette.govt.nz'
 ];
+// Forestry sector primary sources (owner ruling 2026-09-16): the industry bodies, the Crown forestry
+// research institute, and the owners/managers of the forests where the CCTV pest-and-access work runs.
+// Corporate and industry sites are evidence about operations, not legal authority, so they score below
+// the official list and above the open web.
+const SECTOR_REFERENCE_DOMAINS = [
+  // industry bodies and research
+  'nzfoa.org.nz',
+  'nzffa.org.nz',
+  'nzif.org.nz',
+  'fica.org.nz',
+  'scionresearch.com',
+  'eastlandwood.co.nz',
+  // forest owners and managers
+  'tasmanpine.co.nz',
+  'onefortyone.com',
+  'matarikiforests.co.nz',
+  'portblakely.com',
+  'forest360.nz',
+  'pfolsen.com',
+  'forestmanagement.co.nz',
+  'fmnz.co.nz',
+  'forestenterprises.co.nz',
+  'nzforestry.co.nz'
+];
+const OFFICIAL_TRUST = 1;
+const SECTOR_TRUST = 0.8;
+const OPEN_WEB_TRUST = 0.4;
+const AUTO_INVOKE_MIN_TRUST = SECTOR_TRUST;
 const BLOCKED_PATTERNS = [
   /porn|adult|xxx|escort/i,
   /casino|gambling|betting|poker/i,
@@ -88,10 +116,15 @@ function isSafePublicUrl(raw) {
   if (/^\d+$/.test(host)) return false;
   return true;
 }
+function hostMatches(host, domains) {
+  return domains.some((d)=>host === d || host.endsWith(`.${d}`));
+}
 function trustScore(url) {
   try {
     const host = new URL(url).hostname.toLowerCase();
-    return TRUSTED_DOMAINS.some((d)=>host === d || host.endsWith(`.${d}`)) ? 1 : 0.4;
+    if (hostMatches(host, TRUSTED_DOMAINS)) return OFFICIAL_TRUST;
+    if (hostMatches(host, SECTOR_REFERENCE_DOMAINS)) return SECTOR_TRUST;
+    return OPEN_WEB_TRUST;
   } catch  {
     return 0;
   }
@@ -187,7 +220,7 @@ serve(async (req)=>{
         error: 'web_research_requires_human_invocation',
         message: 'Live web research must be explicitly invoked by a human in this session (set human_invoked=true), or fired for an allowlisted autonomous purpose (auto_invoke_purpose one of: ' + [
           ...AUTO_INVOKE_PURPOSES
-        ].join(', ') + ') — trusted-domain sources only in that case.'
+        ].join(', ') + ') — allowlisted official and sector-reference sources only in that case.'
       }, 403);
     }
     // #97: HARD BOUNDARY — never auto-search a named individual's personal
@@ -218,12 +251,12 @@ serve(async (req)=>{
     }
     // Auto-invoked requests may not supply explicit urls — that would let a
     // caller point Bob at an arbitrary untrusted page under the cover of an
-    // allowlisted purpose. Auto-invoke is query-driven against TRUSTED_DOMAINS
-    // only.
+    // allowlisted purpose. Auto-invoke is query-driven against the allowlists
+    // (TRUSTED_DOMAINS + SECTOR_REFERENCE_DOMAINS) only.
     if (isAutoInvoked && Array.isArray(body.urls) && body.urls.length) {
       return json({
         error: 'auto_invoke_urls_not_allowed',
-        message: 'Autonomous purpose-bound research cannot target explicit urls; it is restricted to a query against TRUSTED_DOMAINS.'
+        message: 'Autonomous purpose-bound research cannot target explicit urls; it is restricted to a query against the allowlisted official and sector-reference domains.'
       }, 400);
     }
     const rawQuery = String(body.query ?? '').trim();
@@ -265,10 +298,10 @@ serve(async (req)=>{
     }
     const filtered = [
       ...new Set(candidateUrls)
-    ].filter((u)=>isSafePublicUrl(u) && !isBlocked(u))// Auto-invoked (no human in the loop this turn): ONLY the trusted-domain
-    // allowlist qualifies (trustScore === 1). Never let an autonomous fire
+    ].filter((u)=>isSafePublicUrl(u) && !isBlocked(u))// Auto-invoked (no human in the loop this turn): ONLY allowlisted sources
+    // qualify (official, or sector-reference). Never let an autonomous fire
     // fall back to a generic, lower-trust result.
-    .filter((u)=>!isAutoInvoked || trustScore(u) === 1).sort((a, b)=>trustScore(b) - trustScore(a)).slice(0, maxResults);
+    .filter((u)=>!isAutoInvoked || trustScore(u) >= AUTO_INVOKE_MIN_TRUST).sort((a, b)=>trustScore(b) - trustScore(a)).slice(0, maxResults);
     if (!filtered.length) {
       return json({
         success: true,
@@ -295,7 +328,7 @@ serve(async (req)=>{
         })),
       failed: failures,
       advisory: true,
-      note: isAutoInvoked ? `Autonomous, purpose-bound research (${autoInvokePurpose}), trusted-domain sources only. Advisory only — Bob does not act on fetched content. A human must still confirm before this data is relied upon.` : 'Advisory research only. Bob does not act on fetched content. Verify against official sources before use.',
+      note: isAutoInvoked ? `Autonomous, purpose-bound research (${autoInvokePurpose}), allowlisted official and sector-reference sources only. Advisory only — Bob does not act on fetched content. A human must still confirm before this data is relied upon.` : 'Advisory research only. Bob does not act on fetched content. Verify against official sources before use.',
       audit: {
         actor_id: user.id,
         role: profile.role,
