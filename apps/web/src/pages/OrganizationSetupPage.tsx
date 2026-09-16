@@ -313,7 +313,8 @@ const OrganizationSetupPage: React.FC = () => {
     const { data, error: previewError } = await supabase.functions.invoke('bob-jurisdiction-preview', { body: { district_names: jurisdictionNames } });
     if (previewError || !data?.results?.length || data.results.some((result: { matched: boolean }) => !result.matched)) {
       const unmatched = (data?.unmatched ?? jurisdictionNames).join(', ');
-      setJurisdictionPreviewMessage(previewError?.message ?? `No council boundary matched: ${unmatched}.`);
+      const unavailable = (data?.unavailable ?? []).join(', ');
+      setJurisdictionPreviewMessage(previewError?.message ?? (unavailable ? `Boundary source unavailable for: ${unavailable}. Nothing has been saved; retry or draw the boundary manually.` : `No council boundary matched: ${unmatched}.`));
     } else {
       setJurisdictionPreview({ type: 'FeatureCollection', features: data.results.map((result: { geometry: GeoJSON.GeoJsonObject; name: string }) => ({ type: 'Feature', properties: { name: result.name }, geometry: result.geometry })) } as GeoJSON.GeoJsonObject);
       setJurisdictionPreviewMessage(`Boundary preview loaded for ${jurisdictionNames.join(', ')}. Nothing has been saved yet — Bob sends it to Approvals when you are ready.`);

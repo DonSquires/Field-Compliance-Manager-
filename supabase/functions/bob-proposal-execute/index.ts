@@ -32,7 +32,8 @@
  *     client_organization_id, name. No 'status' column (draft = inert flags).
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { fuzzyTopN, fetchCanonicalTaNames, validateTaName, NZTA_TA_FEATURESERVER as _SHARED_NZTA_TA_FEATURESERVER, TA_NAME_CANDIDATES as _SHARED_TA_NAME_CANDIDATES } from '../_shared/ta-validation.ts';
+import { validateTaName } from '../_shared/ta-validation.ts';
+import { resolveTaBoundary } from '../_shared/ta-boundary-resolver.ts';
 import { resolveOrCreateHouseEdge, HouseConflictError } from '../_shared/houseResolve.ts';
 import { computeEffectiveDedupKey } from '../_shared/addressKey.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -125,207 +126,11 @@ const SUPPORTED_ACTIONS = new Set([
   'create_rate_rule',
   'start_staff_onboarding'
 ]);
-// NZ Territorial Authority (council) boundaries: NZTA hosts a PUBLIC ArcGIS
-// FeatureServer (no API key) for TA Boundaries. ArcGIS REST supports name-based
-// querying, which matches the architecture's by-name council merge directly --
-// no point-guessing, no per-site key. (LINZ has no admin-boundary layer; the
-// Stats NZ Koordinates path needed an unverified guessed layer id + a key.)
-//
-// Phase 2 (epic #226): levenshtein, fuzzyTopN, fetchCanonicalTaNames, and
-// validateTaName are now imported from _shared/ta-validation.ts so that
-// propose-time and execute-time paths share the same code (no divergent
-// duplicate). The local NZTA constants below alias the shared exports for
-// use by fetchTaGeoJson and arcgisQueryByName which remain in this file.
-const NZTA_TA_FEATURESERVER = _SHARED_NZTA_TA_FEATURESERVER;
-const TA_NAME_CANDIDATES = [
-  ..._SHARED_TA_NAME_CANDIDATES
-];
-const snippet = (s)=>s.replace(/\s+/g, ' ').trim().slice(0, 500);
-// -- Phase 0 (item 3): Source-fallback env keys --
-const GOOGLE_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY') ?? Deno.env.get('GOOGLE_API_TOKEN') ?? '';
-const STATSNZ_API_KEY = Deno.env.get('STATSNZ_API_KEY') ?? '';
-// Run an ArcGIS REST query against the NZTA TA FeatureServer for one name field.
-// Returns: geometry object on match, null on clean no-match (field valid, no row),
-// 'field_error' on bad field name, or throws on HTTP/network error (source outage).
-async function arcgisQueryByName(field, districtName) {
-  const where = `UPPER(${field}) = UPPER('${districtName.replace(/'/g, "''")}')`;
-  const url = `${NZTA_TA_FEATURESERVER}/query` + `?where=${encodeURIComponent(where)}` + `&outFields=*&returnGeometry=true&outSR=4326&f=geojson`;
-  const res = await fetch(url, {
-    headers: {
-      'Accept': 'application/json'
-    }
-  });
-  const text = await res.text();
-  // A bad/unknown field is a FIELD ERROR regardless of HTTP status (ArcGIS may
-  // return it with 200 or 4xx). Detect from the body wording so we cycle to the
-  // next candidate field instead of failing hard.
-  const looksLikeFieldError = /does not exist|could not be found|cannot be found|unable to (complete|perform)|invalid (field|where|expression)|no field|unknown field/i.test(text) || /"error"\s*:/.test(text) && /field|where|expression/i.test(text);
-  if (looksLikeFieldError) return 'field_error';
-  if (!res.ok) throw new Error(`NZTA ArcGIS query failed (${res.status}) for '${districtName}' field '${field}': ${snippet(text)}`);
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch  {
-    throw new Error(`NZTA ArcGIS returned non-JSON for '${districtName}': ${snippet(text)}`);
-  }
-  if (data.error) return 'field_error';
-  const features = data.features ?? [];
-  return features[0]?.geometry ?? null;
-}
-// -- Phase 0 (item 3): Fallback source helpers --
-// Google Geocoding fallback: attempt to get a TA boundary polygon via Google
-// Geocoding API. Phase 0 scope -- minimal, clearly commented. The result is
-// NOT auto-trusted (Phase 1A adds verification state); Phase 0 just must not
-// silently produce empty on outage.
-async function fetchTaGeoJsonFromGoogle(districtName) {
-  if (!GOOGLE_API_KEY) return null;
-  try {
-    const url = 'https://maps.googleapis.com/maps/api/geocode/json' + `?address=${encodeURIComponent(districtName + ', New Zealand')}` + `&key=${encodeURIComponent(GOOGLE_API_KEY)}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const body = await res.json();
-    if (body.status !== 'OK' || !body.results?.length) return null;
-    const bounds = body.results[0]?.geometry?.bounds;
-    if (!bounds?.northeast || !bounds?.southwest) return null;
-    // Convert bounding box to a GeoJSON Polygon (5-point rectangle)
-    const ne = bounds.northeast;
-    const sw = bounds.southwest;
-    return {
-      type: 'Polygon',
-      coordinates: [
-        [
-          [
-            sw.lng,
-            sw.lat
-          ],
-          [
-            ne.lng,
-            sw.lat
-          ],
-          [
-            ne.lng,
-            ne.lat
-          ],
-          [
-            sw.lng,
-            ne.lat
-          ],
-          [
-            sw.lng,
-            sw.lat
-          ]
-        ]
-      ]
-    };
-  } catch  {
-    return null;
-  }
-}
-// Stats NZ / Koordinates fallback: attempt to get a TA boundary polygon.
-// Phase 0 scope -- minimal stub. Requires STATSNZ_API_KEY.
-async function fetchTaGeoJsonFromStatsNZ(districtName) {
-  if (!STATSNZ_API_KEY) return null;
-  try {
-    // Stats NZ Koordinates TA boundaries layer (layer 111182 is the 2024 TA set)
-    const url = 'https://datafinder.stats.govt.nz/services/query/v1/vector.json' + `?key=${encodeURIComponent(STATSNZ_API_KEY)}` + `&layer=111182` + `&where=${encodeURIComponent("TA2024_V1_00_NAME_ASCII LIKE '%" + districtName.replace(/'/g, "''") + "%'")}` + '&geometry=true&outSR=4326';
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const body = await res.json();
-    const layers = body.vectorQuery?.layers ?? {};
-    const firstLayer = Object.values(layers)[0];
-    const geom = firstLayer?.features?.[0]?.geometry ?? null;
-    return geom;
-  } catch  {
-    return null;
-  }
-}
-// Fetch the Territorial Authority polygon (GeoJSON geometry) for a council by
-// name from the NZTA TA FeatureServer. Self-diagnosing on field-name mismatch.
-//
-// Phase 0 (item 3): On NZTA HTTP error/timeout (source outage, as opposed to
-// a clean no-match), attempt fallback sources before giving up:
-//   1. Google Geocoding (if GOOGLE_MAPS_API_KEY/GOOGLE_API_TOKEN available)
-//   2. Stats NZ / Koordinates (if STATSNZ_API_KEY available)
-// Distinguishes 'source unavailable' from 'valid query, no such TA'.
-//
-// Phase 0 (item 4): On clean no-match, includes top 3 fuzzy-matched valid TA
-// names in the thrown error message.
-async function fetchTaGeoJson(districtName) {
-  let nztaSourceOutage = false;
-  try {
-    for (const field of TA_NAME_CANDIDATES){
-      const result = await arcgisQueryByName(field, districtName);
-      if (result === 'field_error') continue; // wrong field, try next
-      if (result) {
-        console.log(`[Phase0] fetchTaGeoJson: resolved '${districtName}' from NZTA FeatureServer (field: ${field})`);
-        return result; // got the polygon
-      }
-    // field valid but no row matched this name -- keep trying other fields in
-    // case a different field holds the value, then fall through to diagnosis.
-    }
-  } catch (e) {
-    // NZTA source outage (HTTP error/timeout) -- flag it and try fallbacks
-    nztaSourceOutage = true;
-    console.error(`[Phase0] fetchTaGeoJson: NZTA source outage for '${districtName}': ${e instanceof Error ? e.message : String(e)}`);
-  }
-  // -- Phase 0 (item 3): Source fallback on NZTA outage --
-  // Only attempt fallbacks on SOURCE OUTAGE, not on clean no-match.
-  // A clean no-match (all fields tried, none matched) means the name is wrong
-  // and must return the fuzzy-suggest error from item 1/4, NOT a source-outage
-  // error.
-  if (nztaSourceOutage) {
-    // Fallback 1: Google Geocoding
-    try {
-      const googleResult = await fetchTaGeoJsonFromGoogle(districtName);
-      if (googleResult) {
-        console.log(`[Phase0] fetchTaGeoJson: resolved '${districtName}' from Google Geocoding fallback (NZTA was unavailable)`);
-        return googleResult;
-      }
-    } catch (e) {
-      console.error(`[Phase0] fetchTaGeoJson: Google fallback also failed for '${districtName}': ${e instanceof Error ? e.message : String(e)}`);
-    }
-    // Fallback 2: Stats NZ / Koordinates
-    try {
-      const statsResult = await fetchTaGeoJsonFromStatsNZ(districtName);
-      if (statsResult) {
-        console.log(`[Phase0] fetchTaGeoJson: resolved '${districtName}' from Stats NZ fallback (NZTA was unavailable)`);
-        return statsResult;
-      }
-    } catch (e) {
-      console.error(`[Phase0] fetchTaGeoJson: Stats NZ fallback also failed for '${districtName}': ${e instanceof Error ? e.message : String(e)}`);
-    }
-    // ALL sources unavailable
-    throw new Error(`GEOFENCE_SOURCE_UNAVAILABLE: all boundary sources failed for '${districtName}'; manual draw required`);
-  }
-  // -- Clean no-match on NZTA (source was reachable, name not found) --
-  // Phase 0 (item 4): Include top 3 fuzzy-matched valid TA names in the error.
-  let fuzzyHint = '';
-  try {
-    const canonical = await fetchCanonicalTaNames();
-    if (canonical.length > 0) {
-      const suggestions = fuzzyTopN(districtName, canonical, 3);
-      fuzzyHint = ' Did you mean: ' + suggestions.map((s)=>"'" + s + "'").join(', ') + '?';
-    }
-  } catch  {
-  // Non-critical -- proceed without fuzzy hint
-  }
-  // Self-diagnosing field dump (existing behaviour, enhanced with fuzzy hint)
-  try {
-    const sampleUrl = `${NZTA_TA_FEATURESERVER}/query?where=1=1&outFields=*&returnGeometry=false&resultRecordCount=1&f=json`;
-    const sres = await fetch(sampleUrl, {
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-    const sjson = await sres.json();
-    const fields = (sjson.fields ?? []).map((f)=>f.name).filter(Boolean).join(', ');
-    const sample = sjson.features?.[0]?.attributes ?? {};
-    const sampleStr = Object.entries(sample).slice(0, 8).map(([k, v])=>`${k}=${JSON.stringify(v)}`).join('; ');
-    throw new Error(`No NZTA TA boundary for '${districtName}'.${fuzzyHint} Available fields: [${fields}]. Sample attributes: ${sampleStr}. Set NZTA_TA_NAME_FIELD to the correct field.`);
-  } catch (e) {
-    if (e instanceof Error && e.message.startsWith('No NZTA TA boundary')) throw e;
-    throw new Error(`No NZTA TA boundary for '${districtName}'.${fuzzyHint} Field diagnosis failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
+async function fetchTaBoundary(districtName: string) {
+  const resolution = await resolveTaBoundary(districtName);
+  if (resolution.source_status === 'matched' && resolution.geometry && resolution.source) return resolution;
+  if (resolution.source_status === 'source_unavailable') throw new Error(`GEOFENCE_SOURCE_UNAVAILABLE: ${resolution.detail ?? 'Territorial Authority boundary source unavailable'}; manual draw required`);
+  throw new Error(`No Territorial Authority boundary found for '${districtName}'`);
 }
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
@@ -464,8 +269,9 @@ serve(async (req)=>{
       return json({ success: true, action_id: action.id, result_table: 'staff_onboarding_ledgers', result_record_id: ledgerId, note: 'Approved staff onboarding started.' });
     }
     // ── set_org_jurisdiction ──
-    // payload: { target_org_id, district_names: string[] }. Fetch each TA polygon
-    // from Stats NZ, union into one MultiPolygon, write organizations.jurisdiction_geom.
+    // payload: { target_org_id, district_names: string[] }. Resolve each TA polygon
+    // through the shared authoritative source ladder, union into one MultiPolygon,
+    // then write organizations.jurisdiction_geom.
     if (action.action_type === 'set_org_jurisdiction') {
       const jp = action.proposed_payload ?? {};
       const targetOrgId = jp.target_org_id ? String(jp.target_org_id) : String(action.organization_id);
@@ -475,29 +281,30 @@ serve(async (req)=>{
       const { data: targetOrg } = await admin.from('organizations').select('id').eq('id', targetOrgId).maybeSingle();
       if (!targetOrg) return await failAction(`target_org_id ${targetOrgId} does not exist`);
       // Phase 0 (item 1): Validate each TA name against the live canonical set
-      // BEFORE calling fetchTaGeoJson. On no exact match, return fuzzy suggestions.
+      // BEFORE resolving a boundary. On no exact match, return fuzzy suggestions.
       for (const name of districtNames){
         const validationErr = await validateTaName(name);
         if (validationErr) return await failAction(validationErr);
       }
-      // Fetch each TA polygon from NZTA FeatureServer.
+      // Fetch each TA polygon through the shared authoritative resolver.
       const polygons = [];
+      const boundarySources = new Set();
       for (const name of districtNames){
-        let geom = null;
+        let boundary = null;
         try {
-          geom = await fetchTaGeoJson(name);
+          boundary = await fetchTaBoundary(name);
         } catch (e) {
-          return await failAction(e instanceof Error ? e.message : `NZTA fetch failed for '${name}'`);
+          return await failAction(e instanceof Error ? e.message : `Territorial Authority boundary fetch failed for '${name}'`);
         }
-        if (!geom) return await failAction(`No NZTA Territorial Authority boundary found for '${name}'`);
-        polygons.push(geom);
+        polygons.push(boundary.geometry);
+        boundarySources.add(boundary.source);
       }
       // Union + write via the SQL helper. Phase 1: RPC now returns area (m^2).
       // Phase 4 fast-follow (0284): pass real provenance + actor.
       const { data: jurAreaData, error: rpcErr } = await admin.rpc('set_org_jurisdiction_geom', {
         p_org_id: targetOrgId,
         p_polygons: polygons,
-        p_boundary_source: 'nzta',
+        p_boundary_source: boundarySources.size === 1 ? [...boundarySources][0] : 'mixed_authoritative_ta',
         p_changed_by: action.approved_by ?? null
       });
       if (rpcErr) return await failAction(`set_org_jurisdiction_geom failed: ${rpcErr.message}`);
@@ -532,7 +339,7 @@ serve(async (req)=>{
         result_record_id: targetOrgId,
         // Phase 5: deep link to the org setup page for visual verification
         deep_link: `/org-setup`,
-        note: `Jurisdiction boundary set from NZTA for: ${districtNames.join(', ')}. UNVERIFIED -- open the Organisation Setup page to visually confirm the boundary on the map.`
+        note: `Jurisdiction boundary set from ${boundarySources.size === 1 ? [...boundarySources][0] : 'mixed authoritative TA sources'} for: ${districtNames.join(', ')}. UNVERIFIED -- open the Organisation Setup page to visually confirm the boundary on the map.`
       });
     }
     // ── set_site_risk_level ──
@@ -1296,12 +1103,12 @@ serve(async (req)=>{
     }
     // ── create_patrol_route_service_area ── (#19 Tier-2 geofence)
     // payload: { patrol_route_id (required, EXPLICIT id — never a name/label),
-    //            district_names: string[] (required, NZTA TA district names),
+    //            district_names: string[] (required, canonical TA names),
     //            despatch_zone_code?, name?, module_key? }
     // Gives a patrol route its SERVICE-AREA geofence: a location_zones row
     // (zone_type='patrol_route', Tier 2 of the four-tier design 0127) whose
-    // boundary is the union of the requested NZTA Territorial Authority
-    // district polygon(s) (same fetchTaGeoJson source as set_org_jurisdiction),
+    // boundary is the union of the requested Territorial Authority district
+    // polygon(s) (same shared resolver as set_org_jurisdiction),
     // linked to the route via patrol_route_zones.
     //
     // IDENTITY GUARD (the two-587-routes test, bob_identity_resolution_across_orgs
@@ -1362,7 +1169,7 @@ serve(async (req)=>{
         });
       }
       // Phase 0 (item 1): Validate each TA name against the live canonical set
-      // BEFORE calling fetchTaGeoJson. On no exact match, return fuzzy suggestions.
+      // BEFORE resolving a boundary. On no exact match, return fuzzy suggestions.
       for (const districtName of districtNames){
         const validationErr = await validateTaName(districtName);
         if (validationErr) return await failSa(validationErr);
@@ -1370,15 +1177,16 @@ serve(async (req)=>{
       // Fetch each requested district's TA polygon (reuses the fn already
       // proven by set_org_jurisdiction above).
       const polygons = [];
+      const boundarySources = new Set();
       for (const districtName of districtNames){
-        let geom = null;
+        let boundary = null;
         try {
-          geom = await fetchTaGeoJson(districtName);
+          boundary = await fetchTaBoundary(districtName);
         } catch (e) {
-          return await failSa(e instanceof Error ? e.message : `NZTA fetch failed for '${districtName}'`);
+          return await failSa(e instanceof Error ? e.message : `Territorial Authority boundary fetch failed for '${districtName}'`);
         }
-        if (!geom) return await failSa(`No NZTA Territorial Authority boundary found for '${districtName}'`);
-        polygons.push(geom);
+        polygons.push(boundary.geometry);
+        boundarySources.add(boundary.source);
       }
       const moduleKey = typeof pp.module_key === 'string' && pp.module_key.trim() ? pp.module_key.trim() : 'general_patrol';
       const zoneName = typeof pp.name === 'string' && pp.name.trim() ? pp.name.trim() : `${route.name} service area`;
@@ -1401,7 +1209,7 @@ serve(async (req)=>{
       const { data: saAreaData, error: geoErr } = await admin.rpc('set_zone_geometry', {
         p_zone_id: createdZone.id,
         p_polygons: polygons,
-        p_boundary_source: 'nzta',
+        p_boundary_source: boundarySources.size === 1 ? [...boundarySources][0] : 'mixed_authoritative_ta',
         p_changed_by: action.approved_by ?? null
       });
       if (geoErr) {

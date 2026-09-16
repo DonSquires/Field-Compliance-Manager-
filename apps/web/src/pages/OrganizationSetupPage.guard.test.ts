@@ -49,4 +49,10 @@ describe('governed organization profile setup', () => {
     expect(source).toContain("label: 'On site', help: 'How close (metres)");
     expect(source).toContain("Turn on {missing.map((dep) => moduleLabel(dep).label).join(', ')} first.");
   });
+
+  it('keeps a boundary-source outage distinct from a valid unmatched council name', () => {
+    expect(source).toContain('const unavailable = (data?.unavailable ?? []).join');
+    expect(source).toContain('Boundary source unavailable for: ${unavailable}');
+    expect(source).toContain('No council boundary matched: ${unmatched}');
+  });
 });

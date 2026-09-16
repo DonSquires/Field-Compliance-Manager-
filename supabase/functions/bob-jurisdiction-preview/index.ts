@@ -8,17 +8,16 @@
  * WHY (owner direction 2026-07-30): the org-jurisdiction boundary was only
  * visible AFTER approval (the executor fetches+unions+writes in one approved
  * step). So a human approved a boundary they could not see. This resolves the
- * SAME NZTA TA polygons READ-ONLY so the panel can draw them at PROPOSE time.
+ * same authoritative TA polygons READ-ONLY so the panel can draw them at PROPOSE time.
  *
  * GOVERNANCE: JWT + admin/master/grand_master only (same gate as
  * bob-resolve-geofence). READ-ONLY -- no DB write, no bob_agentic_actions row.
  * The governed write still happens later via propose -> approve ->
- * bob-proposal-execute, unchanged. Reuses _shared/ta-validation.ts constants +
- * the same ArcGIS name-match as the executor so preview and execute cannot
- * diverge on which polygon a name resolves to.
+ * bob-proposal-execute, unchanged. Reuses the shared TA boundary resolver so
+ * preview and execution cannot diverge on which polygon a name resolves to.
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { NZTA_TA_FEATURESERVER, TA_NAME_CANDIDATES } from '../_shared/ta-validation.ts';
+import { resolveTaBoundary } from '../_shared/ta-boundary-resolver.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -39,44 +38,6 @@ function json(body, status = 200) {
       'Content-Type': 'application/json'
     }
   });
-}
-const snippet = (s)=>s.replace(/\s+/g, ' ').trim().slice(0, 300);
-// Mirrors arcgisQueryByName in bob-proposal-execute: same server, f=geojson,
-// outSR=4326 -- so preview resolves the identical polygon the executor writes.
-async function arcgisQueryByName(field, districtName) {
-  const where = `UPPER(${field}) = UPPER('${districtName.replace(/'/g, "''")}')`;
-  const url = `${NZTA_TA_FEATURESERVER}/query` + `?where=${encodeURIComponent(where)}` + `&outFields=*&returnGeometry=true&outSR=4326&f=geojson`;
-  const res = await fetch(url, {
-    headers: {
-      Accept: 'application/json'
-    }
-  });
-  const text = await res.text();
-  const looksLikeFieldError = /does not exist|could not be found|cannot be found|unable to (complete|perform)|invalid (field|where|expression)|no field|unknown field/i.test(text) || /"error"\s*:/.test(text) && /field|where|expression/i.test(text);
-  if (looksLikeFieldError) return 'field_error';
-  if (!res.ok) throw new Error(`NZTA ArcGIS query failed (${res.status}) for '${districtName}' field '${field}': ${snippet(text)}`);
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch  {
-    throw new Error(`NZTA ArcGIS returned non-JSON for '${districtName}': ${snippet(text)}`);
-  }
-  if (data.error) return 'field_error';
-  const features = data.features ?? [];
-  return features[0]?.geometry ?? null;
-}
-async function resolveTaGeometry(name) {
-  for (const field of TA_NAME_CANDIDATES){
-    let result;
-    try {
-      result = await arcgisQueryByName(field, name);
-    } catch (_e) {
-      continue; // source outage on this field -- try the next candidate field
-    }
-    if (result === 'field_error') continue;
-    if (result) return result;
-  }
-  return null;
 }
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
@@ -124,25 +85,27 @@ serve(async (req)=>{
     }
     const results = [];
     for (const name of names){
-      let geometry = null;
-      try {
-        geometry = await resolveTaGeometry(name);
-      } catch (_e) {
-        geometry = null;
-      }
+      const resolution = await resolveTaBoundary(name);
       results.push({
         name,
-        matched: Boolean(geometry),
-        geometry
+        matched: resolution.source_status === 'matched',
+        geometry: resolution.geometry,
+        source: resolution.source,
+        source_status: resolution.source_status,
+        detail: resolution.detail
       });
     }
     const unmatched = results.filter((r)=>!r.matched).map((r)=>r.name);
+    const unavailable = results.filter((r)=>r.source_status === 'source_unavailable').map((r)=>r.name);
+    const sources = [...new Set(results.map((r)=>r.source).filter(Boolean))];
     return json({
       ok: true,
       results,
       matched_count: results.length - unmatched.length,
       unmatched,
-      note: unmatched.length === 0 ? 'All councils resolved. PREVIEW only -- nothing is saved until you propose + approve.' : `Resolved ${results.length - unmatched.length}/${results.length}. Unmatched: ${unmatched.join(', ')}.`
+      unavailable,
+      sources,
+      note: unmatched.length === 0 ? `All councils resolved from ${sources.join(', ')}. PREVIEW only -- nothing is saved until you propose + approve.` : unavailable.length ? `Boundary source unavailable for: ${unavailable.join(', ')}. Nothing has been saved; retry or draw the boundary manually.` : `Resolved ${results.length - unmatched.length}/${results.length}. Unmatched: ${unmatched.join(', ')}.`
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
