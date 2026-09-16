@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Activity, Briefcase, Building2, Car, HeartPulse, Radio, Video } from 'lucide-react';
+import { Activity, Briefcase, Building2, Car, HeartPulse, Radio, Video, Wrench } from 'lucide-react';
 import { SPECIALTY_MODULES } from './specialtyModules';
 
 export type PlatformModuleKey =
@@ -15,7 +15,8 @@ export type PlatformModuleKey =
   | 'finance'
   | 'welfare'
   | 'dispatch'
-  | 'cctv';
+  | 'cctv'
+  | 'workshop';
 
 export interface PlatformModuleDefinition {
   key: PlatformModuleKey;
@@ -54,6 +55,8 @@ const PLATFORM_MODULES: PlatformModuleDefinition[] = [
   // Catalog rows added by 20260915120000_platform_subscriber_provisioning.sql.
   { key: 'dispatch', label: 'Dispatch', description: 'Callouts, alarm responses, dispatch jobs, and the live map', icon: Radio, standaloneSellable: true, dependsOn: [] },
   { key: 'cctv', label: 'CCTV', description: 'Camera footage library, review, and evidence packaging', icon: Video, standaloneSellable: true, dependsOn: [] },
+  // Catalog row added by 20260916110000_workshop_module.sql. Prices come from the finance price book, so finance is required.
+  { key: 'workshop', label: 'Workshop', description: 'Fabrication builds, maintenance visits, bills of materials, stock on hand, and one-step invoicing of completed work', icon: Wrench, standaloneSellable: false, dependsOn: ['finance'] },
 ];
 
 export const PLATFORM_MODULE_MANIFEST: readonly PlatformModuleDefinition[] = [...FIELD_OPS_MODULES, ...PLATFORM_MODULES];

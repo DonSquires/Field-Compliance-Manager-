@@ -354,3 +354,36 @@ rego/WoF/CoF status, `homeless_status`; no `registered_owner_name`, no
 `homeless_notes`) and `canonical_scv_public` — are now the read path for the
 field and admin vehicle pages and observation search. Verified live as the R&M
 master: 8,975 rows through the projection, 0 through the base table.
+
+### 2026-09-16 — Manufacturing & maintenance is its own module (Don Squires)
+
+> "Let's put the materials in scope as we will need to create another module
+> for manufacturing and maintenance." Asked how it should sit: **a new
+> 'workshop' module on the existing work spine** (not folded into Dispatch, not
+> a full MRP). First slice: fabrication work orders with a bill of materials from
+> the price book; maintenance visits to a client place/asset (materials + labour
+> + travel); strict inventory draw-down and stock-on-hand per workshop/van
+> location; reusable BOM templates.
+
+**Live status (2026-09-16, migration `20260916110000`, applied to
+`dotczcyyzgabmtmnglqj`).** `module_catalog` row `workshop` (depends on
+`finance` for the price book; enabled for R & M). Tables
+`workshop_bom_templates(_lines)`, `workshop_work_orders`,
+`workshop_work_order_lines` (org-scoped read via `org_access_allowed`, writes
+only through RPCs). Ladder `draft → approved → in_progress → completed`
+(cancel from any open state); the assigned worker may start/complete, an
+administrator approves/cancels. Completion draws every material/equipment line
+with a price-book item down from the order's stock location through
+`record_finance_inventory_transaction` (idempotent on `workshop_line:<id>`) and
+refuses with a plain message when stock is short — a maintenance visit with no
+stock location completes with no stock movement. A maintenance order must name
+a site or an asset (a facet of the place model, never a free-text address).
+`generate_crm_invoice_from_completed_work` sweeps every completed, uninvoiced
+workshop line **and** dispatch charge line for one client into a single draft
+invoice (GST 15%) and stamps `invoice_line_item_id` on the sources — before this
+migration nothing populated that column on `dispatch_job_charge_lines`, so
+completed dispatch jobs were producing charge lines no invoice ever picked up.
+Truth table: `supabase/tests/20260916110000_workshop_rls.sql` (40 checks).
+Surface: admin `Workshop` page (work orders / templates / stock) under Field
+Operations. Verified live as the R&M master (rolled back): template from a real
+R&M material → `WO-202609-0001` with a priced line → completed.

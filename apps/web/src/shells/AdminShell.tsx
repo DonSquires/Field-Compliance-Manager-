@@ -48,6 +48,7 @@ import {
     Tags,
   Shield,
   Users,
+  Wrench,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -78,6 +79,7 @@ const RelationshipWorkspacePage = React.lazy(() => import('../pages/Relationship
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
 const RateRulesPage = React.lazy(() => import('../pages/RateRulesPage'));
+const WorkshopPage = React.lazy(() => import('../pages/WorkshopPage'));
 const FinanceBureauPage = React.lazy(() => import('../pages/FinanceBureauPage'));
 const FinanceConnectionsPage = React.lazy(() => import('../pages/FinanceConnectionsPage'));
 const FinanceMoneyPage = React.lazy(() => import('../pages/FinanceMoneyPage'));
@@ -125,7 +127,7 @@ type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
-  | 'platform-subscriptions' | 'platform-billing' | 'platform-subscribers' | 'builder';
+  | 'platform-subscriptions' | 'platform-billing' | 'platform-subscribers' | 'builder' | 'workshop';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
@@ -154,6 +156,7 @@ const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
   roster: 'rostering', 'roster-targets': 'rostering',
   'people-hr': 'hr',
   'finance-bureau': 'finance', 'finance-connections': 'finance', 'finance-money': 'finance', 'finance-costing': 'finance', 'finance-pricing': 'finance', 'rate-rules': 'finance',
+  workshop: 'workshop',
 };
 
 function canAccessAdminPage(page: AdminPage, role: string | undefined, isModuleEnabled: (moduleKey: string) => boolean): boolean {
@@ -199,6 +202,7 @@ const NAVIGATION_MAP = {
     { id: 'roster', label: 'Schedules & Rosters', icon: Users },
     { id: 'people-hr', label: 'People, Pay & HR', icon: Users },
     { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
+    { id: 'workshop', label: 'Workshop', icon: Wrench },
   ],
   'Clients & Commercial': [
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
@@ -575,6 +579,8 @@ const AdminShell: React.FC = () => {
         return <RosterOperationsPage />;
       case 'rate-rules':
         return <RateRulesPage />;
+      case 'workshop':
+        return <WorkshopPage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'finance-bureau':
         return <FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'finance-connections':
