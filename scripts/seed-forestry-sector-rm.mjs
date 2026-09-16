@@ -46,6 +46,16 @@ BEGIN
     RAISE EXCEPTION 'Actor profile % not found', v_actor;
   END IF;
 
+  -- Provider module enablement is an explicit opt-in in the data file: for a service_provider it creates a
+  -- Layer-1 subscription line (tg_align_module_subscription), i.e. a billing change for the tenant.
+  FOR v_mod IN SELECT jsonb_array_elements_text(coalesce(v_data->'provider_modules', '[]'::jsonb)) LOOP
+    IF NOT EXISTS (SELECT 1 FROM public.organization_modules WHERE organization_id = v_provider AND module_key = v_mod) THEN
+      INSERT INTO public.organization_modules (organization_id, module_key, enabled, settings) VALUES (v_provider, v_mod, true, jsonb_build_object('seed_key', v_seed, 'basis', v_data->>'provider_modules_basis'));
+      INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+      VALUES (v_provider, v_actor, 'seed_forestry_sector.provider_module_enabled', 'organization_modules', v_provider, jsonb_build_object('seed_key', v_seed, 'module_key', v_mod, 'basis', v_data->>'provider_modules_basis', 'creates_subscription_line', true));
+    END IF;
+  END LOOP;
+
   FOR v_org IN SELECT * FROM jsonb_array_elements(v_data->'organizations') LOOP
     v_req := md5(v_seed || ':org:' || (v_org->>'key'))::uuid;
     SELECT id INTO v_org_id FROM public.organizations
@@ -174,6 +184,45 @@ BEGIN
         END IF;
       END LOOP;
     END LOOP;
+
+    -- Operational link: what manage_crm_agreement_setup / manage_crm_agreement_zone_coverage would do once the
+    -- client has accepted — acceptance itself is recorded here on the owner's instruction with its basis.
+    IF v_agreement_id IS NOT NULL AND (v_org->'agreement'->>'invitation_status') = 'accepted' THEN
+      UPDATE public.service_agreements
+         SET invitation_status = 'accepted',
+             external_refs = external_refs || jsonb_build_object('accepted_basis', v_org->'agreement'->>'accepted_basis', 'accepted_recorded_at', v_data->>'retrieved_at')
+       WHERE id = v_agreement_id AND invitation_status = 'not_invited';
+      IF FOUND THEN
+        INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+        VALUES (v_provider, v_actor, 'seed_forestry_sector.agreement_accepted', 'service_agreements', v_agreement_id, jsonb_build_object('seed_key', v_seed, 'client_organization_id', v_org_id, 'basis', v_org->'agreement'->>'accepted_basis'));
+      END IF;
+      FOR v_mod IN SELECT jsonb_array_elements_text(coalesce(v_org->'agreement'->'enabled_modules', '[]'::jsonb)) LOOP
+        IF NOT EXISTS (SELECT 1 FROM public.service_agreement_modules WHERE service_agreement_id = v_agreement_id AND module_key = v_mod) THEN
+          INSERT INTO public.service_agreement_modules (service_agreement_id, module_key, enabled, settings) VALUES (v_agreement_id, v_mod, true, jsonb_build_object('seed_key', v_seed));
+        END IF;
+      END LOOP;
+      UPDATE public.service_agreements
+         SET enabled_modules = coalesce((SELECT array_agg(sam.module_key ORDER BY sam.module_key) FROM public.service_agreement_modules sam WHERE sam.service_agreement_id = v_agreement_id AND sam.enabled), '{}'::text[])
+       WHERE id = v_agreement_id;
+      IF coalesce((v_org->'agreement'->>'link_all_sites')::boolean, false) THEN
+        INSERT INTO public.service_agreement_locations (service_agreement_id, site_id, status, created_by)
+        SELECT v_agreement_id, s.id, 'active', v_actor FROM public.client_sites s
+         WHERE s.client_organization_id = v_org_id AND s.active
+           AND NOT EXISTS (SELECT 1 FROM public.service_agreement_locations l WHERE l.service_agreement_id = v_agreement_id AND l.site_id = s.id);
+        UPDATE public.client_sites SET service_agreement_id = v_agreement_id WHERE client_organization_id = v_org_id AND active AND service_agreement_id IS NULL;
+      END IF;
+      IF coalesce((v_org->'agreement'->>'link_all_zones')::boolean, false) THEN
+        INSERT INTO public.service_agreement_locations (service_agreement_id, zone_id, status, created_by)
+        SELECT v_agreement_id, z.id, 'active', v_actor FROM public.location_zones z
+         WHERE z.organization_id = v_org_id AND z.is_active
+           AND NOT EXISTS (SELECT 1 FROM public.service_agreement_locations l WHERE l.service_agreement_id = v_agreement_id AND l.zone_id = z.id);
+        INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
+        VALUES (v_provider, v_actor, 'seed_forestry_sector.agreement_coverage_linked', 'service_agreement_locations', v_agreement_id,
+                jsonb_build_object('seed_key', v_seed, 'client_organization_id', v_org_id,
+                                   'zones_covered', (SELECT count(*) FROM public.service_agreement_locations l WHERE l.service_agreement_id = v_agreement_id AND l.zone_id IS NOT NULL AND l.status = 'active'),
+                                   'sites_covered', (SELECT count(*) FROM public.service_agreement_locations l WHERE l.service_agreement_id = v_agreement_id AND l.site_id IS NOT NULL AND l.status = 'active')));
+      END IF;
+    END IF;
   END LOOP;
 END
 $seed$;
@@ -192,6 +241,11 @@ SELECT
   (SELECT count(*) FROM public.location_zones WHERE metadata->>'seed_key' = '${data.seed_key}' AND center_point IS NOT NULL) AS placed_zones,
   (SELECT count(*) FROM public.location_zones WHERE metadata->>'seed_key' = '${data.seed_key}' AND jurisdiction_rule_set_id IS NOT NULL) AS zones_with_rules,
   (SELECT count(*) FROM public.zone_closures c JOIN public.location_zones z ON z.id = c.zone_id WHERE z.metadata->>'seed_key' = '${data.seed_key}') AS closures,
+  (SELECT count(*) FROM public.service_agreements WHERE provider_organization_id = '${data.provider_organization_id}' AND external_refs->>'seed_key' = '${data.seed_key}' AND invitation_status = 'accepted') AS agreements_accepted,
+  (SELECT count(*) FROM public.service_agreement_modules m JOIN public.service_agreements a ON a.id = m.service_agreement_id WHERE a.external_refs->>'seed_key' = '${data.seed_key}' AND m.enabled) AS agreement_modules,
+  (SELECT count(*) FROM public.service_agreement_locations l JOIN public.service_agreements a ON a.id = l.service_agreement_id WHERE a.external_refs->>'seed_key' = '${data.seed_key}' AND l.zone_id IS NOT NULL AND l.status = 'active') AS zones_covered,
+  (SELECT count(*) FROM public.service_agreement_locations l JOIN public.service_agreements a ON a.id = l.service_agreement_id WHERE a.external_refs->>'seed_key' = '${data.seed_key}' AND l.site_id IS NOT NULL AND l.status = 'active') AS sites_covered,
+  (SELECT string_agg(m.module_key || ':' || coalesce(s.status, 'no-subscription-line'), ', ' ORDER BY m.module_key) FROM public.organization_modules m LEFT JOIN public.org_module_subscriptions s ON s.organization_id = m.organization_id AND s.module_key = m.module_key WHERE m.organization_id = '${data.provider_organization_id}' AND m.settings->>'seed_key' = '${data.seed_key}') AS provider_modules_enabled,
   (SELECT count(*) FROM public.audit_log WHERE action LIKE 'seed_forestry_sector.%' AND metadata->>'seed_key' = '${data.seed_key}') AS audit_rows;
 `;
 

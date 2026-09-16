@@ -4,6 +4,8 @@
   "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
   "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
   "retrieved_at": "2026-09-16",
+  "provider_modules": ["access_control"],
+  "provider_modules_basis": "Owner instruction 2026-09-16 ('yes, link R&M to TPFL and OFO'): enabling access_control on R & M creates an active Layer-1 org_module_subscriptions line at module_catalog pricing (access_control $500/month base at the time).",
   "notes": [
     "Every fact below was read from the organisation's own public website (Bob sector-reference allowlist) on 2026-09-16; source_urls record where.",
     "Office sites were geocoded through the app's governed LINZ path (linz-lookup address_autocomplete); geocode.match records whether the LINZ address matched the published street number exactly.",
@@ -30,7 +32,11 @@
         "enabled_modules": ["access_control", "patrol"],
         "evidence": "tasmanpine.co.nz/forest-security: 'Forest patrols and security checks are completed across our forest and managed by R&M Security & Investigations Ltd'. Forest Rules (July 2024): hunting block applications via R&M Security & Investigations Ltd; after-hours incidents to R&M Security.",
         "evidence_urls": ["https://www.tasmanpine.co.nz/forest-security/", "https://www.tasmanpine.co.nz/s/TPFL_Forest-Rules.pdf"],
-        "external_refs": { "security_phone": "027 530 6230", "hunting_ballot_email": "intel@remsec.co.nz", "client_security_mailbox": "security@tasmanpine.co.nz" }
+        "external_refs": { "security_phone": "027 530 6230", "hunting_ballot_email": "intel@remsec.co.nz", "client_security_mailbox": "security@tasmanpine.co.nz" },
+        "invitation_status": "accepted",
+        "accepted_basis": "Recorded as accepted on the owner's instruction (2026-09-16); the relationship is published by the client itself (tasmanpine.co.nz/forest-security, Forest Rules July 2024). No client portal invitation was sent.",
+        "link_all_sites": true,
+        "link_all_zones": true
       },
       "rule_set": {
         "module_key": "access_control",
@@ -110,7 +116,11 @@
         "enabled_modules": ["access_control", "patrol"],
         "evidence": "onefortyone.com/community/public-information/public-hunting-new-zealand: 'R&M Security are managing the booking process on our behalf' (2026 season). Contact page lists Forest Security +64 275 306 230 (R&M's forest security number, also published by TPFL).",
         "evidence_urls": ["https://onefortyone.com/community/public-information/public-hunting-new-zealand", "https://onefortyone.com/contact-us"],
-        "external_refs": { "security_phone": "+64 27 530 6230", "hunting_permit_fee_nzd": 175, "hunting_season_2026": "2026-04-03/2026-10-25", "hunting_blocks": 60, "hunting_hectares": 45684 }
+        "external_refs": { "security_phone": "+64 27 530 6230", "hunting_permit_fee_nzd": 175, "hunting_season_2026": "2026-04-03/2026-10-25", "hunting_blocks": 60, "hunting_hectares": 45684 },
+        "invitation_status": "accepted",
+        "accepted_basis": "Recorded as accepted on the owner's instruction (2026-09-16); the relationship is published by the client itself (onefortyone.com public-hunting-new-zealand: 'R&M Security are managing the booking process on our behalf'). No client portal invitation was sent.",
+        "link_all_sites": true,
+        "link_all_zones": true
       },
       "rule_set": {
         "module_key": "access_control",
