@@ -55,6 +55,7 @@ services:
     image: fcm/fcm-inference:local
     container_name: fcm-inference
     restart: unless-stopped
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
     ports:
       - "127.0.0.1:3002:3000"
     env_file: /opt/fcm/.env

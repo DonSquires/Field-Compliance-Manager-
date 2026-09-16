@@ -194,8 +194,15 @@ def plausible_box(kind: str, bbox: dict[str, int] | None, width: int, height: in
     return True
 
 
+def path_is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def detector_status() -> dict[str, Any]:
-    staged = DETECTOR_MODEL_PATH.is_file()
+    staged = path_is_file(DETECTOR_MODEL_PATH)
     cpu_vehicle = _openvino_vehicle_staged()
     return {
         "detector": "ready" if staged else ("vehicle_only" if cpu_vehicle else "not_staged"),
@@ -208,13 +215,13 @@ def detector_status() -> dict[str, Any]:
 
 
 def _openvino_vehicle_staged() -> bool:
-    return OPENVINO_VEHICLE_DETECTOR_PATH.is_file() and OPENVINO_VEHICLE_DETECTOR_PATH.with_suffix(".bin").is_file()
+    return path_is_file(OPENVINO_VEHICLE_DETECTOR_PATH) and path_is_file(OPENVINO_VEHICLE_DETECTOR_PATH.with_suffix(".bin"))
 
 
 def _species_provider() -> str:
     if SPECIES_PROVIDER in ("speciesnet", "classifier"):
         return SPECIES_PROVIDER
-    if SPECIES_MODEL_PATH.is_file():
+    if path_is_file(SPECIES_MODEL_PATH):
         return "classifier"
     try:
         import speciesnet  # noqa: F401
@@ -226,7 +233,7 @@ def _species_provider() -> str:
 def _species_available() -> bool:
     provider = _species_provider()
     if provider == "classifier":
-        return SPECIES_MODEL_PATH.is_file()
+        return path_is_file(SPECIES_MODEL_PATH)
     return provider == "speciesnet"
 
 
@@ -276,7 +283,7 @@ def _load_detector() -> Any:
     global _detector_model, _detector_names
     if _detector_model is not None:
         return _detector_model
-    if not DETECTOR_MODEL_PATH.is_file():
+    if not path_is_file(DETECTOR_MODEL_PATH):
         raise FileNotFoundError("detector model is not staged")
     from ultralytics import YOLO  # heavy import, only when a model exists
 
@@ -288,7 +295,7 @@ def _load_detector() -> Any:
 
 def detect(image: np.ndarray, confidence: float = DETECTOR_CONFIDENCE) -> dict[str, Any]:
     """Triage every person / vehicle / animal in a frame. ``coverage`` lists the kinds the staged tier can see."""
-    if not DETECTOR_MODEL_PATH.is_file():
+    if not path_is_file(DETECTOR_MODEL_PATH):
         if _openvino_vehicle_staged():
             try:
                 return {"status": "ready", "coverage": ["vehicle"], "detections": detect_vehicles_openvino(image),
@@ -341,7 +348,7 @@ def classify_species(image: np.ndarray, bbox: dict[str, int]) -> dict[str, Any]:
     crop = _crop(image, bbox)
     if provider == "speciesnet":
         return _classify_with_speciesnet(crop)
-    if provider == "classifier" and SPECIES_MODEL_PATH.is_file():
+    if provider == "classifier" and path_is_file(SPECIES_MODEL_PATH):
         return _classify_with_classifier(crop)
     return {"species": "other", "common_name": "Unidentified animal", "is_pest": None, "species_confidence": None,
             "species_status": "model_not_staged", "species_provider": None}

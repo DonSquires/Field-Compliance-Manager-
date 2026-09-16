@@ -64,9 +64,9 @@ def _health_payload() -> dict[str, str]:
         "status": "ok",
         "service": "fcm-inference",
         "models_dir": str(MODELS_DIR),
-        "face_models": "ready" if YUNET_MODEL_PATH.is_file() and SFACE_MODEL_PATH.is_file() else "not_staged",
-        "vehicle_model": "ready" if VEHICLE_MODEL_PATH.is_file() and VEHICLE_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
-        "person_model": "ready" if PERSON_MODEL_PATH.is_file() and PERSON_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
+        "face_models": "ready" if entity_detector.path_is_file(YUNET_MODEL_PATH) and entity_detector.path_is_file(SFACE_MODEL_PATH) else "not_staged",
+        "vehicle_model": "ready" if entity_detector.path_is_file(VEHICLE_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_MODEL_PATH.with_suffix('.bin')) else "not_staged",
+        "person_model": "ready" if entity_detector.path_is_file(PERSON_MODEL_PATH) and entity_detector.path_is_file(PERSON_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "detector_model": detector_state["detector"],
         "species_model": detector_state["species"],
     }

@@ -123,7 +123,7 @@ def _vehicle_reid_runtime() -> Any:
     global _vehicle_reid_compiled
     if _vehicle_reid_compiled is not None:
         return _vehicle_reid_compiled
-    if not VEHICLE_REID_MODEL_PATH.is_file() or not VEHICLE_REID_MODEL_PATH.with_suffix('.bin').is_file():
+    if not entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH) or not entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH.with_suffix('.bin')):
         raise FileNotFoundError("vehicle re-identification model is not staged")
     core = Core()
     _vehicle_reid_compiled = core.compile_model(core.read_model(str(VEHICLE_REID_MODEL_PATH)), "CPU")
@@ -194,7 +194,7 @@ def _vehicle_runtime() -> Any:
     global _vehicle_model, _vehicle_compiled
     if _vehicle_compiled is not None:
         return _vehicle_compiled
-    if not VEHICLE_MODEL_PATH.is_file() or not VEHICLE_MODEL_PATH.with_suffix('.bin').is_file():
+    if not entity_detector.path_is_file(VEHICLE_MODEL_PATH) or not entity_detector.path_is_file(VEHICLE_MODEL_PATH.with_suffix('.bin')):
         raise FileNotFoundError("vehicle attributes model is not staged")
     _vehicle_model = Core().read_model(str(VEHICLE_MODEL_PATH))
     _vehicle_compiled = Core().compile_model(_vehicle_model, "CPU")
@@ -264,7 +264,7 @@ def _person_runtime() -> Any:
     global _person_compiled
     if _person_compiled is not None:
         return _person_compiled
-    if not PERSON_MODEL_PATH.is_file() or not PERSON_MODEL_PATH.with_suffix('.bin').is_file():
+    if not entity_detector.path_is_file(PERSON_MODEL_PATH) or not entity_detector.path_is_file(PERSON_MODEL_PATH.with_suffix('.bin')):
         raise FileNotFoundError("person detection model is not staged")
     core = Core()
     _person_compiled = core.compile_model(core.read_model(str(PERSON_MODEL_PATH)), "CPU")
@@ -275,7 +275,7 @@ def _person_reid_runtime() -> Any:
     global _person_reid_compiled
     if _person_reid_compiled is not None:
         return _person_reid_compiled
-    if not PERSON_REID_MODEL_PATH.is_file() or not PERSON_REID_MODEL_PATH.with_suffix('.bin').is_file():
+    if not entity_detector.path_is_file(PERSON_REID_MODEL_PATH) or not entity_detector.path_is_file(PERSON_REID_MODEL_PATH.with_suffix('.bin')):
         raise FileNotFoundError("person re-identification model is not staged")
     core = Core()
     _person_reid_compiled = core.compile_model(core.read_model(str(PERSON_REID_MODEL_PATH)), "CPU")
@@ -509,7 +509,7 @@ def _face_models() -> tuple[Any, Any]:
     global _face_detector, _face_recognizer
     if _face_detector is not None and _face_recognizer is not None:
         return _face_detector, _face_recognizer
-    if not YUNET_MODEL_PATH.is_file() or not SFACE_MODEL_PATH.is_file():
+    if not entity_detector.path_is_file(YUNET_MODEL_PATH) or not entity_detector.path_is_file(SFACE_MODEL_PATH):
         raise FileNotFoundError("YuNet/SFace ONNX models are not staged")
     if not hasattr(cv2, "FaceDetectorYN_create") or not hasattr(cv2, "FaceRecognizerSF_create"):
         raise RuntimeError("installed OpenCV does not provide YuNet/SFace APIs")
@@ -565,11 +565,11 @@ async def health() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "fcm-inference",
-        "face_models": "ready" if YUNET_MODEL_PATH.is_file() and SFACE_MODEL_PATH.is_file() else "not_staged",
-        "vehicle_model": "ready" if VEHICLE_MODEL_PATH.is_file() and VEHICLE_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
-        "person_model": "ready" if PERSON_MODEL_PATH.is_file() and PERSON_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
-        "person_reidentification_model": "ready" if PERSON_REID_MODEL_PATH.is_file() and PERSON_REID_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
-        "vehicle_reidentification_model": "ready" if VEHICLE_REID_MODEL_PATH.is_file() and VEHICLE_REID_MODEL_PATH.with_suffix('.bin').is_file() else "not_staged",
+        "face_models": "ready" if entity_detector.path_is_file(YUNET_MODEL_PATH) and entity_detector.path_is_file(SFACE_MODEL_PATH) else "not_staged",
+        "vehicle_model": "ready" if entity_detector.path_is_file(VEHICLE_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_MODEL_PATH.with_suffix('.bin')) else "not_staged",
+        "person_model": "ready" if entity_detector.path_is_file(PERSON_MODEL_PATH) and entity_detector.path_is_file(PERSON_MODEL_PATH.with_suffix('.bin')) else "not_staged",
+        "person_reidentification_model": "ready" if entity_detector.path_is_file(PERSON_REID_MODEL_PATH) and entity_detector.path_is_file(PERSON_REID_MODEL_PATH.with_suffix('.bin')) else "not_staged",
+        "vehicle_reidentification_model": "ready" if entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH) and entity_detector.path_is_file(VEHICLE_REID_MODEL_PATH.with_suffix('.bin')) else "not_staged",
         "detector_model": detector_state["detector"],
         "species_model": detector_state["species"],
     }
