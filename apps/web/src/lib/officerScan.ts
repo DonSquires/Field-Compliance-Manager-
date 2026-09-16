@@ -14,6 +14,17 @@ export interface OfficerScanPayload {
   synced_at?: string;
 }
 
+export interface ScanSafetyWarningSummary {
+  id: string;
+  hazard_class: string;
+  alert_level: string;
+  raised_at: string;
+  organization_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  is_own_organization: boolean;
+}
+
 export interface OfficerScanResult {
   plate_number: string;
   plate_source: 'alpr' | 'manual';
@@ -25,6 +36,8 @@ export interface OfficerScanResult {
   limit_consecutive: number | null;
   limit_monthly: number | null;
   is_scv: boolean;
+  /** Platform-wide H&S warnings on the plate, redacted (get_safety_warnings). */
+  safety_warnings?: ScanSafetyWarningSummary[] | null;
   enforcement_exempt?: boolean;
   exemption_reason?: string | null;
   zone_id: string | null;

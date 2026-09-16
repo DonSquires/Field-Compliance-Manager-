@@ -35,6 +35,7 @@ import {
 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import { resolveAddressForCoordinates } from '../lib/locationAddress';
+import { ScanSafetyWarnings } from '../components/ScanSafetyWarnings';
 import './PageStyles.css';
 
 interface ObservationSummary {
@@ -496,6 +497,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
                 <span className="fc-source">{result.plate_source === 'alpr' ? 'ALPR' : 'MANUAL'}</span>
               </div>
               <div className="fc-result-plate">{result.plate_number}</div>
+              <ScanSafetyWarnings warnings={result.safety_warnings} />
               <p className="fc-verdict-message">{STATUS_MESSAGE[status]}</p>
               {result.compliance_reason && <p className="fc-reason">{formatComplianceReason(result.compliance_reason)}</p>}
               {result.zone_closed && <div className="alert alert-warning" role="alert"><AlertTriangle size={16} aria-hidden="true" />Zone closure in force: {result.zone_closure?.closure_type.replaceAll('_', ' ') ?? 'closure'}{result.zone_closure?.reason ? ` · ${result.zone_closure.reason}` : ''}. The compliance verdict remains rule-derived.</div>}

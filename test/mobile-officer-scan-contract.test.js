@@ -79,3 +79,19 @@ test('mobile scan queue clearly distinguishes empty, pending, and synced states'
 test('mobile queue drops terminal server failures instead of retrying them', () => {
   assert.match(source, /catch \(error\) \{\s*if \(!isNetworkFailure\(error\)\)/);
 });
+test('a scan surfaces every organisation\'s redacted safety warnings on the plate before the officer approaches', () => {
+  // H&S exception (ORG_SERVICE_MODEL): hazard class, severity, raising org + contact path — never the narrative.
+  assert.match(edgeFunction, /supabase\.rpc\('get_safety_warnings', \{\s*p_entity_type: 'vehicle'/);
+  assert.match(edgeFunction, /is_own_organization: warning\.organization_id === orgId/);
+  assert.doesNotMatch(edgeFunction, /reason: warning\.reason/);
+  assert.match(edgeFunction, /safety_warnings: parkingSafetyWarnings/);
+  assert.match(edgeFunction, /safety_warnings: safetyWarnings/);
+  assert.match(source, /safety_warnings\?:/);
+  assert.match(screen, /result\.safety_warnings/);
+  const webResult = readFileSync(resolve(__dirname, '../apps/web/src/lib/officerScan.ts'), 'utf8');
+  const fcPage = readFileSync(resolve(__dirname, '../apps/web/src/pages/OfficerFreedomCampingPage.tsx'), 'utf8');
+  const parkingPage = readFileSync(resolve(__dirname, '../apps/web/src/pages/OfficerParkingPage.tsx'), 'utf8');
+  assert.match(webResult, /safety_warnings\?: ScanSafetyWarningSummary\[\] \| null/);
+  assert.match(fcPage, /<ScanSafetyWarnings warnings=\{result\.safety_warnings\} \/>/);
+  assert.match(parkingPage, /setScanWarnings\(data\.safety_warnings \?\? \[\]\)/);
+});

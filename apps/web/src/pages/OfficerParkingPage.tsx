@@ -12,8 +12,9 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { type AddressCandidate, resolveAddressCandidates } from '../lib/locationAddress';
-import { imageFileToBase64 } from '../lib/officerScan';
+import { imageFileToBase64, type ScanSafetyWarningSummary } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
+import { ScanSafetyWarnings } from '../components/ScanSafetyWarnings';
 import './PageStyles.css';
 
 interface ChalkRecord {
@@ -39,6 +40,7 @@ interface ParkingScanResult {
   effective_limit_minutes: number;
   recommended_action: string;
   zone_name: string | null;
+  safety_warnings?: ScanSafetyWarningSummary[] | null;
   breach_write_error?: string;
 }
 
@@ -63,6 +65,7 @@ const OfficerParkingPage: React.FC = () => {
   const [preparingImage, setPreparingImage] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
+  const [scanWarnings, setScanWarnings] = useState<ScanSafetyWarningSummary[]>([]);
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
@@ -194,6 +197,7 @@ const OfficerParkingPage: React.FC = () => {
       clearVehicleCapture();
       setShowForm(false);
       setReceipt(`Chalk recorded for ${data.zone_name ?? 'selected Zone'}: ${data.verdict.replace(/_/g, ' ')}. Return policy: ${data.effective_limit_minutes} minutes.`);
+      setScanWarnings(data.safety_warnings ?? []);
       if (data.breach_write_error) setError(data.breach_write_error);
       await loadRecords();
     } catch (err) {
@@ -244,6 +248,7 @@ const OfficerParkingPage: React.FC = () => {
           {error}
         </div>
       )}
+      {receipt && <ScanSafetyWarnings warnings={scanWarnings} />}
       {receipt && <div className="alert alert-success" role="status">{receipt}</div>}
 
       <button className="btn btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>

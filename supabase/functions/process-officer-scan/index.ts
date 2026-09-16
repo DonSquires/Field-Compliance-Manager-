@@ -61,6 +61,29 @@ const PLATE_RECOGNIZER_TIMEOUT_MS = 20_000;
 const INFER_TIMEOUT_MS = 30_000;
 const MIN_ALPR_CONFIDENCE = 0.75;
 const SCAN_BUCKET = 'scans';
+// H&S exception (ORG_SERVICE_MODEL): every organisation's active hazard warnings on the plate, redacted by
+// get_safety_warnings (hazard class, severity, raising organisation + contact path; never the narrative).
+// Service-role callers are admitted by the RPC; the officer's own organisation is marked so the UI can say so.
+async function loadSafetyWarnings(supabase, vehicleId, orgId) {
+  if (!vehicleId) return [];
+  const { data, error } = await supabase.rpc('get_safety_warnings', {
+    p_entity_type: 'vehicle',
+    p_entity_ids: [
+      vehicleId
+    ]
+  });
+  if (error || !Array.isArray(data)) return [];
+  return data.map((warning)=>({
+      id: warning.id,
+      hazard_class: warning.hazard_class,
+      alert_level: warning.alert_level,
+      raised_at: warning.raised_at,
+      organization_name: warning.organization_name,
+      contact_email: warning.contact_email,
+      contact_phone: warning.contact_phone,
+      is_own_organization: warning.organization_id === orgId
+    }));
+}
 // GEOFENCE_PRINCIPLES P1: one distinct, loud message per resolver outcome. 'resolved' carries none.
 const GEOFENCE_NOTICE = {
   resolved: null,
@@ -963,6 +986,7 @@ serve(async (req)=>{
       const parkingVehicle = parkingVehicleRes.data;
       const priorChalk = parkingChalkRes.data;
       const parkingOfficerName = parkingOfficerRes.data?.display_name ?? null;
+      const parkingSafetyWarnings = await loadSafetyWarnings(supabase, parkingVehicle?.id ?? null, orgId);
       // Merge vehicle attributes: inference > canonical > null
       const pVehicleMake = inferResult?.vehicle_make ?? parkingVehicle?.make ?? null;
       const pVehicleModel = inferResult?.vehicle_model ?? parkingVehicle?.model ?? null;
@@ -1281,6 +1305,7 @@ serve(async (req)=>{
         wof_status: wofStatus,
         cof_status: cofStatus,
         vehicle_compliance_flags: vehicleComplianceFlags,
+        safety_warnings: parkingSafetyWarnings,
         // Geofence context
         zone_id: zoneId,
         zone_name: zoneName,
@@ -1311,7 +1336,7 @@ serve(async (req)=>{
     // ── END PARKING ENFORCEMENT BRANCH ──────────────────────────────────────
     // Step 6: Canonical lookups + previous observation + org settings (all parallel)
     const [vehicleRes, scvRes, homelessRes, prevObsRes, orgSettingsRes] = await Promise.all([
-      supabase.from('canonical_vehicles').select('make, model, year, colour').eq('plate_number', plateNumber).maybeSingle(),
+      supabase.from('canonical_vehicles').select('id, make, model, year, colour').eq('plate_number', plateNumber).maybeSingle(),
       // Canonical SCV CSV is the primary lookup source. Treat only active,
       // unexpired certificates as valid; expired records remain useful audit data
       // but must not mark a vehicle compliant.
@@ -1333,6 +1358,7 @@ serve(async (req)=>{
       supabase.from('freedom_camping_org_settings').select('verification_mode').eq('organization_id', orgId).eq('is_current', true).maybeSingle()
     ]);
     const vehicle = vehicleRes.data;
+    const safetyWarnings = await loadSafetyWarnings(supabase, vehicle?.id ?? null, orgId);
     const scv = scvRes.data;
     const homeless = homelessRes.data;
     const prevObs = prevObsRes.data;
@@ -1705,6 +1731,7 @@ serve(async (req)=>{
       scv_required: compliance.scv_required,
       is_scv: isScv,
       is_homeless: isHomeless,
+      safety_warnings: safetyWarnings,
       zone_id: zoneId,
       zone_name: zoneName,
       // Geofence resolution context (advisory + on-site state from resolve_context).

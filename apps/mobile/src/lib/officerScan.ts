@@ -31,6 +31,8 @@ export type OfficerScanResult = {
   breach_alert_id: string | null;
   resolution_status?: string | null;
   geofence_notice?: string | null;
+  /** Platform-wide H&S warnings on the plate, redacted by get_safety_warnings. */
+  safety_warnings?: Array<{ id: string; hazard_class: string; alert_level: string; organization_name: string | null; contact_phone: string | null; contact_email: string | null; is_own_organization: boolean }> | null;
 };
 
 export type QueuedOfficerScan = { id: string; attempts: number; payload: OfficerScanPayload };
