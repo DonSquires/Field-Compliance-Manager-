@@ -83,11 +83,88 @@ export type ConsoleObservation = {
   reviewNotes: string | null;
 };
 
+export function isWeakInferenceCandidate(observation: ConsoleObservation): boolean {
+  const frameCount = Number(observation.attributes.frame_count) || 1;
+  return frameCount <= 1 && (observation.confidence ?? 0) < 0.85 && !observation.attributes.face_event_id;
+}
+
+export function inferenceReviewLabel(observation: ConsoleObservation): string {
+  const frameCount = Math.max(1, Number(observation.attributes.frame_count) || 1);
+  const confidence = observation.confidence === null ? 'confidence not reported' : `${Math.round(observation.confidence * 100)}%`;
+  if (isWeakInferenceCandidate(observation)) return `Weak AI candidate · ${confidence} · one sampled frame`;
+  if (observation.attributes.face_event_id) return `AI candidate · ${confidence} · face-backed`;
+  return `AI candidate · ${confidence} · ${frameCount} sampled frame${frameCount === 1 ? '' : 's'}`;
+}
+
 export type TimeView = { startMs: number; endMs: number };
 
 export const PLAYBACK_RATES = [0.5, 1, 2, 4, 8, 16] as const;
 export type GridLayout = 1 | 2 | 4 | 9;
 export const GRID_LAYOUTS: GridLayout[] = [1, 2, 4, 9];
+
+export type EnhanceMode = 'auto' | 'on' | 'off';
+
+export type CCTVInspection = {
+  zoom: number;
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  /** Sharpening override applied on top of the auto plan, percent. */
+  detail: number;
+  focusX: number;
+  focusY: number;
+  /** auto: enhance whenever zoomed in; on: always; off: raw picture with manual adjustments only. */
+  enhance: EnhanceMode;
+};
+
+export const DEFAULT_CCTV_INSPECTION: CCTVInspection = {
+  zoom: 1,
+  brightness: 100,
+  contrast: 100,
+  saturation: 100,
+  detail: 100,
+  focusX: 50,
+  focusY: 50,
+  enhance: 'auto',
+};
+
+const INSPECTION_ZOOM_STEPS = [1, 1.25, 1.5, 2, 3, 4] as const;
+
+function clampInspectionValue(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+export function normalizeCCTVInspection(value: Partial<CCTVInspection>): CCTVInspection {
+  const zoom = Number(value.zoom ?? DEFAULT_CCTV_INSPECTION.zoom);
+  return {
+    zoom: clampInspectionValue(Number.isFinite(zoom) ? Math.round(zoom * 100) / 100 : 1, 1, 4),
+    brightness: clampInspectionValue(Number(value.brightness ?? DEFAULT_CCTV_INSPECTION.brightness), 60, 160),
+    contrast: clampInspectionValue(Number(value.contrast ?? DEFAULT_CCTV_INSPECTION.contrast), 60, 180),
+    saturation: clampInspectionValue(Number(value.saturation ?? DEFAULT_CCTV_INSPECTION.saturation), 0, 200),
+    detail: clampInspectionValue(Number(value.detail ?? DEFAULT_CCTV_INSPECTION.detail), 0, 200),
+    focusX: clampInspectionValue(Number(value.focusX ?? DEFAULT_CCTV_INSPECTION.focusX), 0, 100),
+    focusY: clampInspectionValue(Number(value.focusY ?? DEFAULT_CCTV_INSPECTION.focusY), 0, 100),
+    enhance: value.enhance === 'on' || value.enhance === 'off' ? value.enhance : 'auto',
+  };
+}
+
+export function nextInspectionZoom(current: number, direction: 1 | -1): number {
+  const index = INSPECTION_ZOOM_STEPS.findIndex((zoom) => zoom === current);
+  if (index === -1) {
+    // Wheel zoom can land between steps: snap to the next step in the requested direction.
+    const next = direction === 1 ? INSPECTION_ZOOM_STEPS.find((zoom) => zoom > current) : [...INSPECTION_ZOOM_STEPS].reverse().find((zoom) => zoom < current);
+    return next ?? (direction === 1 ? INSPECTION_ZOOM_STEPS[INSPECTION_ZOOM_STEPS.length - 1] : INSPECTION_ZOOM_STEPS[0]);
+  }
+  return INSPECTION_ZOOM_STEPS[Math.min(INSPECTION_ZOOM_STEPS.length - 1, Math.max(0, index + direction))];
+}
+
+export function isDefaultCCTVInspection(value: CCTVInspection): boolean {
+  return Object.entries(DEFAULT_CCTV_INSPECTION).every(([key, defaultValue]) => value[key as keyof CCTVInspection] === defaultValue);
+}
+
+export function isEnhancementActive(value: CCTVInspection): boolean {
+  return value.enhance === 'on' || (value.enhance === 'auto' && value.zoom > 1);
+}
 
 export const SEVERITY_COLOURS: Record<MarkSeverity, string> = {
   alert: '#d64545',

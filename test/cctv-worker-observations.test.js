@@ -7,7 +7,7 @@ process.env.SUPABASE_URL ||= 'https://example.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
 const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals } = require('../services/vision/vision_job_watcher');
-const { consolidateAnimals, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents } = require('../services/vision/motion_consolidator');
+const { consolidateAnimals, consolidatePeople, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents, isReviewableCandidate } = require('../services/vision/motion_consolidator');
 
 const watcherSource = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
 
@@ -96,6 +96,22 @@ test('consolidateAnimals tracks one animal through frames and votes the species 
   assert.equal(detectionStatus, 'ready');
 });
 
+test('the review gate holds weak single-frame candidates but keeps repeated, face-backed, and high-confidence evidence', () => {
+  assert.equal(isReviewableCandidate({ frame_count: 1, confidence: 0.84, quality_state: 'clear' }), false);
+  assert.equal(isReviewableCandidate({ frame_count: 1, confidence: 0.85, quality_state: 'clear' }), true);
+  assert.equal(isReviewableCandidate({ frame_count: 1, confidence: 0.5, quality_state: 'clear' }, { hasFaceEvidence: true }), true);
+  assert.equal(isReviewableCandidate({ frame_count: 2, confidence: 0.5, quality_state: 'clear' }), true);
+  assert.equal(isReviewableCandidate({ frame_count: 3, confidence: 0.99, quality_state: 'flare' }), false);
+});
+
+test('person consolidation excludes degraded and flare frames before they can create a review candidate', async () => {
+  const events = await consolidatePeople([
+    { frame_index: 1, relative_timestamp_seconds: 1, visual_quality: 'degraded', quality_state: 'clear', people: { success: true, people: [{ bbox: { x: 10, y: 10, width: 70, height: 180 }, confidence: 0.99 }] } },
+    { frame_index: 2, relative_timestamp_seconds: 2, quality_state: 'flare', people: { success: true, people: [{ bbox: { x: 20, y: 10, width: 70, height: 180 }, confidence: 0.99 }] } },
+  ]);
+  assert.deepEqual(events, []);
+});
+
 async function summaryFixture() {
   const frames = [
     { frame_index: 15, relative_timestamp_seconds: 1.0, sha256_hash: 'v1', quality_state: 'clear',
@@ -128,7 +144,7 @@ test('buildEntityObservations emits one observation per tracked entity with abso
   const summary = await summaryFixture();
   const observations = buildEntityObservations(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
   const byKind = observations.reduce((counts, item) => ({ ...counts, [item.entity_kind]: (counts[item.entity_kind] || 0) + 1 }), {});
-  assert.deepEqual(byKind, { vehicle: 2, person: 1, animal: 1 });
+  assert.deepEqual(byKind, { vehicle: 1, person: 1, animal: 1 });
 
   const plated = observations.find((item) => item.candidate_plate === 'ABC123');
   assert.ok(plated, 'plated vehicle observation');
@@ -139,11 +155,7 @@ test('buildEntityObservations emits one observation per tracked entity with abso
   assert.equal(plated.attributes.body_type, 'truck');
   assert.equal(plated.attributes.plate_confidence, 0.92);
 
-  const unplated = observations.find((item) => item.entity_kind === 'vehicle' && !item.candidate_plate);
-  assert.ok(unplated, 'plate-less vehicle still becomes an observation (appearance portfolio)');
-  assert.equal(unplated.candidate_label, 'red');
-  assert.equal(unplated.appearance_embedding.length, 256);
-  assert.equal(unplated.attributes.candidate_state, 'unconfirmed_vehicle_without_plate');
+  assert.equal(observations.some((item) => item.entity_kind === 'vehicle' && item.candidate_label === 'red'), false, 'weak single-frame vehicle stays in the raw inference summary, not the review queue');
 
   const person = observations.find((item) => item.entity_kind === 'person');
   assert.equal(person.candidate_embedding.length, 128, 'the face seen during the body track rides on the person observation');
@@ -178,7 +190,8 @@ test('buildInferenceDeviceEvents grades each motion window and marks camera dist
   assert.equal(windows.length, 3);
   assert.equal(windows[0].severity, 'alert', 'a plated vehicle is an alert');
   assert.equal(windows[0].event_start_at, '2026-09-10T08:15:00.500Z');
-  assert.deepEqual(windows[0].metadata.entity_counts, { vehicle: 2, person: 1 });
+  assert.deepEqual(windows[0].metadata.entity_counts, { vehicle: 1, person: 1 });
+  assert.equal(windows[0].metadata.suppressed_review_candidate_count, 1);
   assert.equal(windows[1].severity, 'alert', 'a pest animal is an alert');
   assert.equal(windows[2].severity, 'motion', 'a window with only a glitch frame is motion only');
   const quality = marks.find((mark) => mark.metadata.kind === 'quality_event');

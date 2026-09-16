@@ -3,13 +3,20 @@ import {
   candidateAction,
   clipAtTime,
   clusterMarks,
+  DEFAULT_CCTV_INSPECTION,
   entityTitle,
   followClock,
   gridColumns,
+  inferenceReviewLabel,
   initialView,
+  isDefaultCCTVInspection,
+  isEnhancementActive,
+  isWeakInferenceCandidate,
   keyboardAction,
   nextClipAfter,
+  nextInspectionZoom,
   nextRate,
+  normalizeCCTVInspection,
   observationsToPins,
   panView,
   tickIntervalMs,
@@ -65,6 +72,20 @@ describe('shared clock and clips', () => {
 
   it('maps grid layouts to columns', () => {
     expect([1, 2, 4, 9].map((layout) => gridColumns(layout as 1 | 2 | 4 | 9))).toEqual([1, 2, 2, 3]);
+  });
+
+  it('keeps inspection adjustments bounded and zoom steps stable', () => {
+    expect(normalizeCCTVInspection({ zoom: 8, brightness: 20, contrast: 300, saturation: -1, detail: 999, focusX: 140, focusY: -20, enhance: 'weird' as never })).toEqual({ zoom: 4, brightness: 60, contrast: 180, saturation: 0, detail: 200, focusX: 100, focusY: 0, enhance: 'auto' });
+    expect(nextInspectionZoom(1, 1)).toBe(1.25);
+    expect(nextInspectionZoom(4, 1)).toBe(4);
+    expect(nextInspectionZoom(1, -1)).toBe(1);
+    expect(nextInspectionZoom(1.7, 1)).toBe(2);
+    expect(nextInspectionZoom(1.7, -1)).toBe(1.5);
+    expect(isDefaultCCTVInspection({ ...DEFAULT_CCTV_INSPECTION })).toBe(true);
+    expect(isEnhancementActive({ ...DEFAULT_CCTV_INSPECTION })).toBe(false);
+    expect(isEnhancementActive({ ...DEFAULT_CCTV_INSPECTION, zoom: 2 })).toBe(true);
+    expect(isEnhancementActive({ ...DEFAULT_CCTV_INSPECTION, zoom: 2, enhance: 'off' })).toBe(false);
+    expect(isEnhancementActive({ ...DEFAULT_CCTV_INSPECTION, enhance: 'on' })).toBe(true);
   });
 });
 
@@ -158,6 +179,15 @@ describe('entities and portfolio actions', () => {
     expect(entityTitle(observation({ kind: 'animal', species: 'possum', isPest: true }))).toBe('Pest · Possum');
     expect(entityTitle(observation({ kind: 'animal', species: 'other' }))).toBe('Unidentified animal');
     expect(entityTitle(observation({ kind: 'person' }))).toBe('Person');
+  });
+
+  it('makes weak inference explicit instead of presenting it as a confirmed sighting', () => {
+    const weak = observation({ kind: 'person', confidence: 0.55, attributes: { frame_count: 1 } });
+    expect(isWeakInferenceCandidate(weak)).toBe(true);
+    expect(inferenceReviewLabel(weak)).toBe('Weak AI candidate · 55% · one sampled frame');
+    const faceBacked = observation({ kind: 'person', confidence: 0.55, attributes: { frame_count: 1, face_event_id: 'face-1' } });
+    expect(isWeakInferenceCandidate(faceBacked)).toBe(false);
+    expect(inferenceReviewLabel(faceBacked)).toBe('AI candidate · 55% · face-backed');
   });
 
   it('turns a candidate into the matching review action for its kind', () => {

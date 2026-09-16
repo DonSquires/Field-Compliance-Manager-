@@ -66,6 +66,36 @@ describe('CCTV console', () => {
     expect(tile).toContain('No footage at');
   });
 
+  it('gives reviewers non-destructive zoom and image adjustments on the active camera', () => {
+    expect(page).toContain('Active camera image inspection');
+    expect(page).toContain('cctv-image-adjustments');
+    expect(page).toContain('Brightness');
+    expect(page).toContain('Contrast');
+    expect(page).toContain('Colour');
+    expect(page).toContain('Detail');
+    expect(page).toContain('nextInspectionZoom(activeInspection.zoom');
+    expect(tile).toContain('onInspectionChange');
+    expect(tile).toContain('zoomAt(zoomState');
+    expect(tile).toContain('panBy(zoomState');
+  });
+
+  it('auto-enhances the zoomed picture on the GPU, labels it display-only, and falls back to CSS honestly', () => {
+    expect(page).toContain('cycleEnhance');
+    expect(page).toContain("activeInspection.enhance === 'auto' ? 'Auto'");
+    expect(page).toContain('Enhanced view is display-only; the recording is unchanged.');
+    expect(page).toContain('enhancementReadout(enhancementState?.plan ?? null)');
+    expect(tile).toContain('crossOrigin="anonymous"');
+    expect(tile).toContain('createEnhancementRenderer(canvas)');
+    expect(tile).toContain('analyseFramePixels(context.getImageData');
+    expect(tile).toContain('estimateNoiseFloor(context.getImageData(0, 0, patch, patch).data, patch, patch)');
+    expect(tile).toContain('planEnhancement(stats, { zoom: zoomState.zoom, previous: planRef.current');
+    expect(tile).toContain('requestVideoFrameCallback');
+    expect(tile).toContain("'Enhanced view' : 'Basic adjustments'");
+    expect(tile).toContain('showing basic adjustments instead.');
+    expect(tile).toContain('cssFilterFor(plan, manual)');
+    expect(styles).toContain('.cctv-tile__body.is-enhanced .cctv-tile__video { visibility: hidden; }');
+  });
+
   it('draws a severity timeline with reviewed entities dimmed and clustered marks', () => {
     expect(timeline).toContain('clusterMarks(marks, view, width)');
     expect(timeline).toContain('SEVERITY_COLOURS[cluster.severity]');
@@ -115,5 +145,11 @@ describe('CCTV console', () => {
     expect(page).toContain('Everything here has been reviewed');
     expect(page).toContain('No people, vehicles or animals were reported for this footage.');
     expect(page).toContain('Loading the camera’s timeline');
+  });
+
+  it('labels weak AI output as a candidate and retains the governed rejection path', () => {
+    expect(page).toContain('inferenceReviewLabel(observation)');
+    expect(page).toContain('isWeakInferenceCandidate(observation)');
+    expect(page).toContain('Not a {observation.kind}');
   });
 });

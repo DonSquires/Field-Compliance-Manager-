@@ -17,12 +17,17 @@ import {
   Plus,
   RefreshCw,
   Rewind,
+  RotateCcw,
+  SlidersHorizontal,
+  Sparkles,
   FastForward,
   Volume2,
   VolumeX,
   UserRound,
   Car,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -30,15 +35,22 @@ import {
   candidateAction,
   clipAtTime,
   clampMs,
+  DEFAULT_CCTV_INSPECTION,
   followClock,
   formatClock,
   formatDate,
   gridColumns,
+  inferenceReviewLabel,
   initialView,
+  isDefaultCCTVInspection,
+  isEnhancementActive,
   isReviewed,
+  isWeakInferenceCandidate,
   keyboardAction,
   nextClipAfter,
+  nextInspectionZoom,
   nextRate,
+  normalizeCCTVInspection,
   parseMs,
   previousClipBefore,
   timelineBounds,
@@ -47,6 +59,7 @@ import {
   PLAYBACK_RATES,
   entityTitle,
   type ClipJobStatus,
+  type CCTVInspection,
   type ConsoleClip,
   type ConsoleMark,
   type ConsoleObservation,
@@ -58,6 +71,7 @@ import {
 } from '../lib/cctvConsole';
 import { CCTVTimeline } from '../components/CCTVTimeline';
 import { CCTVPlayerTile } from '../components/CCTVPlayerTile';
+import { enhancementReadout, type EnhancementPlan } from '../lib/cctvEnhance';
 import './PageStyles.css';
 import './CCTVConsolePage.css';
 
@@ -173,6 +187,9 @@ const CCTVConsolePage: React.FC = () => {
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const [muted, setMuted] = useState(true);
+  const [inspectionsByImport, setInspectionsByImport] = useState<Record<string, CCTVInspection>>({});
+  const [showInspectionTools, setShowInspectionTools] = useState(false);
+  const [enhancementState, setEnhancementState] = useState<{ plan: EnhancementPlan | null; mode: 'gpu' | 'css' } | null>(null);
 
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [showReviewed, setShowReviewed] = useState(false);
@@ -202,6 +219,9 @@ const CCTVConsolePage: React.FC = () => {
   const bounds = useMemo(() => timelineBounds(visibleClips, visibleMarks, visibleObservations), [visibleClips, visibleMarks, visibleObservations]);
   const masterImportId = activeImportIds[masterIndex] ?? activeImportIds[0] ?? null;
   const masterClips = masterImportId ? clipsByImport[masterImportId] ?? [] : [];
+  const activeInspection = selectedImportId ? inspectionsByImport[selectedImportId] ?? DEFAULT_CCTV_INSPECTION : DEFAULT_CCTV_INSPECTION;
+  const inspectionAdjusted = !isDefaultCCTVInspection(activeInspection);
+  const enhancementActive = isEnhancementActive(activeInspection);
 
   const loadImports = useCallback(async () => {
     if (!organizationId) { setImports([]); setImportsLoading(false); setError('Organisation access could not be confirmed. The CCTV console is unavailable.'); return; }
@@ -501,6 +521,30 @@ const CCTVConsolePage: React.FC = () => {
     if (tileIndex >= 0) setMasterIndex(tileIndex);
   };
 
+  const updateInspection = useCallback((patch: Partial<CCTVInspection>) => {
+    if (!selectedImportId) return;
+    setInspectionsByImport((current) => ({
+      ...current,
+      [selectedImportId]: normalizeCCTVInspection({ ...(current[selectedImportId] ?? DEFAULT_CCTV_INSPECTION), ...patch }),
+    }));
+  }, [selectedImportId]);
+
+  const resetInspection = useCallback(() => {
+    if (!selectedImportId) return;
+    setInspectionsByImport((current) => ({ ...current, [selectedImportId]: { ...DEFAULT_CCTV_INSPECTION } }));
+    setEnhancementState(null);
+  }, [selectedImportId]);
+
+  const cycleEnhance = useCallback(() => {
+    // auto -> on -> off -> auto; auto engages whenever the picture is zoomed in.
+    const next = activeInspection.enhance === 'auto' ? 'on' : activeInspection.enhance === 'on' ? 'off' : 'auto';
+    updateInspection({ enhance: next });
+  }, [activeInspection.enhance, updateInspection]);
+
+  const handleEnhancementPlan = useCallback((plan: EnhancementPlan | null, mode: 'gpu' | 'css') => {
+    setEnhancementState((current) => current && current.plan === plan && current.mode === mode ? current : { plan, mode });
+  }, []);
+
   const runReview = async (observation: ConsoleObservation, action: ReviewAction, targetId: string | null = null) => {
     setReviewBusy(`${observation.id}:${action}`);
     setReviewMessage(null);
@@ -629,6 +673,9 @@ const CCTVConsolePage: React.FC = () => {
                     playing={playing} rate={rate} muted={muted} isMaster={row.id === masterImportId} active={row.id === selectedImportId}
                     timeZone={row.source_timezone} resolveUrl={resolveUrl} onTick={handleTick} onClipEnded={handleClipEnded} onDurationKnown={handleDurationKnown}
                     onActivate={() => activateTile(row.id)}
+                    inspection={row.id === selectedImportId ? activeInspection : undefined}
+                    onInspectionChange={row.id === selectedImportId ? updateInspection : undefined}
+                    onEnhancementPlan={row.id === selectedImportId ? handleEnhancementPlan : undefined}
                     onRemove={activeImportIds.length > 1 ? () => removeCamera(row.id) : undefined} />
                 );
               })}
@@ -648,6 +695,18 @@ const CCTVConsolePage: React.FC = () => {
               </select>
             </label>
             <button type="button" className="cctv-console__ctl" onClick={() => setMuted((current) => !current)} aria-label={muted ? 'Unmute' : 'Mute'}>{muted ? <VolumeX size={18} aria-hidden="true" /> : <Volume2 size={18} aria-hidden="true" />}</button>
+            <div className="cctv-console__inspection-controls" role="group" aria-label="Active camera image inspection">
+              <button type="button" className="cctv-console__ctl" onClick={() => updateInspection({ zoom: nextInspectionZoom(activeInspection.zoom, -1) })} disabled={activeInspection.zoom <= 1 || !selectedImportId} aria-label="Zoom out" title="Zoom out"><ZoomOut size={16} aria-hidden="true" /></button>
+              <output className="cctv-console__inspection-value" aria-label={`Active camera zoom ${activeInspection.zoom} times`}>{activeInspection.zoom}×</output>
+              <button type="button" className="cctv-console__ctl" onClick={() => updateInspection({ zoom: nextInspectionZoom(activeInspection.zoom, 1) })} disabled={activeInspection.zoom >= 4 || !selectedImportId} aria-label="Zoom in" title="Zoom in (or scroll on the picture)"><ZoomIn size={16} aria-hidden="true" /></button>
+              <button type="button" className={`cctv-console__ctl${enhancementActive ? ' is-on' : ''}`} onClick={cycleEnhance} disabled={!selectedImportId} aria-pressed={enhancementActive}
+                aria-label={`Enhance: ${activeInspection.enhance === 'auto' ? 'automatic when zoomed' : activeInspection.enhance === 'on' ? 'always on' : 'off'}`}
+                title={activeInspection.enhance === 'auto' ? 'Enhance: automatic when zoomed. Click for always on.' : activeInspection.enhance === 'on' ? 'Enhance: always on. Click to turn off.' : 'Enhance: off. Click for automatic when zoomed.'}>
+                <Sparkles size={16} aria-hidden="true" /> {activeInspection.enhance === 'auto' ? 'Auto' : activeInspection.enhance === 'on' ? 'On' : 'Off'}
+              </button>
+              <button type="button" className={`cctv-console__ctl${showInspectionTools ? ' is-on' : ''}`} onClick={() => setShowInspectionTools((current) => !current)} disabled={!selectedImportId} aria-pressed={showInspectionTools} aria-expanded={showInspectionTools} aria-controls="cctv-image-adjustments" aria-label="Image adjustments" title="Image adjustments"><SlidersHorizontal size={16} aria-hidden="true" /></button>
+              <button type="button" className="cctv-console__ctl" onClick={resetInspection} disabled={!inspectionAdjusted || !selectedImportId} aria-label="Reset image inspection" title="Reset image inspection"><RotateCcw size={16} aria-hidden="true" /></button>
+            </div>
             <div className="cctv-console__layouts" role="group" aria-label="Grid layout">
               {GRID_LAYOUTS.map((option) => <button key={option} type="button" className={`cctv-console__ctl${layout === option ? ' is-on' : ''}`} onClick={() => setLayout(option)} aria-pressed={layout === option} aria-label={`${option} tile grid`}>{option === 1 ? <Maximize2 size={16} aria-hidden="true" /> : <><Grid2x2 size={16} aria-hidden="true" />{option}</>}</button>)}
             </div>
@@ -657,6 +716,21 @@ const CCTVConsolePage: React.FC = () => {
               <button type="button" className="cctv-console__ctl" onClick={() => bounds && clockMs !== null && setView(zoomView(bounds, clockMs, 600_000 / Math.max(1, bounds.endMs - bounds.startMs), bounds))}>10 min</button>
             </div>
           </div>
+
+          {showInspectionTools ? (
+            <div id="cctv-image-adjustments" className="cctv-console__inspection-panel" aria-label="Active camera image adjustments">
+              <p className="cctv-console__inspection-readout" role="status">
+                <Sparkles size={13} aria-hidden="true" />
+                {enhancementActive
+                  ? <>Enhanced view is display-only; the recording is unchanged. {enhancementState?.mode === 'css' ? 'Basic adjustments only in this browser. ' : ''}{enhancementReadout(enhancementState?.plan ?? null)}</>
+                  : activeInspection.enhance === 'off' ? 'Enhancement is off. Zoom, wheel and drag still work on the raw picture.' : 'Enhancement engages automatically when you zoom in. Scroll on the picture to zoom, drag to pan, click to re-centre.'}
+              </p>
+              <label className="cctv-console__inspection-field"><span>Brightness <output>{activeInspection.brightness}%</output></span><input type="range" min="60" max="160" step="5" value={activeInspection.brightness} onChange={(event) => updateInspection({ brightness: Number(event.target.value) })} /></label>
+              <label className="cctv-console__inspection-field"><span>Contrast <output>{activeInspection.contrast}%</output></span><input type="range" min="60" max="180" step="5" value={activeInspection.contrast} onChange={(event) => updateInspection({ contrast: Number(event.target.value) })} /></label>
+              <label className="cctv-console__inspection-field"><span>Colour <output>{activeInspection.saturation}%</output></span><input type="range" min="0" max="200" step="5" value={activeInspection.saturation} onChange={(event) => updateInspection({ saturation: Number(event.target.value) })} /></label>
+              <label className="cctv-console__inspection-field"><span>Detail <output>{activeInspection.detail}%</output></span><input type="range" min="0" max="200" step="5" value={activeInspection.detail} onChange={(event) => updateInspection({ detail: Number(event.target.value) })} disabled={!enhancementActive} /></label>
+            </div>
+          ) : null}
 
           {bounds && view && clockMs !== null ? (
             <CCTVTimeline view={view} bounds={bounds} clockMs={clockMs} clips={visibleClips} marks={visibleMarks} observations={visibleObservations}
@@ -703,14 +777,15 @@ const CCTVConsolePage: React.FC = () => {
           <ul className="cctv-console__entity-list">
             {panelObservations.map((observation) => {
               const selected = observation.id === selectedObservationId;
+              const weakCandidate = isWeakInferenceCandidate(observation);
               return (
-                <li key={observation.id} className={`cctv-entity${selected ? ' is-selected' : ''}${isReviewed(observation) ? ' is-reviewed' : ''} is-${observation.kind}`}>
+                <li key={observation.id} className={`cctv-entity${selected ? ' is-selected' : ''}${isReviewed(observation) ? ' is-reviewed' : ''}${weakCandidate ? ' is-weak' : ''} is-${observation.kind}`}>
                   <button type="button" className="cctv-entity__main" onClick={() => selectObservation(observation)} aria-pressed={selected}>
                     {observation.thumbnail ? <img className="cctv-entity__thumb" src={observation.thumbnail} alt="" /> : <span className="cctv-entity__thumb is-blank">{KIND_ICON[observation.kind]}</span>}
                     <span className="cctv-entity__text">
                       <strong>{entityTitle(observation)}</strong>
                       <small>{formatClock(observation.observedAtMs, timeZone)}{observation.observedToMs ? ` – ${formatClock(observation.observedToMs, timeZone)}` : ''}{observation.confidence !== null ? ` · ${Math.round(observation.confidence * 100)}%` : ''}{observation.qualityState !== 'clear' ? ` · ${observation.qualityState}` : ''}</small>
-                      <small className="cctv-entity__state">{isReviewed(observation) ? observation.reviewState.replace(/_/g, ' ') : observation.candidates.length ? `${observation.candidates.length} possible match${observation.candidates.length === 1 ? '' : 'es'}` : observation.portfolioState === 'candidate' ? 'seen before in this footage' : 'first sighting'}</small>
+                      <small className={`cctv-entity__state${weakCandidate ? ' is-weak' : ''}`}>{isReviewed(observation) ? observation.reviewState.replace(/_/g, ' ') : `${inferenceReviewLabel(observation)} · ${observation.candidates.length ? `${observation.candidates.length} possible match${observation.candidates.length === 1 ? '' : 'es'}` : observation.portfolioState === 'candidate' ? 'seen before in this footage' : 'first sighting'}`}</small>
                     </span>
                   </button>
                   {selected ? (

@@ -10,6 +10,8 @@ const DEFAULT_KEYFRAME_COUNT = 6;
 const APPEARANCE_CONFIRM_THRESHOLD = 0.6;
 const APPEARANCE_RESCUE_THRESHOLD = 0.85;
 const GATE_GROWTH_PER_SECOND = 1.5;
+const SINGLE_FRAME_REVIEW_CONFIDENCE = 0.85;
+const UNUSABLE_QUALITY_STATES = new Set(['glitch', 'ir_switch', 'flare', 'degraded', 'occluded']);
 
 function cosineSimilarity(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) return 0;
@@ -72,7 +74,7 @@ async function consolidateFaces(frames, options = {}) {
   const maxGap = options.maxGapSeconds ?? DEFAULT_MAX_GAP_SECONDS;
 
   const faceFrames = frames.filter(
-    (f) => f && f.face?.success && Array.isArray(f.face?.faces) && f.face.faces.length > 0
+    (frame) => hasUsableFrame(frame) && frame.face?.success && Array.isArray(frame.face?.faces) && frame.face.faces.length > 0
   );
 
   // Subjects registry: subject_id -> { subject_id, subject_label, avgEmbedding, activeTrack: { ... }, completedTracks: [...] }
@@ -217,9 +219,10 @@ async function consolidateFaces(frames, options = {}) {
 
 async function consolidatePeople(frames, options = {}) {
   const maxGap = options.maxGapSeconds ?? DEFAULT_MAX_GAP_SECONDS;
-  const excludedQualityFrames = frames.filter((frame) => frame?.visual_quality === 'degraded').length;
+  const excludedQualityFrames = frames.filter((frame) => frame && !hasUsableFrame(frame)).length;
   const tracks = [];
   for (const frame of frames) {
+    if (!hasUsableFrame(frame)) continue;
     const detections = Array.isArray(frame?.people?.people) ? frame.people.people : [];
     const timestamp = Number(frame.relative_timestamp_seconds) || 0;
     for (const detection of detections) {
@@ -279,7 +282,7 @@ async function consolidateAnimals(frames, options = {}) {
   const tracks = [];
   const statuses = new Set();
   for (const frame of frames) {
-    if (!frame || frame.visual_quality === 'degraded') continue;
+    if (!hasUsableFrame(frame)) continue;
     const container = frame.animals;
     const detections = Array.isArray(container) ? container : Array.isArray(container?.animals) ? container.animals : [];
     if (container && !Array.isArray(container) && container.status) statuses.add(container.status);
@@ -410,14 +413,14 @@ async function consolidateVehicles(frames, options = {}) {
   const metersPerPixel = Number(options.metersPerPixel) > 0 ? Number(options.metersPerPixel) : null;
 
   const alprFrames = frames.filter((f) => {
-    if (!f || !f.alpr?.success || typeof f.alpr?.plate !== 'string') return false;
+    if (!hasUsableFrame(f) || !f.alpr?.success || typeof f.alpr?.plate !== 'string') return false;
     const plate = f.alpr.plate.trim();
     const conf = Number(f.alpr.confidence) || 0;
     return isPlatish(plate, conf);
   });
 
   const genericVehicleFrames = frames.filter((frame) => {
-    if (!frame || (frame.alpr?.success && isPlatish(frame.alpr?.plate, Number(frame.alpr?.confidence) || 0))) return false;
+    if (!hasUsableFrame(frame) || (frame.alpr?.success && isPlatish(frame.alpr?.plate, Number(frame.alpr?.confidence) || 0))) return false;
     const detection = frame.runpod?.vehicle?.detection;
     const confidence = Number(detection?.confidence) || 0;
     const bbox = detection?.bbox;
@@ -610,7 +613,23 @@ function overlapSeconds(a, b) {
 }
 
 function isUsableQuality(state) {
-  return !['glitch', 'ir_switch'].includes(state);
+  return !UNUSABLE_QUALITY_STATES.has(String(state || 'clear'));
+}
+
+function hasUsableFrame(frame) {
+  return Boolean(frame) && frame.visual_quality !== 'degraded' && isUsableQuality(frame.quality_state);
+}
+
+function isReviewableCandidate(event, { hasFaceEvidence = false } = {}) {
+  if (!isUsableQuality(event?.quality_state)) return false;
+  const frameCount = Number(event?.frame_count) || 0;
+  if (frameCount >= 2 || hasFaceEvidence) return true;
+  return Number(event?.confidence) >= SINGLE_FRAME_REVIEW_CONFIDENCE;
+}
+
+function reviewCandidateBasis(event, hasFaceEvidence = false) {
+  if (hasFaceEvidence) return 'face_backed';
+  return (Number(event?.frame_count) || 0) >= 2 ? 'temporal_consensus' : 'single_frame_high_confidence';
 }
 
 // One observation per tracked entity, in the shape record_cctv_entity_observations() accepts. Absolute
@@ -623,7 +642,7 @@ function buildEntityObservations(summary, context = {}) {
   if (!Number.isFinite(base)) return [];
   const observations = [];
   for (const event of events.vehicle_events || []) {
-    if (!isUsableQuality(event.quality_state)) continue;
+    if (!isReviewableCandidate(event)) continue;
     const plated = event.plate && event.plate !== 'Unconfirmed vehicle';
     observations.push({
       source_event_id: event.event_id,
@@ -640,7 +659,7 @@ function buildEntityObservations(summary, context = {}) {
         attribute_confidence: event.vehicle_attribute_confidence, plate_confidence: plated ? event.confidence : null,
         bbox: event.best_bbox, frame_count: event.frame_count, visit_count: event.visit_count, temporal_consensus: event.temporal_consensus,
         speed_kmh: event.speed_kmh, inference_provider: event.inference_provider, appearance_embedding_model: event.appearance_embedding_model,
-        candidate_state: event.candidate_state,
+        candidate_state: event.candidate_state, review_candidate_basis: reviewCandidateBasis(event),
       }),
       frame_sha256: event.best_frame_hash || null,
       thumbnail: event.thumbnail || null,
@@ -654,6 +673,7 @@ function buildEntityObservations(summary, context = {}) {
     const face = faceEvents
       .filter((candidate) => !claimedFaces.has(candidate.event_id) && overlapSeconds(candidate, event) >= 0)
       .sort((a, b) => overlapSeconds(b, event) - overlapSeconds(a, event))[0] || null;
+    if (!isReviewableCandidate(event, { hasFaceEvidence: Boolean(face) })) continue;
     if (face) claimedFaces.add(face.event_id);
     observations.push({
       source_event_id: event.event_id,
@@ -669,6 +689,7 @@ function buildEntityObservations(summary, context = {}) {
         bbox: event.best_bbox, frame_count: event.frame_count, upper_body_colour: event.attributes?.upper_body_colour, lower_body_colour: event.attributes?.lower_body_colour,
         visible_head_region: event.attributes?.visible_head_region?.colour, gait: event.gait_signature?.state === 'provisional_motion_signature' ? event.gait_signature : null,
         face_event_id: face?.event_id, face_visit_count: face?.visit_count, appearance_embedding_model: event.appearance_embedding_model,
+        review_candidate_basis: reviewCandidateBasis(event, Boolean(face)),
       }),
       frame_sha256: event.best_frame_hash || null,
       thumbnail: event.thumbnail || face?.thumbnail || null,
@@ -718,14 +739,20 @@ function buildInferenceDeviceEvents(summary, context = {}) {
   const base = Date.parse(context.recordedStartAt || context.capturedAt || '');
   if (!Number.isFinite(base) || !summary) return [];
   const events = summary.consolidated_events || {};
-  const entities = [
+  const faceEvents = events.face_events || [];
+  const detectedEntities = [
     ...(events.vehicle_events || []).map((event) => ({ ...event, kind: 'vehicle', alert: Boolean(event.plate && event.plate !== 'Unconfirmed vehicle') })),
     ...(events.person_events || []).map((event) => ({ ...event, kind: 'person', alert: false })),
     ...(events.animal_events || []).map((event) => ({ ...event, kind: 'animal', alert: event.is_pest === true })),
   ].filter((entity) => isUsableQuality(entity.quality_state));
+  const entities = detectedEntities.filter((entity) => entity.kind === 'animal' || isReviewableCandidate(entity, {
+    hasFaceEvidence: entity.kind === 'person' && faceEvents.some((face) => overlapSeconds(face, entity) >= 0),
+  }));
+  const heldCandidates = detectedEntities.filter((entity) => !entities.includes(entity));
   const marks = (summary.motion_segments || []).map((segment, index) => {
     const window = { first_seen_seconds: segment.start_time_seconds, last_seen_seconds: segment.end_time_seconds };
     const inside = entities.filter((entity) => overlapSeconds(entity, window) >= 0);
+    const heldInside = heldCandidates.filter((entity) => overlapSeconds(entity, window) >= 0);
     const counts = inside.reduce((totals, entity) => ({ ...totals, [entity.kind]: (totals[entity.kind] || 0) + 1 }), {});
     return {
       source: 'inference',
@@ -733,7 +760,7 @@ function buildInferenceDeviceEvents(summary, context = {}) {
       event_start_at: isoAt(base, segment.start_time_seconds),
       event_end_at: isoAt(base, segment.end_time_seconds),
       severity: inside.some((entity) => entity.alert) ? 'alert' : inside.length ? 'detection' : 'motion',
-      metadata: { kind: 'motion_window', entity_counts: counts, entity_event_ids: inside.map((entity) => entity.event_id), frames: segment.frames?.length || 0 },
+      metadata: { kind: 'motion_window', entity_counts: counts, entity_event_ids: inside.map((entity) => entity.event_id), suppressed_review_candidate_count: heldInside.length, frames: segment.frames?.length || 0 },
     };
   });
   for (const quality of summary.quality_events || []) {
@@ -840,6 +867,7 @@ module.exports = {
   consolidateAnimals,
   buildGaitSignature,
   consolidateVehicles,
+  isReviewableCandidate,
   extractKeyframes,
   consolidateMotionSummary,
   buildEntityObservations,
