@@ -5,7 +5,13 @@ use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::Path};
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct DeviceCandidate { id: String, label: String, size_bytes: u64, removable: bool, read_only: bool, partitions: u32, partition_style: String, bus_type: String }
+struct DeviceCandidate { id: String, label: String, size_bytes: u64, removable: bool, read_only: bool, partitions: u32, partition_style: String, bus_type: String, drive_letters: Vec<String>, offline: bool }
+
+/// What the first sectors of a device look like, so a card that is not recognised can be described
+/// precisely instead of guessed at. Read-only; nothing is interpreted beyond the MBR and the DHFS locate.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceProbe { id: String, size_bytes: u64, sector0_hex: String, sector0_ascii: String, mbr_signature: bool, mbr_partitions: Vec<String>, dhfs_magic_at_zero: bool, dhfs_dpt_marker_within_first_mib: Option<u64>, dhfs_location: Option<String>, dhfs_error: Option<String> }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +43,18 @@ fn is_physical_drive_id(id: &str) -> bool {
     id.strip_prefix("PhysicalDrive").map(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())).unwrap_or(false)
 }
 
+/// Windows raw-device errors in words a field operator can act on.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn explain_device_error(error: &std::io::Error) -> String {
+    match error.raw_os_error() {
+        Some(5) => format!("{error}. Windows only lets an administrator read a whole disk: close FCM Desktop V2, right-click it and choose 'Run as administrator', then discover the card again."),
+        Some(32) => format!("{error}. Another program holds the card open (often Explorer's 'You need to format the disk' prompt, a backup tool or antivirus). Close it and try again."),
+        Some(21) | Some(1167) => format!("{error}. Windows says the device is not ready: reseat the card in the reader and discover again."),
+        Some(87) | Some(27) => format!("{error}. The read fell outside the sectors Windows will serve; the reported disk size may be wrong for this reader."),
+        _ => error.to_string(),
+    }
+}
+
 fn open_source(spec: &DhfsSourceSpec) -> Result<AlignedFileSource, String> {
     match spec {
         DhfsSourceSpec::Image { path } => AlignedFileSource::open_image(Path::new(path)).map_err(|error| error.to_string()),
@@ -46,7 +64,7 @@ fn open_source(spec: &DhfsSourceSpec) -> Result<AlignedFileSource, String> {
             {
                 let device_path = format!(r"\\.\{id}");
                 let file = OpenOptions::new().read(true).write(false).open(&device_path)
-                    .map_err(|error| format!("Could not open {device_path} read-only: {error}"))?;
+                    .map_err(|error| format!("Could not open {device_path} read-only: {}", explain_device_error(&error)))?;
                 Ok(AlignedFileSource::from_file(file, Some(*size_bytes), DEVICE_READ_ALIGNMENT))
             }
             #[cfg(not(target_os = "windows"))]
@@ -58,26 +76,75 @@ fn open_source(spec: &DhfsSourceSpec) -> Result<AlignedFileSource, String> {
     }
 }
 
+/// Every disk Windows knows about except the ones it is running from. Built-in laptop card readers
+/// report bus types such as SD, MMC, USB, SCSI or Unknown depending on the driver, so filtering on the
+/// bus type hid real cards; the drive letters are listed so "my D: drive" maps to a PhysicalDrive.
+const DISCOVERY_SCRIPT: &str = r#"$ErrorActionPreference='SilentlyContinue'; $disks = Get-Disk | Where-Object { -not $_.IsBoot -and -not $_.IsSystem } | ForEach-Object { $d = $_; $letters = @(Get-Partition -DiskNumber $d.Number | Where-Object { $_.DriveLetter } | ForEach-Object { "$($_.DriveLetter):" }); [pscustomobject]@{ Number = [int]$d.Number; FriendlyName = [string]$d.FriendlyName; Size = [uint64]$d.Size; BusType = [string]$d.BusType; PartitionStyle = [string]$d.PartitionStyle; NumberOfPartitions = [int]$d.NumberOfPartitions; IsReadOnly = [bool]$d.IsReadOnly; IsOffline = [bool]$d.IsOffline; DriveLetters = $letters } }; ConvertTo-Json -Compress -Depth 3 @($disks)"#;
+
 #[tauri::command]
 fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
     #[cfg(target_os = "windows")]
     {
-        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "Get-Disk | Where-Object { $_.BusType -in @('USB','SD','MMC') } | Select-Object Number,FriendlyName,Size,BusType,PartitionStyle,NumberOfPartitions | ConvertTo-Json -Compress"]).output().map_err(|e| e.to_string())?;
-        if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_string()); }
+        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", DISCOVERY_SCRIPT]).output().map_err(|e| format!("PowerShell could not be started to list disks: {e}"))?;
+        if !output.status.success() { return Err(format!("Disk discovery failed: {}", String::from_utf8_lossy(&output.stderr).trim())); }
         if output.stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
-        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("Disk list was not readable: {e}"))?;
         let rows = if value.is_array() { value.as_array().cloned().unwrap_or_default() } else { vec![value] };
-        return Ok(rows.into_iter().enumerate().map(|(index, row)| DeviceCandidate {
-            id: row.get("Number").and_then(|v| v.as_u64()).map(|n| format!("PhysicalDrive{n}")).unwrap_or_else(|| format!("removable-{index}")),
-            label: row.get("FriendlyName").and_then(|v| v.as_str()).unwrap_or("Removable camera media").to_string(),
-            size_bytes: row.get("Size").and_then(|v| v.as_u64()).unwrap_or(0), removable: true, read_only: true,
-            partitions: row.get("NumberOfPartitions").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-            partition_style: row.get("PartitionStyle").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
-            bus_type: row.get("BusType").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
-        }).collect());
+        let mut devices: Vec<DeviceCandidate> = rows.into_iter().enumerate().map(|(index, row)| {
+            let bus_type = row.get("BusType").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+            DeviceCandidate {
+                id: row.get("Number").and_then(|v| v.as_u64()).map(|n| format!("PhysicalDrive{n}")).unwrap_or_else(|| format!("removable-{index}")),
+                label: row.get("FriendlyName").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).unwrap_or("Removable camera media").to_string(),
+                size_bytes: row.get("Size").and_then(|v| v.as_u64()).unwrap_or(0),
+                removable: matches!(bus_type.as_str(), "USB" | "SD" | "MMC"),
+                read_only: true,
+                partitions: row.get("NumberOfPartitions").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                partition_style: row.get("PartitionStyle").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
+                bus_type,
+                drive_letters: row.get("DriveLetters").and_then(|v| v.as_array()).map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect()).unwrap_or_default(),
+                offline: row.get("IsOffline").and_then(|v| v.as_bool()).unwrap_or(false),
+            }
+        }).collect();
+        // Removable buses first, then smallest disks: a camera card is rarely the biggest thing attached.
+        devices.sort_by(|a, b| b.removable.cmp(&a.removable).then(a.size_bytes.cmp(&b.size_bytes)));
+        return Ok(devices);
     }
     #[cfg(not(target_os = "windows"))]
     Ok(Vec::new())
+}
+
+/// Describe the first sectors of a discovered device and where (if anywhere) the DHFS volume is.
+#[tauri::command]
+fn probe_device(id: String, size_bytes: u64) -> Result<DeviceProbe, String> {
+    let mut source = open_source(&DhfsSourceSpec::Device { id: id.clone(), size_bytes })?;
+    let mut sector0 = vec![0_u8; 512];
+    fcm_dhfs::BlockSource::read_at(&mut source, 0, &mut sector0).map_err(|error| error.to_string())?;
+    let mbr_signature = sector0[510] == 0x55 && sector0[511] == 0xaa;
+    let mbr_partitions = if mbr_signature {
+        (0..4).filter_map(|index| {
+            let entry = &sector0[446 + index * 16..446 + index * 16 + 16];
+            let type_code = entry[4];
+            let first_lba = u32::from_le_bytes(entry[8..12].try_into().expect("four bytes"));
+            let sectors = u32::from_le_bytes(entry[12..16].try_into().expect("four bytes"));
+            (type_code != 0 || first_lba != 0).then(|| format!("entry {}: type 0x{type_code:02x}, first LBA {first_lba}, {} MiB", index + 1, sectors as u64 * 512 / (1024 * 1024)))
+        }).collect()
+    } else { Vec::new() };
+    let mut first_mib = vec![0_u8; 1024 * 1024];
+    let dpt = fcm_dhfs::BlockSource::read_at(&mut source, 0, &mut first_mib).ok()
+        .and_then(|_| first_mib.windows(fcm_dhfs::DPT_MARKER.len()).position(|window| window == fcm_dhfs::DPT_MARKER).map(|position| position as u64));
+    let (dhfs_location, dhfs_error) = match fcm_dhfs::open_volume(&mut source) {
+        Ok(volume) => (Some(format!("DHFS4.1 at byte {} ({}), {} partition(s)", volume.location.base_offset, location_label(&volume), volume.partitions.len())), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
+    Ok(DeviceProbe {
+        id, size_bytes,
+        sector0_hex: sector0[..64].iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(" "),
+        sector0_ascii: sector0[..64].iter().map(|&byte| if (0x20..0x7f).contains(&byte) { byte as char } else { '.' }).collect(),
+        mbr_signature, mbr_partitions,
+        dhfs_magic_at_zero: sector0.starts_with(fcm_dhfs::MAGIC),
+        dhfs_dpt_marker_within_first_mib: dpt,
+        dhfs_location, dhfs_error,
+    })
 }
 
 fn hash_reader(mut reader: impl Read) -> Result<(u64, String), String> {
@@ -92,7 +159,7 @@ fn acquire_read_only_device_image(source_id: String, destination_path: String) -
     #[cfg(target_os = "windows")]
     {
         let source_path = format!(r"\\.\{}", source_id);
-        let mut source = OpenOptions::new().read(true).write(false).open(&source_path).map_err(|e| format!("Could not open source read-only: {e}"))?;
+        let mut source = OpenOptions::new().read(true).write(false).open(&source_path).map_err(|e| format!("Could not open source read-only: {}", explain_device_error(&e)))?;
         let destination = Path::new(&destination_path);
         if destination.exists() { return Err("The destination already exists. Choose a new acquisition path; existing evidence will not be overwritten.".to_string()); }
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|e| format!("Could not create acquisition directory: {e}"))?; }
@@ -187,5 +254,5 @@ fn extract_dhfs_recording(source: DhfsSourceSpec, partition_index: u32, descript
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, acquire_read_only_device_image, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

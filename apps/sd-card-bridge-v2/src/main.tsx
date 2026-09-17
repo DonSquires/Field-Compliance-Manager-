@@ -17,7 +17,25 @@ type DeviceCandidate = {
   partitions: number;
   partitionStyle: string;
   busType: string;
+  driveLetters: string[];
+  offline: boolean;
 };
+
+type DeviceProbe = {
+  id: string;
+  sizeBytes: number;
+  sector0Hex: string;
+  sector0Ascii: string;
+  mbrSignature: boolean;
+  mbrPartitions: string[];
+  dhfsMagicAtZero: boolean;
+  dhfsDptMarkerWithinFirstMib: number | null;
+  dhfsLocation: string | null;
+  dhfsError: string | null;
+};
+
+declare const __APP_VERSION__: string;
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
 
 type AcquisitionReceipt = {
   sourceId: string;
@@ -140,6 +158,8 @@ export default function App() {
   const [clips, setClips] = useState<Record<string, ExtractedClip>>({});
   const [status, setStatus] = useState('Connect a camera card to begin a read-only acquisition.');
   const [error, setError] = useState<string | null>(null);
+  const [probe, setProbe] = useState<DeviceProbe | null>(null);
+  const [probing, setProbing] = useState(false);
 
   const selectedSize = useMemo(() => selectedDevice ? formatBytes(selectedDevice.sizeBytes) : 'No source selected', [selectedDevice]);
   const recordingDays = useMemo(() => {
@@ -156,12 +176,23 @@ export default function App() {
   const failWith = (cause: unknown, fallback: string) => setError(typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : fallback);
 
   const discover = async () => {
-    setStage('discovery'); setError(null); setStatus('Enumerating removable devices without opening a write handle...');
+    setStage('discovery'); setError(null); setProbe(null); setStatus('Enumerating disks without opening a write handle...');
     try {
       const found = await invoke<DeviceCandidate[]>('discover_read_only_devices');
       setDevices(found); setSelectedDevice(found[0] || null); setStage(found.length ? 'ready' : 'idle');
-      setStatus(found.length ? `${found.length} removable source${found.length === 1 ? '' : 's'} available for acquisition.` : 'No removable source found.');
+      setStatus(found.length
+        ? `${found.length} disk${found.length === 1 ? '' : 's'} available besides the Windows system disk. Pick the card (its drive letter is shown), then list recordings directly from it.`
+        : 'No disk besides the Windows system disk was found. Reseat the card, wait for Windows to notice it (cancel any "format the disk" prompt), then discover again.');
     } catch (cause) { setStage('failed'); failWith(cause, 'Device discovery failed.'); }
+  };
+
+  const probeDevice = async (device: DeviceCandidate) => {
+    setProbing(true); setProbe(null);
+    try {
+      setProbe(await invoke<DeviceProbe>('probe_device', { id: device.id, sizeBytes: device.sizeBytes }));
+    } catch (cause) {
+      setProbe({ id: device.id, sizeBytes: device.sizeBytes, sector0Hex: '', sector0Ascii: '', mbrSignature: false, mbrPartitions: [], dhfsMagicAtZero: false, dhfsDptMarkerWithinFirstMib: null, dhfsLocation: null, dhfsError: typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : 'The card could not be probed.' });
+    } finally { setProbing(false); }
   };
 
   const acquire = async () => {
@@ -176,14 +207,18 @@ export default function App() {
   };
 
   const readCatalog = async (source: DhfsSource) => {
-    setCatalogBusy(true); setError(null); setCatalog(null); setCatalogSource(source); setClips({});
+    setCatalogBusy(true); setError(null); setCatalog(null); setCatalogSource(source); setClips({}); setProbe(null);
     setStatus(source.kind === 'image' ? 'Walking the DHFS partition table and fragment descriptors inside the image...' : 'Reading the DHFS partition table directly from the card (read-only, sector-aligned)...');
     try {
       const result = await invoke<DhfsCatalog>('read_dhfs_catalog', { source });
       setCatalog(result);
       const partition = result.volume.partitions[0];
       setStatus(`${result.recordings.length} recording${result.recordings.length === 1 ? '' : 's'} on the hidden DHFS partition (${locationLabel(result.volume)}), ${formatTime(partition?.firstDate)} to ${formatTime(partition?.lastDate)}.${result.skippedDescriptors ? ` ${result.skippedDescriptors} descriptor${result.skippedDescriptors === 1 ? '' : 's'} skipped as untrustworthy.` : ''}`);
-    } catch (cause) { failWith(cause, 'The DHFS catalog could not be read.'); }
+    } catch (cause) {
+      failWith(cause, 'The DHFS catalog could not be read.');
+      // Show what the first sectors actually hold so the failure is describable, not a shrug.
+      if (source.kind === 'device') { const device = devices.find((candidate) => candidate.id === source.id); if (device) await probeDevice(device); }
+    }
     finally { setCatalogBusy(false); }
   };
 
@@ -220,12 +255,12 @@ export default function App() {
   const catalogPartition = catalog?.volume.partitions[0];
 
   return <main className="v2-shell">
-    <aside className="rail"><div className="brand"><span><Waves size={19} /></span><div><b>FCM</b><small>Desktop V2</small></div></div><nav><button className="is-active"><HardDrive size={17} /> Acquisition</button><button><Database size={17} /> Image explorer</button><button><Search size={17} /> Decoder lab</button></nav><div className="rail-note"><LockKeyhole size={16} /><span>Prototype only. V1 remains the working field bridge.</span></div></aside>
+    <aside className="rail"><div className="brand"><span><Waves size={19} /></span><div><b>FCM</b><small>Desktop V2 · v{APP_VERSION}</small></div></div><nav><button className="is-active"><HardDrive size={17} /> Acquisition</button><button><Database size={17} /> Image explorer</button><button><Search size={17} /> Decoder lab</button></nav><div className="rail-note"><LockKeyhole size={16} /><span>Prototype only. V1 remains the working field bridge.</span></div></aside>
     <section className="workspace">
       <header className="topbar"><div><span className="eyebrow">Evidence workstation / prototype</span><h1>Clone first. Decode second.</h1><p>Preserve the exact camera source locally, then inspect the virtual image with multiple decoder adapters.</p></div><div className="topbar-badge"><ShieldCheck size={17} /> Read-only source</div></header>
       <section className="steps"><Step number="01" title="Discover" detail="Find removable media" complete={stage !== 'idle' && stage !== 'discovery'} active={stage === 'discovery'} /><ChevronRight size={17} /><Step number="02" title="Acquire" detail="Clone and verify" complete={stage === 'complete'} active={stage === 'cloning' || stage === 'verifying'} /><ChevronRight size={17} /><Step number="03" title="Inspect" detail="Map and decode" complete={Boolean(inspection)} active={decoderStage === 'scanning'} /><ChevronRight size={17} /><Step number="04" title="Recordings" detail="List and extract" complete={Boolean(catalog)} active={catalogBusy || Boolean(extracting)} /></section>
       <div className="grid">
-        <section className="panel source-panel"><div className="panel-heading"><div><span className="eyebrow">01 / Source</span><h2>Read-only device discovery</h2></div><Activity size={19} /></div><p className="muted">FCM opens the source read-only and never mounts or writes the camera card. Dahua cards show as RAW with no drive letter; that is the hidden DHFS partition, not a fault.</p><button className="primary" onClick={() => void discover()} disabled={stage === 'discovery'}><HardDrive size={16} /> {stage === 'discovery' ? 'Scanning...' : 'Discover removable media'}</button>{devices.length > 0 && <div className="device-list">{devices.map((device) => <button key={device.id} className={`device ${selectedDevice?.id === device.id ? 'is-selected' : ''}`} onClick={() => setSelectedDevice(device)}><span className="device-icon"><HardDrive size={17} /></span><span><strong>{device.label}</strong><small>{formatBytes(device.sizeBytes)} · {device.busType} · {device.partitionStyle} · {device.partitions} partition{device.partitions === 1 ? '' : 's'} · {device.readOnly ? 'read-only' : 'write protection unknown'}</small></span><CheckCircle2 size={16} /></button>)}</div>}{selectedDevice && <div className="source-facts"><span>Selected source<strong>{selectedDevice.label}</strong></span><span>Capacity<strong>{selectedSize}</strong></span><span>Write mode<strong>Blocked</strong></span></div>}{selectedDevice && <div className="actions"><button className="secondary" onClick={() => void readCatalog({ kind: 'device', id: selectedDevice.id, sizeBytes: selectedDevice.sizeBytes })} disabled={catalogBusy || stage === 'cloning'}><Clapperboard size={16} /> {catalogBusy && catalogSource?.kind === 'device' ? 'Reading card...' : 'List recordings directly from card'}</button><small className="muted">Read-only, no clone. Use this to confirm what the card holds before committing to a full acquisition.</small></div>}</section>
+        <section className="panel source-panel"><div className="panel-heading"><div><span className="eyebrow">01 / Source</span><h2>Read-only device discovery</h2></div><Activity size={19} /></div><p className="muted">FCM opens the source read-only and never mounts or writes the camera card. A Dahua card usually shows in Explorer as a RAW drive letter that Windows offers to format — cancel that prompt; the letter is the hidden DHFS partition, not a fault. Reading a whole disk needs FCM Desktop V2 to be run as administrator.</p><button className="primary" onClick={() => void discover()} disabled={stage === 'discovery'}><HardDrive size={16} /> {stage === 'discovery' ? 'Scanning...' : 'Discover camera cards and disks'}</button>{devices.length > 0 && <div className="device-list">{devices.map((device) => <button key={device.id} className={`device ${selectedDevice?.id === device.id ? 'is-selected' : ''}`} onClick={() => { setSelectedDevice(device); setProbe(null); }}><span className="device-icon"><HardDrive size={17} /></span><span><strong>{device.driveLetters.length ? `${device.driveLetters.join(' ')} · ` : ''}{device.label}</strong><small>{device.id} · {formatBytes(device.sizeBytes)} · {device.busType}{device.removable ? ' (removable)' : ''} · {device.partitionStyle} · {device.partitions} partition{device.partitions === 1 ? '' : 's'}{device.offline ? ' · offline' : ''} · {device.readOnly ? 'read-only' : 'write protection unknown'}</small></span><CheckCircle2 size={16} /></button>)}</div>}{selectedDevice && <div className="source-facts"><span>Selected source<strong>{selectedDevice.driveLetters.length ? `${selectedDevice.driveLetters.join(' ')} · ` : ''}{selectedDevice.label}</strong></span><span>Capacity<strong>{selectedSize}</strong></span><span>Write mode<strong>Blocked</strong></span></div>}{selectedDevice && <div className="actions"><button className="secondary" onClick={() => void readCatalog({ kind: 'device', id: selectedDevice.id, sizeBytes: selectedDevice.sizeBytes })} disabled={catalogBusy || stage === 'cloning'}><Clapperboard size={16} /> {catalogBusy && catalogSource?.kind === 'device' ? 'Reading card...' : 'List recordings directly from card'}</button><button className="secondary" onClick={() => void probeDevice(selectedDevice)} disabled={probing || catalogBusy}><Search size={16} /> {probing ? 'Probing...' : 'Probe first sectors'}</button><small className="muted">Read-only, no clone. Use this to confirm what the card holds before committing to a full acquisition.</small></div>}{probe && <div className="probe"><strong>Card probe · {probe.id} · {formatBytes(probe.sizeBytes)}</strong><dl><div><dt>DHFS volume</dt><dd>{probe.dhfsLocation ?? probe.dhfsError ?? '—'}</dd></div><div><dt>DHFS4.1 at sector 0</dt><dd>{probe.dhfsMagicAtZero ? 'yes' : 'no'}</dd></div><div><dt>DHFS_DPT marker</dt><dd>{probe.dhfsDptMarkerWithinFirstMib === null ? 'not in first MiB' : `byte ${probe.dhfsDptMarkerWithinFirstMib.toLocaleString()}`}</dd></div><div><dt>MBR</dt><dd>{probe.mbrSignature ? (probe.mbrPartitions.length ? probe.mbrPartitions.join('; ') : 'signature present, no partition entries') : 'no MBR signature (superfloppy / raw)'}</dd></div><div><dt>Sector 0 (first 64 bytes)</dt><dd className="mono">{probe.sector0Hex || '—'}<br />{probe.sector0Ascii}</dd></div></dl><small className="muted">Copy this block into a support message if the card is not recognised.</small></div>}</section>
         <section className="panel acquire-panel"><div className="panel-heading"><div><span className="eyebrow">02 / Acquisition</span><h2>Immutable source image</h2></div><LockKeyhole size={19} /></div><p className="muted">The image becomes the working copy. The card remains untouched and can be safely removed after verification.</p><button className="primary" onClick={() => void acquire()} disabled={!selectedDevice || stage === 'cloning'}><Square size={15} /> Acquire exact image</button><div className={`status-card status-${stage}`}><span>{stageLabel[stage]}</span><strong>{receipt ? `${formatBytes(receipt.bytesCopied)} copied` : 'No acquisition receipt yet'}</strong><small>{status}</small></div>{receipt && <div className="receipt"><div><CheckCircle2 size={17} /><strong>Hash verification {receipt.verified ? 'passed' : 'needs review'}</strong></div><dl><div><dt>Source SHA-256</dt><dd>{receipt.sourceSha256}</dd></div><div><dt>Image SHA-256</dt><dd>{receipt.imageSha256}</dd></div><div><dt>Read errors</dt><dd>{receipt.readErrors}</dd></div></dl></div>}</section>
         <section className="panel inspect-panel"><div className="panel-heading"><div><span className="eyebrow">03 / Decoder lab</span><h2>Virtual image inspection</h2></div><Search size={19} /></div><p className="muted">Run several adapters against the clone. Unknown layouts are preserved as investigation candidates instead of rejected.</p><button className="secondary" onClick={() => void inspectImage()} disabled={!receipt || decoderStage === 'scanning'}><Search size={16} /> {decoderStage === 'scanning' ? 'Inspecting...' : 'Inspect image and map partitions'}</button>{inspection && <div className="inspection"><div className="facts"><span>Image<strong>{formatBytes(inspection.imageBytes)}</strong></span><span>Signatures<strong>{inspection.signatures.length}</strong></span><span>DHFS<strong>{inspection.dhfs ? locationLabel(inspection.dhfs) : 'not found'}</strong></span></div><div className="signature-list">{inspection.signatures.map((signature) => <span key={signature}>{signature}</span>)}</div>{inspection.adapters.map((adapter) => <div className="adapter" key={adapter.name}><span className={`dot dot-${adapter.state}`} /><div><strong>{adapter.name}</strong><small>{adapter.detail}</small></div><em>{adapter.confidence}</em></div>)}</div>}</section>
         <section className="panel recordings-panel"><div className="panel-heading"><div><span className="eyebrow">04 / Recordings</span><h2>Hidden DHFS partition</h2></div><Clapperboard size={19} /></div>
@@ -243,7 +278,7 @@ export default function App() {
         </section>
       </div>
       {error && <div className="error"><strong>Action blocked</strong><span>{error}</span></div>}
-      <footer><span><ShieldCheck size={14} /> V2 prototype keeps acquisition, inspection, and decoder evidence separate.</span><span>{stageLabel[stage]} · decoder {decoderStage.replace('_', ' ')}{catalog ? ` · ${catalog.recordings.length} recordings` : ''}</span></footer>
+      <footer><span><ShieldCheck size={14} /> V2 prototype keeps acquisition, inspection, and decoder evidence separate.</span><span>v{APP_VERSION} · {stageLabel[stage]} · decoder {decoderStage.replace('_', ' ')}{catalog ? ` · ${catalog.recordings.length} recordings` : ''}</span></footer>
     </section>
   </main>;
 }
