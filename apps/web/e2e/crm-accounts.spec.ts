@@ -40,6 +40,51 @@ test('CRM account context and governed quote creation are operational', async ({
   await expect(page).toHaveURL(/\/admin\/relationships\?account=40404040-4040-4040-8040-404040404040&agreement=46464646-4646-4646-8646-464646464646$/);await expect(page.getByRole('heading', { name: 'Civic Events Compliance Services', exact: true })).toBeVisible(); expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('a saved workshop build adds its priced lines to a draft quote at the selected client site', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  let templateRequest: Record<string, unknown> | null = null;
+  let copiedLines: Array<Record<string, unknown>> = [];
+  await page.route('**/rest/v1/workshop_bom_templates*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+    { id: 'babebabe-babe-4abe-8abe-babebabebabe', name: 'Standard lockbox', kind: 'fabrication', description: 'Lockbox steel, fixings and workshop labour.' },
+  ]) }));
+  await page.route('**/rest/v1/quote_lines*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify(copiedLines) }));
+  await page.route('**/rest/v1/rpc/add_crm_quote_lines_from_bom_template', async (route) => {
+    templateRequest = JSON.parse(route.request().postData() ?? '{}');
+    copiedLines = [
+      { id: 'line-1', kind: 'materials', description: 'Standard lockbox — 200x200mm box section', quantity: 2.5, unit_cost: 40, unit_charge: 62 },
+      { id: 'line-2', kind: 'labour', description: 'Standard lockbox — Cut, weld, finish', quantity: 3, unit_cost: 45, unit_charge: 95 },
+    ];
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ lines_added: 2, lines_needing_price: 0, quote_id: '44444444-4444-4444-8444-444444444449', total_cost: 235, subtotal_charge: 440, discount_amount: 0, gst_amount: 66, total_charge: 506 }]) });
+  });
+
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
+  await workspace.getByRole('button', { name: 'Create proposal' }).click();
+  const createDialog = page.getByRole('dialog', { name: /New quote for Civic Events Limited/ });
+  await createDialog.getByLabel('Include static_guarding').check();
+  await createDialog.getByRole('button', { name: 'Create draft quote' }).click();
+
+  const pricing = page.getByRole('dialog', { name: /Price Civic Events Limited - .* proposal/ });
+  await pricing.getByLabel('Add a standard build').selectOption('babebabe-babe-4abe-8abe-babebabebabe');
+  await pricing.getByRole('button', { name: 'Add its lines' }).click();
+
+  await expect(page.getByText('2 lines from Standard lockbox added to Civic Events Limited - Civic Centre proposal.')).toBeVisible();
+  await expect(pricing.getByText('Standard lockbox — 200x200mm box section')).toBeVisible();
+  await expect(pricing.getByText('Standard lockbox — Cut, weld, finish')).toBeVisible();
+  await expect(pricing.getByText('Total cost $235.00')).toBeVisible();
+  await expect(pricing.getByText('Total charge $506.00')).toBeVisible();
+  expect(templateRequest).toMatchObject({
+    p_quote_id: '44444444-4444-4444-8444-444444444449',
+    p_expected_status: 'draft',
+    p_template_id: 'babebabe-babe-4abe-8abe-babebabebabe',
+    p_site_id: '25252525-2525-4525-8525-252525252525',
+  });
+  expect(typeof templateRequest?.p_client_request_id).toBe('string');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('account team manages contacts, follow-up activity, and receivables', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
   const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');

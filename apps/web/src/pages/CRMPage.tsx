@@ -24,6 +24,7 @@ import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/Crm
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
 import { PriceListPicker } from '../components/PriceListPicker';
+import { BomTemplateQuoteAdder } from '../components/BomTemplateQuoteAdder';
 import './PageStyles.css';
 import './CRMPage.css';
 
@@ -889,6 +890,24 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               setLineForm((current) => ({ ...current, kind: selection.kind, description: selection.description, unitCharge: selection.unitCharge === null ? current.unitCharge : selection.unitCharge.toFixed(2), unitCost: selection.unitCost === null ? current.unitCost : selection.unitCost.toFixed(2), moduleKey: '' }));
             }}
           />
+          {pricingQuote.status === 'draft' && (
+            <BomTemplateQuoteAdder
+              organizationIds={[quoteOperatingProviderId].filter(Boolean)}
+              quoteId={pricingQuote.id}
+              quoteStatus={pricingQuote.status}
+              siteId={lineForm.siteId || null}
+              disabled={quoteSaving}
+              onError={(message) => setState((current) => ({ ...current, error: message }))}
+              onAdded={async (receipt, template) => {
+                setPricingReceipt({ totalCost: receipt.total_cost, totalCharge: receipt.total_charge });
+                setNotice(receipt.lines_added === 0
+                  ? `${template.name} was already on ${pricingQuote.title} — nothing added twice.`
+                  : `${receipt.lines_added} line${receipt.lines_added === 1 ? '' : 's'} from ${template.name} added to ${pricingQuote.title}.${receipt.lines_needing_price > 0 ? ` ${receipt.lines_needing_price} line${receipt.lines_needing_price === 1 ? ' has' : 's have'} no price yet — set a price before sending.` : ''}`);
+                await loadQuoteLines(pricingQuote.id);
+                await loadCrm();
+              }}
+            />
+          )}
         </div>
         <div>
           <label>
