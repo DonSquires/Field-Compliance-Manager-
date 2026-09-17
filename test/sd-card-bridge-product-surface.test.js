@@ -49,6 +49,9 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.match(adminShell, new RegExp(`const DESKTOP_V2_VERSION = '${v2Package.version.replace(/\./g, '\\.')}';`));
   // FCM roles do not grant GitHub auth: V2 is served from the public desktop-releases bucket.
   assert.match(adminShell, /storage\/v1\/object\/public\/desktop-releases\/v2\/\$\{DESKTOP_V2_VERSION\}\/FCM-Desktop-V2-Setup\.exe/);
+  assert.match(adminShell, /const DESKTOP_V2_FILENAME = `FCM-Desktop-V2-v\$\{DESKTOP_V2_VERSION\}-Setup\.exe`/);
+  assert.match(adminShell, /\?download=\$\{DESKTOP_V2_FILENAME\}/);
+  assert.match(adminShell, /download=\{DESKTOP_V2_FILENAME\}/);
   assert.match(adminShell, /FCM Desktop V2 · v\{DESKTOP_V2_VERSION\}/);
   assert.match(adminShell, /unsigned development build/);
   assert.ok(capability.permissions.includes('opener:default'));
