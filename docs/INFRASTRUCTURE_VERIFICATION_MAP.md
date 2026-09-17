@@ -56,9 +56,11 @@ def run_vps_cmd(cmd_to_run):
 - **Authentication**: `Authorization: Bearer <RUNPOD_API>` or `RUNPOD_API_KEY`
 - **Health Status**: Verified `HTTP 200 OK` (3 workers ready/idle)
 - **Connected Services**: `fcm-vision-watcher`, `fcm-inference`
-- **Template / image (2026-09-17)**: template `bwway2hiwx` → `git.fcmanager.co.nz/iron-eagle-security-ltd/fcm-inference-gpu@sha256:e798f41f…`
-  (RF-DETR large-704 + plate detector + OCR on onnxruntime-gpu 1.26 / CUDA 12). Endpoint: 1 GPU per worker,
-  GPU types RTX 4090 / RTX 6000 Ada / L40S / A40, no network-volume pin, idle 30 s, execution timeout 600 s.
+- **Template / image (2026-09-17)**: template `bwway2hiwx` → `git.fcmanager.co.nz/iron-eagle-security-ltd/fcm-inference-gpu@sha256:944b93bb…`
+  (commit `6363ae2`: RF-DETR large-704 + plate detector + OCR + SpeciesNet v4.0.2a on onnxruntime-gpu 1.26 / CUDA 12),
+  pulled with container registry auth `gitea-fcmanager-pull` (read-only Gitea token; anonymous registry access is
+  refused). Endpoint: 1 GPU per worker, GPU types RTX 4090 / RTX 6000 Ada / L40S / A40, no network-volume pin,
+  idle 30 s, execution timeout 600 s. Verified live: `ping` → `CUDAExecutionProvider`, `cuda: true`.
   Workers only start while the RunPod account balance is positive — a negative balance shows as
   `inQueue > 0` with every worker count at 0. Design and evidence rules: `docs/CCTV_INFERENCE_TIER.md`.
 

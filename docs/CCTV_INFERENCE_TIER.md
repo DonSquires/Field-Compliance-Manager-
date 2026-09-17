@@ -1,8 +1,9 @@
 # CCTV Inference Tier — design, evidence standard and operations
 
-_Status: built and deployed to the CPU tier 2026-09-17 (commit after `253628f`); GPU tier image published,
-worker verification pending a RunPod account top-up (see §7). Owner instruction: "make our system the best
-you can make it … provide that level of inference" (2026-09-16)._
+_Status: built and deployed to both tiers 2026-09-17 (commit `6363ae2`): VPS CPU tier live, RunPod GPU tier
+verified on CUDA (RF-DETR large-704, plate reader, SpeciesNet all on `CUDAExecutionProvider`). Owner
+instruction: "make our system the best you can make it … provide that level of inference" (2026-09-16);
+species model had to be one that "does not require payment" (2026-09-17)._
 
 This document is the authority for `services/fcm-inference` (the model service), the RunPod serverless
 worker that runs the same code on a GPU, and the parts of `services/vision` that consume its answers.
@@ -36,11 +37,14 @@ wide, however confident the OCR claims to be.
 | Face detect / embed | YuNet 2023mar / SFace 2021dec (opencv_zoo) | Apache-2.0 | OpenCV | both |
 | Person re-ID / vehicle colour-type | OpenVINO person-reidentification-retail-0288, vehicle-attributes-recognition-barrier-0039 | Apache-2.0 | OpenVINO CPU | both |
 | Vehicle-only fallback | OpenVINO vehicle-detection-0200 | Apache-2.0 | OpenVINO CPU | only when no RF-DETR export is present in `MODELS_DIR` |
-| Species (optional) | SpeciesNet, geofenced `NZL` | Apache-2.0, weights via Kaggle (credentialled) | torch | not staged; animals carry the detector's coarse label and say so |
+| Species | SpeciesNet v4.0.2a `always_crop` (Google; EfficientNetV2-M, 2,498 labels, camera-trap trained), exported to ONNX at image build from the Addax Data Science Hugging Face mirror (Apache-2.0, pinned revision `c56465f`), geofenced `NZL` | Apache-2.0 | onnxruntime | both |
 
 Rejected: Ultralytics YOLO (AGPL-3.0 — incompatible with a closed SaaS), Plate Recognizer / cloud ALPR
 (evidence leaves the custodian's control), tesseract on contour heuristics (kept only as the not-staged
-fallback; it is what produced the "inaccurate inference" the owner reported).
+fallback; it is what produced the "inaccurate inference" the owner reported), the Kaggle distribution of
+SpeciesNet (needs an account; the Apache-2.0 mirror does not), third-party ONNX re-exports of SpeciesNet
+(unknown preprocessing — we export from the checkpoint and prove parity ourselves), BioCLIP zero-shot (MIT,
+free, but a general biology CLIP rather than a camera-trap classifier; kept as the fallback idea).
 
 CPU trial on the real TAPO sample (2304x1296, 16-core Codespace): RF-DETR nano 81 ms, small 145 ms,
 medium 195 ms, large 297 ms per full frame; the VPS CPU tier (small-512, 5 passes) is ~0.9–1.2 s per
@@ -63,11 +67,13 @@ medium 195 ms, large 297 ms per full frame; the VPS CPU tier (small-512, 5 passe
   (15 %) tile pass in the same batch (`passes: 5`). Tile detections must clear 0.45, must not span more than
   half the tile (fragment guard), and are merged only when no same-kind full-frame detection overlaps them
   (IoU ≥ 0.5) or contains them (≥ 70 %). `DETECTOR_TILES=off` disables it for a CPU budget.
-* **Class policy.** COCO → kind map; animals limited to `bird, cat, dog, horse, sheep, cow` (giraffe/
-  elephant/zebra/bear are what the detector calls a tree trunk — the "giraffe 0.41" false positive in the
-  sample). Floors: person 0.35, vehicle 0.35, animal 0.50; per-class `train 0.60, boat 0.50, bicycle 0.40`.
-  `plausible_box` drops whole-frame boxes (≥ 85 % area), specks (< 0.1 %) and "people" shorter than 5 % of
-  the frame.
+* **Class policy.** COCO → kind map. Without a species model, animals are limited to `bird, cat, dog, horse,
+  sheep, cow` (giraffe/elephant/zebra/bear are what the detector calls a tree trunk — the "giraffe 0.41"
+  false positive in the sample); with SpeciesNet staged every COCO animal class is admitted as "something
+  alive is here" and SpeciesNet decides what, and a crop SpeciesNet calls `blank` above 0.8 is moved to
+  `suppressed_animals` (visible, not counted). Floors: person 0.35, vehicle 0.35, animal 0.50; per-class
+  `train 0.60, boat 0.50, bicycle 0.40`. `plausible_box` drops whole-frame boxes (≥ 85 % area), specks
+  (< 0.1 %) and "people" shorter than 5 % of the frame.
 * **NMS.** DETR-family models emit no suppression; `suppress_duplicates` (class-aware IoU 0.6) removes the
   edge duplicates seen in the sample (two boxes on one person at x=0).
 
@@ -94,7 +100,31 @@ resolution; the reader locates them, reads `J44F5` / `CTV81` with weak character
 `plate_unreadable` rather than promoting a guess. A 2304x1296 camera at that range cannot produce a
 registration; the console's enhancement/zoom gets the located box.
 
-## 5. Consumers
+## 5. Species (`services/fcm-inference/species.py`)
+
+* **Export.** `export_speciesnet_onnx.py` runs in a torch-only Docker stage: downloads the checkpoint (a
+  torch.fx GraphModule produced by onnx2torch) plus labels / taxonomy / geofence / four reference crops from
+  the pinned mirror revision, exports opset-17 ONNX with a dynamic batch, and refuses to finish unless the
+  torch and ONNX top-1 agree on every reference crop with max probability delta < 1e-3 (measured 2e-6). The
+  report is shipped as `speciesnet_v4.0.2a_always_crop.parity.json`. Runtime preprocessing (OpenCV RGB,
+  bilinear 480x480, /255, NHWC) is within 0.007 probability of the torchvision reference.
+* **Decision rules** are a port of `speciesnet.ensemble_prediction_combiner` / `geofence_utils` for a
+  detection of class animal: blank > 0.99 → blank; top > 0.8 (or > 0.65 with detection > 0.2) → geofence
+  check → roll up to family/order/class/kingdom when the species is implausible for the configured country
+  (`SPECIES_COUNTRY=NZL`, optional `SPECIES_ADMIN1_REGION` ISO 3166-2); otherwise roll up genus → kingdom at
+  0.65; otherwise the detector's plain `animal`. Sample: a plains-zebra crop under `NZL` becomes
+  `equidae family` via `classifier+geofence+rollup_to_family`; under `KEN` it stays `plains zebra`.
+* **NZ table.** `detector.normalise_species` maps the 7-part label onto `NZ_SPECIES` by **exact** alias only
+  (common name, `genus species`, genus, family); a roll-up such as `weasel family` stays `other` with
+  SpeciesNet's own name and `species_status: taxon_above_species` rather than becoming "weasel". Aliases
+  cover the mirror's naming (`western polecat` = ferret, `rattus species` = rat, `red-necked wallaby`,
+  `equidae` = horse, `phalangeridae` = possum, …). Every answer carries `speciesnet: {label, common_name,
+  score, source, top[5], country, admin1_region, geofence}` and `species_provider =
+  speciesnet:4.0.2a+onnxruntime@<provider>`.
+* **Coverage caveat.** SpeciesNet's label set has no stoat-vs-ferret-vs-weasel guarantee at night-IR quality
+  and no tahr; those land at genus/family with the raw label attached. That is reported, not papered over.
+
+## 6. Consumers
 
 * RunPod `infer_batch` (`runpod_handler.py`) now returns `alpr` and `face` blocks per frame in addition to
   the triage; `ping` returns the full health payload including providers.
@@ -105,36 +135,37 @@ registration; the console's enhancement/zoom gets the located box.
   attributes: `alpr_provider, alpr_models, alpr_evidence_quality, plate_raw_text, plate_corrections,
   plate_char_confidence_min, plate_width_px, detector_provider`.
 
-## 6. Packaging and deployment
+## 7. Packaging and deployment
 
-* `services/fcm-inference/Dockerfile`: `python:3.12-slim`; `--build-arg GPU=1` installs
-  `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last CUDA 12 line; 1.27+ is CUDA 13) as its own layer;
-  `GPU=0` installs plain `onnxruntime`. `download_models.py` bakes RF-DETR large+small, the plate pair, the
-  OCR pair and the OpenVINO models into `/app/models` with size checks. Images: CPU 773 MB, GPU 2.8 GB.
+* `services/fcm-inference/Dockerfile`: stage 1 (`speciesnet-export`, torch CPU) produces the SpeciesNet
+  ONNX + parity report; stage 2 is `python:3.12-slim` with `--build-arg GPU=1` installing
+  `onnxruntime-gpu[cuda,cudnn]==1.26.0` (last CUDA 12 line; 1.27+ is CUDA 13) as its own layer, `GPU=0`
+  plain `onnxruntime`. `download_models.py` bakes RF-DETR large+small, the plate pair, the OCR pair, the
+  SpeciesNet sidecars and the OpenVINO models into `/app/models` with size checks. Images: CPU ~1.0 GB,
+  GPU ~3.0 GB.
 * Registry: `git.fcmanager.co.nz/iron-eagle-security-ltd/fcm-inference` (CPU) and `fcm-inference-gpu`
   (GPU), tagged `<sha7>` and `latest`; `.gitea/workflows/publish_workload_containers.yml` builds both.
-  nginx `/v2/` on the VPS now has `client_max_body_size 0` (the CUDA layer exceeded the old 2 GB cap).
+  nginx `/v2/` on the VPS has `client_max_body_size 0` (the CUDA layer exceeded the old 2 GB cap) and **no
+  longer injects a fixed `Authorization` header** — anonymous registry access is refused (401); RunPod pulls
+  with a read-only `read:package` Gitea token registered as container registry auth `gitea-fcmanager-pull`.
 * VPS (`docker-compose.full.yml`): host volume `/opt/fcm/models` **overlays** the baked models, so new
   weights must be staged there (`MODELS_DIR=/opt/fcm/models python3 services/fcm-inference/download_models.py`
-  — done 2026-09-16, 330 MB). Env: `DETECTOR_MODEL=rf-detr-small-512-coco`, `DETECTOR_TILES=auto`,
-  `INFERENCE_DEVICE=cpu`.
-* RunPod: template `bwway2hiwx` → `fcm-inference-gpu@sha256:e798f41f…`, env `DETECTOR_MODEL=rf-detr-large-704-coco`;
-  endpoint `katqqnmds1dphs` set to 1 GPU per worker (was 2), GPU types 4090 / RTX 6000 Ada / L40S / A40
-  (all CUDA 12), network-volume pin removed (models are in the image), idle 30 s, execution timeout 600 s.
+  for downloadable files; the SpeciesNet ONNX + parity report are `docker cp`'d out of the built image).
+  Env: `DETECTOR_MODEL=rf-detr-small-512-coco`, `DETECTOR_TILES=auto`, `INFERENCE_DEVICE=cpu`.
+* RunPod: template `bwway2hiwx` → `fcm-inference-gpu@sha256:944b93bb…` (commit `6363ae2`), env
+  `DETECTOR_MODEL=rf-detr-large-704-coco`; endpoint `katqqnmds1dphs` set to 1 GPU per worker (was 2), GPU
+  types 4090 / RTX 6000 Ada / L40S / A40 (all CUDA 12), network-volume pin removed, idle 30 s, execution
+  timeout 600 s. Verified 2026-09-17: `ping` → `detector_provider: CUDAExecutionProvider`, `cuda: true`;
+  a 6-frame `infer_batch` executed in 5.1 s with RF-DETR, plate reader and SpeciesNet all on CUDA and
+  detections identical to the CPU run.
 
-## 7. Open items / honest gaps
+## 8. Open items / honest gaps
 
-* **RunPod balance is negative (−$0.07 at 2026-09-17 00:10 UTC)** — no serverless worker will start until
-  the account is topped up; 15 jobs sit `IN_QUEUE`. The CUDA execution path is therefore verified only as
-  far as the image's own CPU fallback; first `ping` after top-up must show
-  `detector_provider: CUDAExecutionProvider`.
-* The Gitea registry vhost hard-codes a `proxy_set_header Authorization "Basic …"` for `/v2/`, which makes
-  every anonymous registry request act as one user (that is how RunPod pulls with
-  `containerRegistryAuthId: ""`). It should be replaced by a RunPod registry credential and removed —
-  owner decision, blast radius = every anonymous pull/push.
-* Species: only coarse detector labels until SpeciesNet (Kaggle-credentialled) or an NZ pest classifier is
-  staged; `species_status` says `detector_coarse_label` / `model_not_staged`.
 * Tracking across frames is still the consolidator's IoU/embedding association; a Kalman/ByteTrack-style
   tracker on the detector boxes is the next step to cut duplicate observations.
 * No live plate has yet been read from the TAPO corpus because none is legible at that resolution; the
   reader is proven with fake sessions (`test_inference_tier.py`) and on real frames for location only.
+* Species accuracy on NZ night-IR footage is unmeasured (no labelled NZ corpus in the repo); the first real
+  possum/stoat clips should be kept as a regression set with the reviewer's verdicts.
+* RunPod idle timeout is 30 s; each cold start costs ~15–35 s (`delayTime`) — raise `workersMin` to 1 if
+  batch latency matters more than idle cost.
