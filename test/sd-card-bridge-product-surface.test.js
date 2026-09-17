@@ -47,7 +47,8 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   const v2Tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/tauri.conf.json'), 'utf8'));
   assert.equal(v2Tauri.version, v2Package.version);
   assert.match(adminShell, new RegExp(`const DESKTOP_V2_VERSION = '${v2Package.version.replace(/\./g, '\\.')}';`));
-  assert.match(adminShell, /releases\/download\/sd-card-bridge-v2-v\$\{DESKTOP_V2_VERSION\}\/FCM-Desktop-V2-Setup\.exe/);
+  // FCM roles do not grant GitHub auth: V2 is served from the public desktop-releases bucket.
+  assert.match(adminShell, /storage\/v1\/object\/public\/desktop-releases\/v2\/\$\{DESKTOP_V2_VERSION\}\/FCM-Desktop-V2-Setup\.exe/);
   assert.match(adminShell, /FCM Desktop V2 · v\{DESKTOP_V2_VERSION\}/);
   assert.match(adminShell, /unsigned development build/);
   assert.ok(capability.permissions.includes('opener:default'));
