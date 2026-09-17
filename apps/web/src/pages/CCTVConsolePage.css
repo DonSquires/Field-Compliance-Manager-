@@ -24,6 +24,7 @@
 }
 .cctv-console__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
 .cctv-console__header .page-title { align-items: center; color: #edf4f5; display: inline-flex; font-size: 26px; gap: 10px; margin: 0; }
+.cctv-console__camera-list { list-style: none; margin: 0; padding: 0; }
 .cctv-console__header .page-subtitle { color: #b6c9d0; margin: 6px 0 0; }
 .cctv-console__popout-badge { background: var(--cc-brand-dim); border: 1px solid var(--cc-brand); border-radius: 4px; color: var(--cc-brand); font-size: 11px; font-weight: 700; letter-spacing: .08em; margin-left: 10px; padding: 2px 8px; text-transform: uppercase; vertical-align: middle; }
 .cctv-console__header-actions { display: flex; flex-wrap: wrap; gap: 8px; }
