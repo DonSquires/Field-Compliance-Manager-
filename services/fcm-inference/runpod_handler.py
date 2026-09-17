@@ -126,6 +126,8 @@ def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
         result["people_provider"] = (triage or {}).get("people_provider") or (triage or {}).get("detector_provider")
     animals = (triage or {}).get("animals") or []
     result["animals"] = animals
+    if (triage or {}).get("suppressed_animals"):
+        result["suppressed_animals"] = triage["suppressed_animals"]
     result["animal_detection_status"] = (
         "model_not_staged" if "animal" not in coverage
         else ("ready" if triage["species_status"] == "ready" else "detector_only_species_not_staged")

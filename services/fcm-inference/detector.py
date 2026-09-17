@@ -68,9 +68,11 @@ COCO_TO_KIND = {
     "sheep": ("animal", "sheep"), "cow": ("animal", "cattle"), "elephant": ("animal", "elephant"), "bear": ("animal", "bear"),
     "zebra": ("animal", "zebra"), "giraffe": ("animal", "giraffe"),
 }
-# COCO animals that can actually stand in a New Zealand paddock or forestry block. The others (giraffe,
-# elephant, zebra, bear) are what the detector calls a tree trunk or a dark stump; they are dropped.
+# COCO animals that can actually stand in a New Zealand paddock or forestry block. Applied only when no species
+# model is staged: the others (giraffe, elephant, zebra, bear) are what the detector calls a tree trunk or a dark
+# stump. With SpeciesNet staged every animal class is admitted and SpeciesNet's own "blank" verdict prunes them.
 NZ_PLAUSIBLE_COCO_ANIMALS = frozenset({"bird", "cat", "dog", "horse", "sheep", "cow"})
+BLANK_SUPPRESSION_SCORE = float(os.getenv("SPECIES_BLANK_SUPPRESSION_SCORE", "0.8"))
 # Classes the detector confuses with sheds, fences and jetties need a stronger case than a car does.
 RAW_CLASS_MIN_CONFIDENCE = {"train": 0.60, "boat": 0.50, "bicycle": 0.40}
 # The tile pass exists to recover small far-field objects. A tile detection that spans most of its tile is a
@@ -186,14 +188,15 @@ def species_payload(label: str | None, confidence: float | None, provider: str) 
     }
 
 
-def map_detection(class_name: str | None) -> tuple[str, str | None] | None:
-    """Return (entity_kind, coarse_label) for a COCO class, or None when it is not a person/vehicle/animal
-    that belongs in a New Zealand scene."""
+def map_detection(class_name: str | None, allow_all_animals: bool = False) -> tuple[str, str | None] | None:
+    """Return (entity_kind, coarse_label) for a COCO class, or None when it is not a person/vehicle/animal.
+    Without a species model the COCO animal set is narrowed to what can stand in a New Zealand scene; with one
+    staged every animal class is only a hint that *something* alive is there and SpeciesNet decides what."""
     label = str(class_name or "").lower()
     mapped = COCO_TO_KIND.get(label)
     if mapped is None:
         return None
-    if mapped[0] == "animal" and label not in NZ_PLAUSIBLE_COCO_ANIMALS:
+    if mapped[0] == "animal" and not allow_all_animals and label not in NZ_PLAUSIBLE_COCO_ANIMALS:
         return None
     return mapped
 
@@ -442,11 +445,11 @@ def merge_detections(primary: list[dict[str, Any]], extra: list[dict[str, Any]],
     return merged
 
 
-def _detections_from_results(results: Any, offset_x: int, offset_y: int, width: int, height: int, source: str, window: dict[str, int] | None = None) -> list[dict[str, Any]]:
+def _detections_from_results(results: Any, offset_x: int, offset_y: int, width: int, height: int, source: str, window: dict[str, int] | None = None, allow_all_animals: bool = False) -> list[dict[str, Any]]:
     detections: list[dict[str, Any]] = []
     for result in results or []:
         label = str(getattr(result, "label", "") or "")
-        mapped = map_detection(label)
+        mapped = map_detection(label, allow_all_animals)
         if mapped is None:
             continue
         kind, coarse = mapped
@@ -589,10 +592,11 @@ def detect(image: np.ndarray) -> dict[str, Any]:
         windows = tile_windows(width, height, _detector_meta.get("input_size"))
         crops = [image] + [image[w["y"]:w["y"] + w["height"], w["x"]:w["x"] + w["width"]] for w in windows]
         outputs = model.predict(crops) if len(crops) > 1 else [model.predict(image)]
-        full = suppress_duplicates(_detections_from_results(outputs[0], 0, 0, width, height, "full"))
+        all_animals = _species_available()
+        full = suppress_duplicates(_detections_from_results(outputs[0], 0, 0, width, height, "full", allow_all_animals=all_animals))
         extra: list[dict[str, Any]] = []
         for window, results in zip(windows, outputs[1:]):
-            extra.extend(_detections_from_results(results, window["x"], window["y"], width, height, "tile", window))
+            extra.extend(_detections_from_results(results, window["x"], window["y"], width, height, "tile", window, allow_all_animals=all_animals))
         detections = merge_detections(full, extra) if extra else full
         provider = f"rf_detr:{_detector_meta.get('name')}@{_detector_meta.get('provider')}"
         return {"status": "ready", "coverage": ["person", "vehicle", "animal"], "detections": detections, "provider": provider,
@@ -637,6 +641,7 @@ def triage_frame(image: np.ndarray, want_species: bool = True) -> dict[str, Any]
     people = [item for item in detection["detections"] if item["kind"] == "person"]
     vehicles = [item for item in detection["detections"] if item["kind"] == "vehicle"]
     animals = []
+    suppressed = []
     for item in detection["detections"]:
         if item["kind"] != "animal":
             continue
@@ -645,6 +650,12 @@ def triage_frame(image: np.ndarray, want_species: bool = True) -> dict[str, Any]
             entry.update(classify_species(image, item["bbox"], item.get("coarse_label"), item["confidence"], detection.get("provider")))
         elif item.get("coarse_label"):
             entry.update(species_payload(item["coarse_label"], item["confidence"], detection["provider"] or "detector"))
+        # SpeciesNet has a trained "blank" class; when it is sure nothing alive is in the crop, the detector's
+        # animal was a stump or a shadow. Kept visible under suppressed_animals, not counted as a sighting.
+        if entry.get("species_status") == "classifier_blank" and (entry.get("species_confidence") or 0) > BLANK_SUPPRESSION_SCORE:
+            entry["suppressed_reason"] = "speciesnet_blank"
+            suppressed.append(entry)
+            continue
         animals.append(entry)
     return {
         "detector_status": detection["status"], "detector_provider": detection.get("provider"),
@@ -653,5 +664,5 @@ def triage_frame(image: np.ndarray, want_species: bool = True) -> dict[str, Any]
         "detector_coverage": detection.get("coverage", []),
         "detector_error": detection.get("error"),
         "species_status": "ready" if _species_available() else "model_not_staged",
-        "people": people, "vehicles": vehicles, "animals": animals,
+        "people": people, "vehicles": vehicles, "animals": animals, "suppressed_animals": suppressed,
     }
