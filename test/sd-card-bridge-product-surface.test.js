@@ -41,8 +41,15 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.doesNotMatch(source, /vercel\.app/);
   const adminShell = fs.readFileSync(path.join(root, 'apps/web/src/shells/AdminShell.tsx'), 'utf8');
   assert.match(adminShell, /releases\/download\/sd-card-bridge-v0\.1\.53\/FCM-SD-Card-Bridge-Setup\.exe/);
-  assert.match(adminShell, /releases\/download\/sd-card-bridge-v2-v0\.1\.3\/FCM-Desktop-V2-Setup\.exe/);
-  assert.match(adminShell, /Unsigned development build/);
+  // The web app's V2 download must follow the V2 build it advertises: a stale pin here shipped the blank 0.1.3 window
+  // to an operator twice (2026-09-17) while 0.1.4/0.1.5 sat unused on the releases page.
+  const v2Package = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/package.json'), 'utf8'));
+  const v2Tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/tauri.conf.json'), 'utf8'));
+  assert.equal(v2Tauri.version, v2Package.version);
+  assert.match(adminShell, new RegExp(`const DESKTOP_V2_VERSION = '${v2Package.version.replace(/\./g, '\\.')}';`));
+  assert.match(adminShell, /releases\/download\/sd-card-bridge-v2-v\$\{DESKTOP_V2_VERSION\}\/FCM-Desktop-V2-Setup\.exe/);
+  assert.match(adminShell, /FCM Desktop V2 · v\{DESKTOP_V2_VERSION\}/);
+  assert.match(adminShell, /unsigned development build/);
   assert.ok(capability.permissions.includes('opener:default'));
   for (const label of ['Desktop home', 'One-shot SD import', 'Review in web portal', 'Upload exported video', 'FCM web portal']) {
     assert.match(source, new RegExp(label));
