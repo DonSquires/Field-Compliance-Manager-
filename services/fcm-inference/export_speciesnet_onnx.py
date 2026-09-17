@@ -69,8 +69,11 @@ def main() -> None:
 
     session = ort.InferenceSession(str(OUT), providers=["CPUExecutionProvider"])
     labels = [line.strip() for line in (SRC / "always_crop_99710272_22x8_v12_epoch_00148.labels.20251208.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
+    examples = sorted((SRC / "examples").glob("*.jpg"))
+    if len(examples) < 2:
+        raise SystemExit(f"parity check needs the reference crops in {SRC / 'examples'}; found {len(examples)}")
     report = []
-    for example in sorted((SRC / "examples").glob("*.jpg")):
+    for example in examples:
         ref = preprocess_reference(example)
         with torch.no_grad():
             ref_probs = torch.softmax(model(torch.from_numpy(ref).unsqueeze(0)), dim=1).numpy()[0]

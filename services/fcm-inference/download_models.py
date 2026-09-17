@@ -40,6 +40,8 @@ SPECIESNET_FILES = {
     'geofence_release.20251208.json': f'{SPECIESNET_MIRROR}/geofence_release.20251208.json',
 }
 SPECIESNET_CHECKPOINT = ('always_crop_99710272_22x8_v12_epoch_00148.pt', f'{SPECIESNET_MIRROR}/always_crop_99710272_22x8_v12_epoch_00148.pt')
+# Reference camera-trap crops (LILA BC, CDLA-Permissive) used by export_speciesnet_onnx.py's parity check.
+SPECIESNET_EXAMPLES = {f'examples/{index}.jpg': f'{SPECIESNET_MIRROR}/examples/{index}.jpg' for index in (1, 2, 3, 4)}
 RF_DETR_MODELS = tuple(name.strip() for name in os.getenv('RF_DETR_MODELS', 'rf-detr-large-704-coco,rf-detr-small-512-coco').split(',') if name.strip())
 FILES.update({
     f'{name}.onnx': f'https://github.com/ankandrew/open-image-models/releases/download/assets/{name}.onnx' for name in RF_DETR_MODELS
@@ -53,7 +55,7 @@ FILES.update({
 })
 FILES.update(SPECIESNET_FILES)
 # Anything under this size is an error page, not a model.
-MIN_BYTES = {'.onnx': 100_000, '.bin': 10_000, '.xml': 1_000, '.yaml': 200, '.txt': 100_000, '.json': 1_000_000, '.pt': 100_000_000}
+MIN_BYTES = {'.onnx': 100_000, '.bin': 10_000, '.xml': 1_000, '.yaml': 200, '.txt': 100_000, '.json': 1_000_000, '.pt': 100_000_000, '.jpg': 20_000}
 OPTIONAL_FILES: dict[str, str] = {}
 
 
@@ -80,6 +82,7 @@ if __name__ == '__main__':
         # Export stage: only the PyTorch checkpoint + its sidecar files, into MODELS_DIR.
         targets = dict(SPECIESNET_FILES)
         targets[SPECIESNET_CHECKPOINT[0]] = SPECIESNET_CHECKPOINT[1]
+        targets.update(SPECIESNET_EXAMPLES)
     else:
         targets = FILES
     for filename, url in targets.items():
