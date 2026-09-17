@@ -70,7 +70,7 @@ import AdminHubPage from '../pages/AdminHubPage';
 const DESKTOP_V1_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v0.1.53/FCM-SD-Card-Bridge-Setup.exe';
 // Release downloads on this private repo require the user to be signed in to GitHub.
 // Must match apps/sd-card-bridge-v2/package.json version (pinned by test/sd-card-bridge-product-surface.test.js).
-const DESKTOP_V2_VERSION = '0.1.6';
+const DESKTOP_V2_VERSION = '0.1.7';
 const DESKTOP_V2_DOWNLOAD_URL = `https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v2-v${DESKTOP_V2_VERSION}/FCM-Desktop-V2-Setup.exe`;
 
 // Lazy load pages for code-splitting

@@ -1,11 +1,21 @@
 use fcm_dhfs::{AlignedFileSource, Catalog, ExtractedClip, LocationMethod, Volume, DEVICE_READ_ALIGNMENT};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::Path};
+use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::Path, sync::atomic::{AtomicBool, Ordering}, time::Instant};
+use tauri::Emitter;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct DeviceCandidate { id: String, label: String, size_bytes: u64, removable: bool, read_only: bool, partitions: u32, partition_style: String, bus_type: String, drive_letters: Vec<String>, offline: bool }
+
+/// Emitted as `acquisition-progress` while a card is being cloned and while the clone is re-read for verification.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AcquisitionProgress { source_id: String, stage: &'static str, bytes_done: u64, total_bytes: u64, elapsed_seconds: f64, bytes_per_second: f64, eta_seconds: Option<f64> }
+
+static ACQUISITION_CANCELLED: AtomicBool = AtomicBool::new(false);
+const ACQUISITION_CHUNK: usize = 4 * 1024 * 1024;
+const PROGRESS_EVERY_BYTES: u64 = 256 * 1024 * 1024;
 
 /// What the first sectors of a device look like, so a card that is not recognised can be described
 /// precisely instead of guessed at. Read-only; nothing is interpreted beyond the MBR and the DHFS locate.
@@ -81,7 +91,7 @@ fn open_source(spec: &DhfsSourceSpec) -> Result<AlignedFileSource, String> {
 /// bus type hid real cards; the drive letters are listed so "my D: drive" maps to a PhysicalDrive.
 const DISCOVERY_SCRIPT: &str = r#"$ErrorActionPreference='SilentlyContinue'; $disks = Get-Disk | Where-Object { -not $_.IsBoot -and -not $_.IsSystem } | ForEach-Object { $d = $_; $letters = @(Get-Partition -DiskNumber $d.Number | Where-Object { $_.DriveLetter } | ForEach-Object { "$($_.DriveLetter):" }); [pscustomobject]@{ Number = [int]$d.Number; FriendlyName = [string]$d.FriendlyName; Size = [uint64]$d.Size; BusType = [string]$d.BusType; PartitionStyle = [string]$d.PartitionStyle; NumberOfPartitions = [int]$d.NumberOfPartitions; IsReadOnly = [bool]$d.IsReadOnly; IsOffline = [bool]$d.IsOffline; DriveLetters = $letters } }; ConvertTo-Json -Compress -Depth 3 @($disks)"#;
 
-#[tauri::command]
+#[tauri::command(async)]
 fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
     #[cfg(target_os = "windows")]
     {
@@ -114,7 +124,7 @@ fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
 }
 
 /// Describe the first sectors of a discovered device and where (if anywhere) the DHFS volume is.
-#[tauri::command]
+#[tauri::command(async)]
 fn probe_device(id: String, size_bytes: u64) -> Result<DeviceProbe, String> {
     let mut source = open_source(&DhfsSourceSpec::Device { id: id.clone(), size_bytes })?;
     let mut sector0 = vec![0_u8; 512];
@@ -147,36 +157,96 @@ fn probe_device(id: String, size_bytes: u64) -> Result<DeviceProbe, String> {
     })
 }
 
-fn hash_reader(mut reader: impl Read) -> Result<(u64, String), String> {
-    let mut hasher = Sha256::new(); let mut total = 0_u64; let mut buffer = [0_u8; 4 * 1024 * 1024];
-    loop { let count = reader.read(&mut buffer).map_err(|e| e.to_string())?; if count == 0 { break; } total += count as u64; hasher.update(&buffer[..count]); }
-    Ok((total, format!("{:x}", hasher.finalize())))
+fn progress_event(source_id: &str, stage: &'static str, bytes_done: u64, total_bytes: u64, started: Instant) -> AcquisitionProgress {
+    let elapsed = started.elapsed().as_secs_f64().max(0.001);
+    let rate = bytes_done as f64 / elapsed;
+    let eta = (total_bytes > bytes_done && rate > 0.0).then(|| (total_bytes - bytes_done) as f64 / rate);
+    AcquisitionProgress { source_id: source_id.to_string(), stage, bytes_done, total_bytes, elapsed_seconds: elapsed, bytes_per_second: rate, eta_seconds: eta }
+}
+
+/// Raw disks reject reads that are not sector multiples and answer the very end with an error rather than 0.
+fn is_end_of_device(error: &std::io::Error, copied: u64, expected: u64) -> bool {
+    expected > 0 && copied >= expected || matches!(error.raw_os_error(), Some(27) | Some(38) | Some(87) | Some(1117)) && copied > 0 && (expected == 0 || copied + DEVICE_READ_ALIGNMENT > expected)
 }
 
 #[tauri::command]
-fn acquire_read_only_device_image(source_id: String, destination_path: String) -> Result<AcquisitionReceipt, String> {
+fn cancel_acquisition() {
+    ACQUISITION_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+/// Clone the whole card into an immutable image with progress events. Runs off the main thread: a 128 GB card
+/// over USB takes 20–60 minutes and the window must stay responsive throughout.
+#[tauri::command(async)]
+fn acquire_read_only_device_image(app: tauri::AppHandle, source_id: String, destination_path: String, size_bytes: u64) -> Result<AcquisitionReceipt, String> {
     if !is_physical_drive_id(&source_id) { return Err("Only a discovered removable physical device can be acquired.".to_string()); }
     #[cfg(target_os = "windows")]
     {
+        ACQUISITION_CANCELLED.store(false, Ordering::SeqCst);
         let source_path = format!(r"\\.\{}", source_id);
         let mut source = OpenOptions::new().read(true).write(false).open(&source_path).map_err(|e| format!("Could not open source read-only: {}", explain_device_error(&e)))?;
         let destination = Path::new(&destination_path);
         if destination.exists() { return Err("The destination already exists. Choose a new acquisition path; existing evidence will not be overwritten.".to_string()); }
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|e| format!("Could not create acquisition directory: {e}"))?; }
+        if size_bytes > 0 {
+            let free = destination.parent().filter(|p| p.as_os_str().len() > 0).map(fs2::available_space).unwrap_or_else(|| fs2::available_space(destination));
+            if let Ok(free) = free {
+                if free < size_bytes + 64 * 1024 * 1024 {
+                    return Err(format!("Not enough free space for the image: the card is {:.1} GB but only {:.1} GB is free at {}. Choose another drive.", size_bytes as f64 / 1e9, free as f64 / 1e9, destination.parent().map(|p| p.display().to_string()).unwrap_or_default()));
+                }
+            }
+        }
         let partial_path = destination.with_extension("img.part");
         let mut image = OpenOptions::new().write(true).create_new(true).open(&partial_path).map_err(|e| format!("Could not create temporary image: {e}"))?;
-        let mut source_hash = Sha256::new(); let mut image_hash = Sha256::new(); let mut total = 0_u64; let mut buffer = [0_u8; 4 * 1024 * 1024];
-        loop { let count = source.read(&mut buffer).map_err(|e| format!("Read failed: {e}"))?; if count == 0 { break; } image.write_all(&buffer[..count]).map_err(|e| e.to_string())?; source_hash.update(&buffer[..count]); image_hash.update(&buffer[..count]); total += count as u64; }
+        let mut source_hash = Sha256::new(); let mut image_hash = Sha256::new(); let mut total = 0_u64; let mut buffer = vec![0_u8; ACQUISITION_CHUNK];
+        let started = Instant::now(); let mut last_report = 0_u64;
+        let _ = app.emit("acquisition-progress", progress_event(&source_id, "cloning", 0, size_bytes, started));
+        loop {
+            if ACQUISITION_CANCELLED.load(Ordering::SeqCst) {
+                drop(image); let _ = fs::remove_file(&partial_path);
+                return Err(format!("Acquisition cancelled after {:.1} GB; the partial image was deleted and the card was not modified.", total as f64 / 1e9));
+            }
+            let mut want = buffer.len();
+            if size_bytes > 0 {
+                let remaining = size_bytes - total;
+                if remaining == 0 { break; }
+                want = want.min(remaining as usize);
+                if want >= DEVICE_READ_ALIGNMENT as usize { want -= want % DEVICE_READ_ALIGNMENT as usize; } else { want -= want % 512; }
+                if want == 0 { break; }
+            }
+            let count = match source.read(&mut buffer[..want]) {
+                Ok(0) => break,
+                Ok(count) => count,
+                Err(error) if is_end_of_device(&error, total, size_bytes) => break,
+                Err(error) => { drop(image); let _ = fs::remove_file(&partial_path); return Err(format!("Read failed after {:.1} GB: {}", total as f64 / 1e9, explain_device_error(&error))); }
+            };
+            image.write_all(&buffer[..count]).map_err(|e| format!("Could not write the image after {:.1} GB: {e}", total as f64 / 1e9))?;
+            source_hash.update(&buffer[..count]); image_hash.update(&buffer[..count]); total += count as u64;
+            if total - last_report >= PROGRESS_EVERY_BYTES { last_report = total; let _ = app.emit("acquisition-progress", progress_event(&source_id, "cloning", total, size_bytes, started)); }
+        }
         image.flush().map_err(|e| e.to_string())?; image.sync_all().map_err(|e| e.to_string())?;
         drop(image);
         fs::rename(&partial_path, destination).map_err(|e| format!("Could not commit verified image atomically: {e}"))?;
-        let (verified_bytes, image_sha256) = hash_reader(File::open(destination).map_err(|e| format!("Could not reopen image for verification: {e}"))?)?;
+        let verify_started = Instant::now();
+        let _ = app.emit("acquisition-progress", progress_event(&source_id, "verifying", 0, total, verify_started));
+        let mut verifier = File::open(destination).map_err(|e| format!("Could not reopen image for verification: {e}"))?;
+        let mut verify_hash = Sha256::new(); let mut verified_bytes = 0_u64; last_report = 0;
+        loop {
+            let count = verifier.read(&mut buffer).map_err(|e| format!("Verification read failed: {e}"))?;
+            if count == 0 { break; }
+            verify_hash.update(&buffer[..count]); verified_bytes += count as u64;
+            if verified_bytes - last_report >= PROGRESS_EVERY_BYTES { last_report = verified_bytes; let _ = app.emit("acquisition-progress", progress_event(&source_id, "verifying", verified_bytes, total, verify_started)); }
+        }
+        let image_sha256 = format!("{:x}", verify_hash.finalize());
         let source_sha256 = format!("{:x}", source_hash.finalize());
-        let verified = verified_bytes == total && image_sha256 == format!("{:x}", image_hash.finalize());
+        let verified = verified_bytes == total && image_sha256 == format!("{:x}", image_hash.finalize()) && image_sha256 == source_sha256;
+        let _ = app.emit("acquisition-progress", progress_event(&source_id, if verified { "complete" } else { "mismatch" }, verified_bytes, total, verify_started));
         return Ok(AcquisitionReceipt { source_id, image_path: destination_path, bytes_copied: total, source_sha256, image_sha256, verified, read_errors: 0 });
     }
     #[cfg(not(target_os = "windows"))]
-    Err("Whole-device acquisition is implemented for the Windows desktop prototype.".to_string())
+    {
+        let _ = (app, destination_path, size_bytes);
+        Err("Whole-device acquisition is implemented for the Windows desktop prototype.".to_string())
+    }
 }
 
 fn location_label(volume: &Volume) -> String {
@@ -188,7 +258,7 @@ fn location_label(volume: &Volume) -> String {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn inspect_acquisition_image(image_path: String) -> Result<InspectionResult, String> {
     let mut file = File::open(&image_path).map_err(|e| e.to_string())?;
     let metadata = file.metadata().map_err(|e| e.to_string())?;
@@ -234,14 +304,14 @@ fn inspect_acquisition_image(image_path: String) -> Result<InspectionResult, Str
 }
 
 /// Locate the hidden DHFS partition and list every recording it holds, from an image or the card.
-#[tauri::command]
+#[tauri::command(async)]
 fn read_dhfs_catalog(source: DhfsSourceSpec) -> Result<Catalog, String> {
     let mut block_source = open_source(&source)?;
     fcm_dhfs::catalog(&mut block_source).map_err(|error| error.to_string())
 }
 
 /// Copy one recording out of the volume into `destination_directory` (atomic, hashed, never overwrites).
-#[tauri::command]
+#[tauri::command(async)]
 fn extract_dhfs_recording(source: DhfsSourceSpec, partition_index: u32, descriptor: u32, destination_directory: String) -> Result<ExtractedClip, String> {
     let mut block_source = open_source(&source)?;
     let catalog = fcm_dhfs::catalog(&mut block_source).map_err(|error| error.to_string())?;
@@ -254,5 +324,5 @@ fn extract_dhfs_recording(source: DhfsSourceSpec, partition_index: u32, descript
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

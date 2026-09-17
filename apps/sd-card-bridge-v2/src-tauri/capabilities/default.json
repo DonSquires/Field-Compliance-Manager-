@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "FCM Desktop V2 main window: core IPC/events plus the native open/save dialogs used to pick image and clip destinations.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

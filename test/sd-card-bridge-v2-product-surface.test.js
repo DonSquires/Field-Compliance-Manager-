@@ -73,6 +73,30 @@ test('Desktop V2 finds the card behind a drive letter and can describe an unreco
   assert.match(source, /device\.driveLetters\.join\(' '\)/);
 });
 
+const capability = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/capabilities/default.json'), 'utf8'));
+
+test('Desktop V2 acquisition cannot fail silently and keeps the window alive for a 128 GB clone', () => {
+  // Without a capability the save dialog was refused and the rejection vanished: "Acquire" did nothing.
+  assert.deepEqual(capability.windows, ['main']);
+  assert.ok(capability.permissions.includes('core:default'));
+  assert.ok(capability.permissions.includes('dialog:default'));
+  assert.match(source, /try \{\s*destination = await save\(/);
+  assert.match(source, /window\.addEventListener\('unhandledrejection', onRejection\)/);
+  // The clone runs off the main thread and reports progress; a sync command froze the window for the whole copy.
+  assert.match(native, /#\[tauri::command\(async\)\]\s*fn acquire_read_only_device_image\(app: tauri::AppHandle, source_id: String, destination_path: String, size_bytes: u64\)/);
+  assert.match(native, /app\.emit\("acquisition-progress"/);
+  assert.match(native, /fn cancel_acquisition\(\)/);
+  assert.match(native, /fs2::available_space/);
+  assert.match(native, /fn is_end_of_device/);
+  for (const command of ['discover_read_only_devices', 'probe_device', 'inspect_acquisition_image', 'read_dhfs_catalog', 'extract_dhfs_recording']) {
+    assert.match(native, new RegExp(`#\\[tauri::command\\(async\\)\\]\\s*fn ${command}\\(`), `${command} must run off the main thread`);
+  }
+  assert.match(source, /listen<AcquisitionProgress>\('acquisition-progress'/);
+  assert.match(source, /invoke\('cancel_acquisition'\)/);
+  assert.match(source, /role="progressbar"/);
+  assert.match(source, /sizeBytes: selectedDevice\.sizeBytes \}\)/);
+});
+
 test('Desktop V2 reads the hidden DHFS partition through the shared fcm-dhfs crate', () => {
   assert.match(cargo, /fcm-dhfs = \{ path = "\.\.\/crates\/dhfs" \}/);
   // Locate: sector 0, MBR/GPT partition starts, then a bounded sector scan — never "not found" because Windows shows RAW.

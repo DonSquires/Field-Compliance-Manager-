@@ -1,6 +1,7 @@
-import { StrictMode, useMemo, useState } from 'react';
+import { StrictMode, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { Activity, CheckCircle2, ChevronRight, Clapperboard, Database, Download, FolderOpen, HardDrive, LockKeyhole, Search, ShieldCheck, Square, Waves } from 'lucide-react';
 import './styles.css';
@@ -45,6 +46,16 @@ type AcquisitionReceipt = {
   imageSha256: string;
   verified: boolean;
   readErrors: number;
+};
+
+type AcquisitionProgress = {
+  sourceId: string;
+  stage: 'cloning' | 'verifying' | 'complete' | 'mismatch';
+  bytesDone: number;
+  totalBytes: number;
+  elapsedSeconds: number;
+  bytesPerSecond: number;
+  etaSeconds: number | null;
 };
 
 type DhfsTime = { year: number; month: number; day: number; hour: number; minute: number; second: number };
@@ -122,9 +133,12 @@ const formatClock = (time: DhfsTime) => `${pad(time.hour)}:${pad(time.minute)}:$
 const formatDay = (time: DhfsTime) => `${time.year}-${pad(time.month)}-${pad(time.day)}`;
 const formatDuration = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '—';
-  const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = seconds % 60;
+  const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = Math.floor(seconds % 60);
   return h > 0 ? `${h}h ${pad(m)}m ${pad(s)}s` : `${m}m ${pad(s)}s`;
 };
+const formatRate = (bytesPerSecond: number) => (Number.isFinite(bytesPerSecond) && bytesPerSecond > 0 ? `${(bytesPerSecond / 1024 ** 2).toFixed(1)} MB/s` : '—');
+/** Rough clone time for a card of `bytes` at a conservative USB reader rate, so the operator can decide before committing. */
+const estimateCloneMinutes = (bytes: number) => Math.max(1, Math.round(bytes / (40 * 1024 ** 2) / 60));
 const recordingKey = (recording: DhfsRecording) => `${recording.partitionIndex}:${recording.descriptor}`;
 const locationLabel = (volume: DhfsVolume) => {
   switch (volume.location.method) {
@@ -160,6 +174,19 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [probe, setProbe] = useState<DeviceProbe | null>(null);
   const [probing, setProbing] = useState(false);
+  const [progress, setProgress] = useState<AcquisitionProgress | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const describeFailure = (cause: unknown, fallback: string) => (typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : fallback);
+  const failWith = (cause: unknown, fallback: string) => setError(describeFailure(cause, fallback));
+
+  useEffect(() => {
+    // A rejected promise outside a handler used to vanish: the operator saw a button that "did nothing".
+    const onRejection = (event: PromiseRejectionEvent) => { event.preventDefault(); setError(`Unhandled failure: ${describeFailure(event.reason, String(event.reason))}`); };
+    const onError = (event: ErrorEvent) => setError(`Interface error: ${event.message}`);
+    window.addEventListener('unhandledrejection', onRejection); window.addEventListener('error', onError);
+    return () => { window.removeEventListener('unhandledrejection', onRejection); window.removeEventListener('error', onError); };
+  }, []);
 
   const selectedSize = useMemo(() => selectedDevice ? formatBytes(selectedDevice.sizeBytes) : 'No source selected', [selectedDevice]);
   const recordingDays = useMemo(() => {
@@ -172,8 +199,6 @@ export default function App() {
   }, [catalog]);
   const totalRecordingBytes = useMemo(() => (catalog?.recordings ?? []).reduce((sum, recording) => sum + recording.bytes, 0), [catalog]);
   const sourceLabel = (source: DhfsSource | null) => (source ? (source.kind === 'image' ? 'verified image' : `card ${source.id}`) : 'no source');
-
-  const failWith = (cause: unknown, fallback: string) => setError(typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : fallback);
 
   const discover = async () => {
     setStage('discovery'); setError(null); setProbe(null); setStatus('Enumerating disks without opening a write handle...');
@@ -197,13 +222,29 @@ export default function App() {
 
   const acquire = async () => {
     if (!selectedDevice) return;
-    const destination = await save({ title: 'Save immutable source image', defaultPath: 'C:\\Users\\Public\\Documents\\fcm-acquisitions\\source.img', filters: [{ name: 'Disk image', extensions: ['img'] }] });
-    if (!destination) return;
-    setStage('cloning'); setError(null); setReceipt(null); setInspection(null); setDecoderStage('not_started'); setStatus('Reading the source with a read-only handle. The card will not be modified.');
+    setError(null);
+    let destination: string | null;
     try {
-      const result = await invoke<AcquisitionReceipt>('acquire_read_only_device_image', { sourceId: selectedDevice.id, destinationPath: destination });
-      setReceipt(result); setStage('complete'); setStatus(result.verified ? 'Acquisition verified. The prototype now works from the immutable image.' : 'Image created but verification requires attention.');
+      destination = await save({ title: 'Save immutable source image', defaultPath: 'C:\\Users\\Public\\Documents\\fcm-acquisitions\\source.img', filters: [{ name: 'Disk image', extensions: ['img'] }] });
+    } catch (cause) { failWith(cause, 'The save dialog could not be opened.'); return; }
+    if (!destination) { setStatus('Acquisition not started: no destination was chosen.'); return; }
+    setStage('cloning'); setReceipt(null); setInspection(null); setDecoderStage('not_started'); setProgress(null); setCancelling(false);
+    setStatus(`Cloning ${formatBytes(selectedDevice.sizeBytes)} with a read-only handle (roughly ${estimateCloneMinutes(selectedDevice.sizeBytes)} min over USB). The card will not be modified.`);
+    const unlisten = await listen<AcquisitionProgress>('acquisition-progress', (event) => {
+      if (event.payload.sourceId !== selectedDevice.id) return;
+      setProgress(event.payload);
+      if (event.payload.stage === 'verifying') setStage('verifying');
+    });
+    try {
+      const result = await invoke<AcquisitionReceipt>('acquire_read_only_device_image', { sourceId: selectedDevice.id, destinationPath: destination, sizeBytes: selectedDevice.sizeBytes });
+      setReceipt(result); setStage('complete'); setStatus(result.verified ? 'Acquisition verified: source and image hashes match. The prototype now works from the immutable image.' : 'Image created but the verification hashes do not match. Treat the image as suspect.');
     } catch (cause) { setStage('failed'); failWith(cause, 'Acquisition failed.'); }
+    finally { unlisten(); setCancelling(false); }
+  };
+
+  const cancelAcquisition = async () => {
+    setCancelling(true);
+    try { await invoke('cancel_acquisition'); } catch (cause) { failWith(cause, 'Cancel request failed.'); }
   };
 
   const readCatalog = async (source: DhfsSource) => {
@@ -233,9 +274,11 @@ export default function App() {
   };
 
   const chooseDestination = async () => {
-    const chosen = await open({ title: 'Choose where extracted clips are written', directory: true, multiple: false, defaultPath: 'C:\\Users\\Public\\Documents\\fcm-acquisitions' });
-    if (typeof chosen === 'string') setDestinationDirectory(chosen);
-    return typeof chosen === 'string' ? chosen : null;
+    try {
+      const chosen = await open({ title: 'Choose where extracted clips are written', directory: true, multiple: false, defaultPath: 'C:\\Users\\Public\\Documents\\fcm-acquisitions' });
+      if (typeof chosen === 'string') setDestinationDirectory(chosen);
+      return typeof chosen === 'string' ? chosen : null;
+    } catch (cause) { failWith(cause, 'The folder dialog could not be opened.'); return null; }
   };
 
   const extract = async (recording: DhfsRecording) => {
@@ -261,7 +304,7 @@ export default function App() {
       <section className="steps"><Step number="01" title="Discover" detail="Find removable media" complete={stage !== 'idle' && stage !== 'discovery'} active={stage === 'discovery'} /><ChevronRight size={17} /><Step number="02" title="Acquire" detail="Clone and verify" complete={stage === 'complete'} active={stage === 'cloning' || stage === 'verifying'} /><ChevronRight size={17} /><Step number="03" title="Inspect" detail="Map and decode" complete={Boolean(inspection)} active={decoderStage === 'scanning'} /><ChevronRight size={17} /><Step number="04" title="Recordings" detail="List and extract" complete={Boolean(catalog)} active={catalogBusy || Boolean(extracting)} /></section>
       <div className="grid">
         <section className="panel source-panel"><div className="panel-heading"><div><span className="eyebrow">01 / Source</span><h2>Read-only device discovery</h2></div><Activity size={19} /></div><p className="muted">FCM opens the source read-only and never mounts or writes the camera card. A Dahua card usually shows in Explorer as a RAW drive letter that Windows offers to format — cancel that prompt; the letter is the hidden DHFS partition, not a fault. Reading a whole disk needs FCM Desktop V2 to be run as administrator.</p><button className="primary" onClick={() => void discover()} disabled={stage === 'discovery'}><HardDrive size={16} /> {stage === 'discovery' ? 'Scanning...' : 'Discover camera cards and disks'}</button>{devices.length > 0 && <div className="device-list">{devices.map((device) => <button key={device.id} className={`device ${selectedDevice?.id === device.id ? 'is-selected' : ''}`} onClick={() => { setSelectedDevice(device); setProbe(null); }}><span className="device-icon"><HardDrive size={17} /></span><span><strong>{device.driveLetters.length ? `${device.driveLetters.join(' ')} · ` : ''}{device.label}</strong><small>{device.id} · {formatBytes(device.sizeBytes)} · {device.busType}{device.removable ? ' (removable)' : ''} · {device.partitionStyle} · {device.partitions} partition{device.partitions === 1 ? '' : 's'}{device.offline ? ' · offline' : ''} · {device.readOnly ? 'read-only' : 'write protection unknown'}</small></span><CheckCircle2 size={16} /></button>)}</div>}{selectedDevice && <div className="source-facts"><span>Selected source<strong>{selectedDevice.driveLetters.length ? `${selectedDevice.driveLetters.join(' ')} · ` : ''}{selectedDevice.label}</strong></span><span>Capacity<strong>{selectedSize}</strong></span><span>Write mode<strong>Blocked</strong></span></div>}{selectedDevice && <div className="actions"><button className="secondary" onClick={() => void readCatalog({ kind: 'device', id: selectedDevice.id, sizeBytes: selectedDevice.sizeBytes })} disabled={catalogBusy || stage === 'cloning'}><Clapperboard size={16} /> {catalogBusy && catalogSource?.kind === 'device' ? 'Reading card...' : 'List recordings directly from card'}</button><button className="secondary" onClick={() => void probeDevice(selectedDevice)} disabled={probing || catalogBusy}><Search size={16} /> {probing ? 'Probing...' : 'Probe first sectors'}</button><small className="muted">Read-only, no clone. Use this to confirm what the card holds before committing to a full acquisition.</small></div>}{probe && <div className="probe"><strong>Card probe · {probe.id} · {formatBytes(probe.sizeBytes)}</strong><dl><div><dt>DHFS volume</dt><dd>{probe.dhfsLocation ?? probe.dhfsError ?? '—'}</dd></div><div><dt>DHFS4.1 at sector 0</dt><dd>{probe.dhfsMagicAtZero ? 'yes' : 'no'}</dd></div><div><dt>DHFS_DPT marker</dt><dd>{probe.dhfsDptMarkerWithinFirstMib === null ? 'not in first MiB' : `byte ${probe.dhfsDptMarkerWithinFirstMib.toLocaleString()}`}</dd></div><div><dt>MBR</dt><dd>{probe.mbrSignature ? (probe.mbrPartitions.length ? probe.mbrPartitions.join('; ') : 'signature present, no partition entries') : 'no MBR signature (superfloppy / raw)'}</dd></div><div><dt>Sector 0 (first 64 bytes)</dt><dd className="mono">{probe.sector0Hex || '—'}<br />{probe.sector0Ascii}</dd></div></dl><small className="muted">Copy this block into a support message if the card is not recognised.</small></div>}</section>
-        <section className="panel acquire-panel"><div className="panel-heading"><div><span className="eyebrow">02 / Acquisition</span><h2>Immutable source image</h2></div><LockKeyhole size={19} /></div><p className="muted">The image becomes the working copy. The card remains untouched and can be safely removed after verification.</p><button className="primary" onClick={() => void acquire()} disabled={!selectedDevice || stage === 'cloning'}><Square size={15} /> Acquire exact image</button><div className={`status-card status-${stage}`}><span>{stageLabel[stage]}</span><strong>{receipt ? `${formatBytes(receipt.bytesCopied)} copied` : 'No acquisition receipt yet'}</strong><small>{status}</small></div>{receipt && <div className="receipt"><div><CheckCircle2 size={17} /><strong>Hash verification {receipt.verified ? 'passed' : 'needs review'}</strong></div><dl><div><dt>Source SHA-256</dt><dd>{receipt.sourceSha256}</dd></div><div><dt>Image SHA-256</dt><dd>{receipt.imageSha256}</dd></div><div><dt>Read errors</dt><dd>{receipt.readErrors}</dd></div></dl></div>}</section>
+        <section className="panel acquire-panel"><div className="panel-heading"><div><span className="eyebrow">02 / Acquisition</span><h2>Immutable source image</h2></div><LockKeyhole size={19} /></div><p className="muted">The image becomes the working copy. The card remains untouched and can be safely removed after verification.{selectedDevice ? ` A ${formatBytes(selectedDevice.sizeBytes)} card takes roughly ${estimateCloneMinutes(selectedDevice.sizeBytes)} minutes over USB, then as long again to verify; listing recordings directly from the card is immediate.` : ''}</p><div className="actions"><button className="primary" onClick={() => void acquire()} disabled={!selectedDevice || stage === 'cloning' || stage === 'verifying'}><Square size={15} /> {stage === 'cloning' ? 'Cloning...' : stage === 'verifying' ? 'Verifying...' : 'Acquire exact image'}</button>{(stage === 'cloning' || stage === 'verifying') && <button className="secondary" onClick={() => void cancelAcquisition()} disabled={cancelling || stage === 'verifying'}>{cancelling ? 'Cancelling...' : 'Cancel'}</button>}</div><div className={`status-card status-${stage}`}><span>{stageLabel[stage]}</span><strong>{receipt ? `${formatBytes(receipt.bytesCopied)} copied` : progress ? `${formatBytes(progress.bytesDone)} of ${formatBytes(progress.totalBytes)} · ${progress.totalBytes ? Math.floor((progress.bytesDone / progress.totalBytes) * 100) : 0}%` : 'No acquisition receipt yet'}</strong>{progress && (stage === 'cloning' || stage === 'verifying') && <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.totalBytes ? Math.floor((progress.bytesDone / progress.totalBytes) * 100) : 0}><div style={{ width: `${progress.totalBytes ? Math.min(100, (progress.bytesDone / progress.totalBytes) * 100) : 0}%` }} /></div>}{progress && (stage === 'cloning' || stage === 'verifying') && <small className="mono">{progress.stage} · {formatRate(progress.bytesPerSecond)} · elapsed {formatDuration(progress.elapsedSeconds)} · remaining {progress.etaSeconds === null ? '—' : formatDuration(progress.etaSeconds)}</small>}<small>{status}</small></div>{receipt && <div className="receipt"><div><CheckCircle2 size={17} /><strong>Hash verification {receipt.verified ? 'passed' : 'needs review'}</strong></div><dl><div><dt>Source SHA-256</dt><dd>{receipt.sourceSha256}</dd></div><div><dt>Image SHA-256</dt><dd>{receipt.imageSha256}</dd></div><div><dt>Read errors</dt><dd>{receipt.readErrors}</dd></div></dl></div>}</section>
         <section className="panel inspect-panel"><div className="panel-heading"><div><span className="eyebrow">03 / Decoder lab</span><h2>Virtual image inspection</h2></div><Search size={19} /></div><p className="muted">Run several adapters against the clone. Unknown layouts are preserved as investigation candidates instead of rejected.</p><button className="secondary" onClick={() => void inspectImage()} disabled={!receipt || decoderStage === 'scanning'}><Search size={16} /> {decoderStage === 'scanning' ? 'Inspecting...' : 'Inspect image and map partitions'}</button>{inspection && <div className="inspection"><div className="facts"><span>Image<strong>{formatBytes(inspection.imageBytes)}</strong></span><span>Signatures<strong>{inspection.signatures.length}</strong></span><span>DHFS<strong>{inspection.dhfs ? locationLabel(inspection.dhfs) : 'not found'}</strong></span></div><div className="signature-list">{inspection.signatures.map((signature) => <span key={signature}>{signature}</span>)}</div>{inspection.adapters.map((adapter) => <div className="adapter" key={adapter.name}><span className={`dot dot-${adapter.state}`} /><div><strong>{adapter.name}</strong><small>{adapter.detail}</small></div><em>{adapter.confidence}</em></div>)}</div>}</section>
         <section className="panel recordings-panel"><div className="panel-heading"><div><span className="eyebrow">04 / Recordings</span><h2>Hidden DHFS partition</h2></div><Clapperboard size={19} /></div>
           {!catalog && <p className="muted">{catalogBusy ? 'Reading the partition table, superblock and fragment descriptors...' : 'Recordings appear here after the image is inspected, or straight from the card via the source panel.'}</p>}
