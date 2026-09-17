@@ -4,9 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FCM Desktop V2</title>
+    <style>
+      #boot{font:14px/1.6 system-ui,sans-serif;color:#c5d8d1;background:#101716;min-height:100vh;margin:0;padding:48px}
+      #boot b{color:#b7e4cf}#boot pre{white-space:pre-wrap;color:#f0b0a7;margin-top:16px;font-size:12px}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Replaced by React on mount. If this text is still visible, the interface failed to start and the error below says why. -->
+    <div id="root"><div id="boot"><b>FCM Desktop V2 · build __APP_VERSION__</b><br />Starting the interface… If this message stays, press Ctrl+Shift+I for the console and send the text below.<pre id="boot-error"></pre></div></div>
+    <script>
+      (function () {
+        function report(prefix, detail) {
+          var target = document.getElementById('boot-error');
+          if (target) target.textContent += prefix + ': ' + detail + '\n';
+        }
+        window.addEventListener('error', function (event) {
+          var target = event.target;
+          if (target && target !== window && (target.src || target.href)) {
+            report('failed to load', (target.tagName || 'resource').toLowerCase() + ' ' + (target.src || target.href));
+            return;
+          }
+          report('error', event.message + (event.filename ? ' (' + event.filename + ':' + event.lineno + ')' : ''));
+        }, true);
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event.reason;
+          report('unhandled promise', reason && reason.stack ? reason.stack : String(reason));
+        });
+        window.setTimeout(function () {
+          if (document.getElementById('boot')) report('timeout', 'the interface script did not mount within 8 seconds');
+        }, 8000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

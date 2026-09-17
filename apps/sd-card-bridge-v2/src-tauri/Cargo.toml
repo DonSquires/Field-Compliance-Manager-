@@ -1,6 +1,6 @@
 [package]
 name = "fcm-sd-card-bridge-v2"
-version = "0.1.5"
+version = "0.1.6"
 description = "FCM Desktop V2 read-only acquisition prototype"
 authors = ["Field Compliance Manager"]
 edition = "2021"
@@ -17,5 +17,5 @@ fcm-dhfs = { path = "../crates/dhfs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-tauri = { version = "2.11.1", features = [] }
+tauri = { version = "2.11.1", features = ["devtools"] }
 tauri-plugin-dialog = "2.7.3"

@@ -5,7 +5,10 @@ import react from '@vitejs/plugin-react';
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
 
 export default defineConfig({
-        plugins: [react()],
+        plugins: [
+                react(),
+                { name: 'fcm-html-version', transformIndexHtml: (html) => html.replaceAll('__APP_VERSION__', version) },
+        ],
         define: { __APP_VERSION__: JSON.stringify(version) },
 	server: {
 		host: '0.0.0.0',
