@@ -14,6 +14,23 @@ GitHub `DonSquires/Field-Compliance-Manager-` on `main` is the authoritative sou
 
 The live public Supabase schema is stored in [`supabase/schema.sql`](supabase/schema.sql). It includes organizations, users, staff, sites, patrols, shifts, dispatch, observations, incidents, enforcement, documents, reporting, and Bob/workflow tables.
 
+## Engineering fixture data
+
+Large local working files (raw camera-card captures, inference trial frames, model exports) do not belong in
+the repository or the Codespace disk long-term. They live in the private `engineering-fixtures` Supabase
+Storage bucket instead, under a `<topic>/<dated-label>/...` prefix that preserves the original directory
+structure:
+
+```bash
+node scripts/upload-engineering-fixtures.mjs <localDir> <remotePrefix>
+node scripts/download-engineering-fixtures.mjs <remotePrefix> <localDir>
+```
+
+Upload writes a manifest (`sha256` + size per file) next to the source directory and verifies every uploaded
+object's size before you delete the local copy. The bucket has no authenticated/anon storage policy (deny by
+default, like `incident-evidence`); only `SUPABASE_SERVICE_ROLE_KEY` can read or write it. The TAPO/Dahua CCTV
+sample capture used for inference-tier development is at `engineering-fixtures/cctv-samples/tapo-2026-09/`.
+
 ## Services
 
 - `bob-control-plane-server.js`: Bob control-plane HTTP service
