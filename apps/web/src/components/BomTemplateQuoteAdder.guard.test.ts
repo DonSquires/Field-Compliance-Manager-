@@ -13,7 +13,7 @@ const readWeb = (relative: string) => readFileSync(resolve(webRoot, relative), '
 const component = readWeb('src/components/BomTemplateQuoteAdder.tsx');
 const crmPage = readWeb('src/pages/CRMPage.tsx');
 const migration = readFileSync(
-  resolve(repoRoot, 'supabase/migrations/20260916130000_bom_template_quote_lines.sql'),
+  resolve(repoRoot, 'supabase/migrations/20260917050000_bom_template_quote_lines.sql'),
   'utf8',
 );
 

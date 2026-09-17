@@ -26,8 +26,16 @@ for (const file of process.argv.slice(2)) {
   const [version, ...rest] = base.split('_');
   const name = rest.join('_');
   if (!/^\d{14}$/.test(version)) throw new Error(`not a timestamped migration: ${file}`);
-  const recorded = await sql(`select version from supabase_migrations.schema_migrations where version = ${lit(version)}`);
-  if (recorded.length) { console.log(`skip ${base}: already in ledger`); continue; }
+  const recorded = await sql(`select version, name from supabase_migrations.schema_migrations where version = ${lit(version)}`);
+  if (recorded.length) {
+    // The ledger is keyed on version alone. A different file recorded under this version means two
+    // authors picked the same timestamp; skipping here would silently leave this migration unapplied.
+    if (recorded[0].name !== name) {
+      throw new Error(`version ${version} is already in the ledger as "${recorded[0].name}" — rename ${base} to a free version (see scripts/check-migration-versions.js) before applying`);
+    }
+    console.log(`skip ${base}: already in ledger`);
+    continue;
+  }
   const body = fs.readFileSync(file, 'utf8');
   console.log(`apply ${base} (${body.length} bytes)`);
   // One transaction per migration: a failing statement leaves nothing half-applied.

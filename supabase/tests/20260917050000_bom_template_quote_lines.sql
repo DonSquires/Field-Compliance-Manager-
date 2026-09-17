@@ -1,4 +1,4 @@
--- Behavioural truth table: a workshop BOM template becomes priced quote lines in one step (20260916130000).
+-- Behavioural truth table: a workshop BOM template becomes priced quote lines in one step (20260917050000).
 begin;
 set local role postgres;
 set local search_path to public, extensions, pg_catalog;

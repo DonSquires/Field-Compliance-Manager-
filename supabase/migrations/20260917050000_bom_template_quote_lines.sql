@@ -1,4 +1,4 @@
--- 20260916130000_bom_template_quote_lines.sql
+-- 20260917050000_bom_template_quote_lines.sql
 -- A saved bill of materials ("Standard lockbox") becomes quote lines in one
 -- step, at today's approved price-book cost and sell price. Every line goes
 -- through add_crm_quote_line (same authorisation, validation, totals and
