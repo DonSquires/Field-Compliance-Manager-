@@ -16,9 +16,10 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY requirements.txt requirements-onnxruntime-cpu.txt requirements-onnxruntime-gpu.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
-    && if [ "$GPU" = "1" ]; then pip install --no-cache-dir -r requirements-onnxruntime-gpu.txt; \
-       else pip install --no-cache-dir -r requirements-onnxruntime-cpu.txt; fi
+RUN pip install --no-cache-dir -r requirements.txt
+# Separate layer: the GPU wheel set (CUDA 12 runtime + cuDNN 9) is ~2 GB and must stay its own registry blob.
+RUN if [ "$GPU" = "1" ]; then pip install --no-cache-dir -r requirements-onnxruntime-gpu.txt; \
+    else pip install --no-cache-dir -r requirements-onnxruntime-cpu.txt; fi
 
 COPY download_models.py ./
 RUN mkdir -p /app/models && python download_models.py
