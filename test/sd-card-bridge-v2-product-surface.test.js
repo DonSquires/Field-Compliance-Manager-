@@ -12,7 +12,7 @@ const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-sd-c
 
 test('Desktop V2 preserves V1 and implements clone-first acquisition boundaries', () => {
   assert.match(source, /Clone first\. Decode second\./);
-  assert.match(source, /Discover removable media/);
+  assert.match(source, /Discover camera cards and disks/);
   assert.match(source, /Acquire exact image/);
   assert.match(source, /Inspect image and map partitions/);
   assert.match(source, /Prototype only\. V1 remains the working field bridge\./);
@@ -40,6 +40,37 @@ test('Desktop V2 actually mounts its React app', () => {
   // The first prototype exported App without rendering it: the installed window was blank.
   assert.match(source, /createRoot\(root\)\.render\(<StrictMode><App \/><\/StrictMode>\)/);
   assert.match(source, /document\.getElementById\('root'\)/);
+});
+
+const indexHtml = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/index.html'), 'utf8');
+const v2Package = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/package.json'), 'utf8'));
+const v2Tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/tauri.conf.json'), 'utf8'));
+
+test('Desktop V2 can never open to a silent blank window and always says which build it is', () => {
+  // 0.1.3 shipped blank and every installer reported 0.1.0: the operator could not tell builds apart.
+  assert.equal(v2Tauri.version, v2Package.version);
+  assert.match(cargo, new RegExp(`^version = "${v2Package.version.replace(/\./g, '\\.')}"`, 'm'));
+  assert.match(source, /Desktop V2 · v\{APP_VERSION\}/);
+  assert.match(indexHtml, /FCM Desktop V2 · build __APP_VERSION__/);
+  assert.match(indexHtml, /id="boot-error"/);
+  assert.match(indexHtml, /window\.addEventListener\('error'/);
+  assert.match(indexHtml, /window\.addEventListener\('unhandledrejection'/);
+  assert.match(indexHtml, /did not mount within 8 seconds/);
+  assert.match(cargo, /features = \["devtools"\]/);
+});
+
+test('Desktop V2 finds the card behind a drive letter and can describe an unrecognised one', () => {
+  // Bus-type filtering hid cards in built-in readers; the operator knows the card as "D:", not as a PhysicalDrive.
+  assert.match(native, /Get-Disk \| Where-Object \{ -not \$_\.IsBoot -and -not \$_\.IsSystem \}/);
+  assert.match(native, /Get-Partition -DiskNumber/);
+  assert.match(native, /drive_letters: Vec<String>/);
+  assert.match(native, /fn probe_device\(id: String, size_bytes: u64\)/);
+  assert.match(native, /sector0_hex/);
+  assert.match(native, /fn explain_device_error/);
+  assert.match(native, /Run as administrator/);
+  assert.match(source, /Probe first sectors/);
+  assert.match(source, /if \(device\) await probeDevice\(device\);/);
+  assert.match(source, /device\.driveLetters\.join\(' '\)/);
 });
 
 test('Desktop V2 reads the hidden DHFS partition through the shared fcm-dhfs crate', () => {
