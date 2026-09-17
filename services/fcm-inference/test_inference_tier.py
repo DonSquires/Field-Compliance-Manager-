@@ -118,6 +118,102 @@ def test_animal_without_species_model_carries_the_detector_label_honestly(monkey
     assert payload['species_status'] == 'model_not_staged'
 
 
+# --------------------------------------------------------------------------------------------- species (SpeciesNet rules)
+
+import species  # noqa: E402
+
+POSSUM = 'a1;mammalia;diprotodontia;phalangeridae;trichosurus;vulpecula;common brushtail possum'
+TRICHOSURUS = 'a2;mammalia;diprotodontia;phalangeridae;trichosurus;;trichosurus species'
+PHALANGERIDAE = 'a3;mammalia;diprotodontia;phalangeridae;;;possum family'
+ZEBRA = 'b1;mammalia;perissodactyla;equidae;equus;quagga;plains zebra'
+EQUIDAE = 'b2;mammalia;perissodactyla;equidae;;;horse family'
+STOAT = 'c1;mammalia;carnivora;mustelidae;mustela;erminea;stoat'
+POLECAT = 'c2;mammalia;carnivora;mustelidae;mustela;putorius;western polecat'
+MUSTELIDAE = 'c3;mammalia;carnivora;mustelidae;;;weasel family'
+MAMMALIA = 'd1;mammalia;;;;;mammal'
+TAXONOMY = [POSSUM, TRICHOSURUS, PHALANGERIDAE, ZEBRA, EQUIDAE, STOAT, POLECAT, MUSTELIDAE, MAMMALIA, species.BLANK, species.HUMAN, species.VEHICLE, species.UNKNOWN]
+
+
+def _taxonomy_map():
+    return {species.taxa_from_label(label): label for label in TAXONOMY if label not in (species.BLANK, species.VEHICLE, species.UNKNOWN)} | {species.taxa_from_label(species.ANIMAL): species.ANIMAL}
+
+
+GEOFENCE = {species.taxa_from_label(ZEBRA): {'allow': {'KEN': [], 'TZA': []}}, species.taxa_from_label(STOAT): {'allow': {'NZL': [], 'GBR': []}}}
+
+
+def test_geofence_rolls_an_implausible_species_up_to_its_family():
+    labels = [ZEBRA, EQUIDAE, MAMMALIA]
+    scores = [0.9, 0.05, 0.02]
+    label, score, source = species.combine_for_animal_detection(labels, scores, 0.9, 'NZL', None, _taxonomy_map(), GEOFENCE, True)
+    assert label == EQUIDAE and source == 'classifier+geofence+rollup_to_family'
+    assert abs(score - 0.95) < 1e-6
+    # same answer is a plains zebra where zebras live
+    assert species.combine_for_animal_detection(labels, scores, 0.9, 'KEN', None, _taxonomy_map(), GEOFENCE, True)[0] == ZEBRA
+    # and with the geofence disabled
+    assert species.combine_for_animal_detection(labels, scores, 0.9, 'NZL', None, _taxonomy_map(), GEOFENCE, False)[0] == ZEBRA
+
+
+def test_weak_species_scores_roll_up_to_genus_and_then_to_the_detector():
+    labels = [POSSUM, TRICHOSURUS, PHALANGERIDAE, STOAT]
+    scores = [0.4, 0.3, 0.1, 0.05]
+    label, score, source = species.combine_for_animal_detection(labels, scores, 0.9, 'NZL', None, _taxonomy_map(), GEOFENCE, True)
+    assert label == TRICHOSURUS and source == 'classifier+rollup_to_genus' and abs(score - 0.7) < 1e-6
+    label, score, source = species.combine_for_animal_detection([STOAT, POLECAT, MAMMALIA], [0.3, 0.2, 0.1], 0.9, 'NZL', None, _taxonomy_map(), GEOFENCE, True)
+    assert label == species.ANIMAL and source == 'detector' and score == 0.9
+    assert species.combine_for_animal_detection([species.BLANK, POSSUM], [0.995, 0.005], 0.9, 'NZL', None, _taxonomy_map(), GEOFENCE, True)[0] == species.BLANK
+
+
+def test_confident_species_passes_straight_through_and_maps_onto_the_nz_table(monkeypatch):
+    class FakeSession:
+        def run(self, outputs, feeds):
+            batch = feeds['images_nhwc']
+            assert batch.shape[1:] == (480, 480, 3) and batch.dtype == np.float32 and batch.max() <= 1.0
+            logits = np.full((batch.shape[0], len(TAXONOMY)), -5.0, dtype=np.float32)
+            logits[:, TAXONOMY.index(POLECAT)] = 6.0
+            logits[:, TAXONOMY.index(STOAT)] = 2.0
+            return [logits]
+
+    monkeypatch.setattr(species, '_session', FakeSession())
+    monkeypatch.setattr(species, '_labels', list(TAXONOMY))
+    monkeypatch.setattr(species, '_taxonomy_map', _taxonomy_map())
+    monkeypatch.setattr(species, '_geofence_map', GEOFENCE)
+    monkeypatch.setattr(species, '_provider', 'CPUExecutionProvider')
+    monkeypatch.setattr(species, 'SPECIES_COUNTRY', 'NZL')
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    payload = species.classify_animal(image, {'x': 100, 'y': 100, 'width': 200, 'height': 120}, 0.77)
+    assert payload['species'] == 'ferret' and payload['is_pest'] is True and payload['species_status'] == 'candidate'
+    assert payload['speciesnet']['source'] == 'classifier' and payload['speciesnet']['label'] == POLECAT
+    assert payload['speciesnet']['top'][0]['common_name'] == 'western polecat' and len(payload['speciesnet']['top']) == 5
+    assert payload['species_provider'].startswith('speciesnet:4.0.2a+onnxruntime@CPUExecutionProvider')
+
+
+def test_family_rollup_keeps_speciesnet_name_without_claiming_a_species(monkeypatch):
+    class FakeSession:
+        def run(self, outputs, feeds):
+            logits = np.full((1, len(TAXONOMY)), -5.0, dtype=np.float32)
+            logits[0, TAXONOMY.index(ZEBRA)] = 6.0
+            logits[0, TAXONOMY.index(EQUIDAE)] = 1.0
+            return [logits]
+
+    monkeypatch.setattr(species, '_session', FakeSession())
+    monkeypatch.setattr(species, '_labels', list(TAXONOMY))
+    monkeypatch.setattr(species, '_taxonomy_map', _taxonomy_map())
+    monkeypatch.setattr(species, '_geofence_map', GEOFENCE)
+    monkeypatch.setattr(species, 'SPECIES_COUNTRY', 'NZL')
+    payload = species.classify_animal(np.zeros((300, 300, 3), dtype=np.uint8), {'x': 0, 'y': 0, 'width': 100, 'height': 100}, 0.9)
+    # A zebra is not plausible in New Zealand: SpeciesNet rolls up to the family; the NZ table names equids "horse".
+    assert payload['speciesnet']['source'] == 'classifier+geofence+rollup_to_family'
+    assert payload['speciesnet']['label'] == EQUIDAE
+    assert payload['species'] == 'horse' and payload['species_status'] == 'candidate'
+
+
+def test_species_status_reports_not_staged_without_files(monkeypatch):
+    monkeypatch.setattr(species, 'staged', lambda: False)
+    assert species.status()['species'] == 'not_staged'
+    monkeypatch.setattr(detector, 'SPECIES_PROVIDER', 'auto')
+    assert detector._species_provider() == 'detector_labels'
+
+
 # --------------------------------------------------------------------------------------------- plates
 
 

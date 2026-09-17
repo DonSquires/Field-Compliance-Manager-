@@ -568,6 +568,7 @@ def _health_payload() -> dict[str, Any]:
         "detector_tiles": detector_state.get("detector_tiles"),
         "species_model": detector_state["species"],
         "species_provider": detector_state.get("species_provider"),
+        "species_execution_provider": detector_state.get("species_execution_provider"),
         "alpr": plate_state["alpr"],
         "alpr_provider": plate_state["alpr_provider"],
         "plate_detector_model": plate_state["plate_detector_model"],

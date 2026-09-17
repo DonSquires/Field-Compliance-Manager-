@@ -10,9 +10,10 @@ Model tiers, all lazily loaded and all honest about absence:
   full-frame pass, never duplicated.
 * CPU vehicle detector — OpenVINO ``vehicle-detection-0200``. Used only when no RF-DETR model is staged; it
   covers vehicles only, and the result says so through ``coverage``.
-* Species — SpeciesNet (Google camera-trap classifier, geofenced to New Zealand) via the optional
-  ``speciesnet`` package when ``SPECIES_PROVIDER=speciesnet``. Without it, animals carry the detector's
-  coarse COCO label mapped onto the New Zealand species table and ``species_status`` says so.
+* Species — SpeciesNet v4.0.2a (Google, Apache-2.0) exported to ONNX at image build (``export_speciesnet_onnx.py``)
+  and run through onnxruntime with the official taxonomy roll-up and country geofence (``species.py``). Without
+  it, animals carry the detector's coarse COCO label mapped onto the New Zealand species table and
+  ``species_status`` says so.
 
 When a tier is not staged the result says ``model_not_staged`` and carries no detections. Nothing here
 invents a sighting; identity is never decided here either — that is a human review action.
@@ -21,7 +22,6 @@ invents a sighting; identity is never decided here either — that is a human re
 from __future__ import annotations
 
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,8 +53,6 @@ INFERENCE_DEVICE = os.getenv("INFERENCE_DEVICE", "auto").strip().lower()  # auto
 OPENVINO_VEHICLE_DETECTOR_PATH = Path(os.getenv("OPENVINO_VEHICLE_DETECTOR_PATH", MODELS_DIR / "vehicle-detection-0200.xml"))
 OPENVINO_VEHICLE_CONFIDENCE = float(os.getenv("OPENVINO_VEHICLE_CONFIDENCE", "0.4"))
 SPECIES_PROVIDER = os.getenv("SPECIES_PROVIDER", "auto").strip().lower()
-SPECIESNET_MODEL = os.getenv("SPECIESNET_MODEL", "kaggle:google/speciesnet/pyTorch/v4.0.1a")
-SPECIES_COUNTRY = os.getenv("SPECIES_COUNTRY", "NZL")
 SPECIES_MIN_CONFIDENCE = float(os.getenv("SPECIES_MIN_CONFIDENCE", "0.35"))
 
 # A box covering (almost) the whole frame is the camera pressed against something, not an entity to identify.
@@ -94,26 +92,26 @@ class Species:
 # management plans), then the common non-target species a trail camera sees. Keys are what the database
 # stores in cctv_entity_observations.animal_type.
 NZ_SPECIES: tuple[Species, ...] = (
-    Species("possum", "Brushtail possum", True, "mammal", ("brushtail possum", "common brushtail possum", "trichosurus vulpecula")),
+    Species("possum", "Brushtail possum", True, "mammal", ("brushtail possum", "common brushtail possum", "trichosurus vulpecula", "trichosurus", "phalangeridae")),
     Species("stoat", "Stoat", True, "mammal", ("mustela erminea", "ermine", "short-tailed weasel")),
-    Species("ferret", "Ferret", True, "mammal", ("mustela furo", "mustela putorius furo", "mustela putorius")),
+    Species("ferret", "Ferret", True, "mammal", ("mustela furo", "mustela putorius furo", "mustela putorius", "western polecat", "polecat")),
     Species("weasel", "Weasel", True, "mammal", ("mustela nivalis", "least weasel")),
-    Species("rat", "Rat", True, "mammal", ("ship rat", "black rat", "norway rat", "brown rat", "kiore", "pacific rat", "rattus rattus", "rattus norvegicus", "rattus exulans", "rattus")),
-    Species("mouse", "House mouse", True, "mammal", ("house mouse", "mus musculus")),
-    Species("hedgehog", "Hedgehog", True, "mammal", ("european hedgehog", "erinaceus europaeus")),
-    Species("deer", "Deer", True, "mammal", ("red deer", "fallow deer", "sika deer", "white-tailed deer", "sambar", "rusa", "wapiti", "elk", "cervus elaphus", "dama dama", "cervus nippon", "odocoileus virginianus", "cervidae")),
-    Species("pig", "Feral pig", True, "mammal", ("feral pig", "wild boar", "wild pig", "boar", "sus scrofa")),
-    Species("goat", "Feral goat", True, "mammal", ("feral goat", "capra hircus", "capra aegagrus hircus")),
-    Species("cat", "Cat", True, "mammal", ("feral cat", "domestic cat", "felis catus", "felis silvestris catus")),
-    Species("rabbit", "Rabbit", True, "mammal", ("european rabbit", "oryctolagus cuniculus")),
-    Species("hare", "Hare", True, "mammal", ("european hare", "brown hare", "lepus europaeus")),
-    Species("wallaby", "Wallaby", True, "mammal", ("bennett's wallaby", "red-necked wallaby", "dama wallaby", "tammar wallaby", "parma wallaby", "notamacropus", "macropus")),
+    Species("rat", "Rat", True, "mammal", ("ship rat", "black rat", "norway rat", "brown rat", "kiore", "pacific rat", "polynesian rat", "rattus rattus", "rattus norvegicus", "rattus exulans", "rattus", "rattus species")),
+    Species("mouse", "House mouse", True, "mammal", ("house mouse", "mus musculus", "mus")),
+    Species("hedgehog", "Hedgehog", True, "mammal", ("european hedgehog", "erinaceus europaeus", "erinaceus", "hedgehog family", "erinaceidae")),
+    Species("deer", "Deer", True, "mammal", ("red deer", "fallow deer", "common fallow deer", "sika deer", "white-tailed deer", "sambar", "rusa", "wapiti", "elk", "cervus elaphus", "dama dama", "cervus nippon", "odocoileus virginianus", "cervidae", "cervus", "cervus species", "deer family")),
+    Species("pig", "Feral pig", True, "mammal", ("feral pig", "wild boar", "wild pig", "boar", "sus scrofa", "sus", "suidae", "pig family")),
+    Species("goat", "Feral goat", True, "mammal", ("feral goat", "domestic goat", "capra hircus", "capra aegagrus hircus", "capra", "capra species")),
+    Species("cat", "Cat", True, "mammal", ("feral cat", "domestic cat", "felis catus", "felis silvestris catus", "felis", "felis species", "felidae", "felidae family", "cat family")),
+    Species("rabbit", "Rabbit", True, "mammal", ("european rabbit", "oryctolagus cuniculus", "oryctolagus")),
+    Species("hare", "Hare", True, "mammal", ("european hare", "brown hare", "lepus europaeus", "lepus", "lepus species")),
+    Species("wallaby", "Wallaby", True, "mammal", ("bennett's wallaby", "red-necked wallaby", "dama wallaby", "tammar wallaby", "parma wallaby", "notamacropus", "macropus", "macropodidae", "kangaroo family")),
     Species("tahr", "Himalayan tahr", True, "mammal", ("himalayan tahr", "hemitragus jemlahicus")),
     Species("chamois", "Chamois", True, "mammal", ("rupicapra rupicapra",)),
-    Species("dog", "Dog", False, "mammal", ("domestic dog", "canis familiaris", "canis lupus familiaris")),
-    Species("cattle", "Cattle", False, "mammal", ("cow", "bull", "bos taurus")),
-    Species("sheep", "Sheep", False, "mammal", ("ovis aries",)),
-    Species("horse", "Horse", False, "mammal", ("equus caballus", "equus ferus caballus")),
+    Species("dog", "Dog", False, "mammal", ("domestic dog", "canis familiaris", "canis lupus familiaris", "canis", "canis species", "canidae", "canidae family", "dog family")),
+    Species("cattle", "Cattle", False, "mammal", ("cow", "bull", "bos taurus", "domestic cattle", "bos", "bos species")),
+    Species("sheep", "Sheep", False, "mammal", ("ovis aries", "domestic sheep", "ovis", "ovis species")),
+    Species("horse", "Horse", False, "mammal", ("equus caballus", "equus ferus caballus", "domestic horse", "equus", "equus species", "equidae", "equidae family", "horse family")),
     Species("bird", "Bird", False, "bird", ("aves",)),
     Species("other", "Unidentified animal", False, "unknown", ("animal", "blank", "unknown")),
 )
@@ -140,7 +138,8 @@ def normalise_species(label: str | None) -> Species | None:
     if not text:
         return None
     candidates: list[str] = []
-    if ";" in text:
+    taxonomy_label = ";" in text
+    if taxonomy_label:
         parts = [part.strip() for part in text.split(";")]
         if len(parts) >= 7:
             _uuid, taxon_class, order, family, genus, species, common = parts[:7]
@@ -161,6 +160,9 @@ def normalise_species(label: str | None) -> Species | None:
     for candidate in candidates:
         if candidate in _SPECIES_BY_ALIAS:
             return _SPECIES_BY_ALIAS[candidate]
+    if taxonomy_label:
+        # A taxonomy label maps only on an exact alias: "weasel family" must not become "weasel".
+        return None
     for candidate in candidates:
         for alias, species in _SPECIES_BY_ALIAS.items():
             if len(alias) >= 4 and (alias in candidate or candidate in alias):
@@ -487,6 +489,7 @@ def detector_status() -> dict[str, Any]:
             "coverage": ["person", "vehicle", "animal"],
             "species": "ready" if _species_available() else "not_staged",
             "species_provider": _species_provider(),
+            "species_execution_provider": _species_execution_provider(),
         }
     return {
         "detector": "vehicle_only" if cpu_vehicle else "not_staged",
@@ -499,6 +502,7 @@ def detector_status() -> dict[str, Any]:
         "coverage": ["vehicle"] if cpu_vehicle else [],
         "species": "ready" if _species_available() else "not_staged",
         "species_provider": _species_provider(),
+        "species_execution_provider": _species_execution_provider(),
     }
 
 
@@ -507,22 +511,29 @@ def _openvino_vehicle_staged() -> bool:
 
 
 def _species_provider() -> str:
-    if SPECIES_PROVIDER == "speciesnet":
-        return SPECIES_PROVIDER
-    if SPECIES_PROVIDER in ("none", "off", "detector"):
+    if SPECIES_PROVIDER in ("none", "off", "detector", "detector_labels"):
         return "detector_labels"
-    try:
-        import speciesnet  # noqa: F401
-        return "speciesnet"
-    except Exception:
-        return "detector_labels"
+    import species as speciesnet_tier  # lazy: species.py imports this module
+
+    if speciesnet_tier.staged():
+        return f"speciesnet:{speciesnet_tier.SPECIESNET_VERSION}"
+    return "detector_labels"
 
 
 def _species_available() -> bool:
-    return _species_provider() == "speciesnet"
+    return _species_provider().startswith("speciesnet")
 
 
-_speciesnet_model: Any = None
+def _species_execution_provider() -> str | None:
+    import species as speciesnet_tier  # lazy: species.py imports this module
+
+    if speciesnet_tier._provider:
+        return speciesnet_tier._provider
+    if not speciesnet_tier.staged():
+        return None
+    return onnx_providers()[0]
+
+
 _openvino_vehicle_model: Any = None
 
 
@@ -600,11 +611,17 @@ def _crop(image: np.ndarray, bbox: dict[str, int], padding: float = 0.15) -> np.
 
 
 def classify_species(image: np.ndarray, bbox: dict[str, int], coarse_label: str | None = None, confidence: float | None = None, provider: str | None = None) -> dict[str, Any]:
-    """Species for one animal detection: SpeciesNet when staged, otherwise the detector's coarse label mapped
-    onto the New Zealand species table (a COCO "cow" is cattle, a "sheep" is sheep; the status says the answer
-    came from a general detector, not a species model)."""
-    if _species_provider() == "speciesnet":
-        return _classify_with_speciesnet(_crop(image, bbox))
+    """Species for one animal detection: SpeciesNet (ONNX) when staged, otherwise the detector's coarse label
+    mapped onto the New Zealand species table (a COCO "cow" is cattle, a "sheep" is sheep; the status says the
+    answer came from a general detector, not a species model)."""
+    if _species_provider().startswith("speciesnet"):
+        import species as speciesnet_tier  # lazy: species.py imports this module
+
+        try:
+            return speciesnet_tier.classify_animal(image, bbox, float(confidence or 0.0))
+        except Exception as error:
+            return {"species": "other", "common_name": "Unidentified animal", "is_pest": None, "species_confidence": None,
+                    "species_status": "error", "species_provider": _species_provider(), "error": str(error)[:300]}
     if coarse_label:
         payload = species_payload(coarse_label, confidence, provider or "detector_labels")
         if payload.get("species_status") == "candidate":
@@ -612,35 +629,6 @@ def classify_species(image: np.ndarray, bbox: dict[str, int], coarse_label: str 
         return payload
     return {"species": "other", "common_name": "Unidentified animal", "is_pest": None, "species_confidence": None,
             "species_status": "model_not_staged", "species_provider": None}
-
-
-def _classify_with_speciesnet(crop: np.ndarray) -> dict[str, Any]:
-    global _speciesnet_model
-    try:
-        import cv2
-        from speciesnet import SpeciesNet
-
-        if _speciesnet_model is None:
-            _speciesnet_model = SpeciesNet(SPECIESNET_MODEL, components="classifier")
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
-            cv2.imwrite(handle.name, crop)
-            temp_path = handle.name
-        try:
-            output = _speciesnet_model.classify(filepaths=[temp_path], country=SPECIES_COUNTRY, run_mode="single_thread")
-        finally:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
-        prediction = (output.get("predictions") or [{}])[0]
-        classes = (prediction.get("classifications") or {}).get("classes") or []
-        scores = (prediction.get("classifications") or {}).get("scores") or []
-        if not classes:
-            raise RuntimeError("speciesnet returned no classes")
-        return species_payload(classes[0], float(scores[0]) if scores else None, f"speciesnet:{SPECIESNET_MODEL}")
-    except Exception as error:
-        return {"species": "other", "common_name": "Unidentified animal", "is_pest": None, "species_confidence": None,
-                "species_status": "error", "species_provider": "speciesnet", "error": str(error)[:300]}
 
 
 def triage_frame(image: np.ndarray, want_species: bool = True) -> dict[str, Any]:

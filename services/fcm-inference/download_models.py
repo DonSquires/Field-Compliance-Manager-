@@ -29,9 +29,17 @@ FILES = {
 #  - yolo-v9-s-608 licence-plate detector and the cct-s-v2-global plate OCR (+ its config) from fast-plate-ocr.
 #  - vehicle-detection-0200: OpenVINO CPU vehicle detector kept as the last-resort fallback when no RF-DETR
 #    export is present in MODELS_DIR (for example an old models volume).
-#  - SpeciesNet weights are distributed through Kaggle and cannot be fetched anonymously; install the
-#    `speciesnet` package and set SPECIES_PROVIDER=speciesnet to use them. Without it animals carry the
-#    detector's coarse label.
+#  - SpeciesNet v4.0.2a (Google, Apache-2.0): labels, taxonomy and geofence files come from the Addax Data
+#    Science mirror on Hugging Face (pinned revision; the Kaggle original needs an account). The classifier
+#    itself is exported to ONNX by export_speciesnet_onnx.py in the Dockerfile's export stage and copied into
+#    MODELS_DIR as speciesnet_v4.0.2a_always_crop.onnx; on a host, copy it out of a built image.
+SPECIESNET_MIRROR = os.getenv('SPECIESNET_MIRROR', 'https://huggingface.co/Addax-Data-Science/SPECIESNET-v4-0-2-A/resolve/c56465f3efdee012fcfb99e0e84867aed5fafcb7')
+SPECIESNET_FILES = {
+    'always_crop_99710272_22x8_v12_epoch_00148.labels.20251208.txt': f'{SPECIESNET_MIRROR}/always_crop_99710272_22x8_v12_epoch_00148.labels.20251208.txt',
+    'taxonomy_release.20251208.txt': f'{SPECIESNET_MIRROR}/taxonomy_release.20251208.txt',
+    'geofence_release.20251208.json': f'{SPECIESNET_MIRROR}/geofence_release.20251208.json',
+}
+SPECIESNET_CHECKPOINT = ('always_crop_99710272_22x8_v12_epoch_00148.pt', f'{SPECIESNET_MIRROR}/always_crop_99710272_22x8_v12_epoch_00148.pt')
 RF_DETR_MODELS = tuple(name.strip() for name in os.getenv('RF_DETR_MODELS', 'rf-detr-large-704-coco,rf-detr-small-512-coco').split(',') if name.strip())
 FILES.update({
     f'{name}.onnx': f'https://github.com/ankandrew/open-image-models/releases/download/assets/{name}.onnx' for name in RF_DETR_MODELS
@@ -43,8 +51,9 @@ FILES.update({
     'vehicle-detection-0200.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/3/vehicle-detection-0200/FP16/vehicle-detection-0200.xml',
     'vehicle-detection-0200.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/3/vehicle-detection-0200/FP16/vehicle-detection-0200.bin',
 })
+FILES.update(SPECIESNET_FILES)
 # Anything under this size is an error page, not a model.
-MIN_BYTES = {'.onnx': 100_000, '.bin': 10_000, '.xml': 1_000, '.yaml': 200}
+MIN_BYTES = {'.onnx': 100_000, '.bin': 10_000, '.xml': 1_000, '.yaml': 200, '.txt': 100_000, '.json': 1_000_000, '.pt': 100_000_000}
 OPTIONAL_FILES: dict[str, str] = {}
 
 
@@ -67,7 +76,13 @@ def download_file(url: str, destination: Path) -> None:
 
 if __name__ == '__main__':
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    for filename, url in FILES.items():
+    if os.getenv('SPECIESNET_CHECKPOINT_ONLY') == '1':
+        # Export stage: only the PyTorch checkpoint + its sidecar files, into MODELS_DIR.
+        targets = dict(SPECIESNET_FILES)
+        targets[SPECIESNET_CHECKPOINT[0]] = SPECIESNET_CHECKPOINT[1]
+    else:
+        targets = FILES
+    for filename, url in targets.items():
         destination = MODELS_DIR / filename
         if destination.exists() and destination.stat().st_size >= MIN_BYTES.get(destination.suffix, 1):
             print(f'skipping {filename} (already present)')
