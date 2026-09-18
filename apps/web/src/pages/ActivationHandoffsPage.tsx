@@ -136,11 +136,11 @@ export default function ActivationHandoffsPage({
     <div className="handoff-page">
       <header>
         <div>
-          <span>Mobilisation control</span>
-          <h1>Activation handoffs</h1>
+          <span>Delivery setup</span>
+          <h1>Start delivery</h1>
           <p>
-            Turn activated agreements into visible site briefings, roster
-            actions, and reporting delivery.
+            Turn an activated agreement into clear site briefings, roster
+            actions, and the first report delivery.
           </p>
         </div>
         <button

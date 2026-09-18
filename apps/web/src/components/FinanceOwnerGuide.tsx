@@ -31,21 +31,21 @@ export function FinanceOwnerGuide({ onOpenBob }: FinanceOwnerGuideProps) {
     }
     setLoading(true); setError(null);
     const { data, error: briefError } = await supabase.rpc('get_finance_owner_brief');
-    if (briefError) setError(briefError.message); else setBrief(data as OwnerBrief);
+    if (briefError) setError(briefError.message); else setBrief(data ? { ...(data as OwnerBrief), priorities: Array.isArray((data as OwnerBrief).priorities) ? (data as OwnerBrief).priorities : [] } : null);
     setLoading(false);
   }, [profile?.organizationId]);
   useEffect(() => { void loadBrief(); }, [loadBrief]);
   const assessReadiness = async () => {
     setAssessing(true);
     const { data } = await supabase.rpc('assess_bob_nz_finance_readiness');
-    if (data) setReadiness(data as Readiness);
+    if (data) setReadiness({ ...(data as Readiness), checks: Array.isArray((data as Readiness).checks) ? (data as Readiness).checks : [] });
     setAssessing(false);
   };
 
   return <section className="finance-owner-guide" aria-labelledby="finance-owner-guide-heading">
     <div className="finance-owner-guide-intro"><div className="finance-owner-guide-icon"><Bot size={20} /></div><div><p className="finance-owner-eyebrow">Your finance co-pilot</p><h2 id="finance-owner-guide-heading">You do not need to be an accountant</h2><p>Bob can gather the records, do the maths, explain what changed, and prepare the next step. You stay in control of approvals, filing, and payments.</p></div></div>
     <div className="finance-owner-actions">{questions.map(({ icon: Icon, title, detail, prompt }) => <button key={title} type="button" className="finance-owner-action" onClick={() => onOpenBob?.(prompt)} disabled={!onOpenBob}><Icon size={16} /><span><strong>{title}</strong><small>{detail}</small></span><span className="finance-owner-action-arrow">Ask Bob</span></button>)}</div>
-    <div className="finance-owner-brief" aria-live="polite"><div className="finance-owner-brief-heading"><strong>Bob's quick check</strong><button type="button" className="finance-owner-refresh" onClick={() => void loadBrief()} disabled={loading} title="Run the finance check again"><RefreshCw size={13} /></button></div>{loading ? <p>Bob is checking your finance records...</p> : error ? <p className="finance-owner-error"><AlertTriangle size={14} />{error}</p> : <><p className="finance-owner-headline">{brief?.headline}</p>{brief?.priorities.length ? <ul>{brief.priorities.slice(0, 4).map((priority) => <li key={`${priority.kind}-${priority.title}`}><strong>{priority.title}</strong><span>{priority.detail}</span></li>)}</ul> : null}</>}</div>
+    <div className="finance-owner-brief" aria-live="polite"><div className="finance-owner-brief-heading"><strong>Bob's quick check</strong><button type="button" className="finance-owner-refresh" onClick={() => void loadBrief()} disabled={loading} title="Run the finance check again"><RefreshCw size={13} /></button></div>{loading ? <p>Bob is checking your finance records...</p> : error ? <p className="finance-owner-error"><AlertTriangle size={14} />{error}</p> : <>{brief?.headline ? <p className="finance-owner-headline">{brief.headline}</p> : <p>Finance records returned no headline. Run the check again or ask Bob for a plain-language review.</p>}{brief?.priorities.length ? <ul>{brief.priorities.slice(0, 4).map((priority) => <li key={`${priority.kind}-${priority.title}`}><strong>{priority.title}</strong><span>{priority.detail}</span></li>)}</ul> : null}</>}</div>
     <div className="finance-owner-readiness"><div><strong>How ready are we for NZ finance?</strong><small>This is a readiness check, not a legal compliance certificate.</small></div><button type="button" className="finance-owner-check" onClick={() => void assessReadiness()} disabled={assessing}>{assessing ? 'Checking...' : 'Check now'}</button></div>
     {readiness && <div className="finance-owner-results" aria-live="polite"><strong>Readiness snapshot: {readiness.overall_score}%</strong><div>{readiness.checks.map((check) => <span key={check.source_key} className={`finance-owner-result status-${check.status}`} title={check.title}>{check.status === 'ready' ? 'Ready' : check.status === 'partial' ? 'Partly ready' : 'Gap'}<small>{check.title}</small></span>)}</div></div>}
     <div className="finance-owner-boundary"><LockKeyhole size={15} /><span><strong>Human approval stays with you.</strong> Bob will never file tax, close a period, pay a bill, or change a number without showing you what he found and asking first.</span><CheckCircle2 size={15} /></div>

@@ -204,11 +204,11 @@ export default function AccountOnboardingPage({
         <div className="onboarding-page">
         <header>
           <div>
-            <span>Account operations</span>
-            <h1>Account onboarding</h1>
+            <span>Client setup</span>
+            <h1>Set up a new client</h1>
             <p>
-              Resume qualification, configuration, readiness review, and
-              activation from durable evidence.
+              Work through the few things needed before service can start:
+              client details, agreement, places, and a final readiness check.
             </p>
           </div>
         </header>
@@ -239,11 +239,11 @@ export default function AccountOnboardingPage({
       <div className="onboarding-page">
       <header>
         <div>
-          <span>Account operations</span>
-          <h1>Account onboarding</h1>
+          <span>Client setup</span>
+          <h1>Set up a new client</h1>
           <p>
-            Resume qualification, configuration, readiness review, and
-            activation from durable evidence.
+            Work through the few things needed before service can start:
+            client details, agreement, places, and a final readiness check.
           </p>
         </div>
         <div className="onboarding-header-actions">

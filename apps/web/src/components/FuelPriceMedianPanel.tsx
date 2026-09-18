@@ -72,8 +72,9 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
     const row = Array.isArray(medianRes.data) ? medianRes.data[0] : medianRes.data;
     setMedian((row as MedianFuelPrice | null) ?? null);
     setObservations((observationsRes.data as FuelObservation[]) ?? []);
-    setSources((sourcesRes.data as FuelPriceSource[]) ?? []);
-    setSourceId((current) => current && (sourcesRes.data as FuelPriceSource[]).some((source) => source.id === current) ? current : '');
+    const sourceRows = (sourcesRes.data as FuelPriceSource[] | null) ?? [];
+    setSources(sourceRows);
+    setSourceId((current) => current && sourceRows.some((source) => source.id === current) ? current : '');
     setLoading(false);
   }, [fuelType, organizationId]);
 

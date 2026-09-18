@@ -10,7 +10,7 @@ test('administrator resumes evidence-backed onboarding and activates a ready pro
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/onboarding');
 
-  await expect(page.getByRole('heading', { name: 'Account onboarding' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Set up a new client' })).toBeVisible();
   await page.getByRole('button', { name: /Blocked Harbour Prospect/ }).click();
   await expect(page.getByText('Target overdue')).toBeVisible();
   await expect(page.getByText('An active primary contact is required')).toBeVisible();
@@ -28,7 +28,7 @@ test('administrator resumes evidence-backed onboarding and activates a ready pro
   await expect(page.getByRole('status')).toContainText('Ready Venue Trust activated and removed from the incomplete queue');
   await expect(page.getByRole('button', { name: /Ready Venue Trust/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Open activation handoff' }).click();
-  await expect(page.getByRole('heading', { name: 'Activation handoffs' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Start delivery' })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
 

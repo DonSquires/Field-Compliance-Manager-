@@ -85,7 +85,8 @@ describe('AdminShell access and routing boundaries', () => {
   });
 
   it('keeps specialist routes visible until their container pages exist locally', () => {
-    expect(source).toContain("'Clients & Commercial': [");
+    expect(source).toContain("'Clients & Delivery': [");
+    expect(source).toContain('Finance: [');
     expect(source).toContain("{ id: 'crm', label: 'Client Portfolios'");
     expect(source).toContain("{ id: 'finance-bureau', label: 'Finance home'");
     expect(source).toContain("{ id: 'finance-connections', label: 'Connect ANZ & IRD'");
@@ -96,7 +97,8 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("'Reports & Analytics': [");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
     expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
-    expect(source).toContain("{ id: 'onboarding', label: 'New Account Setup'");
+    expect(source).toContain("{ id: 'onboarding', label: 'Set up a new client'");
+    expect(source).toContain("{ id: 'handoffs', label: 'Start delivery'");
   });
 
   it('consolidates duplicate admin menu entries and landing shortcuts', () => {

@@ -208,10 +208,12 @@ const NAVIGATION_MAP = {
     { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
     { id: 'workshop', label: 'Workshop', icon: Wrench },
   ],
-  'Clients & Commercial': [
+  'Clients & Delivery': [
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
-    { id: 'onboarding', label: 'New Account Setup', icon: ClipboardCheck },
-    { id: 'handoffs', label: 'Activation Checklists', icon: ClipboardCheck },
+    { id: 'onboarding', label: 'Set up a new client', icon: ClipboardCheck },
+    { id: 'handoffs', label: 'Start delivery', icon: ClipboardCheck },
+  ],
+  Finance: [
     { id: 'finance-bureau', label: 'Finance home', icon: DollarSign },
     { id: 'finance-money', label: 'Business money check', icon: BarChart3 },
     { id: 'finance-connections', label: 'Connect ANZ & IRD', icon: Landmark },
