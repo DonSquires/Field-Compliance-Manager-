@@ -46,5 +46,6 @@ describe('officer debrief workspace', () => {
     expect(page).toContain("sourceType: 'debrief'");
     expect(page).toContain('sourceId: receipt.id');
     expect(page).toContain('Debrief review draft created');
+    expect(page).toContain("const recorded = 'Debrief recorded. Complete the shift when all field work is finished.';");
   });
 });

@@ -117,12 +117,13 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
         <p className="patrol-stops-subtle">This shift has no contracted site visits. If it should, ask your supervisor to build the patrol run for the agreement.</p>
       ) : (
         <ol className="patrol-stops-list">
-          {stops.map((stop) => {
+          {stops.map((stop, index) => {
             const isCurrent = current?.id === stop.id;
             const state = stop.status === 'completed' ? 'done' : stop.status === 'skipped' || stop.status === 'cancelled' ? 'off' : isCurrent ? 'current' : 'later';
             return (
               <li key={stop.id} className={`patrol-stop is-${state} ${stop.sla_status === 'breached' ? 'is-late' : ''}`} aria-current={isCurrent ? 'step' : undefined}>
-                <span className="patrol-stop-number">{state === 'done' ? <CheckCircle2 size={15} aria-hidden="true" /> : stop.stop_order}</span>
+                {/* stop_order is a generator sort key (order × 10 + visit); officers get a plain 1..N. */}
+                <span className="patrol-stop-number">{state === 'done' ? <CheckCircle2 size={15} aria-hidden="true" /> : index + 1}</span>
                 <div className="patrol-stop-body">
                   <div className="patrol-stop-title">
                     <strong>{stop.place.name}</strong>

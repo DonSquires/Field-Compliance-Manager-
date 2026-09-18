@@ -32,6 +32,7 @@ test('officer debrief is structured, validated, and server-confirmed', async ({ 
   await actionBar.evaluate((element) => { element.style.visibility = ''; });
   await submit.click();
   await expect(page.getByText('Debrief recorded. Complete the shift when all field work is finished.')).toBeVisible();
+  await expect(page.getByText(/Debrief review draft created for your supervisor: Debrief review - North District Patrol 30 Aug\./)).toBeVisible();
   const complete = page.getByRole('button', { name: 'Complete shift' });
   await expect(complete).toBeVisible();
   await complete.click();

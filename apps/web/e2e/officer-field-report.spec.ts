@@ -15,7 +15,7 @@ test('officer report capture is evidential, responsive, and server-confirmed', a
   await page.getByLabel('Title').fill('Unsafe access lighting');
   await page.getByLabel('Description').fill('Lighting at the north access failed during the patrol and reduced visibility.');
   await page.getByLabel('Location name').fill('North Yard');
-  await page.getByLabel('Address').fill('14 Harbour Road');
+  await page.getByLabel('Street address').fill('14 Harbour Road');
   await page.getByLabel('Immediate action taken').fill('Used the controlled alternate entrance and notified dispatch.');
   await page.getByText('Follow-up required', { exact: true }).click();
   await expect(submit).toBeDisabled();
@@ -26,7 +26,8 @@ test('officer report capture is evidential, responsive, and server-confirmed', a
   const actionBar = page.locator('.officer-action-bar');
   const submitBounds = await submit.boundingBox();
   const actionBarBounds = await actionBar.boundingBox();
-  expect(submitBounds && actionBarBounds && submitBounds.y + submitBounds.height <= actionBarBounds.y).toBe(true);
+  // Sub-pixel layout can put the button bottom a fraction below the bar top after scrollIntoView.
+  expect(submitBounds && actionBarBounds && submitBounds.y + submitBounds.height <= actionBarBounds.y + 1).toBe(true);
   const shellHeader = page.locator('.officer-shell-header');
   await shellHeader.evaluate((element) => { element.style.visibility = 'hidden'; });
   await actionBar.evaluate((element) => { element.style.visibility = 'hidden'; });

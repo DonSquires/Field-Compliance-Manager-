@@ -524,6 +524,9 @@ export async function installOfficerScheduleFixtures(page: Page, options: { free
     }
     await route.fulfill(fulfillJson([]));
   });
+  await page.route('**/functions/v1/bob-agentic-document-draft', async (route) => {
+    await route.fulfill(fulfillJson({ ok: true, draft: { id: 'draft-debrief-0001', title: 'Debrief review - North District Patrol 30 Aug' } }));
+  });
   await page.route('**/functions/v1/process-officer-scan', async (route) => {
     await route.fulfill(fulfillJson({ plate_number: 'ABC123', plate_source: 'manual', compliance_status: 'compliant', is_compliant: true, compliance_reason: 'within_nightly_limits', nights_this_zone: 1, nights_this_month: 1, limit_consecutive: 2, limit_monthly: 10, is_scv: false, enforcement_exempt: false, exemption_reason: null, zone_id: '66666666-6666-4666-8666-666666666666', zone_name: 'Civic Event Operations Zone', on_site: false, in_operating_bounds: true, out_of_bounds_district: null, effective_rules: { nightly_limit_consecutive: 2 }, zone_closed: true, zone_closure: { closure_type: 'restricted', reason: 'Controlled loading access only', effective_from: '2026-08-31', effective_to: '2026-08-31' }, vehicle_make: null, vehicle_model: null, vehicle_colour: null, observation_id: '69696969-6969-4969-8969-696969696969', breach_alert_id: null, scan_window: 'evening', overnight_verification_status: null, requires_morning_verification: false }));
   });
