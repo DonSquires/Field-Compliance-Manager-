@@ -38,4 +38,12 @@ describe('BOM template quote adder contract', () => {
     expect(component).toContain('lines_needing_price');
     expect(crmPage).toContain('no price yet — set a price before sending');
   });
+
+  it('shows the selected template lines and current price-book values before copying them', () => {
+    expect(component).toContain("from('workshop_bom_template_lines')");
+    expect(component).toContain("from('finance_price_book')");
+    expect(component).toContain('Review before adding');
+    expect(component).toContain('Needs a price');
+    expect(component).toContain('Current total:');
+  });
 });

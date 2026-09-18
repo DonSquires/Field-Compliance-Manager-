@@ -16,7 +16,12 @@ test('operating branch selector is visible and switches the session context', as
 });
 
 test('CRM account context and governed quote creation are operational', async ({ page }) => {
-  const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
+  const errors = monitorBrowserErrors(page);
+  await page.route('**/rest/v1/workshop_bom_templates*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'tpl-lockbox', name: 'Standard lockbox', kind: 'fabrication', description: 'Box section, fixings and fabrication labour.' }]) }));
+  await page.route('**/rest/v1/workshop_bom_template_lines*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'tpl-line-1', line_kind: 'material', item_id: 'item-steel', description: '200x200mm box section', quantity: 2.5, unit_of_measure: 'm', position: 1 }, { id: 'tpl-line-2', line_kind: 'labour', item_id: null, description: 'Cut, weld, finish', quantity: 3, unit_of_measure: 'hr', position: 2 }]) }));
+  await page.route('**/rest/v1/finance_price_book*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ item_id: 'item-steel', unit_cost: 40, unit_price: 62 }]) }));
+  await page.route('**/rest/v1/rpc/add_crm_quote_lines_from_bom_template', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ lines_added: 2, lines_needing_price: 1, total_cost: 380, subtotal_charge: 549, total_charge: 631.35 }]) }));
+  await signInAsAdmin(page, '/admin/crm');
   await expect(page.getByRole('heading', { name: 'Client Portfolios', exact: true })).toBeVisible();
   const client = page.locator('#crm-account-40404040-4040-4040-8040-404040404040');
   await client.click();
@@ -34,6 +39,13 @@ test('CRM account context and governed quote creation are operational', async ({
   await pricing.getByLabel('Quantity').fill('8'); await pricing.getByLabel('Provider unit cost').fill('35'); await pricing.getByLabel('Client unit charge').fill('52.5');
   await expect(pricing).toHaveScreenshot('crm-quote-pricing.png'); await pricing.getByRole('button', { name: 'Add pricing line' }).click();
   await expect(pricing.getByText('Total cost $280.00')).toBeVisible(); await expect(pricing.getByText('Total charge $483.00')).toBeVisible();
+  await pricing.getByLabel('Add a standard build').selectOption('tpl-lockbox');
+  await expect(pricing.getByText('Review before adding')).toBeVisible();
+  await expect(pricing.getByText('2.5 m · 200x200mm box section')).toBeVisible();
+  await expect(pricing.getByText('$155.00')).toBeVisible();
+  await expect(pricing.getByText('1 line needs a price before the quote can be sent.')).toBeVisible();
+  await pricing.getByRole('button', { name: 'Add its lines' }).click();
+  await expect(page.getByText(/2 lines from Standard lockbox added.*1 line has no price yet/)).toBeVisible();
   await pricing.getByRole('button', { name: 'Send quote' }).click();const sendDialog=page.getByRole('dialog',{name:'Send quote?'});await expect(sendDialog).toHaveScreenshot('crm-send-quote.png');await sendDialog.getByRole('button',{name:'Confirm send'}).click();await expect(page.getByText(/Civic Events Limited - .* proposal sent for acceptance\./)).toBeVisible();
   await pricing.getByRole('button', { name: 'Accept quote' }).click();const acceptDialog=page.getByRole('dialog',{name:'Accept quote?'});await expect(acceptDialog).toHaveScreenshot('crm-accept-quote.png');await acceptDialog.getByRole('button',{name:'Confirm acceptance'}).click();
   const receipt = page.getByRole('region', { name: 'Quote acceptance receipt' });await expect(receipt).toContainText('Service agreement 46464646 established for Civic Events Limited.');await receipt.getByRole('button',{name:'Open service agreement'}).click();
