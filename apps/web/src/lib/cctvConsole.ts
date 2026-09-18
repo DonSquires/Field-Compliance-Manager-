@@ -523,3 +523,75 @@ export function initialView(bounds: TimeView, clockMs: number, footage?: TimeVie
   if (span >= total) return bounds;
   return zoomView(bounds, clockMs, span / total, bounds);
 }
+
+export type ConsoleFailureKind = 'offline' | 'transport' | 'timeout' | 'permission' | 'other';
+export type ConsoleFailure = { kind: ConsoleFailureKind; text: string; retryable: boolean };
+
+/**
+ * Turns a raw data-service error into something a reviewer can act on. supabase-js reports a dropped
+ * connection as the literal string "TypeError: Failed to fetch", which says nothing about which request
+ * failed or whether anything was changed — so the scope is always named and the safe next step stated.
+ */
+export function describeConsoleFailure(rawMessage: string | null | undefined, scope: string, online = true): ConsoleFailure {
+  const message = (rawMessage ?? '').trim();
+  const lower = message.toLowerCase();
+  if (!online) {
+    return { kind: 'offline', text: `You are offline, so the ${scope} could not be loaded. Nothing was changed; the console retries when the connection returns.`, retryable: true };
+  }
+  if (/failed to fetch|networkerror|network request failed|load failed|err_network|err_connection|econnreset|fetch failed|the operation was aborted|abort/.test(lower)) {
+    return { kind: 'transport', text: `The ${scope} could not be loaded because the connection to the FCM data service was interrupted. Nothing was changed. Retry, or check the network if this keeps happening.`, retryable: true };
+  }
+  if (/statement timeout|canceling statement|\b57014\b|timed out|timeout/.test(lower)) {
+    return { kind: 'timeout', text: `Loading the ${scope} took too long and was stopped. Retry; if it keeps happening, review one camera or one day at a time.`, retryable: true };
+  }
+  if (/permission denied|row-level security|\b42501\b|\bjwt\b|not authorized|unauthorized|forbidden|\b401\b|\b403\b/.test(lower)) {
+    return { kind: 'permission', text: `Your account is not permitted to load the ${scope}. Sign in again, or ask an administrator to check your role.`, retryable: false };
+  }
+  return { kind: 'other', text: `The ${scope} could not be loaded: ${message || 'unknown error'}.`, retryable: true };
+}
+
+export type RefreshCoalescer = { request: (id: string) => void; dispose: () => void };
+
+/**
+ * Collapses bursts of refresh requests for the same key into one run. Realtime change events, the
+ * active-job poll, and reviewer actions can all ask for the same import to reload within the same
+ * second; each reload is several large queries, and a burst starves the video streams of connections
+ * (surfacing as "Failed to fetch"). Requests arriving while a run is in flight mark it dirty and cause
+ * exactly one follow-up run after it completes.
+ */
+export function createRefreshCoalescer(run: (id: string) => Promise<void>, delayMs = 1500): RefreshCoalescer {
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const inFlight = new Set<string>();
+  const dirty = new Set<string>();
+  let disposed = false;
+
+  const schedule = (id: string) => {
+    if (disposed || timers.has(id)) return;
+    timers.set(id, setTimeout(() => {
+      timers.delete(id);
+      void execute(id);
+    }, delayMs));
+  };
+
+  const execute = async (id: string) => {
+    if (disposed) return;
+    if (inFlight.has(id)) { dirty.add(id); return; }
+    inFlight.add(id);
+    try {
+      await run(id);
+    } finally {
+      inFlight.delete(id);
+      if (dirty.delete(id)) schedule(id);
+    }
+  };
+
+  return {
+    request: schedule,
+    dispose: () => {
+      disposed = true;
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      dirty.clear();
+    },
+  };
+}

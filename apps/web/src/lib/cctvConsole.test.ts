@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   bytesLabel,
   cameraItem,
@@ -7,7 +7,9 @@ import {
   clipItem,
   clipStatusLabel,
   clusterMarks,
+  createRefreshCoalescer,
   DEFAULT_CCTV_INSPECTION,
+  describeConsoleFailure,
   durationLabel,
   entityTitle,
   fitTiles,
@@ -277,5 +279,84 @@ describe('entities and portfolio actions', () => {
     ]);
     expect(pins.map((pin) => pin.severity)).toEqual(['alert', 'alert', 'detection']);
     expect(pins[1].endMs - pins[1].startMs).toBe(1000);
+  });
+});
+
+describe('data-service failures', () => {
+  it('names the scope and the safe next step for a dropped connection instead of echoing the raw fetch error', () => {
+    const failure = describeConsoleFailure('TypeError: Failed to fetch', 'recordings for this camera');
+    expect(failure.kind).toBe('transport');
+    expect(failure.retryable).toBe(true);
+    expect(failure.text).toContain('recordings for this camera');
+    expect(failure.text).toContain('Nothing was changed');
+    expect(failure.text).not.toContain('TypeError');
+  });
+
+  it('tells an offline reviewer the console will retry when the connection returns', () => {
+    const failure = describeConsoleFailure('TypeError: Failed to fetch', 'camera list', false);
+    expect(failure.kind).toBe('offline');
+    expect(failure.retryable).toBe(true);
+  });
+
+  it('does not offer a retry for a permission failure and points at the role instead', () => {
+    const failure = describeConsoleFailure('permission denied for table cctv_entity_observations', 'observations for this camera');
+    expect(failure.kind).toBe('permission');
+    expect(failure.retryable).toBe(false);
+    expect(failure.text).toContain('administrator');
+    expect(describeConsoleFailure('JWT expired', 'camera list').kind).toBe('permission');
+  });
+
+  it('separates a database timeout from a network fault and does not mistake ids for HTTP codes', () => {
+    expect(describeConsoleFailure('canceling statement due to statement timeout', 'camera events').kind).toBe('timeout');
+    expect(describeConsoleFailure('relation "x401" does not exist', 'camera events').kind).toBe('other');
+    expect(describeConsoleFailure('', 'camera events').text).toContain('unknown error');
+  });
+});
+
+describe('refresh coalescing', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('collapses a burst of realtime requests for one import into a single reload', async () => {
+    const run = vi.fn((_id: string) => Promise.resolve());
+    const coalescer = createRefreshCoalescer(run, 1500);
+    for (let i = 0; i < 25; i += 1) coalescer.request('imp-a');
+    coalescer.request('imp-b');
+    expect(run).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls.map(([id]) => id).sort()).toEqual(['imp-a', 'imp-b']);
+    coalescer.dispose();
+  });
+
+  it('runs exactly one follow-up when requests arrive while a reload is in flight', async () => {
+    const releases: Array<() => void> = [];
+    const run = vi.fn((_id: string) => new Promise<void>((resolve) => { releases.push(resolve); }));
+    const coalescer = createRefreshCoalescer(run, 100);
+    coalescer.request('imp');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(run).toHaveBeenCalledTimes(1);
+    coalescer.request('imp');
+    coalescer.request('imp');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(run).toHaveBeenCalledTimes(1);
+    releases.shift()?.();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(run).toHaveBeenCalledTimes(2);
+    releases.shift()?.();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(run).toHaveBeenCalledTimes(2);
+    coalescer.dispose();
+  });
+
+  it('drops pending work once disposed so an unmounted console issues no queries', async () => {
+    const run = vi.fn((_id: string) => Promise.resolve());
+    const coalescer = createRefreshCoalescer(run, 100);
+    coalescer.request('imp');
+    coalescer.dispose();
+    await vi.advanceTimersByTimeAsync(1000);
+    coalescer.request('imp');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(run).not.toHaveBeenCalled();
   });
 });

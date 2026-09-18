@@ -36,6 +36,10 @@
 .cctv-console__keys { background: var(--cc-surface); border: 1px solid var(--cc-line); border-radius: 6px; color: var(--cc-text-2); display: flex; flex-wrap: wrap; font-size: 12px; gap: 14px; margin-bottom: 12px; padding: 8px 12px; }
 .cctv-console__keys kbd { background: var(--cc-elevated); border: 1px solid var(--cc-line-strong); border-bottom-width: 2px; border-radius: 4px; color: var(--cc-text); font: inherit; font-family: var(--cc-mono); margin-right: 3px; padding: 1px 6px; }
 .cctv-console .page-error { align-items: center; background: rgba(216, 80, 80, .16); border: 1px solid rgba(216, 80, 80, .5); border-radius: 6px; color: #ffb4ad; display: flex; gap: 8px; margin-bottom: 12px; padding: 10px 12px; }
+.cctv-console__error-text { flex: 1 1 auto; min-width: 0; }
+.cctv-console__error-retry { align-items: center; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 180, 173, .6); border-radius: 4px; color: inherit; cursor: pointer; display: inline-flex; flex: 0 0 auto; font: inherit; gap: 6px; padding: 4px 10px; }
+.cctv-console__error-retry:hover { background: rgba(255, 255, 255, .16); }
+.cctv-console .page-error .cctv-console__icon-btn { color: inherit; }
 .cctv-console .spin { animation: spin 1s linear infinite; }
 .cctv-console__muted { color: var(--cc-text-3); font-size: 13px; line-height: 1.45; margin: 8px 0; }
 .cctv-console__footnote { align-items: center; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }

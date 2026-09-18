@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Loader2, Pause, Play, Sparkles, VideoOff } from 'lucide-react';
+import { Loader2, Sparkles, VideoOff } from 'lucide-react';
 import { clipAtTime, formatClock, nextClipAfter, type CCTVInspection, type ConsoleClip } from '../lib/cctvConsole';
 import { analyseFramePixels, cssFilterFor, estimateNoiseFloor, panBy, planEnhancement, roiFor, zoomAt, type EnhancementPlan, type ZoomState } from '../lib/cctvEnhance';
 import { createEnhancementRenderer, type EnhancementRenderer } from '../lib/cctvEnhanceRenderer';
@@ -12,6 +12,8 @@ export type CCTVPlayerTileHandle = {
   /** Rasterise the picture currently on screen (enhanced view when active) for a still export. */
   captureFrame: () => Promise<TileSnapshot | null>;
   currentMs: () => number | null;
+  /** Align this clip to a relative playback position without changing its recorded clock. */
+  syncTo: (seconds: number) => void;
 };
 
 type CCTVPlayerTileProps = {
@@ -19,6 +21,8 @@ type CCTVPlayerTileProps = {
   placeLabel: string | null;
   clips: ConsoleClip[];
   clockMs: number;
+  /** Changes on every deliberate seek; a pinned recording follows those, never the clock's ordinary ticking. */
+  seekNonce?: number;
   playing: boolean;
   rate: number;
   muted: boolean;
@@ -54,9 +58,10 @@ type VideoFrameCapable = HTMLVideoElement & {
  * One tile in the grid. In camera mode it shows whichever clip of its camera covers the shared clock and
  * switches clips as the clock crosses ring-slot boundaries; the master tile's playback drives the clock and
  * every other tile seeks to it. In pinned mode it plays exactly one recording on its own clock, independent
- * of the wall, so a reviewer can open several recordings side by side.
+ * of the wall, so a reviewer can open several recordings side by side; it still answers deliberate seeks that
+ * land inside its recording, and when it is the active recording its playback drives the timeline.
  */
-export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerTileProps>(function CCTVPlayerTile({ label, placeLabel, clips, clockMs, playing, rate, muted, isMaster, active, timeZone, pinnedClip = null, resolveUrl, onTick, onClipEnded, onDurationKnown, onActivate, inspection, onInspectionChange, onEnhancementPlan, onRemove }, ref) {
+export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerTileProps>(function CCTVPlayerTile({ label, placeLabel, clips, clockMs, seekNonce = 0, playing, rate, muted, isMaster, active, timeZone, pinnedClip = null, resolveUrl, onTick, onClipEnded, onDurationKnown, onActivate, inspection, onInspectionChange, onEnhancementPlan, onRemove }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -71,7 +76,6 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
   const [error, setError] = useState<string | null>(null);
   const [gpuUnavailable, setGpuUnavailable] = useState<string | null>(null);
   const [cssFilter, setCssFilter] = useState<string | null>(null);
-  const [localPlaying, setLocalPlaying] = useState(false);
   const [localMs, setLocalMs] = useState<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const openingRef = useRef<string | null>(null);
@@ -81,7 +85,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
 
   const pinned = Boolean(pinnedClip);
   const targetClip = pinnedClip ?? clipAtTime(clips, clockMs);
-  const effectivePlaying = pinned ? localPlaying : playing;
+  const effectivePlaying = playing;
   const converting = Boolean(targetClip && !targetClip.playbackPath && /^video\/h26[45]$/.test(targetClip.fileType));
 
   // Keyed on the clip id held in a ref, not on state, so the re-render caused by setClip does not cancel
@@ -111,15 +115,28 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
 
   const seekToClock = useCallback((force = false) => {
     const video = videoRef.current;
-    if (pinned || !video || !clip || !Number.isFinite(video.duration)) return;
-    const target = Math.max(0, (clockMs - clip.startMs) / 1000);
+    if (!video || !clip || !Number.isFinite(video.duration)) return;
+    const offset = (clockMs - clip.startMs) / 1000;
+    // A recording on its own clock only moves when the instant lies inside it; the wall never drags it elsewhere.
+    if (pinned && (offset < 0 || offset > video.duration)) return;
+    const target = Math.max(0, offset);
     if (target > video.duration) return;
-    if (force || Math.abs(video.currentTime - target) > DRIFT_TOLERANCE_SECONDS) video.currentTime = target;
+    if (force || Math.abs(video.currentTime - target) > DRIFT_TOLERANCE_SECONDS) {
+      video.currentTime = target;
+      if (pinned) setLocalMs(clip.startMs + target * 1000);
+    }
   }, [clip, clockMs, pinned]);
 
   // Followers chase the shared clock. The master's own ticks never drift past the tolerance, so this only
-  // moves it when the clock was set from outside (scrub, pin click, keyboard).
-  useEffect(() => { seekToClock(false); }, [seekToClock]);
+  // moves it when the clock was set from outside (scrub, pin click, keyboard). Pinned recordings respond only
+  // to those deliberate seeks, so two synced recordings are never pulled apart by the clock ticking.
+  const seenSeekNonce = useRef(seekNonce);
+  useEffect(() => {
+    if (!pinned) { seekToClock(false); return; }
+    if (seenSeekNonce.current === seekNonce) return;
+    seenSeekNonce.current = seekNonce;
+    seekToClock(true);
+  }, [seekToClock, seekNonce, pinned]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -145,7 +162,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
       if (video && clip && !video.paused && !video.seeking) {
         const at = clip.startMs + video.currentTime * 1000;
         if (pinned) setLocalMs(at);
-        else onTick(at);
+        if (isMaster) onTick(at);
       }
       frameRef.current = requestAnimationFrame(step);
     };
@@ -153,7 +170,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
     return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current); };
   }, [isMaster, pinned, effectivePlaying, src, clip, onTick]);
 
-  useEffect(() => { setLocalPlaying(false); setLocalMs(pinnedClip ? pinnedClip.startMs : null); }, [pinnedClip?.evidenceId]);
+  useEffect(() => { setLocalMs(pinnedClip ? pinnedClip.startMs : null); }, [pinnedClip?.evidenceId]);
 
   const handleLoadedMetadata = () => {
     const video = videoRef.current;
@@ -170,11 +187,11 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
       const video = videoRef.current;
       if (!video || !clip || !Number.isFinite(video.duration)) return null;
       video.pause();
-      if (pinned) setLocalPlaying(false);
       const next = Math.min(video.duration, Math.max(0, video.currentTime + direction * FRAME_STEP_SECONDS));
       video.currentTime = next;
       const at = clip.startMs + next * 1000;
-      if (pinned) setLocalMs(at); else onTick(at);
+      if (pinned) setLocalMs(at);
+      if (isMaster) onTick(at);
       return at;
     },
     captureFrame: async () => {
@@ -201,7 +218,16 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
       const video = videoRef.current;
       return video && clip ? clip.startMs + video.currentTime * 1000 : null;
     },
-  }), [clip, pinned, gpuActive, onTick]);
+    syncTo: (seconds) => {
+      const video = videoRef.current;
+      if (!video || !clip || !Number.isFinite(video.duration)) return;
+      const next = Math.min(video.duration, Math.max(0, seconds));
+      video.currentTime = next;
+      const at = clip.startMs + next * 1000;
+      if (pinned) setLocalMs(at);
+      if (isMaster) onTick(at);
+    },
+  }), [clip, pinned, isMaster, gpuActive, onTick]);
 
   const nextClip = !targetClip && !pinned ? nextClipAfter(clips, clockMs) : null;
 
@@ -401,7 +427,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
           <video ref={videoRef} src={src ?? undefined} className="cctv-tile__video" playsInline preload="auto" crossOrigin="anonymous"
             style={videoStyle}
             onLoadedMetadata={handleLoadedMetadata}
-            onEnded={() => { if (pinned) setLocalPlaying(false); else if (isMaster && clip) onClipEnded(clip); }}
+            onEnded={() => { if (!pinned && isMaster && clip) onClipEnded(clip); }}
             onError={() => setError('This clip could not be played in the browser.')} />
         ) : null}
         {targetClip && !converting && enhanceRequested ? <canvas ref={canvasRef} className={`cctv-tile__enhanced${gpuActive ? ' is-live' : ''}`} aria-hidden="true" /> : null}
@@ -422,11 +448,6 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
         ) : null}
         {targetClip ? (
           <div className="cctv-tile__footer">
-            {pinned ? (
-              <button type="button" className="cctv-tile__transport" onClick={(event) => { event.stopPropagation(); setLocalPlaying((current) => !current); }} aria-label={localPlaying ? 'Pause this recording' : 'Play this recording'}>
-                {localPlaying ? <Pause size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
-              </button>
-            ) : null}
             <span className="cctv-tile__clip">{targetClip.fileName}</span>
             <span className="cctv-tile__time">{formatClock(pinned ? (localMs ?? targetClip.startMs) : clockMs, timeZone)}</span>
           </div>

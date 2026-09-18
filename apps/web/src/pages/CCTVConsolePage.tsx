@@ -47,7 +47,9 @@ import {
   clipItem,
   clipStatusLabel,
   clampMs,
+  createRefreshCoalescer,
   DEFAULT_CCTV_INSPECTION,
+  describeConsoleFailure,
   durationLabel,
   fitTiles,
   followClock,
@@ -79,6 +81,7 @@ import {
   type ClipJobStatus,
   type CCTVInspection,
   type ConsoleClip,
+  type ConsoleFailure,
   type ConsoleMark,
   type ConsoleObservation,
   type EntityKind,
@@ -119,6 +122,9 @@ type LockDraft = { evidenceId: string; reason: string };
 
 const SIGNED_URL_TTL_SECONDS = 3600;
 const DETAIL_POLL_INTERVAL_MS = 10_000;
+// Realtime change bursts (progress ticks, observation inserts) collapse into one reload per import per window.
+const DETAIL_REFRESH_COALESCE_MS = 1500;
+type ConsoleError = ConsoleFailure & { retry: (() => void) | null };
 const KIND_ICON: Record<EntityKind, React.ReactNode> = {
   person: <UserRound size={14} aria-hidden="true" />,
   vehicle: <Car size={14} aria-hidden="true" />,
@@ -195,7 +201,7 @@ const CCTVConsolePage: React.FC = () => {
 
   const [imports, setImports] = useState<ImportRow[]>([]);
   const [importsLoading, setImportsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ConsoleError | null>(null);
   const [selectedImportId, setSelectedImportId] = useState<string | null>(requestedImportId);
   const [tiles, setTiles] = useState<Array<ViewItem | null>>([]);
   const [layout, setLayout] = useState<GridLayout>(1);
@@ -209,6 +215,9 @@ const CCTVConsolePage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [clockMs, setClockMs] = useState<number | null>(null);
+  // Incremented on every explicit seek (timeline, pin, keyboard) so recordings on their own clocks can tell a
+  // deliberate jump from the ordinary ticking of the shared clock.
+  const [seekNonce, setSeekNonce] = useState(0);
   const [view, setView] = useState<TimeView | null>(null);
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -244,7 +253,21 @@ const CCTVConsolePage: React.FC = () => {
   const activeImportIds = useMemo(() => importIdsOf(wallItems), [wallItems]);
   const cameraItems = useMemo(() => wallItems.filter((item) => item.kind === 'camera'), [wallItems]);
   const cameraImportIds = useMemo(() => importIdsOf(cameraItems), [cameraItems]);
-  const visibleClips = useMemo(() => cameraImportIds.flatMap((id) => clipsByImport[id] ?? []), [cameraImportIds, clipsByImport]);
+  // Camera tiles contribute every clip of their camera; recordings opened on their own contribute just themselves,
+  // so the timeline shows and controls whatever is actually on the wall.
+  const visibleClips = useMemo(() => {
+    const seen = new Set<string>();
+    const result: ConsoleClip[] = [];
+    for (const clip of cameraImportIds.flatMap((id) => clipsByImport[id] ?? [])) {
+      if (!seen.has(clip.evidenceId)) { seen.add(clip.evidenceId); result.push(clip); }
+    }
+    for (const item of wallItems) {
+      if (item.kind !== 'clip' || seen.has(item.evidenceId)) continue;
+      const clip = (clipsByImport[item.importId] ?? []).find((candidate) => candidate.evidenceId === item.evidenceId);
+      if (clip) { seen.add(clip.evidenceId); result.push(clip); }
+    }
+    return result.sort((a, b) => a.startMs - b.startMs);
+  }, [cameraImportIds, clipsByImport, wallItems]);
   const visibleMarks = useMemo(() => cameraImportIds.flatMap((id) => marksByImport[id] ?? []), [cameraImportIds, marksByImport]);
   const visibleObservations = useMemo(
     () => activeImportIds.flatMap((id) => observationsByImport[id] ?? []).sort((a, b) => a.observedAtMs - b.observedAtMs),
@@ -254,6 +277,8 @@ const CCTVConsolePage: React.FC = () => {
   const masterItem = cameraItems[Math.min(masterIndex, Math.max(0, cameraItems.length - 1))] ?? null;
   const masterClips = masterItem ? clipsByImport[masterItem.importId] ?? [] : [];
   const activeTile = wallItems.find((item) => item.id === activeTileId) ?? wallItems[0] ?? null;
+  // The clock is driven by the master camera; with only recordings on the wall, by the active recording.
+  const clockDriverId = masterItem?.id ?? activeTile?.id ?? null;
   const activeInspection = activeTile ? inspectionsByTile[activeTile.id] ?? DEFAULT_CCTV_INSPECTION : DEFAULT_CCTV_INSPECTION;
   const inspectionAdjusted = !isDefaultCCTVInspection(activeInspection);
   const enhancementActive = isEnhancementActive(activeInspection);
@@ -275,7 +300,12 @@ const CCTVConsolePage: React.FC = () => {
   }, [activeTile, clipsById, clipsByImport, clockMs]);
 
   const loadImports = useCallback(async () => {
-    if (!organizationId) { setImports([]); setImportsLoading(false); setError('Organisation access could not be confirmed. The CCTV console is unavailable.'); return; }
+    if (!organizationId) {
+      setImports([]);
+      setImportsLoading(false);
+      setError({ kind: 'permission', text: 'Organisation access could not be confirmed. The CCTV console is unavailable.', retryable: false, retry: null });
+      return;
+    }
     setImportsLoading(true);
     const { data, error: loadError } = await supabase
       .from('cctv_imports')
@@ -284,7 +314,12 @@ const CCTVConsolePage: React.FC = () => {
       .neq('status', 'archived')
       .order('created_at', { ascending: false })
       .limit(200);
-    if (loadError) setError(loadError.message);
+    if (loadError) {
+      setError({ ...describeConsoleFailure(loadError.message, 'camera list', navigator.onLine), retry: () => void loadImports() });
+      setImportsLoading(false);
+      return;
+    }
+    setError((current) => (current?.retryable ? null : current));
     const rows = (data as unknown as ImportRow[]) ?? [];
     setImports(rows);
     setImportsLoading(false);
@@ -305,13 +340,25 @@ const CCTVConsolePage: React.FC = () => {
       supabase.from('cctv_device_events').select('id, source, source_ref, event_start_at, event_end_at, severity, thumbnail_path, metadata').eq('cctv_import_id', importId).order('event_start_at').limit(5000),
       supabase.from('cctv_entity_observations').select('id, evidence_item_id, cctv_import_id, source_event_id, entity_kind, observed_at, observed_to, candidate_label, candidate_plate, animal_type, species_confidence, is_pest, model_confidence, quality_state, attributes, thumbnail, review_state, portfolio_key, portfolio_state, portfolio_candidates, person_record_id, canonical_person_id, canonical_vehicle_id, reviewed_at, review_notes, person_records(display_name, metadata)').eq('organization_id', organizationId).eq('cctv_import_id', importId).order('observed_at').limit(2000),
     ]);
+    const failed = evidenceRes.error ? 'recordings' : marksRes.error ? 'camera events' : observationsRes.error ? 'observations' : null;
     const failure = evidenceRes.error ?? marksRes.error ?? observationsRes.error;
-    if (failure) setError(failure.message);
+    if (failure && failed) {
+      // Keep whatever this camera already showed; a dropped connection must not blank the wall or the timeline.
+      setError({ ...describeConsoleFailure(failure.message, `${failed} for this camera`, navigator.onLine), retry: () => void loadImportDetail(importId) });
+      setDetailLoading(false);
+      return;
+    }
     const evidenceRows = (evidenceRes.data as Array<{ id: string; storage_path: string | null; captured_at: string; metadata: Record<string, unknown> | null; sha256_hash: string | null; is_court_ready: boolean | null; locked_at: string | null; retention_hold: boolean | null }>) ?? [];
     const evidenceIds = evidenceRows.map((row) => row.id);
-    const { data: jobRows } = evidenceIds.length
+    const { data: jobRows, error: jobsError } = evidenceIds.length
       ? await supabase.from('inference_jobs').select('id, evidence_item_id, status').in('evidence_item_id', evidenceIds).eq('domain', 'video_motion')
-      : { data: [] };
+      : { data: [], error: null };
+    if (jobsError) {
+      setError({ ...describeConsoleFailure(jobsError.message, 'analysis status for this camera', navigator.onLine), retry: () => void loadImportDetail(importId) });
+      setDetailLoading(false);
+      return;
+    }
+    setError((current) => (current?.retryable ? null : current));
     const jobByEvidence = new Map<string, { id: string; status: string }>();
     for (const job of (jobRows as Array<{ id: string; evidence_item_id: string; status: string }>) ?? []) jobByEvidence.set(job.evidence_item_id, { id: job.id, status: job.status });
     const clips: ConsoleClip[] = evidenceRows.flatMap((row) => {
@@ -359,6 +406,11 @@ const CCTVConsolePage: React.FC = () => {
     setDetailLoading(false);
   }, [organizationId]);
 
+  // Reactive reloads (realtime, poll) go through one coalescer so a burst of change events is one query set.
+  const refreshCoalescer = useMemo(() => createRefreshCoalescer(loadImportDetail, DETAIL_REFRESH_COALESCE_MS), [loadImportDetail]);
+  useEffect(() => () => refreshCoalescer.dispose(), [refreshCoalescer]);
+  const requestDetailRefresh = useCallback((importId: string) => refreshCoalescer.request(importId), [refreshCoalescer]);
+
   // Choosing a camera loads its recordings and, when the wall is empty, puts the camera in tile 1.
   useEffect(() => {
     if (!selectedImportId) return;
@@ -392,10 +444,10 @@ const CCTVConsolePage: React.FC = () => {
   useEffect(() => {
     if (!hasActiveJob) return;
     const timer = window.setInterval(() => {
-      for (const importId of activeImportIds) void loadImportDetail(importId);
+      for (const importId of activeImportIds) requestDetailRefresh(importId);
     }, DETAIL_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [hasActiveJob, activeImportIds, loadImportDetail]);
+  }, [hasActiveJob, activeImportIds, requestDetailRefresh]);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -403,15 +455,22 @@ const CCTVConsolePage: React.FC = () => {
       .channel(`cctv-console-${organizationId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cctv_entity_observations', filter: `organization_id=eq.${organizationId}` }, (payload) => {
         const importId = (payload.new as { cctv_import_id?: string } | null)?.cctv_import_id ?? (payload.old as { cctv_import_id?: string } | null)?.cctv_import_id;
-        if (importId && activeImportIds.includes(importId)) void loadImportDetail(importId);
+        if (importId && activeImportIds.includes(importId)) requestDetailRefresh(importId);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inference_jobs', filter: `organization_id=eq.${organizationId}` }, () => {
-        for (const id of activeImportIds) void loadImportDetail(id);
+        for (const id of activeImportIds) requestDetailRefresh(id);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cctv_imports', filter: `organization_id=eq.${organizationId}` }, () => void loadImports())
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [organizationId, activeImportIds, loadImportDetail, loadImports]);
+  }, [organizationId, activeImportIds, requestDetailRefresh, loadImports]);
+
+  // When the browser comes back online, reload whatever failed instead of leaving a stale banner.
+  useEffect(() => {
+    const handler = () => { if (error?.retryable) error.retry?.(); };
+    window.addEventListener('online', handler);
+    return () => window.removeEventListener('online', handler);
+  }, [error]);
 
   // First clock position: the first unreviewed entity, else the start of the footage.
   useEffect(() => {
@@ -434,8 +493,22 @@ const CCTVConsolePage: React.FC = () => {
     if (!bounds) return;
     const next = clampMs(ms, bounds);
     setClockMs(next);
+    setSeekNonce((current) => current + 1);
     setView((current) => current ? followClock(current, next, bounds) : current);
-  }, [bounds]);
+    // With only recordings on the wall, a jump into another recording hands the clock to that recording.
+    if (!cameraItems.length) {
+      const driver = wallItems.find((item) => item.id === clockDriverId);
+      const driverClip = driver?.kind === 'clip' ? clipsById.get(driver.evidenceId) ?? null : null;
+      if (!driverClip || next < driverClip.startMs || next > driverClip.endMs) {
+        const covering = wallItems.find((item) => {
+          if (item.kind !== 'clip') return false;
+          const clip = clipsById.get(item.evidenceId);
+          return Boolean(clip && next >= clip.startMs && next <= clip.endMs);
+        });
+        if (covering) setActiveTileId(covering.id);
+      }
+    }
+  }, [bounds, cameraItems.length, wallItems, clockDriverId, clipsById]);
 
   const handleTick = useCallback((ms: number) => {
     setClockMs(ms);
@@ -672,6 +745,14 @@ const CCTVConsolePage: React.FC = () => {
     if (previous) seek(previous.startMs);
   };
 
+  const syncOpenClips = () => {
+    const activeSeconds = activeTile ? (tileRefs.current[activeTile.id]?.currentMs() ?? clockMs ?? 0) : (clockMs ?? 0);
+    const activeClipStart = activeClip?.startMs ?? activeSeconds;
+    const relativeSeconds = Math.max(0, (activeSeconds - activeClipStart) / 1000);
+    for (const item of wallItems) tileRefs.current[item.id]?.syncTo(relativeSeconds);
+    setEvidenceMessage(`Open clips aligned at ${Math.round(relativeSeconds)} seconds. Their recorded timestamps remain unchanged.`);
+  };
+
   const pendingObservations = useMemo(() => visibleObservations.filter((observation) => !isReviewed(observation)), [visibleObservations]);
   const panelObservations = useMemo(
     () => visibleObservations.filter((observation) => (kindFilter === 'all' || observation.kind === kindFilter) && (showReviewed || !isReviewed(observation))),
@@ -785,7 +866,14 @@ const CCTVConsolePage: React.FC = () => {
           <span><kbd>[</kbd><kbd>]</kbd> speed</span><span><kbd>1</kbd><kbd>2</kbd><kbd>4</kbd><kbd>9</kbd> grid</span><span><kbd>f</kbd> full screen</span><span><kbd>m</kbd> mute</span><span><kbd>b</kbd> bookmark</span><span><kbd>s</kbd> still</span><span><kbd>Esc</kbd> clear selection</span>
         </div>
       ) : null}
-      {error ? <div className="page-error" role="alert"><AlertTriangle size={16} aria-hidden="true" /> {error}</div> : null}
+      {error ? (
+        <div className="page-error" role="alert">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span className="cctv-console__error-text">{error.text}</span>
+          {error.retryable && error.retry ? <button type="button" className="cctv-console__error-retry" onClick={error.retry}><RefreshCw size={14} aria-hidden="true" /> Retry</button> : null}
+          <button type="button" className="cctv-console__icon-btn" onClick={() => setError(null)} aria-label="Dismiss message"><X size={14} aria-hidden="true" /></button>
+        </div>
+      ) : null}
 
       <div className="cctv-console__layout">
         <aside className="cctv-console__cameras" aria-label="Cameras and recordings">
@@ -882,11 +970,11 @@ const CCTVConsolePage: React.FC = () => {
                   );
                 }
                 const pinnedClip = item.kind === 'clip' ? clipsById.get(item.evidenceId) ?? null : null;
-                const isCameraMaster = item.kind === 'camera' && masterItem?.id === item.id;
+                const drivesClock = item.id === clockDriverId;
                 const isActive = item.id === activeTile?.id;
                 return (
                   <CCTVPlayerTile key={item.id} ref={(handle) => { tileRefs.current[item.id] = handle; }} label={pinnedClip ? `${row.camera_label} · ${formatClock(pinnedClip.startMs, row.source_timezone)}` : row.camera_label} placeLabel={placeLabelOf(row)}
-                    clips={clipsByImport[row.id] ?? []} clockMs={clockMs} playing={playing} rate={rate} muted={muted} isMaster={isCameraMaster} active={isActive}
+                    clips={clipsByImport[row.id] ?? []} clockMs={clockMs} seekNonce={seekNonce} playing={playing} rate={rate} muted={muted} isMaster={drivesClock} active={isActive}
                     timeZone={row.source_timezone} pinnedClip={pinnedClip} resolveUrl={resolveUrl} onTick={handleTick} onClipEnded={handleClipEnded} onDurationKnown={handleDurationKnown}
                     onActivate={() => { setActiveTileId(item.id); setSelectedImportId(item.importId); if (item.kind === 'camera') setMasterIndex(Math.max(0, cameraItems.findIndex((camera) => camera.id === item.id))); }}
                     inspection={isActive ? activeInspection : undefined}
@@ -903,6 +991,7 @@ const CCTVConsolePage: React.FC = () => {
             <button type="button" className="cctv-console__ctl" onClick={() => clockMs !== null && seek(clockMs - 10_000)} aria-label="Back 10 seconds"><Rewind size={18} aria-hidden="true" /></button>
             <button type="button" className="cctv-console__ctl" onClick={() => stepFrame(-1)} aria-label="Back one frame" title="Back one frame (,)"><StepBack size={16} aria-hidden="true" /></button>
             <button type="button" className="cctv-console__ctl is-primary" onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} disabled={clockMs === null}>{playing ? <Pause size={20} aria-hidden="true" /> : <Play size={20} aria-hidden="true" />}</button>
+            <button type="button" className="cctv-console__ctl" onClick={syncOpenClips} disabled={wallItems.length < 2} title="Align open clips to the active clip's relative playback position; recorded times stay independent"><Link2 size={16} aria-hidden="true" /> Sync clips</button>
             <button type="button" className="cctv-console__ctl" onClick={() => stepFrame(1)} aria-label="Forward one frame" title="Forward one frame (.)"><StepForward size={16} aria-hidden="true" /></button>
             <button type="button" className="cctv-console__ctl" onClick={() => clockMs !== null && seek(clockMs + 10_000)} aria-label="Forward 10 seconds"><FastForward size={18} aria-hidden="true" /></button>
             <button type="button" className="cctv-console__ctl" onClick={() => jumpClip(1)} aria-label="Next recording"><ChevronRight size={18} aria-hidden="true" /></button>
@@ -989,7 +1078,7 @@ const CCTVConsolePage: React.FC = () => {
               selectedObservationId={selectedObservationId} timeZone={timeZone} onSeek={seek} onViewChange={setView}
               onSelectObservation={(id) => { const found = visibleObservations.find((item) => item.id === id); if (found) selectObservation(found); }} />
           ) : (
-            <div className="cctv-console__timeline-empty">{detailLoading ? <><Loader2 size={16} className="spin" aria-hidden="true" /> Loading the camera’s timeline…</> : cameraItems.length === 0 && wallItems.length > 0 ? 'Recordings on the wall play on their own clocks. Add a camera to drive the shared timeline.' : 'No footage, snapshots or detections yet for this camera.'}</div>
+            <div className="cctv-console__timeline-empty">{detailLoading ? <><Loader2 size={16} className="spin" aria-hidden="true" /> Loading the camera’s timeline…</> : cameraItems.length === 0 && wallItems.length > 0 ? 'Recordings on the wall play on their own clocks; the timeline follows the active recording once it has loaded.' : 'No footage, snapshots or detections yet for this camera.'}</div>
           )}
           <div className="cctv-console__legend" aria-hidden="true">
             <span><i className="is-alert" /> alert (plate read / pest)</span><span><i className="is-detection" /> detection</span><span><i className="is-motion" /> camera motion</span><span><i className="is-quality" /> camera disturbance</span><span><i className="is-pin" /> entity · dimmed once reviewed</span>

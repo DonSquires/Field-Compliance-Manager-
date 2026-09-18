@@ -18,7 +18,20 @@ describe('CCTV console', () => {
     expect(page).toContain("from('cctv_entity_observations')");
     expect(page).toContain(".eq('cctv_import_id', importId)");
     expect(page).toContain(".eq('organization_id', organizationId)");
-    expect(page).toContain("setError('Organisation access could not be confirmed. The CCTV console is unavailable.')");
+    expect(page).toContain("text: 'Organisation access could not be confirmed. The CCTV console is unavailable.'");
+  });
+
+  it('explains data-service faults by scope with a retry, and coalesces realtime refresh bursts', () => {
+    expect(page).toContain('describeConsoleFailure(');
+    expect(page).toContain("'recordings' : marksRes.error ? 'camera events' : observationsRes.error ? 'observations'");
+    expect(page).toContain('retry: () => void loadImportDetail(importId)');
+    expect(page).toContain('retry: () => void loadImports()');
+    expect(page).toContain("setError((current) => (current?.retryable ? null : current));");
+    expect(page).toContain('createRefreshCoalescer(loadImportDetail, DETAIL_REFRESH_COALESCE_MS)');
+    expect(page).toContain('requestDetailRefresh(importId)');
+    expect(page).toContain("window.addEventListener('online', handler)");
+    expect(page).toContain('onClick={error.retry}');
+    expect(page).not.toMatch(/postgres_changes[\s\S]{0,400}void loadImportDetail\(/);
   });
 
   it('records every identity decision through the governed review RPC and never writes the table directly', () => {
@@ -52,8 +65,8 @@ describe('CCTV console', () => {
 
   it('plays every camera on one shared clock with NVR controls and keyboard shortcuts', () => {
     expect(page).toContain('clockMs');
-    expect(page).toContain('isMaster={isCameraMaster}');
-    expect(page).toContain("const isCameraMaster = item.kind === 'camera' && masterItem?.id === item.id;");
+    expect(page).toContain('isMaster={drivesClock}');
+    expect(page).toContain('const clockDriverId = masterItem?.id ?? activeTile?.id ?? null;');
     expect(page).toContain('onTick={handleTick}');
     expect(page).toContain('PLAYBACK_RATES.map');
     expect(page).toContain('GRID_LAYOUTS.map');
@@ -77,11 +90,29 @@ describe('CCTV console', () => {
     expect(page).toContain('pinnedClip={pinnedClip}');
     expect(page).toContain('clipStatusLabel(clip.jobStatus)');
     expect(page).toContain('bytesLabel(clip.sizeBytes)');
-    expect(page).toContain('Recordings on the wall play on their own clocks. Add a camera to drive the shared timeline.');
+    expect(page).toContain('Recordings on the wall play on their own clocks; the timeline follows the active recording once it has loaded.');
     expect(tile).toContain('const pinned = Boolean(pinnedClip);');
-    expect(tile).toContain('const effectivePlaying = pinned ? localPlaying : playing;');
+    expect(tile).toContain('const effectivePlaying = playing;');
+    expect(page).toContain('Sync clips');
+    expect(page).toContain('syncOpenClips');
+    expect(tile).toContain('syncTo: (seconds: number) => void;');
     expect(tile).toContain('own clock');
     expect(tile).toContain('React.forwardRef<CCTVPlayerTileHandle');
+  });
+
+  it('lets the timeline track and control recordings opened on their own clocks', () => {
+    // Recordings on the wall appear on the timeline and bound it.
+    expect(page).toContain("if (item.kind !== 'clip' || seen.has(item.evidenceId)) continue;");
+    expect(page).toContain('clips={visibleClips}');
+    // The active recording drives the playhead; a deliberate seek is distinguishable from a tick.
+    expect(page).toContain('setSeekNonce((current) => current + 1);');
+    expect(page).toContain('seekNonce={seekNonce}');
+    expect(tile).toContain('if (seenSeekNonce.current === seekNonce) return;');
+    expect(tile).toContain('if (pinned && (offset < 0 || offset > video.duration)) return;');
+    expect(tile).toContain('if (isMaster) onTick(at);');
+    expect(tile).not.toContain('if (pinned || !video || !clip');
+    // Seeking into another recording hands the clock to that recording.
+    expect(page).toContain('if (covering) setActiveTileId(covering.id);');
   });
 
   it('pops the wall out for a second monitor and offers full screen', () => {
@@ -187,7 +218,7 @@ describe('CCTV console', () => {
     expect(page).toContain('const DETAIL_POLL_INTERVAL_MS = 10_000;');
     expect(page).toContain("clip.jobStatus === 'queued' || clip.jobStatus === 'processing'");
     expect(page).toContain('window.setInterval(() => {');
-    expect(page).toContain('void loadImportDetail(importId);');
+    expect(page).toContain('for (const importId of activeImportIds) requestDetailRefresh(importId);');
     expect(page).toContain('window.clearInterval(timer)');
   });
 
