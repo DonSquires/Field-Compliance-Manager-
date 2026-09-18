@@ -387,3 +387,23 @@ Truth table: `supabase/tests/20260916110000_workshop_rls.sql` (40 checks).
 Surface: admin `Workshop` page (work orders / templates / stock) under Field
 Operations. Verified live as the R&M master (rolled back): template from a real
 R&M material → `WO-202609-0001` with a priced line → completed.
+
+### 2026-09-18 — Website-backed fuel price median (Don Squires)
+
+> "For realtime pricing use the websites and get the median over an average of
+> 3 months." The customer-facing per-kilometre default remains the **IRD
+> recommended vehicle kilometre rate**, rather than being silently overwritten
+> by retail fuel changes.
+
+**Live status (migration `20260917070000`, applied to
+`dotczcyyzgabmtmnglqj`).** `fuel_price_observations` retains a finance
+administrator's cited website price, observation date, publisher, URL, published
+date/reference/hash, and audit receipt. `get_median_fuel_price` calculates the
+median of the trailing three-month observations for a fuel type and returns the
+source names/URLs; `record_fuel_price_observation` is idempotent and
+admin-only. The Rate Rules page now displays the median and sources and records
+a reviewed website citation. It states plainly that this is a travel-planning
+input and does **not** automatically alter R&M's IRD Tier 1 petrol default of
+`$1.04/km` (effective 2025-04-01). Truth table:
+`supabase/tests/20260917070000_fuel_price_observations_median.sql`; browser
+acceptance covers entry and recalculation on desktop and mobile.

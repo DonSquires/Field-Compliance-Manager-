@@ -1,0 +1,18 @@
+.fuel-price-panel { display: grid; gap: 12px; margin: 16px 0; padding: 16px; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 8px; }
+.fuel-price-panel__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.fuel-price-panel__header h2 { margin: 2px 0 4px; font-size: 18px; }
+.fuel-price-panel__header p { max-width: 68ch; margin: 0; color: var(--color-text-secondary); font-size: 13px; }
+.fuel-price-panel__eyebrow { color: var(--color-text-muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.fuel-price-panel__controls { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(210px, 1fr) auto; gap: 12px; align-items: end; }
+.fuel-price-panel__controls label, .fuel-price-panel__form label { display: grid; gap: 5px; font-size: 12px; color: var(--color-text-secondary); }
+.fuel-price-panel__median { display: grid; gap: 2px; }
+.fuel-price-panel__median span { font-size: 12px; color: var(--color-text-secondary); }
+.fuel-price-panel__median strong { font-size: 20px; color: var(--color-text-primary); }
+.fuel-price-panel__median small, .fuel-price-panel__hint { font-size: 11px; color: var(--color-text-muted); }
+.fuel-price-panel__notice { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--color-success-bg, rgba(34, 197, 94, .12)); font-size: 13px; }
+.fuel-price-panel__form { margin: 0; }
+.fuel-price-panel__hint { margin: 0; }
+.fuel-price-panel__sources { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.fuel-price-panel__sources li { display: grid; grid-template-columns: 100px 100px 1fr; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--color-border); font-size: 12px; }
+.fuel-price-panel__sources a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-primary); }
+@media (max-width: 640px) { .fuel-price-panel__controls { grid-template-columns: 1fr; } .fuel-price-panel__controls .btn { width: 100%; } .fuel-price-panel__sources li { grid-template-columns: 90px 90px 1fr; } }
