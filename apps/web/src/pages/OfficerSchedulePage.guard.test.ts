@@ -40,7 +40,7 @@ describe('officer schedule workspace', () => {
   it('shows the server-confirmed slot and linked-shift ownership receipt', () => {
     expect(page).toContain('receipt.slot_id');
     expect(page).toContain('receipt.shift_id');
-    expect(page).toContain('Assignment ownership receipt');
+    expect(page).toContain('Roster response recorded');
   });
   it('focuses the exact finalized coverage assignment from notification context',()=>{expect(page).toContain("get('slot')");expect(page).toContain('officer-roster-slot-${slot.id}');expect(page).toContain('scrollIntoView');});
 });

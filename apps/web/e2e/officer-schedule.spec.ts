@@ -67,8 +67,8 @@ test('officer schedule and coverage claim are visually correct and operational',
   await expect(responseDialog).toHaveScreenshot('officer-schedule-decline-dialog.png');
   await responseDialog.getByRole('button', { name: 'Confirm decline' }).click();
   await expect(page.getByText('Assignment declined with your recorded reason.')).toBeVisible();
-  const receipt = page.getByRole('region', { name: 'Assignment ownership receipt' });
-  await expect(receipt).toContainText('Roster slot 55555555 · workforce assignment');
+  const receipt = page.getByRole('region', { name: 'Roster response recorded' });
+  await expect(receipt).toContainText('Roster slot 55555555 · internal work, no field shift');
   await receipt.getByRole('button', { name: 'Dismiss receipt' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.locator('.officer-schedule')).toHaveScreenshot('officer-schedule-assigned.png');
@@ -94,7 +94,7 @@ test('linked assignment acceptance returns the shared roster and shift identity'
   await fieldAssignment.getByRole('button', { name: 'Accept' }).click();
   await page.getByRole('dialog', { name: 'Accept assignment?' }).getByRole('button', { name: 'Confirm acceptance' }).click();
 
-  const receipt = page.getByRole('region', { name: 'Assignment ownership receipt' });
+  const receipt = page.getByRole('region', { name: 'Roster response recorded' });
   await expect(receipt).toContainText('accepted');
   await expect(receipt).toContainText('Roster slot 33333333 · field shift 66666666 accepted');
   await expect(page.getByText('Assignment accepted and confirmed.')).toBeVisible();
