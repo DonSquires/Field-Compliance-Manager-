@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { itemToSelection, rateToSelection, RATE_UNITS, type PriceListItem, type PriceListRate, type PriceListSelection } from '../lib/priceList';
+import { isIrdDefaultKilometreRate, itemToSelection, rateToSelection, RATE_UNITS, type PriceListItem, type PriceListRate, type PriceListSelection } from '../lib/priceList';
 import './PriceListPicker.css';
 
 export function usePriceList(organizationIds: string[]) {
@@ -54,6 +54,7 @@ export function PriceListPicker({ organizationIds, value, onSelect, label = 'Pic
 }) {
   const { billingRates, payRates, items, error } = usePriceList(organizationIds);
   const empty = (!includeRates || billingRates.length === 0) && (!includeItems || items.length === 0);
+  const selectedRate = value.startsWith('rate:') ? billingRates.find((rate) => rate.id === value.slice(5)) : null;
   return (
     <label className="price-list-picker">
       <span>{label}</span>
@@ -68,7 +69,7 @@ export function PriceListPicker({ organizationIds, value, onSelect, label = 'Pic
         {includeRates && billingRates.length > 0 && <optgroup label="Rates">{billingRates.map((rate) => <option key={rate.id} value={`rate:${rate.id}`}>{rate.name} — {money(Number(rate.amount))} per {RATE_UNITS[rate.rate_type] ?? rate.rate_type.replaceAll('_', ' ')}</option>)}</optgroup>}
         {includeItems && items.length > 0 && <optgroup label="Materials and equipment">{items.map((item) => <option key={item.item_id} value={`item:${item.item_id}`}>{item.sku} · {item.name} — {money(item.unit_price === null ? null : Number(item.unit_price))} per {item.unit_of_measure}</option>)}</optgroup>}
       </select>
-      <small id={`${id}-hint`}>{error ?? 'Fills the line for you. You can still change any number before saving.'}</small>
+      <small id={`${id}-hint`}>{error ?? (isIrdDefaultKilometreRate(selectedRate) ? 'IRD customer charge selected. Website fuel median informs internal job costing only; it does not change this customer price.' : 'Fills the line for you. You can still change any number before saving.')}</small>
     </label>
   );
 }

@@ -17,6 +17,10 @@ export interface PriceListSelection {
 
 export const RATE_UNITS: Record<string, string> = { hourly: 'hour', daily: 'day', per_km: 'km', per_unit: 'unit', per_visit: 'visit', per_notice: 'notice', callout: 'callout', flat: 'job', per_hour_travel: 'hour', per_hour_allowance: 'hour', oncall_flat: 'period', higher_duties_flat: 'shift', percentage: '%' };
 
+export function isIrdDefaultKilometreRate(rate: Pick<PriceListRate, 'rate_type' | 'name'> | null | undefined): boolean {
+  return rate?.rate_type === 'per_km' && /ird recommended vehicle kilometre rate/i.test(rate.name);
+}
+
 export function rateToSelection(rate: PriceListRate, payRules: PriceListRate[]): PriceListSelection {
   const pay = rate.service_type ? payRules.find((rule) => rule.service_type === rate.service_type && rule.rate_type === rate.rate_type) : undefined;
   const kind = rate.rate_type === 'per_km' ? 'travel' : rate.rate_type === 'per_unit' ? 'equipment' : 'labour';

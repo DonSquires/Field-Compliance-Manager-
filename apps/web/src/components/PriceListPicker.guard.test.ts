@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { itemToSelection, rateToSelection } from '../lib/priceList';
+import { isIrdDefaultKilometreRate, itemToSelection, rateToSelection } from '../lib/priceList';
 
 const picker = readFileSync(resolve(process.cwd(), 'src/components/PriceListPicker.tsx'), 'utf8');
 const priceBook = readFileSync(resolve(process.cwd(), 'src/components/PriceBookPanel.tsx'), 'utf8');
@@ -28,6 +28,12 @@ describe('price list, price book, and live job financials', () => {
     expect(item).toMatchObject({ kind: 'equipment', costType: 'equipment', description: '33014 · 4MP camera', unitCharge: 180.7, unitCost: 139 });
     const material = itemToSelection({ item_id: 'i2', organization_id: 'o', sku: 'POSTCRETE-BAG', name: 'Post crete bag', item_type: 'material', unit_of_measure: 'ea', unit_cost: null, unit_price: 15.6 });
     expect(material).toMatchObject({ kind: 'materials', costType: 'materials', unitCost: null });
+  });
+
+  it('labels the named IRD per-km customer default without treating all travel rates as IRD rates', () => {
+    expect(isIrdDefaultKilometreRate({ rate_type: 'per_km', name: 'IRD recommended vehicle kilometre rate (Tier 1 petrol, default)' })).toBe(true);
+    expect(isIrdDefaultKilometreRate({ rate_type: 'per_km', name: 'Travel, trailer or digger (per km)' })).toBe(false);
+    expect(picker).toContain('Website fuel median informs internal job costing only');
   });
 
   it('quotes and job costs pick from the price list and accept materials/equipment kinds', () => {
