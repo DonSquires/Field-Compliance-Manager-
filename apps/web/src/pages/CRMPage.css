@@ -135,6 +135,56 @@
 	outline-offset: 0;
 }
 
+.crm-quote-purpose {
+	display: grid;
+	gap: 10px;
+	margin: 12px 0 0;
+	padding: 12px 14px;
+	border: 1px solid #315969;
+	border-radius: 6px;
+	background: #071820;
+}
+
+.crm-quote-purpose legend {
+	padding: 0 6px;
+	color: #67e4e8;
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.crm-quote-dialog .crm-quote-purpose-option {
+	grid-template-columns: 18px minmax(0, 1fr);
+	align-items: start;
+	gap: 10px;
+	margin-top: 0;
+	cursor: pointer;
+}
+
+.crm-quote-dialog .crm-quote-purpose-option input {
+	width: 18px;
+	height: 18px;
+	margin: 2px 0 0;
+	padding: 0;
+}
+
+.crm-quote-purpose-option span {
+	display: grid;
+	gap: 2px;
+}
+
+.crm-quote-purpose-option small {
+	color: #b8cad4;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 1.4;
+}
+
+.crm-quote-purpose > label:last-child {
+	margin-top: 2px;
+}
+
 .crm-pricing-receipt {
 	border-color: #4cc38a;
 	color: #c5f3df;

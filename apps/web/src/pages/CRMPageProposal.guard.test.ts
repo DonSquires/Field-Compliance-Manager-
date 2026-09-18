@@ -21,6 +21,16 @@ describe('CRM proposal package', () => {
     expect(page).toContain('operating branch');
   });
 
+  it('lets a quote vary an existing operational agreement instead of spawning a second one', () => {
+    expect(page).toContain(".from('service_agreements').select('id,name,starts_on,ends_on,invitation_status,agreement_type').eq('client_organization_id', client.id).eq('agreement_type', 'operational')");
+    expect(page).toContain('p_service_agreement_id: variedAgreement?.id ?? null');
+    expect(page).toContain('What is this quote for?');
+    expect(page).toContain('A change to an existing agreement (variation)');
+    expect(page).toContain('Nothing changes until the variation is accepted.');
+    expect(page).toContain('quoteAgreements.length > 0 && (');
+    expect(page).toContain('Draft variation created for ${variedAgreement.name}');
+  });
+
   it('uses the selected branch rate book before an explicit parent template', () => {
     expect(page).toContain(".in('organization_id', providerOrgIds)");
     expect(page).toContain('rule.organization_id === quoteOperatingProviderId || rule.organization_id === state.ownOrg?.id');

@@ -52,6 +52,47 @@ test('CRM account context and governed quote creation are operational', async ({
   await expect(page).toHaveURL(/\/admin\/relationships\?account=40404040-4040-4040-8040-404040404040&agreement=46464646-4646-4646-8646-464646464646$/);await expect(page.getByRole('heading', { name: 'Civic Events Compliance Services', exact: true })).toBeVisible(); expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('a quote can be raised as a variation of the client\'s existing agreement', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  const agreementQueries: string[] = [];
+  let quotePayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/service_agreements**', async (route) => {
+    const url = new URL(route.request().url());
+    const select = url.searchParams.get('select') ?? '';
+    if (!select.startsWith('id,name,starts_on,ends_on,invitation_status')) { await route.fallback(); return; }
+    agreementQueries.push(url.search);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+      { id: '24242424-2424-4424-8424-242424242424', name: 'Civic Events Compliance Services', starts_on: '2026-08-01', ends_on: null, invitation_status: 'accepted', agreement_type: 'operational' },
+      { id: '25252525-2525-4525-8525-252525252525', name: 'Expired summer patrols', starts_on: '2025-11-01', ends_on: '2026-03-31', invitation_status: 'accepted', agreement_type: 'operational' },
+    ]) });
+  });
+  await page.route('**/rest/v1/rpc/create_crm_draft_quote_for_provider', async (route) => {
+    quotePayload = JSON.parse(route.request().postData() ?? '{}');
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: '44444444-4444-4444-8444-444444444449', client_org_id: '40404040-4040-4040-8040-404040404040', provider_org_id: '41414141-4141-4141-8141-414141414141', status: 'draft', title: 'Civic Events Limited - Civic Centre proposal', service_agreement_id: '24242424-2424-4424-8424-242424242424' }) });
+  });
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
+  await workspace.getByRole('button', { name: 'Create proposal' }).click();
+  const dialog = page.getByRole('dialog', { name: /New quote for Civic Events Limited/ });
+  const purpose = dialog.getByRole('group', { name: 'What is this quote for?' });
+  await expect(purpose.getByRole('radio', { name: /A new agreement/ })).toBeChecked();
+  await purpose.getByRole('radio', { name: /A change to an existing agreement \(variation\)/ }).check();
+  const agreementSelect = purpose.getByLabel('Agreement being varied');
+  await expect(agreementSelect).toHaveValue('24242424-2424-4424-8424-242424242424');
+  await expect(agreementSelect.locator('option')).toHaveCount(1);
+  expect(agreementQueries.length).toBeGreaterThan(0);
+  expect(agreementQueries[0]).toContain('client_organization_id=eq.40404040-4040-4040-8040-404040404040');
+  expect(agreementQueries[0]).toContain('agreement_type=eq.operational');
+  await dialog.getByLabel('Include static_guarding').check();
+  await dialog.getByRole('button', { name: 'Create draft quote' }).click();
+  await expect(page.getByText('Draft variation created for Civic Events Compliance Services. Add the new places, services, and prices, then send it for acceptance.')).toBeVisible();
+  expect(quotePayload).toMatchObject({ p_client_org_id: '40404040-4040-4040-8040-404040404040', p_service_agreement_id: '24242424-2424-4424-8424-242424242424' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('a saved workshop build adds its priced lines to a draft quote at the selected client site', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   let templateRequest: Record<string, unknown> | null = null;

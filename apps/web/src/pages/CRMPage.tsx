@@ -193,6 +193,9 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [quoteClient, setQuoteClient] = useState<AccountRow | null>(null);
   const [proposalAnchor, setProposalAnchor] = useState<{ siteId?: string; zoneId?: string; name: string } | null>(null);
   const [quoteOperatingProviderId, setQuoteOperatingProviderId] = useState('');
+  // Existing operational agreements for the client: a quote may vary one of them instead of creating another.
+  const [quoteAgreements, setQuoteAgreements] = useState<Array<{ id: string; name: string; starts_on: string | null; ends_on: string | null; invitation_status: string }>>([]);
+  const [quoteVariationAgreementId, setQuoteVariationAgreementId] = useState('');
   const [quoteForm, setQuoteForm] = useState({
     title: '',
     targetMargin: '20',
@@ -645,6 +648,15 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setQuoteOperatingProviderId(client.operating_provider_organization_id ?? operatingOrganizationId ?? profile?.organizationId ?? '');
     setProposalModules([]);
     setQuotedModuleKeys([]);
+    setQuoteAgreements([]);
+    setQuoteVariationAgreementId('');
+    // ATLAS READS: service_agreements (client's live operational agreements this quote may vary)
+    void supabase.from('service_agreements').select('id,name,starts_on,ends_on,invitation_status,agreement_type').eq('client_organization_id', client.id).eq('agreement_type', 'operational').order('created_at', { ascending: false }).limit(50)
+      .then(({ data, error }) => {
+        if (error) { setState((current) => ({ ...current, error: `Existing agreements could not be checked: ${error.message}` })); return; }
+        const today = new Date().toISOString().slice(0, 10);
+        setQuoteAgreements(((data as Array<{ id: string; name: string; starts_on: string | null; ends_on: string | null; invitation_status: string }> | null) ?? []).filter((agreement) => !agreement.ends_on || agreement.ends_on >= today));
+      });
     setQuoteForm({
       title: `${client.name} - ${place?.name ?? 'service'} proposal`,
       targetMargin: '20',
@@ -657,6 +669,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const createQuote = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!quoteClient) return;
+    const variedAgreement = quoteAgreements.find((agreement) => agreement.id === quoteVariationAgreementId) ?? null;
     setQuoteSaving(true);
     setState((current) => ({ ...current, error: null }));
     const { data, error } = await supabase.rpc('create_crm_draft_quote_for_provider', {
@@ -667,6 +680,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       p_target_margin_pct: Number(quoteForm.targetMargin),
       p_valid_until: quoteForm.validUntil || null,
       p_notes: quoteForm.notes.trim() || null,
+      p_service_agreement_id: variedAgreement?.id ?? null,
     });
     if (error || !data)
       setState((current) => ({
@@ -676,7 +690,9 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     else {
       const quote = data as { id: string; title: string; status: string };
       setNotice(
-        `Draft quote created for ${quoteClient.name}. Add explicit pricing lines before review.`,
+        variedAgreement
+          ? `Draft variation created for ${variedAgreement.name}. Add the new places, services, and prices, then send it for acceptance.`
+          : `Draft quote created for ${quoteClient.name}. Add explicit pricing lines before review.`,
       );
       for (const module of proposalModules) {
         const { error: moduleError } = await supabase.rpc(
@@ -1234,6 +1250,31 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                 {state.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name} (operating branch)</option>)}
               </select>
             </label>
+            {quoteAgreements.length > 0 && (
+              <fieldset className="crm-quote-purpose">
+                <legend>What is this quote for?</legend>
+                <label className="crm-quote-purpose-option">
+                  <input type="radio" name="crm-quote-purpose" value="" checked={quoteVariationAgreementId === ''} onChange={() => setQuoteVariationAgreementId('')} />
+                  <span><strong>A new agreement</strong><small>Creates a separate contract for {quoteClient.name} when it is accepted.</small></span>
+                </label>
+                <label className="crm-quote-purpose-option">
+                  <input type="radio" name="crm-quote-purpose" value="variation" checked={quoteVariationAgreementId !== ''} onChange={() => setQuoteVariationAgreementId(quoteAgreements[0]?.id ?? '')} />
+                  <span><strong>A change to an existing agreement (variation)</strong><small>Adds new places, services, or prices to the agreement you choose. Nothing changes until the variation is accepted.</small></span>
+                </label>
+                {quoteVariationAgreementId !== '' && (
+                  <label>
+                    <span>Agreement being varied</span>
+                    <select value={quoteVariationAgreementId} onChange={(event) => setQuoteVariationAgreementId(event.target.value)} aria-label="Agreement being varied">
+                      {quoteAgreements.map((agreement) => (
+                        <option key={agreement.id} value={agreement.id}>
+                          {agreement.name}{agreement.starts_on ? ` · from ${agreement.starts_on}` : ''}{agreement.invitation_status !== 'accepted' ? ' · not yet accepted by client' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </fieldset>
+            )}
             <label>
               <span>Quote title</span>
               <input

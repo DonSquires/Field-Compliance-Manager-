@@ -37100,6 +37100,7 @@ export type Database = {
           p_client_request_id: string
           p_notes?: string
           p_operating_provider_organization_id: string
+          p_service_agreement_id?: string
           p_target_margin_pct?: number
           p_title: string
           p_valid_until?: string
