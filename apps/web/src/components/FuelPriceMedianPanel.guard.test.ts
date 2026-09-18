@@ -17,7 +17,8 @@ describe('website-backed fuel price median', () => {
     expect(migration).toContain('CREATE OR REPLACE FUNCTION public.get_median_fuel_price(');
     expect(migration).toContain('percentile_cont(0.5) within group (order by r.price_per_litre)');
     expect(panel).toContain("p_months: 3");
-    expect(panel).toContain("supabase.rpc('record_fuel_price_observation'");
+    expect(panel).toContain("'record_fuel_price_observation'");
+    expect(panel).toContain("'record_approved_fuel_price_observation'");
   });
 
   it('is scoped to the operating organisation and does not silently change the IRD per-km rule', () => {
@@ -33,5 +34,6 @@ describe('website-backed fuel price median', () => {
     expect(panel).not.toContain("from('fuel_price_observations').insert");
     expect(panel).toContain('Source URL');
     expect(panel).toContain('This records the citation with the price');
+    expect(panel).toContain("supabase.rpc('manage_fuel_price_source'");
   });
 });

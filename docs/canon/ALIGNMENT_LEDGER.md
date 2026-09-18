@@ -407,3 +407,15 @@ input and does **not** automatically alter R&M's IRD Tier 1 petrol default of
 `$1.04/km` (effective 2025-04-01). Truth table:
 `supabase/tests/20260917070000_fuel_price_observations_median.sql`; browser
 acceptance covers entry and recalculation on desktop and mobile.
+
+### 2026-09-18 — Approved website sources for fuel pricing
+
+**Live status (migration `20260917080000`, applied to
+`dotczcyyzgabmtmnglqj`).** Finance administrators approve or retire a named
+public fuel-price source per organisation and fuel type. An observation selected
+against an approved source must use a URL under that source's approved base URL;
+the source, observation, and approval are all retained and audited. Historical
+manual citations remain readable and recordable so prior evidence is not erased,
+but the fuel panel now selects the URL-checked path for approved sources. This
+is deliberately a governed review step, not an undocumented retail-site scraper.
+Truth table: `supabase/tests/20260917080000_approved_fuel_price_sources.sql`.

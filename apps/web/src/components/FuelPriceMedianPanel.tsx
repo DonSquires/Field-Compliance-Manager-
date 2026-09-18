@@ -15,6 +15,7 @@ interface FuelObservation {
   source_url: string;
   source_published_at: string | null;
 }
+interface FuelPriceSource { id: string; name: string; source_url: string; fuel_type: FuelType; refresh_guidance: string | null; }
 
 interface MedianFuelPrice {
   fuel_type: FuelType;
@@ -41,31 +42,38 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
   const [fuelType, setFuelType] = useState<FuelType>('petrol');
   const [median, setMedian] = useState<MedianFuelPrice | null>(null);
   const [observations, setObservations] = useState<FuelObservation[]>([]);
+  const [sources, setSources] = useState<FuelPriceSource[]>([]);
+  const [sourceId, setSourceId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState({ observedOn: new Date().toISOString().slice(0, 10), price: '', sourceName: '', sourceUrl: '' });
+  const [showSourceForm, setShowSourceForm] = useState(false);
+  const [sourceForm, setSourceForm] = useState({ name: '', sourceUrl: '', guidance: '' });
   const freshness = fuelMedianStatus(median?.observation_count ?? 0, median?.latest_observed_on);
 
   const load = useCallback(async () => {
-    if (!organizationId) { setMedian(null); setObservations([]); setLoading(false); return; }
+    if (!organizationId) { setMedian(null); setObservations([]); setSources([]); setLoading(false); return; }
     setLoading(true);
     setError(null);
     // Website observations retain their source; the SQL function computes the trailing three-month median.
-    const [medianRes, observationsRes] = await Promise.all([
+    const [medianRes, observationsRes, sourcesRes] = await Promise.all([
       supabase.rpc('get_median_fuel_price', { p_organization_id: organizationId, p_fuel_type: fuelType, p_as_at: null, p_months: 3 }),
       supabase.from('fuel_price_observations').select('id,fuel_type,observed_on,price_per_litre,source_name,source_url,source_published_at').eq('organization_id', organizationId).eq('fuel_type', fuelType).order('observed_on', { ascending: false }).limit(12),
+      supabase.from('fuel_price_sources').select('id,name,source_url,fuel_type,refresh_guidance').eq('organization_id', organizationId).eq('fuel_type', fuelType).eq('active', true).order('name'),
     ]);
-    if (medianRes.error || observationsRes.error) {
-      setError(medianRes.error?.message ?? observationsRes.error?.message ?? 'Fuel prices could not be loaded.');
+    if (medianRes.error || observationsRes.error || sourcesRes.error) {
+      setError(medianRes.error?.message ?? observationsRes.error?.message ?? sourcesRes.error?.message ?? 'Fuel prices could not be loaded.');
       setLoading(false);
       return;
     }
     const row = Array.isArray(medianRes.data) ? medianRes.data[0] : medianRes.data;
     setMedian((row as MedianFuelPrice | null) ?? null);
     setObservations((observationsRes.data as FuelObservation[]) ?? []);
+    setSources((sourcesRes.data as FuelPriceSource[]) ?? []);
+    setSourceId((current) => current && (sourcesRes.data as FuelPriceSource[]).some((source) => source.id === current) ? current : '');
     setLoading(false);
   }, [fuelType, organizationId]);
 
@@ -77,7 +85,11 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
     setSaving(true);
     setError(null);
     setNotice(null);
-    const { error: rpcError } = await supabase.rpc('record_fuel_price_observation', {
+    const selectedSource = sources.find((source) => source.id === sourceId) ?? null;
+    const { error: rpcError } = await supabase.rpc(selectedSource ? 'record_approved_fuel_price_observation' : 'record_fuel_price_observation', selectedSource ? {
+      p_client_request_id: requestId(), p_organization_id: organizationId, p_source_id: selectedSource.id, p_observed_on: form.observedOn,
+      p_price_per_litre: Number(form.price), p_source_url: form.sourceUrl, p_source_published_at: null, p_source_reference: null, p_source_hash: null,
+    } : {
       p_client_request_id: requestId(),
       p_organization_id: organizationId,
       p_fuel_type: fuelType,
@@ -96,6 +108,19 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
       setShowForm(false);
       await load();
     }
+    setSaving(false);
+  };
+
+  const approveSource = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!organizationId) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: rpcError } = await supabase.rpc('manage_fuel_price_source', {
+      p_client_request_id: requestId(), p_organization_id: organizationId, p_action: 'approve', p_source_id: null,
+      p_name: sourceForm.name, p_source_url: sourceForm.sourceUrl, p_fuel_type: fuelType, p_refresh_guidance: sourceForm.guidance || null,
+    });
+    if (rpcError) setError(rpcError.message);
+    else { setNotice('Fuel price source approved. New observations from it are checked against its URL.'); setShowSourceForm(false); setSourceForm({ name: '', sourceUrl: '', guidance: '' }); setSourceId((data as FuelPriceSource).id); await load(); }
     setSaving(false);
   };
 
@@ -120,11 +145,16 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
         <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowForm((value) => !value)} disabled={!organizationId || saving}>{showForm ? 'Cancel' : 'Record website price'}</button>
       </div>
 
+      <div className="fuel-price-panel__sources-control"><span>{sources.length} approved source{sources.length === 1 ? '' : 's'} for {FUEL_LABELS[fuelType].toLowerCase()}.</span><button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowSourceForm((value) => !value)} disabled={!organizationId || saving}>{showSourceForm ? 'Cancel source' : 'Approve a source'}</button></div>
+
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {notice && <p className="fuel-price-panel__notice" role="status">{notice}</p>}
       {!loading && <p className={`fuel-price-panel__freshness fuel-price-panel__freshness--${freshness.state}`} role="status">{freshness.message}</p>}
 
+      {showSourceForm && <form className="assessment-form fuel-price-panel__form" onSubmit={approveSource}><div className="form-row"><label><span>Website / publisher</span><input required value={sourceForm.name} onChange={(event) => setSourceForm({ ...sourceForm, name: event.target.value })} placeholder="e.g. Fuel Watch" /></label><label><span>Approved base URL</span><input type="url" required value={sourceForm.sourceUrl} onChange={(event) => setSourceForm({ ...sourceForm, sourceUrl: event.target.value })} placeholder="https://…" /></label></div><label><span>Review guidance (optional)</span><input value={sourceForm.guidance} onChange={(event) => setSourceForm({ ...sourceForm, guidance: event.target.value })} placeholder="e.g. Check weekly, use Nelson price" /></label><button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Approving…' : 'Approve source'}</button></form>}
+
       {showForm && <form className="assessment-form fuel-price-panel__form" onSubmit={record}>
+        {sources.length > 0 && <label><span>Approved source (recommended)</span><select value={sourceId} onChange={(event) => { const source = sources.find((row) => row.id === event.target.value) ?? null; setSourceId(event.target.value); if (source) setForm((current) => ({ ...current, sourceName: source.name, sourceUrl: source.source_url })); }}><option value="">Record a historical/manual citation</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>}
         <div className="form-row">
           <label><span>Date shown by the website</span><input type="date" required value={form.observedOn} onChange={(event) => setForm({ ...form, observedOn: event.target.value })} /></label>
           <label><span>Price per litre (NZD)</span><input type="number" min="0.001" step="0.001" required value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} placeholder="e.g. 2.399" /></label>

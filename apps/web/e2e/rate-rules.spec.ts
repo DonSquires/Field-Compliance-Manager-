@@ -52,3 +52,29 @@ test('administrator records a cited website fuel price and sees the rolling thre
   expect(typeof (recorded as Record<string, unknown> | null)?.p_client_request_id).toBe('string');
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('administrator approves a fuel source before recording a current website price from it', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  let sources: Array<Record<string, unknown>> = [];
+  let approvedObservation: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/fuel_price_sources*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify(sources) }));
+  await page.route('**/rest/v1/rpc/manage_fuel_price_source', async (route) => { const body = JSON.parse(route.request().postData() ?? '{}'); const source = { id: 'source-aa', name: body.p_name, source_url: body.p_source_url, fuel_type: body.p_fuel_type, refresh_guidance: body.p_refresh_guidance }; sources = [source]; await route.fulfill({ contentType: 'application/json', body: JSON.stringify(source) }); });
+  await page.route('**/rest/v1/rpc/record_approved_fuel_price_observation', async (route) => { approvedObservation = JSON.parse(route.request().postData() ?? '{}'); await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'fuel-approved' }) }); });
+
+  await signInAsAdmin(page, '/admin/rate-rules');
+  const fuelPanel = page.locator('.fuel-price-panel');
+  await fuelPanel.getByRole('button', { name: 'Approve a source' }).click();
+  await fuelPanel.getByLabel('Website / publisher').fill('AA Fuel Prices');
+  await fuelPanel.getByLabel('Approved base URL').fill('https://fuel.example.test/prices');
+  await fuelPanel.getByLabel('Review guidance (optional)').fill('Check weekly for Nelson petrol.');
+  await fuelPanel.getByRole('button', { name: 'Approve source' }).click();
+  await expect(fuelPanel.getByText('Fuel price source approved. New observations from it are checked against its URL.')).toBeVisible();
+  await expect(fuelPanel.getByText('1 approved source for petrol.')).toBeVisible();
+  await fuelPanel.getByRole('button', { name: 'Record website price' }).click();
+  await fuelPanel.getByLabel('Approved source (recommended)').selectOption('source-aa');
+  await fuelPanel.getByLabel('Price per litre (NZD)').fill('2.499');
+  await fuelPanel.getByLabel('Source URL').fill('https://fuel.example.test/prices/nelson');
+  await fuelPanel.getByRole('button', { name: 'Save cited price' }).click();
+  expect(approvedObservation).toMatchObject({ p_source_id: 'source-aa', p_price_per_litre: 2.499, p_source_url: 'https://fuel.example.test/prices/nelson' });
+  expect(errors, errors.join('\n')).toEqual([]);
+});

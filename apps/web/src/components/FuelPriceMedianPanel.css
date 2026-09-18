@@ -5,6 +5,7 @@
 .fuel-price-panel__eyebrow { color: var(--color-text-muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .fuel-price-panel__controls { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(210px, 1fr) auto; gap: 12px; align-items: end; }
 .fuel-price-panel__controls label, .fuel-price-panel__form label { display: grid; gap: 5px; font-size: 12px; color: var(--color-text-secondary); }
+.fuel-price-panel__sources-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--color-text-secondary); }
 .fuel-price-panel__median { display: grid; gap: 2px; }
 .fuel-price-panel__median span { font-size: 12px; color: var(--color-text-secondary); }
 .fuel-price-panel__median strong { font-size: 20px; color: var(--color-text-primary); }
