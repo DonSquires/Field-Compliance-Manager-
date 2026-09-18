@@ -33,6 +33,7 @@ class FrameArtifact:
     visual_quality: str = "usable"
     visual_quality_reason: str | None = None
     quality_state: str = "clear"
+    sharpness_score: float = 0.0
 
 
 @dataclass
@@ -235,7 +236,7 @@ def _write_frame(
     width: int | None,
     height: int | None,
     scan_quality_state: str | None = None,
-) -> tuple[str, str, str, str | None, str]:
+) -> tuple[str, str, str, str | None, str, float]:
     if not 1 <= quality <= 100:
         raise ValueError("output_quality must be between 1 and 100")
     rendered = frame
@@ -248,6 +249,7 @@ def _write_frame(
             frame, (target_width, target_height), interpolation=cv2.INTER_AREA
         )
     stats, _grey = _frame_stats(rendered)
+    sharpness_score = float(cv2.Laplacian(_grey, cv2.CV_32F).var())
     quality_state, visual_quality_reason = static_quality_state(stats)
     # The scan saw this frame in sequence; a glitch, IR switch or scene-change burst it found there outranks the still test.
     if scan_quality_state in ("glitch", "ir_switch"):
@@ -268,7 +270,7 @@ def _write_frame(
         temporary = destination.with_suffix(".jpg.tmp")
         temporary.write_bytes(content)
         os.replace(temporary, destination)
-    return digest, str(destination), visual_quality, visual_quality_reason, quality_state
+    return digest, str(destination), visual_quality, visual_quality_reason, quality_state, round(sharpness_score, 3)
 
 
 def extract_motion_summary(
@@ -405,12 +407,12 @@ def extract_motion_summary(
                         target_index += 1
                     if decoded_frame is None:
                         continue
-                    digest, file_path, visual_quality, visual_quality_reason, quality_state = _write_frame(
+                    digest, file_path, visual_quality, visual_quality_reason, quality_state, sharpness_score = _write_frame(
                         decoded_frame, artifacts_dir, output_quality, scale_width, scale_height,
                         gate.states.get(index),
                     )
                     segment.frames.append(
-                        FrameArtifact(index, round(index / fps, 3), digest, file_path, visual_quality, visual_quality_reason, quality_state)
+                        FrameArtifact(index, round(index / fps, 3), digest, file_path, visual_quality, visual_quality_reason, quality_state, sharpness_score)
                     )
                     job_frames += 1
                 if job_frames >= max_job_frames:

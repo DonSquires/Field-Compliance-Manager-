@@ -4,7 +4,7 @@ const test = require('node:test');
 process.env.SUPABASE_URL ||= 'https://example.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
-const { playbackStoragePath, selectFramesForClassification } = require('../services/vision/vision_job_watcher');
+const { playbackStoragePath, selectFramesForClassification, representativeFrameHashes } = require('../services/vision/vision_job_watcher');
 
 test('playbackStoragePath replaces the source extension with .playback.mp4', () => {
   assert.equal(
@@ -42,6 +42,18 @@ test('selectFramesForClassification samples across a segment instead of only its
   assert.ok(Math.max(...indices) > 200, `expected samples spread past frame 200, got ${indices}`);
 });
 
+test('representativeFrameHashes deduplicates a twelve-frame tracked observation before recognition', () => {
+  const summary = {
+    consolidated_events: {
+      person_events: [{ event_id: 'person-1', frame_count: 12, best_frame_hash: 'clearest-person-frame' }],
+      vehicle_events: [{ event_id: 'vehicle-1', frame_count: 12, best_frame_hash: 'clearest-vehicle-frame' }],
+      animal_events: [],
+      face_events: [{ event_id: 'face-1', frame_count: 12, best_frame_hash: 'clearest-person-frame' }],
+    },
+  };
+  assert.deepEqual(representativeFrameHashes(summary).sort(), ['clearest-person-frame', 'clearest-vehicle-frame']);
+});
+
 test('vision watcher source contains a degraded-frame inference gate', () => {
   const fs = require('node:fs');
   const path = require('node:path');
@@ -51,6 +63,7 @@ test('vision watcher source contains a degraded-frame inference gate', () => {
   assert.match(source, /human_review_required: true/);
   assert.match(source, /RUNPOD_CAPTURE_API_URL/);
   assert.match(source, /capture_recognition/);
+  assert.match(source, /detector_triage_then_one_full_recognition_per_unique_observation/);
   assert.match(source, /deterministic_capture_v1/);
   assert.match(source, /capture_endpoint_not_configured/);
   assert.match(source, /RUNPOD_CAPTURE_API_KEY/);

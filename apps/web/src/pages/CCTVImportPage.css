@@ -126,6 +126,7 @@
 .cctv-import-fields input[aria-invalid='true'] { border-color: #b8433d; }
 
 .cctv-import-folder-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
+.cctv-import-selection-status { color: #315761; font-size: 13px; line-height: 1.45; margin: 12px 0 0; }
 .cctv-import-muted { color: #75828a; font-size: 13px; }
 .cctv-import-summary {
   display: grid;

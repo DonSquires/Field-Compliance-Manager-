@@ -46,6 +46,9 @@ describe('CCTV import — the place comes first, files are classified locally, w
     expect(page).toContain('Empty slots skipped');
     expect(page).toContain('showDirectoryPicker');
     expect(page).toContain('webkitdirectory=""');
+    expect(page).toContain('Choose video files');
+    expect(page).toContain('accept=".mp4,.mov,.mkv,.avi,.m4v,.ts,.h264,.h265,.hevc,.264,.265,.dav,.asf,.wmv,.webm,video/*"');
+    expect(page).toContain('role="status"');
   });
 
   it('is reachable as a field-ops area and from the review page', () => {

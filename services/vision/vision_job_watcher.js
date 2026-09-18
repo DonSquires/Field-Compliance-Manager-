@@ -276,11 +276,35 @@ function selectFramesForClassification(segments, maxFrames) {
   return selected;
 }
 
+function applyTriageResult(frame, result) {
+  frame.runpod = result;
+  frame.detect = result;
+  frame.people = Array.isArray(result?.people)
+    ? { success: true, people: result.people, provider: result.people_provider || result.detector_provider || 'runpod' }
+    : { success: false, people: [], error: 'person_detector_unavailable' };
+  frame.animals = normaliseAnimals(result, null);
+  const vehicle = result?.vehicle || null;
+  frame.inference = vehicle
+    ? { success: true, data: vehicle, provider: 'runpod_triage' }
+    : { success: false, error: 'no_vehicle_detected', review_required: false };
+}
+
+function representativeFrameHashes(summary) {
+  const events = summary.consolidated_events || {};
+  const hashes = [
+    ...(events.vehicle_events || []),
+    ...(events.person_events || []),
+    ...(events.animal_events || []),
+    ...(events.face_events || []),
+  ].map((event) => event.best_frame_hash).filter(Boolean);
+  return [...new Set(hashes)];
+}
+
 async function classifyFrames(summary, job) {
   if (!INFERENCE_API_KEY) throw new Error('INFERENCE_API_KEY is required for frame classification');
   const totalFrames = summary.motion_segments.reduce((total, segment) => total + (segment.frames?.length || 0), 0);
   const selectedFrames = selectFramesForClassification(summary.motion_segments, MAX_CLASSIFICATION_FRAMES);
-  const totalBatches = Math.ceil(selectedFrames.length / RUNPOD_BATCH_SIZE);
+  const triageBatches = Math.ceil(selectedFrames.length / RUNPOD_BATCH_SIZE);
   const checkpointFrames = await readClassificationCheckpoint(job.id);
   const frameInputs = await Promise.all(selectedFrames.map(async (frame) => ({
     frame,
@@ -289,18 +313,67 @@ async function classifyFrames(summary, job) {
   for (let batchStart = 0; batchStart < frameInputs.length; batchStart += RUNPOD_BATCH_SIZE) {
     const batch = frameInputs.slice(batchStart, batchStart + RUNPOD_BATCH_SIZE);
     const batchNumber = Math.floor(batchStart / RUNPOD_BATCH_SIZE) + 1;
-    const pendingBatch = batch.filter(({ frame }) => !checkpointFrames[frame.sha256_hash]);
-    for (const { frame } of batch) {
-      if (checkpointFrames[frame.sha256_hash]) Object.assign(frame, checkpointFrames[frame.sha256_hash]);
-    }
+    const pendingBatch = batch.filter(({ frame }) => !checkpointFrames[frame.sha256_hash]?.triage);
     await updateProgress(job, 'running_inference', {
       current: batchStart,
       total: selectedFrames.length,
       percent: (batchStart / Math.max(1, selectedFrames.length)) * 100,
-      label: pendingBatch.length ? `Running inference batch ${batchNumber} of ${totalBatches}` : `Resuming completed batch ${batchNumber} of ${totalBatches}`,
+      label: pendingBatch.length ? `Detecting motion entities, batch ${batchNumber} of ${triageBatches}` : `Resuming detection batch ${batchNumber} of ${triageBatches}`,
+    });
+    const runpodResults = await classifyWithRunpodBatch(pendingBatch, ['person', 'vehicle', 'animal', 'detect']);
+    for (const { frame } of batch) {
+      const checkpoint = checkpointFrames[frame.sha256_hash];
+      if (checkpoint?.triage) applyTriageResult(frame, checkpoint.triage);
+      else {
+        const triage = runpodResults.get(frame.sha256_hash);
+        if (triage) {
+          applyTriageResult(frame, triage);
+          checkpointFrames[frame.sha256_hash] = { ...(checkpoint || {}), triage };
+        }
+      }
+    }
+    await writeClassificationCheckpoint(job.id, checkpointFrames);
+  }
+
+  await consolidateMotionSummary(summary, { metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null });
+  const representativeHashes = new Set(representativeFrameHashes(summary));
+  const representatives = frameInputs.filter(({ frame }) => representativeHashes.has(frame.sha256_hash));
+  const recognitionBatches = Math.ceil(representatives.length / RUNPOD_BATCH_SIZE);
+  for (let batchStart = 0; batchStart < representatives.length; batchStart += RUNPOD_BATCH_SIZE) {
+    const batch = representatives.slice(batchStart, batchStart + RUNPOD_BATCH_SIZE);
+    const batchNumber = Math.floor(batchStart / RUNPOD_BATCH_SIZE) + 1;
+    const pendingBatch = batch.filter(({ frame }) => !checkpointFrames[frame.sha256_hash]?.recognition);
+    await updateProgress(job, 'running_inference', {
+      current: batchStart,
+      total: representatives.length,
+      percent: (batchStart / Math.max(1, representatives.length)) * 100,
+      label: pendingBatch.length ? `Recognising ${representatives.length} best observation frame${representatives.length === 1 ? '' : 's'}, batch ${batchNumber} of ${recognitionBatches}` : `Resuming recognition batch ${batchNumber} of ${recognitionBatches}`,
     });
     const runpodResults = await classifyWithRunpodBatch(pendingBatch);
-    for (const [batchIndex, { frame, image }] of pendingBatch.entries()) {
+    for (const { frame, image } of batch) {
+      const checkpoint = checkpointFrames[frame.sha256_hash];
+      if (checkpoint?.recognition) {
+        Object.assign(frame, checkpoint.recognition);
+        continue;
+      }
+      const runpodResult = runpodResults.get(frame.sha256_hash);
+      if (!runpodResult) continue;
+      const recognition = await enrichRepresentativeFrame(frame, image, job, runpodResult);
+      Object.assign(frame, recognition);
+      checkpointFrames[frame.sha256_hash] = { ...(checkpoint || {}), recognition };
+    }
+    await writeClassificationCheckpoint(job.id, checkpointFrames);
+  }
+  if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
+  summary.classification_plan = {
+    sampled_frames: selectedFrames.length,
+    representative_frames: representatives.length,
+    policy: 'detector_triage_then_one_full_recognition_per_unique_observation',
+  };
+  return summary;
+}
+
+async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       if (frame.visual_quality === 'degraded') {
         frame.inference_quality = {
           state: 'degraded',
@@ -318,7 +391,6 @@ async function classifyFrames(summary, job) {
         return form;
       };
       const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
-      const runpodResult = runpodResults.get(frame.sha256_hash);
       if (runpodResult) frame.runpod = runpodResult;
       // GPU first: infer_batch now carries ALPR (plate detector + OCR anchored on the detected vehicles) and
       // faces alongside the triage. The VPS is asked only for what the GPU answer lacks.
@@ -343,12 +415,6 @@ async function classifyFrames(summary, job) {
         needLocalDetect ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, buildForm) : Promise.resolve(null),
       ];
       const [alprResponse, faceResponse, peopleResponse, localDetect] = await Promise.all(localRequests);
-      await updateProgress(job, 'running_alpr', {
-        current: batchStart + batchIndex + 1,
-        total: selectedFrames.length,
-        percent: ((batchStart + batchIndex + 1) / Math.max(1, selectedFrames.length)) * 100,
-        label: `Running ALPR and face checks, frame ${batchStart + batchIndex + 1} of ${selectedFrames.length}`,
-      });
       if (localDetect) frame.detect = localDetect;
       if (runpodAlpr) {
         frame.alpr = { ...runpodAlpr, provider: 'runpod' };
@@ -407,7 +473,7 @@ async function classifyFrames(summary, job) {
       } else {
         frame.inference = { success: false, error: 'vehicle_crop_unavailable', review_required: true };
       }
-      checkpointFrames[frame.sha256_hash] = {
+      return {
         alpr: frame.alpr,
         face: frame.face,
         people: frame.people,
@@ -417,11 +483,6 @@ async function classifyFrames(summary, job) {
         inference: frame.inference,
         runpod: frame.runpod,
       };
-    }
-    await writeClassificationCheckpoint(job.id, checkpointFrames);
-  }
-  if (totalFrames > selectedFrames.length) summary.classification_truncated = true;
-  return summary;
 }
 
 async function classifyLocally(baseUrl, route, headers, buildForm) {
@@ -453,7 +514,7 @@ function normaliseAnimals(runpodResult, localDetect) {
   return { success: false, animals: [], status: 'animal_inference_unavailable', review_required: true };
 }
 
-async function classifyWithRunpodBatch(batch) {
+async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'animal', 'plate', 'face']) {
   if (!RUNPOD_API_KEY || batch.length === 0) return new Map();
   if (Date.now() < runpodUnavailableUntil) {
     log('runpod_inference_circuit_open', { retry_after_ms: runpodUnavailableUntil - Date.now(), batch_size: batch.length });
@@ -467,7 +528,7 @@ async function classifyWithRunpodBatch(batch) {
         input: {
           action: 'infer_batch',
           frames: batch.map(({ frame, image }) => ({ frame_id: frame.sha256_hash, image_base64: image.toString('base64') })),
-          tasks: ['person', 'vehicle', 'animal', 'plate', 'face'],
+          tasks,
         },
       }),
       signal: AbortSignal.timeout(45_000),
@@ -793,4 +854,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash };

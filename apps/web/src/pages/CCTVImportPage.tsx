@@ -119,6 +119,7 @@ const CCTVImportPage: React.FC = () => {
   const [rawInputs, setRawInputs] = useState<ScanInput[]>([]);
   const [scanned, setScanned] = useState<ScannedFile[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [selectionStatus, setSelectionStatus] = useState<string | null>(null);
   const [includeSnapshots, setIncludeSnapshots] = useState(true);
 
   const [phase, setPhase] = useState<RunPhase>('idle');
@@ -129,6 +130,7 @@ const CCTVImportPage: React.FC = () => {
   const [recentImports, setRecentImports] = useState<ImportRow[]>([]);
 
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
   const activeUploadRef = useRef<TusUpload | null>(null);
   const cancelRef = useRef(false);
 
@@ -203,6 +205,7 @@ const CCTVImportPage: React.FC = () => {
     setPhase('idle');
     setImportRow(null);
     setProgress({});
+    setSelectionStatus(null);
     setFolderLabel(label);
     setRawInputs(inputs);
     const detected = detectDeviceKind(inputs.map((input) => input.relativePath));
@@ -236,6 +239,23 @@ const CCTVImportPage: React.FC = () => {
     acceptInputs(inputsFromFileList(list), first.split('/')[0] || 'Selected folder');
     event.target.value = '';
   };
+
+  const onVideoInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const list = event.target.files;
+    if (!list || list.length === 0) return;
+    const inputs = Array.from(list).map((file) => ({ file, relativePath: file.name }));
+    acceptInputs(inputs, inputs.length === 1 ? inputs[0].file.name : `${inputs.length} selected video files`);
+    event.target.value = '';
+  };
+
+  useEffect(() => {
+    if (!rawInputs.length || scanning) return;
+    const accepted = scanned.filter((item) => item.kind === 'video').length;
+    const excluded = scanned.length - accepted;
+    setSelectionStatus(accepted
+      ? `${accepted} video file${accepted === 1 ? '' : 's'} ready to import${excluded ? `; ${excluded} item${excluded === 1 ? '' : 's'} excluded` : ''}.`
+      : 'No usable video files were found. Choose .mp4, .dav, .mov, .mkv, .avi, or camera-stream files.');
+  }, [rawInputs.length, scanned, scanning]);
 
   const uploadObject = async (file: File, objectName: string, contentType: string, onBytes?: (sent: number) => void): Promise<void> => {
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -548,11 +568,16 @@ const CCTVImportPage: React.FC = () => {
             <button type="button" className="page-action" onClick={() => void pickFolder()} disabled={busy || scanning}>
               <FolderOpen size={17} /> {folderLabel ? 'Choose a different folder' : 'Choose SD card or camera folder'}
             </button>
+            <button type="button" className="page-action" onClick={() => videoInputRef.current?.click()} disabled={busy || scanning}>
+              <FileVideo2 size={17} /> Choose video files
+            </button>
             <input ref={folderInputRef} type="file" multiple hidden onChange={onFolderInput}
               // @ts-expect-error webkitdirectory is a non-standard attribute understood by all major browsers
               webkitdirectory="" />
+            <input ref={videoInputRef} type="file" multiple hidden accept=".mp4,.mov,.mkv,.avi,.m4v,.ts,.h264,.h265,.hevc,.264,.265,.dav,.asf,.wmv,.webm,video/*" onChange={onVideoInput} />
             {folderLabel && <span className="cctv-import-muted">{folderLabel}{scanning ? ' · scanning…' : ` · ${DEVICE_LABELS[deviceKind]}`}</span>}
           </div>
+          {selectionStatus && <p className="cctv-import-selection-status" role="status">{selectionStatus}</p>}
           {scanned.length > 0 && !scanning && (
             <>
               <dl className="cctv-import-summary">

@@ -5,6 +5,7 @@ const {
   consolidateFaces,
   consolidatePeople,
   consolidateVehicles,
+  representativeFrameScore,
   extractKeyframes,
   consolidateMotionSummary,
 } = require('../services/vision/motion_consolidator');
@@ -19,6 +20,15 @@ test('cosineSimilarity computes expected vector similarity', () => {
   assert.equal(cosineSimilarity(v1, v3), 0.0);
   assert.ok(Math.abs(cosineSimilarity(v1, v4) - 0.7071) < 0.001);
   assert.equal(cosineSimilarity([], []), 0);
+});
+
+test('representative frame scoring favours a sharper clear frame when subject size is comparable', () => {
+  const bbox = { width: 120, height: 240 };
+  assert.ok(
+    representativeFrameScore({ quality_state: 'clear', sharpness_score: 480 }, bbox, 0.8)
+      > representativeFrameScore({ quality_state: 'clear', sharpness_score: 20 }, bbox, 0.8)
+  );
+  assert.equal(representativeFrameScore({ quality_state: 'flare', sharpness_score: 900 }, bbox, 0.99), -Infinity);
 });
 
 test('consolidateFaces clusters continuous frames into one subject and handles returns', async () => {

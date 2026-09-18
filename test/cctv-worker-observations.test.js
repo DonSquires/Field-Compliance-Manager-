@@ -195,6 +195,21 @@ test('buildEntityObservations returns nothing without a time base and uses captu
   assert.equal(fallback.find((item) => item.candidate_plate === 'ABC123').observed_at, '2026-09-10T09:00:01.000Z');
 });
 
+test('body-only detection remains place activity and is not persisted as a person observation', () => {
+  const summary = {
+    consolidated_events: {
+      vehicle_events: [],
+      person_events: [{ event_id: 'person-body-only', first_seen_seconds: 1, last_seen_seconds: 4, frame_count: 12, confidence: 0.98, quality_state: 'clear', best_frame_hash: 'body-frame', best_bbox: { x: 1, y: 1, width: 50, height: 170 } }],
+      face_events: [],
+      animal_events: [],
+    },
+    motion_segments: [{ start_time_seconds: 0, end_time_seconds: 5, frames: [] }],
+  };
+  assert.deepEqual(buildEntityObservations(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' }), []);
+  const marks = buildInferenceDeviceEvents(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });
+  assert.deepEqual(marks.find((mark) => mark.metadata.kind === 'motion_window')?.metadata.entity_counts, { person: 1 });
+});
+
 test('buildInferenceDeviceEvents grades each motion window and marks camera disturbances', async () => {
   const summary = await summaryFixture();
   const marks = buildInferenceDeviceEvents(summary, { recordedStartAt: '2026-09-10T08:15:00.000Z' });

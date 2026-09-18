@@ -69,6 +69,13 @@ function bestTrackFor(tracks, detection, maxGap) {
   return candidates.sort((a, b) => Math.hypot(detection.center.x - a.center.x, detection.center.y - a.center.y) - Math.hypot(detection.center.x - b.center.x, detection.center.y - b.center.y))[0];
 }
 
+function representativeFrameScore(frame, bbox, confidence = 0) {
+  if (!hasUsableFrame(frame)) return -Infinity;
+  const area = Math.max(0, Number(bbox?.width) || 0) * Math.max(0, Number(bbox?.height) || 0);
+  const sharpness = Math.min(1, Math.max(0, Number(frame?.sharpness_score) || 0) / 500);
+  return Math.log1p(area) * 0.6 + sharpness * 0.4 + Math.min(1, Math.max(0, Number(confidence) || 0)) * 0.15;
+}
+
 async function consolidateFaces(frames, options = {}) {
   const simThreshold = options.faceSimilarityThreshold ?? DEFAULT_FACE_SIMILARITY_THRESHOLD;
   const maxGap = options.maxGapSeconds ?? DEFAULT_MAX_GAP_SECONDS;
@@ -110,7 +117,7 @@ async function consolidateFaces(frames, options = {}) {
           track.frameCount++;
           const bbox = detectedFace.bbox || null;
           const bboxArea = bbox ? (bbox.width || 0) * (bbox.height || 0) : 0;
-          if (bboxArea > track.bestBboxArea) {
+          if (representativeFrameScore(frame, bbox) > representativeFrameScore(track.bestFrame, track.bestBbox)) {
             track.bestBboxArea = bboxArea;
             track.bestFrame = frame;
             track.bestBbox = bbox;
@@ -240,7 +247,7 @@ async function consolidatePeople(frames, options = {}) {
       track.confidence = Math.max(track.confidence, Number(detection.confidence) || 0);
       track.center = center;
       track.gaitSamples.push({ timestamp, center, width: Number(bbox.width), height: Number(bbox.height) });
-      if ((bbox.width * bbox.height) > (track.bestBbox.width * track.bestBbox.height)) {
+      if (representativeFrameScore(frame, bbox, detection.confidence) > representativeFrameScore(track.bestFrame, track.bestBbox, track.confidence)) {
         track.bestBbox = bbox;
         track.bestFrame = frame;
         track.bestAttributes = detection.attributes || track.bestAttributes;
@@ -306,7 +313,7 @@ async function consolidateAnimals(frames, options = {}) {
       vote.count += 1;
       if ((Number(detection.species_confidence) || 0) >= (Number(vote.detection.species_confidence) || 0)) vote.detection = detection;
       track.speciesVotes.set(species, vote);
-      if ((Number(bbox.width) * Number(bbox.height)) > (Number(track.bestBbox.width) * Number(track.bestBbox.height))) {
+      if (representativeFrameScore(frame, bbox, detection.confidence) > representativeFrameScore(track.bestFrame, track.bestBbox, track.confidence)) {
         track.bestBbox = bbox;
         track.bestFrame = frame;
         track.bestDetection = detection;
@@ -573,7 +580,7 @@ async function consolidateVehicles(frames, options = {}) {
     track.frameCount += 1;
     track.confidence = Math.max(track.confidence, Number(detection.confidence) || 0);
     track.center = center;
-    if ((Number(bbox.width) * Number(bbox.height)) > (Number(track.bestBbox.width) * Number(track.bestBbox.height))) {
+    if (representativeFrameScore(frame, bbox, detection.confidence) > representativeFrameScore(track.bestFrame, track.bestBbox, track.confidence)) {
       track.bestBbox = bbox;
       track.bestFrame = frame;
       if (embedding) track.embedding = embedding;
@@ -683,12 +690,13 @@ function buildEntityObservations(summary, context = {}) {
   const claimedFaces = new Set();
   for (const event of events.person_events || []) {
     if (!isUsableQuality(event.quality_state)) continue;
-    // A face seen during the same body track belongs to that person; the best temporal overlap wins.
+    // A body track establishes only that a person was at the place. It becomes an identity-review
+    // observation only when a usable face track overlaps it.
     const face = faceEvents
       .filter((candidate) => !claimedFaces.has(candidate.event_id) && overlapSeconds(candidate, event) >= 0)
       .sort((a, b) => overlapSeconds(b, event) - overlapSeconds(a, event))[0] || null;
-    if (!isReviewableCandidate(event, { hasFaceEvidence: Boolean(face) })) continue;
-    if (face) claimedFaces.add(face.event_id);
+    if (!face) continue;
+    claimedFaces.add(face.event_id);
     observations.push({
       source_event_id: event.event_id,
       entity_kind: 'person',
@@ -876,6 +884,7 @@ async function consolidateMotionSummary(summary, options = {}) {
 
 module.exports = {
   cosineSimilarity,
+  representativeFrameScore,
   consolidateFaces,
   consolidatePeople,
   consolidateAnimals,
