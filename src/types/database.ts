@@ -37571,6 +37571,20 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_patrol_route_from_agreement: {
+        Args: {
+          p_client_request_id: string
+          p_name?: string
+          p_service_agreement_id: string
+        }
+        Returns: {
+          attached_places: number
+          created: boolean
+          route_id: string
+          route_name: string
+          skipped_places: number
+        }[]
+      }
       create_organization_workplace: {
         Args: { p_address?: string; p_name: string }
         Returns: {
