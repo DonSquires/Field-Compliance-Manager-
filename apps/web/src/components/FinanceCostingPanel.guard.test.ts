@@ -17,4 +17,11 @@ describe('finance costing panel', () => {
     expect(migration).toContain("'depreciation_annual'");
     expect(migration).toContain("'approval_required', true");
   });
+
+  it('uses the cited three-month fuel median only as an explicit internal-cost suggestion', () => {
+    for (const label of ['Fuel use (L/100km)', 'Other running cost/km', 'Use suggested internal cost']) expect(panel).toContain(label);
+    expect(panel).toContain("supabase.rpc('get_median_fuel_price'");
+    expect(panel).toContain('p_months: 3');
+    expect(panel).toContain('does not change the IRD $1.04/km customer charge');
+  });
 });

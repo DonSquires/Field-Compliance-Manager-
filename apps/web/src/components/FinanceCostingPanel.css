@@ -1,0 +1,6 @@
+.finance-fuel-suggestion { display: grid; gap: 6px; margin: 12px 0; padding: 12px; border: 1px solid var(--color-border); border-left: 4px solid var(--color-warning); border-radius: 6px; background: var(--color-bg-secondary); }
+.finance-fuel-suggestion strong { color: var(--color-text-primary); font-size: 14px; }
+.finance-fuel-suggestion span { color: var(--color-text-secondary); font-size: 13px; }
+.finance-fuel-suggestion small { color: var(--color-text-muted); font-size: 12px; }
+.finance-fuel-suggestion .btn { justify-self: start; }
+@media (max-width: 640px) { .finance-fuel-suggestion .btn { width: 100%; } }

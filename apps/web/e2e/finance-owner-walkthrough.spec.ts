@@ -76,6 +76,24 @@ test('owner can enter IRD details and calculate a job cost like a human', async 
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('owner uses the three-month fuel median as an internal vehicle-cost suggestion', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await page.route('**/rest/v1/rpc/get_median_fuel_price', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ fuel_type: 'petrol', median_price_per_litre: 2.399, observation_count: 4, window_start: '2026-06-01', window_end: '2026-09-01', latest_observed_on: '2026-08-30', source_names: ['AA Fuel Prices'], source_urls: ['https://example.test/aa'] }]) }));
+
+  await signInAsAdmin(page, '/admin/finance-costing');
+  await expect(page.getByText('Website fuel median: $2.399/L')).toBeVisible();
+  await page.getByLabel('Fuel use (L/100km)').fill('8.5');
+  await page.getByLabel('Other running cost/km').fill('0.15');
+  await expect(page.getByText(/suggested internal vehicle cost is \$0\.35\/km/)).toBeVisible();
+  await page.getByRole('button', { name: 'Use suggested internal cost' }).click();
+  await expect(page.getByLabel('Fuel and running cost/km')).toHaveValue('0.3539');
+  await page.getByLabel('Hourly pay rate').fill('42');
+  await page.getByLabel('Vehicle kilometres').fill('10');
+  await page.getByRole('button', { name: 'Calculate job cost' }).click();
+  await expect(page.getByText('Real cost')).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('owner can run readiness check without submitting to IRD or bank', async ({ page }) => {
   await signInAsAdmin(page, '/admin/finance-bureau');
   await page.getByRole('button', { name: 'Check now' }).click();
