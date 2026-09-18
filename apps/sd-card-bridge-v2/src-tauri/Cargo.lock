@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "fcm-sd-card-bridge-v2"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "fcm-dhfs",
  "fs2",

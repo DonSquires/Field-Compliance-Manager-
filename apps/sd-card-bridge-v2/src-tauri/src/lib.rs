@@ -95,7 +95,7 @@ const DISCOVERY_SCRIPT: &str = r#"$ErrorActionPreference='SilentlyContinue'; $di
 fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
     #[cfg(target_os = "windows")]
     {
-        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", DISCOVERY_SCRIPT]).output().map_err(|e| format!("PowerShell could not be started to list disks: {e}"))?;
+        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", DISCOVERY_SCRIPT]).output().map_err(|e| format!("PowerShell could not be started to list disks: {e}"))?;
         if !output.status.success() { return Err(format!("Disk discovery failed: {}", String::from_utf8_lossy(&output.stderr).trim())); }
         if output.stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("Disk list was not readable: {e}"))?;

@@ -70,7 +70,7 @@ import AdminHubPage from '../pages/AdminHubPage';
 const DESKTOP_V1_DOWNLOAD_URL = 'https://github.com/DonSquires/Field-Compliance-Manager-/releases/download/sd-card-bridge-v0.1.53/FCM-SD-Card-Bridge-Setup.exe';
 // V2 is delivered from the public release bucket: FCM master access does not grant a browser GitHub access
 // to the private repository's release assets. Must match the V2 package version (pinned by the product test).
-const DESKTOP_V2_VERSION = '0.1.7';
+const DESKTOP_V2_VERSION = '0.1.8';
 const DESKTOP_V2_FILENAME = `FCM-Desktop-V2-v${DESKTOP_V2_VERSION}-Setup.exe`;
 const DESKTOP_V2_DOWNLOAD_URL = `https://dotczcyyzgabmtmnglqj.supabase.co/storage/v1/object/public/desktop-releases/v2/${DESKTOP_V2_VERSION}/FCM-Desktop-V2-Setup.exe?download=${DESKTOP_V2_FILENAME}`;
 
