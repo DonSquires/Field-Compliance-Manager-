@@ -78,10 +78,16 @@ test('owner can enter IRD details and calculate a job cost like a human', async 
 
 test('owner uses the three-month fuel median as an internal vehicle-cost suggestion', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
-  await page.route('**/rest/v1/rpc/get_median_fuel_price', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ fuel_type: 'petrol', median_price_per_litre: 2.399, observation_count: 4, window_start: '2026-06-01', window_end: '2026-09-01', latest_observed_on: '2026-08-30', source_names: ['AA Fuel Prices'], source_urls: ['https://example.test/aa'] }]) }));
+  const requestedFuelTypes: string[] = [];
+  await page.route('**/rest/v1/rpc/get_median_fuel_price', async (route) => { const fuelType = JSON.parse(route.request().postData() ?? '{}').p_fuel_type; requestedFuelTypes.push(fuelType); const price = fuelType === 'diesel' ? 2.149 : 2.399; await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ fuel_type: fuelType, median_price_per_litre: price, observation_count: 4, window_start: '2026-06-01', window_end: '2026-09-01', latest_observed_on: '2026-08-30', source_names: ['AA Fuel Prices'], source_urls: ['https://example.test/aa'] }]) }); });
 
   await signInAsAdmin(page, '/admin/finance-costing');
-  await expect(page.getByText('Website fuel median: $2.399/L')).toBeVisible();
+  await expect(page.getByText('Website petrol median: $2.399/L')).toBeVisible();
+  await page.getByLabel('Vehicle fuel type').selectOption('diesel');
+  await expect(page.getByText('Website diesel median: $2.149/L')).toBeVisible();
+  expect(requestedFuelTypes).toContain('diesel');
+  await page.getByLabel('Vehicle fuel type').selectOption('petrol');
+  await expect(page.getByText('Website petrol median: $2.399/L')).toBeVisible();
   await page.getByLabel('Fuel use (L/100km)').fill('8.5');
   await page.getByLabel('Other running cost/km').fill('0.15');
   await expect(page.getByText(/suggested internal vehicle cost is \$0\.35\/km/)).toBeVisible();

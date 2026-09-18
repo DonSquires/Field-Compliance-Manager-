@@ -48,6 +48,7 @@ const money = (value: number) => new Intl.NumberFormat('en-NZ', { style: 'curren
 export function FinanceCostingPanel() {
   const { profile, operatingOrganizationId } = useAuth();
   const [inputs, setInputs] = useState<CostInputs>(initialInputs);
+  const [fuelType, setFuelType] = useState<'petrol' | 'diesel' | 'lpg' | 'other'>('petrol');
   const [medianFuelPrice, setMedianFuelPrice] = useState<number | null>(null);
   const [fuelObservationCount, setFuelObservationCount] = useState(0);
   const [result, setResult] = useState<CostResult | null>(null);
@@ -57,13 +58,13 @@ export function FinanceCostingPanel() {
   const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
   useEffect(() => {
     if (!organizationId) { setMedianFuelPrice(null); setFuelObservationCount(0); return; }
-    void supabase.rpc('get_median_fuel_price', { p_organization_id: organizationId, p_fuel_type: 'petrol', p_as_at: null, p_months: 3 }).then(({ data, error: medianError }) => {
+    void supabase.rpc('get_median_fuel_price', { p_organization_id: organizationId, p_fuel_type: fuelType, p_as_at: null, p_months: 3 }).then(({ data, error: medianError }) => {
       if (medianError) return;
       const row = Array.isArray(data) ? data[0] : data;
       setMedianFuelPrice(row?.median_price_per_litre == null ? null : Number(row.median_price_per_litre));
       setFuelObservationCount(Number(row?.observation_count ?? 0));
     });
-  }, [organizationId]);
+  }, [fuelType, organizationId]);
 
   const fuelOnlyPerKm = fuelCostPerKm(medianFuelPrice, Number(inputs.vehicle_fuel_consumption_l_per_100km));
   const suggestedPerKm = suggestedVehicleVariableCost(fuelOnlyPerKm, Number(inputs.vehicle_running_cost_per_km));
@@ -84,7 +85,7 @@ export function FinanceCostingPanel() {
   return <section className="reports-section" aria-label="Job cost calculator">
     <div className="crm-section-heading"><div><span>Before you quote</span><h2><Calculator size={18} /> Check the real job cost</h2><p className="subtitle">Enter the source facts. The server adds wages, leave, vehicle use, gear, travel, shared business costs, and the amount you want left over.</p></div><button type="button" className="btn btn-secondary" onClick={() => { setInputs(initialInputs); setResult(null); setError(null); }}><RefreshCw size={15} /> Reset</button></div>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
-    <form className="assessment-form" onSubmit={calculate}><div className="form-row">{fields.map(([key, label]) => <label key={key}><span>{label}</span><input type="number" min="0" step={key.includes('per_km') ? '0.0001' : '0.01'} value={inputs[key]} onChange={(event) => setInputs((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div>{medianFuelPrice !== null && <div className="finance-fuel-suggestion"><strong>Website fuel median: ${medianFuelPrice.toFixed(3)}/L</strong><span>{fuelObservationCount} cited observation{fuelObservationCount === 1 ? '' : 's'} in the last three months. {fuelOnlyPerKm === null ? 'Enter fuel use to calculate the fuel cost per kilometre.' : `Fuel is ${money(fuelOnlyPerKm)}/km; with other running cost, suggested internal vehicle cost is ${money(suggestedPerKm ?? 0)}/km.`}</span>{suggestedPerKm !== null && <button type="button" className="btn btn-secondary btn-sm" onClick={applyFuelSuggestion}>Use suggested internal cost</button>}<small>This affects this cost check only. It does not change the IRD $1.04/km customer charge.</small></div>}<button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Calculating...' : 'Calculate job cost'}</button></form>
+    <form className="assessment-form" onSubmit={calculate}><div className="form-row">{fields.map(([key, label]) => <label key={key}><span>{label}</span><input type="number" min="0" step={key.includes('per_km') ? '0.0001' : '0.01'} value={inputs[key]} onChange={(event) => setInputs((current) => ({ ...current, [key]: event.target.value }))} /></label>)}</div>{medianFuelPrice !== null && <div className="finance-fuel-suggestion"><label><span>Vehicle fuel type</span><select value={fuelType} onChange={(event) => setFuelType(event.target.value as typeof fuelType)}><option value="petrol">Petrol</option><option value="diesel">Diesel</option><option value="lpg">LPG</option><option value="other">Other fuel</option></select></label><strong>Website {fuelType} median: ${medianFuelPrice.toFixed(3)}/L</strong><span>{fuelObservationCount} cited observation{fuelObservationCount === 1 ? '' : 's'} in the last three months. {fuelOnlyPerKm === null ? 'Enter fuel use to calculate the fuel cost per kilometre.' : `Fuel is ${money(fuelOnlyPerKm)}/km; with other running cost, suggested internal vehicle cost is ${money(suggestedPerKm ?? 0)}/km.`}</span>{suggestedPerKm !== null && <button type="button" className="btn btn-secondary btn-sm" onClick={applyFuelSuggestion}>Use suggested internal cost</button>}<small>This affects this cost check only. It does not change the IRD $1.04/km customer charge.</small></div>}<button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Calculating...' : 'Calculate job cost'}</button></form>
     {result && <div className="crm-finance-kpis" role="status"><span>Real cost <strong>{money(result.true_cost)}</strong></span><span>Price to customer <strong>{money(result.client_charge)}</strong></span><span>Left after costs <strong>{money(result.gross_margin)} ({result.gross_margin_pct}%)</strong></span><span>Gear cost per year <strong>{money(result.breakdown.depreciation_annual ?? 0)}</strong></span></div>}
   </section>;
 }
