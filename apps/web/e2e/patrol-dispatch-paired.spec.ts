@@ -32,7 +32,7 @@ test.describe('paired patrol and dispatch acceptance', () => {
     await expect(officer.getByText('Alarm response', { exact: true })).toBeVisible();
     events.push('officer-received-dispatch');
 
-    const complete = officer.getByRole('button', { name: 'Mark Completed' });
+    const complete = officer.getByRole('button', { name: 'Complete job' });
     await expect(complete).toBeDisabled();
     await officer.getByLabel('Outcome notes').fill('Paired test: entrance checked, panel reset, supervisor notified.');
     await expect(complete).toBeEnabled();

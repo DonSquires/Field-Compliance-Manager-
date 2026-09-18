@@ -194,6 +194,12 @@
   overflow-y: auto;
 }
 
+/* Module pages centre like Officer Home instead of shrink-wrapping to their widest line. */
+.officer-shell-content > .page-container {
+  width: 100%;
+  max-width: 1180px;
+}
+
 .officer-shell-safety-error {
   padding: 9px 16px;
   color: #fecaca;

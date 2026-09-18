@@ -1,0 +1,42 @@
+/* Officer dispatch: one job card = one walkthrough (acknowledge → travel → attend → complete). */
+.officer-dispatch-job { display: grid; gap: 12px; }
+.officer-dispatch-job .contact-header { align-items: flex-start; }
+.officer-dispatch-site { margin: 4px 0 0; color: var(--color-text-secondary, #94a3b8); font-size: 13px; overflow-wrap: anywhere; }
+
+.officer-dispatch-priority { flex: 0 0 auto; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; background: #22364a; color: #c6d8e6; }
+.officer-dispatch-priority.priority-urgent { background: #5a262c; color: #ffd4d4; }
+.officer-dispatch-priority.priority-high { background: #4b3721; color: #ffe1b5; }
+.officer-dispatch-priority.priority-low { background: #1c2f3a; color: #9fb7c6; }
+
+.officer-dispatch-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.officer-dispatch-steps li { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 4px; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-secondary, #94a3b8); font-size: 12px; font-weight: 600; }
+.officer-dispatch-steps li::before { content: attr(data-step); display: inline-grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; }
+.officer-dispatch-steps li.is-done { border-color: var(--color-success, #22c55e); color: var(--color-success, #22c55e); background: rgba(34, 197, 94, .08); }
+.officer-dispatch-steps li.is-done::before { content: '\2713'; }
+.officer-dispatch-steps li.is-next { border-color: #f2bf3a; color: #ffe1a1; background: rgba(242, 191, 58, .12); }
+
+.officer-dispatch-status { margin: 0; color: var(--color-text-secondary, #94a3b8); font-size: 13px; }
+.officer-dispatch-status strong { color: var(--color-text-primary, #e2e8f0); }
+.officer-dispatch-status.tone-due_soon { color: #ffd166; }
+.officer-dispatch-status.tone-due_soon strong { color: #ffd166; }
+.officer-dispatch-status.tone-overdue { color: #ff8a8a; }
+.officer-dispatch-status.tone-overdue strong { color: #ff8a8a; }
+
+.officer-dispatch-brief { display: grid; gap: 5px; padding: 10px 12px; border-left: 3px solid #4d7c96; border-radius: 4px; background: var(--color-bg-primary, #0b1723); font-size: 13px; }
+.officer-dispatch-brief h4 { margin: 0; color: #9ebbc8; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.officer-dispatch-brief p { margin: 0; color: var(--color-text-secondary, #94a3b8); overflow-wrap: anywhere; }
+.officer-dispatch-brief p.is-safety { color: #f4d88a; }
+
+.officer-dispatch-outcome small { display: block; margin-top: 4px; color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.officer-dispatch-action { min-height: 44px; width: 100%; }
+
+.officer-dispatch-empty { display: grid; gap: 10px; justify-items: center; text-align: center; }
+.officer-dispatch-empty small { color: var(--color-text-secondary, #94a3b8); }
+.officer-dispatch-empty .btn { display: inline-flex; align-items: center; gap: 7px; }
+
+@media (min-width: 720px) {
+  .officer-dispatch-action { width: auto; min-width: 220px; justify-self: start; }
+}
+@media (max-width: 480px) {
+  .officer-dispatch-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

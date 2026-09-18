@@ -15,6 +15,7 @@ import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { OfficerRouteGuidance } from '../components/OfficerRouteGuidance';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './OfficerDispatchPage.css';
 
 interface DispatchJob {
   id: string;
@@ -46,14 +47,47 @@ const NEXT_STATUS: Record<string, string> = {
   on_scene: 'completed',
 };
 
+// Button wording: what the officer is telling dispatch right now.
 const STATUS_LABEL: Record<string, string> = {
-  pending: 'Accept Job',
-  acknowledged: 'Start En Route',
-  dispatched: 'Acknowledge Job',
-  en_route: 'Mark On Scene',
-  on_scene: 'Mark Completed',
+  pending: 'Accept job',
+  dispatched: 'Acknowledge job',
+  acknowledged: 'On my way',
+  en_route: 'Arrived on site',
+  on_scene: 'Complete job',
 };
+const STATUS_TEXT: Record<string, string> = {
+  pending: 'Waiting to be dispatched',
+  dispatched: 'Dispatched to you',
+  acknowledged: 'Acknowledged',
+  en_route: 'On the way',
+  on_scene: 'On site',
+  completed: 'Finished',
+};
+const JOB_STEPS = [
+  { rank: 1, label: 'Acknowledge' },
+  { rank: 2, label: 'Travel' },
+  { rank: 3, label: 'Attend' },
+  { rank: 4, label: 'Complete' },
+];
+const STEP_RANK: Record<string, number> = { pending: 0, dispatched: 0, acknowledged: 1, en_route: 2, on_scene: 3, completed: 4 };
 const PRIORITY_WEIGHT: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+
+const humanise = (value: string) => {
+  const words = value.replaceAll('_', ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : value;
+};
+
+// Amber once three quarters of the response window has gone, red once it has passed.
+function responseTone(job: DispatchJob, now: number): { tone: 'on_track' | 'due_soon' | 'overdue'; label: string } | null {
+  if (!job.sla_respond_by || STEP_RANK[job.status] >= 3) return null;
+  const deadline = new Date(job.sla_respond_by).getTime();
+  const created = new Date(job.created_at).getTime();
+  const time = new Date(deadline).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' });
+  if (now > deadline) return { tone: 'overdue', label: `Response time passed at ${time}` };
+  const elapsed = deadline > created ? (now - created) / (deadline - created) : 0;
+  if (elapsed >= 0.75) return { tone: 'due_soon', label: `Respond by ${time} · due soon` };
+  return { tone: 'on_track', label: `Respond by ${time}` };
+}
 
 const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' | 'report' | 'debrief') => void }> = ({ onNavigate }) => {
   const location = useLocation();
@@ -195,7 +229,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
     <div className="page-container">
       <header className="page-header">
         <h1>Dispatch</h1>
-        <p className="subtitle">{jobs.length} active jobs on your shift</p>
+        <p className="subtitle">{jobs.length === 0 ? 'No jobs assigned to you right now' : `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'} assigned to you`}</p>
       </header>
 
       {error && (
@@ -231,51 +265,74 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
 
       <div className="contacts-list">
         {jobs.length === 0 ? (
-          <div className="empty-state">
+          <div className="empty-state officer-dispatch-empty">
             <p>No active dispatch jobs right now.</p>
+            <small>New jobs appear here the moment dispatch assigns them to you. Until then, carry on with your shift.</small>
+            <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('home')}><Home size={16} />Back to shift home</button>
           </div>
         ) : (
-          jobs.map((job) => (
-            <div key={job.id} id={`officer-dispatch-${job.id}`} className={`contact-card ${job.id === requestedJobId ? 'is-context-focus' : ''}`}>
-              <div className="contact-header">
-                <h3>{job.job_type}</h3>
-                <span className={`severity-badge severity-${job.priority === 'high' ? 'high' : 'low'}`}>
-                  {job.priority}
-                </span>
-              </div>
-              <div className="contact-details">
-                {job.site && <><p><strong>{job.site.name}</strong>{job.site.address && ` · ${job.site.address}`}</p>{job.site.access_instructions && <p>Access: {job.site.access_instructions}</p>}{job.site.hs_notes && <p><strong>Safety: </strong>{job.site.hs_notes}</p>}</>}
-                {job.briefing_notes && <p>{job.briefing_notes}</p>}
-                <p className="contact-meta">
-                  {job.status}
-                  {job.sla_respond_by ? ` · respond by ${new Date(job.sla_respond_by).toLocaleTimeString()}` : ''}
-                  {` · ${job.expected_dwell_minutes} min dwell`}
-                </p>
-              </div>
-              {job.status === 'on_scene' && (
-                <div className="form-group" style={{ marginTop: '10px' }}>
-                  <label htmlFor={`dispatch-outcome-${job.id}`}>Outcome notes</label>
-                  <textarea
-                    id={`dispatch-outcome-${job.id}`}
-                    rows={3}
-                    required
-                    value={outcomeNotes[job.id] ?? ''}
-                    onChange={(event) => setOutcomeNotes((current) => ({ ...current, [job.id]: event.target.value }))}
-                    placeholder="Record actions taken and the verified outcome"
-                  />
+          jobs.map((job) => {
+            const rank = STEP_RANK[job.status] ?? 0;
+            const response = responseTone(job, Date.now());
+            const isFocused = job.id === requestedJobId;
+            const briefHeading = rank >= 3 ? 'On-site notes' : 'Before you arrive';
+            return (
+              <article key={job.id} id={`officer-dispatch-${job.id}`} className={`contact-card officer-dispatch-job ${isFocused ? 'is-context-focus' : ''}`} aria-label={`${humanise(job.job_type)} at ${job.site?.name ?? 'unconfirmed site'}`}>
+                <div className="contact-header">
+                  <div>
+                    <h3>{humanise(job.job_type)}</h3>
+                    {job.site && <p className="officer-dispatch-site"><strong>{job.site.name}</strong>{job.site.address && ` · ${job.site.address}`}</p>}
+                  </div>
+                  <span className={`officer-dispatch-priority priority-${job.priority}`}>{job.priority}</span>
                 </div>
-              )}
-              {NEXT_STATUS[job.status] && (
-                <button
-                  className="btn btn-sm btn-primary"
-                  disabled={busyId === job.id || (job.status === 'on_scene' && !(outcomeNotes[job.id]?.trim()))}
-                  onClick={() => handleAdvanceStatus(job)}
-                >
-                  {STATUS_LABEL[job.status]}
-                </button>
-              )}
-            </div>
-          ))
+
+                <ol className="officer-dispatch-steps" aria-label="Job progress">
+                  {JOB_STEPS.map((step) => {
+                    const state = rank >= step.rank ? 'done' : rank === step.rank - 1 ? 'next' : 'later';
+                    return <li key={step.rank} className={`is-${state}`} data-step={step.rank} aria-current={state === 'next' ? 'step' : undefined}>{step.label}</li>;
+                  })}
+                </ol>
+
+                <p className={`officer-dispatch-status tone-${response?.tone ?? 'none'}`}>
+                  <strong>{STATUS_TEXT[job.status] ?? humanise(job.status)}</strong>
+                  {response ? ` · ${response.label}` : ''}
+                  {` · expect about ${job.expected_dwell_minutes} min on site`}
+                </p>
+
+                <section className="officer-dispatch-brief" aria-label={briefHeading}>
+                  <h4>{briefHeading}</h4>
+                  {job.site?.access_instructions && <p>Access: {job.site.access_instructions}</p>}
+                  {job.site?.hs_notes && <p className="is-safety"><strong>Safety: </strong>{job.site.hs_notes}</p>}
+                  {job.briefing_notes && <p>{job.briefing_notes}</p>}
+                  {!job.site?.access_instructions && !job.site?.hs_notes && !job.briefing_notes && <p>No access, safety, or briefing notes were recorded for this job.</p>}
+                </section>
+
+                {job.status === 'on_scene' && (
+                  <div className="form-group officer-dispatch-outcome">
+                    <label htmlFor={`dispatch-outcome-${job.id}`}>Outcome notes</label>
+                    <textarea
+                      id={`dispatch-outcome-${job.id}`}
+                      rows={3}
+                      required
+                      value={outcomeNotes[job.id] ?? ''}
+                      onChange={(event) => setOutcomeNotes((current) => ({ ...current, [job.id]: event.target.value }))}
+                      placeholder="Record actions taken and the verified outcome"
+                    />
+                    <small>Say what you found, what you did, and who you told. This goes on the client record.</small>
+                  </div>
+                )}
+                {NEXT_STATUS[job.status] && (
+                  <button
+                    className="btn btn-primary officer-dispatch-action"
+                    disabled={busyId === job.id || (job.status === 'on_scene' && !(outcomeNotes[job.id]?.trim()))}
+                    onClick={() => handleAdvanceStatus(job)}
+                  >
+                    {busyId === job.id ? 'Updating…' : STATUS_LABEL[job.status]}
+                  </button>
+                )}
+              </article>
+            );
+          })
         )}
       </div>
     </div>

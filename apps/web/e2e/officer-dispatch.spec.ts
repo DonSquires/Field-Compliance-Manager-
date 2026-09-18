@@ -12,8 +12,12 @@ test('dispatch completion keeps shift context and gives the officer a next comma
 
   await expect(page.getByRole('heading', { name: 'Dispatch', exact: true })).toBeVisible();
   await expect(page.getByText('Alarm response', { exact: true })).toBeVisible();
-  const complete = page.getByRole('button', { name: 'Mark Completed' });
+  const complete = page.getByRole('button', { name: 'Complete job' });
   await expect(complete).toBeDisabled();
+  const progress = page.getByRole('list', { name: 'Job progress' });
+  await expect(progress.getByRole('listitem')).toHaveText(['Acknowledge', 'Travel', 'Attend', 'Complete']);
+  await expect(progress.locator('[aria-current="step"]')).toHaveText('Complete');
+  await expect(page.getByRole('region', { name: 'On-site notes' })).toContainText('Use the north loading entrance.');
   await page.getByLabel('Outcome notes').fill('Entrance checked, alarm panel reset, and site contact notified.');
   await expect(complete).toBeEnabled();
   await complete.click();
@@ -26,6 +30,7 @@ test('dispatch completion keeps shift context and gives the officer a next comma
     await expect(receipt.getByRole('button', { name: command })).toBeVisible();
   }
   await expect(page.getByText('No active dispatch jobs right now.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back to shift home' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   await receipt.getByRole('button', { name: 'Open map' }).click();
@@ -40,7 +45,7 @@ test('personal dispatch notification opens the exact assigned job', async ({ pag
   const job = page.locator('#officer-dispatch-cccccccc-cccc-4ccc-8ccc-cccccccccccc');
   await expect(job).toHaveClass(/is-context-focus/);
   await expect(job.getByText('Alarm response', { exact: true })).toBeVisible();
-  await expect(job.getByRole('button', { name: 'Mark Completed' })).toBeVisible();
+  await expect(job.getByRole('button', { name: 'Complete job' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

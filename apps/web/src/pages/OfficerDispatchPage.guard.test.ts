@@ -41,13 +41,28 @@ describe('officer dispatch lifecycle boundary', () => {
   it('opens and focuses the exact personally delivered dispatch job', () => {
     expect(source).toContain("get('job')");
     expect(source).toContain('id={`officer-dispatch-${job.id}`}');
-    expect(source).toContain("job.id === requestedJobId ? 'is-context-focus' : ''");
+    expect(source).toContain('const isFocused = job.id === requestedJobId;');
+    expect(source).toContain("${isFocused ? 'is-context-focus' : ''}");
   });
 
   it('shows location, access, and safety context before attendance', () => {
     expect(source).toContain('site:client_site_id(name, address, hs_notes, access_instructions)');
     expect(source).toContain('Access: {job.site.access_instructions}');
     expect(source).toContain('Safety: ');
+    expect(source).toContain("const briefHeading = rank >= 3 ? 'On-site notes' : 'Before you arrive';");
+  });
+
+  it('walks the officer through the job in plain words with one action at a time', () => {
+    expect(source).toContain("acknowledged: 'On my way'");
+    expect(source).toContain("en_route: 'Arrived on site'");
+    expect(source).toContain("on_scene: 'Complete job'");
+    expect(source).toContain("{ rank: 1, label: 'Acknowledge' }");
+    expect(source).toContain("{ rank: 4, label: 'Complete' }");
+    expect(source).toContain("aria-current={state === 'next' ? 'step' : undefined}");
+    expect(source).toContain("tone: 'overdue', label: `Response time passed at ${time}`");
+    expect(source).toContain('elapsed >= 0.75');
+    expect(source).toContain('Back to shift home');
+    expect(source).not.toContain('<h3>{job.job_type}</h3>');
   });
 
   it('returns the locked job context without widening RPC access', () => {
