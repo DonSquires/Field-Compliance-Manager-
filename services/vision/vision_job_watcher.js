@@ -697,17 +697,18 @@ async function ensurePlaybackCopy(job, evidence, videoPath) {
     .upload(destinationPath, bytes, { contentType: 'video/mp4', upsert: true });
   if (uploadError) throw new Error(`playback upload failed: ${uploadError.message}`);
 
-  const { error: updateError } = await supabase
-    .from('evidence_items')
-    .update({ metadata: {
-      ...(evidence.metadata || {}),
+  // Merged in the database (jsonb ||), never replaced from this stale read: the source hash provenance recorded a
+  // moment ago must survive, and the custody guard would refuse a replacement on sealed evidence anyway.
+  const { error: updateError } = await supabase.rpc('set_cctv_playback_copy', {
+    p_evidence_id: evidence.id,
+    p_playback: {
       playback_storage_path: destinationPath,
       playback_content_type: 'video/mp4',
       playback_transcode_profile: PLAYBACK_PROFILES[strategy],
       playback_source_codec: probe?.codec_name || null,
       playback_source_preserved: true,
-    } })
-    .eq('id', evidence.id);
+    },
+  });
   if (updateError) throw new Error(`evidence playback metadata update failed: ${updateError.message}`);
   log('playback_copy_ready', { job_id: job.id, evidence_item_id: evidence.id, destination_path: destinationPath, strategy, source_codec: probe?.codec_name || null });
 }
@@ -754,16 +755,32 @@ async function hashFile(filePath) {
   return { sha256: hash.digest('hex'), size };
 }
 
-// The stored source bytes are hashed once so a reviewer can lock the recording against retention with an
-// integrity anchor. Never overwrites a hash the intake already recorded; skipped once the item is locked.
+// Chain of custody for the stored source bytes. The first pass records the hash so a reviewer can seal the
+// recording with an integrity anchor; every later pass (re-run, resume, re-analysis) re-measures the same
+// bytes and records whether they still match — the only way a silent change to a stored recording is ever seen.
+// Never overwrites a recorded hash: a differing measurement is an integrity finding, recorded as a mismatch.
 async function recordSourceHash(job, evidence, videoPath) {
-  if (evidence.metadata?.source_sha256 || evidence.locked_at) return null;
+  const recorded = String(evidence.sha256_hash || evidence.metadata?.source_sha256 || '').toLowerCase() || null;
   try {
     const { sha256, size } = await hashFile(videoPath);
-    const { error } = await supabase.rpc('record_cctv_source_hash', { p_evidence_id: evidence.id, p_sha256: sha256, p_size_bytes: size });
-    if (error) throw new Error(error.message);
-    log('source_hash_recorded', { job_id: job.id, evidence_item_id: evidence.id, bytes: size });
-    return sha256;
+    if (!recorded && !evidence.locked_at) {
+      const { data, error } = await supabase.rpc('record_cctv_source_hash', { p_evidence_id: evidence.id, p_sha256: sha256, p_size_bytes: size });
+      if (error) throw new Error(error.message);
+      if (data === true) {
+        log('source_hash_recorded', { job_id: job.id, evidence_item_id: evidence.id, bytes: size });
+        return { sha256, size, state: 'recorded' };
+      }
+      // Another pass recorded a hash between our read and this write; fall through and verify against it.
+    }
+    const { data: check, error: checkError } = await supabase.rpc('record_cctv_integrity_check', {
+      p_evidence_id: evidence.id, p_sha256_observed: sha256, p_size_bytes: size, p_checked_by: 'vision_worker',
+    });
+    if (checkError) throw new Error(checkError.message);
+    const state = check?.state || 'unknown';
+    log(state === 'verified' ? 'source_integrity_verified' : 'source_integrity_finding', {
+      job_id: job.id, evidence_item_id: evidence.id, bytes: size, state, expected_sha256: check?.expected_sha256 || null, observed_sha256: sha256,
+    });
+    return { sha256, size, state };
   } catch (error) {
     log('source_hash_failed', { job_id: job.id, evidence_item_id: evidence.id, error: error.message });
     return null;
@@ -791,7 +808,7 @@ async function processOne() {
     await updateProgress(job, 'loading_evidence', { label: 'Loading evidence file' });
     const { data: evidence, error: evidenceError } = await supabase
       .from('evidence_items')
-      .select('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id, locked_at')
+      .select('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id, locked_at, sha256_hash')
       .eq('id', job.evidence_item_id)
       .eq('organization_id', job.organization_id)
       .maybeSingle();

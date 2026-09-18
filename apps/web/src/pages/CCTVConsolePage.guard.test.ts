@@ -100,6 +100,18 @@ describe('CCTV console', () => {
     expect(tile).toContain('React.forwardRef<CCTVPlayerTileHandle');
   });
 
+  it('shows chain of custody from the governed record, never from browser-held state alone', () => {
+    expect(page).toContain("supabase.rpc('cctv_evidence_custody', { p_evidence_id: evidenceId })");
+    expect(page).toContain('integrity: parseClipIntegrity(metadata.integrity)');
+    expect(page).toContain('custodyBadge(clip)');
+    expect(page).toContain('aria-label="Custody record"');
+    expect(page).toContain("cctv_evidence_integrity_mismatch: 'Stored bytes did NOT match the recorded hash'");
+    expect(page).toContain('Treat this recording as altered until the custodian explains it.');
+    expect(page).not.toMatch(/from\('evidence_items'\)[\s\S]{0,300}\.(update|delete)\(/);
+    expect(styles).toContain('.cctv-clip__custody.is-mismatch');
+    expect(styles).toContain('.cctv-console__custody.is-mismatch { border-color: var(--cc-critical); }');
+  });
+
   it('lets the timeline track and control recordings opened on their own clocks', () => {
     // Recordings on the wall appear on the timeline and bound it.
     expect(page).toContain("if (item.kind !== 'clip' || seen.has(item.evidenceId)) continue;");

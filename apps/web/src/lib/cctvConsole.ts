@@ -28,7 +28,38 @@ export type ConsoleClip = {
   courtReady: boolean;
   lockedAt: string | null;
   retentionHold: boolean;
+  /** Latest re-measurement of the stored bytes against the recorded hash (record_cctv_integrity_check). */
+  integrity: ClipIntegrity | null;
 };
+
+export type ClipIntegrityState = 'verified' | 'mismatch' | 'unanchored';
+export type ClipIntegrity = { state: ClipIntegrityState; checkedAt: string | null; checkCount: number; mismatchCount: number };
+
+export function parseClipIntegrity(value: unknown): ClipIntegrity | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const state = record.state;
+  if (state !== 'verified' && state !== 'mismatch' && state !== 'unanchored') return null;
+  return {
+    state,
+    checkedAt: typeof record.checked_at === 'string' ? record.checked_at : null,
+    checkCount: typeof record.check_count === 'number' ? record.check_count : Number(record.check_count) || 0,
+    mismatchCount: typeof record.mismatch_count === 'number' ? record.mismatch_count : Number(record.mismatch_count) || 0,
+  };
+}
+
+export type CustodyBadge = { label: string; tone: 'locked' | 'hashed' | 'none' | 'mismatch'; detail: string };
+
+/** What a reviewer needs to know about a recording's custody at a glance; a mismatch always wins. */
+export function custodyBadge(clip: Pick<ConsoleClip, 'sha256' | 'lockedAt' | 'integrity'>): CustodyBadge {
+  if (clip.integrity?.state === 'mismatch') {
+    return { label: 'Integrity mismatch', tone: 'mismatch', detail: `The stored bytes no longer match the recorded hash (${clip.integrity.mismatchCount} of ${clip.integrity.checkCount} checks). Treat this recording as altered until the custodian explains it.` };
+  }
+  const verified = clip.integrity?.state === 'verified' ? ` · verified ${clip.integrity.checkCount === 1 ? 'once' : `${clip.integrity.checkCount} times`}` : '';
+  if (clip.lockedAt) return { label: 'Locked', tone: 'locked', detail: `Sealed with hash ${clip.sha256 ?? 'unknown'}${verified}. Retention cannot purge it; the hash, file and capture time are frozen.` };
+  if (clip.sha256) return { label: 'Hashed', tone: 'hashed', detail: `Integrity hash ${clip.sha256}${verified}. Not yet sealed; an administrator can lock it.` };
+  return { label: 'No hash yet', tone: 'none', detail: 'The analysis worker records the integrity hash when it first processes this recording. Until then it cannot be locked.' };
+}
 
 export type MarkSeverity = 'motion' | 'detection' | 'alert' | 'quality';
 

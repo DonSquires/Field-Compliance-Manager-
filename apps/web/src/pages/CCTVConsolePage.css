@@ -107,6 +107,11 @@
 .cctv-clip__status.is-failed { color: var(--cc-critical); }
 .cctv-clip__status.is-manual_review_required, .cctv-clip__status.is-inconclusive { color: var(--cc-action); }
 .cctv-clip__lock { align-items: center; color: var(--cc-watch); display: inline-flex; font-weight: 700; gap: 3px; }
+.cctv-clip__custody { align-items: center; display: inline-flex; gap: 3px; }
+.cctv-clip__custody.is-locked { color: var(--cc-watch); font-weight: 700; }
+.cctv-clip__custody.is-hashed { color: var(--cc-normal); }
+.cctv-clip__custody.is-none { color: var(--cc-text-3); }
+.cctv-clip__custody.is-mismatch { background: rgba(216, 80, 80, .18); border-radius: 3px; color: #ffb4ad; font-weight: 700; padding: 0 4px; }
 .cctv-clip__actions { display: inline-flex; flex: 0 0 auto; gap: 0; }
 
 /* Wall */
@@ -151,6 +156,7 @@
 .cctv-console__ctl.is-primary { background: var(--cc-brand); border-color: var(--cc-brand); color: var(--cc-brand-ink); min-width: 44px; }
 .cctv-console__ctl.is-on { background: var(--cc-brand); border-color: var(--cc-brand); color: var(--cc-brand-ink); }
 .cctv-console__ctl.is-locked { border-color: var(--cc-watch); color: var(--cc-watch); }
+.cctv-console__ctl.is-mismatch { border-color: var(--cc-critical); color: #ffb4ad; }
 .cctv-console__ctl:disabled { cursor: default; opacity: .45; }
 .cctv-console__clock { display: grid; margin: 0 8px; min-width: 150px; }
 .cctv-console__clock strong { color: var(--cc-text); font-family: var(--cc-mono); font-size: 18px; font-variant-numeric: tabular-nums; }
@@ -177,6 +183,23 @@
 .cctv-console__evidence-form-head svg { align-self: center; color: var(--cc-brand); }
 .cctv-console__evidence-form.is-lock .cctv-console__evidence-form-head svg { color: var(--cc-watch); }
 .cctv-console__evidence-form-head small { color: var(--cc-text-3); font-size: 12px; }
+
+/* Custody record: hash, seal, latest integrity check and the audited trail, read through cctv_evidence_custody. */
+.cctv-console__custody { background: var(--cc-surface); border: 1px solid var(--cc-line-strong); border-radius: 6px; display: grid; gap: 10px; padding: 12px; }
+.cctv-console__custody.is-mismatch { border-color: var(--cc-critical); }
+.cctv-console__custody .cctv-console__evidence-form-head svg { color: var(--cc-normal); }
+.cctv-console__custody.is-mismatch .cctv-console__evidence-form-head svg { color: var(--cc-critical); }
+.cctv-console__custody .cctv-console__evidence-form-head .cctv-console__icon-btn { margin-left: auto; }
+.cctv-console__custody-facts { display: grid; gap: 8px; margin: 0; }
+.cctv-console__custody-facts div { display: grid; gap: 2px; }
+.cctv-console__custody-facts dt { color: var(--cc-text-3); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.cctv-console__custody-facts dd { color: var(--cc-text-2); font-size: 13px; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
+.cctv-console__custody-facts code { color: var(--cc-text); font-family: var(--cc-mono); font-size: 12px; }
+.cctv-console__custody-trail { border-top: 1px solid var(--cc-line); display: grid; gap: 6px; list-style: none; margin: 0; padding: 10px 0 0; }
+.cctv-console__custody-trail li { color: var(--cc-text-2); display: grid; font-size: 12px; gap: 2px 12px; grid-template-columns: minmax(150px, auto) 1fr; }
+.cctv-console__custody-trail time { color: var(--cc-text-3); font-family: var(--cc-mono); font-variant-numeric: tabular-nums; }
+.cctv-console__custody-trail li.is-mismatch span { color: #ffb4ad; font-weight: 700; }
+@media (max-width: 720px) { .cctv-console__custody-trail li { grid-template-columns: 1fr; } }
 .cctv-console__evidence-message { align-items: center; display: flex; gap: 6px; margin: 0; }
 
 /* Timeline */

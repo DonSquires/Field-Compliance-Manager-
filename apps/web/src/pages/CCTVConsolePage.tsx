@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Rewind,
   RotateCcw,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   StepBack,
@@ -48,6 +49,7 @@ import {
   clipStatusLabel,
   clampMs,
   createRefreshCoalescer,
+  custodyBadge,
   DEFAULT_CCTV_INSPECTION,
   describeConsoleFailure,
   durationLabel,
@@ -71,6 +73,7 @@ import {
   nextRate,
   normalizeCCTVInspection,
   observationCountsByEvidence,
+  parseClipIntegrity,
   parseMs,
   previousClipBefore,
   timelineBounds,
@@ -119,6 +122,31 @@ type ImportRow = {
 type KindFilter = 'all' | EntityKind;
 type BookmarkDraft = { evidenceId: string; atMs: number; title: string; notes: string; severity: 'low' | 'standard' | 'high' | 'critical'; observationId: string | null };
 type LockDraft = { evidenceId: string; reason: string };
+type CustodyEvent = { at: string; kind: string; actor_user_id: string | null; detail: Record<string, unknown> };
+type CustodyRecord = {
+  evidence_item_id: string;
+  storage_path: string | null;
+  captured_at: string;
+  sha256_hash: string | null;
+  source_size_bytes: number | null;
+  source_hashed_at: string | null;
+  is_court_ready: boolean;
+  locked_at: string | null;
+  lock: { locked_by?: string; reason?: string; locked_at?: string } | null;
+  retention_hold: boolean;
+  retention_reason: string | null;
+  integrity: { state?: string; checked_at?: string; checked_by?: string; check_count?: number; mismatch_count?: number; first_verified_at?: string } | null;
+  events: CustodyEvent[];
+};
+
+const CUSTODY_EVENT_LABEL: Record<string, string> = {
+  cctv_evidence_locked: 'Evidence lock applied',
+  cctv_bookmark_created: 'Bookmark recorded as an incident',
+  cctv_evidence_integrity_verified: 'Stored bytes verified against the recorded hash',
+  cctv_evidence_integrity_mismatch: 'Stored bytes did NOT match the recorded hash',
+  cctv_evidence_integrity_unanchored: 'Bytes measured before any hash was recorded',
+  cctv_report_issued: 'Report receipt issued',
+};
 
 const SIGNED_URL_TTL_SECONDS = 3600;
 const DETAIL_POLL_INTERVAL_MS = 10_000;
@@ -239,6 +267,7 @@ const CCTVConsolePage: React.FC = () => {
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
   const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
   const [lockDraft, setLockDraft] = useState<LockDraft | null>(null);
+  const [custody, setCustody] = useState<{ evidenceId: string; loading: boolean; record: CustodyRecord | null; error: string | null } | null>(null);
   const [evidenceBusy, setEvidenceBusy] = useState<string | null>(null);
   const [evidenceMessage, setEvidenceMessage] = useState<string | null>(null);
 
@@ -386,6 +415,7 @@ const CCTVConsolePage: React.FC = () => {
         courtReady: Boolean(row.is_court_ready),
         lockedAt: row.locked_at,
         retentionHold: Boolean(row.retention_hold),
+        integrity: parseClipIntegrity(metadata.integrity),
       }];
     });
     const marks: ConsoleMark[] = ((marksRes.data as Array<Record<string, unknown>>) ?? []).flatMap((row) => {
@@ -709,6 +739,22 @@ const CCTVConsolePage: React.FC = () => {
     if (clip) void loadImportDetail(clip.importId);
   };
 
+  // The custody record is read through the governed RPC so the trail comes from audit_log and receipts, not from
+  // whatever the browser happens to hold.
+  const openCustody = async (evidenceId: string) => {
+    setCustody({ evidenceId, loading: true, record: null, error: null });
+    const { data, error: custodyError } = await supabase.rpc('cctv_evidence_custody', { p_evidence_id: evidenceId });
+    if (custodyError) {
+      setCustody({ evidenceId, loading: false, record: null, error: describeConsoleFailure(custodyError.message, 'custody record', navigator.onLine).text });
+      return;
+    }
+    setCustody({ evidenceId, loading: false, record: data as CustodyRecord, error: null });
+  };
+
+  useEffect(() => {
+    if (custody && !clipsById.has(custody.evidenceId)) setCustody(null);
+  }, [custody, clipsById]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -937,7 +983,7 @@ const CCTVConsolePage: React.FC = () => {
                                     <span className={`cctv-clip__status is-${clip.jobStatus}`}>{clipStatusLabel(clip.jobStatus)}</span>
                                     {counts ? <span>{counts.total} sighting{counts.total === 1 ? '' : 's'}{counts.pending ? ` · ${counts.pending} to review` : ''}{counts.alerts ? ` · ${counts.alerts} alert${counts.alerts === 1 ? '' : 's'}` : ''}</span> : <span>No sightings</span>}
                                     <span>{bytesLabel(clip.sizeBytes)}</span>
-                                    {clip.lockedAt ? <span className="cctv-clip__lock"><Lock size={11} aria-hidden="true" /> Locked</span> : clip.sha256 ? <span title={clip.sha256}>Hashed</span> : <span>No hash yet</span>}
+                                    {(() => { const badge = custodyBadge(clip); return <span className={`cctv-clip__custody is-${badge.tone}`} title={badge.detail}>{badge.tone === 'locked' ? <Lock size={11} aria-hidden="true" /> : badge.tone === 'mismatch' ? <AlertTriangle size={11} aria-hidden="true" /> : null} {badge.label}</span>; })()}
                                   </small>
                                 </span>
                               </button>
@@ -1018,6 +1064,7 @@ const CCTVConsolePage: React.FC = () => {
               <button type="button" className="cctv-console__ctl" onClick={startBookmark} disabled={!activeClip} aria-label="Bookmark this moment" title="Bookmark this moment as an incident (b)"><Bookmark size={16} aria-hidden="true" /> Bookmark</button>
               <button type="button" className="cctv-console__ctl" onClick={() => void captureSnapshot()} disabled={!activeClip} aria-label="Save a still" title="Save a still of the active tile (s)"><ImageDown size={16} aria-hidden="true" /> Still</button>
               {isAdmin ? <button type="button" className={`cctv-console__ctl${activeClip?.lockedAt ? ' is-locked' : ''}`} onClick={() => activeClip && !activeClip.lockedAt && setLockDraft({ evidenceId: activeClip.evidenceId, reason: '' })} disabled={!activeClip || Boolean(activeClip.lockedAt) || !activeClip.sha256} aria-label={activeClip?.lockedAt ? 'Recording is locked' : 'Lock this recording'} title={activeClip?.lockedAt ? `Locked ${formatDate(parseMs(activeClip.lockedAt) ?? 0, timeZone)}` : activeClip && !activeClip.sha256 ? 'Locking needs the integrity hash the analysis records' : 'Evidence lock: retention cannot purge this recording'}><Lock size={16} aria-hidden="true" /> {activeClip?.lockedAt ? 'Locked' : 'Lock'}</button> : null}
+              <button type="button" className={`cctv-console__ctl${activeClip?.integrity?.state === 'mismatch' ? ' is-mismatch' : ''}${custody && activeClip && custody.evidenceId === activeClip.evidenceId ? ' is-on' : ''}`} onClick={() => activeClip && (custody?.evidenceId === activeClip.evidenceId ? setCustody(null) : void openCustody(activeClip.evidenceId))} disabled={!activeClip} aria-pressed={Boolean(custody && activeClip && custody.evidenceId === activeClip.evidenceId)} aria-label="Custody record" title={activeClip ? custodyBadge(activeClip).detail : 'Custody record: hash, seal, integrity checks and the audit trail'}><ShieldCheck size={16} aria-hidden="true" /> Custody</button>
             </div>
             <div className="cctv-console__layouts" role="group" aria-label="Grid layout">
               {GRID_LAYOUTS.map((option) => <button key={option} type="button" className={`cctv-console__ctl${layout === option ? ' is-on' : ''}`} onClick={() => setLayout(option)} aria-pressed={layout === option} aria-label={`${option} tile grid`}>{option === 1 ? <Maximize2 size={16} aria-hidden="true" /> : <><Grid2x2 size={16} aria-hidden="true" />{option}</>}</button>)}
@@ -1072,6 +1119,40 @@ const CCTVConsolePage: React.FC = () => {
             </form>
           ) : null}
           {evidenceMessage ? <p className="cctv-console__muted cctv-console__evidence-message" role="status">{evidenceBusy ? <Loader2 size={14} className="spin" aria-hidden="true" /> : null} {evidenceMessage}</p> : null}
+
+          {custody ? (
+            <section className={`cctv-console__custody${custody.record?.integrity?.state === 'mismatch' ? ' is-mismatch' : ''}`} aria-label="Custody record" aria-live="polite">
+              <div className="cctv-console__evidence-form-head">
+                <ShieldCheck size={15} aria-hidden="true" />
+                <strong>Custody of {clipsById.get(custody.evidenceId)?.fileName ?? 'recording'}</strong>
+                <button type="button" className="cctv-console__icon-btn" onClick={() => setCustody(null)} aria-label="Close custody record"><X size={14} aria-hidden="true" /></button>
+              </div>
+              {custody.loading ? <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Reading the custody record…</p> : null}
+              {custody.error ? <p className="cctv-console__muted" role="alert">{custody.error}</p> : null}
+              {custody.record ? (
+                <>
+                  <dl className="cctv-console__custody-facts">
+                    <div><dt>Integrity hash</dt><dd>{custody.record.sha256_hash ? <code>{custody.record.sha256_hash}</code> : 'Not yet recorded'}{custody.record.source_size_bytes ? ` · ${bytesLabel(custody.record.source_size_bytes)}` : ''}{custody.record.source_hashed_at ? ` · measured ${formatDate(parseMs(custody.record.source_hashed_at) ?? 0, timeZone)}` : ''}</dd></div>
+                    <div><dt>Seal</dt><dd>{custody.record.locked_at ? `Locked ${formatDate(parseMs(custody.record.locked_at) ?? 0, timeZone)}${custody.record.lock?.reason ? ` — ${custody.record.lock.reason}` : ''}. Hash, file and capture time are frozen; retention cannot purge it.` : 'Not sealed. Retention rules apply until an administrator locks it.'}</dd></div>
+                    <div><dt>Last integrity check</dt><dd>{custody.record.integrity?.state === 'verified' ? `Verified ${custody.record.integrity.checked_at ? formatDate(parseMs(custody.record.integrity.checked_at) ?? 0, timeZone) : ''} by ${custody.record.integrity.checked_by ?? 'the analysis worker'} (${custody.record.integrity.check_count ?? 1} check${(custody.record.integrity.check_count ?? 1) === 1 ? '' : 's'}, ${custody.record.integrity.mismatch_count ?? 0} mismatch${(custody.record.integrity.mismatch_count ?? 0) === 1 ? '' : 'es'})`
+                      : custody.record.integrity?.state === 'mismatch' ? `MISMATCH ${custody.record.integrity.checked_at ? formatDate(parseMs(custody.record.integrity.checked_at) ?? 0, timeZone) : ''}: the stored bytes no longer match the recorded hash. Treat this recording as altered until the custodian explains it.`
+                        : custody.record.integrity?.state === 'unanchored' ? 'Measured before any hash was recorded; no comparison was possible.'
+                          : 'Not yet re-measured. The worker verifies the stored bytes each time it processes this recording.'}</dd></div>
+                  </dl>
+                  {custody.record.events.length ? (
+                    <ol className="cctv-console__custody-trail">
+                      {custody.record.events.map((event, index) => (
+                        <li key={`${event.kind}-${event.at}-${index}`} className={event.kind === 'cctv_evidence_integrity_mismatch' ? 'is-mismatch' : undefined}>
+                          <time dateTime={event.at}>{formatDate(parseMs(event.at) ?? 0, timeZone)}</time>
+                          <span>{CUSTODY_EVENT_LABEL[event.kind] ?? event.kind.replace(/_/g, ' ')}{typeof event.detail.reason === 'string' ? ` — ${event.detail.reason}` : ''}{typeof event.detail.batch_id === 'string' ? ` · batch ${event.detail.batch_id}` : ''}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : <p className="cctv-console__muted">No custody events yet: nothing has locked, bookmarked, verified or exported this recording.</p>}
+                </>
+              ) : null}
+            </section>
+          ) : null}
 
           {bounds && view && clockMs !== null ? (
             <CCTVTimeline view={view} bounds={bounds} clockMs={clockMs} clips={visibleClips} marks={visibleMarks} observations={visibleObservations}

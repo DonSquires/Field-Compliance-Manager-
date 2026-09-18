@@ -8,6 +8,7 @@ import {
   clipStatusLabel,
   clusterMarks,
   createRefreshCoalescer,
+  custodyBadge,
   DEFAULT_CCTV_INSPECTION,
   describeConsoleFailure,
   durationLabel,
@@ -31,6 +32,7 @@ import {
   observationCountsByEvidence,
   observationsToPins,
   panView,
+  parseClipIntegrity,
   tickIntervalMs,
   ticksFor,
   timeToX,
@@ -46,7 +48,7 @@ const T0 = Date.parse('2026-09-15T02:18:19.000Z');
 const clip = (start: number, end: number, id = `c${start}`): ConsoleClip => ({
   evidenceId: id, importId: 'imp', jobId: null, jobStatus: 'complete', fileName: id, startMs: T0 + start * 1000, endMs: T0 + end * 1000,
   bucket: 'bob-uploads', playbackPath: null, sourcePath: `org/x/cctv/imp/${id}.mp4`, fileType: 'video/mp4',
-  sizeBytes: null, sha256: null, courtReady: false, lockedAt: null, retentionHold: false,
+  sizeBytes: null, sha256: null, courtReady: false, lockedAt: null, retentionHold: false, integrity: null,
 });
 const mark = (start: number, end: number, severity: ConsoleMark['severity'], id = `m${start}`): ConsoleMark => ({
   id, startMs: T0 + start * 1000, endMs: T0 + end * 1000, severity, source: 'device_snapshot', kind: 'motion', thumbnailPath: null, label: id,
@@ -279,6 +281,28 @@ describe('entities and portfolio actions', () => {
     ]);
     expect(pins.map((pin) => pin.severity)).toEqual(['alert', 'alert', 'detection']);
     expect(pins[1].endMs - pins[1].startMs).toBe(1000);
+  });
+});
+
+describe('chain of custody', () => {
+  it('reads the worker integrity record and ignores anything malformed', () => {
+    expect(parseClipIntegrity(null)).toBeNull();
+    expect(parseClipIntegrity({ state: 'tampered' })).toBeNull();
+    expect(parseClipIntegrity({ state: 'verified', checked_at: '2026-09-18T10:00:00Z', check_count: 3, mismatch_count: 0 }))
+      .toEqual({ state: 'verified', checkedAt: '2026-09-18T10:00:00Z', checkCount: 3, mismatchCount: 0 });
+    expect(parseClipIntegrity({ state: 'mismatch', check_count: '2', mismatch_count: '1' })).toMatchObject({ state: 'mismatch', checkCount: 2, mismatchCount: 1 });
+  });
+
+  it('badges custody honestly: a mismatch outranks a lock, a lock outranks a bare hash', () => {
+    const hash = 'ab'.repeat(32);
+    expect(custodyBadge({ sha256: null, lockedAt: null, integrity: null })).toMatchObject({ label: 'No hash yet', tone: 'none' });
+    expect(custodyBadge({ sha256: hash, lockedAt: null, integrity: null })).toMatchObject({ label: 'Hashed', tone: 'hashed' });
+    const locked = custodyBadge({ sha256: hash, lockedAt: '2026-09-18T10:00:00Z', integrity: { state: 'verified', checkedAt: null, checkCount: 2, mismatchCount: 0 } });
+    expect(locked).toMatchObject({ label: 'Locked', tone: 'locked' });
+    expect(locked.detail).toContain('verified 2 times');
+    const mismatch = custodyBadge({ sha256: hash, lockedAt: '2026-09-18T10:00:00Z', integrity: { state: 'mismatch', checkedAt: null, checkCount: 3, mismatchCount: 1 } });
+    expect(mismatch).toMatchObject({ label: 'Integrity mismatch', tone: 'mismatch' });
+    expect(mismatch.detail).toContain('Treat this recording as altered');
   });
 });
 
