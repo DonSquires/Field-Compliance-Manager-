@@ -12,6 +12,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { countCompletedCheckpoints, evaluateCheckpointVisit, mapCheckpointVisitScanMethod } from '../lib/checkpointVisit';
+import { OfficerPatrolStops } from '../components/OfficerPatrolStops';
 import './PageStyles.css';
 
 interface Shift {
@@ -539,6 +540,8 @@ const PatrolPage: React.FC = () => {
                   </button>
                 </div>
               )}
+
+              <OfficerPatrolStops key={session.shift.id} shiftId={session.shift.id} />
 
               {session.id && session.status === 'in_progress' && (
                 <div className="checkpoints-container" style={{ marginTop: '16px' }}>

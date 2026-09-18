@@ -1,0 +1,40 @@
+/* Officer contracted stops: one current stop, one action, plain words. */
+.patrol-stops { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid var(--color-border, #334155); border-radius: 10px; background: var(--color-bg-secondary, #0f172a); }
+.patrol-stops-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.patrol-stops-header h3 { margin: 2px 0 0; font-size: 16px; }
+.patrol-stops-kicker { color: var(--color-text-secondary, #94a3b8); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.patrol-stops-refresh { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-primary, #e2e8f0); background: transparent; cursor: pointer; }
+.patrol-stops-subtle { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--color-text-secondary, #94a3b8); font-size: 13px; }
+
+.patrol-stops-message { display: flex; align-items: flex-start; gap: 8px; padding: 9px 11px; border-radius: 6px; font-size: 13px; }
+.patrol-stops-message > svg { flex: 0 0 auto; margin-top: 1px; }
+.patrol-stops-message.is-error { border: 1px solid #8f2e2e; color: #fecaca; background: #351a1a; }
+.patrol-stops-message.is-success { border: 1px solid #276044; color: #d6f5e3; background: #0f2a1c; }
+
+.patrol-stops-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.patrol-stop { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px; border: 1px solid var(--color-border, #334155); border-radius: 8px; background: var(--color-bg-primary, #0b1723); }
+.patrol-stop.is-current { border-color: #f2bf3a; box-shadow: 0 0 0 1px rgba(242, 191, 58, .35); }
+.patrol-stop.is-done { opacity: .85; }
+.patrol-stop.is-later, .patrol-stop.is-off { opacity: .6; }
+.patrol-stop.is-late { border-left: 3px solid #ff8a8a; }
+.patrol-stop-number { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid currentColor; border-radius: 50%; color: var(--color-text-secondary, #94a3b8); font-size: 12px; font-weight: 800; }
+.patrol-stop.is-done .patrol-stop-number { border-color: var(--color-success, #22c55e); color: var(--color-success, #22c55e); }
+.patrol-stop.is-current .patrol-stop-number { border-color: #f2bf3a; color: #ffe1a1; }
+.patrol-stop-body { display: grid; gap: 6px; min-width: 0; }
+.patrol-stop-title { display: grid; gap: 2px; }
+.patrol-stop-title strong { font-size: 14px; }
+.patrol-stop-title span { color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.patrol-stop-address, .patrol-stop-notes { margin: 0; color: var(--color-text-secondary, #94a3b8); font-size: 12px; overflow-wrap: anywhere; }
+.patrol-stop-brief { display: grid; gap: 4px; padding: 8px 10px; border-left: 3px solid #4d7c96; border-radius: 4px; background: rgba(77, 124, 150, .1); font-size: 13px; }
+.patrol-stop-brief p { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; color: var(--color-text-secondary, #94a3b8); overflow-wrap: anywhere; }
+.patrol-stop-brief p strong { color: var(--color-text-primary, #e2e8f0); }
+.patrol-stop-brief p.is-safety { color: #f4d88a; }
+.patrol-stop-brief p.is-safety strong { color: #f4d88a; }
+.patrol-stop-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; width: 100%; }
+.patrol-stop-depart { display: grid; gap: 8px; }
+.patrol-stop-depart label { display: grid; gap: 4px; color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.patrol-stop-depart textarea, .patrol-stop-depart input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-primary, #e2e8f0); background: var(--color-bg-secondary, #0f172a); font: inherit; font-size: 13px; }
+
+@media (min-width: 720px) {
+  .patrol-stop-action { width: auto; min-width: 240px; justify-self: start; }
+}

@@ -1938,6 +1938,12 @@
     grid-template-columns: 1fr;
   }
 
+  /* Officer patrol / smoke pages: shift list stacks above the working area on phones. */
+  .patrol-layout,
+  .smoke-layout {
+    grid-template-columns: 1fr;
+  }
+
   .officer-next-job { align-items: stretch; flex-direction: column; }
   .officer-next-job .officer-primary-action { width: 100%; }
 
