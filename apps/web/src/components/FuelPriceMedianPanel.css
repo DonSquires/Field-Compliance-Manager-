@@ -16,4 +16,9 @@
 .fuel-price-panel__sources { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .fuel-price-panel__sources li { display: grid; grid-template-columns: 100px 100px 1fr; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--color-border); font-size: 12px; }
 .fuel-price-panel__sources a { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-primary); }
+.fuel-price-panel__approved-sources { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.fuel-price-panel__approved-sources li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--color-border); }
+.fuel-price-panel__approved-sources li > div { display: grid; gap: 3px; min-width: 0; }
+.fuel-price-panel__approved-sources a { display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; color: var(--color-text-primary); font-size: 12px; }
+.fuel-price-panel__approved-sources small { color: var(--color-text-muted); font-size: 11px; }
 @media (max-width: 640px) { .fuel-price-panel__controls { grid-template-columns: 1fr; } .fuel-price-panel__controls .btn { width: 100%; } .fuel-price-panel__sources li { grid-template-columns: 90px 90px 1fr; } }

@@ -35,5 +35,7 @@ describe('website-backed fuel price median', () => {
     expect(panel).toContain('Source URL');
     expect(panel).toContain('This records the citation with the price');
     expect(panel).toContain("supabase.rpc('manage_fuel_price_source'");
+    expect(panel).toContain("p_action: 'retire'");
+    expect(panel).toContain('Retire source');
   });
 });

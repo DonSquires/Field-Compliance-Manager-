@@ -58,7 +58,7 @@ test('administrator approves a fuel source before recording a current website pr
   let sources: Array<Record<string, unknown>> = [];
   let approvedObservation: Record<string, unknown> | null = null;
   await page.route('**/rest/v1/fuel_price_sources*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify(sources) }));
-  await page.route('**/rest/v1/rpc/manage_fuel_price_source', async (route) => { const body = JSON.parse(route.request().postData() ?? '{}'); const source = { id: 'source-aa', name: body.p_name, source_url: body.p_source_url, fuel_type: body.p_fuel_type, refresh_guidance: body.p_refresh_guidance }; sources = [source]; await route.fulfill({ contentType: 'application/json', body: JSON.stringify(source) }); });
+  await page.route('**/rest/v1/rpc/manage_fuel_price_source', async (route) => { const body = JSON.parse(route.request().postData() ?? '{}'); const source = { id: 'source-aa', name: body.p_name ?? 'AA Fuel Prices', source_url: body.p_source_url ?? 'https://fuel.example.test/prices', fuel_type: body.p_fuel_type, refresh_guidance: body.p_refresh_guidance ?? 'Check weekly for Nelson petrol.' }; if (body.p_action === 'retire') sources = []; else sources = [source]; await route.fulfill({ contentType: 'application/json', body: JSON.stringify(source) }); });
   await page.route('**/rest/v1/rpc/record_approved_fuel_price_observation', async (route) => { approvedObservation = JSON.parse(route.request().postData() ?? '{}'); await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: 'fuel-approved' }) }); });
 
   await signInAsAdmin(page, '/admin/rate-rules');
@@ -76,5 +76,8 @@ test('administrator approves a fuel source before recording a current website pr
   await fuelPanel.getByLabel('Source URL').fill('https://fuel.example.test/prices/nelson');
   await fuelPanel.getByRole('button', { name: 'Save cited price' }).click();
   expect(approvedObservation).toMatchObject({ p_source_id: 'source-aa', p_price_per_litre: 2.499, p_source_url: 'https://fuel.example.test/prices/nelson' });
+  await fuelPanel.getByRole('button', { name: 'Retire source' }).click();
+  await expect(fuelPanel.getByText('AA Fuel Prices retired. It stays in prior citations but cannot receive new observations.')).toBeVisible();
+  await expect(fuelPanel.getByText('0 approved sources for petrol.')).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });

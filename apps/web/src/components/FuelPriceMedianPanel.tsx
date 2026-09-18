@@ -124,6 +124,18 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
     setSaving(false);
   };
 
+  const retireSource = async (source: FuelPriceSource) => {
+    if (!organizationId) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: rpcError } = await supabase.rpc('manage_fuel_price_source', {
+      p_client_request_id: requestId(), p_organization_id: organizationId, p_action: 'retire', p_source_id: source.id,
+      p_name: null, p_source_url: null, p_fuel_type: source.fuel_type, p_refresh_guidance: null,
+    });
+    if (rpcError) setError(rpcError.message);
+    else { setNotice(`${source.name} retired. It stays in prior citations but cannot receive new observations.`); await load(); }
+    setSaving(false);
+  };
+
   return (
     <section className="fuel-price-panel" aria-labelledby="fuel-price-title">
       <header className="fuel-price-panel__header">
@@ -146,6 +158,8 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
       </div>
 
       <div className="fuel-price-panel__sources-control"><span>{sources.length} approved source{sources.length === 1 ? '' : 's'} for {FUEL_LABELS[fuelType].toLowerCase()}.</span><button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowSourceForm((value) => !value)} disabled={!organizationId || saving}>{showSourceForm ? 'Cancel source' : 'Approve a source'}</button></div>
+
+      {!loading && sources.length > 0 && <ul className="fuel-price-panel__approved-sources">{sources.map((source) => <li key={source.id}><div><strong>{source.name}</strong><a href={source.source_url} target="_blank" rel="noreferrer">{source.source_url} <ExternalLink size={12} aria-hidden="true" /></a>{source.refresh_guidance && <small>{source.refresh_guidance}</small>}</div><button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => void retireSource(source)}>Retire source</button></li>)}</ul>}
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {notice && <p className="fuel-price-panel__notice" role="status">{notice}</p>}
