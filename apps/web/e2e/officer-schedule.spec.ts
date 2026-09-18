@@ -38,6 +38,21 @@ test('officer standby keeps self-service and safety available when shift status 
   expect(browserErrors.filter((error) => !error.includes('Roster service is unavailable.') && !error.includes('status of 500'))).toEqual([]);
 });
 
+test('an assigned urgent dispatch job is the officer’s first next action from home', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsOfficer(page, '/officer');
+
+  const nextJob = page.locator('.officer-next-job');
+  await expect(nextJob).toContainText('Alarm response');
+  await expect(nextJob).toContainText('Civic Operations Centre');
+  await expect(nextJob.getByRole('button', { name: 'Open and acknowledge job' })).toBeVisible();
+  await nextJob.getByRole('button', { name: 'Open and acknowledge job' }).click();
+  await expect(page).toHaveURL(/\/officer\/dispatch$/);
+  await expect(page.getByRole('heading', { name: 'Dispatch' })).toBeVisible();
+  await expect(page.locator('#officer-dispatch-cccccccc-cccc-4ccc-8ccc-cccccccccccc')).toContainText('Civic Operations Centre');
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
 test('officer schedule and coverage claim are visually correct and operational', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsOfficer(page);

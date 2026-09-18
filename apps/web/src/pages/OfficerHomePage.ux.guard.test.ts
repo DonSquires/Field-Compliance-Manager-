@@ -16,4 +16,12 @@ describe('officer coverage tenant states', () => {
     expect(source).toContain('>Try again</button>');
     expect(source).toContain('onClick={() => void reload()}');
   });
+
+  it('elevates the officer’s next assigned dispatch job before generic tools', () => {
+    expect(source).toContain("from('dispatch_jobs')");
+    expect(source).toContain(".eq('assigned_officer_id', officerId)");
+    expect(source).toContain('Your next job');
+    expect(source).toContain('Open and acknowledge job');
+    expect(source).toContain('nextDispatchError');
+  });
 });

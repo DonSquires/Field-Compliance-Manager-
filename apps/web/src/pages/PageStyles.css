@@ -1490,6 +1490,14 @@
   gap: 16px;
 }
 
+.officer-next-job { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 16px 0; padding: 16px 18px; border: 1px solid #d68b3d; border-left: 4px solid #f2bf3a; border-radius: 8px; background: #1d1710; }
+.officer-next-job.priority-urgent,
+.officer-next-job.priority-high { border-color: #b75252; border-left-color: #ff6b6b; background: #201116; }
+.officer-next-job h2 { margin: 3px 0; font-size: 20px; text-transform: capitalize; }
+.officer-next-job p,
+.officer-next-job small { display: block; margin: 0; color: #b5c7d9; }
+.officer-next-job small { margin-top: 4px; font-size: 12px; text-transform: capitalize; }
+
 .officer-shift-panel,
 .officer-safety-panel,
 .officer-quick-actions,
@@ -1929,6 +1937,9 @@
   .officer-home-grid {
     grid-template-columns: 1fr;
   }
+
+  .officer-next-job { align-items: stretch; flex-direction: column; }
+  .officer-next-job .officer-primary-action { width: 100%; }
 
   .officer-brief-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

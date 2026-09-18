@@ -38,6 +38,15 @@ interface OpenShift {
   site_name: string | null;
 }
 
+interface AssignedDispatchJob {
+  id: string;
+  job_type: string;
+  priority: string;
+  status: string;
+  sla_respond_by: string | null;
+  site: { name: string; address: string | null } | null;
+}
+
 type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control' | 'map' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'credentials' | 'leave' | 'timesheet';
 
 interface OfficerHomePageProps {
@@ -169,10 +178,33 @@ function useOpenShifts(organizationId: string | null | undefined) {
   return { openShifts, loading, error, notice, claimingId, claim, reload: load };
 }
 
+function useNextDispatchJob(officerId: string | null | undefined) {
+  const [job, setJob] = useState<AssignedDispatchJob | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    if (!officerId) { setJob(null); setLoading(false); return; }
+    setLoading(true); setError(null);
+    const { data, error: queryError } = await supabase.from('dispatch_jobs')
+      .select('id,job_type,priority,status,sla_respond_by,site:client_site_id(name,address)')
+      .eq('assigned_officer_id', officerId)
+      .in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene'])
+      .order('sla_respond_by', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (queryError) setError(queryError.message); else setJob(data as AssignedDispatchJob | null);
+    setLoading(false);
+  }, [officerId]);
+  useEffect(() => { void load(); }, [load]);
+  return { job, loading, error, reload: load };
+}
+
 export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNavigate, onRefreshShift }: OfficerHomePageProps) {
   const { profile } = useAuth();
   const online = useConnectionState();
   const { openShifts, loading: openShiftsLoading, error: openShiftsError, notice, claimingId, claim, reload } = useOpenShifts(profile?.organizationId);
+  const { job: nextDispatchJob, loading: nextDispatchLoading, error: nextDispatchError, reload: reloadNextDispatch } = useNextDispatchJob(profile?.id);
   const firstName = profile?.displayName?.split(' ')[0] || 'Officer';
   const activeShiftLaunch = shift ? shiftLaunch(shift.shift_type) : null;
 
@@ -220,6 +252,8 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           <button type="button" onClick={() => void onRefreshShift()} disabled={shiftLoading}>Try again</button>
         </div>
       )}
+
+      {nextDispatchError ? <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>Your assigned jobs could not be checked: {nextDispatchError}</span><button type="button" onClick={() => void reloadNextDispatch()} disabled={nextDispatchLoading}>Try again</button></div> : nextDispatchJob ? <section className={`officer-next-job priority-${nextDispatchJob.priority}`} aria-labelledby="next-job-heading"><div><span className="officer-kicker">Your next job</span><h2 id="next-job-heading">{nextDispatchJob.job_type.replaceAll('_', ' ')}</h2><p>{nextDispatchJob.site?.name ?? 'Site details to be confirmed'}{nextDispatchJob.site?.address ? ` · ${nextDispatchJob.site.address}` : ''}</p><small>{nextDispatchJob.status.replaceAll('_', ' ')}{nextDispatchJob.sla_respond_by ? ` · respond by ${new Date(nextDispatchJob.sla_respond_by).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</small></div><button type="button" className="officer-primary-action" onClick={() => onNavigate('dispatch')}><Radio size={18} aria-hidden="true" /> Open and acknowledge job <ArrowRight size={17} aria-hidden="true" /></button></section> : null}
 
       <div className="officer-home-grid">
         <section className={`officer-shift-panel ${shift ? 'has-shift' : 'is-standby'}`}>
