@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
+import { fuelMedianStatus } from '../lib/fuelPriceFreshness';
 import { supabase } from '../lib/supabase';
 import './FuelPriceMedianPanel.css';
 
@@ -46,6 +47,7 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState({ observedOn: new Date().toISOString().slice(0, 10), price: '', sourceName: '', sourceUrl: '' });
+  const freshness = fuelMedianStatus(median?.observation_count ?? 0, median?.latest_observed_on);
 
   const load = useCallback(async () => {
     if (!organizationId) { setMedian(null); setObservations([]); setLoading(false); return; }
@@ -120,6 +122,7 @@ export function FuelPriceMedianPanel({ organizationId }: { organizationId: strin
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {notice && <p className="fuel-price-panel__notice" role="status">{notice}</p>}
+      {!loading && <p className={`fuel-price-panel__freshness fuel-price-panel__freshness--${freshness.state}`} role="status">{freshness.message}</p>}
 
       {showForm && <form className="assessment-form fuel-price-panel__form" onSubmit={record}>
         <div className="form-row">

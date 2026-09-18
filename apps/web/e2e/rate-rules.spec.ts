@@ -38,6 +38,7 @@ test('administrator records a cited website fuel price and sees the rolling thre
   await expect(page.getByRole('heading', { name: 'Fuel price: three-month median' })).toBeVisible();
   const fuelPanel = page.locator('.fuel-price-panel');
   await expect(fuelPanel.locator('.fuel-price-panel__median strong')).toHaveText('$2.399/L');
+  await expect(fuelPanel.getByText('3 cited prices in the three-month window. Latest price is 5 days old.')).toBeVisible();
   await expect(page.getByText(/does not automatically change the IRD \$1\.04\/km customer charge/)).toBeVisible();
   await page.getByRole('button', { name: 'Record website price' }).click();
   await page.getByLabel('Price per litre (NZD)').fill('2.461');
@@ -46,6 +47,7 @@ test('administrator records a cited website fuel price and sees the rolling thre
   await page.getByRole('button', { name: 'Save cited price' }).click();
   await expect(page.getByText('Website price recorded. The three-month median has been recalculated.')).toBeVisible();
   await expect(fuelPanel.locator('.fuel-price-panel__median strong')).toHaveText('$2.420/L');
+  await expect(fuelPanel.getByText('4 cited prices in the three-month window. Latest price is 5 days old.')).toBeVisible();
   expect(recorded).toMatchObject({ p_organization_id: '41414141-4141-4141-8141-414141414141', p_fuel_type: 'petrol', p_price_per_litre: 2.461, p_source_name: 'AA Fuel Prices', p_source_url: 'https://example.test/aa/2026-08-30' });
   expect(typeof (recorded as Record<string, unknown> | null)?.p_client_request_id).toBe('string');
   expect(errors, errors.join('\n')).toEqual([]);
