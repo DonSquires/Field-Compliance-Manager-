@@ -108,6 +108,19 @@ interface ShiftStop {
   status: StopStatus;
 }
 
+const JOB_STATUS_LABELS: Record<JobStatus, string> = { pending: 'Waiting to dispatch', pending_approval: 'Waiting for approval', dispatched: 'Dispatched', acknowledged: 'Acknowledged', en_route: 'On the way', on_scene: 'On site', completed: 'Completed', cancelled: 'Cancelled' };
+
+const DispatchJobList: React.FC<{ jobs: DispatchJob[]; onOpen: (jobId: string) => void }> = ({ jobs, onOpen }) => (
+  <div className="dispatch-job-list-wrap">
+    <table className="dispatch-job-list">
+      <thead><tr><th>Priority</th><th>Job</th><th>Site</th><th>Status</th><th>Assigned to</th><th>Respond by</th></tr></thead>
+      <tbody>{jobs.length === 0 ? <tr><td colSpan={6} className="dispatch-job-list-empty">No active jobs</td></tr> : jobs.map((job) => <tr key={job.id} className={`priority-${job.priority} ${job.slaBreached ? 'is-sla-breached' : ''}`} onClick={() => onOpen(job.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onOpen(job.id); }}>
+        <td><span className="dispatch-job-list-priority">{job.priority}</span></td><td>{JOB_TYPES.find((type) => type.id === job.jobType)?.label ?? job.jobType.replaceAll('_', ' ')}</td><td><strong>{job.siteName}</strong><small>{job.siteAddress ?? 'Address not recorded'}</small></td><td>{JOB_STATUS_LABELS[job.status]}</td><td>{job.resourceName ?? 'Unassigned'}</td><td>{job.slaRespondBy ? new Date(job.slaRespondBy).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' }) : 'Not set'}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>
+);
+
 // Job types dropdown
 const JOB_TYPES: { id: JobType; label: string; icon: string }[] = [
   { id: 'alarm_response', label: 'Alarm Response', icon: '🚨' },
@@ -182,41 +195,6 @@ const StopCard: React.FC<{ stop: ShiftStop; selected?: boolean; onSelect?: () =>
   </div>
 );
 
-// Component: Job Card
-const JobCard: React.FC<{ job: DispatchJob; selected: boolean; onSelect: () => void }> = ({ job, selected, onSelect }) => {
-  const priorityColor = PRIORITIES.find((p) => p.id === job.priority)?.color || '#666';
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`dispatch-job-card ${job.slaBreached ? 'is-sla-breached' : ''} ${selected ? 'is-selected' : ''}`}
-      style={{ '--dispatch-priority': priorityColor } as React.CSSProperties}
-    >
-      <div className="dispatch-job-card-header">
-        <div className="dispatch-job-card-title">
-          <strong>{job.siteName}</strong>
-          <span>{JOB_TYPES.find((t) => t.id === job.jobType)?.label}</span>
-        </div>
-        <span className="dispatch-job-priority">{job.priority}</span>
-      </div>
-      {job.slaBreached && (
-        <div className="dispatch-job-breach">SLA breached</div>
-      )}
-      <div className="dispatch-job-card-sla">Response SLA: {job.slaMinutes} min{job.slaRespondBy ? ` · respond by ${new Date(job.slaRespondBy).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</div>
-      {selected && <div className="dispatch-job-details" aria-label={`Dispatch details for ${job.siteName}`}>
-        <p><strong>Location</strong>{job.siteAddress ?? 'Address not recorded'}</p>
-        <p><strong>Status</strong>{job.status.replaceAll('_', ' ')}</p>
-        <p><strong>Assignment</strong>{job.resourceName ?? 'Unassigned'}{job.shiftId ? ` · shift ${job.shiftId.slice(0, 8)}` : ''}</p>
-        <p><strong>Expected attendance</strong>{job.expectedDwellMinutes ?? 5} min · {job.timingSource?.replaceAll('_', ' ') ?? 'dispatch default'}</p>
-        {job.briefingNotes && <p><strong>Briefing</strong>{job.briefingNotes}</p>}
-        {job.accessInstructions && <p><strong>Access</strong>{job.accessInstructions}</p>}
-        {job.safetyNotes && <p className="is-safety"><strong>Safety</strong>{job.safetyNotes}</p>}
-      </div>}
-    </button>
-  );
-};
-
 // Main Component
 const DispatchConsolePage: React.FC = () => {
   const location = useLocation();
@@ -240,7 +218,9 @@ const DispatchConsolePage: React.FC = () => {
 
   // State: Phase B (Shift stops)
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(requestedJobId);
+  const [jobDetailId, setJobDetailId] = useState<string | null>(requestedJobId);
+  const [jobActionReason, setJobActionReason] = useState('');
+  const [jobResourceId, setJobResourceId] = useState('');
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [shiftStops, setShiftStops] = useState<ShiftStop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
@@ -268,6 +248,7 @@ const DispatchConsolePage: React.FC = () => {
   const [formComplainantPhone, setFormComplainantPhone] = useState('');
   const [formComplainantNotes, setFormComplainantNotes] = useState('');
   const [warning, setWarning] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [formRequestId, setFormRequestId] = useState(() => crypto.randomUUID());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -406,7 +387,7 @@ const DispatchConsolePage: React.FC = () => {
 
   useEffect(() => {
     if (!requestedJobId) return;
-    setSelectedJobId(requestedJobId);
+    setJobDetailId(requestedJobId);
     setMobileTab('jobs');
   }, [requestedJobId]);
 
@@ -679,23 +660,258 @@ const DispatchConsolePage: React.FC = () => {
 
   const handleSelectSite = useCallback((siteId: string) => setFormSiteId(siteId), []);
 
-  const operatorAction = async (target: 'job' | 'stop' | 'shift', action: string) => {
+  const operatorAction = async (target: 'stop' | 'shift', action: string) => {
     const reason = window.prompt(`Reason for ${action.replaceAll('_', ' ')}:`)?.trim();
     if (!reason) return;
-    const targetId = target === 'job' ? selectedJobId : target === 'stop' ? selectedStopId : selectedShiftId;
+    const targetId = target === 'stop' ? selectedStopId : selectedShiftId;
     if (!targetId) return;
     setOperatorBusy(true); setError(null);
-    const currentStatus = target === 'job' ? jobs.find((job) => job.id === targetId)?.status : target === 'stop' ? shiftStops.find((stop) => stop.id === targetId)?.status : activeShifts.find((shift) => shift.id === targetId)?.status;
-    const rpc = target === 'job' ? 'manage_dispatch_job' : target === 'stop' ? 'manage_shift_stop' : 'manage_active_shift';
-    const payload = target === 'job'
-      ? { p_job_id: targetId, p_expected_status: currentStatus, p_action: action, p_priority: null, p_briefing_notes: null, p_dispatch_resource_id: null, p_reason: reason }
-      : target === 'stop'
-        ? { p_stop_id: targetId, p_expected_status: currentStatus, p_action: action, p_new_order: null, p_reason: reason }
-        : { p_shift_id: targetId, p_expected_status: currentStatus, p_action: action, p_notes: null, p_reason: reason };
+    const currentStatus = target === 'stop' ? shiftStops.find((stop) => stop.id === targetId)?.status : activeShifts.find((shift) => shift.id === targetId)?.status;
+    const rpc = target === 'stop' ? 'manage_shift_stop' : 'manage_active_shift';
+    const payload = target === 'stop'
+      ? { p_stop_id: targetId, p_expected_status: currentStatus, p_action: action, p_new_order: null, p_reason: reason }
+      : { p_shift_id: targetId, p_expected_status: currentStatus, p_action: action, p_notes: null, p_reason: reason };
     const { error: actionError } = await supabase.rpc(rpc, payload);
     if (actionError) setError(actionError.message); else { await loadPhaseA(); if (selectedShiftId) await loadPhaseB(selectedShiftId); }
     setOperatorBusy(false);
   };
+
+  const selectedJob = jobs.find((job) => job.id === jobDetailId) ?? null;
+  const openJobDetail = (jobId: string) => { setJobDetailId(jobId); setJobActionReason(''); setJobResourceId(''); setError(null); };
+  const closeJobDetail = () => setJobDetailId(null);
+  const manageJobFromDetail = async (action: 'amend' | 'reassign' | 'escalate' | 'cancel') => {
+    if (!selectedJob || !jobActionReason.trim()) { setError('Write a short reason before changing this job.'); return; }
+    if (action === 'reassign' && !jobResourceId) { setError('Choose the person or resource taking this job.'); return; }
+    setOperatorBusy(true); setError(null);
+    // ATLAS WRITES: manage_dispatch_job (optimistic status check + audit receipt on the server)
+    const { error: actionError } = await supabase.rpc('manage_dispatch_job', {
+      p_job_id: selectedJob.id, p_expected_status: selectedJob.status, p_action: action,
+      p_priority: null, p_briefing_notes: null, p_dispatch_resource_id: action === 'reassign' ? jobResourceId : null, p_reason: jobActionReason.trim(),
+    });
+    if (actionError) setError(actionError.message);
+    else {
+      closeJobDetail();
+      const outcome = action === 'cancel' ? 'cancelled' : action === 'reassign' ? 'reallocated' : action === 'escalate' ? 'escalated' : 'updated';
+      setNotice(`Job ${outcome} with an audit receipt.`);
+      await loadPhaseA();
+    }
+    setOperatorBusy(false);
+  };
+
+  const noticeBanner = notice && (
+    <div className="dispatch-console-inline-success" role="status">
+      {notice} <button type="button" className="btn btn-sm btn-secondary" onClick={() => setNotice(null)}>Dismiss</button>
+    </div>
+  );
+
+  const jobDetailDialog = selectedJob && (
+    <div className="dispatch-job-dialog-backdrop" role="presentation" onMouseDown={closeJobDetail}>
+      <section
+        className="dispatch-job-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Dispatch details for ${selectedJob.siteName}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <span className={`dispatch-job-list-priority priority-${selectedJob.priority}`}>{selectedJob.priority}</span>
+            <h2>{JOB_TYPES.find((type) => type.id === selectedJob.jobType)?.label ?? selectedJob.jobType.replaceAll('_', ' ')}</h2>
+            <p>{selectedJob.siteName}</p>
+          </div>
+          <button type="button" className="dispatch-job-dialog-close" onClick={closeJobDetail} aria-label="Close job details">×</button>
+        </header>
+
+        {error && <div className="dispatch-console-error-box" role="alert">{error}</div>}
+
+        <div className="dispatch-job-dialog-grid">
+          <div><strong>Status</strong><span>{JOB_STATUS_LABELS[selectedJob.status]}{selectedJob.slaBreached ? ' · response time breached' : ''}</span></div>
+          <div><strong>Respond by</strong><span>{selectedJob.slaRespondBy ? new Date(selectedJob.slaRespondBy).toLocaleString('en-NZ') : `Not set (${selectedJob.slaMinutes} min target)`}</span></div>
+          <div><strong>Assigned to</strong><span>{selectedJob.resourceName ?? 'Unassigned'}</span></div>
+          <div><strong>Expected attendance</strong><span>{selectedJob.expectedDwellMinutes ?? 5} minutes · {selectedJob.timingSource?.replaceAll('_', ' ') ?? 'dispatch default'}</span></div>
+        </div>
+
+        <section className="dispatch-job-dialog-detail">
+          <h3>Where and what to do</h3>
+          <p><strong>Address</strong>{selectedJob.siteAddress ?? 'Address not recorded'}</p>
+          {selectedJob.briefingNotes && <p><strong>Briefing</strong>{selectedJob.briefingNotes}</p>}
+          {selectedJob.accessInstructions && <p><strong>Access</strong>{selectedJob.accessInstructions}</p>}
+          {selectedJob.safetyNotes && <p className="is-safety"><strong>Safety</strong>{selectedJob.safetyNotes}</p>}
+        </section>
+
+        <section className="dispatch-job-dialog-actions">
+          <h3>Manage this job</h3>
+          <p className="dispatch-console-form-note">Every change needs a short reason. It is saved with the job as an audit receipt.</p>
+          <label>
+            <span>Reason for the change</span>
+            <textarea value={jobActionReason} onChange={(event) => setJobActionReason(event.target.value)} placeholder="Explain what changed and why" rows={2} />
+          </label>
+          <label>
+            <span>Reallocate to</span>
+            <select value={jobResourceId} onChange={(event) => setJobResourceId(event.target.value)}>
+              <option value="">Choose a currently available resource…</option>
+              {assignableResources.map((resource) => (
+                <option key={resource.id} value={resource.id}>{resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}</option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <button type="button" className="btn btn-secondary" disabled={operatorBusy} onClick={() => void manageJobFromDetail('amend')}>Save details note</button>
+            <button type="button" className="btn btn-secondary" disabled={operatorBusy || !jobResourceId} onClick={() => void manageJobFromDetail('reassign')}>Reallocate</button>
+            <button type="button" className="btn btn-secondary" disabled={operatorBusy} onClick={() => void manageJobFromDetail('escalate')}>Escalate to urgent</button>
+            <button type="button" className="btn btn-danger" disabled={operatorBusy} onClick={() => void manageJobFromDetail('cancel')}>Cancel job</button>
+          </div>
+        </section>
+      </section>
+    </div>
+  );
+
+  const openNewJob = () => { setShowNewJob(true); setError(null); if (isMobile) setMobileTab('jobs'); };
+
+  const newJobPanel = showNewJob && (
+    <div className="dispatch-console-form-panel">
+      <div className="dispatch-console-form-title">Create New Job</div>
+
+      <div className="dispatch-console-agreement-card">
+        <div className="dispatch-console-form-label">Service agreement</div>
+        <strong>{selectedAgreement?.name ?? 'No agreement selected'}</strong>
+        <div className="dispatch-console-form-note">
+          Client: {selectedAgreement?.client_name ?? selectedAgreement?.client_organization_id ?? 'Unavailable'}
+        </div>
+      </div>
+
+      <div className="dispatch-console-form-field">
+        <label className="dispatch-console-form-label">Job Type</label>
+        <select value={formJobType} onChange={(e) => setFormJobType(e.target.value as JobType)}>
+          {JOB_TYPES.map((t) => (
+            <option key={t.id} value={t.id}>{t.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="dispatch-console-form-field">
+        <label className="dispatch-console-form-label">Priority</label>
+        <select value={formPriority} onChange={(e) => setFormPriority(e.target.value as JobPriority)}>
+          {PRIORITIES.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {formJobType === 'alarm_response' && (
+        <>
+          <div className="dispatch-console-form-field">
+            <label className="dispatch-console-form-label">Intake channel</label>
+            <select value={formAlarmIntakeChannel} onChange={(e) => setFormAlarmIntakeChannel(e.target.value as AlarmIntakeChannel)}>
+              <option value="phone">Phone call</option>
+              <option value="email">Email</option>
+            </select>
+          </div>
+          <div className="dispatch-console-form-field">
+            <label className="dispatch-console-form-label">Alarm received at</label>
+            <input type="datetime-local" value={formAlarmReceivedAt} onChange={(e) => setFormAlarmReceivedAt(e.target.value)} />
+          </div>
+        </>
+      )}
+
+      <div className="dispatch-console-form-field">
+        <label className="dispatch-console-form-label">Site</label>
+        <select value={formSiteId} disabled={isNewIncidentLocation} onChange={(e) => handleSelectSite(e.target.value)}>
+          <option value="">Select a site...</option>
+          {sites.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        {!relationshipLoading && sites.length === 0 && (
+          <div className="dispatch-console-inline-warning">No active sites are linked to the selected agreement.</div>
+        )}
+        <label className="dispatch-console-check-row">
+          <input type="checkbox" checked={isNewIncidentLocation} onChange={(event) => { setIsNewIncidentLocation(event.target.checked); setFormSiteId(''); setResolvedLocation(null); }} />
+          Create location from this dispatch
+        </label>
+        {isNewIncidentLocation && (
+          <div className="dispatch-console-address-row">
+            <input value={formLocationAddress} onChange={(event) => { setFormLocationAddress(event.target.value); setResolvedLocation(null); }} placeholder="Incident address" />
+            <button type="button" onClick={resolveIncidentLocation} disabled={!formLocationAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
+          </div>
+        )}
+        {isNewIncidentLocation && resolvedLocation && <div className="dispatch-console-inline-success">Resolved: {resolvedLocation.label}</div>}
+      </div>
+
+      {formJobType === 'noise_control' && (
+        <div className="dispatch-console-form-field">
+          <label className="dispatch-console-form-label">Complainant place (harmed party · protected)</label>
+          <div className="dispatch-console-form-note">The site above is the noise source, where the officer works. Record where the complaint comes from so the officer can assess near it and attend it. Identity is stored behind an audited read — never put it in briefing notes.</div>
+          <select value={formComplainantSiteId} onChange={(e) => setFormComplainantSiteId(e.target.value)} aria-label="Complainant place as a known site">
+            <option value="">Not a known site — enter the address below</option>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+          <div className="dispatch-console-address-row">
+            <input value={formComplainantAddress} onChange={(event) => { setFormComplainantAddress(event.target.value); setResolvedComplainant(null); }} placeholder="Complainant address" aria-label="Complainant address" />
+            <button type="button" onClick={resolveComplainantLocation} disabled={!formComplainantAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
+          </div>
+          {resolvedComplainant && <div className="dispatch-console-inline-success">Resolved: {resolvedComplainant.label}</div>}
+          {!formComplainantSiteId && formComplainantAddress.trim() && resolvedComplainant && <div className="dispatch-console-inline-warning">Resolved address: the complainant place will be recorded as a provisional site (centre from the address, boundary unverified) so attendance there is measured, not assumed.</div>}
+          {!formComplainantSiteId && formComplainantAddress.trim() && !resolvedComplainant && <div className="dispatch-console-inline-warning">Unresolved address: resolve it to give the complainant place a centre; otherwise attendance there is recorded by time only.</div>}
+          <div className="dispatch-console-address-row">
+            <input value={formComplainantName} onChange={(e) => setFormComplainantName(e.target.value)} placeholder="Complainant name (protected)" aria-label="Complainant name" autoComplete="off" />
+            <input value={formComplainantPhone} onChange={(e) => setFormComplainantPhone(e.target.value)} placeholder="Complainant phone (protected)" aria-label="Complainant phone" autoComplete="off" />
+          </div>
+          <input value={formComplainantNotes} onChange={(e) => setFormComplainantNotes(e.target.value)} placeholder="Contact preferences (protected)" aria-label="Complainant contact preferences" />
+        </div>
+      )}
+
+      <div className="dispatch-console-form-field">
+        <label className="dispatch-console-form-label">Dispatch Resource</label>
+        <select value={formResourceId} onChange={(e) => assignResource(e.target.value)}>
+          <option value="">Leave in unassigned queue</option>
+          {assignableResources.map((resource) => (
+            <option key={resource.id} value={resource.id}>
+              {resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}
+            </option>
+          ))}
+        </select>
+        {formResourceId && !formShiftId && <div className="dispatch-console-inline-error">No active matching shift is available for this resource.</div>}
+      </div>
+
+      <div className="dispatch-console-form-field">
+        <label className="dispatch-console-form-label">SLA Minutes</label>
+        <input type="number" value={formSlaMinutes} onChange={(e) => setFormSlaMinutes(parseInt(e.target.value))} />
+      </div>
+
+      <div className="dispatch-console-form-field">
+        <label className="dispatch-console-form-label">Briefing Notes</label>
+        <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} />
+      </div>
+
+      {resolvedRate && (
+        <div className="dispatch-console-rate-banner">
+          Billing rule matched: ${resolvedRate.amount.toFixed(2)} · {resolvedRate.rateType.replace(/_/g, ' ')}
+        </div>
+      )}
+      {isUnrateable && (
+        <div className="dispatch-console-rate-warning">
+          No applicable billing rule found. The job can be created, but billing requires review.
+        </div>
+      )}
+
+      <div className="dispatch-console-form-actions">
+        <button
+          type="button"
+          className="dispatch-console-primary-button"
+          onClick={handleCreateJob}
+          disabled={saving || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
+        >
+          Create
+        </button>
+        <button type="button" className="dispatch-console-secondary-button" onClick={() => setShowNewJob(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 
   // Mobile: Shift + Stops + Jobs tabs
   if (isMobile) {
@@ -734,9 +950,12 @@ const DispatchConsolePage: React.FC = () => {
           </div>
 
           <div className="dispatch-console-mobile-pane">
+            {error && !selectedJob && <div className="dispatch-console-error-box">{error}</div>}
+            {noticeBanner}
+            {warning && <div className="dispatch-console-inline-warning" role="status">{warning} <button type="button" className="btn btn-sm btn-secondary" onClick={() => setWarning(null)}>Dismiss</button></div>}
             {mobileTab === 'shifts' && (
               <div className="dispatch-console-list dispatch-console-list--stacked">
-                <button type="button" className="dispatch-console-primary-button" onClick={() => setShowNewJob(!showNewJob)}>
+                <button type="button" className="dispatch-console-primary-button" onClick={openNewJob}>
                   + New Job
                 </button>
                 {loading ? (
@@ -768,15 +987,22 @@ const DispatchConsolePage: React.FC = () => {
 
             {mobileTab === 'jobs' && (
               <div className="dispatch-console-list dispatch-console-list--stacked">
+                {!showNewJob && (
+                  <button type="button" className="dispatch-console-primary-button" onClick={openNewJob}>
+                    + New Job
+                  </button>
+                )}
+                {newJobPanel}
                 {jobs.length === 0 ? (
                   <div className="dispatch-console-empty-state">No active jobs</div>
                 ) : (
-                  jobs.map((job) => <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />)
+                  <DispatchJobList jobs={jobs} onOpen={openJobDetail} />
                 )}
               </div>
             )}
           </div>
         </div>
+        {jobDetailDialog}
       </ShellLayout>
     );
   }
@@ -811,10 +1037,11 @@ const DispatchConsolePage: React.FC = () => {
             <span>Active Shifts</span>
             <strong>({activeShifts.length})</strong>
           </div>
-          {error && <div className="dispatch-console-error-box">{error}</div>}
+          {error && !selectedJob && <div className="dispatch-console-error-box">{error}</div>}
+          {noticeBanner}
           {warning && <div className="dispatch-console-inline-warning" role="status">{warning} <button type="button" className="btn btn-sm btn-secondary" onClick={() => setWarning(null)}>Dismiss</button></div>}
-          <button type="button" className="dispatch-console-primary-button" onClick={() => setShowNewJob(!showNewJob)}>
-            + New Job
+          <button type="button" className="dispatch-console-primary-button" onClick={() => (showNewJob ? setShowNewJob(false) : openNewJob())}>
+            {showNewJob ? 'Close new job form' : '+ New Job'}
           </button>
           {loading ? (
             <div className="dispatch-console-empty-state">Loading shifts...</div>
@@ -858,159 +1085,12 @@ const DispatchConsolePage: React.FC = () => {
             <strong>({jobs.length})</strong>
           </div>
 
-          {showNewJob && (
-            <div className="dispatch-console-form-panel">
-              <div className="dispatch-console-form-title">Create New Job</div>
+          {newJobPanel}
 
-              <div className="dispatch-console-agreement-card">
-                <div className="dispatch-console-form-label">Service agreement</div>
-                <strong>{selectedAgreement?.name ?? 'No agreement selected'}</strong>
-                <div className="dispatch-console-form-note">
-                  Client: {selectedAgreement?.client_name ?? selectedAgreement?.client_organization_id ?? 'Unavailable'}
-                </div>
-              </div>
-
-              <div className="dispatch-console-form-field">
-                <label className="dispatch-console-form-label">Job Type</label>
-                <select value={formJobType} onChange={(e) => setFormJobType(e.target.value as JobType)}>
-                  {JOB_TYPES.map((t) => (
-                    <option key={t.id} value={t.id}>{t.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="dispatch-console-form-field">
-                <label className="dispatch-console-form-label">Priority</label>
-                <select value={formPriority} onChange={(e) => setFormPriority(e.target.value as JobPriority)}>
-                  {PRIORITIES.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {formJobType === 'alarm_response' && (
-                <>
-                  <div className="dispatch-console-form-field">
-                    <label className="dispatch-console-form-label">Intake channel</label>
-                    <select value={formAlarmIntakeChannel} onChange={(e) => setFormAlarmIntakeChannel(e.target.value as AlarmIntakeChannel)}>
-                      <option value="phone">Phone call</option>
-                      <option value="email">Email</option>
-                    </select>
-                  </div>
-                  <div className="dispatch-console-form-field">
-                    <label className="dispatch-console-form-label">Alarm received at</label>
-                    <input type="datetime-local" value={formAlarmReceivedAt} onChange={(e) => setFormAlarmReceivedAt(e.target.value)} />
-                  </div>
-                </>
-              )}
-
-              <div className="dispatch-console-form-field">
-                <label className="dispatch-console-form-label">Site</label>
-                <select value={formSiteId} disabled={isNewIncidentLocation} onChange={(e) => handleSelectSite(e.target.value)}>
-                  <option value="">Select a site...</option>
-                  {sites.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-                {!relationshipLoading && sites.length === 0 && (
-                  <div className="dispatch-console-inline-warning">No active sites are linked to the selected agreement.</div>
-                )}
-                <label className="dispatch-console-check-row">
-                  <input type="checkbox" checked={isNewIncidentLocation} onChange={(event) => { setIsNewIncidentLocation(event.target.checked); setFormSiteId(''); setResolvedLocation(null); }} />
-                  Create location from this dispatch
-                </label>
-                {isNewIncidentLocation && (
-                  <div className="dispatch-console-address-row">
-                    <input value={formLocationAddress} onChange={(event) => { setFormLocationAddress(event.target.value); setResolvedLocation(null); }} placeholder="Incident address" />
-                    <button type="button" onClick={resolveIncidentLocation} disabled={!formLocationAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
-                  </div>
-                )}
-                {isNewIncidentLocation && resolvedLocation && <div className="dispatch-console-inline-success">Resolved: {resolvedLocation.label}</div>}
-              </div>
-
-              {formJobType === 'noise_control' && (
-                <div className="dispatch-console-form-field">
-                  <label className="dispatch-console-form-label">Complainant place (harmed party · protected)</label>
-                  <div className="dispatch-console-form-note">The site above is the noise source, where the officer works. Record where the complaint comes from so the officer can assess near it and attend it. Identity is stored behind an audited read — never put it in briefing notes.</div>
-                  <select value={formComplainantSiteId} onChange={(e) => setFormComplainantSiteId(e.target.value)} aria-label="Complainant place as a known site">
-                    <option value="">Not a known site — enter the address below</option>
-                    {sites.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <div className="dispatch-console-address-row">
-                    <input value={formComplainantAddress} onChange={(event) => { setFormComplainantAddress(event.target.value); setResolvedComplainant(null); }} placeholder="Complainant address" aria-label="Complainant address" />
-                    <button type="button" onClick={resolveComplainantLocation} disabled={!formComplainantAddress.trim()} className="btn btn-sm btn-secondary">Resolve</button>
-                  </div>
-                  {resolvedComplainant && <div className="dispatch-console-inline-success">Resolved: {resolvedComplainant.label}</div>}
-                  {!formComplainantSiteId && formComplainantAddress.trim() && resolvedComplainant && <div className="dispatch-console-inline-warning">Resolved address: the complainant place will be recorded as a provisional site (centre from the address, boundary unverified) so attendance there is measured, not assumed.</div>}
-                  {!formComplainantSiteId && formComplainantAddress.trim() && !resolvedComplainant && <div className="dispatch-console-inline-warning">Unresolved address: resolve it to give the complainant place a centre; otherwise attendance there is recorded by time only.</div>}
-                  <div className="dispatch-console-address-row">
-                    <input value={formComplainantName} onChange={(e) => setFormComplainantName(e.target.value)} placeholder="Complainant name (protected)" aria-label="Complainant name" autoComplete="off" />
-                    <input value={formComplainantPhone} onChange={(e) => setFormComplainantPhone(e.target.value)} placeholder="Complainant phone (protected)" aria-label="Complainant phone" autoComplete="off" />
-                  </div>
-                  <input value={formComplainantNotes} onChange={(e) => setFormComplainantNotes(e.target.value)} placeholder="Contact preferences (protected)" aria-label="Complainant contact preferences" />
-                </div>
-              )}
-
-              <div className="dispatch-console-form-field">
-                <label className="dispatch-console-form-label">Dispatch Resource</label>
-                <select value={formResourceId} onChange={(e) => assignResource(e.target.value)}>
-                  <option value="">Leave in unassigned queue</option>
-                  {assignableResources.map((resource) => (
-                    <option key={resource.id} value={resource.id}>
-                      {resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}
-                    </option>
-                  ))}
-                </select>
-                {formResourceId && !formShiftId && <div className="dispatch-console-inline-error">No active matching shift is available for this resource.</div>}
-              </div>
-
-              <div className="dispatch-console-form-field">
-                <label className="dispatch-console-form-label">SLA Minutes</label>
-                <input type="number" value={formSlaMinutes} onChange={(e) => setFormSlaMinutes(parseInt(e.target.value))} />
-              </div>
-
-              <div className="dispatch-console-form-field">
-                <label className="dispatch-console-form-label">Briefing Notes</label>
-                <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} />
-              </div>
-
-              {resolvedRate && (
-                <div className="dispatch-console-rate-banner">
-                  Billing rule matched: ${resolvedRate.amount.toFixed(2)} · {resolvedRate.rateType.replace(/_/g, ' ')}
-                </div>
-              )}
-              {isUnrateable && (
-                <div className="dispatch-console-rate-warning">
-                  No applicable billing rule found. The job can be created, but billing requires review.
-                </div>
-              )}
-
-              <div className="dispatch-console-form-actions">
-                <button
-                  type="button"
-                  className="dispatch-console-primary-button"
-                  onClick={handleCreateJob}
-                  disabled={saving || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
-                >
-                  Create
-                </button>
-                <button type="button" className="dispatch-console-secondary-button" onClick={() => setShowNewJob(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="dispatch-console-list">
-            {jobs.map((job) => (
-              <JobCard key={job.id} job={job} selected={job.id === selectedJobId} onSelect={() => setSelectedJobId(job.id)} />
-            ))}
-          </div>
-          {selectedJobId && <div className="dispatch-operator-actions"><strong>Selected job</strong><div><button type="button" onClick={() => void operatorAction('job', 'amend')} disabled={operatorBusy}>Amend details</button><button type="button" onClick={() => void operatorAction('job', 'reassign')} disabled={operatorBusy}>Reassign</button><button type="button" onClick={() => void operatorAction('job', 'escalate')} disabled={operatorBusy}>Escalate</button><button type="button" onClick={() => void operatorAction('job', 'cancel')} disabled={operatorBusy}>Cancel job</button></div></div>}
+          <DispatchJobList jobs={jobs} onOpen={openJobDetail} />
         </div>
       </div>
+      {jobDetailDialog}
     </ShellLayout>
   );
 };

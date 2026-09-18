@@ -33,8 +33,24 @@ describe('dispatch agreement and creation boundary', () => {
   it('preserves an overview job deep link and shows its full dispatch record', () => {
     expect(source).toContain("get('job')");
     expect(source).toContain("site:client_site_id(name, address, hs_notes, access_instructions)");
-    expect(source).toContain('Dispatch details for ${job.siteName}');
+    expect(source).toContain('aria-label={`Dispatch details for ${selectedJob.siteName}`}');
+    expect(source).toContain('useState<string | null>(requestedJobId)');
     expect(source).toContain('setMobileTab(\'jobs\')');
+  });
+
+  it('lists jobs as a scannable table in plain words and opens one job at a time', () => {
+    expect(source).toContain('const DispatchJobList');
+    expect(source).toContain('<th>Priority</th><th>Job</th><th>Site</th><th>Status</th><th>Assigned to</th><th>Respond by</th>');
+    expect(source).toContain("pending: 'Waiting to dispatch'");
+    expect(source).toContain("en_route: 'On the way'");
+    expect(source).toContain('role="dialog"');
+    expect(source).not.toContain('const JobCard');
+  });
+
+  it('offers the new job form on mobile as well as desktop', () => {
+    expect(source).toContain('const newJobPanel = showNewJob && (');
+    expect(source.split('{newJobPanel}').length).toBe(3);
+    expect(source).toContain("if (isMobile) setMobileTab('jobs')");
   });
 
   it('records phone or email provenance for manual alarm responses', () => {
@@ -88,9 +104,14 @@ describe('dispatch agreement and creation boundary', () => {
   });
 
   it('exposes governed operator controls for jobs, stops, and shifts', () => {
-    expect(source).toContain("operatorAction('job', 'amend')");
-    expect(source).toContain("operatorAction('job', 'reassign')");
-    expect(source).toContain("operatorAction('job', 'escalate')");
+    expect(source).toContain("manageJobFromDetail('amend')");
+    expect(source).toContain("manageJobFromDetail('reassign')");
+    expect(source).toContain("manageJobFromDetail('escalate')");
+    expect(source).toContain("manageJobFromDetail('cancel')");
+    expect(source).toContain("supabase.rpc('manage_dispatch_job'");
+    expect(source).toContain('p_expected_status: selectedJob.status');
+    expect(source).toContain("p_dispatch_resource_id: action === 'reassign' ? jobResourceId : null");
+    expect(source).toContain('Write a short reason before changing this job.');
     expect(source).toContain("operatorAction('stop', 'reorder')");
     expect(source).toContain("operatorAction('shift', 'cancel')");
     expect(source).toContain('supabase.rpc(rpc, payload)');
