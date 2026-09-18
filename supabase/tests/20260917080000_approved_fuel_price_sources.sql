@@ -20,6 +20,8 @@ begin
   perform pg_temp.check('observation carries its approved source',v_row.source_id=v_source.id and v_row.source_name='Fuel Watch' and v_row.fuel_type='petrol');
   begin perform public.record_approved_fuel_price_observation(gen_random_uuid(),v_org,v_source.id,current_date,2.499,'https://elsewhere.example.test/prices',null,null,null); v_ok:=false; exception when others then v_ok:=true; v_err:=sqlerrm; end;
   perform pg_temp.check('an observation cannot claim a URL outside the approved source: '||coalesce(v_err,''),v_ok and v_err like '%approved source URL%');
+  begin perform public.record_approved_fuel_price_observation(gen_random_uuid(),v_org,v_source.id,current_date,2.499,'https://fuel.example.test.evil/prices',null,null,null); v_ok:=false; exception when others then v_ok:=true; v_err:=sqlerrm; end;
+  perform pg_temp.check('a lookalike hostname cannot pass the approved source boundary: '||coalesce(v_err,''),v_ok and v_err like '%approved source URL%');
   perform pg_temp.as_user(v_officer);
   perform pg_temp.check('ordinary members can read their source but cannot add it',(select count(*) from public.fuel_price_sources where id=v_source.id)=1);
   perform pg_temp.as_user(v_admin);
