@@ -191,7 +191,13 @@ fn acquire_read_only_device_image(app: tauri::AppHandle, source_id: String, dest
             let free = destination.parent().filter(|p| p.as_os_str().len() > 0).map(fs2::available_space).unwrap_or_else(|| fs2::available_space(destination));
             if let Ok(free) = free {
                 if free < size_bytes + 64 * 1024 * 1024 {
-                    return Err(format!("Not enough free space for the image: the card is {:.1} GB but only {:.1} GB is free at {}. Choose another drive.", size_bytes as f64 / 1e9, free as f64 / 1e9, destination.parent().map(|p| p.display().to_string()).unwrap_or_default()));
+                    // Same unit the interface uses (GiB), and the reason the whole card counts: an exact image copies empty space too.
+                    return Err(format!(
+                        "Not enough free space for an exact image: it is the whole card, {:.1} GB including unused space, but only {:.1} GB is free on {}. Either choose a drive with at least {:.1} GB free, or skip the image and use \"List recordings directly from card\" then extract only the recordings you need.",
+                        size_bytes as f64 / 1073741824.0, free as f64 / 1073741824.0,
+                        destination.parent().map(|p| p.display().to_string()).unwrap_or_default(),
+                        (size_bytes + 64 * 1024 * 1024) as f64 / 1073741824.0
+                    ));
                 }
             }
         }
