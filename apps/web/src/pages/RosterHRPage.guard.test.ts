@@ -29,6 +29,13 @@ describe('governed HR administration', () => {
     expect(page).not.toContain(".from('timesheets').update");
   });
 
+  it('shows corporate payroll every branch\'s timesheets at organisation level, and the branch queue only in a branch', () => {
+    expect(page).toContain("const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);");
+    expect(page).toContain("workingInBranch\n            ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })");
+    expect(page).toContain(".from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by').eq('organization_id', orgId)");
+    expect(page).toContain("{workingInBranch ? 'Branch timesheets' : 'Timesheets across branches'}");
+  });
+
   it('surfaces generated dispatch pay evidence without directly mutating financial lines', () => {
     expect(page).toContain(".from('dispatch_job_pay_lines')");
     expect(page).toContain("{ id: 'pay-review', label: 'Pay Review' }");

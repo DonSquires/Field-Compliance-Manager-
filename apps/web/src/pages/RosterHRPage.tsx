@@ -313,6 +313,8 @@ const RosterHRPage: React.FC = () => {
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
   const { profile, operatingOrganizationId } = useAuth();
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  // "Working in" the organisation itself sets operatingOrganizationId to the home org; only another org is branch mode.
+  const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);
   const corporatePayrollReviewer = Boolean(profile?.employerOrganizationId && profile.employerOrganizationId === profile.organizationId && ['grand_master', 'master', 'admin'].includes(profile.role));
   const [tab, setTab] = useState<RosterTab>(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff');
   const [tabGroup, setTabGroup] = useState<RosterTabGroup>(tabGroupFor(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff'));
@@ -470,9 +472,10 @@ const RosterHRPage: React.FC = () => {
           operatingOrganizationId
             ? supabase.rpc('get_branch_leave_queue', { p_operating_organization_id: operatingBranchId })
             : Promise.resolve({ data: [], error: null }),
-          operatingOrganizationId
+          workingInBranch
             ? supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: operatingBranchId })
-            : Promise.resolve({ data: [], error: null }),
+            // ATLAS READS: timesheets — at organisation level the corporate payroll reviewer sees every branch's sheets (RLS: is_admin_for_org)
+            : supabase.from('timesheets').select('id, staff_id, period_start, period_end, scheduled_hours, actual_hours, overtime_hours, work_derived_hours, adjustment_hours, work_summary, status, branch_review_notes, branch_reviewed_by').eq('organization_id', orgId).order('period_start', { ascending: false }).limit(200),
           supabase
             .from('dispatch_job_pay_lines')
             .select('id, source_dispatch_id, officer_user_id, rate_rule_id, pay_code, rate_type, description, quantity, unit_rate, line_total, distance_km, distance_reason, created_at')
@@ -1777,8 +1780,8 @@ const RosterHRPage: React.FC = () => {
 
       {tab === 'timesheets' && (
         <section className="reports-section">
-          <h2>Branch Timesheets ({timesheets.length})</h2>
-          <p className="subtitle">Branch review confirms local time and operational evidence. Corporate payroll gives final approval and exports paid time.</p>
+          <h2>{workingInBranch ? 'Branch timesheets' : 'Timesheets across branches'} ({timesheets.length})</h2>
+          <p className="subtitle">{workingInBranch ? 'Branch review confirms local time and operational evidence. Corporate payroll gives final approval and exports paid time.' : 'Corporate payroll sees every branch’s sheets here. Branch check happens while working in the branch; final approval must come from a different reviewer than the branch check.'}</p>
           {corporatePayrollReviewer && <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => { const now = new Date(); setPayrollExport({ from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10), to: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10) }); }}>
             Export approved to payroll
           </button>}
