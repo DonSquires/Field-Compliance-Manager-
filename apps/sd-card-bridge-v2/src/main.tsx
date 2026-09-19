@@ -94,6 +94,17 @@ type DhfsRecording = {
 
 type DhfsCatalog = { volume: DhfsVolume; recordings: DhfsRecording[]; skippedDescriptors: number; warnings: string[] };
 
+type ContentKind = 'dhav_video' | 'pictures' | 'raw_stream';
+
+type ExtractionStats = {
+  framesKept: number; videoFrames: number; keyFrames: number; audioFrames: number;
+  staleFrames: number; staleBytes: number; unstructuredBytes: number; structuralBytesRemoved: number;
+  leadingFramesDropped: number; sourceBytesRead: number; pictures: number;
+  contentStart: DhfsTime | null; contentEnd: DhfsTime | null; stoppedAtNextRecording: boolean; truncatedFinalFrame: boolean;
+};
+
+type ExtractedPicture = { path: string; fileName: string; bytes: number; sha256: string; takenAt: DhfsTime; width: number | null; height: number | null };
+
 type ExtractedClip = {
   path: string;
   fileName: string;
@@ -109,6 +120,9 @@ type ExtractedClip = {
   fragments: number;
   descriptor: number;
   partitionIndex: number;
+  kind: ContentKind;
+  stats: ExtractionStats;
+  pictures: ExtractedPicture[];
 };
 
 type InspectionResult = {
@@ -157,7 +171,22 @@ const storagePathFor = (organizationId: string, importId: string, relativePath: 
   const safe = relativePath.split('/').map((segment) => (segment === '.' || segment === '..' ? '_' : segment.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120))).filter(Boolean).join('/');
   return `org/${organizationId}/cctv/${importId}/${safe || 'file'}`;
 };
-const sendLabel: Record<SendStatus, string> = { extracting: 'Stitching from card…', uploading: 'Sending…', registering: 'Registering…', done: 'Sent to FCM', failed: 'Send failed' };
+const sendLabel: Record<SendStatus, string> = { extracting: 'Reading from card…', uploading: 'Sending…', registering: 'Registering…', done: 'Sent to FCM', failed: 'Send failed' };
+/** What an extraction actually held, in the operator's terms; the descriptor's byte count is not the recording. */
+const describeClip = (clip: ExtractedClip) => {
+  const s = clip.stats;
+  const span = s.contentStart && s.contentEnd ? `${formatClock(s.contentStart)}–${formatClock(s.contentEnd)}` : null;
+  const skipped = s.staleBytes + s.unstructuredBytes + s.structuralBytesRemoved;
+  const parts: string[] = [];
+  if (clip.kind === 'pictures') parts.push(`${s.pictures} event picture${s.pictures === 1 ? '' : 's'}`);
+  else if (clip.kind === 'dhav_video') parts.push(`${clip.codec.replace('dhav/', '').toUpperCase()} video · ${s.videoFrames.toLocaleString()} frames`);
+  else parts.push(`${clip.codec} stream (frames not validated)`);
+  if (span) parts.push(span);
+  parts.push(formatBytes(clip.bytes));
+  if (skipped > 0) parts.push(`${formatBytes(skipped)} of card leftovers skipped`);
+  if (s.truncatedFinalFrame) parts.push('last frame cut by the card');
+  return parts.join(' · ');
+};
 
 const formatBytes = (bytes: number) => {
   if (!Number.isFinite(bytes)) return '—';
@@ -374,7 +403,7 @@ export default function App() {
     try {
       const clip = await invoke<ExtractedClip>('extract_dhfs_recording', { source: catalogSource, partitionIndex: recording.partitionIndex, descriptor: recording.descriptor, destinationDirectory: directory });
       setClips((current) => ({ ...current, [key]: clip }));
-      setStatus(`Wrote ${clip.fileName} (${formatBytes(clip.bytes)}, ${clip.codec}). SHA-256 recorded; the source was not modified.`);
+      setStatus(`${clip.kind === 'pictures' ? `Wrote ${clip.pictures.length} pictures into ${clip.fileName}` : `Wrote ${clip.fileName}`} — ${describeClip(clip)}. SHA-256 recorded; the card was not modified.`);
     } catch (cause) { failWith(cause, 'Extraction failed.'); }
     finally { setExtracting(null); }
   };
@@ -444,7 +473,25 @@ export default function App() {
     return data.session.access_token;
   };
 
-  /** Stitch one recording from the card (or reuse the finished copy), send it, and register it against the import. */
+  /** One resumable upload with the session refreshed if it lapses mid-way; returns once the object is stored. */
+  const uploadFile = async (uploadId: string, filePath: string, objectName: string, contentType: string) => {
+    let resumeUrl: string | null = null;
+    for (let attempt = 0; ; attempt += 1) {
+      const outcome: UploadOutcome = await invoke<UploadOutcome>('upload_clip_resumable', {
+        uploadId, clipPath: filePath, resumeUrl,
+        target: { supabaseUrl: FCM_SUPABASE_URL, apiKey: FCM_PUBLISHABLE_KEY, accessToken: await accessToken(), bucket: 'bob-uploads', objectName, contentType },
+      });
+      if (outcome.status !== 'unauthorized') return outcome;
+      // The session expired mid-send: refresh once and continue from the same offset.
+      if (attempt >= 2) throw new Error('FCM no longer accepts this session. Sign in again and choose Send to resume.');
+      const { error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) throw new Error(`Session refresh failed: ${refreshError.message}`);
+      resumeUrl = outcome.uploadUrl;
+    }
+  };
+
+  /** Read one recording off the card (or reuse the finished copy), send it, and register it against the import:
+   *  video becomes evidence queued for analysis; a picture stream becomes dated timeline events with thumbnails. */
   const sendRecording = async (recording: DhfsRecording, importTarget: ImportRow): Promise<boolean> => {
     if (!catalogSource) return false;
     const key = recordingKey(recording);
@@ -455,31 +502,43 @@ export default function App() {
       if (!clip) {
         const directory = destinationDirectory ?? await invoke<string>('default_clip_directory', { sourceId: catalogSource.kind === 'device' ? catalogSource.id : 'image' });
         if (!destinationDirectory) setDestinationDirectory(directory);
-        setStatus(`Stitching channel ${recording.channel}, ${formatTime(recording.start)} (${formatBytes(recording.bytes)}) from the ${sourceLabel(catalogSource)}…`);
+        setStatus(`Reading channel ${recording.channel}, ${formatTime(recording.start)} from the ${sourceLabel(catalogSource)} — only frames the camera dated inside this recording are kept…`);
         clip = await invoke<ExtractedClip>('extract_dhfs_recording', { source: catalogSource, partitionIndex: recording.partitionIndex, descriptor: recording.descriptor, destinationDirectory: directory, reuseExisting: true });
         setClips((current) => ({ ...current, [key]: clip }));
+      }
+      if (clip.kind === 'pictures') {
+        if (!clip.pictures.length) throw new Error('No pictures dated inside this recording were found on the card.');
+        updateSend(key, { status: 'uploading', sent: 0, total: clip.pictures.length });
+        const events: Array<Record<string, unknown>> = [];
+        for (const [index, picture] of clip.pictures.entries()) {
+          setStatus(`Sending picture ${index + 1} of ${clip.pictures.length} (${formatTime(picture.takenAt)})…`);
+          const objectName = storagePathFor(importTarget.organization_id, importTarget.id, `${clip.fileName}/${picture.fileName}`);
+          await uploadFile(`${key}:${index}`, picture.path, objectName, 'image/jpeg');
+          events.push({
+            source: 'device_snapshot', source_ref: picture.fileName, event_start_at: wallClockToIso(picture.takenAt, timeZone), event_end_at: null, severity: 'motion', thumbnail_path: objectName,
+            metadata: { size_bytes: picture.bytes, sha256: picture.sha256, width: picture.width, height: picture.height, channel: clip.channel, descriptor: clip.descriptor, origin: 'dahua_picture_stream' },
+          });
+          updateSend(key, { status: 'uploading', sent: index + 1, total: clip.pictures.length });
+        }
+        updateSend(key, { status: 'registering', sent: clip.pictures.length, total: clip.pictures.length });
+        const { error: eventsError } = await supabase.rpc('record_cctv_device_events', { p_import_id: importTarget.id, p_events: events });
+        if (eventsError) throw new Error(eventsError.message);
+        doneClipsRef.current[key] = clip;
+        updateSend(key, { status: 'done' });
+        setStatus(`${clip.pictures.length} event pictures from ${formatTime(clip.pictures[0].takenAt)} are on the timeline at ${selectedHouse?.name ?? 'the chosen place'}.`);
+        return true;
       }
       if (!clip.contentType.startsWith('video/')) throw new Error(`${clip.fileName} was not recognised as a video stream (${clip.codec}); it stays in the working folder and is not sent.`);
       const objectName = storagePathFor(importTarget.organization_id, importTarget.id, clip.fileName);
       updateSend(key, { status: 'uploading', sent: 0, total: clip.bytes });
       setStatus(`Sending ${clip.fileName} (${formatBytes(clip.bytes)}) to FCM…`);
-      let resumeUrl: string | null = null;
-      for (let attempt = 0; ; attempt += 1) {
-        const outcome: UploadOutcome = await invoke<UploadOutcome>('upload_clip_resumable', {
-          uploadId: key, clipPath: clip.path, resumeUrl,
-          target: { supabaseUrl: FCM_SUPABASE_URL, apiKey: FCM_PUBLISHABLE_KEY, accessToken: await accessToken(), bucket: 'bob-uploads', objectName, contentType: clip.contentType },
-        });
-        if (outcome.status !== 'unauthorized') break;
-        // The session expired mid-send: refresh once and continue from the same offset.
-        if (attempt >= 2) throw new Error('FCM no longer accepts this session. Sign in again and choose Send to resume.');
-        const { error: refreshError } = await supabase.auth.refreshSession();
-        if (refreshError) throw new Error(`Session refresh failed: ${refreshError.message}`);
-        resumeUrl = outcome.uploadUrl;
-      }
+      await uploadFile(key, clip.path, objectName, clip.contentType);
       updateSend(key, { status: 'registering', sent: clip.bytes, total: clip.bytes });
+      const recordedStart = clip.stats.contentStart ?? clip.start;
+      const recordedEnd = clip.stats.contentEnd ?? clip.end;
       const { error: registerError } = await supabase.rpc('register_cctv_import_video', {
         p_import_id: importTarget.id, p_storage_path: objectName, p_file_name: clip.fileName, p_file_size_bytes: clip.bytes, p_sha256: clip.sha256,
-        p_recorded_start_at: wallClockToIso(clip.start, timeZone), p_recorded_end_at: wallClockToIso(clip.end, timeZone), p_source_ref: clip.fileName, p_content_type: clip.contentType,
+        p_recorded_start_at: wallClockToIso(recordedStart, timeZone), p_recorded_end_at: wallClockToIso(recordedEnd, timeZone), p_source_ref: clip.fileName, p_content_type: clip.contentType,
       });
       if (registerError) throw new Error(registerError.message);
       doneClipsRef.current[key] = clip;
@@ -493,8 +552,14 @@ export default function App() {
     } finally { setSendingKey(null); }
   };
 
-  const manifestFor = (target: ImportRow) => Object.values(doneClipsRef.current)
-    .map((clip) => ({ name: clip.fileName, relative_path: clip.fileName, size_bytes: clip.bytes, kind: 'video', slot_start_at: wallClockToIso(clip.start, timeZone), slot_end_at: wallClockToIso(clip.end, timeZone), sha256: clip.sha256, import_id: target.id }));
+  const manifestFor = (target: ImportRow) => Object.values(doneClipsRef.current).flatMap((clip) => {
+    if (clip.kind === 'pictures') {
+      return clip.pictures.map((picture) => ({ name: picture.fileName, relative_path: `${clip.fileName}/${picture.fileName}`, size_bytes: picture.bytes, kind: 'snapshot', slot_start_at: wallClockToIso(picture.takenAt, timeZone), sha256: picture.sha256, import_id: target.id }));
+    }
+    const start = clip.stats.contentStart ?? clip.start;
+    const end = clip.stats.contentEnd ?? clip.end;
+    return [{ name: clip.fileName, relative_path: clip.fileName, size_bytes: clip.bytes, kind: 'video', slot_start_at: wallClockToIso(start, timeZone), slot_end_at: wallClockToIso(end, timeZone), sha256: clip.sha256, import_id: target.id, content_kind: clip.kind, frames: clip.stats.videoFrames, stale_bytes_skipped: clip.stats.staleBytes }];
+  });
 
   const finishImport = async (target: ImportRow) => {
     const anySent = Object.keys(doneClipsRef.current).length > 0;
@@ -541,10 +606,11 @@ export default function App() {
             <p className="muted small">Volume at byte {catalog.volume.location.baseOffset.toLocaleString()} ({locationLabel(catalog.volume)}). {catalog.volume.tableNote}{catalog.skippedDescriptors ? ` ${catalog.skippedDescriptors} untrustworthy descriptor${catalog.skippedDescriptors === 1 ? '' : 's'} skipped, not silently included.` : ''}</p>
             <div className="actions">{importRow && <button className="primary" onClick={() => void sendAll()} disabled={Boolean(extracting) || sendingKey !== null || unsentRecordings.length === 0}><UploadCloud size={15} /> {unsentRecordings.length === 0 ? 'All recordings sent' : `Send all ${unsentRecordings.length} to FCM`}</button>}{queueRemaining > 0 && <button className="secondary" onClick={() => void stopQueue()}>Stop sending ({queueRemaining} left)</button>}<button className="secondary" onClick={() => void chooseDestination()} disabled={sendingKey !== null}><FolderOpen size={15} /> {destinationDirectory ? 'Change working folder' : 'Choose working folder'}</button><small className="muted mono">{destinationDirectory ?? 'Working folder: Public Documents\\fcm-acquisitions, chosen automatically'}</small></div>
             {!importRow && <p className="muted small">{fcmSession ? 'Create the import under “Send to FCM” to send recordings straight from the card. “Extract” alone writes a hashed copy to the working folder.' : 'Sign in under “Send to FCM” to send recordings straight from the card, or use “Extract” to write hashed copies to the working folder.'}</p>}
-            {sentCount > 0 && <p className="muted small">{sentCount} recording{sentCount === 1 ? '' : 's'} sent to FCM with the SHA-256 taken as {sentCount === 1 ? 'it' : 'they'} left the card; the analysis worker re-hashes each one on intake. The stitched copies stay in {destinationDirectory ?? 'the working folder'}.</p>}
+            {sentCount > 0 && <p className="muted small">{sentCount} recording{sentCount === 1 ? '' : 's'} sent to FCM: video with the SHA-256 taken as it left the card (the analysis worker re-hashes on intake), pictures as dated timeline events. Copies stay in {destinationDirectory ?? 'the working folder'}.</p>}
+            <p className="muted small">Sizes listed below are what the card reserves for a recording; what is actually sent is only the frames the camera dated inside it — a previous occupant's leftovers and the card's own bookkeeping are left behind.</p>
             {catalog.recordings.length === 0 && <p className="muted">The volume is intact but holds no trustworthy recordings.</p>}
             <div className="recording-days">{recordingDays.map(([day, recordings]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{recordings.length} recording{recordings.length === 1 ? '' : 's'} · {formatBytes(recordings.reduce((sum, recording) => sum + recording.bytes, 0))}</small></div>
-              {recordings.map((recording) => { const key = recordingKey(recording); const clip = clips[key]; const send = sends[key]; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; return <div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''}`} key={key}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>Channel {recording.channel} · {formatDuration(recording.durationSeconds)}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.fileName} · {clip.codec} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{sendLabel[send.status]}{send.status === 'uploading' && send.total ? ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}` : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions">{importRow && <button className="primary" onClick={() => void sendOne(recording)} disabled={Boolean(extracting) || sendingKey !== null || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? sendLabel[send.status] : send?.status === 'failed' ? 'Send again' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={Boolean(extracting) || sendingKey !== null}><Download size={14} /> {extracting === key ? 'Extracting...' : clip ? 'Extract again' : importRow ? 'Extract only' : 'Extract'}</button></span></div>; })}
+              {recordings.map((recording) => { const key = recordingKey(recording); const clip = clips[key]; const send = sends[key]; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; return <div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''}`} key={key}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>Channel {recording.channel} · {formatDuration(recording.durationSeconds)}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.kind === 'pictures' ? clip.fileName : clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions">{importRow && <button className="primary" onClick={() => void sendOne(recording)} disabled={Boolean(extracting) || sendingKey !== null || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? sendLabel[send.status] : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={Boolean(extracting) || sendingKey !== null}><Download size={14} /> {extracting === key ? 'Extracting...' : clip ? 'Extract again' : importRow ? 'Extract only' : 'Extract'}</button></span></div>; })}
             </div>)}</div>
             {catalog.warnings.length > 0 && <details className="warnings"><summary>{catalog.warnings.length} descriptor warning{catalog.warnings.length === 1 ? '' : 's'}</summary><ul>{catalog.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
           </>}

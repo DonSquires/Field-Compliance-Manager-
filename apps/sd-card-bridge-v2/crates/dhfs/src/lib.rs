@@ -730,34 +730,242 @@ pub struct ExtractReport {
     pub sha256: String,
     pub probe: StreamProbe,
     pub fragments_copied: u32,
+    pub kind: ContentKind,
+    pub stats: ExtractionStats,
 }
 
-struct HashingSink<'a> { inner: &'a mut dyn Write, hasher: Sha256, written: u64 }
+/// What a recording turned out to hold once its bytes were read frame by frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentKind {
+    /// DHAV-framed video: the frames were validated one by one and copied verbatim.
+    DhavVideo,
+    /// Back-to-back JPEG stills (Dahua's picture stream), one file per picture.
+    Pictures,
+    /// No DHAV frames dated inside the recording: bytes copied as they lay, header trimmed (older firmware).
+    RawStream,
+}
 
-impl HashingSink<'_> {
-    fn write_all(&mut self, bytes: &[u8]) -> Result<(), DhfsError> {
-        self.inner.write_all(bytes).map_err(|error| DhfsError::Io(format!("clip write failed: {error}")))?;
-        self.hasher.update(bytes);
-        self.written += bytes.len() as u64;
-        Ok(())
+/// Counts that make an extraction explainable: how much of the card region was the recording, how much
+/// was the filesystem's own bookkeeping or a previous occupant's leftovers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractionStats {
+    pub frames_kept: u32,
+    pub video_frames: u32,
+    pub key_frames: u32,
+    pub audio_frames: u32,
+    /// Frames whose own clock lies outside the recording: a previous occupant of the flash, never erased.
+    pub stale_frames: u32,
+    pub stale_bytes: u64,
+    /// Bytes that were neither a frame nor a picture (index area, padding, erased space).
+    pub unstructured_bytes: u64,
+    /// Group checkpoint blocks (4 KiB, mostly zeros) the filesystem writes mid-frame, removed so decoders see whole frames.
+    pub structural_bytes_removed: u64,
+    /// In-window P/audio frames before the first key frame: undecodable on their own, so not written.
+    pub leading_frames_dropped: u32,
+    pub source_bytes_read: u64,
+    pub pictures: u32,
+    /// First and last kept frame / picture, on the camera's clock.
+    pub content_start: Option<DhfsTime>,
+    pub content_end: Option<DhfsTime>,
+    /// True when scanning stopped because the next frame already belonged to a later recording.
+    pub stopped_at_next_recording: bool,
+    /// True when the last frame ran past the end of the recording's fragments.
+    pub truncated_final_frame: bool,
+}
+
+/// Recordings begin a little before their descriptor time (pre-record) and may run a little past it.
+const WINDOW_BEFORE_SECONDS: i64 = 90;
+const WINDOW_AFTER_SECONDS: i64 = 15;
+/// A frame header claiming more than this is corruption, not a frame.
+const MAX_FRAME_BYTES: u32 = 32 << 20;
+/// Once frames have been kept, this much continuous 0xFF (erased flash) ends the recording.
+const ERASED_RUN_BYTES: usize = 64 * 1024;
+const SCAN_COMPACT_BYTES: usize = 8 << 20;
+/// Every fragment is written in groups of this many blocks; the group's last block is a write checkpoint
+/// (below), not stream data. Measured on a real card: block 4096 -> 2 MiB groups.
+const CHECKPOINT_GROUP_BLOCKS: u64 = 512;
+/// Bytes 4..8 of a group checkpoint block: CRC, this magic, a counter, the recording's begin time, the time of
+/// the last write, and the descriptor index, then zeros. Frames straddling the block continue after it.
+const CHECKPOINT_MAGIC: [u8; 4] = [0x13, 0x57, 0x75, 0x31];
+
+fn is_checkpoint_block(block: &[u8]) -> bool {
+    block.len() >= 8 && (block[4..8] == CHECKPOINT_MAGIC || block.iter().all(|byte| *byte == 0))
+}
+
+fn frame_kind_is_video(kind: u8) -> bool { matches!(kind, 0xfc | 0xfd) }
+fn frame_kind_is_audio(kind: u8) -> bool { matches!(kind, 0xf0 | 0xf1) }
+fn frame_kind_is_known(kind: u8) -> bool { frame_kind_is_video(kind) || frame_kind_is_audio(kind) }
+
+/// Everything a recording's descriptor chain covers, in stream order, read a chunk at a time with the
+/// filesystem's group checkpoint blocks removed. The last fragment is read in full: the descriptor's
+/// "blocks used" field has been seen under-reporting while frames continued, so the frame walk decides
+/// where the recording really ends.
+struct RecordingBytes<'a> {
+    source: &'a mut dyn BlockSource,
+    fragments: Vec<u64>,
+    fragment_size: u64,
+    block_size: u64,
+    /// Bytes the descriptor claims for the last fragment; reads past it that fail (image ends there) end the stream.
+    declared_last_len: u64,
+    fragment_index: usize,
+    offset_in_fragment: u64,
+    structural_removed: u64,
+    bytes_read: u64,
+}
+
+impl<'a> RecordingBytes<'a> {
+    fn new(source: &'a mut dyn BlockSource, partition: &Partition, recording: &Recording) -> Self {
+        let fragments: Vec<u64> = recording.fragments.iter().map(|fragment| partition.video_absolute + *fragment as u64 * partition.fragment_size).collect();
+        let declared_last_len = recording.bytes.saturating_sub((fragments.len() as u64 - 1) * partition.fragment_size).min(partition.fragment_size);
+        Self { source, fragments, fragment_size: partition.fragment_size, block_size: partition.block_size as u64, declared_last_len, fragment_index: 0, offset_in_fragment: 0, structural_removed: 0, bytes_read: 0 }
+    }
+
+    fn read(&mut self, offset: u64, length: usize) -> Result<Option<Vec<u8>>, DhfsError> {
+        let base = self.fragments[self.fragment_index];
+        match read_vec(self.source, base + offset, length) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(_) if self.fragment_index + 1 == self.fragments.len() && offset >= self.declared_last_len => Ok(None),
+            Err(error) => Err(DhfsError::Io(format!("card read failed inside fragment {}; partial output retained: {error}", self.fragment_index))),
+        }
+    }
+
+    /// Append the next chunk of recording bytes to `out`; false once every fragment has been read.
+    fn fill(&mut self, out: &mut Vec<u8>) -> Result<bool, DhfsError> {
+        loop {
+            if self.fragment_index >= self.fragments.len() { return Ok(false); }
+            if self.offset_in_fragment >= self.fragment_size { self.fragment_index += 1; self.offset_in_fragment = 0; continue; }
+            let group = CHECKPOINT_GROUP_BLOCKS * self.block_size;
+            let checkpoint_at = group - self.block_size;
+            let in_group = self.offset_in_fragment % group;
+            if in_group == checkpoint_at {
+                let Some(block) = self.read(self.offset_in_fragment, self.block_size as usize)? else { self.fragment_index = self.fragments.len(); return Ok(false); };
+                self.bytes_read += self.block_size;
+                self.offset_in_fragment += self.block_size;
+                if is_checkpoint_block(&block) { self.structural_removed += self.block_size; continue; }
+                out.extend_from_slice(&block);
+                return Ok(true);
+            }
+            let until_checkpoint = if in_group < checkpoint_at { checkpoint_at - in_group } else { group - in_group };
+            let length = until_checkpoint.min(COPY_CHUNK).min(self.fragment_size - self.offset_in_fragment) as usize;
+            let Some(chunk) = self.read(self.offset_in_fragment, length)? else { self.fragment_index = self.fragments.len(); return Ok(false); };
+            out.extend_from_slice(&chunk);
+            self.bytes_read += length as u64;
+            self.offset_in_fragment += length as u64;
+            return Ok(true);
+        }
     }
 }
 
-fn fragment_length(recording: &Recording, partition: &Partition, position: usize) -> u64 {
-    if position + 1 == recording.fragments.len() {
-        recording.bytes - (recording.fragments.len() as u64 - 1) * partition.fragment_size
-    } else {
-        partition.fragment_size
-    }
+struct FrameHeader { kind: u8, length: usize, date: DhfsTime }
+
+fn parse_frame_header(bytes: &[u8]) -> Option<FrameHeader> {
+    if bytes.len() < 24 || &bytes[..4] != b"DHAV" { return None; }
+    let kind = bytes[4];
+    if !frame_kind_is_known(kind) { return None; }
+    let length = le_u32(&bytes[12..16]);
+    if length < 32 || length > MAX_FRAME_BYTES { return None; }
+    Some(FrameHeader { kind, length: length as usize, date: DhfsTime::decode(le_u32(&bytes[16..20])) })
 }
 
-/// Copy a recording's fragments, in order, into `sink`, trimming the proprietary `DHII` header
-/// so the output starts at the first real frame / parameter set. Bytes are otherwise untouched.
-pub fn extract_recording(source: &mut dyn BlockSource, volume: &Volume, recording: &Recording, sink: &mut dyn Write) -> Result<ExtractReport, DhfsError> {
+fn trailer_matches(frame: &[u8]) -> bool {
+    let n = frame.len();
+    n >= 32 && &frame[n - 8..n - 4] == b"dhav" && le_u32(&frame[n - 4..]) as usize == n
+}
+
+fn window_for(recording: &Recording) -> (i64, i64) {
+    let begin = recording.start.naive_epoch_seconds();
+    let end = recording.end.naive_epoch_seconds().max(begin);
+    (begin - WINDOW_BEFORE_SECONDS, end + WINDOW_AFTER_SECONDS)
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> { haystack.windows(needle.len()).position(|window| window == needle) }
+
+/// Walk the recording's bytes as DHAV frames: validate each header against its trailer, keep only frames
+/// the camera dated inside this recording, start at the first key frame, stop at erased flash or at the
+/// next recording. Writes nothing when no frame qualifies, so the caller can fall back.
+fn extract_dhav_frames(source: &mut dyn BlockSource, partition: &Partition, recording: &Recording, sink: &mut HashingSink<'_>) -> Result<Option<(StreamProbe, ExtractionStats)>, DhfsError> {
+    let (window_begin, window_end) = window_for(recording);
+    let mut reader = RecordingBytes::new(source, partition, recording);
+    let mut buf: Vec<u8> = Vec::with_capacity(2 * COPY_CHUNK as usize);
+    let mut pos = 0_usize;
+    let mut eof = false;
+    let mut stats = ExtractionStats::default();
+    let mut probe: Option<StreamProbe> = None;
+    let mut erased_run = 0_usize;
+    loop {
+        if pos > SCAN_COMPACT_BYTES { buf.drain(..pos); pos = 0; }
+        if buf.len() - pos < 24 {
+            if eof { stats.unstructured_bytes += (buf.len() - pos) as u64; break; }
+            if !reader.fill(&mut buf)? { eof = true; }
+            continue;
+        }
+        let Some(rel) = find(&buf[pos..], b"DHAV") else {
+            let span = &buf[pos..];
+            if probe.is_some() && span.iter().all(|byte| *byte == 0xff) {
+                erased_run += span.len();
+                if erased_run >= ERASED_RUN_BYTES { break; }
+            } else { erased_run = 0; }
+            let keep = 3.min(span.len());
+            stats.unstructured_bytes += (span.len() - keep) as u64;
+            pos = buf.len() - keep;
+            if eof { stats.unstructured_bytes += keep as u64; break; }
+            if !reader.fill(&mut buf)? { eof = true; }
+            continue;
+        };
+        erased_run = 0;
+        stats.unstructured_bytes += rel as u64;
+        pos += rel;
+        if buf.len() - pos < 24 { if eof { stats.unstructured_bytes += (buf.len() - pos) as u64; break; } if !reader.fill(&mut buf)? { eof = true; } continue; }
+        let Some(header) = parse_frame_header(&buf[pos..pos + 24]) else { stats.unstructured_bytes += 4; pos += 4; continue; };
+        if buf.len() - pos < header.length {
+            if eof {
+                // The card ended (or a later occupant began) inside this frame.
+                if probe.is_some() { stats.truncated_final_frame = true; }
+                stats.unstructured_bytes += (buf.len() - pos) as u64;
+                break;
+            }
+            if !reader.fill(&mut buf)? { eof = true; }
+            continue;
+        }
+        let frame = &buf[pos..pos + header.length];
+        if !trailer_matches(frame) { stats.unstructured_bytes += 4; pos += 4; continue; }
+        let at = header.date.naive_epoch_seconds();
+        if at < window_begin || at > window_end {
+            if probe.is_some() && at > window_end { stats.stopped_at_next_recording = true; break; }
+            stats.stale_frames += 1;
+            stats.stale_bytes += header.length as u64;
+            pos += header.length;
+            continue;
+        }
+        if probe.is_none() && header.kind != 0xfd {
+            stats.leading_frames_dropped += 1;
+            pos += header.length;
+            continue;
+        }
+        if probe.is_none() {
+            probe = Some(probe_stream(&frame[..frame.len().min(PROBE_BYTES)]));
+            stats.content_start = Some(header.date);
+        }
+        sink.write_all(frame)?;
+        stats.frames_kept += 1;
+        if frame_kind_is_video(header.kind) { stats.video_frames += 1; }
+        if header.kind == 0xfd { stats.key_frames += 1; }
+        if frame_kind_is_audio(header.kind) { stats.audio_frames += 1; }
+        stats.content_end = Some(header.date);
+        pos += header.length;
+    }
+    stats.structural_bytes_removed = reader.structural_removed;
+    stats.source_bytes_read = reader.bytes_read;
+    Ok(probe.map(|probe| (probe, stats)))
+}
+
+/// Copy a recording's fragments as they lie, trimming the proprietary `DHII` header: the path for cards whose
+/// firmware writes raw elementary streams rather than DHAV frames.
+fn extract_raw_stream(source: &mut dyn BlockSource, volume: &Volume, recording: &Recording, sink: &mut HashingSink<'_>) -> Result<ExtractReport, DhfsError> {
     let partition = volume.partitions.iter().find(|partition| partition.index == recording.partition_index)
         .ok_or_else(|| DhfsError::Layout(format!("partition {} is not part of this volume", recording.partition_index)))?;
-    if recording.fragments.is_empty() { return Err(DhfsError::Layout("recording has no fragments".to_string())); }
-    let mut sink = HashingSink { inner: sink, hasher: Sha256::new(), written: 0 };
     let mut probe = None;
     for (position, fragment) in recording.fragments.iter().enumerate() {
         let fragment_start = partition.video_absolute + *fragment as u64 * partition.fragment_size;
@@ -780,18 +988,63 @@ pub fn extract_recording(source: &mut dyn BlockSource, volume: &Volume, recordin
     }
     Ok(ExtractReport {
         bytes_written: sink.written,
-        sha256: format!("{:x}", sink.hasher.finalize()),
+        sha256: format!("{:x}", sink.hasher.clone().finalize()),
         probe: probe.unwrap_or_else(|| probe_stream(&[])),
         fragments_copied: recording.fragments.len() as u32,
+        kind: ContentKind::RawStream,
+        stats: ExtractionStats { source_bytes_read: recording.bytes, ..ExtractionStats::default() },
     })
+}
+
+/// Write a recording into `sink` as a decodable DHAV stream: only frames the camera dated inside this
+/// recording, whole and in order, starting at a key frame, with the filesystem's bookkeeping blocks and a
+/// previous occupant's leftovers removed. Falls back to a header-trimmed raw copy when the region holds no
+/// DHAV frames at all.
+pub fn extract_recording(source: &mut dyn BlockSource, volume: &Volume, recording: &Recording, sink: &mut dyn Write) -> Result<ExtractReport, DhfsError> {
+    let partition = volume.partitions.iter().find(|partition| partition.index == recording.partition_index)
+        .ok_or_else(|| DhfsError::Layout(format!("partition {} is not part of this volume", recording.partition_index)))?;
+    if recording.fragments.is_empty() { return Err(DhfsError::Layout("recording has no fragments".to_string())); }
+    let mut sink = HashingSink { inner: sink, hasher: Sha256::new(), written: 0 };
+    if let Some((probe, stats)) = extract_dhav_frames(source, partition, recording, &mut sink)? {
+        return Ok(ExtractReport {
+            bytes_written: sink.written,
+            sha256: format!("{:x}", sink.hasher.finalize()),
+            probe,
+            fragments_copied: recording.fragments.len() as u32,
+            kind: ContentKind::DhavVideo,
+            stats,
+        });
+    }
+    extract_raw_stream(source, volume, recording, &mut sink)
+}
+
+struct HashingSink<'a> { inner: &'a mut dyn Write, hasher: Sha256, written: u64 }
+
+impl HashingSink<'_> {
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), DhfsError> {
+        self.inner.write_all(bytes).map_err(|error| DhfsError::Io(format!("clip write failed: {error}")))?;
+        self.hasher.update(bytes);
+        self.written += bytes.len() as u64;
+        Ok(())
+    }
+}
+
+fn fragment_length(recording: &Recording, partition: &Partition, position: usize) -> u64 {
+    if position + 1 == recording.fragments.len() {
+        recording.bytes - (recording.fragments.len() as u64 - 1) * partition.fragment_size
+    } else {
+        partition.fragment_size
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedClip {
+    /// The clip file, or for pictures the folder holding one JPEG per picture.
     pub path: String,
     pub file_name: String,
     pub bytes: u64,
+    /// SHA-256 of the clip file; for pictures, of every picture's bytes in capture order.
     pub sha256: String,
     pub content_type: String,
     pub codec: String,
@@ -803,6 +1056,21 @@ pub struct ExtractedClip {
     pub fragments: u32,
     pub descriptor: u32,
     pub partition_index: u32,
+    pub kind: ContentKind,
+    pub stats: ExtractionStats,
+    pub pictures: Vec<ExtractedPicture>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractedPicture {
+    pub path: String,
+    pub file_name: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub taken_at: DhfsTime,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 pub fn codec_label(probe: &StreamProbe) -> String {
@@ -814,21 +1082,118 @@ pub fn codec_label(probe: &StreamProbe) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Picture stream: back-to-back JPEGs, each carrying a `DHAV` 0xfb header inside a comment segment
+// ---------------------------------------------------------------------------------------------
+
+/// One JPEG found in a byte run: its span and the capture time Dahua embeds in a COM segment.
+struct JpegSpan { start: usize, end: usize, taken_at: Option<DhfsTime>, width: Option<u32>, height: Option<u32> }
+
+/// Parse the JPEG starting at `start` (must be `FF D8`). Tolerates the runs of zero bytes Dahua leaves
+/// between marker segments, exactly as libjpeg does ("extraneous bytes before marker"). `None` when the
+/// image is not complete within `buf`.
+fn parse_jpeg(buf: &[u8], start: usize) -> Option<JpegSpan> {
+    let mut i = start + 2;
+    let (mut taken_at, mut width, mut height) = (None, None, None);
+    loop {
+        // Skip filler until the next marker; give up on a gap longer than a plausible comment.
+        let mut skipped = 0_usize;
+        while i < buf.len() && buf[i] != 0xff { i += 1; skipped += 1; if skipped > 64 * 1024 { return None; } }
+        while i + 1 < buf.len() && buf[i + 1] == 0xff { i += 1; }
+        if i + 4 > buf.len() { return None; }
+        let marker = buf[i + 1];
+        if marker == 0xd8 || marker == 0x01 || (0xd0..=0xd7).contains(&marker) { i += 2; continue; }
+        let length = u16::from_be_bytes([buf[i + 2], buf[i + 3]]) as usize;
+        if length < 2 || i + 2 + length > buf.len() { return None; }
+        let body = &buf[i + 4..i + 2 + length];
+        match marker {
+            0xfe => {
+                if let Some(k) = find(body, b"DHAV\xfb") {
+                    if body.len() >= k + 20 { taken_at = Some(DhfsTime::decode(le_u32(&body[k + 16..k + 20]))); }
+                }
+            }
+            0xc0 | 0xc1 | 0xc2 if body.len() >= 5 => {
+                height = Some(u16::from_be_bytes([body[1], body[2]]) as u32);
+                width = Some(u16::from_be_bytes([body[3], body[4]]) as u32);
+            }
+            _ => {}
+        }
+        i += 2 + length;
+        if marker == 0xda {
+            // Entropy-coded data: FF is always followed by 00 or a restart marker, so FF D9 is the true end.
+            let end = find(&buf[i..], b"\xff\xd9")? + i + 2;
+            return Some(JpegSpan { start, end, taken_at, width, height });
+        }
+    }
+}
+
+struct PictureScan { stats: ExtractionStats, hasher: Sha256, total_bytes: u64 }
+
+/// Walk the recording's bytes as JPEG pictures, keeping those the camera dated inside this recording.
+fn extract_pictures(source: &mut dyn BlockSource, partition: &Partition, recording: &Recording, mut emit: impl FnMut(&[u8], DhfsTime, Option<u32>, Option<u32>) -> Result<(), DhfsError>) -> Result<PictureScan, DhfsError> {
+    let (window_begin, window_end) = window_for(recording);
+    let mut reader = RecordingBytes::new(source, partition, recording);
+    let mut buf: Vec<u8> = Vec::with_capacity(2 * COPY_CHUNK as usize);
+    let mut pos = 0_usize;
+    let mut eof = false;
+    let mut scan = PictureScan { stats: ExtractionStats::default(), hasher: Sha256::new(), total_bytes: 0 };
+    let mut erased_run = 0_usize;
+    loop {
+        if pos > SCAN_COMPACT_BYTES { buf.drain(..pos); pos = 0; }
+        let Some(rel) = find(&buf[pos..], b"\xff\xd8\xff") else {
+            let span = &buf[pos..];
+            if scan.stats.pictures > 0 && span.iter().all(|byte| *byte == 0xff) { erased_run += span.len(); if erased_run >= ERASED_RUN_BYTES { break; } } else { erased_run = 0; }
+            let keep = 2.min(span.len());
+            scan.stats.unstructured_bytes += (span.len() - keep) as u64;
+            pos = buf.len() - keep;
+            if eof { scan.stats.unstructured_bytes += keep as u64; break; }
+            if !reader.fill(&mut buf)? { eof = true; }
+            continue;
+        };
+        erased_run = 0;
+        scan.stats.unstructured_bytes += rel as u64;
+        pos += rel;
+        let Some(span) = parse_jpeg(&buf, pos) else {
+            if eof || buf.len() - pos > 4 * COPY_CHUNK as usize { scan.stats.unstructured_bytes += 2; pos += 2; continue; }
+            if !reader.fill(&mut buf)? { eof = true; }
+            continue;
+        };
+        let picture = &buf[span.start..span.end];
+        match span.taken_at {
+            Some(at) if (window_begin..=window_end).contains(&at.naive_epoch_seconds()) => {
+                emit(picture, at, span.width, span.height)?;
+                scan.hasher.update(picture);
+                scan.total_bytes += picture.len() as u64;
+                scan.stats.pictures += 1;
+                if scan.stats.content_start.is_none() { scan.stats.content_start = Some(at); }
+                scan.stats.content_end = Some(at);
+            }
+            Some(at) => {
+                if scan.stats.pictures > 0 && at.naive_epoch_seconds() > window_end { scan.stats.stopped_at_next_recording = true; break; }
+                scan.stats.stale_frames += 1;
+                scan.stats.stale_bytes += picture.len() as u64;
+            }
+            None => { scan.stats.unstructured_bytes += picture.len() as u64; }
+        }
+        pos = span.end;
+    }
+    scan.stats.structural_bytes_removed = reader.structural_removed;
+    scan.stats.source_bytes_read = reader.bytes_read;
+    Ok(scan)
+}
+
 /// The evidence-style file stem every extraction of this recording gets, so a copy made earlier can be found again.
+/// `r2` marks the frame-validated extraction rule; copies made by the earlier rule carry no suffix and are not reused.
 pub fn recording_file_stem(recording: &Recording, label: &str) -> String {
     let safe_label: String = label.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
     format!(
-        "FCM-{safe_label}-p{}-d{:06}-{}-{}-ch{:02}",
+        "FCM-{safe_label}-p{}-d{:06}-{}-{}-ch{:02}-r2",
         recording.partition_index, recording.descriptor, recording.start.file_stamp(), recording.end.file_stamp(), recording.channel
     )
 }
 
-/// A finished copy of `recording` already in `directory`, re-hashed from its bytes (the hash is never
-/// taken on trust from a name). `None` when no finished copy exists; `.part` files are never accepted.
-pub fn existing_extracted_clip(recording: &Recording, directory: &Path, label: &str) -> Result<Option<ExtractedClip>, DhfsError> {
-    let stem = recording_file_stem(recording, label);
-    let Some((path, file_name)) = ["dav", "h264", "h265", "dhfs"].iter().map(|extension| format!("{stem}.{extension}")).map(|name| (directory.join(&name), name)).find(|(path, _)| path.is_file()) else { return Ok(None); };
-    let mut file = File::open(&path).map_err(|error| DhfsError::Io(format!("could not open {}: {error}", path.display())))?;
+fn hash_file(path: &Path) -> Result<(u64, String, Vec<u8>), DhfsError> {
+    let mut file = File::open(path).map_err(|error| DhfsError::Io(format!("could not open {}: {error}", path.display())))?;
     let mut hasher = Sha256::new();
     let mut head: Vec<u8> = Vec::new();
     let mut buffer = vec![0_u8; COPY_CHUNK as usize];
@@ -840,15 +1205,17 @@ pub fn existing_extracted_clip(recording: &Recording, directory: &Path, label: &
         hasher.update(&buffer[..count]);
         bytes += count as u64;
     }
-    if bytes == 0 { return Ok(None); }
-    let probe = probe_stream(&head);
-    Ok(Some(ExtractedClip {
+    Ok((bytes, format!("{:x}", hasher.finalize()), head))
+}
+
+fn clip_shell(recording: &Recording, path: &Path, file_name: String, bytes: u64, sha256: String, content_type: String, codec: String, kind: ContentKind, stats: ExtractionStats) -> ExtractedClip {
+    ExtractedClip {
         path: path.to_string_lossy().to_string(),
         file_name,
         bytes,
-        sha256: format!("{:x}", hasher.finalize()),
-        content_type: probe.content_type.clone(),
-        codec: codec_label(&probe),
+        sha256,
+        content_type,
+        codec,
         stream_start_offset: 0,
         channel: recording.channel,
         start: recording.start,
@@ -857,47 +1224,137 @@ pub fn existing_extracted_clip(recording: &Recording, directory: &Path, label: &
         fragments: recording.fragments.len() as u32,
         descriptor: recording.descriptor,
         partition_index: recording.partition_index,
-    }))
+        kind,
+        stats,
+        pictures: Vec::new(),
+    }
+}
+
+fn picture_file_name(stem: &str, index: u32, taken_at: &DhfsTime) -> String { format!("{stem}-{index:04}-{}.jpg", taken_at.file_stamp()) }
+
+/// A finished copy of `recording` already in `directory`, re-hashed from its bytes (the hash is never
+/// taken on trust from a name). `None` when no finished copy exists; `.part` files are never accepted.
+pub fn existing_extracted_clip(recording: &Recording, directory: &Path, label: &str) -> Result<Option<ExtractedClip>, DhfsError> {
+    let stem = recording_file_stem(recording, label);
+    if let Some((path, file_name)) = ["dav", "h264", "h265", "dhfs"].iter().map(|extension| format!("{stem}.{extension}")).map(|name| (directory.join(&name), name)).find(|(path, _)| path.is_file()) {
+        let (bytes, sha256, head) = hash_file(&path)?;
+        if bytes == 0 { return Ok(None); }
+        let probe = probe_stream(&head);
+        let kind = if matches!(probe.stream, StreamKind::Dhav { .. }) { ContentKind::DhavVideo } else { ContentKind::RawStream };
+        return Ok(Some(clip_shell(recording, &path, file_name, bytes, sha256, probe.content_type.clone(), codec_label(&probe), kind, ExtractionStats::default())));
+    }
+    let folder = directory.join(&stem);
+    if folder.is_dir() {
+        let mut names: Vec<String> = fs::read_dir(&folder).map_err(|error| DhfsError::Io(error.to_string()))?
+            .filter_map(|entry| entry.ok()).map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.ends_with(".jpg") && name.starts_with(&stem)).collect();
+        if names.is_empty() { return Ok(None); }
+        names.sort();
+        let mut pictures = Vec::new();
+        let mut hasher = Sha256::new();
+        let mut total = 0_u64;
+        for name in names {
+            let path = folder.join(&name);
+            let data = fs::read(&path).map_err(|error| DhfsError::Io(format!("could not read {}: {error}", path.display())))?;
+            let Some(span) = parse_jpeg(&data, 0) else { continue; };
+            let Some(taken_at) = span.taken_at else { continue; };
+            hasher.update(&data);
+            total += data.len() as u64;
+            pictures.push(ExtractedPicture { path: path.to_string_lossy().to_string(), file_name: name, bytes: data.len() as u64, sha256: format!("{:x}", Sha256::digest(&data)), taken_at, width: span.width, height: span.height });
+        }
+        if pictures.is_empty() { return Ok(None); }
+        let stats = ExtractionStats { pictures: pictures.len() as u32, content_start: pictures.first().map(|p| p.taken_at), content_end: pictures.last().map(|p| p.taken_at), ..ExtractionStats::default() };
+        let mut clip = clip_shell(recording, &folder, stem, total, format!("{:x}", hasher.finalize()), "image/jpeg".to_string(), "jpeg".to_string(), ContentKind::Pictures, stats);
+        clip.pictures = pictures;
+        return Ok(Some(clip));
+    }
+    Ok(None)
+}
+
+fn commit_part(part_path: &Path, ready_path: &Path) -> Result<(), DhfsError> {
+    if ready_path.exists() {
+        let _ = fs::remove_file(part_path);
+        return Err(DhfsError::Io(format!("{} already exists; existing evidence is never overwritten", ready_path.display())));
+    }
+    fs::rename(part_path, ready_path).map_err(|error| DhfsError::Io(format!("could not commit {}: {error}", ready_path.display())))
 }
 
 /// Extract a recording into `directory` with an evidence-style name, writing to a `.part` file
 /// and renaming only after fsync so a half-copied clip can never be mistaken for a finished one.
+/// Video becomes one `.dav`/`.h26x` file; a picture stream becomes a folder of JPEGs, one per picture.
 pub fn extract_recording_to_directory(source: &mut dyn BlockSource, volume: &Volume, recording: &Recording, directory: &Path, label: &str) -> Result<ExtractedClip, DhfsError> {
     fs::create_dir_all(directory).map_err(|error| DhfsError::Io(format!("could not create {}: {error}", directory.display())))?;
+    let partition = volume.partitions.iter().find(|partition| partition.index == recording.partition_index)
+        .ok_or_else(|| DhfsError::Layout(format!("partition {} is not part of this volume", recording.partition_index)))?;
+    if recording.fragments.is_empty() { return Err(DhfsError::Layout("recording has no fragments".to_string())); }
     let stem = recording_file_stem(recording, label);
     let part_path: PathBuf = directory.join(format!("{stem}.part"));
     let mut part = OpenOptions::new().write(true).create_new(true).open(&part_path)
         .map_err(|error| DhfsError::Io(format!("could not create {}: {error}", part_path.display())))?;
-    let report = match extract_recording(source, volume, recording, &mut part) {
-        Ok(report) => report,
-        Err(error) => { let _ = fs::remove_file(&part_path); return Err(error); }
+
+    // 1. DHAV video frames dated inside the recording.
+    let mut sink = HashingSink { inner: &mut part, hasher: Sha256::new(), written: 0 };
+    let video = match extract_dhav_frames(source, partition, recording, &mut sink) {
+        Ok(video) => video,
+        Err(error) => { drop(sink); let _ = fs::remove_file(&part_path); return Err(error); }
     };
+    if let Some((probe, stats)) = video {
+        let (bytes, sha256) = (sink.written, format!("{:x}", sink.hasher.finalize()));
+        part.flush().map_err(|error| DhfsError::Io(error.to_string()))?;
+        part.sync_all().map_err(|error| DhfsError::Io(error.to_string()))?;
+        drop(part);
+        let file_name = format!("{stem}.{}", probe.extension);
+        let ready_path = directory.join(&file_name);
+        commit_part(&part_path, &ready_path)?;
+        return Ok(clip_shell(recording, &ready_path, file_name, bytes, sha256, probe.content_type.clone(), codec_label(&probe), ContentKind::DhavVideo, stats));
+    }
+    drop(sink);
+
+    // 2. Picture stream: one JPEG file per in-window picture, in a folder named after the recording.
+    let folder = directory.join(&stem);
+    let folder_part = directory.join(format!("{stem}.part-dir"));
+    fs::create_dir_all(&folder_part).map_err(|error| DhfsError::Io(format!("could not create {}: {error}", folder_part.display())))?;
+    let mut pictures: Vec<ExtractedPicture> = Vec::new();
+    let scan = extract_pictures(source, partition, recording, |picture, taken_at, width, height| {
+        let name = picture_file_name(&stem, pictures.len() as u32 + 1, &taken_at);
+        let path = folder_part.join(&name);
+        fs::write(&path, picture).map_err(|error| DhfsError::Io(format!("could not write {}: {error}", path.display())))?;
+        pictures.push(ExtractedPicture { path: folder.join(&name).to_string_lossy().to_string(), file_name: name, bytes: picture.len() as u64, sha256: format!("{:x}", Sha256::digest(picture)), taken_at, width, height });
+        Ok(())
+    });
+    let scan = match scan {
+        Ok(scan) => scan,
+        Err(error) => { let _ = fs::remove_dir_all(&folder_part); let _ = fs::remove_file(&part_path); return Err(error); }
+    };
+    if scan.stats.pictures > 0 {
+        let _ = fs::remove_file(&part_path);
+        if folder.exists() {
+            let _ = fs::remove_dir_all(&folder_part);
+            return Err(DhfsError::Io(format!("{} already exists; existing evidence is never overwritten", folder.display())));
+        }
+        fs::rename(&folder_part, &folder).map_err(|error| DhfsError::Io(format!("could not commit {}: {error}", folder.display())))?;
+        let mut clip = clip_shell(recording, &folder, stem, scan.total_bytes, format!("{:x}", scan.hasher.finalize()), "image/jpeg".to_string(), "jpeg".to_string(), ContentKind::Pictures, scan.stats);
+        clip.pictures = pictures;
+        return Ok(clip);
+    }
+    let _ = fs::remove_dir_all(&folder_part);
+
+    // 3. Nothing the frame walk recognises: copy the region as it lies (older firmware, raw elementary streams).
+    let mut sink = HashingSink { inner: &mut part, hasher: Sha256::new(), written: 0 };
+    let report = match extract_raw_stream(source, volume, recording, &mut sink) {
+        Ok(report) => report,
+        Err(error) => { drop(sink); let _ = fs::remove_file(&part_path); return Err(error); }
+    };
+    drop(sink);
     part.flush().map_err(|error| DhfsError::Io(error.to_string()))?;
     part.sync_all().map_err(|error| DhfsError::Io(error.to_string()))?;
     drop(part);
     let file_name = format!("{stem}.{}", report.probe.extension);
     let ready_path = directory.join(&file_name);
-    if ready_path.exists() {
-        let _ = fs::remove_file(&part_path);
-        return Err(DhfsError::Io(format!("{} already exists; existing evidence is never overwritten", ready_path.display())));
-    }
-    fs::rename(&part_path, &ready_path).map_err(|error| DhfsError::Io(format!("could not commit {}: {error}", ready_path.display())))?;
-    Ok(ExtractedClip {
-        path: ready_path.to_string_lossy().to_string(),
-        file_name,
-        bytes: report.bytes_written,
-        sha256: report.sha256,
-        content_type: report.probe.content_type.clone(),
-        codec: codec_label(&report.probe),
-        stream_start_offset: report.probe.stream_start,
-        channel: recording.channel,
-        start: recording.start,
-        end: recording.end,
-        duration_seconds: recording.duration_seconds,
-        fragments: report.fragments_copied,
-        descriptor: recording.descriptor,
-        partition_index: recording.partition_index,
-    })
+    commit_part(&part_path, &ready_path)?;
+    let mut clip = clip_shell(recording, &ready_path, file_name, report.bytes_written, report.sha256, report.probe.content_type.clone(), codec_label(&report.probe), ContentKind::RawStream, report.stats);
+    clip.stream_start_offset = report.probe.stream_start;
+    Ok(clip)
 }
 
 #[cfg(test)]
@@ -1126,9 +1583,198 @@ mod tests {
         }
         assert_eq!(report.probe.stream_start, 0);
         assert_eq!(report.probe.extension, "dav");
-        assert_eq!(out.len() as u64, recording.bytes);
+        assert_eq!(report.kind, ContentKind::DhavVideo);
+        // Only the frame itself is written: the fragment's zero padding is not part of the recording.
+        assert_eq!(out.len(), 24 + 10 + 1000 + 8);
         assert_eq!(&out[..4], b"DHAV");
+        assert_eq!((report.stats.frames_kept, report.stats.key_frames, report.stats.stale_frames), (1, 1, 0));
+        assert_eq!(report.stats.content_start, Some(time(2026, 9, 12, 8, 0, 0)));
         assert_eq!(codec_label(&report.probe), "dhav/hevc");
+    }
+
+    fn dated_frame(kind: u8, frame_no: u32, at: DhfsTime, payload_len: usize) -> Vec<u8> {
+        let ext: Vec<u8> = vec![0x81, 0x00, 0x0c, 3, 0x80, 0, 0, 0, 240, 135];
+        let frame_length = (24 + ext.len() + payload_len + 8) as u32;
+        let mut frame = Vec::new();
+        frame.extend_from_slice(b"DHAV");
+        frame.extend_from_slice(&[kind, 0x00, 0x00, 0x00]);
+        frame.extend_from_slice(&frame_no.to_le_bytes());
+        frame.extend_from_slice(&frame_length.to_le_bytes());
+        frame.extend_from_slice(&at.encode().to_le_bytes());
+        frame.extend_from_slice(&0x0010_u16.to_le_bytes());
+        frame.push(ext.len() as u8);
+        frame.push(0);
+        frame.extend_from_slice(&ext);
+        frame.extend((0..payload_len).map(|i| (i % 253) as u8 + 1));
+        frame.extend_from_slice(b"dhav");
+        frame.extend_from_slice(&frame_length.to_le_bytes());
+        frame
+    }
+
+    /// A raw volume (no partition table) with one channel-0 recording spanning two 1 MiB fragments, laid out
+    /// the way the real card was measured: header + JSON with the word DHAV in it, stale frames from an
+    /// earlier occupant, the recording's own frames from a P-frame, a checkpoint block closing every
+    /// 512-block group (frames straddle it), then erased flash.
+    fn measured_layout_image() -> (Vec<u8>, Vec<u8>, DhfsTime, DhfsTime) {
+        const BLOCK: usize = 512;
+        const FRAG_BLOCKS: u32 = 2048; // 1 MiB fragments -> 256 KiB groups
+        const FRAG: usize = FRAG_BLOCKS as usize * BLOCK;
+        const GROUP: usize = 512 * BLOCK;
+        const VIDEO_BLOCKS: u32 = 64;
+        let begin = time(2026, 7, 24, 14, 39, 0);
+        let end = time(2026, 7, 24, 14, 39, 16);
+        let stale_at = time(2026, 6, 16, 13, 44, 6);
+        let later_at = time(2026, 7, 24, 14, 45, 0);
+        let mut image = vec![0_u8; VIDEO_BLOCKS as usize * BLOCK + 3 * FRAG];
+        put(&mut image, 0, MAGIC);
+        put(&mut image, 0x3c00, DPT_MARKER);
+        let sb = 0x3c00 + SINGLE_PARTITION_SUPERBLOCK_OFFSET;
+        put(&mut image, sb + 0x2c, &(BLOCK as u32).to_le_bytes());
+        put(&mut image, sb + 0x30, &FRAG_BLOCKS.to_le_bytes());
+        put(&mut image, sb + 0x44, &32_u32.to_le_bytes());
+        put(&mut image, sb + 0x48, &VIDEO_BLOCKS.to_le_bytes());
+        put(&mut image, sb + 0x4c, &3_u32.to_le_bytes());
+        let table = 32 * BLOCK as u64;
+        // Descriptor 1: main, fragments 1 -> 2; the last-fragment size deliberately under-reports (1 block).
+        put(&mut image, table + 32, &descriptor(1, b'0', begin.encode(), end.encode(), 2, 1, 0, 1));
+        put(&mut image, table + 64, &descriptor(2, b'0', begin.encode(), end.encode(), 0, 1, 1, 1));
+        // Two fragments as one erased span; a writer that skips the checkpoint block closing each group.
+        let mut area = vec![0xff_u8; 2 * FRAG];
+        let mut checkpoint = vec![0_u8; BLOCK];
+        checkpoint[..4].copy_from_slice(&[0x16, 0xbd, 0xef, 0xc5]);
+        checkpoint[4..8].copy_from_slice(&CHECKPOINT_MAGIC);
+        for group_end in (GROUP..=2 * FRAG).step_by(GROUP) { area[group_end - BLOCK..group_end].copy_from_slice(&checkpoint); }
+        let mut cursor = 0_usize;
+        let write = |area: &mut Vec<u8>, cursor: &mut usize, bytes: &[u8]| {
+            let mut written = 0;
+            while written < bytes.len() {
+                if *cursor % GROUP == GROUP - BLOCK { *cursor += BLOCK; }
+                let room = (GROUP - BLOCK) - *cursor % GROUP;
+                let take = room.min(bytes.len() - written);
+                area[*cursor..*cursor + take].copy_from_slice(&bytes[written..written + take]);
+                *cursor += take; written += take;
+            }
+        };
+        let header = br#"DHII....{"Encode":{"Format":"DHAV"},"Video":{"Compression":"H.265","Pack":"DHAV"}}"#;
+        write(&mut area, &mut cursor, header);
+        cursor = 4096;
+        for (kind, no) in [(0xfd_u8, 100_u32), (0xfc, 101)] { write(&mut area, &mut cursor, &dated_frame(kind, no, stale_at, 3000)); }
+        cursor = 200_000;
+        write(&mut area, &mut cursor, &dated_frame(0xfc, 1, begin, 500));
+        let mut stream: Vec<u8> = Vec::new(); // the recording as a decoder should see it
+        let mut frame_no = 2;
+        while cursor < FRAG + 3 * BLOCK {
+            let kind = if frame_no % 4 == 2 { 0xfd } else { 0xfc };
+            let at = if cursor < FRAG - 60_000 { begin } else { end };
+            let f = dated_frame(kind, frame_no, at, if kind == 0xfd { 40_000 } else { 9_000 });
+            stream.extend_from_slice(&f);
+            write(&mut area, &mut cursor, &f);
+            frame_no += 1;
+        }
+        // The next recording begins right after in the same fragment: it must not be swept up.
+        write(&mut area, &mut cursor, &dated_frame(0xfd, 1, later_at, 5_000));
+        let video = VIDEO_BLOCKS as u64 * BLOCK as u64;
+        put(&mut image, video + FRAG as u64, &area);
+        (image, stream, begin, end)
+    }
+
+    #[test]
+    fn keeps_only_the_recordings_own_frames_and_removes_bookkeeping_blocks() {
+        let (image, expected, begin, end) = measured_layout_image();
+        let mut source = MemorySource(image);
+        let catalog = catalog(&mut source).expect("catalog");
+        assert_eq!(catalog.recordings.len(), 1);
+        let recording = &catalog.recordings[0];
+        assert_eq!(recording.fragments, vec![1, 2]);
+        let mut out = Vec::new();
+        let report = extract_recording(&mut source, &catalog.volume, recording, &mut out).expect("extract");
+        assert_eq!(report.kind, ContentKind::DhavVideo);
+        assert_eq!(out, expected, "output is exactly the recording's frames, whole and in order");
+        assert_eq!(&out[..5], b"DHAV\xfd", "starts at a key frame");
+        assert_eq!(report.stats.stale_frames, 2);
+        assert_eq!(report.stats.leading_frames_dropped, 1);
+        assert!(report.stats.structural_bytes_removed >= 512 * 4, "checkpoint blocks removed: {}", report.stats.structural_bytes_removed);
+        assert_eq!(report.stats.content_start, Some(begin));
+        assert_eq!(report.stats.content_end, Some(end));
+        assert!(report.stats.stopped_at_next_recording);
+        assert!(!report.stats.truncated_final_frame);
+        assert_eq!(report.sha256, format!("{:x}", Sha256::digest(&out)));
+    }
+
+    fn synthetic_jpeg(taken_at: Option<DhfsTime>, width: u16, height: u16, seed: u8) -> Vec<u8> {
+        let mut j = vec![0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10];
+        j.extend_from_slice(b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0");
+        if let Some(at) = taken_at {
+            let mut com = Vec::new();
+            com.extend_from_slice(b"DHAV\xfb\0\0\0\0\0\0\0\0\0\0\xfc");
+            com.extend_from_slice(&at.encode().to_le_bytes());
+            com.extend_from_slice(&[0_u8; 200]);
+            j.extend_from_slice(&[0xff, 0xfe]);
+            j.extend_from_slice(&((com.len() + 2) as u16).to_be_bytes());
+            j.extend_from_slice(&com);
+            j.extend_from_slice(&[0_u8; 608]); // Dahua's filler between segments
+        }
+        j.extend_from_slice(&[0xff, 0xc0, 0x00, 0x11, 0x08]);
+        j.extend_from_slice(&height.to_be_bytes());
+        j.extend_from_slice(&width.to_be_bytes());
+        j.extend_from_slice(&[0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]);
+        j.extend_from_slice(&[0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00]);
+        j.extend((0..4000_usize).map(|i| { let b = (i as u8).wrapping_mul(31).wrapping_add(seed); if b == 0xff { 0xfe } else { b } }));
+        j.extend_from_slice(&[0xff, 0xd9]);
+        j
+    }
+
+    #[test]
+    fn extracts_a_picture_stream_as_dated_jpeg_files() {
+        const BLOCK: usize = 512;
+        const FRAG_BLOCKS: u32 = 256;
+        const FRAG: usize = FRAG_BLOCKS as usize * BLOCK;
+        let begin = time(2026, 8, 23, 10, 16, 48);
+        let end = time(2026, 8, 23, 10, 16, 54);
+        let mut image = vec![0_u8; 64 * BLOCK + 3 * FRAG];
+        put(&mut image, 0, MAGIC);
+        put(&mut image, 0x3c00, DPT_MARKER);
+        let sb = 0x3c00 + SINGLE_PARTITION_SUPERBLOCK_OFFSET;
+        put(&mut image, sb + 0x2c, &(BLOCK as u32).to_le_bytes());
+        put(&mut image, sb + 0x30, &FRAG_BLOCKS.to_le_bytes());
+        put(&mut image, sb + 0x44, &32_u32.to_le_bytes());
+        put(&mut image, sb + 0x48, &64_u32.to_le_bytes());
+        put(&mut image, sb + 0x4c, &3_u32.to_le_bytes());
+        put(&mut image, 32 * BLOCK as u64 + 32, &descriptor(1, b'p', begin.encode(), end.encode(), 0, 100, 0, 1));
+        let mut frag = vec![0xff_u8; FRAG];
+        frag[..4].copy_from_slice(b"DHII");
+        let stale_frame = dated_frame(0xfc, 7, time(2026, 6, 20, 20, 33, 38), 2000);
+        frag[1024..1024 + stale_frame.len()].copy_from_slice(&stale_frame);
+        let mut cursor = 8192;
+        let mut expected = Vec::new();
+        for (at, seed) in [(Some(time(2026, 6, 20, 20, 33, 40)), 1_u8), (Some(begin), 2), (Some(time(2026, 8, 23, 10, 16, 50)), 3), (None, 4)] {
+            let jpeg = synthetic_jpeg(at, 1920, 1080, seed);
+            if matches!(at, Some(t) if t >= begin) { expected.push(jpeg.clone()); }
+            frag[cursor..cursor + jpeg.len()].copy_from_slice(&jpeg); cursor += jpeg.len();
+        }
+        put(&mut image, 64 * BLOCK as u64 + FRAG as u64, &frag);
+        let mut source = MemorySource(image);
+        let catalog = catalog(&mut source).expect("catalog");
+        let dir = std::env::temp_dir().join(format!("fcm-dhfs-pictures-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let clip = extract_recording_to_directory(&mut source, &catalog.volume, &catalog.recordings[0], &dir, "card").expect("clip");
+        assert_eq!(clip.kind, ContentKind::Pictures);
+        assert_eq!(clip.content_type, "image/jpeg");
+        assert_eq!(clip.pictures.len(), 2);
+        assert_eq!(clip.stats.pictures, 2);
+        assert_eq!(clip.stats.stale_frames, 1, "the June picture is a previous occupant");
+        assert_eq!(clip.pictures[0].taken_at, begin);
+        assert_eq!((clip.pictures[0].width, clip.pictures[0].height), (Some(1920), Some(1080)));
+        assert!(clip.pictures[0].file_name.ends_with("-0001-2026-08-23_10-16-48.jpg"));
+        assert_eq!(fs::read(&clip.pictures[0].path).unwrap(), expected[0]);
+        assert_eq!(fs::read(&clip.pictures[1].path).unwrap(), expected[1]);
+        assert!(Path::new(&clip.path).is_dir());
+        assert!(!dir.join(format!("{}.part", clip.file_name)).exists());
+        let again = existing_extracted_clip(&catalog.recordings[0], &dir, "card").expect("reuse").expect("found");
+        assert_eq!(again.kind, ContentKind::Pictures);
+        assert_eq!(again.pictures.len(), 2);
+        assert_eq!(again.sha256, clip.sha256);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1138,11 +1784,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("fcm-dhfs-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let clip = extract_recording_to_directory(&mut source, &catalog.volume, &catalog.recordings[0], &dir, "image test").expect("clip");
-        assert_eq!(clip.file_name, "FCM-image-test-p0-d000001-2026-09-11_14-31-56-2026-09-11_14-55-06-ch01.h265");
+        assert_eq!(clip.file_name, "FCM-image-test-p0-d000001-2026-09-11_14-31-56-2026-09-11_14-55-06-ch01-r2.h265");
         assert!(Path::new(&clip.path).is_file());
         assert!(!dir.join(format!("{}.part", clip.file_name.trim_end_matches(".h265"))).exists());
         assert_eq!(clip.codec, "hevc");
+        assert_eq!(clip.kind, ContentKind::RawStream);
         assert_eq!(clip.stream_start_offset, 64);
+        let reused = existing_extracted_clip(&catalog.recordings[0], &dir, "image test").expect("reuse").expect("found");
+        assert_eq!((reused.sha256, reused.bytes), (clip.sha256.clone(), clip.bytes));
         let again = extract_recording_to_directory(&mut source, &catalog.volume, &catalog.recordings[0], &dir, "image test");
         assert!(matches!(again, Err(DhfsError::Io(message)) if message.contains("never overwritten")));
         let _ = fs::remove_dir_all(&dir);

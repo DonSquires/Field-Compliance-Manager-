@@ -10,11 +10,33 @@ The card is the source. V2 reads the hidden DHFS partition straight from the car
 2. List every trustworthy recording on the hidden partition, straight from the card.
 3. Sign in with the operator's own FCM login, choose the place the camera watches and a camera label, and create a
    `cctv_imports` row through the same `create_cctv_import` RPC the web import page uses.
-4. Send recordings: each is stitched from its fragments into the working folder (SHA-256 taken as it leaves the card),
+4. Send recordings: each is read from its fragments into the working folder (SHA-256 taken as it leaves the card),
    uploaded with the tus resumable protocol into `org/<org>/cctv/<import>/`, and registered with
    `register_cctv_import_video` carrying that hash, so the analysis worker verifies rather than first-anchors it.
+   A picture-stream recording (Dahua's event stills) is sent as dated timeline events with thumbnails through
+   `record_cctv_device_events` instead of as video.
 5. Optionally acquire an exact image of the whole card (a forensic bit-for-bit copy, empty space included) and inspect it
    as a virtual source. Not needed to send recordings.
+
+### What a recording's bytes on the card actually are (measured 2026-09-19)
+
+The descriptor chain points at whole fragments, but a recording is not the whole fragment:
+
+- The first fragment opens with a header/index area (`DHII`, JSON encode settings — which contain the literal word
+  `DHAV` — and index space). Unused index space is never erased, so it still holds frames from whatever occupied the
+  flash before, weeks or months older. Extraction rule 1 started at the first `DHAV` bytes and therefore shipped JSON
+  plus up to 1.6 MB of a previous occupant's frames ahead of the real recording; FFmpeg rejected or decoded the wrong footage.
+- Every 512-block group ends with a 4 KiB write-checkpoint block (CRC, magic `13 57 75 31`, counter, begin time, last
+  write time, descriptor index). A frame that straddles it simply continues after it.
+- The descriptor's last-fragment block count can under-report while frames continue, and the true end is erased flash (`0xFF`).
+- Channel byte `0x70` is the picture stream: back-to-back 1920×1080 JPEGs about one per second, each carrying a
+  `DHAV` 0xfb header (with the capture time) inside a comment segment.
+
+Extraction rule 2 (`-r2` in file names) therefore walks frames: header validated against its trailer, checkpoint
+blocks removed, only frames the camera dated inside the recording kept (pre-record tolerance 90 s, 15 s after),
+output starting at a key frame, stopping at erased flash or the next recording. `ExtractionStats` on every clip say
+how much was stale, unstructured or bookkeeping. `cargo run --example replay -- <region> <fragment-offset> <begin> <end> <out>`
+replays a copied region through the walker without the card.
 
 The publishable Supabase key in `src/main.tsx` is the same public key the web bundle ships; every read and write runs as
 the signed-in user under row-level security, and the session is held in memory only.
@@ -29,10 +51,9 @@ the signed-in user under row-level security, and the session is held in memory o
   descriptors, and list every trustworthy recording. Accepts either the
   verified image (`{ kind: 'image', path }`) or the card itself
   (`{ kind: 'device', id, sizeBytes }`), both opened read-only.
-- `extract_dhfs_recording` — copy one recording out of the volume with the
-  proprietary `DHII` header trimmed, DHAV frames or raw H.264/H.265 detected,
-  SHA-256 recorded, written atomically and never over existing evidence. With
-  `reuseExisting`, a finished copy already in the folder is re-hashed and
+- `extract_dhfs_recording` — write one recording out of the volume as a decodable stream (rule 2 above): video
+  as one `.dav`/`.h26x` file, a picture stream as a folder of dated JPEGs, SHA-256 recorded, written atomically
+  and never over existing evidence. With `reuseExisting`, a finished copy already in the folder is re-hashed and
   returned instead of refused.
 - `default_clip_directory` — the per-card working folder under Public
   Documents, created on demand so the operator never has to pick one.
