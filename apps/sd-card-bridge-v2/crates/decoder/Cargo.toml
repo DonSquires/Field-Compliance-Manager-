@@ -1,0 +1,11 @@
+[package]
+name = "fcm-decoder"
+version = "0.1.0"
+edition = "2021"
+description = "FCM Desktop V2 decoder sidecar: pinned FFmpeg build, argument builders and output parsers (no process spawning here)"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"

@@ -62,13 +62,31 @@ the signed-in user under row-level security, and the session is held in memory o
   `upload-progress` events, offset resync on transport errors, and an
   `unauthorized` outcome that hands the resumable URL back so the interface can
   refresh the session and continue from the same offset.
+- `decoder_status` / `install_decoder` — the on-demand decoder (FFmpeg 8.1.2, BtbN `win64-lgpl` build, run as a
+  separate process). Installed under the app's local data folder, one folder per pinned version; the SHA-256 of
+  the binary and of `LICENSE.txt` are compiled into the app and checked on every use, so a swapped or
+  half-downloaded file shows as `rejectedReason` and is never run. `install_decoder` streams to a `.part` file,
+  emits `decoder-progress`, and only commits the file once the hash matches.
+- `render_filmstrip` — key frames spread across an extracted recording as small JPEGs (base64) with each frame's
+  offset from the clip start, so the interface can label them with the camera clock.
+- `render_preview` / `clear_previews` — a 480p H.264 viewing copy under `<app local data>/previews/`
+  (`h264_nvenc` first, `libx264` when no NVENC device answers), played in-app through the asset protocol whose
+  scope is exactly that folder. A reused copy from an earlier run is reported as `cached` with no encoder
+  claim. Previews are derived viewing aids: never uploaded, never registered, and removable at any time.
+
+"Review here" (0.4.0) lets the operator preview a recording on the laptop and choose **Send** or **Skip** per
+recording; skipped recordings are left out of "Send all". Sending itself is unchanged: the `-r2` original with
+its card-side SHA-256 goes to `register_cctv_import_video`. The plan for local analysis is
+`docs/DESKTOP_LOCAL_PROCESSING_PLAN.md`.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device
 start, all-zero partition table with the `0x6c0` superblock fallback, DHII
 trim, DHAV frame headers, cyclic/zero-length descriptors). Run them with
 `cargo test --manifest-path crates/dhfs/Cargo.toml`; the release workflow runs
-them before building the installer.
+them before building the installer. The decoder's pure parts (pinned hashes,
+ffmpeg argument lists, `showinfo` parsing, encoder fallback detection) live in
+`crates/decoder` (`fcm-decoder`) with their own tests, also run by the workflow.
 
 Why Windows shows nothing: Dahua cards carry no mountable filesystem. The card
 is either raw DHFS from sector 0 or a RAW partition whose contents are DHFS, so

@@ -1,10 +1,10 @@
-import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { createClient, type Session } from '@supabase/supabase-js';
-import { Activity, CheckCircle2, ChevronRight, Clapperboard, Database, Download, FolderOpen, HardDrive, LockKeyhole, LogIn, LogOut, MapPin, Search, Send, ShieldCheck, Square, UploadCloud, Waves } from 'lucide-react';
+import { Activity, CheckCircle2, ChevronRight, Clapperboard, Cpu, Database, Download, EyeOff, Film, FolderOpen, HardDrive, LockKeyhole, LogIn, LogOut, MapPin, Play, Search, Send, ShieldCheck, Square, Trash2, Undo2, UploadCloud, Waves } from 'lucide-react';
 import './styles.css';
 
 type AcquisitionStage = 'idle' | 'discovery' | 'ready' | 'cloning' | 'verifying' | 'complete' | 'failed';
@@ -152,6 +152,13 @@ type SendState = { status: SendStatus; sent: number; total: number; error?: stri
 type UploadProgress = { uploadId: string; bytesSent: number; totalBytes: number; elapsedSeconds: number; bytesPerSecond: number };
 type UploadOutcome = { status: 'complete' | 'exists' | 'unauthorized'; uploadUrl: string | null; bytesSent: number; totalBytes: number };
 
+// Review here: the pinned decoder and what it renders on this computer. Nothing here is ever sent or registered.
+type DecoderStatus = { installed: boolean; version: string; path: string | null; licence: string; licenceUrl: string; downloadBytes: number; rejectedReason: string | null };
+type DecoderProgress = { bytesDone: number; totalBytes: number };
+type Filmstrip = { frames: Array<{ atSeconds: number; jpegBase64: string }>; keyFramesUsed: number };
+type PreviewRendition = { path: string; bytes: number; encoder: 'nvenc' | 'software' | null; seconds: number; cached: boolean };
+type ReviewState = { busy: 'filmstrip' | 'preview' | null; filmstrip?: Filmstrip; preview?: PreviewRendition; error?: string };
+
 const isValidTimeZone = (zone: string) => { try { new Intl.DateTimeFormat('en-US', { timeZone: zone }); return true; } catch { return false; } };
 const zoneOffsetMs = (utcMs: number, timeZone: string) => {
   const formatter = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -198,6 +205,12 @@ const formatBytes = (bytes: number) => {
 const pad = (value: number) => String(value).padStart(2, '0');
 const formatTime = (time: DhfsTime | null | undefined) => (time ? `${time.year}-${pad(time.month)}-${pad(time.day)} ${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}` : '—');
 const formatClock = (time: DhfsTime) => `${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}`;
+/** The camera's wall clock `seconds` after `time` — pure wall-clock arithmetic, no time zone involved. */
+const clockPlus = (time: DhfsTime, seconds: number) => {
+  const at = new Date(Date.UTC(time.year, time.month - 1, time.day, time.hour, time.minute, time.second) + Math.round(seconds) * 1000);
+  return `${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}:${pad(at.getUTCSeconds())}`;
+};
+const encoderLabel = (preview: PreviewRendition) => (preview.cached ? 'viewing copy from an earlier run' : preview.encoder === 'nvenc' ? 'rendered on the GPU (NVENC)' : 'rendered in software (libx264)');
 const formatDay = (time: DhfsTime) => `${time.year}-${pad(time.month)}-${pad(time.day)}`;
 const formatDuration = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '—';
@@ -261,6 +274,13 @@ export default function App() {
   const [sends, setSends] = useState<Record<string, SendState>>({});
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [queueRemaining, setQueueRemaining] = useState(0);
+  const [decoder, setDecoder] = useState<DecoderStatus | null>(null);
+  const [decoderError, setDecoderError] = useState<string | null>(null);
+  const [decoderBusy, setDecoderBusy] = useState(false);
+  const [decoderProgress, setDecoderProgress] = useState<DecoderProgress | null>(null);
+  const [reviews, setReviews] = useState<Record<string, ReviewState>>({});
+  const [openReview, setOpenReview] = useState<string | null>(null);
+  const [skipped, setSkipped] = useState<Record<string, true>>({});
   const stopQueueRef = useRef(false);
   // Sends finished during a queue, readable after the loop without waiting for a re-render.
   const doneClipsRef = useRef<Record<string, ExtractedClip>>({});
@@ -289,6 +309,13 @@ export default function App() {
     return () => subscription.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    // Status is read by hash, not by file name, so a tampered or half-downloaded binary shows as rejected.
+    invoke<DecoderStatus>('decoder_status').then(setDecoder).catch((cause: unknown) => setDecoderError(describeFailure(cause, 'The decoder status could not be read.')));
+    const pending = listen<DecoderProgress>('decoder-progress', (event) => setDecoderProgress(event.payload));
+    return () => { void pending.then((unlisten) => unlisten()); };
+  }, []);
+
   const selectedSize = useMemo(() => selectedDevice ? formatBytes(selectedDevice.sizeBytes) : 'No source selected', [selectedDevice]);
   const recordingDays = useMemo(() => {
     const groups = new Map<string, DhfsRecording[]>();
@@ -308,7 +335,9 @@ export default function App() {
   }, [houses, houseQuery, organizationId]);
   const selectedHouse = useMemo(() => houses.find((house) => house.id === houseId) ?? null, [houses, houseId]);
   const sentCount = useMemo(() => Object.values(sends).filter((send) => send.status === 'done').length, [sends]);
-  const unsentRecordings = useMemo(() => (catalog?.recordings ?? []).filter((recording) => sends[recordingKey(recording)]?.status !== 'done'), [catalog, sends]);
+  const skippedCount = useMemo(() => Object.keys(skipped).length, [skipped]);
+  const previewCount = useMemo(() => Object.values(reviews).filter((review) => review.preview).length, [reviews]);
+  const unsentRecordings = useMemo(() => (catalog?.recordings ?? []).filter((recording) => { const key = recordingKey(recording); return sends[key]?.status !== 'done' && !skipped[key]; }), [catalog, sends, skipped]);
 
   const discover = async () => {
     setStage('discovery'); setError(null); setProbe(null); setStatus('Enumerating disks without opening a write handle...');
@@ -358,7 +387,7 @@ export default function App() {
   };
 
   const readCatalog = async (source: DhfsSource) => {
-    setCatalogBusy(true); setError(null); setCatalog(null); setCatalogSource(source); setClips({}); setProbe(null);
+    setCatalogBusy(true); setError(null); setCatalog(null); setCatalogSource(source); setClips({}); setReviews({}); setOpenReview(null); setSkipped({}); setProbe(null);
     setStatus(source.kind === 'image' ? 'Walking the DHFS partition table and fragment descriptors inside the image...' : 'Reading the DHFS partition table directly from the card (read-only, sector-aligned)...');
     try {
       const result = await invoke<DhfsCatalog>('read_dhfs_catalog', { source });
@@ -403,9 +432,83 @@ export default function App() {
     try {
       const clip = await invoke<ExtractedClip>('extract_dhfs_recording', { source: catalogSource, partitionIndex: recording.partitionIndex, descriptor: recording.descriptor, destinationDirectory: directory });
       setClips((current) => ({ ...current, [key]: clip }));
+      // A fresh extraction supersedes anything rendered from the previous copy.
+      setReviews((current) => { const next = { ...current }; delete next[key]; return next; });
       setStatus(`${clip.kind === 'pictures' ? `Wrote ${clip.pictures.length} pictures into ${clip.fileName}` : `Wrote ${clip.fileName}`} — ${describeClip(clip)}. SHA-256 recorded; the card was not modified.`);
     } catch (cause) { failWith(cause, 'Extraction failed.'); }
     finally { setExtracting(null); }
+  };
+
+  /** The recording's `-r2` extraction in the working folder: the copy already made this session, the finished file
+   *  from an earlier run (re-hashed, not trusted by name), or a fresh read from the card. */
+  const ensureClip = async (recording: DhfsRecording): Promise<ExtractedClip> => {
+    if (!catalogSource) throw new Error('No card or image is open.');
+    const key = recordingKey(recording);
+    const existing = clips[key];
+    if (existing) return existing;
+    const directory = destinationDirectory ?? await invoke<string>('default_clip_directory', { sourceId: catalogSource.kind === 'device' ? catalogSource.id : 'image' });
+    if (!destinationDirectory) setDestinationDirectory(directory);
+    setStatus(`Reading channel ${recording.channel}, ${formatTime(recording.start)} from the ${sourceLabel(catalogSource)} — only frames the camera dated inside this recording are kept…`);
+    const clip = await invoke<ExtractedClip>('extract_dhfs_recording', { source: catalogSource, partitionIndex: recording.partitionIndex, descriptor: recording.descriptor, destinationDirectory: directory, reuseExisting: true });
+    setClips((current) => ({ ...current, [key]: clip }));
+    return clip;
+  };
+
+  const updateReview = (key: string, patch: Partial<ReviewState>) => setReviews((current) => ({ ...current, [key]: { ...(current[key] ?? { busy: null }), ...patch } }));
+
+  const installDecoder = async () => {
+    setDecoderBusy(true); setDecoderError(null); setDecoderProgress({ bytesDone: 0, totalBytes: decoder?.downloadBytes ?? 0 });
+    try {
+      setDecoder(await invoke<DecoderStatus>('install_decoder'));
+      setStatus('Decoder installed and verified against the hash built into this app. Choose “Preview” on a recording to see what it holds before sending.');
+    } catch (cause) { setDecoderError(describeFailure(cause, 'The decoder could not be installed.')); }
+    finally { setDecoderBusy(false); setDecoderProgress(null); }
+  };
+
+  /** Open the review for a recording: extract it if needed, then decode key frames on this computer. */
+  const review = async (recording: DhfsRecording) => {
+    const key = recordingKey(recording);
+    setOpenReview(key); setError(null);
+    if (reviews[key]?.filmstrip) return;
+    if (!decoder?.installed) { updateReview(key, { busy: null, error: 'Install the decoder under “Review here” first; previews are decoded on this computer.' }); return; }
+    updateReview(key, { busy: 'filmstrip', error: undefined });
+    try {
+      const clip = await ensureClip(recording);
+      if (clip.kind === 'pictures') {
+        updateReview(key, { busy: null, error: `${clip.pictures.length} dated pictures — a picture stream is sent as timeline events, not as video. The JPEGs are in ${clip.fileName} inside the working folder.` });
+        return;
+      }
+      setStatus(`Decoding key frames of ${clip.fileName} on this computer…`);
+      const filmstrip = await invoke<Filmstrip>('render_filmstrip', { clipPath: clip.path, keyFrames: clip.stats.keyFrames, count: 12 });
+      updateReview(key, { busy: null, filmstrip });
+      setStatus(`${filmstrip.frames.length} key frames from ${clip.fileName}, labelled with the camera clock. Play the preview for the whole recording, then choose Send or Skip.`);
+    } catch (cause) { updateReview(key, { busy: null, error: describeFailure(cause, 'The recording could not be reviewed.') }); }
+  };
+
+  const playPreview = async (recording: DhfsRecording) => {
+    const key = recordingKey(recording);
+    const clip = clips[key];
+    if (!clip) return;
+    updateReview(key, { busy: 'preview', error: undefined });
+    setStatus(`Rendering a 480p viewing copy of ${clip.fileName} on this computer (GPU when available). Nothing leaves the machine.`);
+    try {
+      const preview = await invoke<PreviewRendition>('render_preview', { clipPath: clip.path });
+      updateReview(key, { busy: null, preview });
+      setStatus(`Preview ready — ${encoderLabel(preview)}, ${formatBytes(preview.bytes)}${preview.cached ? '' : `, ${preview.seconds.toFixed(0)} s`}. A viewing aid only: it is never sent and never becomes evidence.`);
+    } catch (cause) { updateReview(key, { busy: null, error: describeFailure(cause, 'The preview could not be rendered.') }); }
+  };
+
+  const toggleSkip = (recording: DhfsRecording) => {
+    const key = recordingKey(recording);
+    setSkipped((current) => { const next = { ...current }; if (next[key]) delete next[key]; else next[key] = true; return next; });
+  };
+
+  const clearPreviews = async () => {
+    try {
+      const freed = await invoke<number>('clear_previews');
+      setReviews((current) => Object.fromEntries(Object.entries(current).map(([key, state]) => [key, { ...state, preview: undefined }])));
+      setStatus(`${formatBytes(freed)} of viewing copies removed from this computer. Extracted originals and the card are untouched.`);
+    } catch (cause) { failWith(cause, 'The viewing copies could not be removed.'); }
   };
 
   const loadFcmContext = async (userId: string) => {
@@ -498,14 +601,7 @@ export default function App() {
     setSendingKey(key); setError(null);
     updateSend(key, { status: 'extracting', sent: 0, total: recording.bytes, error: undefined });
     try {
-      let clip = clips[key];
-      if (!clip) {
-        const directory = destinationDirectory ?? await invoke<string>('default_clip_directory', { sourceId: catalogSource.kind === 'device' ? catalogSource.id : 'image' });
-        if (!destinationDirectory) setDestinationDirectory(directory);
-        setStatus(`Reading channel ${recording.channel}, ${formatTime(recording.start)} from the ${sourceLabel(catalogSource)} — only frames the camera dated inside this recording are kept…`);
-        clip = await invoke<ExtractedClip>('extract_dhfs_recording', { source: catalogSource, partitionIndex: recording.partitionIndex, descriptor: recording.descriptor, destinationDirectory: directory, reuseExisting: true });
-        setClips((current) => ({ ...current, [key]: clip }));
-      }
+      const clip = await ensureClip(recording);
       if (clip.kind === 'pictures') {
         if (!clip.pictures.length) throw new Error('No pictures dated inside this recording were found on the card.');
         updateSend(key, { status: 'uploading', sent: 0, total: clip.pictures.length });
@@ -569,6 +665,8 @@ export default function App() {
 
   const sendOne = async (recording: DhfsRecording) => {
     if (!importRow) return;
+    // An explicit Send overrides an earlier Skip.
+    setSkipped((current) => { const next = { ...current }; delete next[recordingKey(recording)]; return next; });
     await sendRecording(recording, importRow);
     await finishImport(importRow);
   };
@@ -585,7 +683,7 @@ export default function App() {
     }
     setQueueRemaining(0);
     await finishImport(importRow);
-    setStatus(stopQueueRef.current ? `Stopped: ${sentNow} recording${sentNow === 1 ? '' : 's'} sent before the stop.` : `${sentNow} of ${queue.length} recording${queue.length === 1 ? '' : 's'} sent to FCM. Open FCM → CCTV review to watch the analysis land.`);
+    setStatus(stopQueueRef.current ? `Stopped: ${sentNow} recording${sentNow === 1 ? '' : 's'} sent before the stop.` : `${sentNow} of ${queue.length} recording${queue.length === 1 ? '' : 's'} sent to FCM${skippedCount ? ` (${skippedCount} skipped by you)` : ''}. Open FCM → CCTV review to watch the analysis land.`);
   };
 
   const stopQueue = async () => { stopQueueRef.current = true; try { await invoke('cancel_upload'); } catch (cause) { failWith(cause, 'Stop request failed.'); } };
@@ -596,7 +694,7 @@ export default function App() {
     <aside className="rail"><div className="brand"><span><Waves size={19} /></span><div><b>FCM</b><small>Desktop V2 · v{APP_VERSION}</small></div></div><nav><button className="is-active"><HardDrive size={17} /> Camera card</button><button><Database size={17} /> Image explorer</button><button><Search size={17} /> Decoder lab</button></nav><div className="rail-note"><LockKeyhole size={16} /><span>Read-only: the card is opened without a write handle and is never changed.</span></div></aside>
     <section className="workspace">
       <header className="topbar"><div><span className="eyebrow">Evidence workstation</span><h1>Read the card. Send the recordings.</h1><p>FCM reads the hidden Dahua partition straight from the card, stitches only the recordings you choose, and sends them to the place they belong. An exact image of the whole card is optional.</p></div><div className="topbar-badge"><ShieldCheck size={17} /> Read-only source</div></header>
-      <section className="steps"><Step number="01" title="Discover" detail="Find the card" complete={stage !== 'idle' && stage !== 'discovery'} active={stage === 'discovery'} /><ChevronRight size={17} /><Step number="02" title="Recordings" detail="List from the card" complete={Boolean(catalog)} active={catalogBusy} /><ChevronRight size={17} /><Step number="03" title="Send to FCM" detail="Straight from the card" complete={sentCount > 0} active={sendingKey !== null} /><ChevronRight size={17} /><Step number="04" title="Exact image" detail="Optional forensic copy" complete={stage === 'complete'} active={stage === 'cloning' || stage === 'verifying'} /></section>
+      <section className="steps"><Step number="01" title="Discover" detail="Find the card" complete={stage !== 'idle' && stage !== 'discovery'} active={stage === 'discovery'} /><ChevronRight size={17} /><Step number="02" title="Recordings" detail="List from the card" complete={Boolean(catalog)} active={catalogBusy} /><ChevronRight size={17} /><Step number="03" title="Review here" detail="Optional · on this computer" complete={Object.values(reviews).some((review) => review.filmstrip)} active={Object.values(reviews).some((review) => review.busy !== null)} /><ChevronRight size={17} /><Step number="04" title="Send to FCM" detail="Straight from the card" complete={sentCount > 0} active={sendingKey !== null} /><ChevronRight size={17} /><Step number="05" title="Exact image" detail="Optional forensic copy" complete={stage === 'complete'} active={stage === 'cloning' || stage === 'verifying'} /></section>
       <div className="grid">
         <section className="panel source-panel"><div className="panel-heading"><div><span className="eyebrow">01 / Source</span><h2>Read-only device discovery</h2></div><Activity size={19} /></div><p className="muted">FCM opens the source read-only and never mounts or writes the camera card. A Dahua card usually shows in Explorer as a RAW drive letter that Windows offers to format — cancel that prompt; the letter is the hidden DHFS partition, not a fault. Reading a whole disk needs administrator rights, so FCM Desktop V2 asks for them once when it starts.</p><button className="primary" onClick={() => void discover()} disabled={stage === 'discovery'}><HardDrive size={16} /> {stage === 'discovery' ? 'Scanning...' : 'Discover camera cards and disks'}</button>{devices.length > 0 && <div className="device-list">{devices.map((device) => <button key={device.id} className={`device ${selectedDevice?.id === device.id ? 'is-selected' : ''}`} onClick={() => { setSelectedDevice(device); setProbe(null); }}><span className="device-icon"><HardDrive size={17} /></span><span><strong>{device.driveLetters.length ? `${device.driveLetters.join(' ')} · ` : ''}{device.label}</strong><small>{device.id} · {formatBytes(device.sizeBytes)} · {device.busType}{device.removable ? ' (removable)' : ''} · {device.partitionStyle} · {device.partitions} partition{device.partitions === 1 ? '' : 's'}{device.offline ? ' · offline' : ''} · {device.readOnly ? 'read-only' : 'write protection unknown'}</small></span><CheckCircle2 size={16} /></button>)}</div>}{selectedDevice && <div className="source-facts"><span>Selected source<strong>{selectedDevice.driveLetters.length ? `${selectedDevice.driveLetters.join(' ')} · ` : ''}{selectedDevice.label}</strong></span><span>Capacity<strong>{selectedSize}</strong></span><span>Write mode<strong>Blocked</strong></span></div>}{selectedDevice && <div className="actions"><button className="secondary" onClick={() => void readCatalog({ kind: 'device', id: selectedDevice.id, sizeBytes: selectedDevice.sizeBytes })} disabled={catalogBusy || stage === 'cloning'}><Clapperboard size={16} /> {catalogBusy && catalogSource?.kind === 'device' ? 'Reading card...' : 'List recordings directly from card'}</button><button className="secondary" onClick={() => void probeDevice(selectedDevice)} disabled={probing || catalogBusy}><Search size={16} /> {probing ? 'Probing...' : 'Probe first sectors'}</button><small className="muted">Read-only, no clone. This is the normal path: list what the card holds, then send or extract the recordings you need.</small></div>}{probe && <div className="probe"><strong>Card probe · {probe.id} · {formatBytes(probe.sizeBytes)}</strong><dl><div><dt>DHFS volume</dt><dd>{probe.dhfsLocation ?? probe.dhfsError ?? '—'}</dd></div>{!probe.sector0Hex ? <div><dt>Sectors</dt><dd>not read — the disk could not be opened, so nothing below was checked</dd></div> : <><div><dt>DHFS4.1 at sector 0</dt><dd>{probe.dhfsMagicAtZero ? 'yes' : probe.dhfsLocation ? 'no — expected: this card carries a partition table and the volume was found through it' : 'no'}</dd></div><div><dt>DHFS_DPT marker</dt><dd>{probe.dhfsDptMarkerWithinFirstMib === null ? (probe.dhfsLocation ? 'not in first MiB — not needed, located via the partition table' : 'not in first MiB') : `byte ${probe.dhfsDptMarkerWithinFirstMib.toLocaleString()}`}</dd></div><div><dt>MBR</dt><dd>{probe.mbrSignature ? (probe.mbrPartitions.length ? probe.mbrPartitions.join('; ') : 'signature present, no partition entries') : 'no MBR signature (superfloppy / raw)'}</dd></div><div><dt>Sector 0 (first 64 bytes)</dt><dd className="mono">{probe.sector0Hex}<br />{probe.sector0Ascii}</dd></div></>}</dl><small className="muted">{probe.dhfsLocation ? 'The card is recognised. Use “List recordings directly from card” to see what it holds.' : 'Copy this block into a support message if the card is not recognised.'}</small></div>}</section>
         <section className="panel recordings-panel"><div className="panel-heading"><div><span className="eyebrow">02 / Recordings</span><h2>What the card holds</h2></div><Clapperboard size={19} /></div>
@@ -604,18 +702,44 @@ export default function App() {
           {catalog && catalogPartition && <>
             <div className="facts"><span>Source<strong>{sourceLabel(catalogSource)}</strong></span><span>Recordings<strong>{catalog.recordings.length} · {formatBytes(totalRecordingBytes)}</strong></span><span>Layout<strong>{formatBytes(catalogPartition.fragmentSize)} fragments · {catalogPartition.descriptorCount.toLocaleString()} descriptors</strong></span></div>
             <p className="muted small">Volume at byte {catalog.volume.location.baseOffset.toLocaleString()} ({locationLabel(catalog.volume)}). {catalog.volume.tableNote}{catalog.skippedDescriptors ? ` ${catalog.skippedDescriptors} untrustworthy descriptor${catalog.skippedDescriptors === 1 ? '' : 's'} skipped, not silently included.` : ''}</p>
-            <div className="actions">{importRow && <button className="primary" onClick={() => void sendAll()} disabled={Boolean(extracting) || sendingKey !== null || unsentRecordings.length === 0}><UploadCloud size={15} /> {unsentRecordings.length === 0 ? 'All recordings sent' : `Send all ${unsentRecordings.length} to FCM`}</button>}{queueRemaining > 0 && <button className="secondary" onClick={() => void stopQueue()}>Stop sending ({queueRemaining} left)</button>}<button className="secondary" onClick={() => void chooseDestination()} disabled={sendingKey !== null}><FolderOpen size={15} /> {destinationDirectory ? 'Change working folder' : 'Choose working folder'}</button><small className="muted mono">{destinationDirectory ?? 'Working folder: Public Documents\\fcm-acquisitions, chosen automatically'}</small></div>
-            {!importRow && <p className="muted small">{fcmSession ? 'Create the import under “Send to FCM” to send recordings straight from the card. “Extract” alone writes a hashed copy to the working folder.' : 'Sign in under “Send to FCM” to send recordings straight from the card, or use “Extract” to write hashed copies to the working folder.'}</p>}
+            <div className="actions">{importRow && <button className="primary" onClick={() => void sendAll()} disabled={Boolean(extracting) || sendingKey !== null || unsentRecordings.length === 0}><UploadCloud size={15} /> {unsentRecordings.length === 0 ? (skippedCount ? `Nothing left to send (${skippedCount} skipped)` : 'All recordings sent') : `Send all ${unsentRecordings.length} to FCM${skippedCount ? ` (${skippedCount} skipped)` : ''}`}</button>}{queueRemaining > 0 && <button className="secondary" onClick={() => void stopQueue()}>Stop sending ({queueRemaining} left)</button>}<button className="secondary" onClick={() => void chooseDestination()} disabled={sendingKey !== null}><FolderOpen size={15} /> {destinationDirectory ? 'Change working folder' : 'Choose working folder'}</button><small className="muted mono">{destinationDirectory ?? 'Working folder: Public Documents\\fcm-acquisitions, chosen automatically'}</small></div>
+            {!importRow && <p className="muted small">{fcmSession ? 'Create the import under “Send to FCM” to send recordings straight from the card. “Preview” shows what a recording holds on this computer first; “Extract” alone writes a hashed copy to the working folder.' : 'Sign in under “Send to FCM” to send recordings straight from the card. “Preview” shows what a recording holds on this computer first; “Extract” writes a hashed copy to the working folder.'}</p>}
             {sentCount > 0 && <p className="muted small">{sentCount} recording{sentCount === 1 ? '' : 's'} sent to FCM: video with the SHA-256 taken as it left the card (the analysis worker re-hashes on intake), pictures as dated timeline events. Copies stay in {destinationDirectory ?? 'the working folder'}.</p>}
             <p className="muted small">Sizes listed below are what the card reserves for a recording; what is actually sent is only the frames the camera dated inside it — a previous occupant's leftovers and the card's own bookkeeping are left behind.</p>
             {catalog.recordings.length === 0 && <p className="muted">The volume is intact but holds no trustworthy recordings.</p>}
             <div className="recording-days">{recordingDays.map(([day, recordings]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{recordings.length} recording{recordings.length === 1 ? '' : 's'} · {formatBytes(recordings.reduce((sum, recording) => sum + recording.bytes, 0))}</small></div>
-              {recordings.map((recording) => { const key = recordingKey(recording); const clip = clips[key]; const send = sends[key]; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; return <div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''}`} key={key}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>Channel {recording.channel} · {formatDuration(recording.durationSeconds)}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.kind === 'pictures' ? clip.fileName : clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions">{importRow && <button className="primary" onClick={() => void sendOne(recording)} disabled={Boolean(extracting) || sendingKey !== null || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? sendLabel[send.status] : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={Boolean(extracting) || sendingKey !== null}><Download size={14} /> {extracting === key ? 'Extracting...' : clip ? 'Extract again' : importRow ? 'Extract only' : 'Extract'}</button></span></div>; })}
+              {recordings.map((recording) => { const key = recordingKey(recording); const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''}`}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>Channel {recording.channel} · {formatDuration(recording.durationSeconds)}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.kind === 'pictures' ? clip.fileName : clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”; still on the card{clip ? ' and in the working folder' : ''}.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions"><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(recording); }} disabled={Boolean(extracting) || sendingKey !== null || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(recording)} disabled={Boolean(extracting) || sendingKey !== null || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? sendLabel[send.status] : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={Boolean(extracting) || sendingKey !== null}><Download size={14} /> {extracting === key ? 'Extracting...' : clip ? 'Extract again' : importRow ? 'Extract only' : 'Extract'}</button></span></div>
+              {isOpen && <div className="review" role="region" aria-label={`Review of channel ${recording.channel} at ${formatClock(recording.start)}`}>
+                <div className="review__head"><strong>{clip ? `${clip.fileName} · ${describeClip(clip)}` : 'Reading from the card…'}</strong><small>{reviewState?.filmstrip ? `${reviewState.filmstrip.frames.length} key frames, every ${reviewState.filmstrip.keyFramesUsed === 1 ? 'one' : `${reviewState.filmstrip.keyFramesUsed}th`} · times are the camera clock` : reviewState?.busy === 'filmstrip' ? 'Decoding key frames on this computer…' : ''}</small></div>
+                {reviewState?.busy === 'filmstrip' && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}
+                {reviewState?.filmstrip && clip && <div className="filmstrip">{reviewState.filmstrip.frames.map((frame, index) => <figure key={`${key}:${index}`}><img src={`data:image/jpeg;base64,${frame.jpegBase64}`} alt={`Key frame ${index + 1} at ${clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}`} /><figcaption>{clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}</figcaption></figure>)}</div>}
+                {reviewState?.preview && <video controls preload="metadata" src={convertFileSrc(reviewState.preview.path)} />}
+                {reviewState?.busy === 'preview' && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}
+                {reviewState?.error && <p className="review__error">{reviewState.error}</p>}
+                <div className="review__actions">
+                  {clip && clip.kind !== 'pictures' && !reviewState?.preview && <button className="secondary" onClick={() => void playPreview(recording)} disabled={reviewState?.busy !== null && reviewState?.busy !== undefined}><Play size={14} /> {reviewState?.busy === 'preview' ? 'Rendering 480p copy…' : 'Play preview (480p, rendered here)'}</button>}
+                  {importRow ? <button className="primary" onClick={() => void sendOne(recording)} disabled={Boolean(extracting) || sendingKey !== null || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent to FCM' : 'Send this recording to FCM'}</button> : <small>{fcmSession ? 'Create the import under “Send to FCM” to send this recording.' : 'Sign in under “Send to FCM” to send this recording.'}</small>}
+                  {send?.status !== 'done' && <button className="secondary" onClick={() => toggleSkip(recording)}>{isSkipped ? <><Undo2 size={14} /> Include again</> : <><EyeOff size={14} /> Skip — do not send</>}</button>}
+                  {reviewState?.preview && <small>{encoderLabel(reviewState.preview)} · {formatBytes(reviewState.preview.bytes)} · viewing copy only, never sent</small>}
+                </div>
+              </div>}</Fragment>; })}
             </div>)}</div>
             {catalog.warnings.length > 0 && <details className="warnings"><summary>{catalog.warnings.length} descriptor warning{catalog.warnings.length === 1 ? '' : 's'}</summary><ul>{catalog.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
           </>}
         </section>
-        <section className="panel send-panel"><div className="panel-heading"><div><span className="eyebrow">03 / Send to FCM</span><h2>{importRow ? 'Import ready' : fcmSession ? 'Where does this footage belong?' : 'Sign in to FCM'}</h2></div><Send size={19} /></div>
+        <section className="panel review-panel"><div className="panel-heading"><div><span className="eyebrow">03 / Review here</span><h2>See it before it leaves this computer</h2></div><Cpu size={19} /></div>
+          <p className="muted">“Preview” on a recording decodes its key frames and, on request, a 480p viewing copy — on this computer, using the GPU when there is one. The card is only read; viewing copies live under this app's local data and are never sent or treated as evidence. Sending is unchanged: the extracted original goes to FCM with the SHA-256 taken from the card.</p>
+          <div className="facts"><span>Decoder<strong>{decoder ? (decoder.installed ? `FFmpeg ${decoder.version} · hash verified` : decoder.rejectedReason ? 'present but rejected' : 'not installed') : decoderError ? 'status unavailable' : 'checking…'}</strong></span><span>Viewing copies<strong>{previewCount} this session</strong></span><span>Skipped<strong>{skippedCount} recording{skippedCount === 1 ? '' : 's'}</strong></span></div>
+          {decoder && !decoder.installed && <>
+            <p className="muted small">The decoder is a one-time download ({formatBytes(decoder.downloadBytes)}) of a pinned FFmpeg build. FCM checks its SHA-256 against a value compiled into this app and refuses anything else, including a build that has been swapped on disk later.{decoder.rejectedReason ? ` Currently: ${decoder.rejectedReason}.` : ''}</p>
+            <div className="actions"><button className="primary" onClick={() => void installDecoder()} disabled={decoderBusy}><Download size={15} /> {decoderBusy ? 'Downloading and verifying…' : decoder.rejectedReason ? 'Install the decoder again' : 'Install decoder'}</button>{decoderProgress && <small className="muted">{formatBytes(decoderProgress.bytesDone)} of {formatBytes(decoderProgress.totalBytes || decoder.downloadBytes)}</small>}</div>
+            {decoderBusy && <div className={`progress decoder-progress ${decoderProgress && decoderProgress.bytesDone > 0 ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={!decoderProgress || decoderProgress.bytesDone === 0} aria-valuemin={0} aria-valuemax={100} aria-valuenow={decoderProgress && decoderProgress.totalBytes ? Math.floor((decoderProgress.bytesDone / decoderProgress.totalBytes) * 100) : 0}><div style={decoderProgress && decoderProgress.bytesDone > 0 && decoderProgress.totalBytes ? { width: `${Math.min(100, (decoderProgress.bytesDone / decoderProgress.totalBytes) * 100)}%` } : undefined} /></div>}
+          </>}
+          {decoder?.installed && <div className="actions"><button className="secondary" onClick={() => void clearPreviews()} disabled={Object.values(reviews).some((review) => review.busy !== null)}><Trash2 size={15} /> Remove viewing copies</button><small className="muted">Frees disk under this app's local data. Extracted originals in the working folder and the card are untouched.</small></div>}
+          {decoder && <p className="muted small">{decoder.licence}. The licence text ships with the download: <span className="mono">{decoder.licenceUrl}</span></p>}
+          {decoderError && <p className="review__error">{decoderError}</p>}
+        </section>
+        <section className="panel send-panel"><div className="panel-heading"><div><span className="eyebrow">04 / Send to FCM</span><h2>{importRow ? 'Import ready' : fcmSession ? 'Where does this footage belong?' : 'Sign in to FCM'}</h2></div><Send size={19} /></div>
           {!fcmSession && <>
             <p className="muted">Use your FCM login. Recordings are sent under your own account and organisation, exactly as if you had imported them in the web app; nothing about the login is kept on this computer.</p>
             <form className="fcm-form" onSubmit={(event) => { event.preventDefault(); void signIn(); }}>
@@ -639,8 +763,8 @@ export default function App() {
             <div className="actions"><button className="secondary" onClick={() => { setImportRow(null); setSends({}); doneClipsRef.current = {}; }} disabled={sendingKey !== null}>Start another import</button></div>
           </>}
         </section>
-        <section className="panel acquire-panel"><div className="panel-heading"><div><span className="eyebrow">04 / Optional</span><h2>Exact image of the whole card</h2></div><LockKeyhole size={19} /></div><p className="muted">Not needed to send recordings. An exact image is a forensic bit-for-bit copy of the <em>entire</em> card, empty space included, for when the card itself must be handed back or overwritten and you still need to prove nothing changed.{selectedDevice ? ` This ${formatBytes(selectedDevice.sizeBytes)} card needs the same free space on the destination drive and roughly ${estimateCloneMinutes(selectedDevice.sizeBytes)} minutes to clone over USB, then as long again to verify.` : ''}</p><div className="actions"><button className="primary" onClick={() => void acquire()} disabled={!selectedDevice || stage === 'cloning' || stage === 'verifying'}><Square size={15} /> {stage === 'cloning' ? 'Cloning...' : stage === 'verifying' ? 'Verifying...' : 'Acquire exact image'}</button>{(stage === 'cloning' || stage === 'verifying') && <button className="secondary" onClick={() => void cancelAcquisition()} disabled={cancelling || stage === 'verifying'}>{cancelling ? 'Cancelling...' : 'Cancel'}</button>}</div><div className={`status-card status-${stage}`}><span>{stageLabel[stage]}</span><strong>{receipt ? `${formatBytes(receipt.bytesCopied)} copied` : progress ? `${formatBytes(progress.bytesDone)} of ${formatBytes(progress.totalBytes)} · ${progress.totalBytes ? Math.floor((progress.bytesDone / progress.totalBytes) * 100) : 0}%` : stage === 'cloning' ? 'Starting: opening the card read-only and writing the first blocks…' : stage === 'failed' ? (error ?? 'The last acquisition did not complete.') : 'No image acquired yet — not needed to work from the card'}</strong>{stage === 'cloning' && !progress && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}{progress && (stage === 'cloning' || stage === 'verifying') && <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.totalBytes ? Math.floor((progress.bytesDone / progress.totalBytes) * 100) : 0}><div style={{ width: `${progress.totalBytes ? Math.min(100, (progress.bytesDone / progress.totalBytes) * 100) : 0}%` }} /></div>}{progress && (stage === 'cloning' || stage === 'verifying') && <small className="mono">{progress.stage} · {formatRate(progress.bytesPerSecond)} · elapsed {formatDuration(progress.elapsedSeconds)} · remaining {progress.etaSeconds === null ? '—' : formatDuration(progress.etaSeconds)}</small>}<small>{status}</small></div>{receipt && <div className="receipt"><div><CheckCircle2 size={17} /><strong>Hash verification {receipt.verified ? 'passed' : 'needs review'}</strong></div><dl><div><dt>Source SHA-256</dt><dd>{receipt.sourceSha256}</dd></div><div><dt>Image SHA-256</dt><dd>{receipt.imageSha256}</dd></div><div><dt>Read errors</dt><dd>{receipt.readErrors}</dd></div></dl></div>}</section>
-        <section className="panel inspect-panel"><div className="panel-heading"><div><span className="eyebrow">05 / Image inspection</span><h2>Virtual image inspection</h2></div><Search size={19} /></div><p className="muted">Only for an acquired image: run several adapters against the clone. Unknown layouts are preserved as investigation candidates instead of rejected.</p><button className="secondary" onClick={() => void inspectImage()} disabled={!receipt || decoderStage === 'scanning'}><Search size={16} /> {decoderStage === 'scanning' ? 'Inspecting...' : 'Inspect image and map partitions'}</button>{inspection && <div className="inspection"><div className="facts"><span>Image<strong>{formatBytes(inspection.imageBytes)}</strong></span><span>Signatures<strong>{inspection.signatures.length}</strong></span><span>DHFS<strong>{inspection.dhfs ? locationLabel(inspection.dhfs) : 'not found'}</strong></span></div><div className="signature-list">{inspection.signatures.map((signature) => <span key={signature}>{signature}</span>)}</div>{inspection.adapters.map((adapter) => <div className="adapter" key={adapter.name}><span className={`dot dot-${adapter.state}`} /><div><strong>{adapter.name}</strong><small>{adapter.detail}</small></div><em>{adapter.confidence}</em></div>)}</div>}</section>
+        <section className="panel acquire-panel"><div className="panel-heading"><div><span className="eyebrow">05 / Optional</span><h2>Exact image of the whole card</h2></div><LockKeyhole size={19} /></div><p className="muted">Not needed to send recordings. An exact image is a forensic bit-for-bit copy of the <em>entire</em> card, empty space included, for when the card itself must be handed back or overwritten and you still need to prove nothing changed.{selectedDevice ? ` This ${formatBytes(selectedDevice.sizeBytes)} card needs the same free space on the destination drive and roughly ${estimateCloneMinutes(selectedDevice.sizeBytes)} minutes to clone over USB, then as long again to verify.` : ''}</p><div className="actions"><button className="primary" onClick={() => void acquire()} disabled={!selectedDevice || stage === 'cloning' || stage === 'verifying'}><Square size={15} /> {stage === 'cloning' ? 'Cloning...' : stage === 'verifying' ? 'Verifying...' : 'Acquire exact image'}</button>{(stage === 'cloning' || stage === 'verifying') && <button className="secondary" onClick={() => void cancelAcquisition()} disabled={cancelling || stage === 'verifying'}>{cancelling ? 'Cancelling...' : 'Cancel'}</button>}</div><div className={`status-card status-${stage}`}><span>{stageLabel[stage]}</span><strong>{receipt ? `${formatBytes(receipt.bytesCopied)} copied` : progress ? `${formatBytes(progress.bytesDone)} of ${formatBytes(progress.totalBytes)} · ${progress.totalBytes ? Math.floor((progress.bytesDone / progress.totalBytes) * 100) : 0}%` : stage === 'cloning' ? 'Starting: opening the card read-only and writing the first blocks…' : stage === 'failed' ? (error ?? 'The last acquisition did not complete.') : 'No image acquired yet — not needed to work from the card'}</strong>{stage === 'cloning' && !progress && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}{progress && (stage === 'cloning' || stage === 'verifying') && <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.totalBytes ? Math.floor((progress.bytesDone / progress.totalBytes) * 100) : 0}><div style={{ width: `${progress.totalBytes ? Math.min(100, (progress.bytesDone / progress.totalBytes) * 100) : 0}%` }} /></div>}{progress && (stage === 'cloning' || stage === 'verifying') && <small className="mono">{progress.stage} · {formatRate(progress.bytesPerSecond)} · elapsed {formatDuration(progress.elapsedSeconds)} · remaining {progress.etaSeconds === null ? '—' : formatDuration(progress.etaSeconds)}</small>}<small>{status}</small></div>{receipt && <div className="receipt"><div><CheckCircle2 size={17} /><strong>Hash verification {receipt.verified ? 'passed' : 'needs review'}</strong></div><dl><div><dt>Source SHA-256</dt><dd>{receipt.sourceSha256}</dd></div><div><dt>Image SHA-256</dt><dd>{receipt.imageSha256}</dd></div><div><dt>Read errors</dt><dd>{receipt.readErrors}</dd></div></dl></div>}</section>
+        <section className="panel inspect-panel"><div className="panel-heading"><div><span className="eyebrow">06 / Image inspection</span><h2>Virtual image inspection</h2></div><Search size={19} /></div><p className="muted">Only for an acquired image: run several adapters against the clone. Unknown layouts are preserved as investigation candidates instead of rejected.</p><button className="secondary" onClick={() => void inspectImage()} disabled={!receipt || decoderStage === 'scanning'}><Search size={16} /> {decoderStage === 'scanning' ? 'Inspecting...' : 'Inspect image and map partitions'}</button>{inspection && <div className="inspection"><div className="facts"><span>Image<strong>{formatBytes(inspection.imageBytes)}</strong></span><span>Signatures<strong>{inspection.signatures.length}</strong></span><span>DHFS<strong>{inspection.dhfs ? locationLabel(inspection.dhfs) : 'not found'}</strong></span></div><div className="signature-list">{inspection.signatures.map((signature) => <span key={signature}>{signature}</span>)}</div>{inspection.adapters.map((adapter) => <div className="adapter" key={adapter.name}><span className={`dot dot-${adapter.state}`} /><div><strong>{adapter.name}</strong><small>{adapter.detail}</small></div><em>{adapter.confidence}</em></div>)}</div>}</section>
       </div>
       {error && <div className="error"><strong>Action blocked</strong><span>{error}</span></div>}
       <footer><span><ShieldCheck size={14} /> Recordings leave the card hashed; FCM re-hashes them on intake.</span><span>v{APP_VERSION} · {fcmSession ? `signed in as ${fcmProfile?.displayName ?? fcmSession.user.email}` : 'not signed in'} · {stageLabel[stage]}{catalog ? ` · ${catalog.recordings.length} recordings` : ''}{sentCount ? ` · ${sentCount} sent` : ''}</span></footer>

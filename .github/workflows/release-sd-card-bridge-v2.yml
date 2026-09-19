@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: Copy-Item ../sd-card-bridge/src-tauri/icons src-tauri/icons -Recurse -Force
       - name: Prove the DHFS reader against synthetic cards
-        run: cargo test --manifest-path crates/dhfs/Cargo.toml
+        run: cargo test --manifest-path crates/dhfs/Cargo.toml && cargo test --manifest-path crates/decoder/Cargo.toml
       - name: Build installer
         run: npm run tauri build
       - name: Locate installer

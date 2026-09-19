@@ -491,7 +491,185 @@ fn upload_clip_resumable(app: tauri::AppHandle, upload_id: String, clip_path: St
     Ok(UploadOutcome { status: "complete", upload_url: Some(upload_url), bytes_sent: offset, total_bytes })
 }
 
+// ---------------------------------------------------------------------------------------------
+// Review here: the on-demand decoder sidecar, filmstrips and preview renditions
+// ---------------------------------------------------------------------------------------------
+
+use tauri::Manager;
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DecoderProgress { bytes_done: u64, total_bytes: u64 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FilmstripFrame { at_seconds: f64, jpeg_base64: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Filmstrip { frames: Vec<FilmstripFrame>, key_frames_used: u32 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewRendition { path: String, bytes: u64, encoder: Option<fcm_decoder::PreviewEncoder>, seconds: f64, cached: bool }
+
+fn app_local_data(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path().app_local_data_dir().map_err(|error| format!("The app's local data folder is not available: {error}"))
+}
+
+fn verified_ffmpeg(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let path = fcm_decoder::ffmpeg_path(&app_local_data(app)?);
+    let mut file = File::open(&path).map_err(|_| "The decoder is not installed. Install it under “Review here” first.".to_string())?;
+    let digest = fcm_decoder::sha256_of(&mut file).map_err(|error| error.to_string())?;
+    if digest != fcm_decoder::FFMPEG_SHA256 { return Err(format!("The installed decoder does not match the pinned build ({}…); it will not be used. Install it again.", &digest[..12])); }
+    Ok(path)
+}
+
+/// Whether the pinned decoder is present and matches its hash. Never trusts a file by name alone.
+#[tauri::command(async)]
+fn decoder_status(app: tauri::AppHandle) -> Result<fcm_decoder::DecoderStatus, String> {
+    let path = fcm_decoder::ffmpeg_path(&app_local_data(&app)?);
+    let (installed, rejected_reason) = match File::open(&path) {
+        Ok(mut file) => match fcm_decoder::sha256_of(&mut file) {
+            Ok(digest) if digest == fcm_decoder::FFMPEG_SHA256 => (true, None),
+            Ok(digest) => (false, Some(format!("present but hash {}… does not match the pinned build", &digest[..12]))),
+            Err(error) => (false, Some(format!("present but unreadable: {error}"))),
+        },
+        Err(_) => (false, None),
+    };
+    Ok(fcm_decoder::DecoderStatus {
+        installed, version: fcm_decoder::FFMPEG_VERSION.to_string(), path: installed.then(|| path.to_string_lossy().to_string()),
+        licence: fcm_decoder::LICENCE_LABEL.to_string(), licence_url: fcm_decoder::licence_url(), download_bytes: fcm_decoder::FFMPEG_BYTES, rejected_reason,
+    })
+}
+
+fn download_verified(app: &tauri::AppHandle, url: &str, destination: &Path, expected_sha256: &str, expected_bytes: Option<u64>, report: bool) -> Result<(), String> {
+    if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| format!("Could not create {}: {error}", parent.display()))?; }
+    let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(300)).build();
+    let response = agent.get(url).call().map_err(|error| format!("Download failed: {}", describe_http_error(error)))?;
+    let total = response.header("Content-Length").and_then(|value| value.parse::<u64>().ok()).or(expected_bytes).unwrap_or(0);
+    let partial = destination.with_extension("part");
+    let mut file = File::create(&partial).map_err(|error| format!("Could not create {}: {error}", partial.display()))?;
+    let mut reader = response.into_reader();
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1 << 20];
+    let mut done = 0_u64;
+    let mut last_report = 0_u64;
+    loop {
+        let count = reader.read(&mut buffer).map_err(|error| format!("Download interrupted after {} MB: {error}", done / 1_048_576))?;
+        if count == 0 { break; }
+        file.write_all(&buffer[..count]).map_err(|error| error.to_string())?;
+        hasher.update(&buffer[..count]);
+        done += count as u64;
+        if report && done - last_report >= 4 * 1_048_576 { last_report = done; let _ = app.emit("decoder-progress", DecoderProgress { bytes_done: done, total_bytes: total }); }
+    }
+    file.flush().map_err(|error| error.to_string())?;
+    drop(file);
+    let digest = format!("{:x}", hasher.finalize());
+    if digest != expected_sha256 {
+        let _ = fs::remove_file(&partial);
+        return Err(format!("The downloaded file's hash {}… does not match the pinned build. It was discarded; nothing was installed.", &digest[..12]));
+    }
+    fs::rename(&partial, destination).map_err(|error| format!("Could not commit {}: {error}", destination.display()))?;
+    if report { let _ = app.emit("decoder-progress", DecoderProgress { bytes_done: done, total_bytes: done }); }
+    Ok(())
+}
+
+/// Download the pinned FFmpeg build (and its licence) into the app's local data folder, verifying both hashes.
+#[tauri::command(async)]
+fn install_decoder(app: tauri::AppHandle) -> Result<fcm_decoder::DecoderStatus, String> {
+    let data = app_local_data(&app)?;
+    download_verified(&app, &fcm_decoder::licence_url(), &fcm_decoder::licence_path(&data), fcm_decoder::LICENSE_SHA256, None, false)?;
+    download_verified(&app, &fcm_decoder::ffmpeg_url(), &fcm_decoder::ffmpeg_path(&data), fcm_decoder::FFMPEG_SHA256, Some(fcm_decoder::FFMPEG_BYTES), true)?;
+    decoder_status(app)
+}
+
+fn run_ffmpeg(ffmpeg: &Path, args: &[String], timeout: Duration) -> Result<(bool, String), String> {
+    let mut command = std::process::Command::new(ffmpeg);
+    command.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
+    #[cfg(target_os = "windows")]
+    { use std::os::windows::process::CommandExt; command.creation_flags(0x0800_0000); } // CREATE_NO_WINDOW
+    let mut child = command.spawn().map_err(|error| format!("The decoder could not be started: {error}"))?;
+    let mut stderr = child.stderr.take().ok_or("decoder stderr unavailable")?;
+    let started = Instant::now();
+    let reader = std::thread::spawn(move || { let mut text = String::new(); let _ = stderr.read_to_string(&mut text); text });
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => { let text = reader.join().unwrap_or_default(); return Ok((status.success(), text)); }
+            Ok(None) if started.elapsed() > timeout => { let _ = child.kill(); return Err(format!("The decoder took longer than {} s and was stopped.", timeout.as_secs())); }
+            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+}
+
+/// Key frames spread across an extracted recording, as small JPEGs with their offset from the clip start.
+#[tauri::command(async)]
+fn render_filmstrip(app: tauri::AppHandle, clip_path: String, key_frames: u32, count: Option<u32>) -> Result<Filmstrip, String> {
+    let ffmpeg = verified_ffmpeg(&app)?;
+    let count = count.unwrap_or(12).clamp(1, 40);
+    let work = std::env::temp_dir().join(format!("fcm-filmstrip-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
+    fs::create_dir_all(&work).map_err(|error| error.to_string())?;
+    let pattern = work.join("t-%02d.jpg").to_string_lossy().to_string();
+    let stride = fcm_decoder::filmstrip_stride(key_frames, count);
+    let (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::filmstrip_args(&clip_path, &pattern, stride, count), Duration::from_secs(120))?;
+    let times = fcm_decoder::parse_showinfo_times(&stderr);
+    let mut names: Vec<PathBuf> = fs::read_dir(&work).map_err(|error| error.to_string())?.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.extension().map(|ext| ext == "jpg").unwrap_or(false)).collect();
+    names.sort();
+    if names.is_empty() {
+        let _ = fs::remove_dir_all(&work);
+        return Err(if ok { "The decoder produced no frames for this recording.".to_string() } else { format!("The decoder could not read this recording: {}", stderr.lines().last().unwrap_or("no detail").trim()) });
+    }
+    let frames = names.iter().enumerate().map(|(index, path)| {
+        let bytes = fs::read(path).unwrap_or_default();
+        FilmstripFrame { at_seconds: times.get(index).copied().unwrap_or(0.0), jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes) }
+    }).collect();
+    let _ = fs::remove_dir_all(&work);
+    Ok(Filmstrip { frames, key_frames_used: stride })
+}
+
+/// A 480p H.264 viewing copy under the app's local data folder (GPU encoder first, software fallback).
+/// Never uploaded, never registered: the evidence is the extracted original.
+#[tauri::command(async)]
+fn render_preview(app: tauri::AppHandle, clip_path: String) -> Result<PreviewRendition, String> {
+    let ffmpeg = verified_ffmpeg(&app)?;
+    let stem = Path::new(&clip_path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "clip".to_string());
+    let previews = app_local_data(&app)?.join("previews");
+    fs::create_dir_all(&previews).map_err(|error| error.to_string())?;
+    let output = previews.join(format!("{stem}.preview.mp4"));
+    if let Ok(metadata) = fs::metadata(&output) {
+        // A previous run's viewing copy; which encoder produced it is not recorded, so say so.
+        if metadata.len() > 0 { return Ok(PreviewRendition { path: output.to_string_lossy().to_string(), bytes: metadata.len(), encoder: None, seconds: 0.0, cached: true }); }
+    }
+    let started = Instant::now();
+    let mut encoder = fcm_decoder::PreviewEncoder::Nvenc;
+    let (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::preview_args(&clip_path, &output.to_string_lossy(), encoder), Duration::from_secs(600))?;
+    let (ok, stderr) = if !ok && fcm_decoder::encoder_unavailable(&stderr) {
+        encoder = fcm_decoder::PreviewEncoder::Software;
+        run_ffmpeg(&ffmpeg, &fcm_decoder::preview_args(&clip_path, &output.to_string_lossy(), encoder), Duration::from_secs(900))?
+    } else { (ok, stderr) };
+    if !ok {
+        let _ = fs::remove_file(&output);
+        return Err(format!("The preview could not be rendered: {}", stderr.lines().last().unwrap_or("no detail").trim()));
+    }
+    let bytes = fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
+    Ok(PreviewRendition { path: output.to_string_lossy().to_string(), bytes, encoder: Some(encoder), seconds: started.elapsed().as_secs_f64(), cached: false })
+}
+
+/// Previews are derived viewing copies; clearing them frees disk without touching evidence.
+#[tauri::command(async)]
+fn clear_previews(app: tauri::AppHandle) -> Result<u64, String> {
+    let previews = app_local_data(&app)?.join("previews");
+    let mut freed = 0_u64;
+    if let Ok(entries) = fs::read_dir(&previews) {
+        for entry in entries.flatten() {
+            if entry.path().extension().map(|ext| ext == "mp4").unwrap_or(false) { freed += entry.metadata().map(|m| m.len()).unwrap_or(0); let _ = fs::remove_file(entry.path()); }
+        }
+    }
+    Ok(freed)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }
