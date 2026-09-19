@@ -145,7 +145,9 @@ class ContainerClockIntegrationTests(unittest.TestCase):
                     white = np.where(saved[90, :, :].min(axis=1) > 200)[0]
                     self.assertTrue(len(white), 'the saved frame should show the moving square')
                     self.assertEqual(60 + round((int(white[0]) - 20) / 6), artifact.frame_index, 'the saved image is the frame the motion was detected in')
-            self.assertTrue(summary.extraction_truncated, 'a skipped access unit is reported as truncation')
+            self.assertTrue(segment.frames_truncated, 'a window missing frames says so')
+            self.assertEqual(summary.frames_skipped, 3, 'the skipped access unit is counted, not hidden in the budget flag')
+            self.assertFalse(summary.extraction_truncated, 'the frame budget was not exceeded and the stream did not end early')
 
 
 FPS = 15

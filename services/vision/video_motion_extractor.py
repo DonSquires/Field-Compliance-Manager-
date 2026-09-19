@@ -67,6 +67,8 @@ class MotionSummary:
     frames_per_second: float = 0.0
     quality_events: list[QualityEvent] = field(default_factory=list)
     quality_counts: dict[str, int] = field(default_factory=dict)
+    # Positions the decoder could not read (damaged access units). Their frames are absent, never substituted.
+    frames_skipped: int = 0
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"), sort_keys=True)
@@ -481,6 +483,7 @@ def extract_motion_summary(
     artifacts_dir = Path(output_dir).expanduser().resolve() if output_dir else None
     job_frames = 0
     truncated = False
+    frames_skipped = 0
     if artifacts_dir and windows:
         capture = cv2.VideoCapture(str(video_path))
         reader = SequentialFrames(capture, fps)
@@ -497,8 +500,8 @@ def extract_motion_summary(
                     item = reader.take_at(clock.at(index))
                     if item is None:
                         segment.frames_truncated = True
-                        truncated = True
                         if reader.exhausted:
+                            truncated = True
                             break
                         continue
                     frame_seconds, decoded_frame = item
@@ -510,10 +513,9 @@ def extract_motion_summary(
                         FrameArtifact(index, round(frame_seconds, 3), digest, file_path, visual_quality, visual_quality_reason, quality_state, sharpness_score)
                     )
                     job_frames += 1
-                if reader.failures:
-                    truncated = True
                 if job_frames >= max_job_frames:
                     break
+            frames_skipped = reader.failures
         except (cv2.error, MemoryError, OSError) as error:
             raise VideoExtractionError(
                 f"Failed while writing frame artifacts: {error}"
@@ -534,6 +536,7 @@ def extract_motion_summary(
         frames_per_second=round(float(fps), 6),
         quality_events=gate.events,
         quality_counts=quality_counts,
+        frames_skipped=frames_skipped,
     )
 
 
