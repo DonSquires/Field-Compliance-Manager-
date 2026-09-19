@@ -3,15 +3,18 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'services' / 'vision'))
+import video_motion_extractor
 from video_motion_extractor import (
+    FrameClock,
     FrameStats,
     QualityEvent,
+    SequentialFrames,
     TemporalQualityGate,
     _frame_stats,
     _timestamp_seconds,
@@ -32,6 +35,117 @@ class VideoMotionExtractorTimestampTests(unittest.TestCase):
         capture.get.return_value = 0.0
 
         self.assertTrue(math.isclose(_timestamp_seconds(capture, frame_index=30, fps=25.0), 1.2))
+
+    def test_frame_clock_interpolates_between_the_decoded_frames_either_side(self):
+        clock = FrameClock(3.0)
+        for index in (0, 1, 2, 10):
+            clock.record(index, index / 2.8)
+        self.assertAlmostEqual(clock.at(10), 10 / 2.8)
+        # A position the decoder skipped sits proportionally between its decoded neighbours...
+        self.assertAlmostEqual(clock.at(6), 6 / 2.8)
+        # ...and past the last decoded frame the nominal period is all that is known.
+        self.assertAlmostEqual(clock.at(11), 10 / 2.8 + 1 / 3)
+        self.assertAlmostEqual(FrameClock(3.0).at(9), 3.0)
+
+
+class ScriptedCapture:
+    """A VideoCapture whose clock runs at `real_fps` while it declares `nominal_fps`, and whose read() fails
+    once at `fail_at`, advancing the position by `skip` frames the way the worker's decoder does on a damaged
+    access unit. Frames carry their index as a slowly changing grey patch."""
+
+    def __init__(self, frames, real_fps, nominal_fps, fail_at=None, skip=0):
+        self.frames = frames
+        self.real_fps = real_fps
+        self.nominal_fps = nominal_fps
+        self.fail_at = fail_at
+        self.skip = skip
+        self.position = 0
+        self.last = None
+        self.failed = False
+
+    def isOpened(self):
+        return True
+
+    def release(self):
+        pass
+
+    def getBackendName(self):
+        return 'scripted'
+
+    def read(self):
+        if self.fail_at is not None and self.position == self.fail_at and not self.failed:
+            self.failed = True
+            self.position += self.skip
+            return False, None
+        if self.position >= len(self.frames):
+            return False, None
+        self.last = self.position
+        self.position += 1
+        return True, self.frames[self.last].copy()
+
+    def get(self, prop):
+        if prop == cv2.CAP_PROP_FPS:
+            return self.nominal_fps
+        if prop == cv2.CAP_PROP_FRAME_COUNT:
+            return len(self.frames)
+        if prop == cv2.CAP_PROP_FRAME_WIDTH:
+            return self.frames[0].shape[1]
+        if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+            return self.frames[0].shape[0]
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            return self.position
+        if prop == cv2.CAP_PROP_POS_MSEC:
+            return (self.last / self.real_fps) * 1000.0 if self.last is not None else 0.0
+        return 0.0
+
+
+class SequentialFramesTests(unittest.TestCase):
+    def test_hands_out_the_frame_at_the_requested_clock_even_after_a_skip(self):
+        frames = [np.full((8, 8, 3), i, dtype=np.uint8) for i in range(30)]
+        reader = SequentialFrames(ScriptedCapture(frames, real_fps=3.0, nominal_fps=3.0, fail_at=10, skip=4), 3.0)
+        seconds, frame = reader.take_at(2.0)
+        self.assertAlmostEqual(seconds, 2.0)
+        self.assertEqual(int(frame[0, 0, 0]), 6)
+        # Frames 10-13 are lost to the damaged unit: they are reported missing, not replaced by the 4th read after them.
+        self.assertIsNone(reader.take_at(11 / 3))
+        self.assertFalse(reader.exhausted)
+        self.assertEqual(reader.failures, 4)
+        seconds, frame = reader.take_at(14 / 3)
+        self.assertEqual(int(frame[0, 0, 0]), 14)
+        self.assertAlmostEqual(seconds, 14 / 3)
+        seconds, frame = reader.take_at(20 / 3)
+        self.assertEqual(int(frame[0, 0, 0]), 20)
+        self.assertIsNone(reader.take_at(99.0))
+        self.assertTrue(reader.exhausted)
+
+
+class ContainerClockIntegrationTests(unittest.TestCase):
+    def test_segment_and_frame_times_follow_the_container_clock_not_index_over_nominal_fps(self):
+        real_fps, nominal_fps = 2.8, 3.0
+        rng = np.random.default_rng(3)
+        scene = _colour_scene(rng)
+        # A square walks 6 px per frame from index 60 to 74: its position identifies the frame it came from.
+        frames = [_with_square(scene, 20 + (index - 60) * 6) if 60 <= index < 75 else scene.copy() for index in range(120)]
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(video_motion_extractor.cv2, 'VideoCapture', lambda _path: ScriptedCapture(frames, real_fps, nominal_fps, fail_at=64, skip=3)):
+            video = Path(directory) / 'scripted.dav'
+            video.write_bytes(b'x')
+            summary = extract_motion_summary(video, output_dir=Path(directory) / 'frames', warmup_frames=15, pre_roll=1.0, post_roll=1.0)
+            self.assertEqual(len(summary.motion_segments), 1, summary.motion_segments)
+            segment = summary.motion_segments[0]
+            # Motion starts at index 60: on the container clock that is 21.4 s, not 20.0 s (index / nominal fps).
+            self.assertAlmostEqual(segment.start_time_seconds, 60 / real_fps - 1.0, delta=0.4)
+            self.assertTrue(segment.frames)
+            saved_indices = [artifact.frame_index for artifact in segment.frames]
+            self.assertTrue(all(index not in saved_indices for index in (64, 65, 66)), 'frames the decoder skipped are not replaced by later ones')
+            for artifact in segment.frames:
+                self.assertAlmostEqual(artifact.relative_timestamp_seconds, artifact.frame_index / real_fps, delta=0.5 / nominal_fps)
+                if 60 <= artifact.frame_index < 75:
+                    saved = cv2.imread(artifact.file_path)
+                    white = np.where(saved[90, :, :].min(axis=1) > 200)[0]
+                    self.assertTrue(len(white), 'the saved frame should show the moving square')
+                    self.assertEqual(60 + round((int(white[0]) - 20) / 6), artifact.frame_index, 'the saved image is the frame the motion was detected in')
+            self.assertTrue(summary.extraction_truncated, 'a skipped access unit is reported as truncation')
 
 
 FPS = 15

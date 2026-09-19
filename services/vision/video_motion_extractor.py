@@ -200,6 +200,98 @@ def _timestamp_seconds(capture: cv2.VideoCapture, frame_index: int, fps: float) 
     return frame_index / fps
 
 
+class FrameClock:
+    """Container time of each decoded frame, as the first pass saw it.
+
+    DVR streams are not a steady nominal rate: this Dahua card runs ~2.8 fps against a declared 3, and the
+    decoder drops damaged access units, so `index / fps` runs up to half a minute early over a recording.
+    The container clock (PTS) matches the camera's on-screen clock, so every time FCM reports comes from it.
+    """
+
+    def __init__(self, fps: float):
+        self.fps = fps
+        self.times: dict[int, float] = {}
+        self._keys: list[int] | None = None
+
+    def record(self, index: int, seconds: float) -> None:
+        self.times[index] = seconds
+        self._keys = None
+
+    def at(self, index: int) -> float:
+        if index in self.times:
+            return self.times[index]
+        if not self.times:
+            return index / self.fps
+        if self._keys is None:
+            self._keys = sorted(self.times)
+        position = int(np.searchsorted(self._keys, index))
+        if position == 0:
+            key = self._keys[0]
+            return self.times[key] - (key - index) / self.fps
+        before = self._keys[position - 1]
+        if position < len(self._keys):
+            # A position the decoder skipped: place it proportionally between the frames either side of it.
+            after = self._keys[position]
+            return self.times[before] + (self.times[after] - self.times[before]) * (index - before) / (after - before)
+        return self.times[before] + (index - before) / self.fps
+
+
+class SequentialFrames:
+    """Second-pass reader that hands out frames by container clock, not by how many reads it took.
+
+    A damaged access unit makes `read()` fail while the backend advances past several positions; counting
+    attempts then pairs a motion window with frames from later in the recording. Matching on the clock the
+    first pass recorded keeps the saved frame the one the motion was detected in.
+    """
+
+    MAX_CONSECUTIVE_FAILURES = 4096
+
+    def __init__(self, capture: cv2.VideoCapture, fps: float):
+        self.capture = capture
+        self.fps = fps
+        self.decoded = 0
+        self.failures = 0
+        self.pending: tuple[float, np.ndarray] | None = None
+        self.exhausted = False
+
+    def _next(self) -> tuple[float, np.ndarray] | None:
+        if self.pending is not None:
+            return self.pending
+        consecutive = 0
+        while not self.exhausted:
+            success, frame = self.capture.read()
+            if success:
+                seconds = _timestamp_seconds(self.capture, self.decoded + self.failures, self.fps)
+                self.decoded += 1
+                self.pending = (seconds, frame)
+                return self.pending
+            position = self.capture.get(cv2.CAP_PROP_POS_FRAMES)
+            consecutive += 1
+            if np.isfinite(position) and position > self.decoded + self.failures and consecutive <= self.MAX_CONSECUTIVE_FAILURES:
+                self.failures = int(position) - self.decoded
+                continue
+            self.exhausted = True
+        return None
+
+    def take_at(self, target_seconds: float) -> tuple[float, np.ndarray] | None:
+        """The unconsumed frame whose clock is `target_seconds` (within half a frame period). `None` when that
+        frame is missing from the stream or the stream has ended; check `exhausted` to tell the two apart. A
+        later frame is left pending for the target it does belong to, never handed out as a stand-in."""
+        tolerance = 0.5 / self.fps
+        while True:
+            item = self._next()
+            if item is None:
+                return None
+            seconds, _frame = item
+            if seconds < target_seconds - tolerance:
+                self.pending = None
+                continue
+            if seconds > target_seconds + tolerance:
+                return None
+            self.pending = None
+            return item
+
+
 def _codec_name(capture: cv2.VideoCapture) -> str:
     code = int(capture.get(cv2.CAP_PROP_FOURCC))
     if code <= 0:
@@ -316,6 +408,7 @@ def extract_motion_summary(
         history=300, varThreshold=24, detectShadows=False
     )
     gate = TemporalQualityGate(fps)
+    clock = FrameClock(fps)
     frame_states: list[str] = []
     moving: list[int] = []
     frame_index = 0
@@ -333,6 +426,7 @@ def extract_motion_summary(
                 break
             timestamp = max(last_timestamp, _timestamp_seconds(capture, frame_index, fps))
             last_timestamp = timestamp
+            clock.record(frame_index, timestamp)
             stats, grey = _frame_stats(frame)
             state, learn, count_motion = gate.observe(frame_index, stats, grey, fps)
             if state == "ir_switch":
@@ -350,6 +444,11 @@ def extract_motion_summary(
     finally:
         capture.release()
     gate.finish(fps)
+    # Quality events were timed by index inside the gate; report them on the container clock like everything else.
+    gate.events = [
+        QualityEvent(event.kind, round(clock.at(event.frame_start), 3), round(clock.at(event.frame_end), 3), event.frame_start, event.frame_end)
+        for event in gate.events
+    ]
     # Spike frames are labelled only once the gate knows whether they snapped back.
     for index, state in gate.states.items():
         if index < len(frame_states):
@@ -378,12 +477,13 @@ def extract_motion_summary(
         ],
         frame_count,
     )
-    segments = [MotionSegment(start / fps, end / fps) for start, end in windows]
+    segments = [MotionSegment(round(clock.at(start), 3), round(clock.at(end), 3)) for start, end in windows]
     artifacts_dir = Path(output_dir).expanduser().resolve() if output_dir else None
     job_frames = 0
     truncated = False
     if artifacts_dir and windows:
         capture = cv2.VideoCapture(str(video_path))
+        reader = SequentialFrames(capture, fps)
         try:
             for segment, (start, end) in zip(segments, windows):
                 remaining_budget = max_job_frames - job_frames
@@ -393,28 +493,25 @@ def extract_motion_summary(
                 if len(frame_indices) < end - start + 1:
                     segment.frames_truncated = True
                     truncated = True
-                target_index = 0
                 for index in frame_indices:
-                    decoded_frame = None
-                    while target_index <= index:
-                        success, frame = capture.read()
-                        if not success:
-                            segment.frames_truncated = True
-                            truncated = True
-                            target_index += 1
-                            continue
-                        decoded_frame = frame
-                        target_index += 1
-                    if decoded_frame is None:
+                    item = reader.take_at(clock.at(index))
+                    if item is None:
+                        segment.frames_truncated = True
+                        truncated = True
+                        if reader.exhausted:
+                            break
                         continue
+                    frame_seconds, decoded_frame = item
                     digest, file_path, visual_quality, visual_quality_reason, quality_state, sharpness_score = _write_frame(
                         decoded_frame, artifacts_dir, output_quality, scale_width, scale_height,
                         gate.states.get(index),
                     )
                     segment.frames.append(
-                        FrameArtifact(index, round(index / fps, 3), digest, file_path, visual_quality, visual_quality_reason, quality_state, sharpness_score)
+                        FrameArtifact(index, round(frame_seconds, 3), digest, file_path, visual_quality, visual_quality_reason, quality_state, sharpness_score)
                     )
                     job_frames += 1
+                if reader.failures:
+                    truncated = True
                 if job_frames >= max_job_frames:
                     break
         except (cv2.error, MemoryError, OSError) as error:
