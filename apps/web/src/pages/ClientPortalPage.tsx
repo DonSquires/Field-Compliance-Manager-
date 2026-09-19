@@ -17,6 +17,7 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import type { ClientPortalPage } from '../lib/clientPortalAccess';
 import { getClientPortalPages } from '../lib/clientPortalAccess';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
+import { asDeliverySummary, deliveryPeriodBounds, deliveryWords, hoursOnPost, type DeliveryPeriod, type DeliverySummary } from '../lib/serviceDelivery';
 import { supabase } from '../lib/supabase';
 import './ClientPortalPage.css';
 
@@ -55,53 +56,6 @@ interface ClientInvoice {
   sent_at: string | null;
   paid_at: string | null;
 }
-
-interface DeliveryPlace {
-  location_id: string;
-  place_name: string | null;
-  place_kind: 'site' | 'zone';
-  patrol_expected: number;
-  patrol_completed: number;
-  patrol_missed: number;
-  patrol_late: number;
-  post_expected: number;
-  post_attended: number;
-  post_minutes: number;
-  last_presence_at: string | null;
-  shift_count: number;
-}
-
-interface DeliverySummary {
-  agreement_id: string;
-  period_start: string;
-  period_end: string;
-  places: DeliveryPlace[];
-  totals: { patrol_expected: number; patrol_completed: number; patrol_missed: number; patrol_late: number; post_expected: number; post_attended: number; post_minutes: number; place_count: number };
-}
-
-type DeliveryPeriod = 'this_month' | 'last_month';
-
-const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-/** Calendar month bounds the client thinks in; the server caps 'this month' at today. */
-export const deliveryPeriodBounds = (period: DeliveryPeriod, now = new Date()) => {
-  const offset = period === 'last_month' ? -1 : 0;
-  const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
-  return { start: localDate(start), end: localDate(end) };
-};
-export const hoursOnPost = (minutes: number) => minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
-/** One sentence per place, in the client's words. */
-export const deliveryWords = (place: DeliveryPlace): { patrol: string | null; post: string | null; presence: string } => {
-  const patrol = place.patrol_expected === 0 ? null
-    : `${place.patrol_completed} of ${plural(place.patrol_expected, 'contracted visit')} done${place.patrol_missed ? ` · ${plural(place.patrol_missed, 'missed visit')}` : ''}${place.patrol_late ? ` · ${place.patrol_late} late` : ''}`;
-  const post = place.post_expected === 0 ? null
-    : `${plural(place.post_attended, 'guard attendance')} of ${place.post_expected} rostered · ${hoursOnPost(place.post_minutes)} on post`;
-  const presence = place.last_presence_at
-    ? `Last on site ${new Date(place.last_presence_at).toLocaleString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
-    : 'No presence recorded in this period';
-  return { patrol, post, presence };
-};
 
 export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
   const { profile } = useAuth();
@@ -202,8 +156,9 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
     setDeliveryLoading(true); setDeliveryError(null);
     supabase.rpc('get_agreement_service_delivery', { p_agreement_id: agreement.id, p_period_start: bounds.start, p_period_end: bounds.end }).then(({ data, error }) => {
       if (cancelled) return;
-      if (error || !data) { setDeliveryError(error?.message ?? 'Delivered work could not be loaded.'); setDelivery(null); }
-      else setDelivery(data as unknown as DeliverySummary);
+      const parsed = asDeliverySummary(data);
+      if (error || !parsed) { setDeliveryError(error?.message ?? 'Delivered work could not be loaded.'); setDelivery(null); }
+      else setDelivery(parsed);
       setDeliveryLoading(false);
     });
     return () => { cancelled = true; };

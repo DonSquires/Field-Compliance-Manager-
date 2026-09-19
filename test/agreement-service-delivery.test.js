@@ -47,8 +47,26 @@ test('the client portal offers Service delivered in every operational mode and s
   assert.match(shell, /\{ id: 'delivery', label: 'Service delivered', icon: Shield \}/);
   assert.match(page, /supabase\.rpc\('get_agreement_service_delivery', \{ p_agreement_id: agreement\.id, p_period_start: bounds\.start, p_period_end: bounds\.end \}\)/);
   assert.match(page, /if \(!agreement \|\| !allowedPages\.has\('delivery'\)\) \{ setDelivery\(null\); return; \}/);
-  assert.match(page, /of \$\{plural\(place\.patrol_expected, 'contracted visit'\)\} done/);
-  assert.match(page, /\$\{plural\(place\.post_attended, 'guard attendance'\)\} of \$\{place\.post_expected\} rostered \u00b7 \$\{hoursOnPost\(place\.post_minutes\)\} on post/);
+  const words = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/lib/serviceDelivery.ts'), 'utf8');
+  assert.match(words, /of \$\{plural\(place\.patrol_expected, 'contracted visit'\)\} done/);
+  assert.match(words, /\$\{plural\(place\.post_attended, 'guard attendance'\)\} of \$\{place\.post_expected\} rostered · \$\{hoursOnPost\(place\.post_minutes\)\} on post/);
+  assert.match(words, /'No presence recorded in this period'/);
   assert.match(page, /Only shifts already due are counted; the names of individual officers are not shown here\./);
-  assert.match(page, /'No presence recorded in this period'/);
+});
+
+const crmPanel = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CrmAgreementDeliveryPanel.tsx'), 'utf8');
+const workspace = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CrmAccountWorkspace.tsx'), 'utf8');
+const lib = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/lib/serviceDelivery.ts'), 'utf8');
+const handoff = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CrmRosterHandoffPanel.tsx'), 'utf8');
+
+test('the provider reads the same delivery numbers inside the Client Portfolio, and a stub or empty payload never crashes the card', () => {
+  assert.match(workspace, /<CrmRosterHandoffPanel agreement=\{agreement\} onChanged=\{loadWorkspace\} \/><CrmAgreementDeliveryPanel agreementId=\{agreement\.id\} \/>/);
+  assert.match(crmPanel, /supabase\.rpc\('get_agreement_service_delivery', \{ p_agreement_id: agreementId, p_period_start: bounds\.start, p_period_end: bounds\.end \}\)/);
+  assert.match(crmPanel, /const parsed = asDeliverySummary\(data\);/);
+  assert.match(page, /const parsed = asDeliverySummary\(data\);/);
+  assert.match(lib, /if \(!data \|\| typeof data !== 'object' \|\| Array\.isArray\(data\)\) return null;/);
+  assert.match(crmPanel, /The client can see these gaps too\. Check the roster and the officers' shift records before the monthly report goes out\./);
+  // the handoff list says the slot's real state, not "Shift live" for a finished shift
+  assert.match(handoff, /slot\.status === 'completed' \? 'Completed' : slot\.linked_shift_id \? `\$\{slotStatusLabel\(slot\.status\)\} · shift created` : slotStatusLabel\(slot\.status\)/);
+  assert.doesNotMatch(handoff, /'Shift live'/);
 });

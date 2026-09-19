@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { CalendarClock, CheckCircle2, Plus, RefreshCw, UserCheck, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { slotStatusLabel } from '../lib/rosterWords';
 import './CrmRosterHandoffPanel.css';
 
 interface AgreementRef {
@@ -151,7 +152,7 @@ export function CrmRosterHandoffPanel({
     {error && <p className="is-error" role="alert">{error}</p>}
     {notice && <p className="is-success" role="status"><CheckCircle2 size={14} />{notice}</p>}
     {loading ? <p><CalendarClock size={14} /> Loading roster handoff…</p> : <>
-      {slots.length === 0 ? <p className="crm-roster-handoff-empty">No roster slot has been published for this agreement yet.</p> : <div className="crm-roster-handoff-list">{slots.map((slot) => <article key={slot.id}><div><strong>{unitName(slot.work_unit_id)}</strong><span>{staffName(slot.staff_id)} · {new Date(slot.scheduled_start).toLocaleString('en-NZ')} – {new Date(slot.scheduled_end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span></div><em className={slot.linked_shift_id ? 'is-live' : ''}>{slot.linked_shift_id ? 'Shift live' : slot.status}</em></article>)}</div>}
+      {slots.length === 0 ? <p className="crm-roster-handoff-empty">No roster slot has been published for this agreement yet.</p> : <div className="crm-roster-handoff-list">{slots.map((slot) => <article key={slot.id}><div><strong>{unitName(slot.work_unit_id)}</strong><span>{staffName(slot.staff_id)} · {new Date(slot.scheduled_start).toLocaleString('en-NZ')} – {new Date(slot.scheduled_end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span></div><em className={slot.linked_shift_id && !['completed', 'cancelled'].includes(slot.status) ? 'is-live' : ''}>{slot.status === 'completed' ? 'Completed' : slot.linked_shift_id ? `${slotStatusLabel(slot.status)} · shift created` : slotStatusLabel(slot.status)}</em></article>)}</div>}
       {showForm && <form onSubmit={publishAssignment}>
         <label><span>Field officer</span><select required value={form.officerId} onChange={(event) => setForm({ ...form, officerId: event.target.value })}>{staff.map((person) => <option key={person.user_id} value={person.user_id}>{person.display_name ?? person.email ?? 'Unnamed officer'}</option>)}</select></label>
         <label><span>Work unit</span><select required value={form.workUnitId} onChange={(event) => setForm({ ...form, workUnitId: event.target.value })}>{workUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name} · {unit.service_type.replaceAll('_', ' ')}</option>)}</select></label>

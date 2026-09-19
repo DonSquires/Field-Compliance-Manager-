@@ -62,3 +62,38 @@ test('admin turns the accepted agreement places into a patrol run the roster can
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('the Client Portfolio shows what was delivered at the agreement\'s places — the same numbers the client sees', async ({ page }) => {
+  let requested: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/service_agreements**', async (route) => {
+    const select = new URL(route.request().url()).searchParams.get('select') ?? '';
+    if (!select.startsWith('id,name,agreement_type,invitation_status,provider_organization_id,client_organization_id')) { await route.fallback(); return; }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: agreementId, name: 'Civic Events Compliance Services', agreement_type: 'operational', invitation_status: 'accepted', provider_organization_id: '41414141-4141-4141-8141-414141414141', client_organization_id: accountId }]) });
+  });
+  await page.route('**/rest/v1/rpc/get_agreement_service_delivery', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    requested = payload;
+    const lastMonth = String(payload.p_period_start).startsWith('2026-07');
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      agreement_id: agreementId, period_start: payload.p_period_start, period_end: payload.p_period_end,
+      places: [{ location_id: 'f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1', place_name: 'Civic Centre', place_kind: 'site', patrol_expected: lastMonth ? 31 : 27, patrol_completed: lastMonth ? 31 : 25, patrol_missed: lastMonth ? 0 : 2, patrol_late: 0, post_expected: 4, post_attended: lastMonth ? 4 : 3, post_minutes: 1455, last_presence_at: '2026-08-29T20:40:00.000Z', shift_count: 31 }],
+      totals: { patrol_expected: lastMonth ? 31 : 27, patrol_completed: lastMonth ? 31 : 25, patrol_missed: lastMonth ? 0 : 2, patrol_late: 0, post_expected: 4, post_attended: lastMonth ? 4 : 3, post_minutes: 1455, place_count: 1 },
+    }) });
+  });
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator(`#crm-account-${accountId}`).click();
+  const portfolio = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await portfolio.getByRole('button', { name: 'Agreements 1' }).first().click();
+
+  const delivered = portfolio.getByRole('region', { name: "Delivered at this agreement's places" });
+  await expect(delivered).toContainText('25/27');
+  await expect(delivered.locator('.crm-agreement-delivery-places li').filter({ hasText: 'Civic Centre' })).toContainText('25 of 27 contracted visits done · 2 missed visits · 3 guard attendances of 4 rostered · 24h 15m on post');
+  await expect(delivered.locator('.crm-agreement-delivery-places li').first()).toHaveClass(/has-gaps/);
+  await expect(delivered.getByText(/The client can see these gaps too\./)).toBeVisible();
+  expect(requested).toMatchObject({ p_agreement_id: agreementId, p_period_start: '2026-08-01', p_period_end: '2026-08-31' });
+
+  await delivered.getByRole('button', { name: 'Last month' }).click();
+  await expect(delivered).toContainText('31/31');
+  await expect(delivered.getByText(/The client can see these gaps too\./)).toHaveCount(0);
+  expect(requested).toMatchObject({ p_period_start: '2026-07-01', p_period_end: '2026-07-31' });
+});

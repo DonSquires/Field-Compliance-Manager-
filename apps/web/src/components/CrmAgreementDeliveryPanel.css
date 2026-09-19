@@ -1,0 +1,27 @@
+.crm-agreement-delivery{display:grid;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid #284554}
+.crm-agreement-delivery>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.crm-agreement-delivery>header>div:first-child{display:grid;gap:3px;min-width:0}
+.crm-agreement-delivery>header span{color:#73cabc;font-size:12px;font-weight:800;text-transform:uppercase}
+.crm-agreement-delivery>header strong{color:#e6f0f4;font-size:13px}
+.crm-agreement-delivery>header p{margin:0;color:#8fa9b5;font-size:12px;line-height:1.45}
+.crm-agreement-delivery-period{display:inline-flex;flex:none;gap:3px;padding:2px;border:1px solid #284554;border-radius:6px;background:#0a1b25}
+.crm-agreement-delivery-period button{padding:5px 9px;border:0;border-radius:4px;color:#9fb4c2;background:transparent;font-size:12px;font-weight:700;cursor:pointer}
+.crm-agreement-delivery-period button.is-active{color:#0b1a17;background:#7dd3c7}
+.crm-agreement-delivery-totals{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.crm-agreement-delivery-totals>div{display:grid;gap:2px;padding:8px 10px;border:1px solid #284859;border-radius:5px;background:#0a1b25}
+.crm-agreement-delivery-totals strong{color:#bfe9e1;font-size:15px}
+.crm-agreement-delivery-totals.has-gaps>div:nth-child(2) strong{color:#ffb4b4}
+.crm-agreement-delivery-totals span{color:#8fa9b5;font-size:11px;text-transform:uppercase;letter-spacing:.02em}
+.crm-agreement-delivery-places{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.crm-agreement-delivery-places li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 10px;border:1px solid #284859;border-radius:5px;background:#0a1b25;color:#89d8c7}
+.crm-agreement-delivery-places li.has-gaps{border-left:3px solid #e07a7a}
+.crm-agreement-delivery-places li>div{display:grid;gap:2px;min-width:0}
+.crm-agreement-delivery-places li strong{color:#e6f0f4;font-size:12px}
+.crm-agreement-delivery-places li span{color:#b4c6d2;font-size:12px;line-height:1.4}
+.crm-agreement-delivery-places li small{color:#83c9b9;font-size:11px;text-align:right;white-space:nowrap}
+.crm-agreement-delivery-note{display:flex;gap:6px;align-items:center;margin:0;color:#8fa9b5;font-size:12px}
+.crm-agreement-delivery-note.is-gap{color:#f7d77a}
+.crm-agreement-delivery-error{display:flex;gap:6px;align-items:center;margin:0;color:#ffd7d7;font-size:12px}
+.crm-agreement-delivery .is-spinning{animation:crm-agreement-delivery-spin 1s linear infinite}
+@keyframes crm-agreement-delivery-spin{to{transform:rotate(360deg)}}
+@media (max-width:720px){.crm-agreement-delivery>header{flex-direction:column}.crm-agreement-delivery-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.crm-agreement-delivery-places li{grid-template-columns:auto minmax(0,1fr)}.crm-agreement-delivery-places li small{grid-column:2;text-align:left;white-space:normal}}
