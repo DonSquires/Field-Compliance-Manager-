@@ -67,6 +67,16 @@
 .cctv-console__icon-btn { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 4px; color: var(--cc-text-2); cursor: pointer; display: inline-flex; flex: 0 0 auto; padding: 4px; }
 .cctv-console__icon-btn:hover { background: var(--cc-raised); color: var(--cc-text); }
 .cctv-console__icon-btn:disabled { cursor: default; opacity: .35; }
+.cctv-console__icon-btn.is-on { background: var(--cc-brand-dim); color: var(--cc-brand); }
+
+/* Biometric governance readout: purpose, retention and counts only. */
+.cctv-console__governance { background: var(--cc-elevated); border: 1px solid var(--cc-line); border-radius: 6px; color: var(--cc-text-2); display: grid; font-size: 12px; gap: 8px; margin: 8px 0 10px; padding: 10px 12px; }
+.cctv-console__governance strong { color: var(--cc-text); }
+.cctv-console__governance p { line-height: 1.45; margin: 0; }
+.cctv-console__governance dl { display: grid; gap: 6px 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.cctv-console__governance dt { color: var(--cc-text-3); font-size: 11px; }
+.cctv-console__governance dd { color: var(--cc-text); font-variant-numeric: tabular-nums; margin: 0; }
+.cctv-console__governance dd.is-warn { color: var(--cc-watch); font-weight: 700; }
 
 .cctv-console__cameras ul, .cctv-console__entity-list { list-style: none; margin: 0; padding: 0; }
 .cctv-console__camera { align-items: center; border-left: 3px solid transparent; border-radius: 0 4px 4px 0; display: flex; gap: 4px; }

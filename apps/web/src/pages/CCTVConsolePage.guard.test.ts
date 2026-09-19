@@ -100,6 +100,14 @@ describe('CCTV console', () => {
     expect(tile).toContain('React.forwardRef<CCTVPlayerTileHandle');
   });
 
+  it('never selects biometric template columns and explains face matching through the governed readout', () => {
+    expect(page).not.toMatch(/select\([^)]*\b(face_vec|appearance_vec|candidate_embedding|appearance_embedding)\b/);
+    expect(page).toContain("supabase.rpc('cctv_biometric_governance', { p_organization_id: organizationId })");
+    expect(page).toContain('aria-label="Biometric data held by this organisation"');
+    expect(page).toContain('Templates are never shown or downloadable. Rejected sightings lose their template at once');
+    expect(page).toContain('Rejected still holding one');
+  });
+
   it('shows chain of custody from the governed record, never from browser-held state alone', () => {
     expect(page).toContain("supabase.rpc('cctv_evidence_custody', { p_evidence_id: evidenceId })");
     expect(page).toContain('integrity: parseClipIntegrity(metadata.integrity)');

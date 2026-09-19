@@ -123,6 +123,7 @@ type KindFilter = 'all' | EntityKind;
 type BookmarkDraft = { evidenceId: string; atMs: number; title: string; notes: string; severity: 'low' | 'standard' | 'high' | 'critical'; observationId: string | null };
 type LockDraft = { evidenceId: string; reason: string };
 type CustodyEvent = { at: string; kind: string; actor_user_id: string | null; detail: Record<string, unknown> };
+type BiometricGovernance = { live_face_templates: number; live_templates: number; expired_templates: number; rejected_still_holding_templates: number; oldest_live_template_at: string | null; last_expiry_run_at: string | null; purpose: string; default_retention: string };
 type CustodyRecord = {
   evidence_item_id: string;
   storage_path: string | null;
@@ -268,6 +269,8 @@ const CCTVConsolePage: React.FC = () => {
   const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
   const [lockDraft, setLockDraft] = useState<LockDraft | null>(null);
   const [custody, setCustody] = useState<{ evidenceId: string; loading: boolean; record: CustodyRecord | null; error: string | null } | null>(null);
+  const [governance, setGovernance] = useState<BiometricGovernance | null>(null);
+  const [showGovernance, setShowGovernance] = useState(false);
   const [evidenceBusy, setEvidenceBusy] = useState<string | null>(null);
   const [evidenceMessage, setEvidenceMessage] = useState<string | null>(null);
 
@@ -755,6 +758,16 @@ const CCTVConsolePage: React.FC = () => {
     if (custody && !clipsById.has(custody.evidenceId)) setCustody(null);
   }, [custody, clipsById]);
 
+  // Biometric holdings for this organisation: counts only, from the governed readout. Refreshed when the panel opens.
+  useEffect(() => {
+    if (!showGovernance || !organizationId) return;
+    let cancelled = false;
+    void supabase.rpc('cctv_biometric_governance', { p_organization_id: organizationId }).then(({ data }) => {
+      if (!cancelled && data && typeof data === 'object') setGovernance(data as BiometricGovernance);
+    });
+    return () => { cancelled = true; };
+  }, [showGovernance, organizationId, observationsByImport]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -1182,7 +1195,23 @@ const CCTVConsolePage: React.FC = () => {
             <div className="cctv-console__aside-head">
               <strong>Entities</strong>
               <span className="cctv-console__count">{pendingObservations.length} to review</span>
+              <button type="button" className={`cctv-console__icon-btn${showGovernance ? ' is-on' : ''}`} onClick={() => setShowGovernance((current) => !current)} aria-pressed={showGovernance} aria-expanded={showGovernance} aria-controls="cctv-biometric-governance" aria-label="Biometric data held by this organisation" title="Biometric data held by this organisation"><ShieldCheck size={14} aria-hidden="true" /></button>
             </div>
+            {showGovernance ? (
+              <div id="cctv-biometric-governance" className="cctv-console__governance" role="note">
+                <strong>Face matching, plainly</strong>
+                <p>{governance?.purpose ?? 'Templates are used only to suggest same-or-similar sightings within this organisation; identity is always a reviewer decision.'} Templates are never shown or downloadable. Rejected sightings lose their template at once; undecided sightings after {governance?.default_retention ?? '90 days'}.</p>
+                {governance ? (
+                  <dl>
+                    <div><dt>Live face templates</dt><dd>{governance.live_face_templates}</dd></div>
+                    <div><dt>Expired</dt><dd>{governance.expired_templates}</dd></div>
+                    <div><dt>Rejected still holding one</dt><dd className={governance.rejected_still_holding_templates ? 'is-warn' : undefined}>{governance.rejected_still_holding_templates}</dd></div>
+                    <div><dt>Oldest live</dt><dd>{governance.oldest_live_template_at ? formatDate(parseMs(governance.oldest_live_template_at) ?? 0, timeZone) : '—'}</dd></div>
+                    <div><dt>Last expiry run</dt><dd>{governance.last_expiry_run_at ? formatDate(parseMs(governance.last_expiry_run_at) ?? 0, timeZone) : 'Not yet run (daily at 03:41)'}</dd></div>
+                  </dl>
+                ) : <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Reading holdings…</p>}
+              </div>
+            ) : null}
             <div className="cctv-console__filters" role="group" aria-label="Entity filters">
               {(['all', 'person', 'vehicle', 'animal'] as KindFilter[]).map((option) => (
                 <button key={option} type="button" className={`cctv-console__chip${kindFilter === option ? ' is-on' : ''}`} onClick={() => setKindFilter(option)} aria-pressed={kindFilter === option}>
