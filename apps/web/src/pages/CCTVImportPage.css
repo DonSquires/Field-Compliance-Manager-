@@ -127,6 +127,18 @@
 
 .cctv-import-folder-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; }
 .cctv-import-selection-status { color: #315761; font-size: 13px; line-height: 1.45; margin: 12px 0 0; }
+/* The browser cannot see a hidden camera partition; say so and hand over to the desktop reader. */
+.cctv-import-hidden-partition { background: #fff7e8; border: 1px solid #f0d9a6; border-radius: 8px; color: #5a4a1e; display: flex; gap: 10px; margin-top: 12px; padding: 12px 14px; }
+.cctv-import-hidden-partition > svg { color: #bd8419; flex: 0 0 auto; margin-top: 2px; }
+.cctv-import-hidden-partition strong { color: #3f3312; display: block; font-size: 14px; }
+.cctv-import-hidden-partition p { font-size: 13px; line-height: 1.5; margin: 6px 0 10px; }
+.cctv-import-hidden-partition .page-action { display: inline-flex; }
+.cctv-import-left-out { color: #52646d; font-size: 12px; margin-top: 10px; }
+.cctv-import-left-out summary { cursor: pointer; }
+.cctv-import-left-out ul { display: grid; gap: 4px; list-style: none; margin: 8px 0 0; padding: 0; }
+.cctv-import-left-out li { display: grid; gap: 2px 10px; grid-template-columns: minmax(0, 1fr) auto; }
+.cctv-import-left-out li span { font-family: Menlo, Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.cctv-import-left-out li small { color: #75828a; white-space: nowrap; }
 .cctv-import-muted { color: #75828a; font-size: 13px; }
 .cctv-import-summary {
   display: grid;

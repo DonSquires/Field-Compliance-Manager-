@@ -47,6 +47,34 @@ const TAPO_SNAPSHOT = /^(\d{9,10})_(\d{9,10})_(\d+)\.jpe?g$/i;
 const CONTIGUOUS_SLOT_GAP_MS = 2 * 60 * 60 * 1000;
 const EMPTY_HEADER_BYTES = 16;
 
+export type HiddenPartitionVerdict = {
+  likely: boolean;
+  /** Plain-words reason a reviewer can act on; null when the folder simply holds no video. */
+  reason: string | null;
+};
+
+/**
+ * A browser can only see files the operating system mounts. Dahua (and some other) camera cards keep every
+ * recording in a proprietary hidden partition and expose a small system partition to Windows, so a scan of the
+ * visible drive finds nothing usable. Name that plainly instead of "no videos found", and point at the desktop
+ * reader that reads the card raw.
+ */
+export function assessHiddenPartitionCard(scanned: Array<Pick<ScannedFile, 'kind' | 'name' | 'relativePath' | 'sizeBytes'>>, folderLabel: string | null): HiddenPartitionVerdict {
+  const usable = scanned.some((item) => item.kind === 'video' || item.kind === 'snapshot');
+  if (usable) return { likely: false, reason: null };
+  const names = scanned.map((item) => item.name.toLowerCase());
+  const dahuaMarker = names.some((name) => /^(dhfs|dh_|dahua)/.test(name) || /\.(dav|idx)$/.test(name)) || scanned.some((item) => /(^|\/)(dvr_?(data|root)|dhfs)/i.test(item.relativePath));
+  const driveRoot = folderLabel !== null && /^([a-z]:)?[\\/]?$/i.test(folderLabel.trim());
+  const smallSystemFiles = scanned.length > 0 && scanned.length <= 40 && scanned.every((item) => item.sizeBytes < 64 * 1024 * 1024);
+  if (dahuaMarker) {
+    return { likely: true, reason: 'This is the visible part of a Dahua camera card. The recordings are in a hidden DHFS partition that Windows and the browser cannot read.' };
+  }
+  if (driveRoot && smallSystemFiles) {
+    return { likely: true, reason: 'This drive shows only small device files. Camera cards that record to a hidden partition (Dahua and similar) look exactly like this from Windows.' };
+  }
+  return { likely: false, reason: null };
+}
+
 export function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';

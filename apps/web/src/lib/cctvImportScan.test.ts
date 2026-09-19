@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assessHiddenPartitionCard,
   buildDeviceEvents,
   buildManifest,
   classifyFolder,
@@ -65,6 +66,20 @@ describe('device detection', () => {
     expect(detectDeviceKind(['a.mp4', 'b.mov'])).toBe('generic_folder');
     expect(detectDeviceKind(['readme.txt'])).toBe('unknown');
     expect(detectDeviceKind([])).toBe('unknown');
+  });
+
+  it('tells a hidden-partition camera card apart from a folder that simply has no video', () => {
+    const systemFiles = (names: string[]) => names.map((name) => ({ kind: 'other' as const, name, relativePath: name, sizeBytes: 4096 }));
+    // A drive root holding a dozen small device files is what a Dahua card looks like from Windows.
+    const root = assessHiddenPartitionCard(systemFiles(['sys00.bin', 'log01.dat', 'cfg.ini']), '\\');
+    expect(root.likely).toBe(true);
+    expect(root.reason).toContain('hidden partition');
+    expect(assessHiddenPartitionCard(systemFiles(['dhfs.idx']), 'card').reason).toContain('Dahua');
+    // Ordinary folders with no video are not accused of hiding anything.
+    expect(assessHiddenPartitionCard(systemFiles(['notes.txt']), 'Holiday photos').likely).toBe(false);
+    // Anything usable means the browser can see the recordings; no hand-off needed.
+    expect(assessHiddenPartitionCard([{ kind: 'video', name: 'a.mp4', relativePath: 'a.mp4', sizeBytes: 10 }], '\\').likely).toBe(false);
+    expect(assessHiddenPartitionCard([], '\\').likely).toBe(false);
   });
 });
 

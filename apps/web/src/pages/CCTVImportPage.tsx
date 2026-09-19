@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase';
 import {
   COMMON_TIME_ZONES,
   DEFAULT_SOURCE_TIME_ZONE,
+  assessHiddenPartitionCard,
   buildDeviceEvents,
   buildManifest,
   classifyFolder,
@@ -30,6 +31,7 @@ import {
   type ScanInput,
   type ScannedFile,
 } from '../lib/cctvImportScan';
+import { DESKTOP_V2_DOWNLOAD_URL, DESKTOP_V2_FILENAME, DESKTOP_V2_VERSION } from '../lib/desktopReleases';
 import './PageStyles.css';
 import './CCTVImportPage.css';
 
@@ -45,7 +47,7 @@ interface FileProgress { status: FileStatus; sent: number; error?: string }
 type RunPhase = 'idle' | 'creating' | 'uploading' | 'done' | 'failed';
 
 const DEVICE_LABELS: Record<DeviceKind, string> = {
-  tapo: 'TP-Link Tapo SD card', dahua: 'Dahua DVR/NVR', hikvision: 'Hikvision', reolink: 'Reolink',
+  tapo: 'TP-Link Tapo SD card', dahua: 'Dahua DVR/NVR export (.dav)', hikvision: 'Hikvision', reolink: 'Reolink',
   generic_folder: 'Folder of video files', single_file: 'Single video file', unknown: 'Unknown / other',
 };
 const RESUMABLE_UPLOAD_THRESHOLD = 8 * 1024 * 1024;
@@ -139,6 +141,8 @@ const CCTVImportPage: React.FC = () => {
   const summary = useMemo(() => summarize(scanned), [scanned]);
   const videos = useMemo(() => scanned.filter((item) => item.kind === 'video'), [scanned]);
   const snapshots = useMemo(() => scanned.filter((item) => item.kind === 'snapshot'), [scanned]);
+  const leftOut = useMemo(() => scanned.filter((item) => item.kind === 'other' || item.kind === 'index'), [scanned]);
+  const hiddenPartition = useMemo(() => (scanning || !rawInputs.length ? { likely: false, reason: null } : assessHiddenPartitionCard(scanned, folderLabel)), [scanned, folderLabel, scanning, rawInputs.length]);
   const selectedHouse = houses.find((house) => house.id === houseId) ?? null;
   const houseSites = useMemo(() => sites.filter((site) => site.location_id === houseId), [sites, houseId]);
   const houseZones = useMemo(() => zones.filter((zone) => zone.location_id === houseId), [zones, houseId]);
@@ -254,7 +258,7 @@ const CCTVImportPage: React.FC = () => {
     const excluded = scanned.length - accepted;
     setSelectionStatus(accepted
       ? `${accepted} video file${accepted === 1 ? '' : 's'} ready to import${excluded ? `; ${excluded} item${excluded === 1 ? '' : 's'} excluded` : ''}.`
-      : 'No usable video files were found. Choose .mp4, .dav, .mov, .mkv, .avi, or camera-stream files.');
+      : `No usable video files among ${scanned.length} item${scanned.length === 1 ? '' : 's'}. The browser can only read files Windows shows; accepted types are .mp4, .dav, .mov, .mkv, .avi and raw camera streams (.h264/.h265).`);
   }, [rawInputs.length, scanned, scanning]);
 
   const uploadObject = async (file: File, objectName: string, contentType: string, onBytes?: (sent: number) => void): Promise<void> => {
@@ -578,6 +582,27 @@ const CCTVImportPage: React.FC = () => {
             {folderLabel && <span className="cctv-import-muted">{folderLabel}{scanning ? ' · scanning…' : ` · ${DEVICE_LABELS[deviceKind]}`}</span>}
           </div>
           {selectionStatus && <p className="cctv-import-selection-status" role="status">{selectionStatus}</p>}
+          {hiddenPartition.likely && (
+            <div className="cctv-import-hidden-partition" role="note">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <div>
+                <strong>The recordings are not where the browser can see them.</strong>
+                <p>{hiddenPartition.reason} Read the card on this computer with FCM Desktop V2 (run as administrator): it reads the hidden partition directly and uploads the recordings to FCM, hashed, into the same review console.</p>
+                <a className="page-action is-primary" href={DESKTOP_V2_DOWNLOAD_URL} download={DESKTOP_V2_FILENAME}>Get FCM Desktop V2 · v{DESKTOP_V2_VERSION}</a>
+              </div>
+            </div>
+          )}
+          {!scanning && leftOut.length > 0 && (
+            <details className="cctv-import-left-out">
+              <summary>{leftOut.length} file{leftOut.length === 1 ? '' : 's'} left out — show which</summary>
+              <ul>
+                {leftOut.slice(0, 60).map((item) => (
+                  <li key={item.relativePath}><span>{item.relativePath}</span><small>{formatBytes(item.sizeBytes)}{item.skipReason ? ` · ${item.skipReason}` : ''}</small></li>
+                ))}
+                {leftOut.length > 60 && <li><small>…and {leftOut.length - 60} more</small></li>}
+              </ul>
+            </details>
+          )}
           {scanned.length > 0 && !scanning && (
             <>
               <dl className="cctv-import-summary">
