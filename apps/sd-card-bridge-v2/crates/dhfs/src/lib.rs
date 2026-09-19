@@ -814,15 +814,57 @@ pub fn codec_label(probe: &StreamProbe) -> String {
     }
 }
 
+/// The evidence-style file stem every extraction of this recording gets, so a copy made earlier can be found again.
+pub fn recording_file_stem(recording: &Recording, label: &str) -> String {
+    let safe_label: String = label.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
+    format!(
+        "FCM-{safe_label}-p{}-d{:06}-{}-{}-ch{:02}",
+        recording.partition_index, recording.descriptor, recording.start.file_stamp(), recording.end.file_stamp(), recording.channel
+    )
+}
+
+/// A finished copy of `recording` already in `directory`, re-hashed from its bytes (the hash is never
+/// taken on trust from a name). `None` when no finished copy exists; `.part` files are never accepted.
+pub fn existing_extracted_clip(recording: &Recording, directory: &Path, label: &str) -> Result<Option<ExtractedClip>, DhfsError> {
+    let stem = recording_file_stem(recording, label);
+    let Some((path, file_name)) = ["dav", "h264", "h265", "dhfs"].iter().map(|extension| format!("{stem}.{extension}")).map(|name| (directory.join(&name), name)).find(|(path, _)| path.is_file()) else { return Ok(None); };
+    let mut file = File::open(&path).map_err(|error| DhfsError::Io(format!("could not open {}: {error}", path.display())))?;
+    let mut hasher = Sha256::new();
+    let mut head: Vec<u8> = Vec::new();
+    let mut buffer = vec![0_u8; COPY_CHUNK as usize];
+    let mut bytes = 0_u64;
+    loop {
+        let count = file.read(&mut buffer).map_err(|error| DhfsError::Io(format!("could not read {}: {error}", path.display())))?;
+        if count == 0 { break; }
+        if head.len() < PROBE_BYTES { head.extend_from_slice(&buffer[..count.min(PROBE_BYTES - head.len())]); }
+        hasher.update(&buffer[..count]);
+        bytes += count as u64;
+    }
+    if bytes == 0 { return Ok(None); }
+    let probe = probe_stream(&head);
+    Ok(Some(ExtractedClip {
+        path: path.to_string_lossy().to_string(),
+        file_name,
+        bytes,
+        sha256: format!("{:x}", hasher.finalize()),
+        content_type: probe.content_type.clone(),
+        codec: codec_label(&probe),
+        stream_start_offset: 0,
+        channel: recording.channel,
+        start: recording.start,
+        end: recording.end,
+        duration_seconds: recording.duration_seconds,
+        fragments: recording.fragments.len() as u32,
+        descriptor: recording.descriptor,
+        partition_index: recording.partition_index,
+    }))
+}
+
 /// Extract a recording into `directory` with an evidence-style name, writing to a `.part` file
 /// and renaming only after fsync so a half-copied clip can never be mistaken for a finished one.
 pub fn extract_recording_to_directory(source: &mut dyn BlockSource, volume: &Volume, recording: &Recording, directory: &Path, label: &str) -> Result<ExtractedClip, DhfsError> {
     fs::create_dir_all(directory).map_err(|error| DhfsError::Io(format!("could not create {}: {error}", directory.display())))?;
-    let safe_label: String = label.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
-    let stem = format!(
-        "FCM-{safe_label}-p{}-d{:06}-{}-{}-ch{:02}",
-        recording.partition_index, recording.descriptor, recording.start.file_stamp(), recording.end.file_stamp(), recording.channel
-    );
+    let stem = recording_file_stem(recording, label);
     let part_path: PathBuf = directory.join(format!("{stem}.part"));
     let mut part = OpenOptions::new().write(true).create_new(true).open(&part_path)
         .map_err(|error| DhfsError::Io(format!("could not create {}: {error}", part_path.display())))?;

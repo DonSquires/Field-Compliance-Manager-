@@ -1,18 +1,23 @@
-# FCM Desktop V2 Prototype
+# FCM Desktop V2
 
-Desktop V2 is an isolated prototype beside the working `apps/sd-card-bridge` application.
+Desktop V2 is the Windows companion the web app links to for Dahua cards, built beside the older `apps/sd-card-bridge` application.
 
 ## Purpose
 
-V2 tests a clone-first evidence workflow:
+The card is the source. V2 reads the hidden DHFS partition straight from the card and sends recordings to FCM:
 
-1. Discover removable camera media without opening a write handle.
-2. Acquire an exact image to a separate destination.
-3. Hash source and image bytes and verify equality.
-4. Inspect the image as a virtual source.
-5. Run multiple decoder adapters without rejecting unknown layouts.
+1. Discover the card without opening a write handle (the app elevates once at start so the raw disk can be read).
+2. List every trustworthy recording on the hidden partition, straight from the card.
+3. Sign in with the operator's own FCM login, choose the place the camera watches and a camera label, and create a
+   `cctv_imports` row through the same `create_cctv_import` RPC the web import page uses.
+4. Send recordings: each is stitched from its fragments into the working folder (SHA-256 taken as it leaves the card),
+   uploaded with the tus resumable protocol into `org/<org>/cctv/<import>/`, and registered with
+   `register_cctv_import_video` carrying that hash, so the analysis worker verifies rather than first-anchors it.
+5. Optionally acquire an exact image of the whole card (a forensic bit-for-bit copy, empty space included) and inspect it
+   as a virtual source. Not needed to send recordings.
 
-The prototype does not replace or modify Desktop V1.
+The publishable Supabase key in `src/main.tsx` is the same public key the web bundle ships; every read and write runs as
+the signed-in user under row-level security, and the session is held in memory only.
 
 ## Native commands
 
@@ -26,7 +31,16 @@ The prototype does not replace or modify Desktop V1.
   (`{ kind: 'device', id, sizeBytes }`), both opened read-only.
 - `extract_dhfs_recording` — copy one recording out of the volume with the
   proprietary `DHII` header trimmed, DHAV frames or raw H.264/H.265 detected,
-  SHA-256 recorded, written atomically and never over existing evidence.
+  SHA-256 recorded, written atomically and never over existing evidence. With
+  `reuseExisting`, a finished copy already in the folder is re-hashed and
+  returned instead of refused.
+- `default_clip_directory` — the per-card working folder under Public
+  Documents, created on demand so the operator never has to pick one.
+- `upload_clip_resumable` / `cancel_upload` — tus resumable upload of one
+  extracted recording into `bob-uploads` with 6 MiB chunks, per-chunk
+  `upload-progress` events, offset resync on transport errors, and an
+  `unauthorized` outcome that hands the resumable URL back so the interface can
+  refresh the session and continue from the same offset.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device

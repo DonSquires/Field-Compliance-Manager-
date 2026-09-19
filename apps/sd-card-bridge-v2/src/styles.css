@@ -8,3 +8,26 @@
 
 .progress{margin:10px 0 6px;height:8px;border-radius:4px;background:#1e3430;overflow:hidden}.progress>div{height:100%;background:#b7e4cf;transition:width .4s ease}.status-card .mono{display:block;margin-bottom:6px;white-space:normal}
 .progress.is-indeterminate>div{width:32%;animation:progress-sweep 1.2s ease-in-out infinite}@keyframes progress-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}.status-failed{border-color:#8e4d48}.status-failed span{color:#f0b0a7}.status-cloning span,.status-verifying span{color:#e8d27a}
+
+/* 03 / Send to FCM — sign-in, place, camera label; and per-recording send state. */
+.send-panel{min-height:0}
+.fcm-form,.field-row{display:grid;gap:12px;margin-top:14px}
+.field-row{grid-template-columns:1fr 1fr}
+.field{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.fcm-form .field,.field-row .field{margin-top:0}
+.field>span{color:#81958e;font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.field input,.field select{background:#12201e;border:1px solid #35534a;color:#e5f1ed;border-radius:6px;padding:10px 12px;font:500 13px 'DM Sans';min-width:0}
+.field input:focus,.field select:focus{outline:2px solid #b7e4cf;outline-offset:1px}
+.field input.is-invalid{border-color:#c47b73}
+.signed-in{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:10px 12px;background:#12201e;border:1px solid #35534a;border-radius:7px}
+.signed-in span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.signed-in strong{font-size:13px}
+.signed-in small{color:#81958e;font-size:11px}
+.house-list{display:grid;gap:8px;margin-top:10px;max-height:290px;overflow:auto}
+.recording__actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.recording__progress{margin:8px 0 4px;max-width:420px}
+.recording.is-sent{background:#16281f}
+.send-state{display:block;font-size:11px;color:#b7e4cf}
+.send-state--failed{color:#f0b0a7}
+.send-state--done{color:#9ad6b7}
+@media(max-width:1150px){.field-row{grid-template-columns:1fr}}

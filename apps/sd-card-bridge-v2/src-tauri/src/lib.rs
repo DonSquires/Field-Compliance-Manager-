@@ -1,7 +1,8 @@
+use base64::Engine;
 use fcm_dhfs::{AlignedFileSource, Catalog, ExtractedClip, LocationMethod, Volume, DEVICE_READ_ALIGNMENT};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::Path, sync::atomic::{AtomicBool, Ordering}, time::Instant};
+use std::{fs::{self, File, OpenOptions}, io::{Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}, time::{Duration, Instant}};
 use tauri::Emitter;
 
 #[derive(Serialize, Clone)]
@@ -317,18 +318,180 @@ fn read_dhfs_catalog(source: DhfsSourceSpec) -> Result<Catalog, String> {
 }
 
 /// Copy one recording out of the volume into `destination_directory` (atomic, hashed, never overwrites).
+/// With `reuse_existing`, a finished copy already in the folder is re-hashed and returned instead of refused,
+/// so sending can resume after the app was closed without stitching the recording twice.
 #[tauri::command(async)]
-fn extract_dhfs_recording(source: DhfsSourceSpec, partition_index: u32, descriptor: u32, destination_directory: String) -> Result<ExtractedClip, String> {
+fn extract_dhfs_recording(source: DhfsSourceSpec, partition_index: u32, descriptor: u32, destination_directory: String, reuse_existing: Option<bool>) -> Result<ExtractedClip, String> {
     let mut block_source = open_source(&source)?;
     let catalog = fcm_dhfs::catalog(&mut block_source).map_err(|error| error.to_string())?;
     let recording = catalog.recordings.iter()
         .find(|recording| recording.partition_index == partition_index && recording.descriptor == descriptor)
         .ok_or("That recording is no longer present on the source. Re-read the catalog before extracting.")?;
+    if reuse_existing.unwrap_or(false) {
+        if let Some(clip) = fcm_dhfs::existing_extracted_clip(recording, Path::new(&destination_directory), source.label()).map_err(|error| error.to_string())? {
+            return Ok(clip);
+        }
+    }
     fcm_dhfs::extract_recording_to_directory(&mut block_source, &catalog.volume, recording, Path::new(&destination_directory), source.label())
         .map_err(|error| error.to_string())
 }
 
+/// Where extracted recordings are spooled before they are sent: a per-card folder the operator never has to
+/// choose. Public Documents so a second Windows account on the same laptop can still find the evidence copy.
+#[tauri::command]
+fn default_clip_directory(source_id: String) -> Result<String, String> {
+    let safe: String = source_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect();
+    let base = std::env::var_os("PUBLIC").map(PathBuf::from).filter(|p| p.is_absolute())
+        .map(|p| p.join("Documents"))
+        .unwrap_or_else(std::env::temp_dir);
+    let directory = base.join("fcm-acquisitions").join(if safe.is_empty() { "card".to_string() } else { safe });
+    fs::create_dir_all(&directory).map_err(|error| format!("Could not create the working folder {}: {error}", directory.display()))?;
+    Ok(directory.to_string_lossy().to_string())
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sending recordings to FCM: resumable upload (tus) into the tenant's bob-uploads prefix
+// ---------------------------------------------------------------------------------------------
+
+/// The web app's own contract: 6 MiB chunks are the size Supabase's resumable endpoint accepts.
+const TUS_CHUNK: usize = 6 * 1024 * 1024;
+const TUS_MAX_RETRIES: u32 = 5;
+static UPLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadTarget { supabase_url: String, api_key: String, access_token: String, bucket: String, object_name: String, content_type: String }
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct UploadProgress { upload_id: String, bytes_sent: u64, total_bytes: u64, elapsed_seconds: f64, bytes_per_second: f64 }
+
+/// `unauthorized` hands the resumable URL back so the interface can refresh the session and continue
+/// from the same offset instead of starting a 2 GB recording again.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadOutcome { status: &'static str, upload_url: Option<String>, bytes_sent: u64, total_bytes: u64 }
+
+fn tus_metadata(target: &UploadTarget) -> String {
+    let b64 = |value: &str| base64::engine::general_purpose::STANDARD.encode(value.as_bytes());
+    format!("bucketName {},objectName {},contentType {},cacheControl {}", b64(&target.bucket), b64(&target.object_name), b64(&target.content_type), b64("3600"))
+}
+
+fn tus_request(agent: &ureq::Agent, method: &str, url: &str, target: &UploadTarget) -> ureq::Request {
+    agent.request(method, url)
+        .set("Tus-Resumable", "1.0.0")
+        .set("Authorization", &format!("Bearer {}", target.access_token))
+        .set("apikey", &target.api_key)
+}
+
+fn absolute_upload_url(location: &str, supabase_url: &str) -> String {
+    if location.starts_with("http://") || location.starts_with("https://") { location.to_string() }
+    else { format!("{}/{}", supabase_url.trim_end_matches('/'), location.trim_start_matches('/')) }
+}
+
+fn tus_offset(agent: &ureq::Agent, upload_url: &str, target: &UploadTarget) -> Result<u64, String> {
+    let response = tus_request(agent, "HEAD", upload_url, target).call().map_err(|error| format!("Could not ask the server where the upload stopped: {}", describe_http_error(error)))?;
+    response.header("Upload-Offset").and_then(|value| value.trim().parse::<u64>().ok()).ok_or_else(|| "The server did not report an upload offset.".to_string())
+}
+
+fn describe_http_error(error: ureq::Error) -> String {
+    match error {
+        ureq::Error::Status(code, response) => {
+            let body = response.into_string().unwrap_or_default();
+            let detail = serde_json::from_str::<serde_json::Value>(&body).ok()
+                .and_then(|value| value.get("message").or_else(|| value.get("error")).and_then(|m| m.as_str()).map(str::to_string))
+                .unwrap_or_else(|| body.chars().take(200).collect());
+            format!("HTTP {code}{}", if detail.is_empty() { String::new() } else { format!(": {detail}") })
+        }
+        ureq::Error::Transport(transport) => format!("network: {transport}"),
+    }
+}
+
+#[tauri::command]
+fn cancel_upload() {
+    UPLOAD_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+/// Send one extracted recording into FCM storage with the tus resumable protocol, exactly as the web import
+/// page does for large files. Runs off the main thread and reports progress per chunk.
+#[tauri::command(async)]
+fn upload_clip_resumable(app: tauri::AppHandle, upload_id: String, clip_path: String, target: UploadTarget, resume_url: Option<String>) -> Result<UploadOutcome, String> {
+    UPLOAD_CANCELLED.store(false, Ordering::SeqCst);
+    if !target.object_name.starts_with("org/") || target.object_name.contains("..") { return Err("Uploads go only under the organisation's own cctv prefix.".to_string()); }
+    let mut file = File::open(&clip_path).map_err(|error| format!("Could not open the extracted recording: {error}"))?;
+    let total_bytes = file.metadata().map_err(|error| error.to_string())?.len();
+    if total_bytes == 0 { return Err("The extracted recording is empty; extract it again before sending.".to_string()); }
+    let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(30)).timeout_read(Duration::from_secs(180)).timeout_write(Duration::from_secs(180)).build();
+    let started = Instant::now();
+
+    let upload_url = match resume_url {
+        Some(url) => url,
+        None => {
+            let created = tus_request(&agent, "POST", &format!("{}/storage/v1/upload/resumable", target.supabase_url.trim_end_matches('/')), &target)
+                .set("Upload-Length", &total_bytes.to_string())
+                .set("Upload-Metadata", &tus_metadata(&target))
+                .set("x-upsert", "false")
+                .call();
+            match created {
+                Ok(response) => {
+                    let location = response.header("Location").ok_or_else(|| "The server accepted the upload but gave no resumable location.".to_string())?;
+                    absolute_upload_url(location, &target.supabase_url)
+                }
+                // Same object already stored: registration is idempotent, so this is success, not a retry.
+                Err(ureq::Error::Status(409, _)) => return Ok(UploadOutcome { status: "exists", upload_url: None, bytes_sent: total_bytes, total_bytes }),
+                Err(ureq::Error::Status(401, _)) | Err(ureq::Error::Status(403, _)) => return Ok(UploadOutcome { status: "unauthorized", upload_url: None, bytes_sent: 0, total_bytes }),
+                Err(error) => return Err(format!("FCM storage refused to start the upload: {}", describe_http_error(error))),
+            }
+        }
+    };
+
+    let mut offset = tus_offset(&agent, &upload_url, &target)?;
+    let mut buffer = vec![0_u8; TUS_CHUNK];
+    let mut retries = 0_u32;
+    let _ = app.emit("upload-progress", UploadProgress { upload_id: upload_id.clone(), bytes_sent: offset, total_bytes, elapsed_seconds: 0.0, bytes_per_second: 0.0 });
+    while offset < total_bytes {
+        if UPLOAD_CANCELLED.load(Ordering::SeqCst) {
+            return Err(format!("Sending cancelled at {:.1} MB of {:.1} MB; the recording on the card and the extracted copy are untouched.", offset as f64 / 1048576.0, total_bytes as f64 / 1048576.0));
+        }
+        let want = ((total_bytes - offset) as usize).min(TUS_CHUNK);
+        file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
+        file.read_exact(&mut buffer[..want]).map_err(|error| format!("Could not read the extracted recording at byte {offset}: {error}"))?;
+        let patched = tus_request(&agent, "PATCH", &upload_url, &target)
+            .set("Upload-Offset", &offset.to_string())
+            .set("Content-Type", "application/offset+octet-stream")
+            .send_bytes(&buffer[..want]);
+        match patched {
+            Ok(response) => {
+                offset = response.header("Upload-Offset").and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(offset + want as u64);
+                retries = 0;
+                let elapsed = started.elapsed().as_secs_f64().max(0.001);
+                let _ = app.emit("upload-progress", UploadProgress { upload_id: upload_id.clone(), bytes_sent: offset, total_bytes, elapsed_seconds: elapsed, bytes_per_second: offset as f64 / elapsed });
+            }
+            Err(ureq::Error::Status(401, _)) | Err(ureq::Error::Status(403, _)) => {
+                return Ok(UploadOutcome { status: "unauthorized", upload_url: Some(upload_url), bytes_sent: offset, total_bytes });
+            }
+            // tus answers a stale Upload-Offset with 409 too; only a duplicate-object 409 means the bytes are already there.
+            Err(ureq::Error::Status(409, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                if body.contains("already exists") || body.contains("Duplicate") {
+                    return Ok(UploadOutcome { status: "exists", upload_url: Some(upload_url), bytes_sent: total_bytes, total_bytes });
+                }
+                retries += 1;
+                if retries > TUS_MAX_RETRIES { return Err(format!("The server and this upload disagree about the offset after {TUS_MAX_RETRIES} attempts: {}", body.chars().take(200).collect::<String>())); }
+                offset = tus_offset(&agent, &upload_url, &target)?;
+            }
+            Err(error) => {
+                retries += 1;
+                if retries > TUS_MAX_RETRIES { return Err(format!("Sending failed after {TUS_MAX_RETRIES} retries at {:.1} MB: {}. Choose “Send” again to resume from where it stopped.", offset as f64 / 1048576.0, describe_http_error(error))); }
+                std::thread::sleep(Duration::from_millis(500 * 2_u64.pow(retries.min(4))));
+                offset = tus_offset(&agent, &upload_url, &target).unwrap_or(offset);
+            }
+        }
+    }
+    Ok(UploadOutcome { status: "complete", upload_url: Some(upload_url), bytes_sent: offset, total_bytes })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }
