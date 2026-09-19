@@ -40,10 +40,13 @@ certutil -hashfile FCM-Desktop-V2-Setup.exe SHA256
 Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub. So GitHub only
 *builds*; signing and publishing happen on the protected side with the service role.
 
-1. **Certificate (once).** `scripts/desktop-signing/New-FcmSigningCertificate.ps1` mints one stable
-   self-signed code-signing certificate (RSA-3072, SHA-256, Code Signing EKU, 3 years). Done 2026-09-19:
-   publisher `Iron Eagle Security Ltd`, thumbprint `F638533561CC825BBD27CEDD5FEBFB8C1F0B3D7B`, valid to
-   2029-09-19. The `.pfx` stays offline (vault / password manager) and is never committed.
+1. **Certificate (once).** Minted on the protected side by
+   `scripts/desktop-signing/mint-signing-certificate.mjs` (openssl: RSA-3072, SHA-256, Code Signing EKU,
+   3 years) and stored straight into Vault; the private key existed only in a 0700 temp dir and was
+   shredded. Done 2026-09-19: publisher `CN=Iron Eagle Security Ltd, O=Iron Eagle Security Ltd, C=NZ`,
+   thumbprint `CA51E5196C5320E1C5F40253D62A6C308351EAEF`, valid to 2029-09-18. (A certificate minted
+   earlier on Windows with `New-FcmSigningCertificate.ps1`, thumbprint `F638…3D7B`, was never stored and
+   is not in use; that script remains the Windows route for a future rotation.)
 2. **Vault (once per rotation).** Two secrets in Supabase Vault (Dashboard → Project Settings → Vault, or
    `select set_desktop_signing_material(<base64>, <password>)` as the service role):
    `desktop_signing_pfx_base64` and `desktop_signing_pfx_password`. Migration `20260919010000` adds the
@@ -60,8 +63,11 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    wipes the PFX, then publishes the signed installer, `SHA256SUMS`, `manifest.json` (signed, signer,
    thumbprint, timestamped) and the public `FCM-Desktop-Signing.cer` to `desktop-releases/v2/<version>/`
    — the location the web app links to — and replaces the GitHub release assets with the signed set.
-   Runs from the VPS or an operator Codespace; the Linux path was rehearsed 2026-09-19 (sign, timestamp
-   and `Signature verification: ok` on a real PE).
+   Runs from the VPS or an operator Codespace. **Done for 0.1.8 on 2026-09-19:** signed installer
+   SHA-256 `353331aa8c34d0c5ab4b54f06f051e67dc9844d249529a9d289c00d3b769fb71` (2,160,256 bytes),
+   DigiCert timestamp, `Signature verification: ok` re-checked from the public URL; GitHub release
+   assets replaced with the signed set. The bucket allow-list was widened for the artefacts
+   (`20260919020000`).
 
 What it buys:
 

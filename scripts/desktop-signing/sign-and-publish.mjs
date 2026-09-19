@@ -91,7 +91,9 @@ try {
   const certPem = run('openssl', ['pkcs12', '-in', pfxPath, '-clcerts', '-nokeys', '-passin', `pass:${password}`], { redact: [`pass:${password}`] });
   const certPemPath = join(work, 'signer.pem');
   writeFileSync(certPemPath, certPem, { mode: 0o600 });
-  const cerDer = Buffer.from(run('openssl', ['x509', '-outform', 'DER'], { input: certPem, encoding: 'buffer' }));
+  const cerPath = join(work, 'signer.cer');
+  run('openssl', ['x509', '-in', certPemPath, '-outform', 'DER', '-out', cerPath]);
+  const cerDer = readFileSync(cerPath);
   const subject = run('openssl', ['x509', '-noout', '-subject'], { input: certPem }).trim().replace(/^subject=\s*/, '');
   const thumbprint = run('openssl', ['x509', '-noout', '-fingerprint', '-sha1'], { input: certPem }).trim().split('=').pop().replace(/:/g, '');
   const notAfter = run('openssl', ['x509', '-noout', '-enddate'], { input: certPem }).trim().replace(/^notAfter=/, '');
