@@ -4,8 +4,16 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, workflowContextQuery } from '../lib/workflowNavigation';
+import { plainWords, workUnitTypeLabel } from '../lib/rosterWords';
 import './RosterTargetsPage.css';
 type UnitType = 'patrol' | 'static' | 'internal';
+/** Kinds of work seen in live shifts and work units; the field stays free text so an org can add its own. */
+const SERVICE_TYPE_SUGGESTIONS: Record<UnitType, string[]> = {
+  patrol: ['patrol', 'noise_control', 'parking_enforcement', 'freedom_camping', 'smoke_complaints', 'alarm_response', 'general'],
+  static: ['static_guarding', 'event_security', 'reception'],
+  internal: ['administration', 'call_centre', 'ems_on_call', 'training', 'dispatch'],
+};
+const DEFAULT_SERVICE_TYPE: Record<UnitType, string> = { patrol: 'patrol', static: 'static_guarding', internal: 'administration' };
 interface Unit {
   id: string;
   name: string;
@@ -83,6 +91,7 @@ const RosterTargetsPage: React.FC = () => {
     const [a, b, c, d, e, f, g, h, i] = responses;
     setUnits((a.data as Unit[]) ?? []);
     setRoutes((b.data as Option[]) ?? []);
+    setLocations((c.data as AgreementLocation[]) ?? []);
     setModules((d.data as Module[]) ?? []);
     setSites((e.data as Option[]) ?? []);
     setZones((f.data as Option[]) ?? []);
@@ -110,7 +119,7 @@ const RosterTargetsPage: React.FC = () => {
   const reset = () =>
     setForm({
       name: '',
-      serviceType: type === 'internal' ? 'administration' : type === 'static' ? 'static_guarding' : 'patrol',
+      serviceType: DEFAULT_SERVICE_TYPE[type],
       routeId: '',
       locationId: '',
       moduleId: '',
@@ -147,7 +156,7 @@ const RosterTargetsPage: React.FC = () => {
         const { error: skillError } = await supabase.rpc('manage_roster_work_unit_skill_requirements', { p_work_unit_id: createdUnit.id, p_required_skill_names: requiredSkills });
         if (skillError) { setError(skillError.message); setBusy(false); return; }
       }
-      setNotice(`${type} work unit created.`);
+      setNotice(`${workUnitTypeLabel(type)} “${form.name}” created. You can roster shifts against it now.`);
       setDialog(null);
       reset();
       await load();
@@ -171,20 +180,22 @@ const RosterTargetsPage: React.FC = () => {
     }
     setBusy(false);
   };
-  const locationLabel = (l: AgreementLocation) => names.get(l.site_id ?? l.zone_id ?? '') ?? `Agreement location ${l.id.slice(0, 8)}`;
+  const locationLabel = (l: AgreementLocation) => names.get(l.site_id ?? l.zone_id ?? '') ?? 'Contracted place (name not loaded)';
   const scopedLocations = workflowContext.agreementId ? locations.filter((location) => location.service_agreement_id === workflowContext.agreementId) : locations;
   const scopedModules = workflowContext.agreementId ? modules.filter((module) => module.service_agreement_id === workflowContext.agreementId) : modules;
   const matchingModules = scopedModules.filter((module) => module.service_agreement_id === scopedLocations.find((location) => location.id === form.locationId)?.service_agreement_id);
+  const rosterUnit = (unit: Unit) => navigate(`/admin/roster${workflowContextQuery({ ...workflowContext, workUnitId: unit.id })}`);
+  const TYPE_TABS: Array<[UnitType, string]> = [['patrol', 'Patrol run'], ['static', 'Static post'], ['internal', 'Office / internal']];
   return (
     <div className="targets-page">
       <header className="targets-header">
         <div>
-          <span>Roster architecture</span>
+          <span>Rostering</span>
           <h1>Work units</h1>
-          <p>Reusable typed work targets for patrol routes, contracted static posts, and internal teams.</p>
+          <p>The work a shift can cover: patrol runs from client agreements, static posts at a client’s place, and office or internal work.</p>
         </div>
         <div>
-          <button onClick={() => void load()} disabled={loading}>
+          <button onClick={() => void load()} disabled={loading} aria-label="Refresh work units">
             <RefreshCw size={16} className={loading ? 'is-spinning' : ''} />
           </button>
           <button
@@ -220,17 +231,17 @@ const RosterTargetsPage: React.FC = () => {
       <section className="targets-summary">
         <div>
           <Route />
-          <span>Patrol</span>
+          <span>Patrol runs</span>
           <strong>{units.filter((u) => u.work_unit_type === 'patrol').length}</strong>
         </div>
         <div>
           <Shield />
-          <span>Static</span>
+          <span>Static posts</span>
           <strong>{units.filter((u) => u.work_unit_type === 'static').length}</strong>
         </div>
         <div>
           <Building2 />
-          <span>Internal</span>
+          <span>Office / internal</span>
           <strong>{units.filter((u) => u.work_unit_type === 'internal').length}</strong>
         </div>
       </section>
@@ -267,9 +278,23 @@ const RosterTargetsPage: React.FC = () => {
             Loading work units
           </div>
         ) : visible.length === 0 ? (
-          <div className="targets-empty">
+          <div className="targets-empty targets-empty-guide">
             <Route />
-            No work units configured
+            <strong>{units.length === 0 ? 'No work units yet' : 'No work units match this search'}</strong>
+            {units.length === 0 && (
+              <>
+                <p>A work unit is what a shift covers. There are three kinds, and each comes from somewhere specific:</p>
+                <ul>
+                  <li><b>Patrol run</b> – built from a client agreement in Client Portfolios (the Patrol run card). Pick it here once it exists.</li>
+                  <li><b>Static post</b> – a place covered by a client agreement that includes static guarding.</li>
+                  <li><b>Office / internal</b> – your own workplace, team or cost centre. No client involved.</li>
+                </ul>
+                <div>
+                  <button type="button" onClick={() => navigate('/admin/crm')}>Client Portfolios</button>
+                  <button type="button" className="is-primary" onClick={() => { reset(); setDialog('unit'); }}><Plus size={15} />New work unit</button>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           visible.map((unit) => (
@@ -277,13 +302,13 @@ const RosterTargetsPage: React.FC = () => {
               <span>{unit.work_unit_type === 'patrol' ? <Route /> : unit.work_unit_type === 'static' ? <Shield /> : <Building2 />}</span>
               <div>
                 <strong>{unit.name}</strong>
-                <small>{unit.service_type.replaceAll('_', ' ')}</small>
+                <small>{plainWords(unit.service_type)}</small>
               </div>
               <div>
-                <b>{unit.work_unit_type}</b>
+                <b>{workUnitTypeLabel(unit.work_unit_type)}</b>
                 <small>
                   {unit.work_unit_type === 'patrol'
-                    ? names.get(unit.patrol_route_id ?? '')
+                    ? (names.get(unit.patrol_route_id ?? '') ?? 'Patrol run not loaded')
                     : unit.work_unit_type === 'static'
                       ? locationLabel(
                           locations.find((l) => l.id === unit.service_agreement_location_id) ?? {
@@ -297,12 +322,10 @@ const RosterTargetsPage: React.FC = () => {
                 </small>
                     {unit.required_skill_names?.length > 0 && <small>Required skills: {unit.required_skill_names.join(', ')}</small>}
               </div>
-              {workflowContext.workUnitId === unit.id && (
-                <button className="is-primary" onClick={() => navigate(`/admin/roster${workflowContextQuery(workflowContext)}`)}>
-                  <Plus size={15} />
-                  Create assignment
-                </button>
-              )}
+              <button className={workflowContext.workUnitId === unit.id ? 'is-primary' : ''} onClick={() => rosterUnit(unit)} aria-label={`Roster shifts for ${unit.name}`}>
+                <Plus size={15} />
+                {workflowContext.workUnitId === unit.id ? 'Create assignment' : 'Roster it'}
+              </button>
             </article>
           ))
         )}
@@ -312,48 +335,57 @@ const RosterTargetsPage: React.FC = () => {
           <form className="targets-dialog" onSubmit={createUnit} role="dialog" aria-modal="true" aria-labelledby="unit-title">
             <header>
               <div>
-                <span>Typed roster target</span>
+                <span>Work unit</span>
                 <h2 id="unit-title">Create work unit</h2>
               </div>
-              <button type="button" onClick={() => setDialog(null)}>
+              <button type="button" onClick={() => setDialog(null)} aria-label="Close">
                 <X />
               </button>
             </header>
-            <div className="target-type-tabs">
-              {(['patrol', 'static', 'internal'] as UnitType[]).map((v) => (
+            <div className="target-type-tabs" role="tablist" aria-label="Kind of work unit">
+              {TYPE_TABS.map(([v, label]) => (
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={type === v}
                   className={type === v ? 'is-active' : ''}
                   onClick={() => {
                     setType(v);
-                    setForm({
-                      ...form,
-                      serviceType: v === 'internal' ? 'administration' : v === 'static' ? 'static_guarding' : 'patrol',
-                    });
+                    setForm({ ...form, serviceType: DEFAULT_SERVICE_TYPE[v], routeId: '', locationId: '', moduleId: '' });
                   }}
                   key={v}
                 >
-                  {v}
+                  {label}
                 </button>
               ))}
             </div>
             <label>
               <span>Name</span>
-              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={type === 'patrol' ? 'e.g. Nelson CBD night patrol' : type === 'static' ? 'e.g. Civic House front desk' : 'e.g. After-hours rosterer'} />
             </label>
             <label>
-              <span>Service type</span>
-              <input required value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })} />
+              <span>Kind of work</span>
+              <input required list="work-unit-service-types" value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })} />
+              <datalist id="work-unit-service-types">
+                {SERVICE_TYPE_SUGGESTIONS[type].map((value) => <option value={value} key={value}>{plainWords(value)}</option>)}
+              </datalist>
+              <small>Used for reports and pay rules. Pick a suggestion or type your own.</small>
             </label>
             <label>
               <span>Required skills (comma-separated)</span>
               <input value={form.requiredSkills} onChange={(e) => setForm({ ...form, requiredSkills: e.target.value })} placeholder="e.g. First aid, radio operations" />
             </label>
-            {type === 'patrol' && (
+            {type === 'patrol' && (routes.length === 0 ? (
+              <div className="targets-prereq" role="status">
+                <strong>No patrol runs to pick from yet.</strong>
+                <p>Patrol runs come from a client agreement. Open the client in Client Portfolios and use the Patrol run card, then come back here.</p>
+                <button type="button" onClick={() => navigate('/admin/crm')}>Open Client Portfolios</button>
+              </div>
+            ) : (
               <label>
                 <span>Patrol route</span>
                 <select required value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })}>
-                  <option value="">Select route</option>
+                  <option value="">Choose the patrol run this unit covers</option>
                   {routes.map((v) => (
                     <option value={v.id} key={v.id}>
                       {v.name}
@@ -361,23 +393,27 @@ const RosterTargetsPage: React.FC = () => {
                   ))}
                 </select>
               </label>
-            )}
-            {type === 'static' && (
+            ))}
+            {type === 'static' && (scopedLocations.length === 0 ? (
+              <div className="targets-prereq" role="status">
+                <strong>No contracted places to pick from yet.</strong>
+                <p>A static post sits at a place covered by a live client agreement. Attach the place to the agreement in Client Portfolios first.</p>
+                <button type="button" onClick={() => navigate('/admin/crm')}>Open Client Portfolios</button>
+              </div>
+            ) : (
               <>
                 <label>
                   <span>Contracted location</span>
                   <select
                     required
                     value={form.locationId}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        locationId: e.target.value,
-                        moduleId: '',
-                      })
-                    }
+                    onChange={(e) => {
+                      const nextLocation = scopedLocations.find((location) => location.id === e.target.value);
+                      const nextModules = scopedModules.filter((module) => module.service_agreement_id === nextLocation?.service_agreement_id);
+                      setForm({ ...form, locationId: e.target.value, moduleId: nextModules.length === 1 ? nextModules[0].id : '' });
+                    }}
                   >
-                    <option value="">Select active agreement location</option>
+                    <option value="">Choose the place this post guards</option>
                     {scopedLocations.map((v) => (
                       <option value={v.id} key={v.id}>
                         {locationLabel(v)}
@@ -385,25 +421,40 @@ const RosterTargetsPage: React.FC = () => {
                     ))}
                   </select>
                 </label>
-                <label>
-                  <span>Static guarding module</span>
-                  <select required value={form.moduleId} onChange={(e) => setForm({ ...form, moduleId: e.target.value })}>
-                    <option value="">Select matching module</option>
-                    {matchingModules.map((v) => (
-                      <option value={v.id} key={v.id}>
-                        Static guarding · {v.id.slice(0, 8)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {form.locationId && matchingModules.length === 0 && (
+                  <div className="targets-prereq is-blocking" role="alert">
+                    <strong>This agreement does not include static guarding.</strong>
+                    <p>Add the static guarding module to the agreement in Client Portfolios before creating the post.</p>
+                  </div>
+                )}
+                {form.locationId && matchingModules.length === 1 && <p className="targets-auto">Covered by the agreement’s static guarding module.</p>}
+                {matchingModules.length > 1 && (
+                  <label>
+                    <span>Static guarding module</span>
+                    <select required value={form.moduleId} onChange={(e) => setForm({ ...form, moduleId: e.target.value })}>
+                      <option value="">Choose which static guarding module applies</option>
+                      {matchingModules.map((v, index) => (
+                        <option value={v.id} key={v.id}>
+                          Static guarding module {index + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </>
-            )}
-            {type === 'internal' && (
+            ))}
+            {type === 'internal' && (workplaces.length === 0 ? (
+              <div className="targets-prereq" role="status">
+                <strong>No workplaces yet.</strong>
+                <p>Office and internal work is rostered against one of your own workplaces. Add one first – it only needs a name.</p>
+                <button type="button" onClick={() => { reset(); setDialog('workplace'); }}>Add workplace</button>
+              </div>
+            ) : (
               <>
                 <label>
                   <span>Provider workplace</span>
                   <select required value={form.workplaceId} onChange={(e) => setForm({ ...form, workplaceId: e.target.value })}>
-                    <option value="">Select workplace</option>
+                    <option value="">Choose your workplace</option>
                     {workplaces.map((v) => (
                       <option value={v.id} key={v.id}>
                         {v.name}
@@ -436,13 +487,13 @@ const RosterTargetsPage: React.FC = () => {
                   </label>
                 </div>
               </>
-            )}
-            <p>{type === 'patrol' ? 'Client and contract attribution remains at each generated stop-module attendance.' : type === 'static' ? 'The selected agreement location and static module jointly authorize this contracted post.' : 'Internal work is provider-owned and never linked to a client agreement.'}</p>
+            ))}
+            <p>{type === 'patrol' ? 'Every stop on the run keeps its own client and contract, so billing follows the place, not the shift.' : type === 'static' ? 'The post is authorised by the client agreement that covers the place.' : 'Office and internal work belongs to your organisation. It is never billed to a client.'}</p>
             <footer>
               <button type="button" onClick={() => setDialog(null)}>
                 Cancel
               </button>
-              <button type="submit" disabled={busy}>
+              <button type="submit" disabled={busy || (type === 'patrol' && routes.length === 0) || (type === 'static' && (scopedLocations.length === 0 || (!!form.locationId && matchingModules.length === 0))) || (type === 'internal' && workplaces.length === 0)}>
                 {busy ? 'Creating' : 'Create work unit'}
               </button>
             </footer>
