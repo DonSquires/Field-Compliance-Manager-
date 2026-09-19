@@ -51,6 +51,8 @@ export function useActiveShift(userId: string, organizationId: string) {
       const todayEnd = new Date();
       todayEnd.setHours(23, 59, 59, 999);
 
+      // The shift belongs to the branch that rostered it, which may not be the officer's home organisation;
+      // RLS already limits this to shifts the officer may see. A shift is "today's" if it overlaps today.
       const { data, error: err } = await supabase
         .from('shifts')
         .select(`
@@ -76,18 +78,20 @@ export function useActiveShift(userId: string, organizationId: string) {
           )
         `)
         .eq('officer_user_id', userId)
-        .eq('organization_id', organizationId)
-        .gte('scheduled_start', todayStart.toISOString())
         .lte('scheduled_start', todayEnd.toISOString())
+        .gte('scheduled_end', todayStart.toISOString())
         .in('status', ['accepted', 'in_progress'])
+        .order('status', { ascending: false })
         .order('scheduled_start', { ascending: false })
-        .maybeSingle();
+        .limit(1);
 
       if (err && err.code !== 'PGRST116') {
         throw err;
       }
 
-      if (data) {
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row) {
+        const data = row;
         const shift: ActiveShift = {
           id: data.id,
           organization_id: data.organization_id,

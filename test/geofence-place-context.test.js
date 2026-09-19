@@ -26,6 +26,11 @@ test('outside geofences expose current GPS and physical address evidence', () =>
   assert.match(banner, /outside_geofence/);
 });
 
-test('every authenticated shell mounts the shared place context banner', () => {
-  for (const source of shells) assert.match(source, /PlaceContextBanner/);
+test('every authenticated shell shows place context; the officer shell advises only when it matters', () => {
+  const [officerShell, ...otherShells] = shells;
+  for (const source of otherShells) assert.match(source, /PlaceContextBanner/);
+  // Owner ruling 2026-09-19: officers are told about the geofence only when starting a shift outside it
+  // or when leaving a place-bound post mid-shift — never while idle, and never as an automatic "on site".
+  assert.match(officerShell, /<OfficerLocationAdvisory shift=\{activeShift\} \/>/);
+  assert.doesNotMatch(officerShell, /<PlaceContextBanner \/>/);
 });

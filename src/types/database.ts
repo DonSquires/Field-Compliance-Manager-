@@ -38289,6 +38289,10 @@ export type Database = {
         }[]
       }
       equals: { Args: { geom1: unknown; geom2: unknown }; Returns: boolean }
+      evaluate_shift_start_position: {
+        Args: { p_gps_lat?: number | null; p_gps_lng?: number | null; p_shift_id: string }
+        Returns: Json
+      }
       evaluate_parking_compliance: {
         Args: {
           p_is_disabled_bay?: boolean
@@ -45602,12 +45606,16 @@ export type Database = {
         Args: {
           p_client_request_id: string
           p_expected_status: string
-          p_gps_lat?: number
-          p_gps_lng?: number
+          p_gps_lat?: number | null
+          p_gps_lng?: number | null
+          p_off_site_reason?: string | null
           p_shift_id: string
         }
         Returns: {
           created: boolean
+          distance_m: number | null
+          place_name: string | null
+          position_status: string | null
           shift_id: string
           shift_status: string
           started_at: string

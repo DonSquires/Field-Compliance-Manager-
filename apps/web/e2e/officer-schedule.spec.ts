@@ -181,15 +181,43 @@ test('officer requests a direct swap with an eligible replacement officer', asyn
 test('officer starts an accepted shift with GPS attendance evidence', async ({ page, context }) => {
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
+  await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}');
+    expect(payload.p_gps_lat).toBe(-41.274);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'on_site', place_name: 'Civic Centre', distance_m: 0, advisory_radius_m: 250, route_shift: false }) });
+  });
   await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}');
     expect(payload.p_gps_lat).toBe(-41.274);
     expect(payload.p_gps_lng).toBe(173.283);
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: '66666666-6666-4666-8666-666666666666', shift_status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z', created: true }]) });
+    expect(payload.p_off_site_reason).toBeNull();
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: '66666666-6666-4666-8666-666666666666', shift_status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z', created: true, position_status: 'on_site', place_name: 'Civic Centre', distance_m: 0 }]) });
   });
   await signInAsOfficer(page, '/officer/schedule');
   await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Start shift' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Shift started at' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'at Civic Centre.' })).toBeVisible();
+});
+
+test('starting a shift away from its place is advised, not blocked, and the reason travels with the start', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
+  await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'off_site', place_name: 'Civic Centre', distance_m: 3792, advisory_radius_m: 250, route_shift: false }) }));
+  let startPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
+    startPayload = JSON.parse(route.request().postData() ?? '{}');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: '66666666-6666-4666-8666-666666666666', shift_status: 'in_progress', started_at: '2026-08-30T09:30:00.000Z', created: true, position_status: 'off_site', place_name: 'Civic Centre', distance_m: 3792 }]) });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.locator('.officer-assigned-shift').first().getByRole('button', { name: 'Start shift' }).click();
+  const dialog = page.getByRole('dialog', { name: "You're not at Civic Centre" });
+  await expect(dialog.getByText(/You are about 3\.8 km from Civic Centre/)).toBeVisible();
+  await expect(dialog.getByText(/You can still start; the start is recorded as away from site/)).toBeVisible();
+  expect(startPayload).toBeNull();
+  await dialog.getByLabel('Reason (optional)').fill('Starting from the depot, driving to site now.');
+  await dialog.getByRole('button', { name: 'Start anyway' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'recorded as away from Civic Centre (about 3.8 km)' })).toBeVisible();
+  expect(startPayload).toMatchObject({ p_off_site_reason: 'Starting from the depot, driving to site now.', p_gps_lat: -41.274 });
 });
 
 test('officer sees and reads a roster change notification', async ({ page }) => {

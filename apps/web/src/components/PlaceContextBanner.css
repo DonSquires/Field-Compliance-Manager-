@@ -43,3 +43,15 @@
 .place-context-banner small {
   color: #6b521f;
 }
+
+.place-context-banner.is-outside_geofence {
+  border-color: #d85050;
+  background: #fff0ef;
+  color: #5a1a17;
+}
+
+.place-context-banner.is-unavailable {
+  border-color: #aab8c5;
+  background: #f4f7fa;
+  color: #304454;
+}

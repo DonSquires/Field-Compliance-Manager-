@@ -18,6 +18,8 @@ interface AssignedShift {
   shift_health: string | null;
   total_stops: number;
 }
+interface StartPosition { status: 'on_site' | 'near_site' | 'off_site' | 'no_gps' | 'no_place'; place_name?: string | null; distance_m?: number | null; advisory_radius_m?: number; route_shift?: boolean; }
+const describeDistance = (metres: number | null | undefined) => metres == null ? 'an unknown distance' : metres >= 1000 ? `about ${(metres / 1000).toFixed(1)} km` : `about ${Math.round(metres)} m`;
 interface BreakEntitlement { worked_hours: number; rest_breaks_required: number; meal_breaks_required: number; rest_breaks_taken: number; meal_breaks_taken: number; compliant: boolean; }
 interface ActiveBreak { id: string; shift_id: string; break_type: 'rest' | 'meal'; started_at: string; }
 interface SwapOfficer { id: string; label: string; }
@@ -75,6 +77,7 @@ const OfficerSchedulePage: React.FC = () => {
   const [swapRequest, setSwapRequest] = useState<AssignedShift | null>(null);
   const [swapReason, setSwapReason] = useState('');
   const [startingShiftId, setStartingShiftId] = useState<string | null>(null);
+  const [startAdvisory, setStartAdvisory] = useState<{ shift: AssignedShift; position: StartPosition; coords: { lat: number | null; lng: number | null }; reason: string } | null>(null);
   const [swapOfficers, setSwapOfficers] = useState<SwapOfficer[]>([]);
   const [swapOfficerId, setSwapOfficerId] = useState('');
   const [pendingSwaps, setPendingSwaps] = useState<PendingSwap[]>([]);
@@ -220,16 +223,33 @@ const OfficerSchedulePage: React.FC = () => {
     setBreakSaving(false);
   };
 
+  const currentPosition = () => new Promise<{ lat: number | null; lng: number | null }>((resolve) => {
+    if (!navigator.geolocation) { resolve({ lat: null, lng: null }); return; }
+    navigator.geolocation.getCurrentPosition((position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }), () => resolve({ lat: null, lng: null }), { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 });
+  });
+
+  const submitStart = async (shift: AssignedShift, coords: { lat: number | null; lng: number | null }, reason: string | null) => {
+    // ATLAS WRITES: start_officer_shift (records the start position and any off-site reason in its audit row)
+    const response = await supabase.rpc('start_officer_shift', { p_client_request_id: crypto.randomUUID(), p_shift_id: shift.id, p_expected_status: shift.status, p_gps_lat: coords.lat, p_gps_lng: coords.lng, p_off_site_reason: reason });
+    const receipt = (response.data as Array<{ shift_id: string; shift_status: string; started_at: string; position_status: string | null; place_name: string | null; distance_m: number | null }> | null)?.[0];
+    if (response.error || !receipt) setError(describeLoadFailures([['shift start', response.error]]) ?? 'Shift start was not confirmed.');
+    else {
+      const at = new Date(receipt.started_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' });
+      const where = receipt.position_status === 'on_site' ? ` at ${receipt.place_name}` : receipt.position_status === 'near_site' ? `, ${describeDistance(receipt.distance_m)} from ${receipt.place_name}` : receipt.position_status === 'off_site' ? `, recorded as away from ${receipt.place_name} (${describeDistance(receipt.distance_m)})` : receipt.position_status === 'no_gps' ? ' without a GPS position' : '';
+      setNotice(`Shift started at ${at}${where}.`);
+      setStartAdvisory(null);
+      await loadSchedule();
+    }
+  };
+
   const startShift = async (shift: AssignedShift) => {
     setStartingShiftId(shift.id); setError(null); setNotice(null);
-    const submitStart = (lat: number | null, lng: number | null) => supabase.rpc('start_officer_shift', { p_client_request_id: crypto.randomUUID(), p_shift_id: shift.id, p_expected_status: shift.status, p_gps_lat: lat, p_gps_lng: lng });
-    let response;
-    if (navigator.geolocation) {
-      response = await new Promise<{ data: unknown; error: { message: string } | null }>((resolve) => navigator.geolocation.getCurrentPosition((position) => void submitStart(position.coords.latitude, position.coords.longitude).then(resolve), () => void submitStart(null, null).then(resolve), { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }));
-    } else response = await submitStart(null, null);
-    const receipt = (response.data as Array<{ shift_id: string; shift_status: string; started_at: string }> | null)?.[0];
-    if (response.error || !receipt) setError(describeLoadFailures([['shift start', response.error]]) ?? 'Shift start was not confirmed.');
-    else { setNotice(`Shift started at ${new Date(receipt.started_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}.`); await loadSchedule(); }
+    const coords = await currentPosition();
+    // ATLAS READS: evaluate_shift_start_position — advisory only; the officer is told, never blocked
+    const { data } = await supabase.rpc('evaluate_shift_start_position', { p_shift_id: shift.id, p_gps_lat: coords.lat, p_gps_lng: coords.lng });
+    const position = (data ?? { status: 'no_place' }) as StartPosition;
+    if (position.status === 'off_site' || position.status === 'no_gps') setStartAdvisory({ shift, position, coords, reason: '' });
+    else await submitStart(shift, coords, null);
     setStartingShiftId(null);
   };
 
@@ -252,6 +272,7 @@ const OfficerSchedulePage: React.FC = () => {
       ) : coverage.length === 0 ? <div className="officer-schedule-empty"><ShieldCheck size={23} />No open coverage right now</div> : <div className="officer-schedule-list">{coverage.map((request) => <article className={`officer-coverage urgency-${request.urgency}`} key={request.id}><div className="officer-schedule-date"><strong>{formatDate(`${request.shift_date}T00:00:00`)}</strong><span>{request.start_time.slice(0, 5)} - {request.end_time.slice(0, 5)}</span></div><div><strong>{request.site?.name ?? 'Location to be confirmed'}</strong><small><Users size={13} /> {request.required_staff_count} needed{request.notes ? ` · ${request.notes}` : ''}</small></div><span>{request.urgency}</span><button type="button" onClick={() => setSelectedCoverage(request)}>Review claim</button></article>)}</div>}
 
       {selectedCoverage && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-claim-title"><header><div><span>Coverage commitment</span><h2 id="coverage-claim-title">Claim this shift?</h2></div><button type="button" onClick={() => setSelectedCoverage(null)} title="Close"><X size={18} /></button></header><dl><div><dt>Date</dt><dd>{formatDate(`${selectedCoverage.shift_date}T00:00:00`)}</dd></div><div><dt>Time</dt><dd>{selectedCoverage.start_time.slice(0, 5)} - {selectedCoverage.end_time.slice(0, 5)}</dd></div><div><dt>Location</dt><dd><MapPin size={14} />{selectedCoverage.site?.name ?? 'To be confirmed'}</dd></div><div><dt>Urgency</dt><dd>{selectedCoverage.urgency}</dd></div></dl>{selectedCoverage.notes && <p>{selectedCoverage.notes}</p>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSelectedCoverage(null)}>Cancel</button><button type="button" onClick={() => void confirmClaim()} disabled={claiming}>{claiming ? <><RefreshCw size={16} className="is-spinning" />Confirming</> : <><CheckCircle2 size={16} />Confirm claim</>}</button></div></div></div>}
+      {startAdvisory && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="start-advisory-title"><header><div><span>Before you start</span><h2 id="start-advisory-title">{startAdvisory.position.status === 'no_gps' ? 'No GPS position' : `You're not at ${startAdvisory.position.place_name ?? 'the shift location'}`}</h2></div><button type="button" onClick={() => setStartAdvisory(null)} title="Close"><X size={18} /></button></header><p>{startAdvisory.position.status === 'no_gps' ? 'Your location could not be read, so the start will be recorded without a position. Turn location on if you can, or start anyway and say where you are.' : `You are ${describeDistance(startAdvisory.position.distance_m)} from ${startAdvisory.position.place_name ?? 'the shift location'}${startAdvisory.position.route_shift ? ' (the nearest stop on this run)' : ''}. You can still start; the start is recorded as away from site and your supervisor can see that. If there is a reason, say so.`}</p><label><span>Reason (optional)</span><textarea rows={3} value={startAdvisory.reason} onChange={(event) => setStartAdvisory({ ...startAdvisory, reason: event.target.value })} placeholder="e.g. Starting from the depot, travelling to site now" /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setStartAdvisory(null)}>Not yet</button><button type="button" disabled={startingShiftId === startAdvisory.shift.id} onClick={() => { setStartingShiftId(startAdvisory.shift.id); void submitStart(startAdvisory.shift, startAdvisory.coords, startAdvisory.reason.trim() || null).finally(() => setStartingShiftId(null)); }}>Start anyway</button></div></div></div>}
       {responding && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="assignment-response-title"><header><div><span>Roster response</span><h2 id="assignment-response-title">{responding.response === 'accept' ? 'Accept assignment?' : 'Decline assignment?'}</h2></div><button type="button" onClick={() => setResponding(null)} title="Close"><X size={18} /></button></header><p>{responding.response === 'accept' ? 'Accepting makes this shift yours. It moves to your assigned shifts and your supervisor is told.' : 'Declining hands the shift back to the roster team so they can cover it. Tell them why you cannot take it.'}</p>{responding.response === 'decline' && <label><span>Decline reason</span><textarea required rows={4} value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setResponding(null)}>Back</button><button type="button" onClick={() => void respondToSlot()} disabled={claiming || (responding.response === 'decline' && !declineReason.trim())}>{claiming ? 'Saving' : responding.response === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></div></div></div>}
       {swapRequest && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-title"><header><div><span>Roster change</span><h2 id="shift-swap-title">Request shift swap?</h2></div><button type="button" onClick={() => setSwapRequest(null)} title="Close"><X size={18} /></button></header><p>{formatDate(swapRequest.scheduled_start)} · {formatTime(swapRequest.scheduled_start)} - {formatTime(swapRequest.scheduled_end)}. This opens the shift for roster review; the shift remains assigned until approved.</p><label><span>Replacement officer (optional)</span><select value={swapOfficerId} onChange={(event) => setSwapOfficerId(event.target.value)}><option value="">Open coverage request</option>{swapOfficers.map((officer) => <option key={officer.id} value={officer.id}>{officer.label}</option>)}</select></label><label><span>Reason</span><textarea required rows={4} value={swapReason} onChange={(event) => setSwapReason(event.target.value)} placeholder="Why can you no longer work this shift?" /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSwapRequest(null)}>Cancel</button><button type="button" onClick={() => void requestSwap()} disabled={breakSaving || !swapReason.trim()}>Submit swap request</button></div></div></div>}
       {cancelSwap && <div className="officer-schedule-dialog-backdrop"><form className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-swap-title" onSubmit={cancelPendingSwap}><header><div><span>Roster change</span><h2 id="cancel-swap-title">Cancel pending swap?</h2></div><button type="button" onClick={() => setCancelSwap(null)} title="Close"><X size={18} /></button></header><p>The shift will remain assigned to you and the pending swap request will be withdrawn.</p><label><span>Cancellation reason</span><textarea required rows={4} value={cancelSwapReason} onChange={(event) => setCancelSwapReason(event.target.value)} /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setCancelSwap(null)}>Back</button><button type="submit" disabled={breakSaving || !cancelSwapReason.trim()}>Cancel swap request</button></div></form></div>}
