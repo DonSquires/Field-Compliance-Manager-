@@ -29,7 +29,7 @@ jobs:
         run: Copy-Item ../sd-card-bridge/src-tauri/icons src-tauri/icons -Recurse -Force
       - name: Prove the DHFS reader against synthetic cards
         run: cargo test --manifest-path crates/dhfs/Cargo.toml
-      - name: Build unsigned development installer
+      - name: Build installer
         run: npm run tauri build
       - name: Locate installer
         shell: pwsh
@@ -38,20 +38,131 @@ jobs:
           $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
           if ($null -eq $installer) { throw 'V2 Tauri did not produce an NSIS installer.' }
           Copy-Item $installer.FullName release/FCM-Desktop-V2-Setup.exe
-      - name: Upload unsigned development artifact
+
+      # Authenticode signing with the organisation's own certificate (docs/DESKTOP_SIGNED_DISTRIBUTION_PLAN.md).
+      # The PFX never touches the repository: it arrives base64 in a secret, is written to the runner's temp
+      # directory for the length of this step, and is removed afterwards. Absent secret = unsigned build, said plainly.
+      - name: Sign installer (organisation certificate)
+        id: sign
+        shell: pwsh
+        env:
+          FCM_DESKTOP_SIGNING_PFX_BASE64: ${{ secrets.FCM_DESKTOP_SIGNING_PFX_BASE64 }}
+          FCM_DESKTOP_SIGNING_PFX_PASSWORD: ${{ secrets.FCM_DESKTOP_SIGNING_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FCM_DESKTOP_SIGNING_PFX_BASE64)) {
+            Write-Host 'No signing certificate configured; publishing an unsigned build.'
+            'signed=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            'signer=' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            'thumbprint=' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'fcm-desktop-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:FCM_DESKTOP_SIGNING_PFX_BASE64))
+          try {
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+            if ($null -eq $signtool) { throw 'signtool.exe not found on the runner.' }
+            & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $pfx /p $env:FCM_DESKTOP_SIGNING_PFX_PASSWORD release/FCM-Desktop-V2-Setup.exe
+            if ($LASTEXITCODE -ne 0) { throw "signtool exited $LASTEXITCODE" }
+            $sig = Get-AuthenticodeSignature release/FCM-Desktop-V2-Setup.exe
+            if ($null -eq $sig.SignerCertificate) { throw 'The installer carries no signature after signing.' }
+            $subject = $sig.SignerCertificate.Subject
+            $thumb = $sig.SignerCertificate.Thumbprint
+            Write-Host "Signed as $subject ($thumb); chain status $($sig.Status)"
+            # Publish the public certificate so fleet administrators can add it to Trusted Publishers.
+            Export-Certificate -Cert $sig.SignerCertificate -FilePath release/FCM-Desktop-Signing.cer -Type CERT | Out-Null
+            'signed=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "signer=$subject" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "thumbprint=$thumb" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+
+      # Integrity manifest: what an operator checks before running the installer, and what the web download prompt shows.
+      - name: Write integrity manifest
+        id: manifest
+        shell: pwsh
+        env:
+          SIGNED: ${{ steps.sign.outputs.signed }}
+          SIGNER: ${{ steps.sign.outputs.signer }}
+          THUMBPRINT: ${{ steps.sign.outputs.thumbprint }}
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $file = Get-Item release/FCM-Desktop-V2-Setup.exe
+          $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  FCM-Desktop-V2-Setup.exe" | Out-File -FilePath release/SHA256SUMS -Encoding ascii
+          $manifest = [ordered]@{
+            product = 'FCM Desktop V2'
+            version = $version
+            file = 'FCM-Desktop-V2-Setup.exe'
+            sha256 = $hash
+            size_bytes = $file.Length
+            git_sha = $env:GITHUB_SHA
+            built_at = (Get-Date).ToUniversalTime().ToString('o')
+            signed = ($env:SIGNED -eq 'true')
+            signer = $env:SIGNER
+            signer_thumbprint = $env:THUMBPRINT
+            verify = 'certutil -hashfile FCM-Desktop-V2-Setup.exe SHA256'
+          }
+          $manifest | ConvertTo-Json | Out-File -FilePath release/manifest.json -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Get-Content release/manifest.json
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FCM-Desktop-V2-Windows-Unsigned-Development
-          path: apps/sd-card-bridge-v2/release/FCM-Desktop-V2-Setup.exe
+          name: FCM-Desktop-V2-Windows
+          path: |
+            apps/sd-card-bridge-v2/release/FCM-Desktop-V2-Setup.exe
+            apps/sd-card-bridge-v2/release/SHA256SUMS
+            apps/sd-card-bridge-v2/release/manifest.json
+            apps/sd-card-bridge-v2/release/FCM-Desktop-Signing.cer
           if-no-files-found: error
+
+      # The web app downloads from Supabase Storage (desktop-releases/v2/<version>/). Publish there directly when the
+      # storage credentials are configured; otherwise the operator copies the GitHub release assets by hand.
+      - name: Publish to desktop-releases storage
+        if: startsWith(github.ref, 'refs/tags/sd-card-bridge-v2-v')
+        shell: pwsh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VERSION: ${{ steps.manifest.outputs.version }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SUPABASE_URL) -or [string]::IsNullOrWhiteSpace($env:SUPABASE_SERVICE_ROLE_KEY)) {
+            Write-Host "Storage credentials not configured; copy the release assets to desktop-releases/v2/$($env:VERSION) by hand."
+            exit 0
+          }
+          $files = @(
+            @{ name = 'FCM-Desktop-V2-Setup.exe'; type = 'application/vnd.microsoft.portable-executable' },
+            @{ name = 'SHA256SUMS'; type = 'text/plain' },
+            @{ name = 'manifest.json'; type = 'application/json' }
+          )
+          if (Test-Path release/FCM-Desktop-Signing.cer) { $files += @{ name = 'FCM-Desktop-Signing.cer'; type = 'application/pkix-cert' } }
+          foreach ($f in $files) {
+            $uri = "$($env:SUPABASE_URL)/storage/v1/object/desktop-releases/v2/$($env:VERSION)/$($f.name)"
+            $headers = @{ apikey = $env:SUPABASE_SERVICE_ROLE_KEY; Authorization = "Bearer $($env:SUPABASE_SERVICE_ROLE_KEY)"; 'x-upsert' = 'true'; 'Content-Type' = $f.type }
+            Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -InFile "release/$($f.name)" | Out-Null
+            Write-Host "published v2/$($env:VERSION)/$($f.name)"
+          }
+
       - name: Publish V2 release
         if: startsWith(github.ref, 'refs/tags/sd-card-bridge-v2-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: apps/sd-card-bridge-v2/release/FCM-Desktop-V2-Setup.exe
+          files: |
+            apps/sd-card-bridge-v2/release/FCM-Desktop-V2-Setup.exe
+            apps/sd-card-bridge-v2/release/SHA256SUMS
+            apps/sd-card-bridge-v2/release/manifest.json
+            apps/sd-card-bridge-v2/release/FCM-Desktop-Signing.cer
           generate_release_notes: true
           prerelease: true
           body: |
-            Unsigned development installer for the FCM Desktop V2 prototype.
+            FCM Desktop V2 ${{ steps.manifest.outputs.version }} — Windows installer.
 
-            Windows SmartScreen may display a warning because this build does not use a paid code-signing certificate. Verify the release source before installing. Do not use this prototype as the production V1 workstation.
+            **SHA-256:** `${{ steps.manifest.outputs.sha256 }}`
+            Verify before running: `certutil -hashfile FCM-Desktop-V2-Setup.exe SHA256`
+
+            **Signing:** ${{ steps.sign.outputs.signed == 'true' && format('Authenticode-signed by {0} (thumbprint {1}). Fleet administrators can add FCM-Desktop-Signing.cer to Trusted Publishers so the publisher is recognised.', steps.sign.outputs.signer, steps.sign.outputs.thumbprint) || 'Unsigned build. Windows SmartScreen will warn (More info → Run anyway). Verify the SHA-256 above before installing.' }}
+
+            Reading a Dahua card needs the app run as administrator. Do not use this prototype as the production V1 workstation.
