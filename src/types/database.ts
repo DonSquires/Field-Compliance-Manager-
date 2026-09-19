@@ -34266,6 +34266,21 @@ export type Database = {
           proposal_id: string
         }[]
       }
+      apply_deputy_roster_import: {
+        Args: {
+          p_client_request_id: string
+          p_leave?: Json
+          p_locations?: Json
+          p_manifest?: Json
+          p_operating_organization_id: string
+          p_people?: Json
+          p_row_count: number
+          p_slots?: Json
+          p_source_file: string
+          p_source_sha256: string
+        }
+        Returns: Json
+      }
       apply_crm_agreement_promotion_proposal: {
         Args: {
           p_client_organization_id: string
