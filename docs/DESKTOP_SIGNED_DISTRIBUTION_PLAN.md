@@ -87,7 +87,10 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    SHA-256 `56f015b477f6fc7923409bb63217d2ee7b2b8d236c599ba94e1cf72220548e8c`, 132,239,360 bytes, with
    `LICENSE.txt` and `manifest.json`); the app refuses any file whose hash differs from the constant compiled
    into it. The sidecar is not Authenticode-signed by us — it is verified by hash, and it runs as a separate
-   process, never loaded into FCM.
+   process, never loaded into FCM. **0.4.1 signed the same way on 2026-09-19** ("Video files" as a second source,
+   "Save to folder" with a playable MP4, working rail navigation, DHAV header-parse fix): SHA-256
+   `989c0ad68ba2103bd2498d1f26e1fe3e1b05bde9d989eb4f19103c6533bac23c` (3,007,128 bytes), verified from the
+   public URL; the web app's download link points at 0.4.1.
 
 What it buys:
 
