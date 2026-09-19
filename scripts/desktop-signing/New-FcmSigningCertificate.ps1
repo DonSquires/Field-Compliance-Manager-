@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Creates the organisation's own code-signing certificate for FCM Desktop releases and prints the two
-  values to store as GitHub Actions secrets. Run once, on a Windows machine you control, as the owner.
+  values to store in Supabase Vault. Run once, on a Windows machine you control, as the owner.
 
 .DESCRIPTION
   Free interim path (owner ruling 2026-09-18: no paid certificate until the system is proven). A stable
@@ -12,13 +12,14 @@
       Group Policy) or write an AppLocker/WDAC publisher rule for it;
     * a tampered installer fails signature verification.
   It does NOT buy Microsoft SmartScreen reputation. Unmanaged machines still see a SmartScreen warning until a
-  publicly trusted certificate (Azure Trusted Signing or an OV/EV certificate) replaces this one. The CI
-  workflow is written so swapping the certificate is a secret change, not a code change.
+  publicly trusted certificate (Azure Trusted Signing or an OV/EV certificate) replaces this one. Signing runs on
+  the protected side (scripts/desktop-signing/sign-and-publish.mjs) with the PFX read from Supabase Vault; GitHub
+  only builds and never holds the key.
 
   Outputs (in -OutputDirectory, default the current directory):
     FCM-Desktop-Signing.pfx  private key + certificate, password-protected  -> NEVER commit; store offline
     FCM-Desktop-Signing.cer  public certificate                              -> publish; fleets trust this
-    fcm-desktop-signing.secrets.txt  the two secret values, for pasting into GitHub once, then delete
+    fcm-desktop-signing.secrets.txt  the two Vault values, for pasting into Supabase once, then delete
 
 .PARAMETER Subject
   The publisher name shown to users. Defaults to the legal entity; override only if it changes.
@@ -40,7 +41,7 @@ param(
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
-$password = Read-Host -AsSecureString -Prompt 'Choose a password for the PFX (it becomes the FCM_DESKTOP_SIGNING_PFX_PASSWORD secret)'
+$password = Read-Host -AsSecureString -Prompt 'Choose a password for the PFX (it becomes the Vault secret desktop_signing_pfx_password)'
 
 # -Type CodeSigningCert already sets the Code Signing EKU (1.3.6.1.5.5.7.3.3); adding it again via -TextExtension fails as a duplicate.
 $cert = New-SelfSignedCertificate `
@@ -64,10 +65,10 @@ $plain = [Runtime.InteropServices.Marshal]::PtrToStringUni([Runtime.InteropServi
 $base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfxPath))
 $secretsPath = Join-Path $OutputDirectory 'fcm-desktop-signing.secrets.txt'
 @(
-  "# GitHub repository secrets for .github/workflows/release-sd-card-bridge-v2.yml"
+  "# Supabase Vault secrets (Dashboard -> Project Settings -> Vault -> New secret), names exactly as below."
   "# Paste each value, then DELETE this file. Keep FCM-Desktop-Signing.pfx offline (password manager / vault)."
-  "FCM_DESKTOP_SIGNING_PFX_BASE64=$base64"
-  "FCM_DESKTOP_SIGNING_PFX_PASSWORD=$plain"
+  "desktop_signing_pfx_base64=$base64"
+  "desktop_signing_pfx_password=$plain"
 ) | Out-File -FilePath $secretsPath -Encoding ascii
 
 Write-Host ''
@@ -76,7 +77,7 @@ Write-Host "Thumbprint  : $($cert.Thumbprint)"
 Write-Host "Valid until : $($cert.NotAfter.ToString('yyyy-MM-dd'))"
 Write-Host "PFX (secret): $pfxPath"
 Write-Host "CER (public): $cerPath  -> publish next to the installer; fleets add it to Trusted Publishers"
-Write-Host "Secrets     : $secretsPath  -> paste into GitHub Actions secrets, then delete"
+Write-Host "Secrets     : $secretsPath  -> paste into Supabase Vault (two secrets, names as written), then delete"
 Write-Host ''
 Write-Host 'Trust on one machine (admin PowerShell), for testing the signed installer:'
 Write-Host "  Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\TrustedPublisher"

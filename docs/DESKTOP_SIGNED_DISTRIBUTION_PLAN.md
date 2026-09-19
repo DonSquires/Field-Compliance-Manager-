@@ -35,14 +35,33 @@ certutil -hashfile FCM-Desktop-V2-Setup.exe SHA256
 # compare with manifest.json / SHA256SUMS / the release page
 ```
 
-## Phase 1 — sign with our own certificate (ready, free)
+## Phase 1 — sign with our own certificate (live, free; key lives in Supabase, not GitHub)
 
-`scripts/desktop-signing/New-FcmSigningCertificate.ps1` creates one stable self-signed code-signing
-certificate (RSA-3072, SHA-256, Code Signing EKU, 3 years) and prints the two values to store as GitHub
-Actions secrets: `FCM_DESKTOP_SIGNING_PFX_BASE64` and `FCM_DESKTOP_SIGNING_PFX_PASSWORD`. Once they exist,
-every release is Authenticode-signed with an RFC 3161 timestamp, `signtool verify` runs in CI, the public
-certificate `FCM-Desktop-Signing.cer` is published beside the installer, and the manifest records
-`signed: true` with the signer subject and thumbprint.
+Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub. So GitHub only
+*builds*; signing and publishing happen on the protected side with the service role.
+
+1. **Certificate (once).** `scripts/desktop-signing/New-FcmSigningCertificate.ps1` mints one stable
+   self-signed code-signing certificate (RSA-3072, SHA-256, Code Signing EKU, 3 years). Done 2026-09-19:
+   publisher `Iron Eagle Security Ltd`, thumbprint `F638533561CC825BBD27CEDD5FEBFB8C1F0B3D7B`, valid to
+   2029-09-19. The `.pfx` stays offline (vault / password manager) and is never committed.
+2. **Vault (once per rotation).** Two secrets in Supabase Vault (Dashboard → Project Settings → Vault, or
+   `select set_desktop_signing_material(<base64>, <password>)` as the service role):
+   `desktop_signing_pfx_base64` and `desktop_signing_pfx_password`. Migration `20260919010000` adds the
+   service-only reader `desktop_signing_material()`; **every read is written to `audit_log`** by name.
+   Browser roles cannot call either function.
+3. **Sign + publish (per release).** After the tag builds on GitHub:
+
+   ```bash
+   SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/desktop-signing/sign-and-publish.mjs --tag sd-card-bridge-v2-v<version>
+   ```
+
+   Downloads the unsigned asset with `gh`, fetches the PFX from Vault into a 0700 temp dir, signs with
+   `osslsigncode` (SHA-256, RFC 3161 timestamp from DigiCert), verifies against the signer certificate,
+   wipes the PFX, then publishes the signed installer, `SHA256SUMS`, `manifest.json` (signed, signer,
+   thumbprint, timestamped) and the public `FCM-Desktop-Signing.cer` to `desktop-releases/v2/<version>/`
+   — the location the web app links to — and replaces the GitHub release assets with the signed set.
+   Runs from the VPS or an operator Codespace; the Linux path was rehearsed 2026-09-19 (sign, timestamp
+   and `Signature verification: ok` on a real PE).
 
 What it buys:
 
@@ -50,23 +69,25 @@ What it buys:
 - A named publisher ("Iron Eagle Security Ltd") in the elevation prompt on any machine that trusts the
   certificate; and a single object for fleet trust — Intune / Group Policy pushes the `.cer` into
   **Trusted Publishers** (and **Trusted Root**, since it is self-issued), or an AppLocker / WDAC
-  publisher rule allows it.
+  publisher rule allows it. The `.cer` is published at `desktop-releases/v2/FCM-Desktop-Signing.cer`.
+- The private key is only ever in Vault (encrypted at rest, service-role reads audited) and the owner's
+  offline copy. GitHub Actions holds neither the key nor a Supabase credential.
 
 What it does not buy: Microsoft SmartScreen reputation. Unmanaged machines still see "Windows protected
 your PC" until Phase 2. That is stated in the release notes and in the download prompt rather than hidden.
 
-Rotation: the PFX lives offline (password manager / vault), never in the repository. Rotating = run the
-script again, replace the two secrets, publish the new `.cer`. Old installers stay valid because they are
+Rotation: run the certificate script again, store the new values with `set_desktop_signing_material`
+(it updates in place, audited), publish the new `.cer`. Old installers stay valid because they are
 timestamped.
 
 ## Phase 2 — publicly trusted signature (when the system is proven; paid)
 
-Swap the secret, not the pipeline:
+Swap the Vault secret (or the signing step), not the pipeline:
 
 | Option | Cost (indicative) | Trust | Notes |
 | --- | --- | --- | --- |
-| Azure Trusted Signing | ~USD 10 / month | Public CA, SmartScreen reputation accrues quickly | Identity validation of the legal entity (NZBN on file already). Replace the `signtool /f pfx` step with the Trusted Signing `signtool` dlib + `AzureSignTool`/OIDC. |
-| OV code-signing certificate (hardware token / cloud HSM, CA/B Forum rules since 2023) | ~USD 200–400 / year | Public CA; SmartScreen reputation builds over downloads | Key must sit in an HSM/token, so CI signing needs a cloud HSM or a self-hosted signer. |
+| Azure Trusted Signing | ~USD 10 / month | Public CA, SmartScreen reputation accrues quickly | Identity validation of the legal entity (NZBN on file already). Signing moves to Microsoft's service (`signtool` dlib / `AzureSignTool`); the Vault then holds the Azure client credential instead of a PFX. |
+| OV code-signing certificate (hardware token / cloud HSM, CA/B Forum rules since 2023) | ~USD 200–400 / year | Public CA; SmartScreen reputation builds over downloads | Key must sit in an HSM/token, so signing needs a cloud HSM (`osslsigncode` supports PKCS#11) or a self-hosted signer. |
 | EV code-signing certificate | ~USD 300–600 / year | Public CA; immediate SmartScreen reputation | Same HSM constraint; best user experience for unmanaged machines. |
 
 Decision to make then: if FCM Desktop only ever runs on managed fleets, Phase 1 + WDAC may be enough
