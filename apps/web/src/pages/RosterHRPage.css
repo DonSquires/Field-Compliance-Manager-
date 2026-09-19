@@ -130,4 +130,77 @@
 	background: #271913;
 }
 
+/* Checkbox-with-explanation rows in HR dialogs (the roster page styles its own copy) */
+.hr-review-dialog label.roster-publish {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	align-items: start;
+	gap: 10px;
+	margin-top: 12px;
+	padding: 10px 12px;
+	border: 1px solid #2d4153;
+	border-radius: 6px;
+	background: #101e2c;
+}
+
+.hr-review-dialog label.roster-publish input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	margin-top: 2px;
+}
+
+.hr-review-dialog label.roster-publish > span {
+	display: grid;
+	gap: 3px;
+}
+
+.hr-review-dialog label.roster-publish b {
+	color: #e6f0f4;
+	font-size: 13px;
+}
+
+.hr-review-dialog label.roster-publish small {
+	color: #8fa3b3;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+/* Readiness block: record the missing credential right next to the readiness decision */
+.hr-readiness > div.hr-readiness-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	grid-column: 1 / -1;
+	margin-top: 2px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
+/* Credentials tab: pick the person, then record what was sighted */
+.hr-inline-form {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 10px;
+	margin: 0 0 14px;
+}
+
+.hr-inline-form label {
+	display: grid;
+	gap: 4px;
+	min-width: min(320px, 100%);
+}
+
+.hr-inline-form label span {
+	color: #8fa3b3;
+	font-size: 12px;
+	font-weight: 800;
+	text-transform: uppercase;
+}
+
+.hr-inline-form select {
+	min-height: 36px;
+}
+
 .roster-hr-tab-list{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 18px;padding:10px 12px;border-left:2px solid #14c8d4;background:#0c202b}.roster-hr-tab-list .btn{min-height:30px}.roster-hr-tab-list .btn-secondary{border-color:#294b5a;color:#a9c2cd;background:#0a1b25}@media(max-width:560px){.roster-hr-tab-list{overflow-x:auto;flex-wrap:nowrap;margin-bottom:14px}.roster-hr-tab-list .btn{flex:0 0 auto}}

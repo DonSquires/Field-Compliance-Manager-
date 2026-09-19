@@ -43334,6 +43334,27 @@ export type Database = {
           total_cost: number
         }[]
       }
+      record_staff_credential: {
+        Args: {
+          p_authorized_activities?: string[]
+          p_client_request_id: string
+          p_credential_number?: string | null
+          p_credential_type: string
+          p_evidence_notes?: string | null
+          p_expiry_date?: string | null
+          p_issued_date?: string | null
+          p_issuing_authority?: string | null
+          p_staff_id: string
+          p_verified?: boolean
+        }
+        Returns: {
+          created: boolean
+          credential_id: string
+          staff_id: string
+          verified: boolean
+          verified_at: string | null
+        }[]
+      }
       remove_workshop_work_order_line: {
         Args: { p_line_id: string; p_work_order_id: string }
         Returns: undefined

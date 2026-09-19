@@ -10,7 +10,11 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await expect(page.getByText('No verified current credential')).toBeVisible();
   const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
   await expect(staffCard.getByText('Work ready', { exact: true })).toBeVisible();
+  await expect(staffCard.getByRole('button', { name: 'Record credential' })).toHaveCount(0);
   await expect(staffCard).toHaveScreenshot('hr-staff-card.png');
+  const jordanCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Jordan Lee' }) });
+  await expect(jordanCard.getByText('Not work ready', { exact: true })).toBeVisible();
+  await expect(jordanCard.getByRole('button', { name: 'Record credential' })).toBeVisible();
   await page.getByRole('button', { name: 'Remove work readiness' }).click();
   const readinessDialog = page.getByRole('dialog', { name: 'Remove work readiness?' });
   await expect(readinessDialog.getByRole('button', { name: 'Confirm readiness' })).toBeDisabled();
@@ -175,4 +179,30 @@ test('onboarding shows each person as a seven-step ladder with what the next ste
   await dialog.getByLabel('Stage note').fill('Evidence pack checked against the record.');
   await dialog.getByRole('button', { name: 'Advance step' }).click();
   await expect(dialog).toBeHidden();
+});
+
+test('a first credential is recorded and verified from the onboarding card through the governed RPC', async ({ page }) => {
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: null, blockers: ['No verified current credential'], next_action: 'record_evidence' }])));
+  let payload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/record_staff_credential', async (route) => { payload = JSON.parse(route.request().postData() ?? '{}'); await route.fulfill(json([{ credential_id: '91919191-9191-4191-8191-919191919191', staff_id: payload.p_staff_id, verified: true, verified_at: '2026-08-30T10:00:00.000Z', created: true }])); });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
+  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();
+  await card.getByRole('button', { name: 'Record credential' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Record credential' });
+  await expect(dialog.getByText(/A verified, current credential is what makes an officer work ready/)).toBeVisible();
+  const submit = dialog.getByRole('button', { name: 'Record and verify' });
+  await expect(submit).toBeDisabled();
+  await dialog.getByLabel('Credential type').selectOption('security_licence');
+  await dialog.getByLabel('Credential number').fill('COA-123456');
+  await dialog.getByLabel('Issuing authority').fill('PSPLA');
+  await dialog.getByLabel('Issued').fill('2026-01-15');
+  await dialog.getByLabel('Expires').fill('2028-01-14');
+  await dialog.getByLabel('Evidence note', { exact: true }).fill('Original certificate sighted; number matches the PSPLA register.');
+  await expect(submit).toBeEnabled();
+  await expect(dialog).toHaveScreenshot('hr-record-credential-dialog.png');
+  await submit.click();
+  await expect(page.getByRole('status')).toContainText('Security licence recorded and verified for Ana Ngata. If nothing else is holding them up, you can mark them work ready.');
+  expect(payload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_credential_type: 'security_licence', p_credential_number: 'COA-123456', p_issuing_authority: 'PSPLA', p_issued_date: '2026-01-15', p_expiry_date: '2028-01-14', p_verified: true });
 });
