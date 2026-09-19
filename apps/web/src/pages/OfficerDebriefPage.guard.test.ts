@@ -27,7 +27,7 @@ describe('officer debrief workspace', () => {
     expect(page).toContain('!followUp || followUpNotes.trim()');
     expect(page).toContain("supabase.rpc('complete_officer_shift'");
     expect(page).toContain('p_expected_status: completionShift.status');
-    expect(page).toContain('Complete shift');
+    expect(page).toContain('End shift');
     expect(page).toContain('Open timesheet');
     expect(page).toContain('Return home');
     expect(page).toContain('Recent debriefs');
@@ -46,6 +46,6 @@ describe('officer debrief workspace', () => {
     expect(page).toContain("sourceType: 'debrief'");
     expect(page).toContain('sourceId: receipt.id');
     expect(page).toContain('Debrief review draft created');
-    expect(page).toContain("const recorded = 'Debrief recorded. Complete the shift when all field work is finished.';");
+    expect(page).toContain("const recorded = 'Debrief recorded. End the shift when all field work is finished.';");
   });
 });

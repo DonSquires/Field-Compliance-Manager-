@@ -20,6 +20,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { EndShiftDialog, type EndShiftDestination } from '../components/EndShiftDialog';
 import type { ActiveShift } from '../hooks/useActiveShift';
 import type { UseOfficerSafetyApi } from '../hooks/useOfficerSafety';
 import { getDetectionStatusMessage } from '../lib/safetyStatusMessage';
@@ -236,6 +237,15 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
   const nextRostered = useNextRosteredShift(profile?.id, Boolean(shift) || shiftLoading);
   const firstName = profile?.displayName?.split(' ')[0] || 'Officer';
   const activeShiftLaunch = shift ? shiftLaunch(shift.shift_type) : null;
+  const [endingShift, setEndingShift] = useState(false);
+  const [endedNotice, setEndedNotice] = useState<string | null>(null);
+  const endShiftDestination = (destination: EndShiftDestination) => {
+    setEndingShift(false);
+    if (destination === 'stops') onNavigate(activeShiftLaunch?.destination ?? 'patrol');
+    else if (destination === 'debrief') onNavigate('schedule');
+    else if (destination === 'home') onNavigate('modules');
+    else onNavigate(destination);
+  };
 
   const shiftProgress = useMemo(() => {
     const total = shift?.stops.length ?? 0;
@@ -283,6 +293,8 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
       )}
 
       {nextDispatchError ? <div className="officer-notice is-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>Your assigned jobs could not be checked: {nextDispatchError}</span><button type="button" onClick={() => void reloadNextDispatch()} disabled={nextDispatchLoading}>Try again</button></div> : nextDispatchJob ? <section className={`officer-next-job priority-${nextDispatchJob.priority}`} aria-labelledby="next-job-heading"><div><span className="officer-kicker">Your next job</span><h2 id="next-job-heading">{nextDispatchJob.job_type.replaceAll('_', ' ')}</h2><p>{nextDispatchJob.site?.name ?? 'Site details to be confirmed'}{nextDispatchJob.site?.address ? ` · ${nextDispatchJob.site.address}` : ''}</p><small>{nextDispatchJob.status.replaceAll('_', ' ')}{nextDispatchJob.sla_respond_by ? ` · respond by ${new Date(nextDispatchJob.sla_respond_by).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}` : ''}</small></div><button type="button" className="officer-primary-action" onClick={() => onNavigate('dispatch')}><Radio size={18} aria-hidden="true" /> Open and acknowledge job <ArrowRight size={17} aria-hidden="true" /></button></section> : null}
+      {endedNotice && <div className="officer-notice is-success" role="status"><CheckCircle2 size={18} aria-hidden="true" /><span>{endedNotice}</span><button type="button" onClick={() => onNavigate('timesheet')}>Open timesheet</button></div>}
+      {endingShift && shift && <EndShiftDialog shiftId={shift.id} shiftStatus={shift.status} serviceType={shift.shift_type} onClose={() => setEndingShift(false)} onNavigate={endShiftDestination} onEnded={async ({ completed_at }) => { setEndingShift(false); setEndedNotice(`Shift ended at ${new Date(completed_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. You are off duty. Record your worked time when you are ready.`); await onRefreshShift(); }} />}
 
       <div className="officer-home-grid">
         <section className={`officer-shift-panel ${shift ? 'has-shift' : 'is-standby'}`}>
@@ -311,6 +323,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
               <button type="button" className="officer-primary-action" onClick={() => activeShiftLaunch && onNavigate(activeShiftLaunch.destination)}>
                 <Navigation size={18} aria-hidden="true" /> {activeShiftLaunch?.label ?? 'Open assignment'} <ArrowRight size={17} aria-hidden="true" />
               </button>
+              {shift.status === 'in_progress' && <button type="button" className="officer-end-shift" onClick={() => setEndingShift(true)}>End shift</button>}
             </>
           ) : nextRostered ? (
             <div className="officer-standby-copy is-next-shift">

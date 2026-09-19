@@ -36750,7 +36750,7 @@ export type Database = {
         Returns: string
       }
       complete_officer_shift: {
-        Args: { p_expected_status: string; p_shift_id: string }
+        Args: { p_expected_status: string; p_gps_lat?: number | null; p_gps_lng?: number | null; p_shift_id: string }
         Returns: {
           completed_at: string
           shift_id: string
@@ -39371,6 +39371,10 @@ export type Database = {
           reason: string
           requested_id: string
         }[]
+      }
+      get_shift_end_readiness: {
+        Args: { p_shift_id: string }
+        Returns: Json
       }
       get_shift_break_entitlement: {
         Args: { p_shift_id: string }

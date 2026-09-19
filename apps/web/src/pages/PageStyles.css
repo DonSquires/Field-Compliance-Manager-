@@ -1652,6 +1652,24 @@
   background: #a7e8df;
 }
 
+/* Ending the shift sits under the primary action while on shift: visible, never the accidental tap */
+.officer-end-shift {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+  border: 1px solid #47716d;
+  border-radius: 6px;
+  color: #a7e8df;
+  background: #0d2526;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.officer-end-shift:hover {
+  border-color: #7dd3c7;
+  color: #e3edf6;
+}
+
 .officer-standby-copy {
   display: grid;
   grid-template-columns: auto 1fr auto;

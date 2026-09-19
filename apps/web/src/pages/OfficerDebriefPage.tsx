@@ -86,7 +86,7 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
     } else {
       setCompletionShift(selectedShift?.status === 'in_progress' ? selectedShift : null);
       // Plain words for the officer: what happened, and what to do next. The review draft is a supervisor-side detail.
-      const recorded = 'Debrief recorded. Complete the shift when all field work is finished.';
+      const recorded = 'Debrief recorded. End the shift when all field work is finished.';
       try {
         const { data: draftData, error: draftError } = await supabase.functions.invoke('bob-agentic-document-draft', {
           body: { sourceType: 'debrief', sourceId: receipt.id },
@@ -112,7 +112,7 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
     const { data, error: completionError } = await supabase.rpc('complete_officer_shift', { p_shift_id: completionShift.id, p_expected_status: completionShift.status });
     const receipt = (data as Array<{ shift_id: string; shift_status: string; completed_at: string }> | null)?.[0];
     if (completionError || !receipt) setError(completionError?.message ?? 'Shift completion was not confirmed. Review remaining field work and retry.');
-    else { setCompletionShift(null);setCompletedShiftId(receipt.shift_id);setNotice(`Shift completed at ${new Date(receipt.completed_at).toLocaleString('en-NZ')}. You are no longer on active duty for this shift.`);await loadDebriefData(); }
+    else { setCompletionShift(null);setCompletedShiftId(receipt.shift_id);setNotice(`Shift ended at ${new Date(receipt.completed_at).toLocaleString('en-NZ')}. You are no longer on active duty for this shift.`);await loadDebriefData(); }
     setCompleting(false);
   };
 
@@ -120,7 +120,7 @@ const OfficerDebriefPage: React.FC<{ onNavigate?: (destination: 'home' | 'timesh
     <header className="officer-debrief-header"><div><span>Shift handover</span><h1>Debrief</h1><p>Record operational context for the next supervisor or team.</p></div><button type="button" onClick={() => void loadDebriefData()} disabled={loading} title="Refresh debriefs"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
     {error && <div className="officer-debrief-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
     {notice && <div className="officer-debrief-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
-    {completionShift && <section className="officer-debrief-completion" aria-label="Shift completion"><div><span>Debrief received</span><strong>Finish {completionShift.service_type.replaceAll('_', ' ')} shift</strong><p>Completion confirms all stops, required module tasks, dispatch jobs, and welfare alerts are closed.</p></div><button type="button" onClick={() => void completeShift()} disabled={completing}>{completing ? <><RefreshCw size={16} className="is-spinning" />Completing</> : <><CheckCircle2 size={16} />Complete shift</>}</button></section>}
+    {completionShift && <section className="officer-debrief-completion" aria-label="Shift completion"><div><span>Debrief received</span><strong>Finish {completionShift.service_type.replaceAll('_', ' ')} shift</strong><p>Ending the shift checks that every stop, required task, dispatch job and welfare alert is closed.</p></div><button type="button" onClick={() => void completeShift()} disabled={completing}>{completing ? <><RefreshCw size={16} className="is-spinning" />Ending</> : <><CheckCircle2 size={16} />End shift</>}</button></section>}
     {completedShiftId && <section className="officer-debrief-next" aria-label="After shift completion"><div><span>Shift receipt</span><strong>{completedShiftId.slice(0, 8)}</strong><p>Record worked time now, or return to the officer home screen.</p></div><div><button type="button" onClick={() => onNavigate?.('home')}><Home size={16} />Return home</button><button type="button" className="is-primary" onClick={() => onNavigate?.('timesheet')}><Clock3 size={16} />Open timesheet</button></div></section>}
     <div className="officer-debrief-layout">
       <form className="officer-debrief-form" onSubmit={submitDebrief}>

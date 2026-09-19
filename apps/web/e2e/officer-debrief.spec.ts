@@ -31,12 +31,12 @@ test('officer debrief is structured, validated, and server-confirmed', async ({ 
   await shellHeader.evaluate((element) => { element.style.visibility = ''; });
   await actionBar.evaluate((element) => { element.style.visibility = ''; });
   await submit.click();
-  await expect(page.getByText('Debrief recorded. Complete the shift when all field work is finished.')).toBeVisible();
+  await expect(page.getByText('Debrief recorded. End the shift when all field work is finished.')).toBeVisible();
   await expect(page.getByText(/Debrief review draft created for your supervisor: Debrief review - North District Patrol 30 Aug\./)).toBeVisible();
-  const complete = page.getByRole('button', { name: 'Complete shift' });
+  const complete = page.getByRole('button', { name: 'End shift' });
   await expect(complete).toBeVisible();
   await complete.click();
-  await expect(page.getByText(/Shift completed at .* You are no longer on active duty for this shift\./)).toBeVisible();
+  await expect(page.getByText(/Shift ended at .* You are no longer on active duty for this shift\./)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Return home' })).toBeVisible();
   await page.getByRole('button', { name: 'Open timesheet' }).click();
   await expect(page).toHaveURL(/\/officer\/timesheet$/);
