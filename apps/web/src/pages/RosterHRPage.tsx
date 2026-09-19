@@ -281,6 +281,9 @@ const TAB_GROUPS: { id: RosterTabGroup; label: string; tabs: RosterTab[] }[] = [
 
 const tabGroupFor = (tab: RosterTab): RosterTabGroup => TAB_GROUPS.find((group) => group.tabs.includes(tab))?.id ?? 'workforce';
 
+/** What a reviewer reads on a timesheet row; the officer's own words live on the officer page. */
+const HR_TIMESHEET_STATUS: Record<string, string> = { draft: 'Draft', submitted: 'Sent by officer', branch_checked: 'Branch checked', approved: 'Approved', rejected: 'Returned to officer', paid: 'Paid' };
+
 type EvidenceActionKind = 'add_skill' | 'assign_line_manager' | 'record_induction' | 'record_document' | 'record_credential';
 /** Same list the database accepts (record_staff_credential / apply_credential_promotion_proposal). */
 const CREDENTIAL_TYPES: Array<[string, string]> = [
@@ -1791,10 +1794,10 @@ const RosterHRPage: React.FC = () => {
                 <tr>
                   <th>Staff</th>
                   <th>Period</th>
-                  <th>Scheduled</th>
-                  <th>Derived work</th>
-                  <th>Adjustment</th>
-                  <th>Actual</th>
+                  <th>Rostered h</th>
+                  <th>Worked h</th>
+                  <th>Adjustment h</th>
+                  <th>To pay h</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
@@ -1815,11 +1818,11 @@ const RosterHRPage: React.FC = () => {
                         {new Date(t.period_end).toLocaleDateString()}
                       </td>
                       <td>{t.scheduled_hours ?? '-'}</td>
-                      <td>{t.work_derived_hours ?? '-'}{t.work_summary?.source_count !== undefined ? ` · ${t.work_summary.source_count} sources` : ''}</td>
+                      <td>{t.work_derived_hours ?? '-'}{t.work_summary?.source_count !== undefined ? ` from ${t.work_summary.source_count} ${t.work_summary.source_count === 1 ? 'work record' : 'work records'}` : ''}</td>
                       <td>{t.adjustment_hours || 0}</td>
                       <td>{t.actual_hours ?? '-'}</td>
                       <td>
-                        <span className={`status-badge status-${t.status}`}>{t.status}</span>
+                        <span className={`status-badge status-${t.status}`}>{HR_TIMESHEET_STATUS[t.status] ?? plainWords(t.status)}</span>
                       </td>
                       <td>
                         {['submitted', 'branch_checked'].includes(t.status) && <button className="btn btn-sm btn-secondary" onClick={() => setTimesheetCorrection({ item: t, actualHours: String(t.actual_hours ?? ''), overtimeHours: String(t.overtime_hours ?? 0), reason: '' })}>Edit hours</button>}{t.status === 'submitted' && (

@@ -38,9 +38,35 @@ test('administrator copies an existing roster assignment into a future draft', a
 	await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeVisible();
 });
 
+test('the Create shift dialog says what the shift would contain on that day before it exists', async ({ page }) => {
+        let requested: Record<string, unknown> | null = null;
+        await page.route('**/rest/v1/rpc/preview_work_unit_coverage', async (route) => {
+                requested = JSON.parse(route.request().postData() ?? '{}');
+                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ kind: 'patrol', ok: false, has_route: true, config_count: 3, stop_count: 0, day_of_week: 6, contracted_days: [1, 2, 3, 4, 5] }) });
+        });
+        await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+        await page.getByRole('button', { name: 'Copy selected' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Create shift' });
+        await expect(dialog.getByRole('alert')).toContainText(/No contracted stops on a \w+day for this run — the contract covers Mon, Tue, Wed, Thu, Fri\. The shift would have nothing to visit unless stops are added\./);
+        expect(requested).toMatchObject({ p_work_unit_id: '23232323-2323-4323-8323-232323232323' });
+        expect(String((requested as Record<string, unknown> | null)?.p_shift_date)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        // still advisory: the shift can be created
+        await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeEnabled();
+});
+
+test('a static post whose place has no verified boundary is flagged at roster time', async ({ page }) => {
+        await page.route('**/rest/v1/rpc/preview_work_unit_coverage', async (route) => {
+                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ kind: 'static', ok: false, has_module: true, place_name: 'Tahunanui Patrol Zone', place_kind: 'zone', boundary_verified: false }) });
+        });
+        await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+        await page.getByRole('button', { name: 'Copy selected' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Create shift' });
+        await expect(dialog.getByRole('alert')).toContainText('Tahunanui Patrol Zone has no verified boundary (it is a zone, not a site), so the officer cannot record arriving or leaving the post. Verify the site boundary first.');
+});
 test('administrator repeats a selected assignment across a date range', async ({ page }) => {
-	await signInAsAdmin(page, '/admin/roster');
-	await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+        await signInAsAdmin(page, '/admin/roster');	await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
 	await page.getByRole('button', { name: 'Repeat selected' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Repeat assignment' });
 	await expect(dialog).toBeVisible();

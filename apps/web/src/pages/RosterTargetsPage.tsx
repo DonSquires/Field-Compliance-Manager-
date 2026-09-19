@@ -87,7 +87,7 @@ const RosterTargetsPage: React.FC = () => {
     }
     setLoading(true);
     setError(null);
-    const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,required_skill_names').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code')]);
+    const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,required_skill_names').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name,boundary_verification').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code')]);
     const [a, b, c, d, e, f, g, h, i] = responses;
     setUnits((a.data as Unit[]) ?? []);
     setRoutes((b.data as Option[]) ?? []);
@@ -181,6 +181,16 @@ const RosterTargetsPage: React.FC = () => {
     setBusy(false);
   };
   const locationLabel = (l: AgreementLocation) => names.get(l.site_id ?? l.zone_id ?? '') ?? 'Contracted place (name not loaded)';
+  /** manage_officer_static_post needs a site with a verified boundary; a zone or an unverified site means no arrive/depart. */
+  const attendanceBlocker = (unit: Unit): string | null => {
+    if (unit.work_unit_type !== 'static') return null;
+    const location = locations.find((l) => l.id === unit.service_agreement_location_id);
+    if (!location) return null;
+    if (!location.site_id) return `${names.get(location.zone_id ?? '') ?? 'This place'} is a zone, not a site, so the officer cannot record arriving at or leaving this post.`;
+    const site = sites.find((s) => s.id === location.site_id);
+    if (site && site.boundary_verification !== 'verified') return `${site.name} has no verified boundary yet, so the officer cannot record arriving at or leaving this post. Verify the site boundary first.`;
+    return null;
+  };
   const scopedLocations = workflowContext.agreementId ? locations.filter((location) => location.service_agreement_id === workflowContext.agreementId) : locations;
   const scopedModules = workflowContext.agreementId ? modules.filter((module) => module.service_agreement_id === workflowContext.agreementId) : modules;
   const matchingModules = scopedModules.filter((module) => module.service_agreement_id === scopedLocations.find((location) => location.id === form.locationId)?.service_agreement_id);
@@ -321,6 +331,7 @@ const RosterTargetsPage: React.FC = () => {
                       : [names.get(unit.workplace_id ?? ''), names.get(unit.team_id ?? ''), names.get(unit.cost_centre_id ?? '')].filter(Boolean).join(' · ')}
                 </small>
                     {unit.required_skill_names?.length > 0 && <small>Required skills: {unit.required_skill_names.join(', ')}</small>}
+                    {attendanceBlocker(unit) && <small className="targets-unit-warning" role="note"><AlertTriangle size={13} aria-hidden="true" /> {attendanceBlocker(unit)}</small>}
               </div>
               <button className={workflowContext.workUnitId === unit.id ? 'is-primary' : ''} onClick={() => rosterUnit(unit)} aria-label={`Roster shifts for ${unit.name}`}>
                 <Plus size={15} />

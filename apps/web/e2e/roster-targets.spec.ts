@@ -44,3 +44,26 @@ test('static post creation names the contracted place and blocks when the agreem
         await expect(dialog.getByText('Covered by the agreement’s static guarding module.')).toBeVisible();
         await expect(dialog.getByRole('button', { name: 'Create work unit' })).toBeEnabled();
 });
+
+test('a static post whose place cannot take attendance says so on its card', async ({ page }) => {
+        await page.route('**/rest/v1/service_agreement_locations**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+                { id: '21212121-2121-4121-8121-212121212121', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '25252525-2525-4525-8525-252525252525', zone_id: null },
+                { id: '27272727-2727-4727-8727-272727272727', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: null, zone_id: '66666666-6666-4666-8666-666666666666' },
+                { id: '28282828-2828-4828-8828-282828282828', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '29292929-2929-4929-8929-292929292929', zone_id: null },
+        ]) }));
+        await page.route('**/rest/v1/client_sites**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+                { id: '25252525-2525-4525-8525-252525252525', name: 'Civic Centre', boundary_verification: 'verified' },
+                { id: '29292929-2929-4929-8929-292929292929', name: 'Harbour Depot', boundary_verification: 'pending' },
+        ]) }));
+        await page.route('**/rest/v1/location_zones**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '66666666-6666-4666-8666-666666666666', name: 'Civic Event Operations Zone' }]) }));
+        await page.route('**/rest/v1/roster_work_units**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+                { id: '20202020-2020-4020-8020-202020202020', name: 'Civic Centre Static Post', work_unit_type: 'static', service_type: 'static_guarding', active: true, patrol_route_id: null, service_agreement_location_id: '21212121-2121-4121-8121-212121212121', service_agreement_module_id: '22222222-2222-4222-8222-222222222222', workplace_id: null, team_id: null, cost_centre_id: null, required_skill_names: [] },
+                { id: '30303030-3030-4030-8030-303030303030', name: 'Events Zone Static Post', work_unit_type: 'static', service_type: 'static_guarding', active: true, patrol_route_id: null, service_agreement_location_id: '27272727-2727-4727-8727-272727272727', service_agreement_module_id: '22222222-2222-4222-8222-222222222222', workplace_id: null, team_id: null, cost_centre_id: null, required_skill_names: [] },
+                { id: '31313131-3131-4131-8131-313131313131', name: 'Harbour Depot Static Post', work_unit_type: 'static', service_type: 'static_guarding', active: true, patrol_route_id: null, service_agreement_location_id: '28282828-2828-4828-8828-282828282828', service_agreement_module_id: '22222222-2222-4222-8222-222222222222', workplace_id: null, team_id: null, cost_centre_id: null, required_skill_names: [] },
+        ]) }));
+        await signInAsAdmin(page, '/admin/roster-targets');
+        await expect(page.locator('#work-unit-20202020-2020-4020-8020-202020202020')).toContainText('Civic Centre');
+        await expect(page.locator('#work-unit-20202020-2020-4020-8020-202020202020').getByRole('note')).toHaveCount(0);
+        await expect(page.locator('#work-unit-30303030-3030-4030-8030-303030303030').getByRole('note')).toContainText('Civic Event Operations Zone is a zone, not a site, so the officer cannot record arriving at or leaving this post.');
+        await expect(page.locator('#work-unit-31313131-3131-4131-8131-313131313131').getByRole('note')).toContainText('Harbour Depot has no verified boundary yet, so the officer cannot record arriving at or leaving this post. Verify the site boundary first.');
+});

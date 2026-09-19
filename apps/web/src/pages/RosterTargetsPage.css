@@ -4,8 +4,21 @@
 	grid-template-columns: auto minmax(0, 1fr) minmax(200px, .7fr) auto;
 }
 
-.targets-page .targets-list article > button {
-	padding: 0 12px;
+/* A post whose place cannot take attendance is said on the card, before anyone rosters it */
+.targets-page .targets-list article small.targets-unit-warning {
+        display: flex;
+        gap: 5px;
+        align-items: flex-start;
+        margin-top: 6px;
+        color: #f7d77a;
+        white-space: normal;
+        line-height: 1.4;
+}
+
+.targets-page .targets-list article small.targets-unit-warning svg {
+        flex: none;
+        margin-top: 2px;
+}
 	border: 1px solid #40576b;
 	border-radius: 6px;
 	color: #b3c4d3;

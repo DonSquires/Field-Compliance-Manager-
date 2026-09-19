@@ -68,6 +68,6 @@ test('roster context lands on the exact work unit and assignment action', async 
   await expect(page).toHaveURL(new RegExp(`/admin/roster-targets.*work_unit=${WORK_UNIT}`));
   const requestedUnit = page.locator(`#work-unit-${WORK_UNIT}`);
   await expect(requestedUnit).toHaveClass(/is-focused/);
-  await expect(requestedUnit.getByRole('button', { name: 'Create assignment' })).toBeVisible();
+  await expect(requestedUnit.getByRole('button', { name: /^Roster shifts for/ })).toHaveText(/Create assignment/);
   expect(errors, errors.join('\n')).toEqual([]);
 });

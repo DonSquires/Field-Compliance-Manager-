@@ -40,6 +40,6 @@ test('officer debrief is structured, validated, and server-confirmed', async ({ 
   await expect(page.getByRole('button', { name: 'Return home' })).toBeVisible();
   await page.getByRole('button', { name: 'Open timesheet' }).click();
   await expect(page).toHaveURL(/\/officer\/timesheet$/);
-  await expect(page.getByRole('heading', { name: 'Timesheets', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'My timesheet', exact: true })).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

@@ -42387,6 +42387,10 @@ export type Database = {
           unassigned_count: number
         }[]
       }
+      preview_work_unit_coverage: {
+        Args: { p_shift_date: string; p_work_unit_id: string }
+        Returns: Json
+      }
       preview_roster_from_templates: {
         Args: {
           p_from_date: string
