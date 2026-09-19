@@ -55,6 +55,20 @@
 .cctv-job-copy { display: grid; gap: 4px; grid-area: copy; min-width: 0; }
 .cctv-job-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-job-error { color: #a13d3d; display: block; font-size: 12px; grid-column: 1 / -1; overflow: hidden; padding: 0 0 10px 48px; text-overflow: ellipsis; white-space: nowrap; }
+/* Classified failure: what went wrong in plain words, whether Retry can help, and the next step. */
+.cctv-job-failure { border-left: 3px solid #d4dddf; font-size: 12px; grid-column: 1 / -1; margin: 0 12px 10px 48px; padding: 4px 10px; }
+.cctv-job-failure.is-permanent { border-left-color: #a13d3d; }
+.cctv-job-failure.is-transient { border-left-color: #c58a12; }
+.cctv-job-failure summary { color: #1f2f36; cursor: pointer; display: flex; flex-wrap: wrap; gap: 8px; }
+.cctv-job-failure summary span { color: #75828a; }
+.cctv-job-failure.is-permanent summary span { color: #a13d3d; }
+.cctv-job-failure p { color: #52646d; line-height: 1.45; margin: 6px 0 0; }
+.cctv-job-failure__raw code { color: #65727c; font-size: 11px; overflow-wrap: anywhere; }
+.cctv-failure-summary { align-items: center; background: #fff7e8; border: 1px solid #f0d9a6; border-radius: 6px; color: #5a4a1e; display: flex; flex-wrap: wrap; font-size: 13px; gap: 10px; margin: 0 0 10px; padding: 8px 12px; }
+.cctv-failure-summary span { flex: 1 1 auto; min-width: 0; }
+.cctv-failure-summary button { align-items: center; background: #fff; border: 1px solid #d4c08a; border-radius: 4px; color: #6b5411; cursor: pointer; display: inline-flex; font-size: 12px; gap: 5px; padding: 5px 8px; }
+.cctv-failure-summary button:hover { background: #fdf0d0; }
+.cctv-row-actions button.is-unlikely { color: #8a949a; }
 .cctv-job-copy small,
 .cctv-job-findings { color: #75828a; font-size: 12px; }
 .cctv-batch-link { color: #126b62 !important; font-weight: 700; }

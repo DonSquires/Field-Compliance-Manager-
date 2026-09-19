@@ -31,4 +31,16 @@ describe('CCTV inference review', () => {
     expect(source).toContain("setError('Organisation access could not be confirmed. CCTV review is unavailable.');");
     expect(source).toContain('setLoading(false);');
   });
+
+  it('explains each failed job in plain words and only bulk-retries failures a retry can fix', () => {
+    expect(source).toContain("import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';");
+    expect(source).toContain('describeJobFailure(job.error_message, fileName)');
+    expect(source).toContain("jobFailures.get(job.id)?.retryLikelyHelps");
+    expect(source).toContain('Retry the {failureSummary.retryable} fixable');
+    expect(source).toContain("'Retry anyway' : 'Retry'");
+    expect(source).toContain('Worker message (for engineers):');
+    expect(source).toContain("<strong>Next step:</strong> {failure.nextStep}");
+    // The governed RPC remains the only way a job changes state from this page.
+    expect(source).not.toMatch(/from\('inference_jobs'\)[\s\S]{0,300}\.(update|delete)\(/);
+  });
 });

@@ -24,6 +24,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { consolidateResultData } from '../lib/motionConsolidation';
 import { buildCCTVPrintableReport } from '../lib/cctvReport';
+import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';
 import { filterUsableReportImages, type ReportEvidenceImage } from '../lib/cctvImageQuality';
 import type {
   ConsolidatedFaceEvent,
@@ -428,6 +429,36 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const manageSelectedJob = useCallback((action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (selected) void manageJob(selected, action);
   }, [manageJob, selected]);
+
+  // Each failed job with what went wrong, in the reviewer's terms, and whether a retry can plausibly change it.
+  const jobFailures = useMemo(() => {
+    const map = new Map<string, JobFailure>();
+    for (const job of jobs) {
+      if (job.status !== 'failed') continue;
+      const fileName = typeof job.evidence?.metadata?.file_name === 'string' ? job.evidence.metadata.file_name : job.evidence?.storage_path?.split('/').pop() ?? null;
+      map.set(job.id, describeJobFailure(job.error_message, fileName));
+    }
+    return map;
+  }, [jobs]);
+  const failureSummary = useMemo(() => summariseFailures([...jobFailures.values()]), [jobFailures]);
+
+  // Retries only the failures a retry is expected to fix; permanent ones stay visible with their next step.
+  const retryFixableFailures = useCallback(async () => {
+    if (!profile?.organizationId) return;
+    const fixable = jobs.filter((job) => jobFailures.get(job.id)?.retryLikelyHelps);
+    if (!fixable.length) return;
+    if (!window.confirm(`Retry ${fixable.length} failed job${fixable.length === 1 ? '' : 's'} whose failure looks transient? Jobs with damaged or unreadable footage are left alone.`)) return;
+    setJobAction('retry');
+    setError(null);
+    const problems: string[] = [];
+    for (const job of fixable) {
+      const { error: actionError } = await supabase.rpc('manage_cctv_inference_job', { p_job_id: job.id, p_organization_id: profile.organizationId, p_action: 'retry' });
+      if (actionError) problems.push(`${String(job.id).slice(0, 8)}: ${actionError.message}`);
+    }
+    setJobAction(null);
+    if (problems.length) setError(`${problems.length} of ${fixable.length} retries were refused — ${problems.slice(0, 3).join('; ')}${problems.length > 3 ? '…' : ''}`);
+    await loadJobs();
+  }, [jobs, jobFailures, loadJobs, profile?.organizationId]);
 
   // Load Signed URL for the selected video
   useEffect(() => {
@@ -1066,6 +1097,17 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
             </div>
             <strong>{jobs.length}</strong>
           </div>
+          {jobFailures.size > 0 && (
+            <div className="cctv-failure-summary" role="status">
+              <AlertTriangle size={15} aria-hidden="true" />
+              <span>
+                {jobFailures.size} failed {jobFailures.size === 1 ? 'job' : 'jobs'} here: {failureSummary.retryable} where a retry should help, {failureSummary.permanent} where the footage itself is the problem.
+              </span>
+              {failureSummary.retryable > 0 && (
+                <button type="button" disabled={jobAction !== null} onClick={() => void retryFixableFailures()}><RotateCcw size={13} aria-hidden="true" /> Retry the {failureSummary.retryable} fixable</button>
+              )}
+            </div>
+          )}
           {error && (
             <div className="page-error">
               <AlertTriangle size={17} /> {error}
@@ -1112,15 +1154,28 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                     )}
                     <span className={`cctv-status status-${job.status}`}><CircleDot size={13} /> {statusLabel(job.status)}</span>
                   </button>
-                  {job.status === 'failed' && (
-                    <div className="cctv-row-actions" aria-label="Failed CCTV job actions">
-                      <button type="button" title="Retry failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'retry')}><RotateCcw size={13} /><span>Retry</span></button>
-                      <button type="button" title="Close failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'close')}><XCircle size={13} /><span>Close</span></button>
-                      <button type="button" title="Archive failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'archive')}><Archive size={13} /><span>Archive</span></button>
-                      <button type="button" title="Delete failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'delete')}><Trash2 size={13} /><span>Delete</span></button>
-                    </div>
-                  )}
-                  {job.error_message && <span className="cctv-job-error" title={job.error_message}>{job.error_message}</span>}
+                  {job.status === 'failed' && (() => {
+                    const failure = jobFailures.get(job.id);
+                    return (
+                      <div className="cctv-row-actions" aria-label="Failed CCTV job actions">
+                        <button type="button" className={failure && !failure.retryLikelyHelps ? 'is-unlikely' : undefined} title={failure ? (failure.retryLikelyHelps ? 'Retry — this failure looks transient' : 'Retry is unlikely to help: ' + failure.nextStep) : 'Retry failed job'} disabled={jobAction !== null} onClick={() => void manageJob(job, 'retry')}><RotateCcw size={13} /><span>{failure && !failure.retryLikelyHelps ? 'Retry anyway' : 'Retry'}</span></button>
+                        <button type="button" title="Close failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'close')}><XCircle size={13} /><span>Close</span></button>
+                        <button type="button" title="Archive failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'archive')}><Archive size={13} /><span>Archive</span></button>
+                        <button type="button" title="Delete failed job" disabled={jobAction !== null} onClick={() => void manageJob(job, 'delete')}><Trash2 size={13} /><span>Delete</span></button>
+                      </div>
+                    );
+                  })()}
+                  {job.status === 'failed' && jobFailures.get(job.id) ? (() => {
+                    const failure = jobFailures.get(job.id) as JobFailure;
+                    return (
+                      <details className={`cctv-job-failure is-${failure.retryLikelyHelps ? 'transient' : 'permanent'}`}>
+                        <summary><strong>{failure.title}</strong> <span>{failure.retryLikelyHelps ? 'Retry should help' : 'Retry will not fix this'}</span></summary>
+                        <p>{failure.explanation}</p>
+                        <p><strong>Next step:</strong> {failure.nextStep}</p>
+                        {job.error_message ? <p className="cctv-job-failure__raw"><span>Worker message (for engineers):</span> <code>{job.error_message}</code></p> : null}
+                      </details>
+                    );
+                  })() : job.error_message ? <span className="cctv-job-error" title={job.error_message}>{job.error_message}</span> : null}
                 </div>
               );
             })
