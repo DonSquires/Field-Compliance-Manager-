@@ -11,6 +11,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { plainWords } from '../lib/rosterWords';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
@@ -1172,7 +1173,38 @@ const RosterHRPage: React.FC = () => {
 
       {tab === 'staff' && (
         <section className="reports-section">
-          <h2>Skill catalog</h2>
+          <h2>Staff ({staff.length})</h2>
+          <p className="hr-section-hint">Who works here and whether they can be rostered. Field staff join through Recruitment (offer accepted, then hired), complete Onboarding, and are then marked work-ready.</p>
+          <div className="contacts-list">
+            {staff.length === 0 ? (
+              <div className="empty-state hr-empty-guide">
+                <p><strong>No staff yet.</strong></p>
+                <p>Field staff are created when a recruitment offer is accepted and the person is hired. Office and admin users are added under People &amp; Access.</p>
+                <button type="button" className="btn btn-sm btn-primary" onClick={() => { setTab('recruitment'); setTabGroup(tabGroupFor('recruitment')); }}>Open Recruitment</button>
+              </div>
+            ) : (
+              staff.map((s) => (
+                <div key={s.id} className="contact-card">
+                  <div className="contact-header">
+                    <h3>{s.display_name || s.email || 'Unnamed'}</h3>
+                    <div className="hr-staff-badges"><span className="contact-type-badge">{plainWords(s.role)}</span>{s.staff_id && <span className={`status-badge ${s.work_ready ? 'status-active' : 'status-pending'}`}>{s.work_ready ? 'Work ready' : 'Not work ready'}</span>}</div>
+                  </div>
+                  <div className="contact-details">
+                    <p>{s.email}</p>
+                    <p className="contact-meta">
+                      {plainWords(s.employment_type, 'Employment type not set')}
+                      {s.start_date ? ` · started ${new Date(s.start_date).toLocaleDateString('en-NZ')}` : ''}
+                    </p>
+                    {s.staff_id && <div className="form-row" style={{ marginTop: '0.75rem' }}><label><span>Payroll role</span><select value={payRoleDrafts[s.id] ?? s.role_code ?? ''} onChange={(event) => setPayRoleDrafts((drafts) => ({ ...drafts, [s.id]: event.target.value }))}><option value="">No role code assigned</option>{roleCodes.map((code) => <option value={code.code} key={code.code}>{code.code} · {code.name}</option>)}</select></label><button type="button" className="btn btn-sm btn-secondary" disabled={saving || ((payRoleDrafts[s.id] ?? s.role_code ?? '') === (s.role_code ?? ''))} onClick={() => void saveStaffPayRole(s)}>Save payroll role</button></div>}
+                    {s.staff_id && (() => { const assessment = readinessAssessments.find((item) => item.staff_id === s.staff_id); return assessment ? <div className="hr-readiness"><div><span>Identity</span><strong>{plainWords(assessment.identity_status)}</strong></div><div><span>Employment</span><strong>{plainWords(assessment.employment_status)}</strong></div><div><span>Credentials</span><strong>{plainWords(assessment.credential_status)}</strong></div><div><span>Training advisory</span><strong>{plainWords(assessment.training_status)}</strong></div>{assessment.blockers.length > 0 && <p>{assessment.blockers.join(' · ')}</p>}<button type="button" className={`btn btn-sm ${assessment.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setReadinessNotes('');setReadinessReview({ staffId: assessment.staff_id, name: s.display_name || s.email || 'Staff member', current: assessment.work_ready, next: !assessment.work_ready }); }}>{assessment.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button></div> : null; })()}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <h2 style={{ marginTop: '1.5rem' }}>Skill catalog</h2>
+          <p className="hr-section-hint">Reference list of skills a work unit can require and a staff member can hold.</p>
           <div className="assessment-actions" style={{ marginBottom: '1rem' }}>
             <button type="button" className="btn btn-sm btn-primary" onClick={() => { setShowSkillCatalogForm((value) => !value); if (!showSkillCatalogForm) setSkillCatalogDraft({ id: null, name: '', category: 'technical' }); }}>
               {showSkillCatalogForm ? 'Cancel' : 'Add catalog skill'}
@@ -1312,33 +1344,6 @@ const RosterHRPage: React.FC = () => {
             )}
           </div>
 
-          <h2 style={{ marginTop: '1.5rem' }}>Staff ({staff.length})</h2>
-          <div className="contacts-list">
-            {staff.length === 0 ? (
-              <div className="empty-state">
-                <p>No staff records for this organisation.</p>
-              </div>
-            ) : (
-              staff.map((s) => (
-                <div key={s.id} className="contact-card">
-                  <div className="contact-header">
-                    <h3>{s.display_name || s.email || 'Unnamed'}</h3>
-                    <span className="contact-type-badge">{s.role}</span>
-                  </div>
-                  <div className="contact-details">
-                    <p>{s.email}</p>
-                    <p className="contact-meta">
-                      {s.employment_type || 'employment type not set'}
-                      {s.start_date ? ` · started ${new Date(s.start_date).toLocaleDateString()}` : ''}
-                      {s.work_ready === false ? ' · NOT work ready' : ''}
-                    </p>
-                    {s.staff_id && <div className="form-row" style={{ marginTop: '0.75rem' }}><label><span>Payroll role</span><select value={payRoleDrafts[s.id] ?? s.role_code ?? ''} onChange={(event) => setPayRoleDrafts((drafts) => ({ ...drafts, [s.id]: event.target.value }))}><option value="">No role code assigned</option>{roleCodes.map((code) => <option value={code.code} key={code.code}>{code.code} · {code.name}</option>)}</select></label><button type="button" className="btn btn-sm btn-secondary" disabled={saving || ((payRoleDrafts[s.id] ?? s.role_code ?? '') === (s.role_code ?? ''))} onClick={() => void saveStaffPayRole(s)}>Save payroll role</button></div>}
-                    {s.staff_id && (() => { const assessment = readinessAssessments.find((item) => item.staff_id === s.staff_id); return assessment ? <div className="hr-readiness"><div><span>Identity</span><strong>{assessment.identity_status.replaceAll('_', ' ')}</strong></div><div><span>Employment</span><strong>{assessment.employment_status.replaceAll('_', ' ')}</strong></div><div><span>Credentials</span><strong>{assessment.credential_status.replaceAll('_', ' ')}</strong></div><div><span>Training advisory</span><strong>{assessment.training_status}</strong></div>{assessment.blockers.length > 0 && <p>{assessment.blockers.join(' · ')}</p>}<button type="button" className={`btn btn-sm ${assessment.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setReadinessNotes('');setReadinessReview({ staffId: assessment.staff_id, name: s.display_name || s.email || 'Staff member', current: assessment.work_ready, next: !assessment.work_ready }); }}>{assessment.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button></div> : null; })()}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
           <h2 style={{ marginTop: '1.5rem' }}>Shift swap requests ({shiftSwaps.filter((item) => item.status === 'pending').length})</h2>
           <div className="contacts-list">
             {shiftSwaps.filter((item) => item.status === 'pending').length === 0 ? <div className="empty-state"><p>No pending shift swaps.</p></div> : shiftSwaps.filter((item) => item.status === 'pending').map((swap) => <div className="contact-card" key={swap.id}><div className="contact-header"><h3>{swap.swap_type.replaceAll('_', ' ')} swap · {swap.original_shift_id.slice(0, 8)}</h3><span className="status-badge status-pending">pending</span></div><p>{swap.reason ?? 'No reason recorded.'}</p><small>Requested by {staffNames[swap.requested_by] ?? swap.requested_by} · {new Date(swap.requested_at).toLocaleString('en-NZ')}</small><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes(''); setSwapReview({ item: swap, decision: 'approved' }); }}>Approve swap</button><button type="button" className="btn btn-sm btn-danger" onClick={() => { setReviewNotes(''); setSwapReview({ item: swap, decision: 'declined' }); }}>Decline swap</button></div></div>)}

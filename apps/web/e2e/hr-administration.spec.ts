@@ -8,6 +8,9 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Roster & HR' })).toBeVisible();
   await expect(page.getByText('Ana Ngata', { exact: true })).toBeVisible();
   await expect(page.getByText('No verified current credential')).toBeVisible();
+  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
+  await expect(staffCard.getByText('Work ready', { exact: true })).toBeVisible();
+  await expect(staffCard).toHaveScreenshot('hr-staff-card.png');
   await page.getByRole('button', { name: 'Remove work readiness' }).click();
   const readinessDialog = page.getByRole('dialog', { name: 'Remove work readiness?' });
   await expect(readinessDialog.getByRole('button', { name: 'Confirm readiness' })).toBeDisabled();

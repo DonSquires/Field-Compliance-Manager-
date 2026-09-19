@@ -15,4 +15,37 @@
 @media(max-width:560px){.hr-review-backdrop{align-items:end;padding:10px}.hr-review-dialog{padding:15px}.hr-review-dialog h2{font-size:17px}.hr-review-dialog footer .btn{flex:1}}
 .hr-readiness{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid #2b3d4c}.hr-readiness>div{display:grid;gap:2px;padding:7px;border:1px solid #34495a;border-radius:4px;background:#0d1a26}.hr-readiness span{color:#8499aa;font-size: 12px;font-weight:800;text-transform:uppercase}.hr-readiness strong{overflow:hidden;color:#d9e5ec;font-size: 12px;text-overflow:ellipsis;text-transform:capitalize}.hr-readiness>p{grid-column:1/-1;margin:0;padding:7px;border-left:3px solid #c87b55;color:#ddb092;background:#271913;font-size: 12px}.hr-readiness>.btn{grid-column:1/-1;justify-self:start;margin:2px 0 0}
 @media(max-width:700px){.hr-readiness{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Staff tab: one-line explanation under each section heading, badges side by side, guided empty state */
+.hr-section-hint {
+	margin: -4px 0 12px;
+	color: #8fa3b3;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.hr-staff-badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
+}
+
+.hr-readiness strong {
+	text-transform: none;
+}
+
+.empty-state.hr-empty-guide {
+	display: grid;
+	gap: 8px;
+	justify-items: center;
+	text-align: center;
+}
+
+.empty-state.hr-empty-guide p {
+	max-width: 520px;
+	margin: 0;
+	line-height: 1.5;
+}
+
 .roster-hr-tab-list{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 18px;padding:10px 12px;border-left:2px solid #14c8d4;background:#0c202b}.roster-hr-tab-list .btn{min-height:30px}.roster-hr-tab-list .btn-secondary{border-color:#294b5a;color:#a9c2cd;background:#0a1b25}@media(max-width:560px){.roster-hr-tab-list{overflow-x:auto;flex-wrap:nowrap;margin-bottom:14px}.roster-hr-tab-list .btn{flex:0 0 auto}}
