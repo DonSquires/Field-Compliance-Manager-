@@ -2,6 +2,8 @@
 .hr-review-dialog{width:min(100%,480px);padding:18px;border:1px solid #31485b;border-radius:8px;color:#e7eef4;background:#0b1622;box-shadow:0 24px 70px rgba(0,0,0,.45)}
 .hr-review-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:13px;border-bottom:1px solid #263b4c}
 .hr-review-dialog header span{color:#76cfc1;font-size: 12px;font-weight:850;text-transform:uppercase}
+/* The server's answer belongs in the dialog; the page banner sits behind the backdrop */
+.hr-review-error{margin:10px 0 0;padding:9px 11px;border:1px solid #7a3b3b;border-radius:6px;color:#ffd7d7;background:#2a1417;font-size:13px}
 .hr-review-dialog h2{margin:4px 0 0;font-size:20px;line-height:1.2}
 .hr-review-dialog header button{display:grid;place-items:center;width:32px;height:32px;flex:0 0 32px;border:1px solid #3a5062;border-radius:5px;color:#b9c6d0;background:#122231;cursor:pointer}
 .hr-review-dialog>p{margin:14px 0;padding:10px;border-left:3px solid #4c8f84;color:#a9bac6;background:#101f2c;font-size:12px;line-height:1.5}
