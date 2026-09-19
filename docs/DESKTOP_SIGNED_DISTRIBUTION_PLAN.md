@@ -70,7 +70,11 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    (`20260919020000`). **0.1.9 signed the same way on 2026-09-19** (self-elevating build so the raw
    Dahua disk opens without a manual "Run as administrator"): SHA-256
    `faf6034cb661cc8209662b6722eaac1af3e1e8c9d6c3698060dd1ab49cfbce2b`, verified from the public URL;
-   the web app's download link points at 0.1.9.
+   the web app's download link points at 0.1.9. **0.2.0 signed the same way on 2026-09-19** (the card
+   is the drive: V2 signs in with the operator's FCM login, lists recordings from the hidden partition
+   and sends them straight into the tenant's import with the card-side SHA-256; the exact image is now
+   an optional forensic copy): SHA-256 `fa217440f8a8e7ee7d29d151ca403e1dcb7a2319e63c03bd7bc13c96b332144d`
+   (2,892,976 bytes), verified from the public URL; the web app's download link points at 0.2.0.
 
 What it buys:
 

@@ -587,7 +587,7 @@ const CCTVImportPage: React.FC = () => {
               <AlertTriangle size={16} aria-hidden="true" />
               <div>
                 <strong>The recordings are not where the browser can see them.</strong>
-                <p>{hiddenPartition.reason} Read the card on this computer with FCM Desktop V2 (run as administrator): it reads the hidden partition directly and uploads the recordings to FCM, hashed, into the same review console.</p>
+                <p>{hiddenPartition.reason} Read the card on this computer with FCM Desktop V2: it asks for administrator rights once, reads the hidden partition directly, and — signed in with your FCM login — sends the recordings you choose to the place they belong, hashed as they leave the card, into this same review console.</p>
                 <a className="page-action is-primary" href={DESKTOP_V2_DOWNLOAD_URL} download={DESKTOP_V2_FILENAME}>Get FCM Desktop V2 · v{DESKTOP_V2_VERSION}</a>
               </div>
             </div>
