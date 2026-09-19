@@ -37760,6 +37760,7 @@ export type Database = {
           p_location_id?: string
           p_notes?: string
           p_officer_user_id: string
+          p_organization_id?: string
           p_patrol_route_id?: string
           p_publish?: boolean
           p_scheduled_end: string
