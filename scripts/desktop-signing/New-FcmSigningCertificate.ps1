@@ -21,14 +21,18 @@
     fcm-desktop-signing.secrets.txt  the two secret values, for pasting into GitHub once, then delete
 
 .PARAMETER Subject
-  The publisher name shown to users. Use the legal entity exactly.
+  The publisher name shown to users. Defaults to the legal entity; override only if it changes.
 
 .EXAMPLE
-  .\New-FcmSigningCertificate.ps1 -Subject 'CN=Iron Eagle Security Ltd, O=Iron Eagle Security Ltd, C=NZ'
+  # Run the saved file (do not paste the script body into the prompt):
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\New-FcmSigningCertificate.ps1
+
+.EXAMPLE
+  .\New-FcmSigningCertificate.ps1 -Subject 'CN=Iron Eagle Security Ltd, O=Iron Eagle Security Ltd, C=NZ' -OutputDirectory D:\fcm-signing
 #>
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)] [string] $Subject,
+  [string] $Subject = 'CN=Iron Eagle Security Ltd, O=Iron Eagle Security Ltd, C=NZ',
   [string] $OutputDirectory = (Get-Location).Path,
   [int] $ValidYears = 3
 )
@@ -38,14 +42,13 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 $password = Read-Host -AsSecureString -Prompt 'Choose a password for the PFX (it becomes the FCM_DESKTOP_SIGNING_PFX_PASSWORD secret)'
 
-# Code Signing EKU (1.3.6.1.5.5.7.3.3), exportable, SHA-256, RSA 3072: the shape signtool and WDAC expect.
+# -Type CodeSigningCert already sets the Code Signing EKU (1.3.6.1.5.5.7.3.3); adding it again via -TextExtension fails as a duplicate.
 $cert = New-SelfSignedCertificate `
   -Type CodeSigningCert `
   -Subject $Subject `
   -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
   -KeyExportPolicy Exportable `
   -KeyUsage DigitalSignature `
-  -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3') `
   -NotAfter (Get-Date).AddYears($ValidYears) `
   -CertStoreLocation 'Cert:\CurrentUser\My'
 

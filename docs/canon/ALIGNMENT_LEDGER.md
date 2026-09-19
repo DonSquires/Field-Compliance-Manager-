@@ -355,6 +355,40 @@ rego/WoF/CoF status, `homeless_status`; no `registered_owner_name`, no
 field and admin vehicle pages and observation search. Verified live as the R&M
 master: 8,975 rows through the projection, 0 through the base table.
 
+### 2026-09-19 — Canonical people are a global registry, like places and vehicles (Don Squires)
+
+> "Canonical people should be treated the same as canonical places and
+> vehicles: it is a global canonical record with observations attached."
+
+**Ruling.** The three canonical registries — `canonical_places`,
+`canonical_vehicles`, `canonical_people` — are **platform-wide identity
+records**, readable by every authenticated user regardless of organisation. What
+stays tenant-scoped is everything *attached* to them: the observations
+(`cctv_entity_observations`, `observations`, `location_events`,
+`canonical_person_links`, `person_records`), the biometric templates that
+suggest a match (org-scoped in `find_cctv_portfolio_matches`, never readable by
+browser roles — migration `20260918140000`), and the flags and notes an
+organisation raises. A person seen by two organisations is one canonical record;
+each organisation sees only its own sightings of them.
+
+**Live status (verified 2026-09-19).** Already conformant; no schema change was
+needed. `canonical_people_select` is `USING (true)` (116 rows, all named, metadata
+= provenance only: source ids, first-seen, origin, CCTV unknown-person number).
+`canonical_places_select` is `USING (true)`. `canonical_vehicles` reaches every
+user through the redacted `canonical_vehicle_public` projection (2026-09-16
+ruling above) — the same global-read outcome, with `registered_owner_name` and
+`homeless_notes` held back because those are about the person, not the vehicle.
+The same restraint applies to people: should `canonical_people` ever gain
+attributes beyond identity and provenance (welfare, health, legal status), they
+move behind a projection or a definer read path, and the registry row stays
+global.
+
+**Consequence for review surfaces.** The CCTV console's "same or similar on
+record" candidates and `review_cctv_entity_observation`'s `link_person` /
+`new_person` may resolve to a canonical person minted by another organisation.
+That is the intended behaviour, not a leak: the identity is global, the evidence
+behind it is not.
+
 ### 2026-09-16 — Manufacturing & maintenance is its own module (Don Squires)
 
 > "Let's put the materials in scope as we will need to create another module
