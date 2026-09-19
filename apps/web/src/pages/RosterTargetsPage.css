@@ -19,6 +19,9 @@
         flex: none;
         margin-top: 2px;
 }
+
+.targets-page .targets-list article > button {
+	padding: 0 12px;
 	border: 1px solid #40576b;
 	border-radius: 6px;
 	color: #b3c4d3;
