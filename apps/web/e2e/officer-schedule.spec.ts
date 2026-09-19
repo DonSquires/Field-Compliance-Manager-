@@ -11,8 +11,9 @@ test('officer standby keeps safety available and exposes only self-service work'
   await signInAsOfficer(page, '/officer');
 
   await expect(page.getByRole('heading', { name: 'Standby' })).toBeVisible();
-  await expect(page.getByText('No shift assigned', { exact: true })).toBeVisible();
-  await expect(page.getByText('You are not currently rostered for a shift. Contact your supervisor if this is incorrect.')).toBeVisible();
+  await expect(page.getByText('A shift is waiting for your answer', { exact: true })).toBeVisible();
+  await expect(page.getByText('Accept or decline it on your schedule.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Answer now' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Check in now' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'SOS' })).toBeVisible();
   await expect(page.getByRole('button', { name: /^My schedule/ })).toBeVisible();

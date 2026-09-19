@@ -200,11 +200,40 @@ function useNextDispatchJob(officerId: string | null | undefined) {
   return { job, loading, error, reload: load };
 }
 
+interface UpcomingShift { id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; total_stops: number; }
+
+/** The officer's next rostered shift that has not started — what standby is actually waiting for. */
+function useNextRosteredShift(officerId: string | null | undefined, active: boolean) {
+  const [next, setNext] = useState<UpcomingShift | null>(null);
+  const load = useCallback(async () => {
+    if (!officerId || active) { setNext(null); return; }
+    // ATLAS READS: shifts
+    const { data } = await supabase.from('shifts')
+      .select('id,service_type,scheduled_start,scheduled_end,status,total_stops')
+      .eq('officer_user_id', officerId)
+      .in('status', ['scheduled', 'published', 'accepted'])
+      .gte('scheduled_end', new Date().toISOString())
+      .order('scheduled_start', { ascending: true })
+      .limit(1);
+    setNext(((data as UpcomingShift[] | null) ?? [])[0] ?? null);
+  }, [active, officerId]);
+  useEffect(() => { void load(); }, [load]);
+  return next;
+}
+
+const describeUpcoming = (shift: UpcomingShift) => {
+  const start = new Date(shift.scheduled_start);
+  const day = start.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' });
+  const time = `${start.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })} – ${new Date(shift.scheduled_end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}`;
+  return { day, time, isToday: start.toDateString() === new Date().toDateString() };
+};
+
 export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNavigate, onRefreshShift }: OfficerHomePageProps) {
   const { profile } = useAuth();
   const online = useConnectionState();
   const { openShifts, loading: openShiftsLoading, error: openShiftsError, notice, claimingId, claim, reload } = useOpenShifts(profile?.organizationId);
   const { job: nextDispatchJob, loading: nextDispatchLoading, error: nextDispatchError, reload: reloadNextDispatch } = useNextDispatchJob(profile?.id);
+  const nextRostered = useNextRosteredShift(profile?.id, Boolean(shift) || shiftLoading);
   const firstName = profile?.displayName?.split(' ')[0] || 'Officer';
   const activeShiftLaunch = shift ? shiftLaunch(shift.shift_type) : null;
 
@@ -238,7 +267,7 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
           <span className="officer-brief-time">Live field state</span>
         </div>
         <div className="officer-brief-grid">
-          <BriefSignal label="Assignment" value={shift ? serviceTypeLabel(shift.shift_type).label : 'Standby'} detail={shift ? shift.status.replace('_', ' ') : 'No active roster'} tone={shift ? 'active' : 'quiet'} />
+          <BriefSignal label="Assignment" value={shift ? serviceTypeLabel(shift.shift_type).label : nextRostered ? `Next: ${describeUpcoming(nextRostered).day}` : 'Standby'} detail={shift ? shift.status.replace('_', ' ') : nextRostered ? (nextRostered.status === 'published' ? 'Waiting for you to accept' : `${describeUpcoming(nextRostered).time} · ${serviceTypeLabel(nextRostered.service_type).label}`) : 'Nothing rostered yet'} tone={shift ? 'active' : 'quiet'} />
           <BriefSignal label="Route" value={shift ? `${shiftProgress.completed}/${shiftProgress.total} stops` : 'No route'} detail={shift ? `${shiftProgress.percent}% complete` : 'Open your schedule'} tone={shift ? 'active' : 'quiet'} />
           <BriefSignal label="Safety" value={safetyLabel} detail={safety.activeAlert ? 'Action required' : 'Check-in state confirmed'} tone={safety.activeAlert ? 'alert' : 'active'} />
           <BriefSignal label="Evidence" value={online ? 'Connected' : 'Queued locally'} detail={online ? 'Ready to submit evidence' : 'Will sync when online'} tone={online ? 'active' : 'warning'} />
@@ -283,10 +312,20 @@ export function OfficerHomePage({ shift, shiftLoading, shiftError, safety, onNav
                 <Navigation size={18} aria-hidden="true" /> {activeShiftLaunch?.label ?? 'Open assignment'} <ArrowRight size={17} aria-hidden="true" />
               </button>
             </>
+          ) : nextRostered ? (
+            <div className="officer-standby-copy is-next-shift">
+              <CalendarDays size={26} aria-hidden="true" />
+              <div>
+                <strong>{nextRostered.status === 'published' ? 'A shift is waiting for your answer' : `Your next shift is ${describeUpcoming(nextRostered).isToday ? 'today' : describeUpcoming(nextRostered).day}`}</strong>
+                <span>{describeUpcoming(nextRostered).day} · {describeUpcoming(nextRostered).time} · {serviceTypeLabel(nextRostered.service_type).label}{nextRostered.total_stops ? ` · ${nextRostered.total_stops} planned ${nextRostered.total_stops === 1 ? 'stop' : 'stops'}` : ''}</span>
+                <span>{nextRostered.status === 'published' ? 'Accept or decline it on your schedule.' : describeUpcoming(nextRostered).isToday ? 'Start it from your schedule when you are on site.' : 'Nothing to do until then. It will appear here on the day.'}</span>
+              </div>
+              <button type="button" onClick={() => onNavigate('schedule')}>{nextRostered.status === 'published' ? 'Answer now' : 'Open schedule'}</button>
+            </div>
           ) : (
             <div className="officer-standby-copy">
               <CalendarDays size={26} aria-hidden="true" />
-              <div><strong>No shift assigned</strong><span>You are not currently rostered for a shift. Contact your supervisor if this is incorrect.</span></div>
+              <div><strong>No shift rostered</strong><span>You have nothing scheduled. Open shifts you can pick up appear below and on your schedule; contact your supervisor if this looks wrong.</span></div>
               <button type="button" onClick={() => onNavigate('schedule')}>View schedule</button>
             </div>
           )}

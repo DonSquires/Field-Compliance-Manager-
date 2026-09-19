@@ -212,6 +212,20 @@
 	background: #10261c;
 }
 
+.roster-shift.status-completed {
+	border-left-color: #527f94;
+	background: #0f1b27;
+	opacity: .85;
+}
+
+.roster-shift.status-cancelled {
+	border-style: dashed;
+	border-left-style: solid;
+	border-left-color: #6b7f90;
+	background: #101820;
+	opacity: .7;
+}
+
 .roster-shift.status-declined {
 	border-left-color: #ff8a80;
 	background: #301719;

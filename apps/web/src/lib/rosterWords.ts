@@ -12,6 +12,19 @@ const SLOT_STATUS_LABELS: Record<string, string> = {
 /** Roster slot status code -> what the rosterer needs to know about it. */
 export const slotStatusLabel = (status: string): string => SLOT_STATUS_LABELS[status] ?? status.replaceAll('_', ' ');
 
+const SHIFT_STATUS_LABELS: Record<string, string> = {
+  scheduled: 'Scheduled – not sent yet',
+  published: 'Waiting for officer',
+  accepted: 'Accepted',
+  in_progress: 'On shift now',
+  completed: 'Completed',
+  declined: 'Declined – reassign',
+  cancelled: 'Cancelled',
+};
+
+/** Field shift status code -> what the rosterer sees on the board. */
+export const shiftStatusLabel = (status: string): string => SHIFT_STATUS_LABELS[status] ?? plainWords(status);
+
 /** `in_progress` -> `In progress`; null/empty -> the fallback. */
 export const plainWords = (value: string | null | undefined, fallback = 'Not recorded'): string => {
   if (!value) return fallback;

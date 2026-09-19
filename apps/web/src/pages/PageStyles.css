@@ -1671,6 +1671,13 @@
   gap: 4px;
 }
 
+.officer-standby-copy.is-next-shift {
+  border-color: #2b6a63;
+  border-left: 4px solid #69c4af;
+  color: #b8eee7;
+  background: #0d2422;
+}
+
 .officer-standby-copy strong {
   color: #e3edf6;
   font-size: 14px;

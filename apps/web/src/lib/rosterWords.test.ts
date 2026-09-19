@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { plainWords, plural, slotStatusLabel, timeRange, workUnitTypeLabel } from './rosterWords';
+import { plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from './rosterWords';
 
 describe('roster plain words', () => {
+  it('tells the rosterer what each field shift status means on the board', () => {
+    expect(shiftStatusLabel('published')).toBe('Waiting for officer');
+    expect(shiftStatusLabel('accepted')).toBe('Accepted');
+    expect(shiftStatusLabel('in_progress')).toBe('On shift now');
+    expect(shiftStatusLabel('completed')).toBe('Completed');
+    expect(shiftStatusLabel('something_new')).toBe('Something new');
+  });
+
   it('tells the rosterer what each slot status means for them', () => {
     expect(slotStatusLabel('draft')).toBe('Draft \u2013 not sent yet');
     expect(slotStatusLabel('published')).toBe('Waiting for officer');
