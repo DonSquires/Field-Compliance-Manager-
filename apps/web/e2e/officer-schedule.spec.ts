@@ -110,7 +110,7 @@ test('coverage finalization notification opens the exact roster assignment', asy
   const assignment = page.locator('#officer-roster-slot-96969696-9696-4696-8696-969696969696');
   await expect(assignment).toHaveClass(/is-context-focus/);
   await expect(assignment).toContainText('Claimed festival patrol');
-  await expect(assignment.getByText('published', { exact: true })).toBeVisible();
+  await expect(assignment.getByText('Waiting for your answer', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
@@ -178,9 +178,21 @@ test('officer requests a direct swap with an eligible replacement officer', asyn
   await expect(page.getByRole('status').filter({ hasText: 'Direct shift swap request submitted for roster review.' })).toBeVisible();
 });
 
+const SOON_SHIFT = { id: '66666666-6666-4666-8666-666666666666', service_type: 'patrol', scheduled_start: '2026-08-29T22:00:00.000Z', scheduled_end: '2026-08-30T06:00:00.000Z', status: 'accepted', notes: 'North district patrol', shift_health: null, total_stops: 8, ended_reason: null };
+
+test('Start shift is offered only from an hour before the rostered start; before that the card says when it opens', async ({ page }) => {
+  await signInAsOfficer(page, '/officer/schedule');
+  // fixture shift 66666666 starts 2026-08-31T06:00Z, well outside the window at the fixed clock
+  const card = page.locator('.officer-assigned-shift').first();
+  await expect(card.getByText(/^You can start from Mon, 31 Aug/)).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Start shift' })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Request swap' })).toBeVisible();
+});
+
 test('officer starts an accepted shift with GPS attendance evidence', async ({ page, context }) => {
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
+  await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([SOON_SHIFT]) }));
   await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}');
     expect(payload.p_gps_lat).toBe(-41.274);
@@ -202,6 +214,7 @@ test('officer starts an accepted shift with GPS attendance evidence', async ({ p
 test('starting a shift away from its place is advised, not blocked, and the reason travels with the start', async ({ page, context }) => {
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
+  await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([SOON_SHIFT]) }));
   await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'off_site', place_name: 'Civic Centre', distance_m: 3792, advisory_radius_m: 250, route_shift: false }) }));
   let startPayload: Record<string, unknown> | null = null;
   await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
