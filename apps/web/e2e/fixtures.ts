@@ -554,6 +554,50 @@ export async function signInAsOfficer(page: Page, destination = '/officer/schedu
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden();
 }
 
+const CLIENT_USER_ID = '50505050-5050-4050-8050-505050505050';
+const CLIENT_ORG_ID = '40404040-4040-4040-8040-404040404040';
+const clientUser = { ...user, id: CLIENT_USER_ID, email: 'facilities@civic-events.test' };
+
+/** A client_viewer at the Civic Events client organisation, on a transparency-only agreement with one site and one zone. */
+export async function installClientPortalFixtures(page: Page, options: { mode?: 'transparency_only' | 'full_modules' | 'scan_only'; reportsEnabled?: boolean } = {}): Promise<void> {
+  const mode = options.mode ?? 'transparency_only';
+  await page.route('**/auth/v1/token?grant_type=password', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'client-e2e-token', refresh_token: 'client-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: clientUser }) });
+  });
+  await page.route('**/auth/v1/user', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(clientUser) }));
+  await page.route('**/rest/v1/**', async (route) => {
+    const url = new URL(route.request().url());
+    const resource = url.pathname.split('/').at(-1);
+    if (resource === 'user_profiles') { await route.fulfill(fulfillJson([{ id: CLIENT_USER_ID, display_name: 'Tia Whaanga', email: clientUser.email, role: 'client_viewer', organization_id: CLIENT_ORG_ID, employer_organization_id: null, module_access: [], deactivated_at: null }])); return; }
+    if (resource === 'service_agreements') { await route.fulfill(fulfillJson([{ id: '24242424-2424-4424-8424-242424242424', name: 'Civic Events Compliance Services', agreement_type: 'operational', invitation_status: 'accepted', provider_organization_id: ORG_ID, client_organization_id: CLIENT_ORG_ID, client_portal_access_mode: mode, client_portal_reports_enabled: options.reportsEnabled ?? false, client_portal_finance_enabled: false, allows_client_submission: false, allows_auto_dispatch: false, enabled_modules: ['static_guarding', 'patrol'], created_at: '2026-07-01T00:00:00.000Z', provider: { name: 'Iron Eagle Security' }, client: { name: 'Civic Events Trust' } }])); return; }
+    if (resource === 'service_agreement_locations') { await route.fulfill(fulfillJson([{ service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '42424242-4242-4242-8242-424242424242', zone_id: null, status: 'active' }, { service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: null, zone_id: '66666666-6666-4666-8666-666666666666', status: 'active' }])); return; }
+    if (resource === 'client_sites') { await route.fulfill(fulfillJson([{ id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', address: '1 Civic Square, Nelson', site_type: 'commercial_premises', client_organization_id: CLIENT_ORG_ID, service_agreement_id: '24242424-2424-4424-8424-242424242424', active: true }])); return; }
+    if (resource === 'location_zones') { await route.fulfill(fulfillJson([{ id: '66666666-6666-4666-8666-666666666666', name: 'Civic Event Operations Zone', zone_type: 'operations', location_id: '65656565-6565-4565-8565-656565656565', organization_id: ORG_ID, is_active: true }])); return; }
+    if (resource === 'get_agreement_service_delivery') {
+      const payload = JSON.parse(route.request().postData() ?? '{}');
+      const lastMonth = String(payload.p_period_start).startsWith('2026-07');
+      await route.fulfill(fulfillJson({
+        agreement_id: payload.p_agreement_id, period_start: payload.p_period_start, period_end: payload.p_period_end,
+        places: [
+          { location_id: 'f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1', place_name: 'Civic Events Centre', place_kind: 'site', patrol_expected: lastMonth ? 31 : 27, patrol_completed: lastMonth ? 31 : 25, patrol_missed: lastMonth ? 0 : 2, patrol_late: 1, post_expected: 4, post_attended: 4, post_minutes: lastMonth ? 1920 : 1455, last_presence_at: '2026-08-29T20:40:00.000Z', shift_count: 31 },
+          { location_id: 'f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2', place_name: 'Civic Event Operations Zone', place_kind: 'zone', patrol_expected: 0, patrol_completed: 0, patrol_missed: 0, patrol_late: 0, post_expected: 0, post_attended: 0, post_minutes: 0, last_presence_at: null, shift_count: 0 },
+        ],
+        totals: { patrol_expected: lastMonth ? 31 : 27, patrol_completed: lastMonth ? 31 : 25, patrol_missed: lastMonth ? 0 : 2, patrol_late: 1, post_expected: 4, post_attended: 4, post_minutes: lastMonth ? 1920 : 1455, place_count: 2 },
+      }));
+      return;
+    }
+    await route.fulfill(fulfillJson([]));
+  });
+}
+
+export async function signInAsClient(page: Page, destination = '/client'): Promise<void> {
+  await page.goto(destination);
+  await page.getByLabel('Email address').fill(clientUser.email);
+  await page.getByRole('textbox', { name: 'Password' }).fill('playwright-password');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeHidden();
+}
+
 export function monitorBrowserErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));

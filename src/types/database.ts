@@ -34191,6 +34191,10 @@ export type Database = {
             Returns: string
           }
       address_match_key: { Args: { p_address: string }; Returns: string }
+      agreement_service_delivery: {
+        Args: { p_agreement_id: string; p_period_end: string; p_period_start: string }
+        Returns: Json
+      }
       advance_dispatch_job_status: {
         Args: {
           p_expected_status: string
@@ -38771,6 +38775,10 @@ export type Database = {
         Returns: boolean
       }
       geomfromewkt: { Args: { "": string }; Returns: unknown }
+      get_agreement_service_delivery: {
+        Args: { p_agreement_id: string; p_period_end: string; p_period_start: string }
+        Returns: Json
+      }
       get_approvals_activity: {
         Args: {
           p_action_types?: string[]

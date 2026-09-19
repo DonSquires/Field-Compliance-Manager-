@@ -9,11 +9,11 @@ import { ClientPortalPage as ClientPortalContent } from '../pages/ClientPortalPa
 import { getClientPortalPages, isClientPortalPage, type ClientPortalPage } from '../lib/clientPortalAccess';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import { HelpInstructions } from '../components/HelpInstructions';
-import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import './ClientShell.css';
 
 const NAVIGATION: Array<{ id: ClientPortalPage; label: string; icon: LucideIcon }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'delivery', label: 'Service delivered', icon: Shield },
   { id: 'sites', label: 'Sites and zones', icon: Building2 },
   { id: 'observations', label: 'Observations', icon: Eye },
   { id: 'reports', label: 'Reports', icon: FileText },
@@ -122,7 +122,7 @@ export function ClientShell() {
           <span className="client-role-badge">{profile.role.replace('client_', '')}</span>
         </header>
         <main className="client-shell-content" data-app-content>
-          <PlaceContextBanner />
+          {/* A client reads delivered records; nothing here needs their position, so no geolocation prompt or evidence banner. */}
           <ClientPortalContent page={activePage} />
         </main>
       </div>

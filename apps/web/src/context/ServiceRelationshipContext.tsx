@@ -304,7 +304,8 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
 
   useEffect(() => {
     const organizationId = profile?.organizationId;
-    if (!organizationId) {
+    // Client portal users read delivered records; their position is never asked for or recorded.
+    if (!organizationId || profile?.role.startsWith('client_')) {
       setLocationStatus('idle');
       setCurrentCoordinates(null);
       setCurrentAddress(null);

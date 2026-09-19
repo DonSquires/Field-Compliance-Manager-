@@ -56,6 +56,53 @@ interface ClientInvoice {
   paid_at: string | null;
 }
 
+interface DeliveryPlace {
+  location_id: string;
+  place_name: string | null;
+  place_kind: 'site' | 'zone';
+  patrol_expected: number;
+  patrol_completed: number;
+  patrol_missed: number;
+  patrol_late: number;
+  post_expected: number;
+  post_attended: number;
+  post_minutes: number;
+  last_presence_at: string | null;
+  shift_count: number;
+}
+
+interface DeliverySummary {
+  agreement_id: string;
+  period_start: string;
+  period_end: string;
+  places: DeliveryPlace[];
+  totals: { patrol_expected: number; patrol_completed: number; patrol_missed: number; patrol_late: number; post_expected: number; post_attended: number; post_minutes: number; place_count: number };
+}
+
+type DeliveryPeriod = 'this_month' | 'last_month';
+
+const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+/** Calendar month bounds the client thinks in; the server caps 'this month' at today. */
+export const deliveryPeriodBounds = (period: DeliveryPeriod, now = new Date()) => {
+  const offset = period === 'last_month' ? -1 : 0;
+  const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+  return { start: localDate(start), end: localDate(end) };
+};
+export const hoursOnPost = (minutes: number) => minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+/** One sentence per place, in the client's words. */
+export const deliveryWords = (place: DeliveryPlace): { patrol: string | null; post: string | null; presence: string } => {
+  const patrol = place.patrol_expected === 0 ? null
+    : `${place.patrol_completed} of ${plural(place.patrol_expected, 'contracted visit')} done${place.patrol_missed ? ` · ${plural(place.patrol_missed, 'missed visit')}` : ''}${place.patrol_late ? ` · ${place.patrol_late} late` : ''}`;
+  const post = place.post_expected === 0 ? null
+    : `${plural(place.post_attended, 'guard attendance')} of ${place.post_expected} rostered · ${hoursOnPost(place.post_minutes)} on post`;
+  const presence = place.last_presence_at
+    ? `Last on site ${new Date(place.last_presence_at).toLocaleString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+    : 'No presence recorded in this period';
+  return { patrol, post, presence };
+};
+
 export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
   const { profile } = useAuth();
   const relationships = useServiceRelationships();
@@ -64,6 +111,10 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
   const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [recordsError, setRecordsError] = useState<string | null>(null);
+  const [deliveryPeriod, setDeliveryPeriod] = useState<DeliveryPeriod>('this_month');
+  const [delivery, setDelivery] = useState<DeliverySummary | null>(null);
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryError, setDeliveryError] = useState<string | null>(null);
 
   const agreement = relationships.selectedAgreement;
   const allowedPages = useMemo(() => getClientPortalPages(agreement ? {
@@ -143,6 +194,21 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
     void loadRecords();
   }, [loadRecords]);
 
+  // ATLAS READS: get_agreement_service_delivery — scoped server-side to this agreement's places; no officer identities
+  useEffect(() => {
+    if (!agreement || !allowedPages.has('delivery')) { setDelivery(null); return; }
+    let cancelled = false;
+    const bounds = deliveryPeriodBounds(deliveryPeriod);
+    setDeliveryLoading(true); setDeliveryError(null);
+    supabase.rpc('get_agreement_service_delivery', { p_agreement_id: agreement.id, p_period_start: bounds.start, p_period_end: bounds.end }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error || !data) { setDeliveryError(error?.message ?? 'Delivered work could not be loaded.'); setDelivery(null); }
+      else setDelivery(data as unknown as DeliverySummary);
+      setDeliveryLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [agreement, allowedPages, deliveryPeriod]);
+
   if (relationships.loading) {
     return <div className="client-page-state"><RefreshCw className="is-spinning" size={22} aria-hidden="true" /> Loading service access</div>;
   }
@@ -221,6 +287,21 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
           </section>
 
           <div className="client-overview-grid">
+            {allowedPages.has('delivery') && (
+              <section className="client-overview-panel">
+                <div className="client-panel-heading"><div><span className="client-kicker">Delivered this month</span><h2>Presence at your places</h2></div><ShieldCheck size={21} aria-hidden="true" /></div>
+                {deliveryLoading || !delivery ? (
+                  <div className="client-compact-state">{deliveryError ?? 'Checking delivered work'}</div>
+                ) : (
+                  <div className="client-status-summary">
+                    <StatusCount label="Visits done" value={delivery.totals.patrol_completed} tone="success" />
+                    <StatusCount label="Visits missed" value={delivery.totals.patrol_missed} tone={delivery.totals.patrol_missed ? 'danger' : 'neutral'} />
+                    <StatusCount label="Guard attendances" value={delivery.totals.post_attended} tone="success" />
+                    <div className="client-status-count tone-neutral"><strong>{hoursOnPost(delivery.totals.post_minutes)}</strong><span>On post</span></div>
+                  </div>
+                )}
+              </section>
+            )}
             <section className="client-overview-panel">
               <div className="client-panel-heading"><div><span className="client-kicker">Activity</span><h2>Recent field evidence</h2></div><Eye size={21} aria-hidden="true" /></div>
               {!allowedPages.has('observations') ? (
@@ -258,6 +339,44 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
             <LocationGrid sites={relationships.selectedAgreementSites.slice(0, 4)} zones={relationships.selectedAgreementZones.slice(0, 4)} />
           </section>
         </>
+      )}
+
+      {page === 'delivery' && (
+        <section className="client-list-section client-delivery">
+          <div className="client-delivery-toolbar" role="group" aria-label="Period">
+            <button type="button" className={deliveryPeriod === 'this_month' ? 'is-active' : ''} onClick={() => setDeliveryPeriod('this_month')}>This month so far</button>
+            <button type="button" className={deliveryPeriod === 'last_month' ? 'is-active' : ''} onClick={() => setDeliveryPeriod('last_month')}>Last month</button>
+          </div>
+          {deliveryError && <div className="client-inline-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /> {deliveryError}</div>}
+          {deliveryLoading || !delivery ? <div className="client-compact-state">Checking delivered work</div> : (
+            <>
+              <p className="client-delivery-note">Counted from the shifts {providerName} started and ended in the app, and the arrivals and departures recorded at each place. Only shifts already due are counted; the names of individual officers are not shown here.</p>
+              <div className="client-status-summary">
+                <StatusCount label="Visits done" value={delivery.totals.patrol_completed} tone="success" />
+                <StatusCount label="Visits missed" value={delivery.totals.patrol_missed} tone={delivery.totals.patrol_missed ? 'danger' : 'neutral'} />
+                <StatusCount label="Visits late" value={delivery.totals.patrol_late} tone={delivery.totals.patrol_late ? 'warning' : 'neutral'} />
+                <StatusCount label="Guard attendances" value={delivery.totals.post_attended} tone="success" />
+                <div className="client-status-count tone-neutral"><strong>{hoursOnPost(delivery.totals.post_minutes)}</strong><span>On post</span></div>
+              </div>
+              {delivery.places.length === 0 ? <div className="client-compact-state">No places are linked to this agreement yet.</div> : (
+                <div className="client-delivery-list">
+                  {delivery.places.map((place) => { const words = deliveryWords(place); return (
+                    <article key={place.location_id} className={place.patrol_missed ? 'has-missed' : ''}>
+                      <span>{place.place_kind === 'zone' ? <MapPin size={18} /> : <Building2 size={18} />}</span>
+                      <div>
+                        <strong>{place.place_name ?? 'Contracted place'}</strong>
+                        {words.patrol && <small>{words.patrol}</small>}
+                        {words.post && <small>{words.post}</small>}
+                        {!words.patrol && !words.post && <small>Nothing was due here in this period.</small>}
+                      </div>
+                      <em>{words.presence}</em>
+                    </article>
+                  ); })}
+                </div>
+              )}
+            </>
+          )}
+        </section>
       )}
 
       {page === 'sites' && (
@@ -311,12 +430,13 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
 }
 
 function pageTitle(page: ClientPortalPage): string {
-  return { overview: 'Service overview', sites: 'Sites and zones', observations: 'Field observations', reports: 'Monthly reports', finance: 'Invoices', scan: 'Scan access' }[page];
+  return { overview: 'Service overview', delivery: 'Service delivered', sites: 'Sites and zones', observations: 'Field observations', reports: 'Monthly reports', finance: 'Invoices', scan: 'Scan access' }[page];
 }
 
 function pageDescription(page: ClientPortalPage): string {
   return {
     overview: 'A clear view of contracted field work and delivered records.',
+    delivery: 'What was actually delivered at your places: contracted visits made, guards on post and for how long.',
     sites: 'Locations included in the selected service agreement.',
     observations: 'Field evidence shared with your organisation.',
     reports: 'Generated reporting periods and delivery status.',
