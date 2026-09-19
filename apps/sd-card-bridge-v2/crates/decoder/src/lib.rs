@@ -58,15 +58,33 @@ pub fn filmstrip_stride(key_frames: u32, count: u32) -> u32 {
     (key_frames / count).max(1)
 }
 
-/// ffmpeg arguments for a filmstrip: decode key frames only, keep every `stride`-th, log each kept frame's
+/// Which key frames become thumbnails: every `n`th one (when the key-frame count is known, as for an `-r2`
+/// extraction) or one every `seconds` (when only the duration is known, as for an ordinary video file).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FilmstripPlan { Stride(u32), Interval(f64) }
+
+/// The plan for a file: a known key-frame count wins; otherwise spread `count` thumbnails over the duration.
+pub fn filmstrip_plan(key_frames: u32, duration_seconds: Option<f64>, count: u32) -> FilmstripPlan {
+    match duration_seconds {
+        Some(seconds) if key_frames == 0 && seconds > 0.0 => FilmstripPlan::Interval((seconds / count.max(1) as f64).max(0.5)),
+        _ => FilmstripPlan::Stride(filmstrip_stride(key_frames, count)),
+    }
+}
+
+/// ffmpeg arguments for a filmstrip: decode key frames only, keep the planned ones, log each kept frame's
 /// time with `showinfo`, scale to a thumbnail, write numbered JPEGs into `output_pattern` (e.g. `dir/t-%02d.jpg`).
-pub fn filmstrip_args(input: &str, output_pattern: &str, stride: u32, count: u32) -> Vec<String> {
+pub fn filmstrip_args(input: &str, output_pattern: &str, plan: FilmstripPlan, count: u32) -> Vec<String> {
+    let select = match plan {
+        FilmstripPlan::Stride(stride) => format!("select=not(mod(n\\,{}))", stride.max(1)),
+        // Key frames only reach the filter, so this keeps the first key frame at or after each interval.
+        FilmstripPlan::Interval(seconds) => format!("select=isnan(prev_selected_t)+gte(t-prev_selected_t\\,{seconds:.3})"),
+    };
     vec![
         "-hide_banner".into(), "-nostdin".into(), "-loglevel".into(), "info".into(),
         "-fflags".into(), "+genpts".into(), "-skip_frame".into(), "nokey".into(),
         "-i".into(), input.into(),
         "-map".into(), "0:v:0".into(),
-        "-vf".into(), format!("select=not(mod(n\\,{stride})),showinfo,scale=320:-2"),
+        "-vf".into(), format!("{select},showinfo,scale=320:-2"),
         "-fps_mode".into(), "vfr".into(), "-frames:v".into(), count.to_string(),
         "-q:v".into(), "5".into(), "-f".into(), "image2".into(), "-y".into(), output_pattern.into(),
     ]
@@ -110,6 +128,77 @@ pub fn encoder_unavailable(stderr: &str) -> bool {
         .iter().any(|needle| text.contains(needle))
 }
 
+/// How an extracted recording becomes a playable `.mp4` for the operator's own use (the `.dav` stays the evidence).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mp4Mode {
+    /// Frames copied untouched into an MP4 container: exact, fast, but HEVC will not play on a stock Windows install.
+    StreamCopy,
+    /// Full-resolution H.264 re-encode so the file plays anywhere.
+    H264(PreviewEncoder),
+}
+
+/// The first MP4 mode to try for a stream's codec: H.264 sources are copied; everything else is re-encoded.
+pub fn mp4_mode_for(codec: &str) -> Mp4Mode {
+    if codec.to_ascii_lowercase().contains("h264") { Mp4Mode::StreamCopy } else { Mp4Mode::H264(PreviewEncoder::Nvenc) }
+}
+
+/// ffmpeg arguments for the MP4 export. Video only: Dahua audio (G.711) has no place in MP4 and is not evidence.
+pub fn mp4_args(input: &str, output: &str, mode: Mp4Mode) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-hide_banner".into(), "-nostdin".into(), "-loglevel".into(), "error".into(),
+        "-fflags".into(), "+genpts".into(), "-i".into(), input.into(), "-map".into(), "0:v:0".into(),
+    ];
+    match mode {
+        Mp4Mode::StreamCopy => args.extend(["-c:v", "copy"].map(String::from)),
+        Mp4Mode::H264(PreviewEncoder::Nvenc) => args.extend(["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-pix_fmt", "yuv420p"].map(String::from)),
+        Mp4Mode::H264(PreviewEncoder::Software) => args.extend(["-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p"].map(String::from)),
+    }
+    args.extend(["-movflags", "+faststart", "-y", output].map(String::from));
+    args
+}
+
+/// What `ffmpeg -i <file>` reports about a video file, read from its stderr banner.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaProbe {
+    pub duration_seconds: Option<f64>,
+    /// `creation_time` from the container, when the recorder wrote one (ISO 8601, usually UTC).
+    pub creation_time: Option<String>,
+    pub codec: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// Arguments that make ffmpeg print the banner for `input` and exit (no output file is asked for).
+pub fn probe_args(input: &str) -> Vec<String> { vec!["-hide_banner".into(), "-nostdin".into(), "-i".into(), input.into()] }
+
+pub fn parse_media_probe(stderr: &str) -> MediaProbe {
+    let mut probe = MediaProbe::default();
+    for line in stderr.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Duration:") {
+            let clock = rest.trim().split(',').next().unwrap_or("").trim();
+            let parts: Vec<&str> = clock.split(':').collect();
+            if parts.len() == 3 {
+                if let (Ok(h), Ok(m), Ok(s)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>(), parts[2].parse::<f64>()) { probe.duration_seconds = Some(h * 3600.0 + m * 60.0 + s); }
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("creation_time") {
+            if probe.creation_time.is_none() { if let Some(value) = rest.split(':').skip(1).collect::<Vec<_>>().join(":").trim().split_whitespace().next() { probe.creation_time = Some(value.to_string()); } }
+        } else if trimmed.starts_with("Stream #") && trimmed.contains("Video:") && probe.codec.is_none() {
+            let after = trimmed.split("Video:").nth(1).unwrap_or("");
+            probe.codec = after.split(|c: char| c == ' ' || c == ',' || c == '(').find(|token| !token.is_empty()).map(|token| token.to_string());
+            for token in after.split(|c: char| c == ',' || c == ' ') {
+                let token = token.trim();
+                if let Some((w, h)) = token.split_once('x') {
+                    if let (Ok(w), Ok(h)) = (w.parse::<u32>(), h.parse::<u32>()) { if w >= 16 && h >= 16 { probe.width = Some(w); probe.height = Some(h); break; } }
+                }
+            }
+        }
+    }
+    probe
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,12 +221,59 @@ mod tests {
 
     #[test]
     fn filmstrip_args_select_every_nth_key_frame_and_log_times() {
-        let args = filmstrip_args("C:\\clip.dav", "C:\\out\\t-%02d.jpg", 10, 12);
+        let args = filmstrip_args("C:\\clip.dav", "C:\\out\\t-%02d.jpg", FilmstripPlan::Stride(10), 12);
         assert_eq!(args.iter().position(|a| a == "-skip_frame").map(|i| args[i + 1].as_str()), Some("nokey"));
         assert_eq!(args.iter().position(|a| a == "-vf").map(|i| args[i + 1].as_str()), Some("select=not(mod(n\\,10)),showinfo,scale=320:-2"));
         assert_eq!(args.iter().position(|a| a == "-frames:v").map(|i| args[i + 1].as_str()), Some("12"));
         assert_eq!(args.last().map(String::as_str), Some("C:\\out\\t-%02d.jpg"));
         assert!(args.contains(&"-nostdin".to_string()));
+    }
+
+    #[test]
+    fn filmstrip_plan_uses_time_intervals_when_only_the_duration_is_known() {
+        assert_eq!(filmstrip_plan(120, Some(600.0), 12), FilmstripPlan::Stride(10));
+        assert_eq!(filmstrip_plan(0, Some(240.0), 12), FilmstripPlan::Interval(20.0));
+        assert_eq!(filmstrip_plan(0, Some(2.0), 12), FilmstripPlan::Interval(0.5));
+        assert_eq!(filmstrip_plan(0, None, 12), FilmstripPlan::Stride(1));
+        let args = filmstrip_args("a.mp4", "t-%02d.jpg", FilmstripPlan::Interval(20.0), 12);
+        assert_eq!(args.iter().position(|a| a == "-vf").map(|i| args[i + 1].as_str()), Some("select=isnan(prev_selected_t)+gte(t-prev_selected_t\\,20.000),showinfo,scale=320:-2"));
+    }
+
+    #[test]
+    fn mp4_export_copies_h264_and_re_encodes_everything_else() {
+        assert_eq!(mp4_mode_for("dhav/h264"), Mp4Mode::StreamCopy);
+        assert_eq!(mp4_mode_for("dhav/hevc"), Mp4Mode::H264(PreviewEncoder::Nvenc));
+        assert_eq!(mp4_mode_for("unknown"), Mp4Mode::H264(PreviewEncoder::Nvenc));
+        let copy = mp4_args("in.dav", "out.mp4", Mp4Mode::StreamCopy);
+        assert!(copy.windows(2).any(|w| w == ["-c:v", "copy"]));
+        assert!(!copy.iter().any(|a| a.starts_with("scale=")));
+        let soft = mp4_args("in.dav", "out.mp4", Mp4Mode::H264(PreviewEncoder::Software));
+        assert!(soft.windows(2).any(|w| w == ["-c:v", "libx264"]));
+        for args in [&copy, &soft] {
+            assert!(args.windows(2).any(|w| w == ["-map", "0:v:0"]));
+            assert!(args.windows(2).any(|w| w == ["-movflags", "+faststart"]));
+            assert_eq!(args.last().map(String::as_str), Some("out.mp4"));
+        }
+    }
+
+    #[test]
+    fn parses_the_ffmpeg_banner_of_a_video_file() {
+        let stderr = "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'clip.mp4':\n\
+                      \x20 Metadata:\n\
+                      \x20   major_brand     : isom\n\
+                      \x20   creation_time   : 2026-09-11T02:31:56.000000Z\n\
+                      \x20 Duration: 00:03:25.12, start: 0.000000, bitrate: 2048 kb/s\n\
+                      \x20 Stream #0:0[0x1](und): Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv), 2304x1296, 2000 kb/s, 15 fps, 15 tbr, 90k tbn (default)\n\
+                      \x20   Metadata:\n\
+                      \x20     creation_time   : 2026-09-11T02:31:56.000000Z\n\
+                      At least one output file must be specified\n";
+        let probe = parse_media_probe(stderr);
+        assert_eq!(probe.duration_seconds, Some(205.12));
+        assert_eq!(probe.creation_time.as_deref(), Some("2026-09-11T02:31:56.000000Z"));
+        assert_eq!(probe.codec.as_deref(), Some("hevc"));
+        assert_eq!((probe.width, probe.height), (Some(2304), Some(1296)));
+        assert_eq!(parse_media_probe("clip.dav: Invalid data found when processing input\n"), MediaProbe::default());
+        assert_eq!(probe_args("x.mp4").last().map(String::as_str), Some("x.mp4"));
     }
 
     #[test]

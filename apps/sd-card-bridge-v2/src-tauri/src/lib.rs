@@ -603,16 +603,17 @@ fn run_ffmpeg(ffmpeg: &Path, args: &[String], timeout: Duration) -> Result<(bool
     }
 }
 
-/// Key frames spread across an extracted recording, as small JPEGs with their offset from the clip start.
+/// Key frames spread across a video file, as small JPEGs with their offset from the first one. `key_frames`
+/// comes from an `-r2` extraction; an ordinary file passes 0 and its probed duration instead.
 #[tauri::command(async)]
-fn render_filmstrip(app: tauri::AppHandle, clip_path: String, key_frames: u32, count: Option<u32>) -> Result<Filmstrip, String> {
+fn render_filmstrip(app: tauri::AppHandle, clip_path: String, key_frames: u32, count: Option<u32>, duration_seconds: Option<f64>) -> Result<Filmstrip, String> {
     let ffmpeg = verified_ffmpeg(&app)?;
     let count = count.unwrap_or(12).clamp(1, 40);
     let work = std::env::temp_dir().join(format!("fcm-filmstrip-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
     fs::create_dir_all(&work).map_err(|error| error.to_string())?;
     let pattern = work.join("t-%02d.jpg").to_string_lossy().to_string();
-    let stride = fcm_decoder::filmstrip_stride(key_frames, count);
-    let (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::filmstrip_args(&clip_path, &pattern, stride, count), Duration::from_secs(120))?;
+    let plan = fcm_decoder::filmstrip_plan(key_frames, duration_seconds, count);
+    let (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::filmstrip_args(&clip_path, &pattern, plan, count), Duration::from_secs(180))?;
     let times = fcm_decoder::parse_showinfo_times(&stderr);
     let mut names: Vec<PathBuf> = fs::read_dir(&work).map_err(|error| error.to_string())?.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.extension().map(|ext| ext == "jpg").unwrap_or(false)).collect();
     names.sort();
@@ -625,7 +626,7 @@ fn render_filmstrip(app: tauri::AppHandle, clip_path: String, key_frames: u32, c
         FilmstripFrame { at_seconds: times.get(index).copied().unwrap_or(0.0), jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes) }
     }).collect();
     let _ = fs::remove_dir_all(&work);
-    Ok(Filmstrip { frames, key_frames_used: stride })
+    Ok(Filmstrip { frames, key_frames_used: match plan { fcm_decoder::FilmstripPlan::Stride(stride) => stride, fcm_decoder::FilmstripPlan::Interval(_) => 0 } })
 }
 
 /// A 480p H.264 viewing copy under the app's local data folder (GPU encoder first, software fallback).
@@ -669,7 +670,102 @@ fn clear_previews(app: tauri::AppHandle) -> Result<u64, String> {
     Ok(freed)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Mp4Export { path: String, bytes: u64, mode: Option<fcm_decoder::Mp4Mode>, seconds: f64, existing: bool }
+
+/// A playable full-resolution `.mp4` of an extracted recording, next to wherever the operator asked. H.264 is
+/// copied frame for frame; anything else is re-encoded (GPU, then software) so it plays on a stock Windows
+/// install. A derived copy for the operator's own use: the hashed `.dav` remains the evidence.
+#[tauri::command(async)]
+fn export_mp4(app: tauri::AppHandle, clip_path: String, output_directory: String, codec: String) -> Result<Mp4Export, String> {
+    let ffmpeg = verified_ffmpeg(&app)?;
+    let stem = Path::new(&clip_path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "clip".to_string());
+    fs::create_dir_all(&output_directory).map_err(|error| format!("Could not create {output_directory}: {error}"))?;
+    let output = Path::new(&output_directory).join(format!("{stem}.mp4"));
+    if let Ok(metadata) = fs::metadata(&output) {
+        if metadata.len() > 0 { return Ok(Mp4Export { path: output.to_string_lossy().to_string(), bytes: metadata.len(), mode: None, seconds: 0.0, existing: true }); }
+    }
+    let started = Instant::now();
+    let out = output.to_string_lossy().to_string();
+    let mut mode = fcm_decoder::mp4_mode_for(&codec);
+    let (mut ok, mut stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4_args(&clip_path, &out, mode), Duration::from_secs(1800))?;
+    if !ok && mode == fcm_decoder::Mp4Mode::StreamCopy {
+        mode = fcm_decoder::Mp4Mode::H264(fcm_decoder::PreviewEncoder::Nvenc);
+        (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4_args(&clip_path, &out, mode), Duration::from_secs(1800))?;
+    }
+    if !ok && fcm_decoder::encoder_unavailable(&stderr) {
+        mode = fcm_decoder::Mp4Mode::H264(fcm_decoder::PreviewEncoder::Software);
+        (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4_args(&clip_path, &out, mode), Duration::from_secs(3600))?;
+    }
+    if !ok {
+        let _ = fs::remove_file(&output);
+        return Err(format!("The MP4 could not be written: {}", stderr.lines().last().unwrap_or("no detail").trim()));
+    }
+    let bytes = fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
+    Ok(Mp4Export { path: out, bytes, mode: Some(mode), seconds: started.elapsed().as_secs_f64(), existing: false })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Video files already on this computer (or in a synced cloud folder): a second source besides the card
+// ---------------------------------------------------------------------------------------------
+
+const VIDEO_EXTENSIONS: [&str; 15] = ["mp4", "mov", "mkv", "avi", "m4v", "ts", "h264", "h265", "hevc", "264", "265", "dav", "asf", "wmv", "webm"];
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalVideoFile { path: String, file_name: String, extension: String, bytes: u64, modified_epoch_ms: u64 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoFolder { directory: String, files: Vec<LocalVideoFile>, subfolders: u32, other_files: u32 }
+
+/// The video files directly inside a folder (not its subfolders), newest name last. Nothing is opened yet.
+#[tauri::command(async)]
+fn list_video_files(directory: String) -> Result<VideoFolder, String> {
+    let entries = fs::read_dir(&directory).map_err(|error| format!("The folder could not be read: {error}"))?;
+    let mut files = Vec::new();
+    let (mut subfolders, mut other_files) = (0_u32, 0_u32);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata() else { continue; };
+        if metadata.is_dir() { subfolders += 1; continue; }
+        let extension = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        if !VIDEO_EXTENSIONS.contains(&extension.as_str()) || metadata.len() == 0 { other_files += 1; continue; }
+        let modified_epoch_ms = metadata.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+        files.push(LocalVideoFile { path: path.to_string_lossy().to_string(), file_name: entry.file_name().to_string_lossy().to_string(), extension, bytes: metadata.len(), modified_epoch_ms });
+    }
+    files.sort_by(|a, b| a.file_name.cmp(&b.file_name));
+    Ok(VideoFolder { directory, files, subfolders, other_files })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileDigest { sha256: String, bytes: u64 }
+
+/// SHA-256 of a file on disk, streamed; taken before sending so FCM can verify what arrived.
+#[tauri::command(async)]
+fn hash_local_file(path: String) -> Result<FileDigest, String> {
+    let mut file = File::open(&path).map_err(|error| format!("The file could not be opened: {error}"))?;
+    let bytes = file.metadata().map_err(|error| error.to_string())?.len();
+    let sha256 = fcm_decoder::sha256_of(&mut file).map_err(|error| format!("The file could not be read: {error}"))?;
+    Ok(FileDigest { sha256, bytes })
+}
+
+/// Duration, container creation time, codec and size of a video file, from the decoder's banner.
+#[tauri::command(async)]
+fn probe_video_file(app: tauri::AppHandle, path: String) -> Result<fcm_decoder::MediaProbe, String> {
+    let ffmpeg = verified_ffmpeg(&app)?;
+    // ffmpeg exits non-zero here by design (no output was asked for); the banner on stderr is the result.
+    let (_, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::probe_args(&path), Duration::from_secs(60))?;
+    let probe = fcm_decoder::parse_media_probe(&stderr);
+    if probe.duration_seconds.is_none() && probe.codec.is_none() {
+        return Err(format!("The decoder could not read this file: {}", stderr.lines().find(|line| line.contains("Invalid") || line.contains("No such") || line.contains("Permission")).or_else(|| stderr.lines().last()).unwrap_or("no detail").trim()));
+    }
+    Ok(probe)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, export_mp4, list_video_files, hash_local_file, probe_video_file]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

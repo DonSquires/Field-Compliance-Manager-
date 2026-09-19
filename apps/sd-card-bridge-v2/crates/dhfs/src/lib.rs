@@ -603,11 +603,12 @@ pub fn dhav_frame_header(bytes: &[u8]) -> Option<DhavFrame> {
         while ext_remaining > 0 && cursor < bytes.len() {
             let kind = bytes[cursor];
             let consumed: usize = match kind {
+                // Real frame (2026-09-19): `80 00 f0 87` = 1920x1080; one skipped byte, then width/8, height/8.
                 0x80 => {
-                    if cursor + 6 > bytes.len() { break; }
-                    frame.width = Some(8 * bytes[cursor + 4] as u32);
-                    frame.height = Some(8 * bytes[cursor + 5] as u32);
-                    6
+                    if cursor + 4 > bytes.len() { break; }
+                    frame.width = Some(8 * bytes[cursor + 2] as u32);
+                    frame.height = Some(8 * bytes[cursor + 3] as u32);
+                    4
                 }
                 0x81 => {
                     if cursor + 4 > bytes.len() { break; }
@@ -631,6 +632,11 @@ pub fn dhav_frame_header(bytes: &[u8]) -> Option<DhavFrame> {
             };
             cursor += consumed;
             ext_remaining -= consumed as i32;
+        }
+        // No codec extension (or one this parser does not know): the payload's first parameter set still says.
+        if frame.video_codec.is_none() && frame_kind_is_video(frame_type) {
+            let payload_at = 24 + bytes[22] as usize;
+            if let Some(is_hevc) = nal_parameter_set_at(bytes, payload_at) { frame.video_codec = Some(if is_hevc { "hevc" } else { "h264" }.to_string()); }
         }
     }
     let trailer_at = frame_length as usize - 8;
@@ -872,6 +878,30 @@ fn parse_frame_header(bytes: &[u8]) -> Option<FrameHeader> {
 fn trailer_matches(frame: &[u8]) -> bool {
     let n = frame.len();
     n >= 32 && &frame[n - 8..n - 4] == b"dhav" && le_u32(&frame[n - 4..]) as usize == n
+}
+
+/// Frame counts and clock span of an `-r2` DHAV file already on disk, read header by header (the frames
+/// were validated and written back to back). Stops at the first byte that is not a frame header.
+pub fn summarize_dhav_file(path: &Path) -> Result<ExtractionStats, DhfsError> {
+    let mut file = File::open(path).map_err(|error| DhfsError::Io(format!("could not open {}: {error}", path.display())))?;
+    let len = file.metadata().map_err(|error| DhfsError::Io(error.to_string()))?.len();
+    let mut stats = ExtractionStats::default();
+    let mut header = [0_u8; 24];
+    let mut pos = 0_u64;
+    while pos + 24 <= len {
+        file.seek(SeekFrom::Start(pos)).map_err(|error| DhfsError::Io(error.to_string()))?;
+        file.read_exact(&mut header).map_err(|error| DhfsError::Io(error.to_string()))?;
+        let Some(frame) = parse_frame_header(&header) else { break; };
+        if pos + frame.length as u64 > len { stats.truncated_final_frame = true; break; }
+        stats.frames_kept += 1;
+        if frame_kind_is_video(frame.kind) { stats.video_frames += 1; }
+        if frame.kind == 0xfd { stats.key_frames += 1; }
+        if frame_kind_is_audio(frame.kind) { stats.audio_frames += 1; }
+        if stats.content_start.is_none() { stats.content_start = Some(frame.date); }
+        stats.content_end = Some(frame.date);
+        pos += frame.length as u64;
+    }
+    Ok(stats)
 }
 
 fn window_for(recording: &Recording) -> (i64, i64) {
@@ -1241,7 +1271,8 @@ pub fn existing_extracted_clip(recording: &Recording, directory: &Path, label: &
         if bytes == 0 { return Ok(None); }
         let probe = probe_stream(&head);
         let kind = if matches!(probe.stream, StreamKind::Dhav { .. }) { ContentKind::DhavVideo } else { ContentKind::RawStream };
-        return Ok(Some(clip_shell(recording, &path, file_name, bytes, sha256, probe.content_type.clone(), codec_label(&probe), kind, ExtractionStats::default())));
+        let stats = if kind == ContentKind::DhavVideo { summarize_dhav_file(&path)? } else { ExtractionStats::default() };
+        return Ok(Some(clip_shell(recording, &path, file_name, bytes, sha256, probe.content_type.clone(), codec_label(&probe), kind, stats)));
     }
     let folder = directory.join(&stem);
     if folder.is_dir() {
@@ -1373,6 +1404,37 @@ mod tests {
 
     fn time(y: u16, mo: u8, d: u8, h: u8, mi: u8, s: u8) -> DhfsTime { DhfsTime { year: y, month: mo, day: d, hour: h, minute: mi, second: s } }
 
+    /// The first 64 bytes of a key frame from a real card (extracted 2026-07-24 recording, ch129): the
+    /// resolution extension is 4 bytes, the codec extension follows it, then an 8-byte 0x88 and the HEVC VPS.
+    const REAL_KEY_FRAME_HEAD: [u8; 64] = [
+        0x44, 0x48, 0x41, 0x56, 0xfd, 0x00, 0x00, 0x00, 0x6a, 0x75, 0x04, 0x00, 0xc1, 0x93, 0x01, 0x00,
+        0x15, 0x02, 0xf1, 0x69, 0xbf, 0x8c, 0x10, 0x24, 0x80, 0x00, 0xf0, 0x87, 0x81, 0x06, 0x0c, 0x03,
+        0x88, 0x0b, 0xb0, 0xdf, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01,
+        0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0xb0, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00,
+    ];
+
+    #[test]
+    fn parses_a_real_key_frame_header() {
+        let frame = dhav_frame_header(&REAL_KEY_FRAME_HEAD).expect("header");
+        assert_eq!((frame.frame_type, frame.frame_number, frame.frame_length), (0xfd, 292_202, 103_361));
+        assert_eq!(frame.date, time(2026, 7, 24, 16, 8, 21));
+        assert_eq!((frame.width, frame.height), (Some(1920), Some(1080)));
+        assert_eq!(frame.video_codec.as_deref(), Some("hevc"));
+        let probe = probe_stream(&REAL_KEY_FRAME_HEAD);
+        assert_eq!(codec_label(&probe), "dhav/hevc");
+    }
+
+    #[test]
+    fn codec_falls_back_to_the_payload_when_the_extension_is_missing() {
+        // Same frame with only the resolution extension: the VPS start code after it still identifies HEVC.
+        let mut head = REAL_KEY_FRAME_HEAD.to_vec();
+        head.drain(28..40);
+        head[22] = 4;
+        let frame = dhav_frame_header(&head).expect("header");
+        assert_eq!(frame.video_codec.as_deref(), Some("hevc"));
+        assert_eq!((frame.width, frame.height), (Some(1920), Some(1080)));
+    }
+
     fn descriptor(kind: u8, camera: u8, begin: u32, end: u32, next: u32, last_blocks: u32, prev: u32, first: u32) -> [u8; 32] {
         let mut d = [0_u8; 32];
         d[0] = kind; d[1] = camera;
@@ -1386,7 +1448,7 @@ mod tests {
     }
 
     fn dhav_frame(payload: &[u8]) -> Vec<u8> {
-        let ext: Vec<u8> = vec![0x81, 0x00, 0x0c, 25, 0x80, 0, 0, 0, 240, 135]; // hevc @25fps, 1920x1080
+        let ext: Vec<u8> = vec![0x80, 0x00, 240, 135, 0x81, 0x00, 0x0c, 25]; // 1920x1080, hevc @25fps (real-card layout)
         let frame_length = (24 + ext.len() + payload.len() + 8) as u32;
         let mut frame = Vec::new();
         frame.extend_from_slice(b"DHAV");
@@ -1585,7 +1647,7 @@ mod tests {
         assert_eq!(report.probe.extension, "dav");
         assert_eq!(report.kind, ContentKind::DhavVideo);
         // Only the frame itself is written: the fragment's zero padding is not part of the recording.
-        assert_eq!(out.len(), 24 + 10 + 1000 + 8);
+        assert_eq!(out.len(), 24 + 8 + 1000 + 8);
         assert_eq!(&out[..4], b"DHAV");
         assert_eq!((report.stats.frames_kept, report.stats.key_frames, report.stats.stale_frames), (1, 1, 0));
         assert_eq!(report.stats.content_start, Some(time(2026, 9, 12, 8, 0, 0)));
@@ -1593,7 +1655,7 @@ mod tests {
     }
 
     fn dated_frame(kind: u8, frame_no: u32, at: DhfsTime, payload_len: usize) -> Vec<u8> {
-        let ext: Vec<u8> = vec![0x81, 0x00, 0x0c, 3, 0x80, 0, 0, 0, 240, 135];
+        let ext: Vec<u8> = vec![0x80, 0x00, 240, 135, 0x81, 0x00, 0x0c, 3];
         let frame_length = (24 + ext.len() + payload_len + 8) as u32;
         let mut frame = Vec::new();
         frame.extend_from_slice(b"DHAV");
@@ -1794,6 +1856,28 @@ mod tests {
         assert_eq!((reused.sha256, reused.bytes), (clip.sha256.clone(), clip.bytes));
         let again = extract_recording_to_directory(&mut source, &catalog.volume, &catalog.recordings[0], &dir, "image test");
         assert!(matches!(again, Err(DhfsError::Io(message)) if message.contains("never overwritten")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn summarises_a_finished_dav_file_frame_by_frame() {
+        let dir = std::env::temp_dir().join(format!("fcm-dhfs-summary-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("clip.dav");
+        let mut bytes = Vec::new();
+        bytes.extend(dated_frame(0xfd, 1, time(2026, 7, 24, 9, 30, 0), 500));
+        bytes.extend(dated_frame(0xf0, 2, time(2026, 7, 24, 9, 30, 0), 40));
+        bytes.extend(dated_frame(0xfc, 3, time(2026, 7, 24, 9, 30, 1), 200));
+        bytes.extend(dated_frame(0xfd, 4, time(2026, 7, 24, 9, 30, 2), 500));
+        let mut cut = dated_frame(0xfc, 5, time(2026, 7, 24, 9, 30, 3), 200);
+        cut.truncate(cut.len() - 50);
+        bytes.extend(cut);
+        fs::write(&path, &bytes).expect("write");
+        let stats = summarize_dhav_file(&path).expect("summary");
+        assert_eq!((stats.frames_kept, stats.video_frames, stats.key_frames, stats.audio_frames), (4, 3, 2, 1));
+        assert_eq!((stats.content_start, stats.content_end), (Some(time(2026, 7, 24, 9, 30, 0)), Some(time(2026, 7, 24, 9, 30, 2))));
+        assert!(stats.truncated_final_frame);
         let _ = fs::remove_dir_all(&dir);
     }
 
