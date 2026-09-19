@@ -140,6 +140,12 @@
 .cctv-quality-panel { background: #fff7e7; border-left: 4px solid #bd8419; color: #75541b; display: grid; gap: 4px; line-height: 1.35; padding: 11px 12px; }
 .cctv-quality-panel strong { font-size: 12px; }
 .cctv-quality-panel span { font-size: 12px; }
+.cctv-verify-receipt { background: #f3f7f8; border-left-color: #126b62; color: #2f4750; }
+.cctv-verify-receipt label { display: grid; font-size: 12px; gap: 3px; }
+.cctv-verify-receipt input { border: 1px solid #ccd6d8; border-radius: 4px; font: inherit; font-family: Menlo, Consolas, monospace; font-size: 12px; padding: 6px 8px; }
+.cctv-verify-receipt .cctv-btn-jump { justify-self: start; }
+.cctv-decision-message.is-good { color: #126b62; }
+.cctv-decision-message.is-bad { color: #a13d3d; font-weight: 700; }
 
 /* Tabs */
 .cctv-tab-bar { display: flex; border-bottom: 1px solid #dde3e6; gap: 8px; }

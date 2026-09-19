@@ -32,6 +32,18 @@ describe('CCTV inference review', () => {
     expect(source).toContain('setLoading(false);');
   });
 
+  it('issues the receipt before printing, prints it on the page, and offers verification through the governed RPC', () => {
+    const issueIndex = source.indexOf("supabase.rpc('issue_cctv_report_receipt'");
+    const buildIndex = source.indexOf('const report = buildCCTVPrintableReport({');
+    expect(issueIndex).toBeGreaterThan(0);
+    expect(buildIndex).toBeGreaterThan(issueIndex);
+    expect(source).toContain('receipt: { reportId: issuedReceipt.report_id, issuedAt: issuedReceipt.generated_at, sha256: issuedReceipt.sha256, provenance: issuedReceipt.provenance ?? null }');
+    expect(source).toContain("supabase.rpc('verify_cctv_report_receipt', { p_receipt_id: receiptId, p_sha256: verifyDraft.sha256.trim() || null })");
+    expect(source).toContain('aria-label="Verify a printed report"');
+    expect(source).toContain('The hash on the page does NOT match this receipt.');
+    expect(source).not.toMatch(/from\('cctv_report_receipts'\)[\s\S]{0,300}\.(insert|update|delete)\(/);
+  });
+
   it('explains each failed job in plain words and only bulk-retries failures a retry can fix', () => {
     expect(source).toContain("import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';");
     expect(source).toContain('describeJobFailure(job.error_message, fileName)');

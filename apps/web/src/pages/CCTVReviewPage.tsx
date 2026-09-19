@@ -23,7 +23,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { consolidateResultData } from '../lib/motionConsolidation';
-import { buildCCTVPrintableReport } from '../lib/cctvReport';
+import { buildCCTVPrintableReport, type CCTVReportReceiptProvenance } from '../lib/cctvReport';
 import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';
 import { filterUsableReportImages, type ReportEvidenceImage } from '../lib/cctvImageQuality';
 import type {
@@ -206,6 +206,9 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [decisionSaving, setDecisionSaving] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [reportReceipt, setReportReceipt] = useState<{ reportId: string; generatedAt: string; sha256: string; observationCount: number } | null>(null);
+  const [verifyDraft, setVerifyDraft] = useState<{ receiptId: string; sha256: string }>({ receiptId: '', sha256: '' });
+  const [verifyResult, setVerifyResult] = useState<{ text: string; ok: boolean | null } | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [exportSaving, setExportSaving] = useState(false);
   const [exportReceipt, setExportReceipt] = useState<{ id: string; manifestSha256: string } | null>(null);
   const [currentExport, setCurrentExport] = useState<{ id: string; approval_state: string; manifest_sha256: string; manifest: Record<string, unknown> } | null>(null);
@@ -429,6 +432,33 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const manageSelectedJob = useCallback((action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (selected) void manageJob(selected, action);
   }, [manageJob, selected]);
+
+  // Verifies a printed page against the receipt the database holds for it; wording comes from the verdicts, not from the hash.
+  const verifyReceipt = useCallback(async () => {
+    const receiptId = verifyDraft.receiptId.trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(receiptId)) {
+      setVerifyResult({ text: 'Enter the receipt id printed on the report (a 36-character id).', ok: null });
+      return;
+    }
+    setVerifying(true);
+    setVerifyResult(null);
+    const { data, error: verifyError } = await supabase.rpc('verify_cctv_report_receipt', { p_receipt_id: receiptId, p_sha256: verifyDraft.sha256.trim() || null });
+    setVerifying(false);
+    if (verifyError) { setVerifyResult({ text: verifyError.message, ok: false }); return; }
+    const result = data as { found: boolean; receipt_intact?: boolean; presented_matches?: boolean | null; issued_at?: string; evidence_integrity_now?: string | null; evidence_sha256_at_issue?: string | null; evidence_sha256_now?: string | null; superseded_by?: string | null; review_consistency_at_issue?: string | null } | null;
+    if (!result?.found) { setVerifyResult({ text: 'No receipt with that id exists in this organisation. The page was not issued here, or the id was mistyped.', ok: false }); return; }
+    const parts: string[] = [];
+    if (!result.receipt_intact) parts.push('The stored receipt no longer hashes to its own signature — report this to the custodian immediately.');
+    else if (result.presented_matches === false) parts.push('The hash on the page does NOT match this receipt. The page is not the report the receipt was issued for.');
+    else if (result.presented_matches === true) parts.push(`The page matches receipt issued ${result.issued_at ? timeLabel(result.issued_at) : ''}.`);
+    else parts.push(`Receipt found, issued ${result.issued_at ? timeLabel(result.issued_at) : ''}; enter the page's hash to confirm it is the same report.`);
+    if (result.evidence_sha256_at_issue && result.evidence_sha256_now && result.evidence_sha256_at_issue !== result.evidence_sha256_now) parts.push('The recording\'s hash differs from the one sealed at issue.');
+    if (result.evidence_integrity_now === 'mismatch') parts.push('The recording currently FAILS its integrity check.');
+    if (result.review_consistency_at_issue && result.review_consistency_at_issue.startsWith('client_claims')) parts.push('At issue the database still held undecided sightings; treat review states as provisional.');
+    if (result.superseded_by) parts.push(`A later receipt (${result.superseded_by.slice(0, 8)}…) supersedes this one.`);
+    const ok = Boolean(result.receipt_intact) && result.presented_matches !== false && result.evidence_integrity_now !== 'mismatch';
+    setVerifyResult({ text: parts.join(' '), ok });
+  }, [verifyDraft]);
 
   // Each failed job with what went wrong, in the reviewer's terms, and whether a retry can plausibly change it.
   const jobFailures = useMemo(() => {
@@ -997,6 +1027,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       setDecisionMessage(receiptError?.message || 'The CCTV report receipt could not be issued. The report was not opened.');
       return;
     }
+    const issuedReceipt = receipt as { report_id: string; generated_at: string; observation_count: number; sha256: string; provenance?: CCTVReportReceiptProvenance['provenance'] };
     const report = buildCCTVPrintableReport({
       title: reportStatus === 'draft' ? 'CCTV evidence report (Draft)' : 'CCTV evidence report',
       reportStatus,
@@ -1015,6 +1046,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
       assessment,
       evidenceImages,
       observations,
+      // The printed page names the receipt the database just issued for this payload, with the server's provenance.
+      receipt: { reportId: issuedReceipt.report_id, issuedAt: issuedReceipt.generated_at, sha256: issuedReceipt.sha256, provenance: issuedReceipt.provenance ?? null },
     });
     reportWindow.document.open();
     reportWindow.document.write(report);
@@ -1792,6 +1825,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <span>SHA-256: {reportReceipt.sha256}</span>
                 </div>
               )}
+              <form className="cctv-quality-panel cctv-verify-receipt" aria-label="Verify a printed report" onSubmit={(event) => { event.preventDefault(); void verifyReceipt(); }}>
+                <strong>Verify a printed report</strong>
+                <span>Enter the receipt id and report hash printed in its receipt block.</span>
+                <label>Receipt id <input value={verifyDraft.receiptId} onChange={(event) => setVerifyDraft({ ...verifyDraft, receiptId: event.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellCheck={false} /></label>
+                <label>Report hash <input value={verifyDraft.sha256} onChange={(event) => setVerifyDraft({ ...verifyDraft, sha256: event.target.value })} placeholder="64 hex characters (optional)" spellCheck={false} /></label>
+                <button type="submit" className="cctv-btn-jump" disabled={verifying || !verifyDraft.receiptId.trim()}><ShieldAlert size={13} /> {verifying ? 'Checking…' : 'Verify receipt'}</button>
+                {verifyResult ? <p className={`cctv-decision-message${verifyResult.ok === false ? ' is-bad' : verifyResult.ok ? ' is-good' : ''}`} role="status">{verifyResult.text}</p> : null}
+              </form>
               {exportReceipt && (
                 <div className="cctv-quality-panel" aria-label="CCTV export draft receipt">
                   <strong>Export draft created</strong>
