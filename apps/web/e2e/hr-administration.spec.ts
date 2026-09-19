@@ -129,3 +129,28 @@ test('administrator approves a pending direct shift swap', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Confirm decision' }).click();
   await expect(page.getByRole('status')).toContainText('Shift swap approved and roster ownership updated.');
 });
+
+test('an offered candidate can be hired later, which creates the login and staff record for this branch', async ({ page }) => {
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  const calls: string[] = [];
+  await page.route('**/rest/v1/recruitment_vacancies**', async (route) => await route.fulfill(json([{ id: '71717171-7171-4171-8171-717171717171', title: 'Patrol officer – Nelson', employment_type: 'permanent', location_summary: 'Nelson', status: 'open', opens_on: null, closes_on: null }])));
+  await page.route('**/rest/v1/recruitment_candidates**', async (route) => await route.fulfill(json([{ id: '72727272-7272-4272-8272-727272727272', vacancy_id: '71717171-7171-4171-8171-717171717171', first_name: 'Tama', last_name: 'Rangi', email: 'tama@fcm.test', stage: 'offer', status: 'offered', offer_role: 'officer', offer_employment_type: 'casual', offer_start_date: '2026-09-14' }])));
+  await page.route('**/rest/v1/rpc/manage_recruitment_candidate', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); calls.push('manage'); expect(payload.p_expected_stage).toBe('offer'); expect(payload.p_next_stage).toBe('offer'); expect(payload.p_offer_employment_type).toBe('casual'); await route.fulfill(json([{ id: payload.p_candidate_id, stage: 'offer', status: 'offered' }])); });
+  await page.route('**/functions/v1/create-user', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); calls.push('create-user'); expect(payload.role).toBe('officer'); expect(payload.branch_authorisations?.[0]?.can_be_rostered).toBe(true); await route.fulfill(json({ success: true, user_id: '73737373-7373-4373-8373-737373737373', staff_id: '74747474-7474-4474-8474-747474747474' })); });
+  await page.route('**/rest/v1/rpc/convert_recruitment_candidate_to_staff', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); calls.push('convert'); expect(payload.p_staff_id).toBe('74747474-7474-4474-8474-747474747474'); await route.fulfill(json([{ candidate_id: payload.p_candidate_id, status: 'hired' }])); });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'People', exact: true }).click();
+  await page.getByRole('button', { name: 'Recruitment', exact: true }).click();
+  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Tama Rangi' }) });
+  await expect(card.getByText('Offer made', { exact: true })).toBeVisible();
+  await expect(card.getByText(/Offer: Officer · Casual · starts/)).toBeVisible();
+  await card.getByRole('button', { name: 'Candidate accepted – hire' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Confirm acceptance and hire' });
+  await expect(dialog.getByText(/creates their login and staff record for this branch and starts onboarding/)).toBeVisible();
+  await expect(dialog.getByLabel('Employment type')).toHaveValue('casual');
+  await expect(dialog.getByLabel('Proposed start')).toHaveValue('2026-09-14');
+  await dialog.getByLabel('Offer note').fill('Accepted by phone, start confirmed.');
+  await dialog.getByRole('button', { name: 'Confirm acceptance and hire' }).click();
+  await expect(page.getByRole('status')).toContainText('Tama Rangi hired. Their login and staff record are created for this branch and onboarding has started – see the Staff tab.');
+  expect(calls).toEqual(['manage', 'create-user', 'convert']);
+});
