@@ -28,6 +28,9 @@ const EXTRACTOR_TIMEOUT_MS = Number(process.env.VISION_EXTRACTOR_TIMEOUT_MS || 3
 const MAX_SUMMARY_BYTES = Number(process.env.VISION_MAX_SUMMARY_BYTES || 2 * 1024 * 1024);
 const MAX_CLASSIFICATION_FRAMES = Number(process.env.VISION_MAX_CLASSIFICATION_FRAMES || 120);
 const RUNPOD_BATCH_SIZE = Number(process.env.VISION_RUNPOD_BATCH_SIZE || 6);
+// How long a budget-deferred job waits before the queue offers it again (bounded by the budget's reset time).
+const BUDGET_DEFER_MIN_SECONDS = Number(process.env.VISION_BUDGET_DEFER_MIN_SECONDS || 900);
+const BUDGET_DEFER_MAX_SECONDS = Number(process.env.VISION_BUDGET_DEFER_MAX_SECONDS || 6 * 3600);
 const configuredRunpodBackoff = Number(process.env.VISION_RUNPOD_BACKOFF_MS);
 const RUNPOD_BACKOFF_MS = Number.isFinite(configuredRunpodBackoff) ? Math.max(0, configuredRunpodBackoff) : 5 * 60_000;
 const STORAGE_DOWNLOAD_TIMEOUT_MS = Number(process.env.VISION_STORAGE_DOWNLOAD_TIMEOUT_MS || 120_000);
@@ -306,6 +309,8 @@ async function classifyFrames(summary, job) {
   const selectedFrames = selectFramesForClassification(summary.motion_segments, MAX_CLASSIFICATION_FRAMES);
   const triageBatches = Math.ceil(selectedFrames.length / RUNPOD_BATCH_SIZE);
   const checkpointFrames = await readClassificationCheckpoint(job.id);
+  // Metered per job: every GPU call, every frame sent, wall time spent waiting on the GPU.
+  const usage = { gpu_calls: 0, frames_sent: 0, gpu_ms: 0 };
   const frameInputs = await Promise.all(selectedFrames.map(async (frame) => ({
     frame,
     image: await fs.readFile(frame.file_path),
@@ -320,7 +325,7 @@ async function classifyFrames(summary, job) {
       percent: (batchStart / Math.max(1, selectedFrames.length)) * 100,
       label: pendingBatch.length ? `Detecting motion entities, batch ${batchNumber} of ${triageBatches}` : `Resuming detection batch ${batchNumber} of ${triageBatches}`,
     });
-    const runpodResults = await classifyWithRunpodBatch(pendingBatch, ['person', 'vehicle', 'animal', 'detect']);
+    const runpodResults = await classifyWithRunpodBatch(pendingBatch, ['person', 'vehicle', 'animal', 'detect'], usage);
     for (const { frame } of batch) {
       const checkpoint = checkpointFrames[frame.sha256_hash];
       if (checkpoint?.triage) applyTriageResult(frame, checkpoint.triage);
@@ -349,7 +354,7 @@ async function classifyFrames(summary, job) {
       percent: (batchStart / Math.max(1, representatives.length)) * 100,
       label: pendingBatch.length ? `Recognising ${representatives.length} best observation frame${representatives.length === 1 ? '' : 's'}, batch ${batchNumber} of ${recognitionBatches}` : `Resuming recognition batch ${batchNumber} of ${recognitionBatches}`,
     });
-    const runpodResults = await classifyWithRunpodBatch(pendingBatch);
+    const runpodResults = await classifyWithRunpodBatch(pendingBatch, undefined, usage);
     for (const { frame, image } of batch) {
       const checkpoint = checkpointFrames[frame.sha256_hash];
       if (checkpoint?.recognition) {
@@ -369,8 +374,36 @@ async function classifyFrames(summary, job) {
     sampled_frames: selectedFrames.length,
     representative_frames: representatives.length,
     policy: 'detector_triage_then_one_full_recognition_per_unique_observation',
+    usage,
   };
+  await recordInferenceUsage(job, { frames_sampled: selectedFrames.length, frames_recognised: representatives.length, ...usage });
   return summary;
+}
+
+// Counts only, attributed to the job's organisation, so a tenant's GPU use is visible and budgetable.
+async function recordInferenceUsage(job, usage) {
+  try {
+    const { error } = await supabase.rpc('record_cctv_inference_usage', { p_job_id: job.id, p_usage: usage });
+    if (error) throw new Error(error.message);
+    log('inference_usage_recorded', { job_id: job.id, ...usage });
+  } catch (error) {
+    log('inference_usage_record_failed', { job_id: job.id, error: error.message });
+  }
+}
+
+// A spent daily budget pauses work; it never fails it. The job goes back to the queue with a not-before time
+// and a label the reviewer can read, and the next poll skips it until then.
+async function deferIfBudgetExhausted(job) {
+  const { data, error } = await supabase.rpc('cctv_inference_budget_check', { p_organization_id: job.organization_id });
+  if (error) { log('inference_budget_check_failed', { job_id: job.id, error: error.message }); return false; }
+  if (!data?.exhausted) return false;
+  const resetsAt = data.resets_at ? new Date(data.resets_at) : null;
+  const waitSeconds = resetsAt ? Math.min(BUDGET_DEFER_MAX_SECONDS, Math.max(BUDGET_DEFER_MIN_SECONDS, Math.ceil((resetsAt.getTime() - Date.now()) / 1000))) : BUDGET_DEFER_MIN_SECONDS;
+  const reason = `Deferred: this organisation's daily inference budget (${data.daily_frame_budget} frames) is spent; analysis resumes automatically${resetsAt ? ` after ${resetsAt.toISOString()}` : ''}`;
+  const { data: deferred, error: deferError } = await supabase.rpc('defer_cctv_inference_job', { p_job_id: job.id, p_lease_token: job.lease_token, p_reason: reason, p_not_before_seconds: waitSeconds });
+  if (deferError) { log('inference_budget_defer_failed', { job_id: job.id, error: deferError.message }); return false; }
+  log('inference_budget_deferred', { job_id: job.id, organization_id: job.organization_id, frames_used_today: data.frames_used_today, daily_frame_budget: data.daily_frame_budget, not_before_seconds: waitSeconds, deferred: deferred === true });
+  return deferred === true;
 }
 
 async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
@@ -514,12 +547,14 @@ function normaliseAnimals(runpodResult, localDetect) {
   return { success: false, animals: [], status: 'animal_inference_unavailable', review_required: true };
 }
 
-async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'animal', 'plate', 'face']) {
+async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'animal', 'plate', 'face'], usage = null) {
   if (!RUNPOD_API_KEY || batch.length === 0) return new Map();
   if (Date.now() < runpodUnavailableUntil) {
     log('runpod_inference_circuit_open', { retry_after_ms: runpodUnavailableUntil - Date.now(), batch_size: batch.length });
     return new Map();
   }
+  const startedAt = Date.now();
+  const meter = () => { if (usage) { usage.gpu_calls += 1; usage.frames_sent += batch.length; usage.gpu_ms += Date.now() - startedAt; } };
   try {
     const response = await fetch(`${RUNPOD_API_URL}/runsync`, {
       method: 'POST',
@@ -533,6 +568,7 @@ async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'ani
       }),
       signal: AbortSignal.timeout(45_000),
     });
+    meter();
     if (!response.ok) {
       runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
       log('runpod_inference_degraded', { status: response.status, retry_after_ms: RUNPOD_BACKOFF_MS });
@@ -548,6 +584,7 @@ async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'ani
     runpodUnavailableUntil = 0;
     return new Map(Array.isArray(results) ? results.filter((item) => item?.frame_id).map((item) => [item.frame_id, item.result || item]) : []);
   } catch (error) {
+    meter();
     runpodUnavailableUntil = Date.now() + RUNPOD_BACKOFF_MS;
     log('runpod_inference_unavailable', { error: error.message, retry_after_ms: RUNPOD_BACKOFF_MS });
     return new Map();
@@ -798,6 +835,8 @@ async function processOne() {
       .select('id, organization_id, evidence_item_id, domain, status')
       .eq('domain', 'video_motion')
       .eq('status', 'queued')
+      // While queued, lease_expires_at is a not-before time set by a budget deferral.
+      .or(`lease_expires_at.is.null,lease_expires_at.lt.${new Date().toISOString()}`)
       .order('created_at', { ascending: true })
       .limit(1);
     if (error) throw new Error(`job poll failed: ${error.message}`);
@@ -824,6 +863,8 @@ async function processOne() {
       log('playback_copy_failed', { job_id: job.id, evidence_item_id: evidence.id, error: playbackError.message });
     }
     log('job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
+    // Budget gate sits after the free work (hash, playback copy) and before anything that costs GPU time.
+    if (await deferIfBudgetExhausted(job)) { currentJobId = null; return; }
     log('motion_extraction_started', { job_id: job.id });
     await updateProgress(job, 'extracting_motion', { label: 'Extracting motion segments' });
     const summary = await runExtractor(videoPath, path.join(DERIVED_ROOT, job.id));

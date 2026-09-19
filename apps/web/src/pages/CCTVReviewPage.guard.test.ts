@@ -32,6 +32,14 @@ describe('CCTV inference review', () => {
     expect(source).toContain('setLoading(false);');
   });
 
+  it('shows GPU inference use against the daily budget and lets an administrator set it through the governed RPC', () => {
+    expect(source).toContain("supabase.rpc('cctv_inference_usage', { p_organization_id: profile.organizationId, p_days: 14 })");
+    expect(source).toContain("supabase.rpc('set_cctv_inference_budget', { p_organization_id: profile.organizationId, p_daily_frame_budget: Math.round(frames), p_reason: 'Set from CCTV review' })");
+    expect(source).toContain('aria-label="Inference usage and budget"');
+    expect(source).toContain('Nothing fails; work resumes on its own.');
+    expect(source).not.toMatch(/from\('cctv_inference_budgets'\)/);
+  });
+
   it('issues the receipt before printing, prints it on the page, and offers verification through the governed RPC', () => {
     const issueIndex = source.indexOf("supabase.rpc('issue_cctv_report_receipt'");
     const buildIndex = source.indexOf('const report = buildCCTVPrintableReport({');

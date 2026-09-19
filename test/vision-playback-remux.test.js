@@ -71,3 +71,24 @@ test('vision watcher source contains a degraded-frame inference gate', () => {
   assert.match(source, /WORKER_CONCURRENCY/);
   assert.match(source, /worker_concurrency/);
 });
+
+test('vision watcher meters GPU use per job and defers (never fails) when the daily budget is spent', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
+  // Every RunPod call is counted, including failed ones, so the meter reflects what was actually asked of the GPU.
+  assert.match(source, /const meter = \(\) => \{ if \(usage\) \{ usage\.gpu_calls \+= 1; usage\.frames_sent \+= batch\.length; usage\.gpu_ms \+= Date\.now\(\) - startedAt; \} \};/);
+  assert.match(source, /classifyWithRunpodBatch\(pendingBatch, \['person', 'vehicle', 'animal', 'detect'\], usage\)/);
+  assert.match(source, /classifyWithRunpodBatch\(pendingBatch, undefined, usage\)/);
+  assert.match(source, /supabase\.rpc\('record_cctv_inference_usage', \{ p_job_id: job\.id, p_usage: usage \}\)/);
+  // The gate sits after the free work and before extraction/inference; a spent budget returns the job to the queue.
+  const gate = source.indexOf('if (await deferIfBudgetExhausted(job)) { currentJobId = null; return; }');
+  const extraction = source.indexOf("log('motion_extraction_started'");
+  const hashing = source.indexOf('await recordSourceHash(job, evidence, videoPath);');
+  assert.ok(gate > hashing && gate < extraction, 'budget gate runs after hashing and before motion extraction');
+  assert.match(source, /supabase\.rpc\('cctv_inference_budget_check', \{ p_organization_id: job\.organization_id \}\)/);
+  assert.match(source, /supabase\.rpc\('defer_cctv_inference_job', \{ p_job_id: job\.id, p_lease_token: job\.lease_token, p_reason: reason, p_not_before_seconds: waitSeconds \}\)/);
+  assert.doesNotMatch(source, /failJob\([^)]*budget/i, 'a spent budget must never fail a job');
+  // The poll respects a deferred job's not-before time.
+  assert.match(source, /\.or\(`lease_expires_at\.is\.null,lease_expires_at\.lt\.\$\{new Date\(\)\.toISOString\(\)\}`\)/);
+});

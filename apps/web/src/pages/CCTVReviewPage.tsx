@@ -58,6 +58,16 @@ type CCTVJob = {
   result: { status: string; result: Record<string, unknown> } | null;
 };
 
+type InferenceUsage = {
+  daily_frame_budget: number;
+  budget_is_default: boolean;
+  budget_reason: string | null;
+  frames_used_today: number;
+  exhausted: boolean;
+  deferred_jobs: number;
+  days: Array<{ day: string; jobs: number; frames_sent: number; gpu_calls: number; gpu_ms: number }>;
+};
+
 type DesktopReviewBatch = {
   batch_id: string;
   clip_index: number;
@@ -209,6 +219,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [verifyDraft, setVerifyDraft] = useState<{ receiptId: string; sha256: string }>({ receiptId: '', sha256: '' });
   const [verifyResult, setVerifyResult] = useState<{ text: string; ok: boolean | null } | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [usage, setUsage] = useState<InferenceUsage | null>(null);
+  const [budgetDraft, setBudgetDraft] = useState('');
+  const [budgetSaving, setBudgetSaving] = useState(false);
+  const [budgetMessage, setBudgetMessage] = useState<string | null>(null);
   const [exportSaving, setExportSaving] = useState(false);
   const [exportReceipt, setExportReceipt] = useState<{ id: string; manifestSha256: string } | null>(null);
   const [currentExport, setCurrentExport] = useState<{ id: string; approval_state: string; manifest_sha256: string; manifest: Record<string, unknown> } | null>(null);
@@ -219,6 +233,33 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');
+
+  // Org-scoped metering readout; refreshed with the queue so a paused job and its reason appear together.
+  const loadUsage = useCallback(async () => {
+    if (!profile?.organizationId) return;
+    const { data } = await supabase.rpc('cctv_inference_usage', { p_organization_id: profile.organizationId, p_days: 14 });
+    if (data && typeof data === 'object') {
+      const next = data as InferenceUsage;
+      setUsage(next);
+      setBudgetDraft((current) => current || String(next.daily_frame_budget));
+    }
+  }, [profile?.organizationId]);
+
+  const saveBudget = useCallback(async () => {
+    if (!profile?.organizationId) return;
+    const frames = Number(budgetDraft);
+    if (!Number.isFinite(frames) || frames < 100) { setBudgetMessage('A daily budget must be at least 100 frames.'); return; }
+    setBudgetSaving(true);
+    setBudgetMessage(null);
+    const { error: budgetError } = await supabase.rpc('set_cctv_inference_budget', { p_organization_id: profile.organizationId, p_daily_frame_budget: Math.round(frames), p_reason: 'Set from CCTV review' });
+    setBudgetSaving(false);
+    if (budgetError) { setBudgetMessage(budgetError.message); return; }
+    setBudgetMessage(`Daily budget set to ${Math.round(frames).toLocaleString()} frames.`);
+    await loadUsage();
+  }, [budgetDraft, loadUsage, profile?.organizationId]);
+
+  useEffect(() => { void loadUsage(); }, [loadUsage, jobs]);
 
   const loadJobs = useCallback(async () => {
     if (!profile?.organizationId) {
@@ -1119,6 +1160,22 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               Inference is advisory. Confirm identity, plate readings, and return visits against the primary video.
             </span>
           </div>
+          {usage ? (
+            <div className={`cctv-usage-panel${usage.exhausted ? ' is-exhausted' : ''}`} aria-label="Inference usage and budget">
+              <span>GPU inference today</span>
+              <strong>{usage.frames_used_today.toLocaleString()} / {usage.daily_frame_budget.toLocaleString()} frames</strong>
+              <div className="cctv-usage-bar" role="progressbar" aria-valuemin={0} aria-valuemax={usage.daily_frame_budget} aria-valuenow={Math.min(usage.frames_used_today, usage.daily_frame_budget)}><span style={{ width: `${Math.min(100, (usage.frames_used_today / Math.max(1, usage.daily_frame_budget)) * 100)}%` }} /></div>
+              <small>{usage.exhausted ? `Budget spent — ${usage.deferred_jobs} job${usage.deferred_jobs === 1 ? '' : 's'} paused until it resets at midnight UTC. Nothing fails; work resumes on its own.` : usage.deferred_jobs ? `${usage.deferred_jobs} job${usage.deferred_jobs === 1 ? '' : 's'} paused for budget.` : `${usage.budget_is_default ? 'Platform default budget' : 'Budget set for this organisation'}${usage.budget_reason ? ` — ${usage.budget_reason}` : ''}.`}</small>
+              {usage.days.length ? <small>Last {usage.days.length} day{usage.days.length === 1 ? '' : 's'}: {usage.days.reduce((total, day) => total + day.frames_sent, 0).toLocaleString()} frames · {usage.days.reduce((total, day) => total + day.gpu_calls, 0).toLocaleString()} GPU calls · {usage.days.reduce((total, day) => total + day.jobs, 0)} analyses</small> : null}
+              {isAdmin ? (
+                <form className="cctv-usage-budget" onSubmit={(event) => { event.preventDefault(); void saveBudget(); }} aria-label="Set daily frame budget">
+                  <label>Daily frame budget <input type="number" min={100} step={100} value={budgetDraft} onChange={(event) => setBudgetDraft(event.target.value)} /></label>
+                  <button type="submit" className="cctv-btn-jump" disabled={budgetSaving || !budgetDraft || Number(budgetDraft) < 100}>{budgetSaving ? 'Saving…' : 'Set budget'}</button>
+                </form>
+              ) : null}
+              {budgetMessage ? <small role="status">{budgetMessage}</small> : null}
+            </div>
+          ) : null}
         </aside>
 
         {/* Center Queue List */}

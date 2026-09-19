@@ -42,6 +42,19 @@
 .cctv-filter-rail button.is-active { background: #eef7f5; border-left-color: #16847a; color: #11675f; }
 .cctv-filter-rail button strong { font-size: 12px; }
 .cctv-review-note { border-top: 1px solid #e7ecee; color: #65727c; display: flex; gap: 8px; line-height: 1.4; margin-top: 20px; padding: 16px 6px 0; }
+/* Inference metering: frames sent to the GPU today against the organisation's daily budget. */
+.cctv-usage-panel { border-top: 1px solid #e7ecee; color: #53616b; display: grid; font-size: 12px; gap: 6px; margin-top: 16px; padding: 14px 6px 0; }
+.cctv-usage-panel > span { color: #75828a; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.cctv-usage-panel > strong { color: #1f2f36; font-size: 14px; font-variant-numeric: tabular-nums; }
+.cctv-usage-panel small { line-height: 1.4; }
+.cctv-usage-bar { background: #e7ecee; border-radius: 3px; height: 6px; overflow: hidden; }
+.cctv-usage-bar span { background: #126b62; display: block; height: 100%; }
+.cctv-usage-panel.is-exhausted .cctv-usage-bar span { background: #bd8419; }
+.cctv-usage-panel.is-exhausted > strong { color: #8a5a06; }
+.cctv-usage-budget { display: grid; gap: 6px; margin-top: 4px; }
+.cctv-usage-budget label { display: grid; font-size: 12px; gap: 3px; }
+.cctv-usage-budget input { border: 1px solid #ccd6d8; border-radius: 4px; font: inherit; font-size: 12px; padding: 5px 8px; width: 100%; }
+.cctv-filter-rail .cctv-usage-budget .cctv-btn-jump { border-left: 1px solid #d4dddf; justify-content: center; width: auto; }
 .cctv-job-list { min-width: 0; overflow: hidden; }
 .cctv-section-title { border-bottom: 1px solid #e4eaec; padding: 18px; }
 .cctv-section-title h2 { font-size: 18px; }
