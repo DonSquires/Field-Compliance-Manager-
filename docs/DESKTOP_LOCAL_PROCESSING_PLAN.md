@@ -30,6 +30,16 @@ Goal: see what a recording holds *before* it leaves the machine, and send only w
 
 Not in Phase 1: any change to what FCM stores; any inference on the laptop.
 
+**Ruling 2026-09-19 (owner, after the 0.4.0 field test) — shipped as 0.4.1:** V2 gains a second source, **Video
+files** — any folder the computer can see, including synced cloud folders — so an MP4 or other video that did not
+come off a card goes through the same preview / send / skip flow, hashed before it leaves, with its recorded start
+derived from the file name, container metadata or modified time (source shown, operator can correct it, and it is
+recorded in the manifest). "Extract" became **Save to folder**: a folder picker every time, the hashed `.dav`
+original plus a playable full-resolution MP4 (H.264 copied; HEVC re-encoded on the GPU) for the operator's own use.
+The MP4 is a derived copy and never the evidence. Also fixed: the DHAV `0x80` extension is 4 bytes, not 6 — the
+0.4.0 parser stepped into the codec extension and reported "UNKNOWN video"; reused `-r2` files now have their
+frames counted, so the filmstrip spans the whole recording instead of its first 24 seconds.
+
 ## Phase 2 — Analyse here (0.5.x)
 
 Goal: the laptop runs the same detection/recognition tier the VPS runs and FCM receives **results**, not footage,

@@ -47,4 +47,9 @@
 .review__actions small{color:#8ea39c;font-size:11px;line-height:1.4}
 .review__error{color:#f0b0a7;font-size:11px;line-height:1.45;margin:10px 0 0}
 .decoder-progress{max-width:420px}
+.clock-edit{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:10px;color:#8ea39c;flex-wrap:wrap}
+.clock-edit input{height:26px;border:1px solid #35534a;border-radius:5px;background:#0f1a18;color:#dbe9e3;font:11px 'Space Mono',monospace;padding:0 6px;color-scheme:dark}
+.clock-edit input:disabled{opacity:.55}
+.facts strong.mono{font-size:11px;white-space:normal;word-break:break-all}
+.rail nav button[aria-pressed="true"]{background:#203531;color:#d8f3e7}
 @media(max-width:1150px){.field-row{grid-template-columns:1fr}}

@@ -73,10 +73,21 @@ the signed-in user under row-level security, and the session is held in memory o
   (`h264_nvenc` first, `libx264` when no NVENC device answers), played in-app through the asset protocol whose
   scope is exactly that folder. A reused copy from an earlier run is reported as `cached` with no encoder
   claim. Previews are derived viewing aids: never uploaded, never registered, and removable at any time.
+- `export_mp4` — "Save to folder": next to the hashed `.dav` the operator asked for, a full-resolution `.mp4` for their
+  own use. H.264 sources are copied frame for frame; anything else (Dahua cards are usually HEVC, which a stock
+  Windows install cannot play) is re-encoded to H.264 on the GPU, or in software when no NVENC device answers.
+  Video only; an existing `.mp4` in that folder is kept, never overwritten. The `.dav` remains the evidence.
+- `list_video_files` / `hash_local_file` / `probe_video_file` — the second source, "Video files": any folder this
+  computer can see (camera exports, downloads, synced cloud folders). Files are listed by recorded day, hashed
+  where they lie before sending, and their duration / codec / container `creation_time` read from the decoder's
+  banner. The recorded start comes from the file name when a recorder wrote one there, else the container's
+  creation time, else an estimate from the modified time — the source is shown next to an editable field and
+  recorded in the import manifest (`start_time_source`).
 
 "Review here" (0.4.0) lets the operator preview a recording on the laptop and choose **Send** or **Skip** per
 recording; skipped recordings are left out of "Send all". Sending itself is unchanged: the `-r2` original with
-its card-side SHA-256 goes to `register_cctv_import_video`. The plan for local analysis is
+its card-side SHA-256 goes to `register_cctv_import_video`. 0.4.1 added the "Video files" source and "Save to
+folder" (hashed original + playable MP4 wherever the operator chooses). The plan for local analysis is
 `docs/DESKTOP_LOCAL_PROCESSING_PLAN.md`.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
