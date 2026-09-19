@@ -185,7 +185,7 @@ test('a first credential is recorded and verified from the onboarding card throu
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: null, blockers: ['No verified current credential'], next_action: 'record_evidence' }])));
   let payload: Record<string, unknown> | null = null;
-  await page.route('**/rest/v1/rpc/record_staff_credential', async (route) => { payload = JSON.parse(route.request().postData() ?? '{}'); await route.fulfill(json([{ credential_id: '91919191-9191-4191-8191-919191919191', staff_id: payload.p_staff_id, verified: true, verified_at: '2026-08-30T10:00:00.000Z', created: true }])); });
+  await page.route('**/rest/v1/rpc/record_staff_credential', async (route) => { const body = JSON.parse(route.request().postData() ?? '{}'); payload = body; await route.fulfill(json([{ credential_id: '91919191-9191-4191-8191-919191919191', staff_id: body.p_staff_id, verified: true, verified_at: '2026-08-30T10:00:00.000Z', created: true }])); });
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
   const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();

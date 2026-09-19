@@ -103,7 +103,7 @@ test.describe('LIVE Deployment Manual Walkthrough — Production Stack Testing',
     const pageText = await page.locator('body').textContent().catch(() => '');
     
     console.log('CRM page loaded:');
-    console.log(`  - Clients/accounts visible: ${pageText?.length > 1000 ? '✓' : '⚠ sparse content'}`);
+    console.log(`  - Clients/accounts visible: ${(pageText?.length ?? 0) > 1000 ? '✓' : '⚠ sparse content'}`);
     console.log(`  - "Civic Events" in data: ${pageText?.includes('Civic Events') ? '✓' : '⚠'}`);
     console.log(`  - Table/list structure: ${pageText?.includes('name') || pageText?.includes('status') ? '✓' : '?'}`);
 
@@ -165,7 +165,7 @@ test.describe('LIVE Deployment Manual Walkthrough — Production Stack Testing',
 
     const pageText = await page.locator('body').textContent().catch(() => '');
     console.log('Welfare alerts page:');
-    console.log(`  - Page loaded: ${pageText?.length > 100 ? '✓' : '⚠'}`);
+    console.log(`  - Page loaded: ${(pageText?.length ?? 0) > 100 ? '✓' : '⚠'}`);
     console.log(`  - Alerts visible: ${pageText?.includes('alert') || pageText?.includes('SOS') ? '✓' : '?'}`);
 
     // Try to open first alert
@@ -210,7 +210,7 @@ test.describe('LIVE Deployment Manual Walkthrough — Production Stack Testing',
 
     const pageText = await page.locator('body').textContent().catch(() => '');
     console.log('Dispatch jobs page:');
-    console.log(`  - Page loaded: ${pageText?.length > 100 ? '✓' : '⚠'}`);
+    console.log(`  - Page loaded: ${(pageText?.length ?? 0) > 100 ? '✓' : '⚠'}`);
     console.log(`  - Jobs visible: ${pageText?.includes('job') || pageText?.includes('SLA') ? '✓' : '?'}`);
 
     // Try to open first job
@@ -282,7 +282,7 @@ test.describe('LIVE Deployment Manual Walkthrough — Production Stack Testing',
         console.log(`  ⚠ Supabase returned ${response.status}: ${response.statusText}`);
       }
     } catch (err) {
-      console.log(`  ⚠ Supabase connectivity failed: ${err.message}`);
+      console.log(`  ⚠ Supabase connectivity failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
 

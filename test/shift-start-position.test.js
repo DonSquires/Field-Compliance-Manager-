@@ -32,7 +32,7 @@ test('start_officer_shift keeps its guards, records the position and reason, and
 
 test('the schedule advises before an off-site or blind start and passes the reason through', () => {
   assert.match(schedulePage, /supabase\.rpc\('evaluate_shift_start_position', \{ p_shift_id: shift\.id, p_gps_lat: coords\.lat, p_gps_lng: coords\.lng \}\)/);
-  assert.match(schedulePage, /if \(position\.status === 'off_site' \|\| position\.status === 'no_gps'\) setStartAdvisory\(/);
+  assert.match(schedulePage, /if \(stillOn \|\| position\.status === 'off_site' \|\| position\.status === 'no_gps'\) setStartAdvisory\(/);
   assert.match(schedulePage, /p_off_site_reason: reason/);
   assert.match(schedulePage, /You can still start; the start is recorded as away from site and your supervisor can see that\./);
   assert.match(schedulePage, /Start anyway/);

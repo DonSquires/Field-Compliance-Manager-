@@ -287,7 +287,7 @@ test.describe('Welfare Alerts Manual Walkthrough — Data flow & RLS verificatio
       await page.waitForTimeout(300);
 
       // Check for errors
-      const errorMsg = page.locator('text=error|failed|Permission denied', { exact: false });
+      const errorMsg = page.locator('text=error|failed|Permission denied');
       if (await errorMsg.isVisible({ timeout: 1000 }).catch(() => false)) {
         const errText = await errorMsg.textContent();
         console.log(`⚠ Error on alert ${alertId}: "${errText}"`);

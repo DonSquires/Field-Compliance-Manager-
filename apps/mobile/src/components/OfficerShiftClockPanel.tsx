@@ -56,11 +56,11 @@ export function OfficerShiftClockPanel({ shiftId, shiftStatus, onStarted }: Prop
         p_gps_lat: lat,
         p_gps_lng: lng,
       });
-      const receipt = (data as Array<{ started_at: string; created: boolean }> | null)?.[0];
+      const receipt = (data as Array<{ started_at: string; created: boolean; superseded_shift_id?: string | null; superseded_service_type?: string | null }> | null)?.[0];
       if (error || !receipt) throw error ?? new Error('Clock-in was not confirmed.');
       Alert.alert(
         receipt.created ? 'Shift started' : 'Already started',
-        `Clocked in at ${new Date(receipt.started_at).toLocaleTimeString('en-NZ')}.`,
+        `Clocked in at ${new Date(receipt.started_at).toLocaleTimeString('en-NZ')}.${receipt.superseded_shift_id ? ` Your earlier ${(receipt.superseded_service_type ?? 'other').replace(/_/g, ' ')} shift was ended; anything left open on it is on record.` : ''}`,
       );
       onStarted?.();
       await refresh();

@@ -1,0 +1,6 @@
+{
+  // Edge functions are Deno, not Node: hand them to the Deno language server so the built-in
+  // TypeScript server stops reporting `Deno`, https imports and implicit any across supabase/functions.
+  "deno.enablePaths": ["./supabase/functions"],
+  "deno.lint": true
+}

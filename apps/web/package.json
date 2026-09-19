@@ -14,7 +14,7 @@
     "test:e2e:human:live": "HUMAN_TEST_LIVE=true playwright test e2e/dr-bob-human-test.spec.ts",
     "test:e2e:update": "playwright test --update-snapshots",
     "test:e2e:report": "playwright show-report",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit && tsc -p e2e/tsconfig.json"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",

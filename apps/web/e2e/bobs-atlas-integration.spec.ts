@@ -66,7 +66,7 @@ async function queryAtlas<T>(query: string, params?: Record<string, unknown>): P
     const data = await response.json();
     return data || [];
   } catch (err) {
-    console.log(`⚠ Atlas query error: ${err.message}`);
+    console.log(`⚠ Atlas query error: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -88,7 +88,7 @@ async function queryCapabilityMap(entityName: string): Promise<CapabilityMapRow[
       return await response.json();
     }
   } catch (err) {
-    console.log(`⚠ Capability map query error: ${err.message}`);
+    console.log(`⚠ Capability map query error: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return [];
@@ -111,7 +111,7 @@ async function queryEdges(entityName: string): Promise<EdgeRow[]> {
       return await response.json();
     }
   } catch (err) {
-    console.log(`⚠ Edges query error: ${err.message}`);
+    console.log(`⚠ Edges query error: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return [];

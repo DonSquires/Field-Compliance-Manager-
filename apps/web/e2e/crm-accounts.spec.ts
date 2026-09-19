@@ -134,7 +134,7 @@ test('a saved workshop build adds its priced lines to a draft quote at the selec
     p_template_id: 'babebabe-babe-4abe-8abe-babebabebabe',
     p_site_id: '25252525-2525-4525-8525-252525252525',
   });
-  expect(typeof templateRequest?.p_client_request_id).toBe('string');
+  expect(templateRequest).toMatchObject({ p_client_request_id: expect.any(String) });
   expect(errors, errors.join('\n')).toEqual([]);
 });
 

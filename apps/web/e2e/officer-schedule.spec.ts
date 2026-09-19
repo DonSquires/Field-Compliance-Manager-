@@ -220,6 +220,31 @@ test('starting a shift away from its place is advised, not blocked, and the reas
   expect(startPayload).toMatchObject({ p_off_site_reason: 'Starting from the depot, driving to site now.', p_gps_lat: -41.274 });
 });
 
+test('one shift at a time: starting the next shift while still on one is confirmed first, and the receipt says the earlier shift was ended', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: -41.274, longitude: 173.283 });
+  const stillOn = { id: '12121212-1212-4212-8212-121212121212', service_type: 'patrol', scheduled_start: '2026-08-29T20:00:00.000Z', scheduled_end: '2026-08-30T04:00:00.000Z', status: 'in_progress', notes: 'Night patrol', shift_health: 'on_track', total_stops: 2, ended_reason: null };
+  const next = { id: '77777777-7777-4777-8777-777777777777', service_type: 'site_guard', scheduled_start: '2026-08-29T22:00:00.000Z', scheduled_end: '2026-08-30T06:00:00.000Z', status: 'accepted', notes: null, shift_health: null, total_stops: 1, ended_reason: null };
+  let started = false;
+  await page.route('**/rest/v1/shifts**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(started ? [{ ...stillOn, status: 'completed', ended_reason: 'superseded_by_next_shift' }, { ...next, status: 'in_progress' }] : [stillOn, next]) }));
+  await page.route('**/rest/v1/rpc/evaluate_shift_start_position', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'on_site', place_name: 'Civic Centre', distance_m: 0, advisory_radius_m: 250, route_shift: false }) }));
+  let startPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/start_officer_shift', async (route) => {
+    startPayload = JSON.parse(route.request().postData() ?? '{}');
+    started = true;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ shift_id: next.id, shift_status: 'in_progress', started_at: '2026-08-29T22:05:00.000Z', created: true, position_status: 'on_site', place_name: 'Civic Centre', distance_m: 0, superseded_shift_id: stillOn.id, superseded_service_type: 'patrol', superseded_started_at: '2026-08-29T20:02:00.000Z' }]) });
+  });
+  await signInAsOfficer(page, '/officer/schedule');
+  await page.getByRole('button', { name: 'Start shift' }).click();
+  const dialog = page.getByRole('dialog', { name: "You're still on another shift" });
+  await expect(dialog.getByText(/Your patrol shift .* is still in progress\. You can only be on one shift at a time, so starting this one ends it now\./)).toBeVisible();
+  expect(startPayload).toBeNull();
+  await dialog.getByRole('button', { name: 'End it and start this one' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Shift started at' })).toContainText('Your earlier patrol shift was ended at');
+  expect(startPayload).toMatchObject({ p_shift_id: next.id, p_expected_status: 'accepted' });
+  await expect(page.locator('.officer-assigned-shift').filter({ hasText: 'ended when your next shift started' })).toHaveCount(1);
+});
+
 const ACTIVE_SHIFT = { id: '12121212-1212-4212-8212-121212121212', service_type: 'patrol', shift_type: 'patrol', scheduled_start: '2026-08-29T20:00:00.000Z', scheduled_end: '2026-08-30T04:00:00.000Z', status: 'in_progress', notes: 'Active patrol', shift_health: 'on_track', total_stops: 2, completed_stops: 1, organization_id: '33333333-3333-4333-8333-333333333333', officer_user_id: '22222222-2222-4222-8222-222222222222' };
 const readinessBase = { shift_id: ACTIVE_SHIFT.id, status: 'in_progress', service_type: 'patrol', scheduled_end: ACTIVE_SHIFT.scheduled_end, actual_start: null, open_stops: [], open_stop_count: 0, open_required_task_count: 0, open_dispatch_job_count: 0, active_welfare_alert_count: 0, debrief_submitted: false, blockers: ['The debrief has not been recorded'], can_end: false, can_end_after_debrief: true };
 

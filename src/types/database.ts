@@ -28369,6 +28369,7 @@ export type Database = {
           actual_start: string | null
           completed_stops: number
           created_at: string
+          ended_reason: string | null
           external_refs: Json
           generated_at: string | null
           id: string
@@ -28388,6 +28389,7 @@ export type Database = {
           shift_health: string | null
           shift_origin: string
           status: string
+          superseded_by_shift_id: string | null
           total_stops: number
           updated_at: string
           work_unit_id: string | null
@@ -28417,6 +28419,8 @@ export type Database = {
           shift_health?: string | null
           shift_origin?: string
           status?: string
+          superseded_by_shift_id?: string | null
+          ended_reason?: string | null
           total_stops?: number
           updated_at?: string
           work_unit_id?: string | null
@@ -28446,6 +28450,8 @@ export type Database = {
           shift_health?: string | null
           shift_origin?: string
           status?: string
+          superseded_by_shift_id?: string | null
+          ended_reason?: string | null
           total_stops?: number
           updated_at?: string
           work_unit_id?: string | null
@@ -45623,6 +45629,9 @@ export type Database = {
           shift_id: string
           shift_status: string
           started_at: string
+          superseded_service_type: string | null
+          superseded_shift_id: string | null
+          superseded_started_at: string | null
         }[]
       }
       start_patrol_session: {
