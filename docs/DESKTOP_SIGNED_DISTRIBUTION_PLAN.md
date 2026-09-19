@@ -75,6 +75,10 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    and sends them straight into the tenant's import with the card-side SHA-256; the exact image is now
    an optional forensic copy): SHA-256 `fa217440f8a8e7ee7d29d151ca403e1dcb7a2319e63c03bd7bc13c96b332144d`
    (2,892,976 bytes), verified from the public URL; the web app's download link points at 0.2.0.
+   **0.3.0 signed the same way on 2026-09-19** (extraction rule 2: only the recording's own frames, checkpoint
+   blocks removed, picture streams as dated JPEGs — see `apps/sd-card-bridge-v2/README.md`): SHA-256
+   `9f6d66125111908775ce6ad53e3f8088986b90cbbd42775f3cb55ec7ae3767e2` (2,911,424 bytes), verified from the
+   public URL; the web app's download link points at 0.3.0.
 
 What it buys:
 
