@@ -154,3 +154,25 @@ test('an offered candidate can be hired later, which creates the login and staff
   await expect(page.getByRole('status')).toContainText('Tama Rangi hired. Their login and staff record are created for this branch and onboarding has started – see the Staff tab.');
   expect(calls).toEqual(['manage', 'create-user', 'convert']);
 });
+
+test('onboarding shows each person as a seven-step ladder with what the next step needs', async ({ page }) => {
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: '2026-09-07', blockers: ['No verified current credential'], next_action: 'record_evidence' }])));
+  await page.route('**/rest/v1/rpc/manage_staff_onboarding', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); expect(payload.p_action).toBe('advance'); expect(payload.p_stage).toBe('supervision'); expect(payload.p_expected_version).toBe(3); await route.fulfill(json([{ ledger_id: payload.p_ledger_id, current_stage: 'supervision', status: 'in_progress', version: 4 }])); });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
+  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();
+  const ladder = card.getByRole('list', { name: 'Onboarding steps for Ana Ngata' });
+  await expect(ladder.getByRole('listitem')).toHaveCount(7);
+  await expect(ladder.locator('li.is-done')).toHaveCount(2);
+  await expect(ladder.locator('li.is-current')).toContainText('Evidence');
+  await expect(card.getByText('Holding this up: No verified current credential')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Record site induction' })).toBeVisible();
+  await expect(card).toHaveScreenshot('hr-onboarding-ladder.png');
+  await card.getByRole('button', { name: 'Next: Supervision' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move to Supervision?' });
+  await expect(dialog.getByText(/Needs: A line manager assigned/)).toBeVisible();
+  await dialog.getByLabel('Stage note').fill('Evidence pack checked against the record.');
+  await dialog.getByRole('button', { name: 'Advance step' }).click();
+  await expect(dialog).toBeHidden();
+});
