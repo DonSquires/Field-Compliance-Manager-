@@ -67,7 +67,10 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    SHA-256 `353331aa8c34d0c5ab4b54f06f051e67dc9844d249529a9d289c00d3b769fb71` (2,160,256 bytes),
    DigiCert timestamp, `Signature verification: ok` re-checked from the public URL; GitHub release
    assets replaced with the signed set. The bucket allow-list was widened for the artefacts
-   (`20260919020000`).
+   (`20260919020000`). **0.1.9 signed the same way on 2026-09-19** (self-elevating build so the raw
+   Dahua disk opens without a manual "Run as administrator"): SHA-256
+   `faf6034cb661cc8209662b6722eaac1af3e1e8c9d6c3698060dd1ab49cfbce2b`, verified from the public URL;
+   the web app's download link points at 0.1.9.
 
 What it buys:
 
