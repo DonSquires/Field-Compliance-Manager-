@@ -56,3 +56,30 @@ npx playwright test e2e/dr-bob-automation-geofence-module.spec.ts
 ```
 
 The walkthrough is fixture-backed and safe: it does not create dispatch work or submit enforcement actions. It checks the visual geofence decision, module entitlement boundary, and the expected automation boundary.
+
+## CCTV enterprise acceptance (live, staged)
+
+`apps/web/e2e/cctv-acceptance.spec.ts` walks the reviewer's whole CCTV path on the
+live build as a human would, and records JSON evidence lines (`{"stage": ...}`) plus
+screenshots under `test-results/cctv-acceptance-*.png`.
+
+| Stage | Gate | What it proves |
+| --- | --- | --- |
+| A1, A2 | always (needs the dedicated `GRANDMASTER_TEST_EMAIL/PASSWORD` identity) | Console renders for the organisation with custody badges; the Custody record reads through `cctv_evidence_custody`; the biometric governance readout states purpose and retention; the queue explains failures and shows GPU use against the daily budget; the receipt verifier refuses a malformed id and reports an unknown id as not found. No console errors, no failed requests. |
+| B | `CCTV_ACCEPTANCE_IMPORT=true` | Imports one small owner-approved test recording through the real import page (place → camera → file → start) and sees it queued in the console. The fixture is fetched in the Node process with the service key from `CCTV_ACCEPTANCE_FIXTURE_PATH` (default: a 695 KB Dahua `.h265` from the approved test corpus); the key never reaches the browser. |
+| C | `CCTV_ACCEPTANCE_WAIT_FOR_INFERENCE=true` | Waits for the live worker to finish, confirms the recording is hashed, issues a draft report from the queue, checks the printed page carries its receipt, and verifies the receipt through `verify_cctv_report_receipt`. |
+
+```bash
+cd apps/web
+# Stage A only (read-only against the live build)
+npx playwright test e2e/cctv-acceptance.spec.ts --project=desktop-chromium --workers=1
+# Full lifecycle (creates an import labelled "ACCEPTANCE <timestamp>" in the test identity's organisation)
+CCTV_ACCEPTANCE_WAIT_FOR_INFERENCE=true npx playwright test e2e/cctv-acceptance.spec.ts --project=desktop-chromium --workers=1
+```
+
+Stage B/C create test data (import, evidence, job, receipt) labelled `ACCEPTANCE …`
+in the test identity's organisation; purge them with the CCTV test-data purge
+under `app.evidence_delete_scope = 'test_dataset_purge'`. Verified live
+2026-09-19: A1/A2/B/C all passed; the 6-second fixture produced zero motion frames,
+so the receipt was `draft` with zero GPU calls metered — an honest result, not a
+fault.
