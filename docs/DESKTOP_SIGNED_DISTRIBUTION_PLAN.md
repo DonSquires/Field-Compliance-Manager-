@@ -78,7 +78,16 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    **0.3.0 signed the same way on 2026-09-19** (extraction rule 2: only the recording's own frames, checkpoint
    blocks removed, picture streams as dated JPEGs — see `apps/sd-card-bridge-v2/README.md`): SHA-256
    `9f6d66125111908775ce6ad53e3f8088986b90cbbd42775f3cb55ec7ae3767e2` (2,911,424 bytes), verified from the
-   public URL; the web app's download link points at 0.3.0.
+   public URL; the web app's download link points at 0.3.0. **0.4.0 signed the same way on 2026-09-19** ("Review
+   here": on-demand FFmpeg decoder pinned by hash, key-frame filmstrip and 480p viewing copy rendered on the
+   laptop, Send/Skip per recording — see `docs/DESKTOP_LOCAL_PROCESSING_PLAN.md`): SHA-256
+   `21c4a868a8ed2f82d2e801fa064e8db2aae939948c8475da8269f9746ea62137` (2,984,400 bytes), verified from the
+   public URL; the web app's download link points at 0.4.0. The decoder sidecar it downloads is published
+   separately at `desktop-releases/tools/ffmpeg/8.1.2-c573a95381/` (BtbN `win64-lgpl` build, `ffmpeg.exe`
+   SHA-256 `56f015b477f6fc7923409bb63217d2ee7b2b8d236c599ba94e1cf72220548e8c`, 132,239,360 bytes, with
+   `LICENSE.txt` and `manifest.json`); the app refuses any file whose hash differs from the constant compiled
+   into it. The sidecar is not Authenticode-signed by us — it is verified by hash, and it runs as a separate
+   process, never loaded into FCM.
 
 What it buys:
 
