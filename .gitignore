@@ -49,3 +49,6 @@ apps/web/src/shells/Sample Data/
 desktop-signing-intake/
 *.pfx
 *.secrets.txt
+
+# Local, never-committed live-test drivers and evidence (identities file is 0600)
+/.local/
