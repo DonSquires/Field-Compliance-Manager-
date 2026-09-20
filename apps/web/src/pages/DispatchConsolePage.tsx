@@ -30,13 +30,13 @@ import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { resolveAddressCandidates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
+import { ALARM_INTAKE_CHANNELS, ALARM_SIGNAL_TYPES, localDateTimeValue, responseLadderWords, type AlarmIntakeChannel, type AlarmSignal, type AlarmSignalType } from '../lib/alarmResponse';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './DispatchConsolePage.css';
 
 // Type definitions
 type JobType = 'alarm_response' | 'event' | 'incident' | 'noise_control' | 'patrol_support' | 'welfare_check';
 type JobPriority = 'low' | 'normal' | 'high' | 'urgent';
-type AlarmIntakeChannel = 'phone' | 'email';
 type JobStatus = 'pending' | 'pending_approval' | 'dispatched' | 'acknowledged' | 'en_route' | 'on_scene' | 'completed' | 'cancelled';
 type ShiftStatus = 'scheduled' | 'published' | 'accepted' | 'declined' | 'in_progress' | 'completed' | 'cancelled';
 type StopStatus = 'pending' | 'en_route' | 'on_scene' | 'completed' | 'skipped' | 'cancelled';
@@ -79,6 +79,10 @@ interface DispatchJob {
   timingSource: string | null;
   createdAt: string;
   dispatchedAt?: string;
+  acknowledgedAt?: string | null;
+  enRouteAt?: string | null;
+  onSceneAt?: string | null;
+  completedAt?: string | null;
 }
 
 interface ClientSite {
@@ -212,6 +216,7 @@ const DispatchConsolePage: React.FC = () => {
   // State: Phase A (Load initial data)
   const [activeShifts, setActiveShifts] = useState<ActiveShift[]>([]);
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
+  const [alarmsByJob, setAlarmsByJob] = useState<Record<string, AlarmSignal>>({});
   const [sites, setSites] = useState<ClientSite[]>([]);
   const [resources, setResources] = useState<ResourceUnit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -238,7 +243,8 @@ const DispatchConsolePage: React.FC = () => {
   const [formSlaMinutes, setFormSlaMinutes] = useState(15);
   const [formNotes, setFormNotes] = useState('');
   const [formAlarmIntakeChannel, setFormAlarmIntakeChannel] = useState<AlarmIntakeChannel>('phone');
-  const [formAlarmReceivedAt, setFormAlarmReceivedAt] = useState(() => new Date().toISOString().slice(0, 16));
+  const [formAlarmSignalType, setFormAlarmSignalType] = useState<AlarmSignalType>('burglary');
+  const [formAlarmReceivedAt, setFormAlarmReceivedAt] = useState(() => localDateTimeValue(new Date()));
   const [formZoneId, setFormZoneId] = useState<string>('');
   // Harmed party (complainant) for dual-place jobs: place on the job, identity behind the guarded RPC.
   const [formComplainantAddress, setFormComplainantAddress] = useState('');
@@ -295,11 +301,13 @@ const DispatchConsolePage: React.FC = () => {
               .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
               .eq('organization_id', operatingBranchId)
               .in('status', ['published', 'accepted', 'in_progress']),
-        activeZoneIds && activeZoneIds.length > 0
+        // dispatch_jobs has no zone_id: a zoned agreement scopes its jobs by the agreement itself
+        activeZoneIds && activeZoneIds.length > 0 && selectedAgreement
           ? supabase
               .from('dispatch_jobs')
               .select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)')
-              .in('zone_id', activeZoneIds)
+              .eq('organization_id', operatingBranchId)
+              .eq('service_agreement_id', selectedAgreement.id)
               .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[])
           : supabase
               .from('dispatch_jobs')
@@ -362,8 +370,19 @@ const DispatchConsolePage: React.FC = () => {
           expectedDwellMinutes: j.expected_dwell_minutes ?? null,
           timingSource: j.timing_source ?? null,
           createdAt: j.created_at,
+          dispatchedAt: j.dispatched_at ?? undefined,
+          acknowledgedAt: j.acknowledged_at ?? null,
+          enRouteAt: j.en_route_at ?? null,
+          onSceneAt: j.on_scene_at ?? null,
+          completedAt: j.completed_at ?? null,
         }));
         setJobs(formatted);
+        // ATLAS READS: alarm_events (one per alarm-response job; recorded by record_alarm_signal)
+        const alarmJobIds = formatted.filter((job) => job.jobType === 'alarm_response').map((job) => job.id);
+        if (alarmJobIds.length) {
+          const { data: alarmRows } = await supabase.from('alarm_events').select('dispatch_job_id, received_at, signal_type, intake_channel, panel_id, zone_name, zone_number, account_number').in('dispatch_job_id', alarmJobIds);
+          setAlarmsByJob(Object.fromEntries(((alarmRows as (AlarmSignal & { dispatch_job_id: string })[] | null) ?? []).map((row) => [row.dispatch_job_id, row])));
+        } else setAlarmsByJob({});
       }
 
       if (resourcesRes.data) {
@@ -516,7 +535,7 @@ const DispatchConsolePage: React.FC = () => {
       if (relationshipError) throw new Error(`Service agreement access could not be verified: ${relationshipError}`);
       if (!selectedAgreement) throw new Error('Select a service agreement before creating a dispatch job.');
       const briefingNotes = formJobType === 'alarm_response'
-        ? `[Manual alarm intake: ${formAlarmIntakeChannel}; received ${new Date(formAlarmReceivedAt).toISOString()}]${formNotes.trim() ? `\n${formNotes.trim()}` : ''}`
+        ? `[Alarm ${ALARM_SIGNAL_TYPES.find((type) => type.id === formAlarmSignalType)?.label.toLowerCase() ?? formAlarmSignalType}, received ${new Date(formAlarmReceivedAt).toLocaleString('en-NZ')} by ${ALARM_INTAKE_CHANNELS.find((channel) => channel.id === formAlarmIntakeChannel)?.label.toLowerCase() ?? formAlarmIntakeChannel}]${formNotes.trim() ? `\n${formNotes.trim()}` : ''}`
         : formNotes || null;
 
       const response = isNewIncidentLocation
@@ -542,6 +561,15 @@ const DispatchConsolePage: React.FC = () => {
 
       if (error) throw error;
       if (!data?.length) throw new Error('The dispatch job was not confirmed after creation.');
+
+      if (formJobType === 'alarm_response') {
+        // ATLAS WRITES: record_alarm_signal (the alarm becomes a record; the response clock counts from when it was received)
+        const { error: alarmError } = await supabase.rpc('record_alarm_signal', {
+          p_dispatch_job_id: (data as Array<{ id: string }>)[0].id, p_received_at: new Date(formAlarmReceivedAt).toISOString(),
+          p_signal_type: formAlarmSignalType, p_intake_channel: formAlarmIntakeChannel,
+        });
+        if (alarmError) setWarning(`Job created, but the alarm time was not recorded: ${alarmError.message}. The response clock is counting from when the job was created.`);
+      }
 
       const complainantAddress = (resolvedComplainant?.label ?? formComplainantAddress).trim();
       const hasComplainant = formJobType === 'noise_control' && Boolean(formComplainantSiteId || complainantAddress || formComplainantName.trim() || formComplainantPhone.trim() || formComplainantNotes.trim());
@@ -578,7 +606,8 @@ const DispatchConsolePage: React.FC = () => {
       setFormSlaMinutes(15);
       setFormNotes('');
       setFormAlarmIntakeChannel('phone');
-      setFormAlarmReceivedAt(new Date().toISOString().slice(0, 16));
+      setFormAlarmSignalType('burglary');
+      setFormAlarmReceivedAt(localDateTimeValue(new Date()));
       setFormZoneId('');
       setFormComplainantAddress('');
       setResolvedComplainant(null);
@@ -595,7 +624,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt]);
 
   const resolveComplainantLocation = useCallback(async () => {
     try {
@@ -732,6 +761,22 @@ const DispatchConsolePage: React.FC = () => {
         </div>
 
         <section className="dispatch-job-dialog-detail">
+          <h3>Response so far</h3>
+          {(() => {
+            const ladder = responseLadderWords(selectedJob, alarmsByJob[selectedJob.id] ?? null);
+            return (
+              <>
+                <p className={`dispatch-response-verdict is-${ladder.verdict.tone}`} role="status">{ladder.verdict.text}</p>
+                <ol className="dispatch-response-steps">
+                  {ladder.rows.map((row) => <li key={row.label} className={row.words === 'Not yet' ? 'is-pending' : 'is-done'}><span>{row.label}</span><strong>{row.words}</strong></li>)}
+                </ol>
+                {selectedJob.jobType === 'alarm_response' && !alarmsByJob[selectedJob.id] && <p className="dispatch-console-form-note">Record the alarm time on new alarm jobs so the target counts from the alarm.</p>}
+              </>
+            );
+          })()}
+        </section>
+
+        <section className="dispatch-job-dialog-detail">
           <h3>Where and what to do</h3>
           <p><strong>Address</strong>{selectedJob.siteAddress ?? 'Address not recorded'}</p>
           {selectedJob.briefingNotes && <p><strong>Briefing</strong>{selectedJob.briefingNotes}</p>}
@@ -801,15 +846,21 @@ const DispatchConsolePage: React.FC = () => {
       {formJobType === 'alarm_response' && (
         <>
           <div className="dispatch-console-form-field">
-            <label className="dispatch-console-form-label">Intake channel</label>
-            <select value={formAlarmIntakeChannel} onChange={(e) => setFormAlarmIntakeChannel(e.target.value as AlarmIntakeChannel)}>
-              <option value="phone">Phone call</option>
-              <option value="email">Email</option>
+            <label className="dispatch-console-form-label" htmlFor="alarm-signal-type">Alarm signal</label>
+            <select id="alarm-signal-type" value={formAlarmSignalType} onChange={(e) => setFormAlarmSignalType(e.target.value as AlarmSignalType)}>
+              {ALARM_SIGNAL_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
             </select>
           </div>
           <div className="dispatch-console-form-field">
-            <label className="dispatch-console-form-label">Alarm received at</label>
-            <input type="datetime-local" value={formAlarmReceivedAt} onChange={(e) => setFormAlarmReceivedAt(e.target.value)} />
+            <label className="dispatch-console-form-label" htmlFor="alarm-intake-channel">How it reached us</label>
+            <select id="alarm-intake-channel" value={formAlarmIntakeChannel} onChange={(e) => setFormAlarmIntakeChannel(e.target.value as AlarmIntakeChannel)}>
+              {ALARM_INTAKE_CHANNELS.map((channel) => <option key={channel.id} value={channel.id}>{channel.label}</option>)}
+            </select>
+          </div>
+          <div className="dispatch-console-form-field">
+            <label className="dispatch-console-form-label" htmlFor="alarm-received-at">Alarm received at</label>
+            <input id="alarm-received-at" type="datetime-local" value={formAlarmReceivedAt} max={localDateTimeValue(new Date())} onChange={(e) => setFormAlarmReceivedAt(e.target.value)} />
+            <div className="dispatch-console-form-note">The response target counts from this time, not from when the job is saved.</div>
           </div>
         </>
       )}

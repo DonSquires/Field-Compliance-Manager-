@@ -53,9 +53,10 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain("if (isMobile) setMobileTab('jobs')");
   });
 
-  it('records phone or email provenance for manual alarm responses', () => {
-    expect(source).toContain("type AlarmIntakeChannel = 'phone' | 'email'");
-    expect(source).toContain('[Manual alarm intake: ${formAlarmIntakeChannel}; received ${new Date(formAlarmReceivedAt).toISOString()}]');
+  it('records the alarm behind a manual alarm response as a record, not only as briefing text', () => {
+    expect(source).toContain("import { ALARM_INTAKE_CHANNELS, ALARM_SIGNAL_TYPES, localDateTimeValue, responseLadderWords, type AlarmIntakeChannel, type AlarmSignal, type AlarmSignalType } from '../lib/alarmResponse'");
+    expect(source).toContain("supabase.rpc('record_alarm_signal', {");
+    expect(source).toContain('p_signal_type: formAlarmSignalType, p_intake_channel: formAlarmIntakeChannel');
     expect(source).toContain("formJobType === 'alarm_response' && !formAlarmReceivedAt");
   });
 

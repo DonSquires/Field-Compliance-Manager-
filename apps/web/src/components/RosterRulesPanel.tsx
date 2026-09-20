@@ -57,7 +57,7 @@ export function RosterRulesPanel({ organizationId, organizationName }: { organiz
   return (
     <section className="reports-section roster-rules" aria-labelledby="roster-rules-title">
       <h2 id="roster-rules-title">Rest &amp; hours rules</h2>
-      <p className="subtitle">What the roster checks before it lets anyone roster {organizationName ? `${organizationName}'s` : 'your'} staff. Checked when a shift is created, edited, offered for coverage, or filled from a template.</p>
+      <p className="subtitle">What the roster checks before it lets anyone roster {organizationName ? `${organizationName}'s` : 'your'} staff. Checked whenever a shift is put on the roster for someone — created, edited, filled from an open shift, or filled from a template.</p>
       {loading ? <p className="roster-rules-note">Checking the rules…</p> : (
         <>
           <p className={`roster-rules-state ${rules?.enforced ? 'is-on' : 'is-off'}`} role="status">

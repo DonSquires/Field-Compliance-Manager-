@@ -65,6 +65,15 @@
 .dispatch-job-dialog-detail { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--color-border); }
 .dispatch-job-dialog-detail p { display: grid; gap: 3px; margin: 0; }
 .dispatch-job-dialog-detail p.is-safety { padding: 9px; border-left: 3px solid #e68181; background: #28161b; }
+.dispatch-response-verdict { padding: 9px 11px; border-radius: 6px; font-size: 13px; line-height: 1.45; }
+.dispatch-response-verdict.is-ok { color: #bfe9e1; background: #0f2a2a; border: 1px solid #2c5b57; }
+.dispatch-response-verdict.is-warn { color: #ffe1b8; background: #2b2011; border: 1px solid #7a5a2a; }
+.dispatch-response-verdict.is-stop { color: #ffd7d7; background: #2d1517; border: 1px solid #7f2f36; }
+.dispatch-response-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.dispatch-response-steps li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0 5px 14px; border-left: 2px solid #2c5b57; font-size: 13px; }
+.dispatch-response-steps li.is-pending { border-left-color: #3a5064; color: var(--color-text-secondary, #94a3b8); }
+.dispatch-response-steps li strong { color: inherit; font-size: 13px; text-transform: none; letter-spacing: 0; text-align: right; }
+.dispatch-response-steps li.is-done strong { color: #e7eef5; }
 .dispatch-job-dialog-actions { display: grid; gap: 10px; padding-top: 14px; }
 .dispatch-job-dialog-actions label { display: grid; gap: 5px; color: var(--color-text-secondary); font-size: 12px; }
 .dispatch-job-dialog-actions textarea,
