@@ -14,6 +14,7 @@ import {
   Siren,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { ClientPeoplePanel } from '../components/ClientPeoplePanel';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import type { ClientPortalPage } from '../lib/clientPortalAccess';
 import { getClientPortalPages } from '../lib/clientPortalAccess';
@@ -76,7 +77,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
     mode: agreement.client_portal_access_mode as 'transparency_only' | 'full_modules' | 'scan_only' | null,
     reportsEnabled: agreement.client_portal_reports_enabled,
     financeEnabled: agreement.client_portal_finance_enabled,
-  } : null), [agreement]);
+  } : null, profile?.role), [agreement, profile?.role]);
 
   const loadRecords = useCallback(async () => {
     if (!profile?.organizationId || !agreement) {
@@ -375,6 +376,10 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
         </section>
       )}
 
+      {page === 'people' && profile?.organizationId && profile.role === 'client_admin' && (
+        <ClientPeoplePanel organizationId={profile.organizationId} currentUserId={profile.id} />
+      )}
+
       {page === 'scan' && (
         <div className="client-page-state client-scan-state">
           <ScanLine size={28} aria-hidden="true" />
@@ -387,7 +392,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
 }
 
 function pageTitle(page: ClientPortalPage): string {
-  return { overview: 'Service overview', delivery: 'Service delivered', sites: 'Sites and zones', observations: 'Field observations', reports: 'Monthly reports', finance: 'Invoices', scan: 'Scan access' }[page];
+  return { overview: 'Service overview', delivery: 'Service delivered', sites: 'Sites and zones', observations: 'Field observations', reports: 'Monthly reports', finance: 'Invoices', scan: 'Scan access', people: 'Your people' }[page];
 }
 
 function pageDescription(page: ClientPortalPage): string {
@@ -399,6 +404,7 @@ function pageDescription(page: ClientPortalPage): string {
     reports: 'Generated reporting periods and delivery status.',
     finance: 'Invoices issued against this service agreement.',
     scan: 'Standalone scan access for this service agreement.',
+    people: 'Add the people at your organisation who should be able to sign in, and remove access when they leave.',
   }[page];
 }
 

@@ -86,3 +86,18 @@ test('resend-invite: authority is checked before anything about the target organ
   assert.match(resend, /role_label: ROLE_LABELS\[targetProfile\.role\] \?\? targetProfile\.role,/);
   assert.match(resend, /organization_name: targetOrg\?\.name \?\? 'Field Compliance Manager',/);
 });
+
+test("the client's administrator manages their own people from the client portal; provider staff never appear there", () => {
+  const panel = read('apps/web/src/components/ClientPeoplePanel.tsx');
+  const access = read('apps/web/src/lib/clientPortalAccess.ts');
+  const deactivate = read('supabase/functions/deactivate-user/index.ts');
+  assert.match(access, /if \(role === 'client_admin'\) pages\.add\('people'\);/);
+  assert.match(panel, /\.eq\('organization_id', organizationId\)\.like\('role', 'client_%'\)/);
+  assert.match(panel, /functions\.invoke\('create-user', \{ body: \{ email: form\.email\.trim\(\), display_name: form\.name\.trim\(\), role: form\.role, organization_id: organizationId \} \}\)/);
+  assert.match(panel, /functions\.invoke\('deactivate-user', \{ body: \{ user_id: person\.id, action \} \}\)/);
+  assert.match(panel, /Your service provider's staff never have accounts at your organisation; they see your places through the service agreement\./);
+  // the administrator cannot remove their own access from here
+  assert.match(panel, /const me = person\.id === currentUserId;/);
+  assert.match(deactivate, /'admin',\s*'client_admin'\s*\];/);
+  assert.match(deactivate, /if \(currentProfile\.role === 'client_admin' && !String\(targetUser\.role\)\.startsWith\('client_'\)\)/);
+});

@@ -36,3 +36,9 @@ describe('client portal agreement access', () => {
     expect(isClientPortalPage(undefined)).toBe(false);
   });
 });
+it('a client administrator always has the People page, whatever the agreement allows; other client roles never do', () => {
+  expect([...getClientPortalPages({ mode: 'transparency_only', reportsEnabled: false, financeEnabled: false }, 'client_admin')]).toContain('people');
+  expect([...getClientPortalPages(null, 'client_admin')]).toEqual(['overview', 'people']);
+  expect([...getClientPortalPages({ mode: 'full_modules', reportsEnabled: true, financeEnabled: true }, 'client_viewer')]).not.toContain('people');
+  expect([...getClientPortalPages({ mode: 'scan_only', reportsEnabled: false, financeEnabled: false }, 'client_officer')]).not.toContain('people');
+});

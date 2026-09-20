@@ -1,0 +1,20 @@
+.client-people { display: block; }
+.client-people-notice { display: flex; gap: 8px; align-items: center; margin: 12px 0 0; padding: 9px 12px; border-radius: 6px; color: #bfe9e1; background: #0f2a2a; border: 1px solid #2c5b57; font-size: 13px; }
+.client-people-form { display: grid; grid-template-columns: 1fr 1.2fr 1fr auto; gap: 12px; align-items: end; margin-top: 16px; padding: 14px; border: 1px solid #293d4d; border-radius: 8px; background: #0e1b27; }
+.client-people-form label { display: grid; gap: 5px; font-size: 12px; color: #9fb4c2; }
+.client-people-form input, .client-people-form select { padding: 9px 10px; border: 1px solid #3a5064; border-radius: 6px; color: #e7eef5; background: #0b1520; font: inherit; }
+.client-people-form small { color: #7d92a1; font-size: 11.5px; line-height: 1.4; min-height: 2.8em; }
+.client-people-add { display: inline-flex; gap: 6px; align-items: center; padding: 10px 14px; border: 0; border-radius: 6px; color: #0b1a17; background: #7dd3c7; font: inherit; font-weight: 700; cursor: pointer; }
+.client-people-add:disabled { opacity: .6; cursor: default; }
+.client-people-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 7px; }
+.client-people-list li { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid #293d4d; border-radius: 8px; background: #0e1b27; }
+.client-people-list li.is-off { opacity: .65; }
+.client-people-list li > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.client-people-list strong { font-size: 13px; }
+.client-people-list small { color: #b4c6d2; font-size: 12px; }
+.client-people-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.client-people-actions button { display: inline-flex; gap: 5px; align-items: center; padding: 6px 10px; border: 1px solid #3a5064; border-radius: 6px; color: #c9d6de; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.client-people-actions button.is-remove { color: #ffd7d7; border-color: #7f2f36; }
+.client-people-actions button.is-restore { color: #bfe9e1; border-color: #2c5b57; }
+.client-people-actions button:disabled { opacity: .6; cursor: default; }
+@media (max-width: 860px) { .client-people-form { grid-template-columns: 1fr; } .client-people-list li { flex-direction: column; align-items: flex-start; } }

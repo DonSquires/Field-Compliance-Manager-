@@ -93,3 +93,43 @@ test('an invited client administrator lands on "set your password", sets it, and
   expect(page.url()).toMatch(/\/client/);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('a client administrator adds and removes their own people; a viewer never sees the page', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await installClientPortalFixtures(page, { role: 'client_admin' });
+  let created: Record<string, unknown> | null = null;
+  let toggled: Record<string, unknown> | null = null;
+  await page.route('**/functions/v1/create-user', async (route) => { created = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, user_id: '52525252-5252-4252-8252-525252525252' }) }); });
+  await page.route('**/functions/v1/deactivate-user', async (route) => { toggled = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) }); });
+  await signInAsClient(page);
+  const menu = page.getByRole('button', { name: 'Open navigation' });
+  if (await menu.isVisible()) await menu.click();
+  await page.getByRole('button', { name: 'Your people' }).filter({ visible: true }).first().click();
+  await expect(page.getByRole('heading', { name: 'Who can sign in for your organisation' })).toBeVisible();
+  const list = page.locator('.client-people-list');
+  await expect(list.locator('li')).toHaveCount(2);
+  await expect(list).toContainText('Tia Whaanga (you)');
+  await expect(list).toContainText('Rangi Parata');
+  // the administrator's own row has no actions
+  await expect(list.locator('li').filter({ hasText: '(you)' }).getByRole('button')).toHaveCount(0);
+
+  await page.getByLabel('Name').fill('Moana Kāhu');
+  await page.getByLabel('Email').fill('moana@civic-events.test');
+  await page.getByLabel('Role').selectOption('client_officer');
+  await expect(page.getByText('Everything a viewer sees, plus the day-to-day field records the agreement shares with you.')).toBeVisible();
+  await page.getByRole('button', { name: 'Add person' }).click();
+  await expect(page.getByRole('status')).toContainText('Moana Kāhu has been sent an invitation. They choose their own password from the email.');
+  expect(created).toMatchObject({ email: 'moana@civic-events.test', display_name: 'Moana Kāhu', role: 'client_officer', organization_id: '40404040-4040-4040-8040-404040404040' });
+
+  await list.locator('li').filter({ hasText: 'Rangi Parata' }).getByRole('button', { name: 'Remove access' }).click();
+  await expect(page.getByRole('status')).toContainText('Rangi Parata can no longer sign in.');
+  expect(toggled).toMatchObject({ user_id: '51515151-5151-4151-8151-515151515151', action: 'deactivate' });
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+
+  // a viewer: no nav item, and the URL falls back to the overview
+  await page.context().clearCookies();
+  await installClientPortalFixtures(page, { role: 'client_viewer' });
+  await page.goto('/client/people');
+  await expect(page.getByRole('heading', { name: 'Service overview' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Client portal' }).getByRole('button', { name: 'Your people' })).toHaveCount(0);
+});

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Building2, ChevronLeft, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, Menu, Receipt, ScanLine, Shield, X } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, Eye, FileText, LayoutDashboard, LogOut, Menu, Receipt, ScanLine, Shield, Users, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -19,6 +19,7 @@ const NAVIGATION: Array<{ id: ClientPortalPage; label: string; icon: LucideIcon 
   { id: 'reports', label: 'Reports', icon: FileText },
   { id: 'finance', label: 'Invoices', icon: Receipt },
   { id: 'scan', label: 'Scan access', icon: ScanLine },
+  { id: 'people', label: 'Your people', icon: Users },
 ];
 
 export function ClientShell() {
@@ -36,7 +37,7 @@ export function ClientShell() {
     mode: agreement.client_portal_access_mode as 'transparency_only' | 'full_modules' | 'scan_only' | null,
     reportsEnabled: agreement.client_portal_reports_enabled,
     financeEnabled: agreement.client_portal_finance_enabled,
-  } : null), [agreement]);
+  } : null, profile?.role), [agreement, profile?.role]);
 
   useEffect(() => {
     if (routeSegment && !isClientPortalPage(routeSegment)) navigate('/client', { replace: true });

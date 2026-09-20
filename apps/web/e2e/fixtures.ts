@@ -559,8 +559,13 @@ const CLIENT_ORG_ID = '40404040-4040-4040-8040-404040404040';
 const clientUser = { ...user, id: CLIENT_USER_ID, email: 'facilities@civic-events.test' };
 
 /** A client_viewer at the Civic Events client organisation, on a transparency-only agreement with one site and one zone. */
-export async function installClientPortalFixtures(page: Page, options: { mode?: 'transparency_only' | 'full_modules' | 'scan_only'; reportsEnabled?: boolean } = {}): Promise<void> {
+export async function installClientPortalFixtures(page: Page, options: { mode?: 'transparency_only' | 'full_modules' | 'scan_only'; reportsEnabled?: boolean; role?: 'client_viewer' | 'client_admin' } = {}): Promise<void> {
   const mode = options.mode ?? 'transparency_only';
+  const clientRole = options.role ?? 'client_viewer';
+  const clientPeople = [
+    { id: CLIENT_USER_ID, display_name: 'Tia Whaanga', email: clientUser.email, role: clientRole, organization_id: CLIENT_ORG_ID, employer_organization_id: clientRole === 'client_admin' ? CLIENT_ORG_ID : null, module_access: [], deactivated_at: null, created_at: '2026-08-01T00:00:00.000Z' },
+    ...(clientRole === 'client_admin' ? [{ id: '51515151-5151-4151-8151-515151515151', display_name: 'Rangi Parata', email: 'rangi@civic-events.test', role: 'client_viewer', organization_id: CLIENT_ORG_ID, employer_organization_id: CLIENT_ORG_ID, module_access: [], deactivated_at: null, created_at: '2026-08-10T00:00:00.000Z' }] : []),
+  ];
   await page.route('**/auth/v1/token?grant_type=password', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: 'client-e2e-token', refresh_token: 'client-refresh-token', token_type: 'bearer', expires_in: 3600, expires_at: 1893456000, user: clientUser }) });
   });
@@ -568,7 +573,7 @@ export async function installClientPortalFixtures(page: Page, options: { mode?: 
   await page.route('**/rest/v1/**', async (route) => {
     const url = new URL(route.request().url());
     const resource = url.pathname.split('/').at(-1);
-    if (resource === 'user_profiles') { await route.fulfill(fulfillJson([{ id: CLIENT_USER_ID, display_name: 'Tia Whaanga', email: clientUser.email, role: 'client_viewer', organization_id: CLIENT_ORG_ID, employer_organization_id: null, module_access: [], deactivated_at: null }])); return; }
+    if (resource === 'user_profiles') { await route.fulfill(fulfillJson(url.searchParams.has('id') ? clientPeople.filter((person) => `eq.${person.id}` === url.searchParams.get('id')) : clientPeople)); return; }
     if (resource === 'service_agreements') { await route.fulfill(fulfillJson([{ id: '24242424-2424-4424-8424-242424242424', name: 'Civic Events Compliance Services', agreement_type: 'operational', invitation_status: 'accepted', provider_organization_id: ORG_ID, client_organization_id: CLIENT_ORG_ID, client_portal_access_mode: mode, client_portal_reports_enabled: options.reportsEnabled ?? false, client_portal_finance_enabled: false, allows_client_submission: false, allows_auto_dispatch: false, enabled_modules: ['static_guarding', 'patrol'], created_at: '2026-07-01T00:00:00.000Z', provider: { name: 'Iron Eagle Security' }, client: { name: 'Civic Events Trust' } }])); return; }
     if (resource === 'service_agreement_locations') { await route.fulfill(fulfillJson([{ service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '42424242-4242-4242-8242-424242424242', zone_id: null, status: 'active' }, { service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: null, zone_id: '66666666-6666-4666-8666-666666666666', status: 'active' }])); return; }
     if (resource === 'client_sites') { await route.fulfill(fulfillJson([{ id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', address: '1 Civic Square, Nelson', site_type: 'commercial_premises', client_organization_id: CLIENT_ORG_ID, service_agreement_id: '24242424-2424-4424-8424-242424242424', active: true }])); return; }

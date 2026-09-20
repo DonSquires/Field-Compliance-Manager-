@@ -76,7 +76,8 @@ serve(async (req)=>{
     const allowedRoles = [
       'grand_master',
       'master',
-      'admin'
+      'admin',
+      'client_admin'
     ];
     if (!allowedRoles.includes(currentProfile.role)) {
       return json({
@@ -109,6 +110,12 @@ serve(async (req)=>{
     if (currentProfile.role !== 'grand_master' && targetUser.organization_id !== currentProfile.organization_id) {
       return json({
         error: 'Cannot deactivate users from other organizations'
+      }, 403);
+    }
+    // a client administrator manages client users only, never a provider role seated at the client
+    if (currentProfile.role === 'client_admin' && !String(targetUser.role).startsWith('client_')) {
+      return json({
+        error: 'A client administrator can only manage client users'
       }, 403);
     }
     // Prevent deactivating yourself

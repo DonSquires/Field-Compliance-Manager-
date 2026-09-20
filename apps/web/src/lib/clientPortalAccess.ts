@@ -1,5 +1,5 @@
 export type ClientPortalMode = 'transparency_only' | 'full_modules' | 'scan_only';
-export type ClientPortalPage = 'overview' | 'delivery' | 'sites' | 'observations' | 'reports' | 'finance' | 'scan';
+export type ClientPortalPage = 'overview' | 'delivery' | 'sites' | 'observations' | 'reports' | 'finance' | 'scan' | 'people';
 
 export interface ClientPortalAgreementAccess {
   mode: ClientPortalMode | null;
@@ -7,10 +7,11 @@ export interface ClientPortalAgreementAccess {
   financeEnabled: boolean;
 }
 
-export function getClientPortalPages(access: ClientPortalAgreementAccess | null): ReadonlySet<ClientPortalPage> {
-  if (!access) return new Set<ClientPortalPage>(['overview']);
-
+export function getClientPortalPages(access: ClientPortalAgreementAccess | null, role?: string): ReadonlySet<ClientPortalPage> {
+  // the client's administrator manages who at the client can sign in, whatever the agreement allows them to see
   const pages = new Set<ClientPortalPage>(['overview']);
+  if (role === 'client_admin') pages.add('people');
+  if (!access) return pages;
   // Transparency is the point of the portal: what was delivered at the client's places is visible in every operational mode.
   if (access.mode === 'transparency_only' || access.mode === 'full_modules') pages.add('delivery');
   if (access.reportsEnabled) pages.add('reports');
@@ -24,5 +25,5 @@ export function getClientPortalPages(access: ClientPortalAgreementAccess | null)
 }
 
 export function isClientPortalPage(value: string | undefined): value is ClientPortalPage {
-  return value === 'overview' || value === 'delivery' || value === 'sites' || value === 'observations' || value === 'reports' || value === 'finance' || value === 'scan';
+  return value === 'overview' || value === 'delivery' || value === 'sites' || value === 'observations' || value === 'reports' || value === 'finance' || value === 'scan' || value === 'people';
 }
