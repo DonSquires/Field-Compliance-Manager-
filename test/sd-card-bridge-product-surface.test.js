@@ -40,20 +40,24 @@ test('FCM Desktop product surface is versioned and focused on production workflo
   assert.match(source, /const FCM_WEB_URL = 'https:\/\/fcmanager\.co\.nz'/);
   assert.doesNotMatch(source, /vercel\.app/);
   const adminShell = fs.readFileSync(path.join(root, 'apps/web/src/shells/AdminShell.tsx'), 'utf8');
-  assert.match(adminShell, /releases\/download\/sd-card-bridge-v0\.1\.53\/FCM-SD-Card-Bridge-Setup\.exe/);
+  const releases = fs.readFileSync(path.join(root, 'apps/web/src/lib/desktopReleases.ts'), 'utf8');
+  assert.match(releases, /releases\/download\/sd-card-bridge-v0\.1\.53\/FCM-SD-Card-Bridge-Setup\.exe/);
   // The web app's V2 download must follow the V2 build it advertises: a stale pin here shipped the blank 0.1.3 window
   // to an operator twice (2026-09-17) while 0.1.4/0.1.5 sat unused on the releases page.
   const v2Package = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/package.json'), 'utf8'));
   const v2Tauri = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/tauri.conf.json'), 'utf8'));
   assert.equal(v2Tauri.version, v2Package.version);
-  assert.match(adminShell, new RegExp(`const DESKTOP_V2_VERSION = '${v2Package.version.replace(/\./g, '\\.')}';`));
+  assert.match(releases, new RegExp(`export const DESKTOP_V2_VERSION = '${v2Package.version.replace(/\./g, '\\.')}';`));
   // FCM roles do not grant GitHub auth: V2 is served from the public desktop-releases bucket.
-  assert.match(adminShell, /storage\/v1\/object\/public\/desktop-releases\/v2\/\$\{DESKTOP_V2_VERSION\}\/FCM-Desktop-V2-Setup\.exe/);
-  assert.match(adminShell, /const DESKTOP_V2_FILENAME = `FCM-Desktop-V2-v\$\{DESKTOP_V2_VERSION\}-Setup\.exe`/);
-  assert.match(adminShell, /\?download=\$\{DESKTOP_V2_FILENAME\}/);
+  assert.match(releases, /storage\/v1\/object\/public\/desktop-releases\/v2\/\$\{DESKTOP_V2_VERSION\}/);
+  assert.match(releases, /FCM-Desktop-V2-Setup\.exe\?download=\$\{DESKTOP_V2_FILENAME\}/);
+  assert.match(releases, /export const DESKTOP_V2_FILENAME = `FCM-Desktop-V2-v\$\{DESKTOP_V2_VERSION\}-Setup\.exe`/);
   assert.match(adminShell, /download=\{DESKTOP_V2_FILENAME\}/);
   assert.match(adminShell, /FCM Desktop V2 · v\{DESKTOP_V2_VERSION\}/);
-  assert.match(adminShell, /unsigned development build/);
+  // Signed since 0.1.8 with the organisation's own certificate; the dialog says so and warns about SmartScreen honestly.
+  assert.match(adminShell, /signed by Iron Eagle Security Ltd with our own certificate/);
+  assert.match(adminShell, /SmartScreen may still warn/);
+  assert.doesNotMatch(adminShell, /unsigned development build/);
   assert.ok(capability.permissions.includes('opener:default'));
   for (const label of ['Desktop home', 'One-shot SD import', 'Review in web portal', 'Upload exported video', 'FCM web portal']) {
     assert.match(source, new RegExp(label));

@@ -10,12 +10,14 @@ const entrypoint = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-t
 const readme = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/README.md'), 'utf8');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-sd-card-bridge-v2.yml'), 'utf8');
 
-test('Desktop V2 preserves V1 and implements clone-first acquisition boundaries', () => {
-  assert.match(source, /Clone first\. Decode second\./);
+test('Desktop V2 preserves V1 and keeps its read-only, card-first boundaries', () => {
+  // 0.2.0 ruling: the card is the drive. Recordings are read straight from the hidden partition; the exact image is optional.
+  assert.match(source, /Read the card\. Send the recordings\./);
   assert.match(source, /Discover camera cards and disks/);
+  assert.match(source, /List recordings directly from card/);
   assert.match(source, /Acquire exact image/);
   assert.match(source, /Inspect image and map partitions/);
-  assert.match(source, /Prototype only\. V1 remains the working field bridge\./);
+  assert.match(source, /Optional forensic copy/);
   assert.match(native, /OpenOptions::new\(\)\.read\(true\)\.write\(false\)/);
   assert.match(native, /acquire_read_only_device_image/);
   assert.match(entrypoint, /fcm_sd_card_bridge_v2_lib::run/);
@@ -27,8 +29,11 @@ test('Desktop V2 preserves V1 and implements clone-first acquisition boundaries'
   assert.match(native, /with_extension\("img\.part"\)/);
   assert.match(native, /Could not commit verified image atomically/);
   assert.match(readme, /does not replace or modify Desktop V1/);
+  // GitHub builds and publishes an unsigned installer with its integrity manifest; signing happens on the protected side
+  // (scripts/desktop-signing/sign-and-publish.mjs) and replaces the release assets with the signed set.
   assert.match(workflow, /FCM-Desktop-V2-Setup\.exe/);
-  assert.match(workflow, /Build unsigned development installer/);
+  assert.match(workflow, /Write integrity manifest \(unsigned build\)/);
+  assert.match(workflow, /Publish V2 release \(unsigned; sign on the protected side\)/);
   assert.match(workflow, /SmartScreen/);
   assert.match(workflow, /Reuse the approved FCM desktop icon set/);
 });
@@ -56,7 +61,9 @@ test('Desktop V2 can never open to a silent blank window and always says which b
   assert.match(indexHtml, /window\.addEventListener\('error'/);
   assert.match(indexHtml, /window\.addEventListener\('unhandledrejection'/);
   assert.match(indexHtml, /did not mount within 8 seconds/);
-  assert.match(cargo, /features = \["devtools"\]/);
+  // devtools stays on for field diagnosis; protocol-asset exists only so the in-app player can read the previews folder.
+  assert.match(cargo, /features = \["devtools", "protocol-asset"\]/);
+  assert.deepEqual(v2Tauri.app.security.assetProtocol, { enable: true, scope: ['$APPLOCALDATA/previews/**'] });
 });
 
 test('Desktop V2 finds the card behind a drive letter and can describe an unrecognised one', () => {
@@ -137,6 +144,33 @@ test('Desktop V2 exposes catalog + extraction to the UI from either the image or
   assert.match(source, /List recordings directly from card/);
   assert.match(source, /readCatalog\(\{ kind: 'device', id: selectedDevice\.id, sizeBytes: selectedDevice\.sizeBytes \}\)/);
   assert.match(source, /if \(result\.dhfs\) await readCatalog\(\{ kind: 'image', path: receipt\.imagePath \}\)/);
-  assert.match(source, /invoke<ExtractedClip>\('extract_dhfs_recording', \{ source: catalogSource, partitionIndex: recording\.partitionIndex, descriptor: recording\.descriptor, destinationDirectory: directory \}\)/);
+  // Every extraction reuses a finished copy rather than refusing or duplicating it; the operator chooses the folder.
+  assert.match(source, /invoke<ExtractedClip>\('extract_dhfs_recording', \{ source: catalogSource, partitionIndex: recording\.partitionIndex, descriptor: recording\.descriptor, destinationDirectory: chosen, reuseExisting: true \}\)/);
+  assert.match(source, /invoke<ExtractedClip>\('extract_dhfs_recording', \{ source: catalogSource, partitionIndex: recording\.partitionIndex, descriptor: recording\.descriptor, destinationDirectory: directory, reuseExisting: true \}\)/);
   assert.match(workflow, /cargo test --manifest-path crates\/dhfs\/Cargo\.toml/);
+  assert.match(workflow, /cargo test --manifest-path crates\/decoder\/Cargo\.toml/);
+});
+
+const decoder = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/crates/decoder/src/lib.rs'), 'utf8');
+
+test('Desktop V2 "Review here" trusts the decoder by hash only and never treats a preview as evidence', () => {
+  // The sidecar is pinned: version, byte size and SHA-256 of both the binary and its licence are compiled in.
+  assert.match(decoder, /pub const FFMPEG_SHA256: &str = "[0-9a-f]{64}";/);
+  assert.match(decoder, /pub const LICENSE_SHA256: &str = "[0-9a-f]{64}";/);
+  assert.match(decoder, /win64-lgpl/);
+  // Every use re-hashes the installed file; a swapped binary is refused, not run.
+  assert.match(native, /fn verified_ffmpeg\(app: &tauri::AppHandle\)/);
+  assert.match(native, /if digest != fcm_decoder::FFMPEG_SHA256 \{ return Err\(/);
+  assert.match(native, /The downloaded file's hash .* does not match the pinned build\. It was discarded; nothing was installed\./);
+  // Previews live under the app's own data folder and are never uploaded or registered.
+  assert.match(native, /Never uploaded, never registered: the evidence is the extracted original\./);
+  assert.match(native, /app_local_data\(&app\)\?\.join\("previews"\)/);
+  assert.doesNotMatch(source, /upload_clip_resumable'[^\n]*preview\.path/);
+  assert.match(source, /viewing copy only, never sent/);
+  // Sending is unchanged: the extracted original goes up with the hash taken from the card.
+  assert.match(source, /supabase\.rpc\('register_cctv_import_video', \{[^}]*p_sha256: clip\.sha256/);
+  for (const command of ['decoder_status', 'install_decoder', 'render_filmstrip', 'render_preview', 'clear_previews', 'export_mp4']) {
+    assert.match(native, new RegExp(`#\\[tauri::command\\(async\\)\\]\\s*fn ${command}\\(`), `${command} runs off the main thread`);
+    assert.match(native, new RegExp(`generate_handler!\\[[^\\]]*${command}`), `${command} is registered`);
+  }
 });

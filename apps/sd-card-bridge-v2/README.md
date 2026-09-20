@@ -1,6 +1,8 @@
 # FCM Desktop V2
 
-Desktop V2 is the Windows companion the web app links to for Dahua cards, built beside the older `apps/sd-card-bridge` application.
+Desktop V2 is the Windows companion the web app links to for Dahua cards, built beside the older `apps/sd-card-bridge`
+application. It does not replace or modify Desktop V1: V1 stays the stable bridge for mountable cards and its own release
+line; V2 owns the hidden-partition (DHFS) path, local review and the video-files source.
 
 ## Purpose
 
