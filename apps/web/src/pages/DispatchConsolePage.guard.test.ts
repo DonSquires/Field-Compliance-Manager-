@@ -93,7 +93,9 @@ describe('dispatch agreement and creation boundary', () => {
   });
 
   it('uses agreement attribution instead of a phantom requester organization workflow', () => {
-    expect(source).toContain('Client: {selectedAgreement?.client_name');
+    expect(source).toContain("`Client: ${selectedAgreement?.client_name");
+    // only agreements the operating branch holds are offered; the house-wide context carries sibling branches' agreements too
+    expect(source).toContain('agreements.filter((agreement) => agreement.provider_organization_id === operatingBranchId)');
     expect(source).not.toContain('requesterOrgs');
     expect(source).not.toContain('loadPhaseC');
   });
