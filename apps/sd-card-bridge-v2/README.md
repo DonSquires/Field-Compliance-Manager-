@@ -86,7 +86,16 @@ the signed-in user under row-level security, and the session is held in memory o
   duration / codec / container `creation_time` read from the decoder's banner. The recorded start comes from the
   file name when a recorder wrote one there, else the container's creation time, else an estimate from the
   modified time — the source is shown next to an editable field and recorded in the import manifest
-  (`start_time_source`).
+  (`start_time_source`). Listing also classifies each file's `content` from its name and 4 KiB at four offsets
+  (never the decoder, never a full read): `video` (a recognised container signature — ISO BMFF, Matroska, AVI,
+  ASF, FLV, MPEG-TS/PS, DHAV, Annex B), `unwritten` (a slot the recorder pre-allocated by name and never recorded
+  into — Tapo `xxxxxxxx_000000_tpNNNNN.mp4`), `blank` (filler bytes throughout), `unrecognised` (data with no
+  known signature; listed for the decoder to judge) or `offline` (a cloud-sync placeholder, not opened so nothing
+  is fetched). `unwritten` and `blank` files are set aside: counted and sized, listed only on request, never in
+  "Send all".
+- `render_thumbnail` — the list's thumbnail: one small JPEG of a file's first key frame, decoded on this
+  computer, cached under `<app local data>/previews/thumbs/` against the file's path, size and modified time,
+  requested only when a row scrolls into view and at most two at a time. A viewing aid; cleared with the previews.
 - `read_pictures` — the JPEGs of a picture-stream extraction, so its review shows the pictures themselves.
 - `load_review_state` / `save_review_state` — the operator's working notes for one card or folder (marks, per-day
   and per-recording place, what was sent and to which import), kept on this computer under
@@ -127,6 +136,17 @@ through events and sends Play / Send / Skip back the same way. The plan for loca
   undecided recordings, anything sent but not yet verified by FCM (or with a hash mismatch — the row says so),
   and copies the operator saved on purpose with "Save to folder". Removal always asks first, is bounded to the
   working folder by the native side, and the review state forgets only what was actually removed.
+
+0.4.4 (owner field notes 2026-09-20, Tapo card: 915 files, 228 GB, two real recordings) sets aside the files
+that hold no recording and puts a thumbnail on each file row. A Tapo camera fills its card with 256 MB
+placeholder slots named `xxxxxxxx_000000_tpNNNNN.mp4` and renames one to its start time only when it records
+into it; the list showed all 915 as video files with meaningless "last written" start times. Now the listing
+classifies each file's content (see `list_video_files` above): unwritten slots and blank files are counted and
+sized in the facts ("Set aside 913 unwritten or blank · 228.2 GB") but not listed, not counted as video files
+and never part of "Send all"; "Show" lists them, greyed with a badge, so the operator can check one and send it
+on its own if they must. Files with no recognised header stay listed with an amber badge for the decoder to
+judge; cloud-only placeholders are never opened during listing. Each listed file row carries a thumbnail of
+its first key frame (decoder required), loaded as rows scroll into view.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device

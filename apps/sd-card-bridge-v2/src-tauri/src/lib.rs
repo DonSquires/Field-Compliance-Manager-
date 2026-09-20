@@ -667,7 +667,41 @@ fn clear_previews(app: tauri::AppHandle) -> Result<u64, String> {
             if entry.path().extension().map(|ext| ext == "mp4").unwrap_or(false) { freed += entry.metadata().map(|m| m.len()).unwrap_or(0); let _ = fs::remove_file(entry.path()); }
         }
     }
+    if let Ok(entries) = fs::read_dir(previews.join("thumbs")) {
+        for entry in entries.flatten() {
+            if entry.path().extension().map(|ext| ext == "jpg").unwrap_or(false) { freed += entry.metadata().map(|m| m.len()).unwrap_or(0); let _ = fs::remove_file(entry.path()); }
+        }
+    }
     Ok(freed)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Thumbnail { jpeg_base64: String, cached: bool }
+
+/// One small JPEG of a file's first key frame for the list, kept under the app's previews folder against the
+/// file's path, size and modified time so a changed file is decoded again. A viewing aid only, never sent.
+#[tauri::command(async)]
+fn render_thumbnail(app: tauri::AppHandle, path: String) -> Result<Thumbnail, String> {
+    let ffmpeg = verified_ffmpeg(&app)?;
+    let metadata = fs::metadata(&path).map_err(|error| format!("The file could not be read: {error}"))?;
+    let modified = metadata.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis()).unwrap_or(0);
+    let mut hasher = Sha256::new();
+    hasher.update(path.as_bytes()); hasher.update(metadata.len().to_le_bytes()); hasher.update(modified.to_le_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    let thumbs = app_local_data(&app)?.join("previews").join("thumbs");
+    fs::create_dir_all(&thumbs).map_err(|error| error.to_string())?;
+    let output = thumbs.join(format!("{}.jpg", &digest[..32]));
+    if let Ok(bytes) = fs::read(&output) {
+        if !bytes.is_empty() { return Ok(Thumbnail { jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes), cached: true }); }
+    }
+    let (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::thumbnail_args(&path, &output.to_string_lossy()), Duration::from_secs(45))?;
+    let bytes = fs::read(&output).unwrap_or_default();
+    if bytes.is_empty() {
+        let _ = fs::remove_file(&output);
+        return Err(if ok { "The decoder produced no frame for this file.".to_string() } else { format!("The decoder could not read this file: {}", stderr.lines().last().unwrap_or("no detail").trim()) });
+    }
+    Ok(Thumbnail { jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes), cached: false })
 }
 
 #[derive(Serialize)]
@@ -714,21 +748,62 @@ const VIDEO_EXTENSIONS: [&str; 15] = ["mp4", "mov", "mkv", "avi", "m4v", "ts", "
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LocalVideoFile { path: String, file_name: String, extension: String, bytes: u64, modified_epoch_ms: u64 }
+struct LocalVideoFile { path: String, file_name: String, extension: String, bytes: u64, modified_epoch_ms: u64, content: &'static str, container: Option<&'static str> }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VideoFolder { directory: String, files: Vec<LocalVideoFile>, subfolders: u32, other_files: u32 }
+
+#[cfg(windows)]
+fn is_cloud_placeholder(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+    metadata.file_attributes() & (FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0
+}
+#[cfg(not(windows))]
+fn is_cloud_placeholder(_metadata: &fs::Metadata) -> bool { false }
+
+/// What a file holds, from its name and 4 KiB at four offsets — never the decoder, never a full read.
+/// `offline` (a cloud placeholder) is not opened: reading it would make the sync client fetch the whole file.
+/// `unwritten` is a slot the recorder pre-allocated and never recorded into; `blank` is filler bytes throughout;
+/// `video` names the container found; `unrecognised` is data with no known signature, listed and left to the
+/// decoder.
+fn sniff_video_content(path: &Path, file_name: &str, metadata: &fs::Metadata) -> (&'static str, Option<&'static str>) {
+    const SAMPLE: usize = 4096;
+    if is_cloud_placeholder(metadata) { return ("offline", None); }
+    if fcm_decoder::is_unwritten_slot_name(file_name) { return ("unwritten", None); }
+    let len = metadata.len();
+    let Ok(mut file) = File::open(path) else { return ("unrecognised", None); };
+    let mut read_at = |offset: u64| -> Vec<u8> {
+        let mut buffer = vec![0_u8; SAMPLE.min(len.saturating_sub(offset) as usize)];
+        if buffer.is_empty() || file.seek(SeekFrom::Start(offset)).is_err() { return Vec::new(); }
+        let mut done = 0;
+        while done < buffer.len() { match file.read(&mut buffer[done..]) { Ok(0) | Err(_) => break, Ok(count) => done += count } }
+        buffer.truncate(done);
+        buffer
+    };
+    let head = read_at(0);
+    if let Some(container) = fcm_decoder::container_signature(&head) { return ("video", Some(container)); }
+    let body: Vec<Vec<u8>> = if len > (SAMPLE as u64) * 4 { [len / 4, len / 2, len / 4 * 3].into_iter().map(&mut read_at).collect() } else { Vec::new() };
+    let samples: Vec<&[u8]> = std::iter::once(head.as_slice()).chain(body.iter().map(Vec::as_slice)).collect();
+    if fcm_decoder::is_blank(&samples) { return ("blank", None); }
+    ("unrecognised", None)
+}
 
 /// A file as the list shows it, or `None` when it is not a non-empty video file by extension.
 fn describe_video_file(path: &Path, metadata: &fs::Metadata) -> Option<LocalVideoFile> {
     let extension = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     if !VIDEO_EXTENSIONS.contains(&extension.as_str()) || metadata.len() == 0 { return None; }
     let modified_epoch_ms = metadata.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-    Some(LocalVideoFile { path: path.to_string_lossy().to_string(), file_name: path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), extension, bytes: metadata.len(), modified_epoch_ms })
+    let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let (content, container) = sniff_video_content(path, &file_name, metadata);
+    Some(LocalVideoFile { path: path.to_string_lossy().to_string(), file_name, extension, bytes: metadata.len(), modified_epoch_ms, content, container })
 }
 
-/// The video files directly inside a folder (not its subfolders), by name. Nothing is opened yet.
+/// The video files directly inside a folder (not its subfolders), by name. Each is opened only for the
+/// content sniff (a few kilobytes); nothing is decoded or hashed yet.
 #[tauri::command(async)]
 fn list_video_files(directory: String) -> Result<VideoFolder, String> {
     let entries = fs::read_dir(&directory).map_err(|error| format!("The folder could not be read: {error}"))?;
@@ -945,5 +1020,5 @@ fn remove_local_files(paths: Vec<String>, roots: Vec<String>) -> Result<RemovalR
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, export_mp4, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures, load_review_state, save_review_state, disk_report, remove_local_files]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, render_thumbnail, export_mp4, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures, load_review_state, save_review_state, disk_report, remove_local_files]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

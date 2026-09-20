@@ -60,6 +60,17 @@ Removal asks first, is bounded to the working folder on the native side, and rev
 actually removed. Review state lives under `<app local data>/review-state/<sha256(scope)>.json`, scoped by card
 identity or folder path, so the same card restores its notes.
 
+**0.4.4 (owner field notes 2026-09-20):** a Tapo card listed 915 "video files" (228 GB) of which two were
+recordings; the rest are the camera's pre-allocated 256 MB slots (`xxxxxxxx_000000_tpNNNNN.mp4`, renamed to a
+start time only once recorded into). Listing now classifies each file's content from its name and 4 KiB at four
+offsets — `video` / `unwritten` / `blank` / `unrecognised` / `offline` — without the decoder and without
+opening cloud-sync placeholders. Unwritten and blank files are **set aside**: counted and sized in the facts,
+listed only on request (greyed, badged), never in "Send all". Verified against the operator's real Tapo
+recording in the bucket (`ftyp isom` at byte 4 → `video`). File rows gain a **thumbnail** of the first key
+frame (`render_thumbnail`, cached under previews, two decodes at a time, requested as rows scroll into view).
+The pure rules (`container_signature`, `is_blank`, `is_unwritten_slot_name`, `thumbnail_args`) live in
+`crates/decoder` with tests.
+
 ## Phase 2 — Analyse here (0.5.x)
 
 Goal: the laptop runs the same detection/recognition tier the VPS runs and FCM receives **results**, not footage,

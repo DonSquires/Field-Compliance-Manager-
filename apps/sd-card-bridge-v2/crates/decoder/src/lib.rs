@@ -199,6 +199,59 @@ pub fn parse_media_probe(stderr: &str) -> MediaProbe {
     probe
 }
 
+const ISO_BMFF_BOXES: [&[u8; 4]; 11] = [b"ftyp", b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot", b"styp", b"sidx", b"moof", b"uuid"];
+const ASF_HEADER_GUID: [u8; 16] = [0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA, 0x00, 0x62, 0xCE, 0x6C];
+
+/// The container the first bytes of a file announce, without running the decoder. `None` means no known
+/// signature — not proof that the file holds nothing.
+pub fn container_signature(head: &[u8]) -> Option<&'static str> {
+    if head.len() >= 12 && &head[0..4] == b"RIFF" && &head[8..12] == b"AVI " { return Some("avi"); }
+    if head.len() >= 4 && head[0..4] == [0x1A, 0x45, 0xDF, 0xA3] { return Some("matroska"); }
+    if head.len() >= 4 && &head[0..4] == b"DHAV" { return Some("dhav"); }
+    if head.len() >= 3 && &head[0..3] == b"FLV" { return Some("flv"); }
+    if head.len() >= 16 && head[0..16] == ASF_HEADER_GUID { return Some("asf"); }
+    if head.len() >= 8 && ISO_BMFF_BOXES.iter().any(|box_type| &head[4..8] == *box_type) { return Some("mp4"); }
+    if head.len() >= 4 && head[0..4] == [0x00, 0x00, 0x01, 0xBA] { return Some("mpeg_ps"); }
+    if head.len() >= 4 && (head[0..4] == [0x00, 0x00, 0x00, 0x01] || head[0..3] == [0x00, 0x00, 0x01]) { return Some("annex_b"); }
+    if head.len() > 376 && head[0] == 0x47 && head[188] == 0x47 && head[376] == 0x47 { return Some("mpeg_ts"); }
+    if head.len() > 388 && head[4] == 0x47 && head[196] == 0x47 && head[388] == 0x47 { return Some("mpeg_ts"); }
+    None
+}
+
+/// True when every sampled byte is the same filler value (0x00 or 0xFF): a slot the recorder pre-allocated
+/// but never wrote into, or erased flash. Callers sample several offsets so a recording whose header alone
+/// is zeroed is not mistaken for one.
+pub fn is_blank(samples: &[&[u8]]) -> bool {
+    let mut filler: Option<u8> = None;
+    for &byte in samples.iter().flat_map(|sample| sample.iter()) {
+        match filler {
+            None if byte == 0x00 || byte == 0xFF => filler = Some(byte),
+            None => return false,
+            Some(value) if byte != value => return false,
+            Some(_) => {}
+        }
+    }
+    filler.is_some()
+}
+
+/// A recorder's own placeholder name for a slot it pre-allocated but has not recorded into. TP-Link Tapo
+/// cameras fill a card with 256 MB `xxxxxxxx_000000_tp00012.mp4` slots and rename one to its start time
+/// (`20260911_143156_tp00000.mp4`) only when a recording is written into it. Whatever bytes such a slot
+/// still holds are a previous occupant's leftovers, not a recording the camera stands behind.
+pub fn is_unwritten_slot_name(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    lower.starts_with("xxxxxxxx_000000_tp") && lower.ends_with(".mp4")
+}
+
+/// ffmpeg arguments for the list's thumbnail: the first key frame, decoded alone, as one small JPEG.
+pub fn thumbnail_args(input: &str, output: &str) -> Vec<String> {
+    [
+        "-hide_banner", "-nostdin", "-loglevel", "error", "-fflags", "+genpts", "-skip_frame", "nokey",
+        "-i", input, "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=192:-2", "-q:v", "6",
+        "-f", "image2", "-update", "1", "-y", output,
+    ].map(String::from).to_vec()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +363,60 @@ mod tests {
     fn hashes_a_stream() {
         let mut bytes: &[u8] = b"abc";
         assert_eq!(sha256_of(&mut bytes).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    #[test]
+    fn recognises_container_signatures_from_the_first_bytes() {
+        assert_eq!(container_signature(&[0, 0, 0, 0x18, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm']), Some("mp4"));
+        assert_eq!(container_signature(&[0, 0, 0, 0x10, b'm', b'o', b'o', b'f', 0, 0, 0, 0]), Some("mp4"));
+        assert_eq!(container_signature(b"RIFF\x00\x00\x00\x00AVI LIST"), Some("avi"));
+        assert_eq!(container_signature(&[0x1A, 0x45, 0xDF, 0xA3, 0x9F]), Some("matroska"));
+        assert_eq!(container_signature(b"DHAV\x00\x00\x00\x00"), Some("dhav"));
+        assert_eq!(container_signature(b"FLV\x01"), Some("flv"));
+        assert_eq!(container_signature(&ASF_HEADER_GUID), Some("asf"));
+        assert_eq!(container_signature(&[0, 0, 1, 0xBA, 0x44]), Some("mpeg_ps"));
+        assert_eq!(container_signature(&[0, 0, 0, 1, 0x67]), Some("annex_b"));
+        assert_eq!(container_signature(&[0, 0, 1, 0x40]), Some("annex_b"));
+        let mut ts = vec![0x11_u8; 400];
+        ts[0] = 0x47; ts[188] = 0x47; ts[376] = 0x47;
+        assert_eq!(container_signature(&ts), Some("mpeg_ts"));
+        assert_eq!(container_signature(&[0_u8; 512]), None);
+        assert_eq!(container_signature(b"hello world, not a video"), None);
+        assert_eq!(container_signature(&[]), None);
+    }
+
+    #[test]
+    fn blank_means_one_filler_byte_at_every_sampled_offset() {
+        let zeros = [0_u8; 64];
+        let ones = [0xFF_u8; 64];
+        let mut zeroed_header_real_body = [0_u8; 64];
+        zeroed_header_real_body[40] = 0x47;
+        assert!(is_blank(&[&zeros, &zeros, &zeros]));
+        assert!(is_blank(&[&ones, &ones]));
+        assert!(!is_blank(&[&zeros, &ones]), "mixed fillers are not one pre-allocated slot");
+        assert!(!is_blank(&[&zeros, &zeroed_header_real_body]), "content later in the file is not blank");
+        assert!(!is_blank(&[&[0x33_u8; 8]]), "a repeated byte other than 0x00/0xFF is data");
+        assert!(!is_blank(&[]));
+        assert!(!is_blank(&[&[]]));
+    }
+
+    #[test]
+    fn tapo_placeholder_slots_are_unwritten_by_name() {
+        assert!(is_unwritten_slot_name("xxxxxxxx_000000_tp00002.mp4"));
+        assert!(is_unwritten_slot_name("XXXXXXXX_000000_TP00914.MP4"));
+        assert!(!is_unwritten_slot_name("20260911_143156_tp00000.mp4"));
+        assert!(!is_unwritten_slot_name("xxxxxxxx_000000_tp00002.dav"));
+        assert!(!is_unwritten_slot_name("Gingerbread BBQ 2 Jan 2023.mp4"));
+    }
+
+    #[test]
+    fn thumbnail_args_decode_one_key_frame_into_a_single_jpeg() {
+        let args = thumbnail_args("C:\\v\\a.mp4", "C:\\t\\a.jpg");
+        assert!(args.windows(2).any(|w| w == ["-skip_frame", "nokey"]));
+        assert!(args.windows(2).any(|w| w == ["-frames:v", "1"]));
+        assert!(args.windows(2).any(|w| w == ["-update", "1"]), "a plain file name needs -update or image2 treats it as a pattern");
+        assert!(args.windows(2).any(|w| w == ["-vf", "scale=192:-2"]));
+        assert_eq!(args.last().map(String::as_str), Some("C:\\t\\a.jpg"));
+        assert!(args.contains(&"-nostdin".to_string()));
     }
 }
