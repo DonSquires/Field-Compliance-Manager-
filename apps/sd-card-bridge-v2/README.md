@@ -79,17 +79,24 @@ the signed-in user under row-level security, and the session is held in memory o
   own use. H.264 sources are copied frame for frame; anything else (Dahua cards are usually HEVC, which a stock
   Windows install cannot play) is re-encoded to H.264 on the GPU, or in software when no NVENC device answers.
   Video only; an existing `.mp4` in that folder is kept, never overwritten. The `.dav` remains the evidence.
-- `list_video_files` / `hash_local_file` / `probe_video_file` — the second source, "Video files": any folder this
-  computer can see (camera exports, downloads, synced cloud folders). Files are listed by recorded day, hashed
-  where they lie before sending, and their duration / codec / container `creation_time` read from the decoder's
-  banner. The recorded start comes from the file name when a recorder wrote one there, else the container's
-  creation time, else an estimate from the modified time — the source is shown next to an editable field and
-  recorded in the import manifest (`start_time_source`).
+- `list_video_files` / `describe_video_files` / `hash_local_file` / `probe_video_file` — the second source, "Video
+  files": files the operator picks (the file picker shows files; Windows' folder picker shows folders only, so
+  "choose a whole folder" is the alternative) or a whole folder this computer can see (camera exports, downloads,
+  synced cloud folders). Files are listed by recorded day, hashed where they lie before sending, and their
+  duration / codec / container `creation_time` read from the decoder's banner. The recorded start comes from the
+  file name when a recorder wrote one there, else the container's creation time, else an estimate from the
+  modified time — the source is shown next to an editable field and recorded in the import manifest
+  (`start_time_source`).
+- `read_pictures` — the JPEGs of a picture-stream extraction, so its review shows the pictures themselves.
 
 "Review here" (0.4.0) lets the operator preview a recording on the laptop and choose **Send** or **Skip** per
 recording; skipped recordings are left out of "Send all". Sending itself is unchanged: the `-r2` original with
 its card-side SHA-256 goes to `register_cctv_import_video`. 0.4.1 added the "Video files" source and "Save to
-folder" (hashed original + playable MP4 wherever the operator chooses). The plan for local analysis is
+folder" (hashed original + playable MP4 wherever the operator chooses). 0.4.2 marks a saved recording as saved
+(and asks before writing a second copy), lets the operator pick video files directly, shows picture-stream
+reviews as pictures, and adds **Pop out**: the preview opens in its own window (`index.html?popout=1`, the same
+bundle) for a second screen. The workstation window owns every decision; the pop-out mirrors the open review
+through events and sends Play / Send / Skip back the same way. The plan for local analysis is
 `docs/DESKTOP_LOCAL_PROCESSING_PLAN.md`.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "FCM Desktop V2 main window: core IPC/events plus the native open/save dialogs used to pick image and clip destinations.",
-  "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "description": "FCM Desktop V2 windows: core IPC/events, the native open/save dialogs used to pick image and clip destinations, and the pop-out preview window the workstation opens on a second screen.",
+  "windows": ["main", "preview"],
+  "permissions": ["core:default", "dialog:default", "core:webview:allow-create-webview-window", "core:window:allow-set-focus", "core:window:allow-close", "core:window:allow-unminimize"]
 }

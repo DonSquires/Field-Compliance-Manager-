@@ -1,10 +1,12 @@
 import { Fragment, StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { emitTo, listen } from '@tauri-apps/api/event';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { ask, open, save } from '@tauri-apps/plugin-dialog';
 import { createClient, type Session } from '@supabase/supabase-js';
-import { Activity, CheckCircle2, ChevronRight, Clapperboard, Cpu, Download, EyeOff, Film, FolderOpen, HardDrive, LockKeyhole, LogIn, LogOut, MapPin, Play, Search, Send, ShieldCheck, Square, Trash2, Undo2, UploadCloud, Waves } from 'lucide-react';
+import { Activity, CheckCircle2, ChevronRight, Clapperboard, Cpu, Download, ExternalLink, EyeOff, Film, FolderOpen, HardDrive, LockKeyhole, LogIn, LogOut, MapPin, Play, Search, Send, ShieldCheck, Square, Trash2, Undo2, UploadCloud, Waves } from 'lucide-react';
 import './styles.css';
 
 type AcquisitionStage = 'idle' | 'discovery' | 'ready' | 'cloning' | 'verifying' | 'complete' | 'failed';
@@ -157,13 +159,15 @@ type DecoderStatus = { installed: boolean; version: string; path: string | null;
 type DecoderProgress = { bytesDone: number; totalBytes: number };
 type Filmstrip = { frames: Array<{ atSeconds: number; jpegBase64: string }>; keyFramesUsed: number };
 type PreviewRendition = { path: string; bytes: number; encoder: 'nvenc' | 'software' | null; seconds: number; cached: boolean };
-type ReviewState = { busy: 'filmstrip' | 'preview' | null; filmstrip?: Filmstrip; preview?: PreviewRendition; error?: string };
+type ReviewState = { busy: 'filmstrip' | 'preview' | null; filmstrip?: Filmstrip; preview?: PreviewRendition; error?: string; note?: string };
 type Mp4Mode = 'stream_copy' | { h264: 'nvenc' | 'software' };
 type Mp4Export = { path: string; bytes: number; mode: Mp4Mode | null; seconds: number; existing: boolean };
+/** Where the operator chose to save a recording this session; shown on the row so it is not saved twice by accident. */
+type SavedCopy = { directory: string; fileName: string; mp4: Mp4Export | null };
 
 // Video files already on this computer (or in a synced cloud folder): the second source besides the card.
 type LocalVideoFile = { path: string; fileName: string; extension: string; bytes: number; modifiedEpochMs: number };
-type VideoFolder = { directory: string; files: LocalVideoFile[]; subfolders: number; otherFiles: number };
+type VideoFolder = { directory: string; files: LocalVideoFile[]; subfolders: number; otherFiles: number; picked: boolean };
 type MediaProbe = { durationSeconds: number | null; creationTime: string | null; codec: string | null; width: number | null; height: number | null };
 /** Where a file's recorded start came from; every option is shown to the operator, who can overrule it. */
 type ClockSource = 'file_name' | 'file_metadata' | 'modified_time' | 'operator';
@@ -172,6 +176,21 @@ type FileFacts = { sha256: string; bytes: number; probe: MediaProbe | null };
 type SourceMode = 'card' | 'files';
 /** One thing the operator can preview, send or skip: a recording on the card or a video file in a folder. */
 type SourceItem = { kind: 'card'; key: string; recording: DhfsRecording } | { kind: 'file'; key: string; file: LocalVideoFile };
+
+// The pop-out preview is this same bundle in a second window (`?popout=1`). The workstation window owns every
+// decision; the pop-out shows what it is told and sends the operator's choice back as an event.
+const POPOUT_LABEL = 'preview';
+const POPOUT_STATE_EVENT = 'preview-popout-state';
+const POPOUT_ACTION_EVENT = 'preview-popout-action';
+const POPOUT_READY_EVENT = 'preview-popout-ready';
+type PopoutState = {
+  title: string; subtitle: string; itemKey: string; sourceKind: 'card' | 'file';
+  filmstrip: Filmstrip | null; clockBase: DhfsTime | null; clipKind: ContentKind | null;
+  preview: PreviewRendition | null; busy: 'filmstrip' | 'preview' | null; note: string | null; error: string | null;
+  canSend: boolean; sendStatus: SendStatus | null; skipped: boolean; sendHint: string | null;
+};
+type PopoutAction = { itemKey: string; action: 'play' | 'send' | 'skip' | 'include' | 'close' };
+const IS_POPOUT = new URLSearchParams(window.location.search).get('popout') === '1';
 
 const isValidTimeZone = (zone: string) => { try { new Intl.DateTimeFormat('en-US', { timeZone: zone }); return true; } catch { return false; } };
 const zoneOffsetMs = (utcMs: number, timeZone: string) => {
@@ -234,6 +253,8 @@ const clockAdd = (time: DhfsTime, seconds: number): DhfsTime => {
   const at = new Date(Date.UTC(time.year, time.month - 1, time.day, time.hour, time.minute, time.second) + Math.round(seconds) * 1000);
   return { year: at.getUTCFullYear(), month: at.getUTCMonth() + 1, day: at.getUTCDate(), hour: at.getUTCHours(), minute: at.getUTCMinutes(), second: at.getUTCSeconds() };
 };
+const clockSeconds = (time: DhfsTime) => Date.UTC(time.year, time.month - 1, time.day, time.hour, time.minute, time.second) / 1000;
+const VIDEO_FILE_EXTENSIONS = ['mp4', 'mov', 'mkv', 'avi', 'm4v', 'ts', 'h264', 'h265', 'hevc', '264', '265', 'dav', 'asf', 'wmv', 'webm'];
 /** An instant (ISO 8601 or epoch ms) as the camera's wall clock in `timeZone`. */
 const instantToWallClock = (instant: string | number, timeZone: string): DhfsTime | null => {
   const ms = typeof instant === 'number' ? instant : Date.parse(instant);
@@ -288,6 +309,36 @@ function Step({ number, title, detail, active, complete }: { number: string; tit
   return <div className={`step ${active ? 'is-active' : ''} ${complete ? 'is-complete' : ''}`}><span>{complete ? <CheckCircle2 size={16} /> : number}</span><div><strong>{title}</strong><small>{detail}</small></div></div>;
 }
 
+/** The pop-out window: a viewer for whatever the workstation is reviewing, sized for a second screen. */
+function PopoutViewer() {
+  const [state, setState] = useState<PopoutState | null>(null);
+  useEffect(() => {
+    const pending = listen<PopoutState>(POPOUT_STATE_EVENT, (event) => setState(event.payload));
+    // Ask the workstation for the current review once the listener is in place; it re-sends on every change.
+    void emitTo('main', POPOUT_READY_EVENT, {});
+    return () => { void pending.then((unlisten) => unlisten()); };
+  }, []);
+  const act = (action: PopoutAction['action']) => { if (state) void emitTo('main', POPOUT_ACTION_EVENT, { itemKey: state.itemKey, action } satisfies PopoutAction); };
+  const frames = state?.filmstrip?.frames ?? [];
+  const clockBase = state?.clockBase ?? null;
+  return <main className="popout">
+    <header className="popout__head"><div><span className="eyebrow">Preview · FCM Desktop V2 v{APP_VERSION}</span><h1>{state?.title ?? 'Waiting for the workstation…'}</h1><p>{state?.subtitle ?? 'Choose “Preview” on a recording in the main window; it appears here.'}</p></div><button className="secondary" onClick={() => void getCurrentWindow().close()}>Close</button></header>
+    {state && <>
+      {state.preview
+        ? <video key={state.preview.path} className="popout__video" controls autoPlay preload="metadata" src={convertFileSrc(state.preview.path)} />
+        : <div className="popout__stage">{state.busy === 'preview' ? <><div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div><p className="muted">Rendering the 480p viewing copy on this computer…</p></> : state.busy === 'filmstrip' ? <><div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div><p className="muted">{state.clipKind === 'pictures' ? 'Reading the pictures…' : 'Decoding key frames…'}</p></> : state.clipKind === 'pictures' ? <p className="muted">A picture stream: the pictures below are the recording.</p> : frames.length ? <button className="primary popout__play" onClick={() => act('play')}><Play size={18} /> Play preview (480p, rendered here)</button> : <p className="muted">{state.error ?? 'Nothing decoded yet.'}</p>}</div>}
+      {frames.length > 0 && clockBase && <div className="filmstrip popout__filmstrip">{frames.map((frame, index) => <figure key={`${state.itemKey}:${index}`}><img src={`data:image/jpeg;base64,${frame.jpegBase64}`} alt={`Key frame ${index + 1} at ${clockPlus(clockBase, frame.atSeconds)}`} /><figcaption>{clockPlus(clockBase, frame.atSeconds)}</figcaption></figure>)}</div>}
+      {state.note && <p className="review__note">{state.note}</p>}
+      {state.error && <p className="review__error">{state.error}</p>}
+      <footer className="popout__actions">
+        {state.canSend ? <button className="primary" onClick={() => act('send')} disabled={state.sendStatus === 'done' || (state.sendStatus !== null && state.sendStatus !== 'failed')}><Send size={15} /> {state.sendStatus === 'done' ? 'Sent to FCM' : state.sendStatus && state.sendStatus !== 'failed' ? sendLabel[state.sendStatus] : 'Send this recording to FCM'}</button> : <small className="muted">{state.sendHint}</small>}
+        {state.sendStatus !== 'done' && <button className="secondary" onClick={() => act(state.skipped ? 'include' : 'skip')}>{state.skipped ? <><Undo2 size={15} /> Include again</> : <><EyeOff size={15} /> Skip — do not send</>}</button>}
+        {state.preview && <small className="muted">{encoderLabel(state.preview)} · {formatBytes(state.preview.bytes)} · viewing copy only, never sent</small>}
+      </footer>
+    </>}
+  </main>;
+}
+
 export default function App() {
   const [stage, setStage] = useState<AcquisitionStage>('idle');
   const [decoderStage, setDecoderStage] = useState<DecoderStage>('not_started');
@@ -336,7 +387,7 @@ export default function App() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [fileClocks, setFileClocks] = useState<Record<string, FileClock>>({});
   const [fileFacts, setFileFacts] = useState<Record<string, FileFacts>>({});
-  const [mp4s, setMp4s] = useState<Record<string, Mp4Export>>({});
+  const [saves, setSaves] = useState<Record<string, SavedCopy>>({});
   const stopQueueRef = useRef(false);
   // Sends finished during a queue, readable after the loop without waiting for a re-render.
   const doneClipsRef = useRef<Record<string, ExtractedClip>>({});
@@ -489,28 +540,38 @@ export default function App() {
     } catch (cause) { failWith(cause, 'The folder dialog could not be opened.'); return null; }
   };
 
-  /** Save one recording where the operator says: the hashed original, plus a playable MP4 when the decoder is here. */
+  /** Save one recording where the operator says: the hashed original, plus a playable MP4 when the decoder is here.
+   *  A recording already saved this session is not saved again without the operator saying so. */
   const extract = async (recording: DhfsRecording) => {
     if (!catalogSource) return;
     const key = recordingKey(recording);
     setError(null);
+    const already = saves[key];
+    if (already) {
+      let again = false;
+      try {
+        again = await ask(`This recording is already saved in\n${already.directory}\nas ${already.fileName}${already.mp4 ? ' with its MP4' : ''}.\n\nSave another copy in a different folder?`, { title: 'Already saved', kind: 'warning', okLabel: 'Choose another folder', cancelLabel: 'Keep the saved copy' });
+      } catch (cause) { failWith(cause, 'The confirmation dialog could not be opened.'); return; }
+      if (!again) { setStatus(`Kept the copy already saved in ${already.directory}.`); return; }
+    }
     let chosen: string | null;
     try {
       const picked = await open({ title: `Choose where to save the ${formatClock(recording.start)} recording`, directory: true, multiple: false, defaultPath: destinationDirectory ?? 'C:\\Users\\Public\\Documents\\fcm-acquisitions' });
       chosen = typeof picked === 'string' ? picked : null;
     } catch (cause) { failWith(cause, 'The folder dialog could not be opened.'); return; }
     if (!chosen) { setStatus('Nothing saved: no folder was chosen.'); return; }
+    if (already && chosen === already.directory) { setStatus(`That is the folder it is already saved in (${chosen}); nothing was written again.`); return; }
     setDestinationDirectory(chosen);
     setExtracting(key); setStatus(`Reading channel ${recording.channel}, ${formatTime(recording.start)} (${formatBytes(recording.bytes)}) from the ${sourceLabel(catalogSource)} into ${chosen}…`);
     try {
       const clip = await invoke<ExtractedClip>('extract_dhfs_recording', { source: catalogSource, partitionIndex: recording.partitionIndex, descriptor: recording.descriptor, destinationDirectory: chosen, reuseExisting: true });
       setClips((current) => ({ ...current, [key]: clip }));
       setReviews((current) => { const next = { ...current }; delete next[key]; return next; });
-      if (clip.kind === 'pictures') { setStatus(`Saved ${clip.pictures.length} pictures into ${clip.fileName} in ${chosen}.`); return; }
-      if (!decoder?.installed) { setStatus(`Saved ${clip.fileName} (${describeClip(clip)}, SHA-256 recorded) in ${chosen}. Install the decoder under “Review here” to also get a playable MP4 next to it.`); return; }
+      if (clip.kind === 'pictures') { setSaves((current) => ({ ...current, [key]: { directory: chosen as string, fileName: clip.fileName, mp4: null } })); setStatus(`Saved ${clip.pictures.length} pictures into ${clip.fileName} in ${chosen}.`); return; }
+      if (!decoder?.installed) { setSaves((current) => ({ ...current, [key]: { directory: chosen as string, fileName: clip.fileName, mp4: null } })); setStatus(`Saved ${clip.fileName} (${describeClip(clip)}, SHA-256 recorded) in ${chosen}. Install the decoder under “Review here” to also get a playable MP4 next to it.`); return; }
       setStatus(`Saved ${clip.fileName}. Writing a playable MP4 next to it (video only; the .dav stays the hashed original)…`);
       const mp4 = await invoke<Mp4Export>('export_mp4', { clipPath: clip.path, outputDirectory: chosen, codec: clip.codec });
-      setMp4s((current) => ({ ...current, [key]: mp4 }));
+      setSaves((current) => ({ ...current, [key]: { directory: chosen as string, fileName: clip.fileName, mp4 } }));
       setStatus(`Saved in ${chosen}: ${clip.fileName} (original, SHA-256 recorded) and ${mp4.path.split(/[\\/]/).pop()} — ${mp4Label(mp4)}${mp4.existing ? '' : `, ${formatBytes(mp4.bytes)} in ${mp4.seconds.toFixed(0)} s`}.`);
     } catch (cause) { failWith(cause, 'Saving the recording failed.'); }
     finally { setExtracting(null); }
@@ -523,26 +584,50 @@ export default function App() {
     return { year: at.getFullYear(), month: at.getMonth() + 1, day: at.getDate(), hour: at.getHours(), minute: at.getMinutes(), second: at.getSeconds() };
   };
 
+  /** Replace the file listing (and everything derived from it) with what the operator just chose. */
+  const adoptVideoFolder = (folder: VideoFolder, how: string) => {
+    const dropFiles = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith('file:'))) as Record<string, T>;
+    setOpenReview(null); setReviews(dropFiles); setSkipped(dropFiles); setClips(dropFiles); setFileFacts({});
+    setVideoFolder(folder);
+    // First guess at each file's recorded start: the recorder's clock in the name, else when the file was last written.
+    setFileClocks(Object.fromEntries(folder.files.map((file) => {
+      const named = parseFileNameClock(file.fileName);
+      const clock: FileClock = named ? { start: named, source: 'file_name' } : { start: modifiedClock(file), source: 'modified_time' };
+      return [fileKey(file), clock];
+    })));
+    const n = folder.files.length;
+    setStatus(`${n} video file${n === 1 ? '' : 's'} ${how}${folder.subfolders ? ` (${folder.subfolders} subfolder${folder.subfolders === 1 ? '' : 's'} not included)` : ''}${folder.otherFiles ? `; ${folder.otherFiles} ${folder.picked ? 'pick' : 'other file'}${folder.otherFiles === 1 ? '' : 's'} ${folder.picked ? 'set aside (not a video file, or empty)' : 'ignored'}` : ''}. Check each file's start time, then preview or send.`);
+  };
+
+  /** The way in that shows the files: Windows' folder picker lists folders only, which reads as "no files here". */
+  const chooseVideoFiles = async () => {
+    setError(null);
+    let picked: string[];
+    try {
+      const result = await open({ title: 'Choose video files', multiple: true, directory: false, defaultPath: videoFolder?.directory, filters: [{ name: 'Video files', extensions: VIDEO_FILE_EXTENSIONS }, { name: 'All files', extensions: ['*'] }] });
+      picked = Array.isArray(result) ? result : typeof result === 'string' ? [result] : [];
+    } catch (cause) { failWith(cause, 'The file dialog could not be opened.'); return; }
+    if (!picked.length) return;
+    setFolderBusy(true);
+    try {
+      const folder = await invoke<Omit<VideoFolder, 'picked'>>('describe_video_files', { paths: picked });
+      adoptVideoFolder({ ...folder, picked: true }, `chosen from ${folder.directory}`);
+    } catch (cause) { failWith(cause, 'The chosen files could not be read.'); }
+    finally { setFolderBusy(false); }
+  };
+
   const chooseVideoFolder = async () => {
     setError(null);
     let chosen: string | null;
     try {
-      const picked = await open({ title: 'Choose a folder of video files', directory: true, multiple: false, defaultPath: videoFolder?.directory });
+      const picked = await open({ title: 'Choose a folder of video files (the folder picker shows folders only; the files inside are listed after you choose)', directory: true, multiple: false, defaultPath: videoFolder?.directory });
       chosen = typeof picked === 'string' ? picked : null;
     } catch (cause) { failWith(cause, 'The folder dialog could not be opened.'); return; }
     if (!chosen) return;
-    const dropFiles = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith('file:'))) as Record<string, T>;
-    setFolderBusy(true); setOpenReview(null); setReviews(dropFiles); setSkipped(dropFiles); setClips(dropFiles); setFileFacts({});
+    setFolderBusy(true);
     try {
-      const folder = await invoke<VideoFolder>('list_video_files', { directory: chosen });
-      setVideoFolder(folder);
-      // First guess at each file's recorded start: the recorder's clock in the name, else when the file was last written.
-      setFileClocks(Object.fromEntries(folder.files.map((file) => {
-        const named = parseFileNameClock(file.fileName);
-        const clock: FileClock = named ? { start: named, source: 'file_name' } : { start: modifiedClock(file), source: 'modified_time' };
-        return [fileKey(file), clock];
-      })));
-      setStatus(`${folder.files.length} video file${folder.files.length === 1 ? '' : 's'} in ${chosen}${folder.subfolders ? ` (${folder.subfolders} subfolder${folder.subfolders === 1 ? '' : 's'} not included)` : ''}${folder.otherFiles ? `; ${folder.otherFiles} other file${folder.otherFiles === 1 ? '' : 's'} ignored` : ''}. Check each file's start time, then preview or send.`);
+      const folder = await invoke<Omit<VideoFolder, 'picked'>>('list_video_files', { directory: chosen });
+      adoptVideoFolder({ ...folder, picked: false }, `in ${chosen}`);
     } catch (cause) { failWith(cause, 'The folder could not be listed.'); }
     finally { setFolderBusy(false); }
   };
@@ -621,11 +706,17 @@ export default function App() {
     setOpenReview(key); setError(null);
     if (reviews[key]?.filmstrip) return;
     if (!decoder?.installed) { updateReview(key, { busy: null, error: 'Install the decoder under “Review here” first; previews are decoded on this computer.' }); return; }
-    updateReview(key, { busy: 'filmstrip', error: undefined });
+    updateReview(key, { busy: 'filmstrip', error: undefined, note: undefined });
     try {
       const clip = await ensureClip(item);
       if (clip.kind === 'pictures') {
-        updateReview(key, { busy: null, error: `${clip.pictures.length} dated pictures — a picture stream is sent as timeline events, not as video. The JPEGs are in ${clip.fileName} inside the working folder.` });
+        // The pictures are the review: show them, dated by the camera, in place of a decoded filmstrip.
+        const shown = clip.pictures.slice(0, 24);
+        const jpegs = await invoke<string[]>('read_pictures', { paths: shown.map((picture) => picture.path) });
+        const base = clip.stats.contentStart ?? clip.start;
+        const filmstrip: Filmstrip = { frames: shown.map((picture, index) => ({ atSeconds: clockSeconds(picture.takenAt) - clockSeconds(base), jpegBase64: jpegs[index] ?? '' })), keyFramesUsed: 0 };
+        updateReview(key, { busy: null, filmstrip, note: `${clip.pictures.length} dated picture${clip.pictures.length === 1 ? '' : 's'}${clip.pictures.length > shown.length ? ` (first ${shown.length} shown)` : ''} — a picture stream is sent to FCM as dated timeline events with these as thumbnails, not as video.` });
+        setStatus(`${shown.length} event pictures from ${clip.fileName}, dated by the camera. Choose Send or Skip.`);
         return;
       }
       setStatus(`Decoding key frames of ${clip.fileName} on this computer…`);
@@ -843,13 +934,67 @@ export default function App() {
   const switchMode = (next: SourceMode) => { setMode(next); setOpenReview(null); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const busyAnywhere = Boolean(extracting) || sendingKey !== null;
 
+  // ---- Pop-out preview (second screen) -------------------------------------------------------------------
+  const [popoutOpen, setPopoutOpen] = useState(false);
+  const openItem = useMemo(() => items.find((item) => item.key === openReview) ?? null, [items, openReview]);
+  const popoutState = useMemo<PopoutState | null>(() => {
+    if (!openItem) return null;
+    const clip = clips[openItem.key];
+    const reviewState = reviews[openItem.key];
+    const send = sends[openItem.key];
+    const title = openItem.kind === 'card' ? `Channel ${openItem.recording.channel} · ${formatTime(openItem.recording.start)}` : openItem.file.fileName;
+    return {
+      title, subtitle: clip ? `${clip.fileName} · ${describeClip(clip)}` : openItem.kind === 'card' ? 'Reading from the card…' : 'Hashing the file…', itemKey: openItem.key, sourceKind: openItem.kind,
+      filmstrip: reviewState?.filmstrip ?? null, clockBase: clip ? (clip.stats.contentStart ?? clip.start) : null, clipKind: clip?.kind ?? null,
+      preview: reviewState?.preview ?? null, busy: reviewState?.busy ?? null, note: reviewState?.note ?? null, error: reviewState?.error ?? null,
+      canSend: Boolean(importRow), sendStatus: send?.status ?? null, skipped: Boolean(skipped[openItem.key]),
+      sendHint: importRow ? null : fcmSession ? 'Create the import under “Send to FCM” in the main window to send this recording.' : 'Sign in under “Send to FCM” in the main window to send this recording.',
+    };
+  }, [openItem, clips, reviews, sends, skipped, importRow, fcmSession]);
+  const popoutStateRef = useRef(popoutState);
+  popoutStateRef.current = popoutState;
+  useEffect(() => { if (popoutOpen) void emitTo(POPOUT_LABEL, POPOUT_STATE_EVENT, popoutState); }, [popoutOpen, popoutState]);
+  useEffect(() => {
+    const ready = listen(POPOUT_READY_EVENT, () => { setPopoutOpen(true); void emitTo(POPOUT_LABEL, POPOUT_STATE_EVENT, popoutStateRef.current); });
+    return () => { void ready.then((unlisten) => unlisten()); };
+  }, []);
+  const openPopout = async (item: SourceItem) => {
+    setError(null);
+    if (openReview !== item.key) await review(item);
+    try {
+      const existing = await WebviewWindow.getByLabel(POPOUT_LABEL);
+      if (existing) { await existing.unminimize(); await existing.setFocus(); setPopoutOpen(true); void emitTo(POPOUT_LABEL, POPOUT_STATE_EVENT, popoutStateRef.current); return; }
+      const popout = new WebviewWindow(POPOUT_LABEL, { url: 'index.html?popout=1', title: 'FCM Desktop V2 — Preview', width: 1280, height: 860, minWidth: 720, minHeight: 480 });
+      void popout.once('tauri://destroyed', () => setPopoutOpen(false));
+      void popout.once('tauri://error', (event) => setError(`The preview window could not be opened: ${JSON.stringify(event.payload)}`));
+      setStatus('Preview opened in its own window — drag it to a second screen. Send and Skip work from either window.');
+    } catch (cause) { failWith(cause, 'The preview window could not be opened.'); }
+  };
+  // Decisions taken in the pop-out land here, on the same handlers the workstation buttons use.
+  const actionHandlersRef = useRef({ playPreview, sendOne, toggleSkip });
+  actionHandlersRef.current = { playPreview, sendOne, toggleSkip };
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  useEffect(() => {
+    const pending = listen<PopoutAction>(POPOUT_ACTION_EVENT, (event) => {
+      const item = itemsRef.current.find((candidate) => candidate.key === event.payload.itemKey);
+      if (!item) return;
+      const handlers = actionHandlersRef.current;
+      if (event.payload.action === 'play') void handlers.playPreview(item);
+      else if (event.payload.action === 'send') void handlers.sendOne(item);
+      else if (event.payload.action === 'skip' || event.payload.action === 'include') handlers.toggleSkip(item);
+    });
+    return () => { void pending.then((unlisten) => unlisten()); };
+  }, []);
+
   /** Review card shared by both sources: filmstrip, optional 480p playback, then Send or Skip. */
   const renderReview = (item: SourceItem, clip: ExtractedClip | undefined, reviewState: ReviewState | undefined, send: SendState | undefined, isSkipped: boolean, title: string) => <div className="review" role="region" aria-label={`Review of ${title}`}>
-    <div className="review__head"><strong>{clip ? `${clip.fileName} · ${describeClip(clip)}` : item.kind === 'card' ? 'Reading from the card…' : 'Hashing the file…'}</strong><small>{reviewState?.filmstrip ? `${reviewState.filmstrip.frames.length} key frames${reviewState.filmstrip.keyFramesUsed > 1 ? `, every ${reviewState.filmstrip.keyFramesUsed}th` : reviewState.filmstrip.keyFramesUsed === 1 ? ', every one' : ', spread over the duration'} · times are the ${item.kind === 'card' ? 'camera' : 'recorded'} clock` : reviewState?.busy === 'filmstrip' ? 'Decoding key frames on this computer…' : ''}</small></div>
+    <div className="review__head"><strong>{clip ? `${clip.fileName} · ${describeClip(clip)}` : item.kind === 'card' ? 'Reading from the card…' : 'Hashing the file…'}</strong><small>{reviewState?.filmstrip ? (clip?.kind === 'pictures' ? `${reviewState.filmstrip.frames.length} pictures · times are the camera clock` : `${reviewState.filmstrip.frames.length} key frames${reviewState.filmstrip.keyFramesUsed > 1 ? `, every ${reviewState.filmstrip.keyFramesUsed}th` : reviewState.filmstrip.keyFramesUsed === 1 ? ', every one' : ', spread over the duration'} · times are the ${item.kind === 'card' ? 'camera' : 'recorded'} clock`) : reviewState?.busy === 'filmstrip' ? (clip?.kind === 'pictures' ? 'Reading the pictures…' : 'Decoding key frames on this computer…') : ''}</small><button className="secondary review__popout" onClick={() => void openPopout(item)} title="Open this preview in its own window, for a second screen"><ExternalLink size={14} /> {popoutOpen ? 'Show in preview window' : 'Pop out'}</button></div>
     {reviewState?.busy === 'filmstrip' && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}
     {reviewState?.filmstrip && clip && <div className="filmstrip">{reviewState.filmstrip.frames.map((frame, index) => <figure key={`${item.key}:${index}`}><img src={`data:image/jpeg;base64,${frame.jpegBase64}`} alt={`Key frame ${index + 1} at ${clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}`} /><figcaption>{clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}</figcaption></figure>)}</div>}
     {reviewState?.preview && <video controls preload="metadata" src={convertFileSrc(reviewState.preview.path)} />}
     {reviewState?.busy === 'preview' && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}
+    {reviewState?.note && <p className="review__note">{reviewState.note}</p>}
     {reviewState?.error && <p className="review__error">{reviewState.error}</p>}
     <div className="review__actions">
       {clip && clip.kind !== 'pictures' && !reviewState?.preview && <button className="secondary" onClick={() => void playPreview(item)} disabled={reviewState?.busy !== null && reviewState?.busy !== undefined}><Play size={14} /> {reviewState?.busy === 'preview' ? 'Rendering 480p copy…' : 'Play preview (480p, rendered here)'}</button>}
@@ -878,19 +1023,19 @@ export default function App() {
         : <header className="topbar"><div><span className="eyebrow">Evidence workstation</span><h1>Video files on this computer.</h1><p>Point FCM at a folder — a download, a camera export, a synced cloud folder — and send the files you choose to the place they belong, hashed before they leave. Preview any of them here first.</p></div><div className="topbar-badge"><ShieldCheck size={17} /> Files hashed before sending</div></header>}
       {mode === 'card'
         ? <section className="steps"><Step number="01" title="Discover" detail="Find the card" complete={stage !== 'idle' && stage !== 'discovery'} active={stage === 'discovery'} /><ChevronRight size={17} /><Step number="02" title="Recordings" detail="List from the card" complete={Boolean(catalog)} active={catalogBusy} /><ChevronRight size={17} /><Step number="03" title="Review here" detail="Optional · on this computer" complete={reviewed} active={reviewing} /><ChevronRight size={17} /><Step number="04" title="Send to FCM" detail="Straight from the card" complete={sentCount > 0} active={sendingKey !== null} /><ChevronRight size={17} /><Step number="05" title="Exact image" detail="Optional forensic copy" complete={stage === 'complete'} active={stage === 'cloning' || stage === 'verifying'} /></section>
-        : <section className="steps"><Step number="01" title="Choose folder" detail="On this computer or synced" complete={Boolean(videoFolder)} active={folderBusy} /><ChevronRight size={17} /><Step number="02" title="Files" detail="Check each start time" complete={Boolean(videoFolder?.files.length)} /><ChevronRight size={17} /><Step number="03" title="Review here" detail="Optional · on this computer" complete={reviewed} active={reviewing} /><ChevronRight size={17} /><Step number="04" title="Send to FCM" detail="Hashed before sending" complete={sentCount > 0} active={sendingKey !== null} /></section>}
+        : <section className="steps"><Step number="01" title="Choose files" detail="On this computer or synced" complete={Boolean(videoFolder)} active={folderBusy} /><ChevronRight size={17} /><Step number="02" title="Files" detail="Check each start time" complete={Boolean(videoFolder?.files.length)} /><ChevronRight size={17} /><Step number="03" title="Review here" detail="Optional · on this computer" complete={reviewed} active={reviewing} /><ChevronRight size={17} /><Step number="04" title="Send to FCM" detail="Hashed before sending" complete={sentCount > 0} active={sendingKey !== null} /></section>}
       <div className="grid">
         {mode === 'card' && <section className="panel source-panel"><div className="panel-heading"><div><span className="eyebrow">01 / Source</span><h2>Read-only device discovery</h2></div><Activity size={19} /></div><p className="muted">FCM opens the source read-only and never mounts or writes the camera card. A Dahua card usually shows in Explorer as a RAW drive letter that Windows offers to format — cancel that prompt; the letter is the hidden DHFS partition, not a fault. Reading a whole disk needs administrator rights, so FCM Desktop V2 asks for them once when it starts.</p><button className="primary" onClick={() => void discover()} disabled={stage === 'discovery'}><HardDrive size={16} /> {stage === 'discovery' ? 'Scanning...' : 'Discover camera cards and disks'}</button>{devices.length > 0 && <div className="device-list">{devices.map((device) => <button key={device.id} className={`device ${selectedDevice?.id === device.id ? 'is-selected' : ''}`} onClick={() => { setSelectedDevice(device); setProbe(null); }}><span className="device-icon"><HardDrive size={17} /></span><span><strong>{device.driveLetters.length ? `${device.driveLetters.join(' ')} · ` : ''}{device.label}</strong><small>{device.id} · {formatBytes(device.sizeBytes)} · {device.busType}{device.removable ? ' (removable)' : ''} · {device.partitionStyle} · {device.partitions} partition{device.partitions === 1 ? '' : 's'}{device.offline ? ' · offline' : ''} · {device.readOnly ? 'read-only' : 'write protection unknown'}</small></span><CheckCircle2 size={16} /></button>)}</div>}{selectedDevice && <div className="source-facts"><span>Selected source<strong>{selectedDevice.driveLetters.length ? `${selectedDevice.driveLetters.join(' ')} · ` : ''}{selectedDevice.label}</strong></span><span>Capacity<strong>{selectedSize}</strong></span><span>Write mode<strong>Blocked</strong></span></div>}{selectedDevice && <div className="actions"><button className="secondary" onClick={() => void readCatalog({ kind: 'device', id: selectedDevice.id, sizeBytes: selectedDevice.sizeBytes })} disabled={catalogBusy || stage === 'cloning'}><Clapperboard size={16} /> {catalogBusy && catalogSource?.kind === 'device' ? 'Reading card...' : 'List recordings directly from card'}</button><button className="secondary" onClick={() => void probeDevice(selectedDevice)} disabled={probing || catalogBusy}><Search size={16} /> {probing ? 'Probing...' : 'Probe first sectors'}</button><small className="muted">Read-only, no clone. This is the normal path: list what the card holds, then send or extract the recordings you need.</small></div>}{probe && <div className="probe"><strong>Card probe · {probe.id} · {formatBytes(probe.sizeBytes)}</strong><dl><div><dt>DHFS volume</dt><dd>{probe.dhfsLocation ?? probe.dhfsError ?? '—'}</dd></div>{!probe.sector0Hex ? <div><dt>Sectors</dt><dd>not read — the disk could not be opened, so nothing below was checked</dd></div> : <><div><dt>DHFS4.1 at sector 0</dt><dd>{probe.dhfsMagicAtZero ? 'yes' : probe.dhfsLocation ? 'no — expected: this card carries a partition table and the volume was found through it' : 'no'}</dd></div><div><dt>DHFS_DPT marker</dt><dd>{probe.dhfsDptMarkerWithinFirstMib === null ? (probe.dhfsLocation ? 'not in first MiB — not needed, located via the partition table' : 'not in first MiB') : `byte ${probe.dhfsDptMarkerWithinFirstMib.toLocaleString()}`}</dd></div><div><dt>MBR</dt><dd>{probe.mbrSignature ? (probe.mbrPartitions.length ? probe.mbrPartitions.join('; ') : 'signature present, no partition entries') : 'no MBR signature (superfloppy / raw)'}</dd></div><div><dt>Sector 0 (first 64 bytes)</dt><dd className="mono">{probe.sector0Hex}<br />{probe.sector0Ascii}</dd></div></>}</dl><small className="muted">{probe.dhfsLocation ? 'The card is recognised. Use “List recordings directly from card” to see what it holds.' : 'Copy this block into a support message if the card is not recognised.'}</small></div>}</section>}
-        {mode === 'files' && <section className="panel source-panel"><div className="panel-heading"><div><span className="eyebrow">01 / Source</span><h2>A folder of video files</h2></div><FolderOpen size={19} /></div><p className="muted">Any folder this computer can see: a camera or NVR export, a download, a phone backup, or a folder synced from OneDrive, Google Drive or Dropbox (files that are only in the cloud are fetched by the sync client when FCM reads them). MP4, MOV, MKV, AVI, TS, WebM and raw Dahua .dav / H.264 / H.265 files are listed; other files are ignored, and subfolders are not searched.</p><div className="actions"><button className="primary" onClick={() => void chooseVideoFolder()} disabled={folderBusy || busyAnywhere}><FolderOpen size={16} /> {folderBusy ? 'Listing…' : videoFolder ? 'Choose another folder' : 'Choose a folder of video files'}</button>{videoFolder && <small className="muted mono">{videoFolder.directory}</small>}</div><p className="muted small">Files are read where they are and never changed. Each one is hashed (SHA-256) before it is sent, so FCM can verify what arrived; the file stays in your folder afterwards.</p></section>}
-        <section className="panel recordings-panel"><div className="panel-heading"><div><span className="eyebrow">02 / {mode === 'card' ? 'Recordings' : 'Files'}</span><h2>{mode === 'card' ? 'What the card holds' : videoFolder ? 'What the folder holds' : 'Choose a folder first'}</h2></div><Clapperboard size={19} /></div>
+        {mode === 'files' && <section className="panel source-panel"><div className="panel-heading"><div><span className="eyebrow">01 / Source</span><h2>A folder of video files</h2></div><FolderOpen size={19} /></div><p className="muted">Any folder this computer can see: a camera or NVR export, a download, a phone backup, or a folder synced from OneDrive, Google Drive or Dropbox (files that are only in the cloud are fetched by the sync client when FCM reads them). MP4, MOV, MKV, AVI, TS, WebM and raw Dahua .dav / H.264 / H.265 files are listed; other files are ignored, and subfolders are not searched.</p><div className="actions"><button className="primary" onClick={() => void chooseVideoFiles()} disabled={folderBusy || busyAnywhere}><Film size={16} /> {folderBusy ? 'Reading…' : videoFolder ? 'Choose other video files' : 'Choose video files'}</button><button className="secondary" onClick={() => void chooseVideoFolder()} disabled={folderBusy || busyAnywhere}><FolderOpen size={16} /> Choose a whole folder</button>{videoFolder && <small className="muted mono">{videoFolder.picked ? `${videoFolder.files.length} chosen from ` : ''}{videoFolder.directory}</small>}</div><p className="muted small">“Choose video files” shows the files and lets you pick one or many. Windows’ folder picker shows folders only — it looks empty even in a folder full of videos — so use “Choose a whole folder” only when you want everything in it.</p><p className="muted small">Files are read where they are and never changed. Each one is hashed (SHA-256) before it is sent, so FCM can verify what arrived; the file stays in your folder afterwards.</p></section>}
+        <section className="panel recordings-panel"><div className="panel-heading"><div><span className="eyebrow">02 / {mode === 'card' ? 'Recordings' : 'Files'}</span><h2>{mode === 'card' ? 'What the card holds' : videoFolder ? (videoFolder.picked ? 'The files you chose' : 'What the folder holds') : 'Choose files first'}</h2></div><Clapperboard size={19} /></div>
           {mode === 'card' && !catalog && <p className="muted">{catalogBusy ? 'Reading the partition table, superblock and fragment descriptors...' : 'Pick the card above and choose “List recordings directly from card”. Recordings are listed by day; nothing is copied until you send or save one.'}</p>}
-          {mode === 'files' && !videoFolder && <p className="muted">{folderBusy ? 'Listing the folder…' : 'Choose a folder above. Video files are listed by their recorded day; nothing is read until you preview or send one.'}</p>}
+          {mode === 'files' && !videoFolder && <p className="muted">{folderBusy ? 'Reading the chosen files…' : 'Choose video files (or a whole folder) above. Files are listed by their recorded day; nothing is read until you preview or send one.'}</p>}
           {((mode === 'card' && catalog && catalogPartition) || (mode === 'files' && videoFolder)) && <>
             {mode === 'card' && catalog && catalogPartition && <>
               <div className="facts"><span>Source<strong>{sourceLabel(catalogSource)}</strong></span><span>Recordings<strong>{catalog.recordings.length} · {formatBytes(totalRecordingBytes)}</strong></span><span>Layout<strong>{formatBytes(catalogPartition.fragmentSize)} fragments · {catalogPartition.descriptorCount.toLocaleString()} descriptors</strong></span></div>
               <p className="muted small">Volume at byte {catalog.volume.location.baseOffset.toLocaleString()} ({locationLabel(catalog.volume)}). {catalog.volume.tableNote}{catalog.skippedDescriptors ? ` ${catalog.skippedDescriptors} untrustworthy descriptor${catalog.skippedDescriptors === 1 ? '' : 's'} skipped, not silently included.` : ''}</p>
             </>}
-            {mode === 'files' && videoFolder && <div className="facts"><span>Folder<strong className="mono">{videoFolder.directory}</strong></span><span>Video files<strong>{videoFolder.files.length} · {formatBytes(videoFolder.files.reduce((sum, file) => sum + file.bytes, 0))}</strong></span><span>Not included<strong>{videoFolder.subfolders} subfolder{videoFolder.subfolders === 1 ? '' : 's'} · {videoFolder.otherFiles} other file{videoFolder.otherFiles === 1 ? '' : 's'}</strong></span></div>}
+            {mode === 'files' && videoFolder && <div className="facts"><span>{videoFolder.picked ? 'Chosen from' : 'Folder'}<strong className="mono">{videoFolder.directory}</strong></span><span>Video files<strong>{videoFolder.files.length} · {formatBytes(videoFolder.files.reduce((sum, file) => sum + file.bytes, 0))}</strong></span><span>{videoFolder.picked ? 'Set aside' : 'Not included'}<strong>{videoFolder.picked ? `${videoFolder.otherFiles} pick${videoFolder.otherFiles === 1 ? '' : 's'} (not video, or empty)` : `${videoFolder.subfolders} subfolder${videoFolder.subfolders === 1 ? '' : 's'} · ${videoFolder.otherFiles} other file${videoFolder.otherFiles === 1 ? '' : 's'}`}</strong></span></div>}
             <div className="actions">{importRow && <button className="primary" onClick={() => void sendAll()} disabled={busyAnywhere || unsentItems.length === 0}><UploadCloud size={15} /> {unsentItems.length === 0 ? (skippedCount ? `Nothing left to send (${skippedCount} skipped)` : mode === 'card' ? 'All recordings sent' : 'All files sent') : `Send all ${unsentItems.length} to FCM${skippedCount ? ` (${skippedCount} skipped)` : ''}`}</button>}{queueRemaining > 0 && <button className="secondary" onClick={() => void stopQueue()}>Stop sending ({queueRemaining} left)</button>}{mode === 'card' && <button className="secondary" onClick={() => void chooseDestination()} disabled={sendingKey !== null}><FolderOpen size={15} /> {destinationDirectory ? 'Change working folder' : 'Choose working folder'}</button>}{mode === 'card' && <small className="muted mono">{destinationDirectory ?? 'Working folder: Public Documents\\fcm-acquisitions, chosen automatically'}</small>}</div>
             {!importRow && <p className="muted small">{fcmSession ? `Create the import under “Send to FCM” to send ${mode === 'card' ? 'recordings straight from the card' : 'files from this folder'}. “Preview” shows what a recording holds on this computer first${mode === 'card' ? '; “Save to folder” writes the hashed original and a playable MP4 wherever you choose' : ''}.` : `Sign in under “Send to FCM” to send ${mode === 'card' ? 'recordings straight from the card' : 'files from this folder'}. “Preview” shows what a recording holds on this computer first${mode === 'card' ? '; “Save to folder” writes the hashed original and a playable MP4 wherever you choose' : ''}.`}</p>}
             {sentCount > 0 && <p className="muted small">{sentCount} recording{sentCount === 1 ? '' : 's'} sent to FCM{mode === 'card' ? `: video with the SHA-256 taken as it left the card (the analysis worker re-hashes on intake), pictures as dated timeline events. Copies stay in ${destinationDirectory ?? 'the working folder'}.` : ', each with the SHA-256 taken before it left this computer; the files themselves are untouched.'}</p>}
@@ -899,7 +1044,7 @@ export default function App() {
             {mode === 'card' && catalog?.recordings.length === 0 && <p className="muted">The volume is intact but holds no trustworthy recordings.</p>}
             {mode === 'files' && videoFolder?.files.length === 0 && <p className="muted">No video files directly in this folder{videoFolder.subfolders ? ' — its subfolders were not searched; choose one of them' : ''}.</p>}
             {mode === 'card' && <div className="recording-days">{recordingDays.map(([day, recordings]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{recordings.length} recording{recordings.length === 1 ? '' : 's'} · {formatBytes(recordings.reduce((sum, recording) => sum + recording.bytes, 0))}</small></div>
-              {recordings.map((recording) => { const item: SourceItem = { kind: 'card', key: recordingKey(recording), recording }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const mp4 = mp4s[key]; return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''}`}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>Channel {recording.channel} · {formatDuration(recording.durationSeconds)}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{mp4 && <small className="mono">MP4 {mp4.path} · {mp4Label(mp4)}</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”; still on the card{clip ? ' and in the working folder' : ''}.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions"><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={busyAnywhere}><Download size={14} /> {extracting === key ? 'Saving…' : 'Save to folder…'}</button></span></div>
+              {recordings.map((recording) => { const item: SourceItem = { kind: 'card', key: recordingKey(recording), recording }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const saved = saves[key]; return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''}`}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>Channel {recording.channel} · {formatDuration(recording.durationSeconds)}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{saved && <small className="send-state send-state--saved"><CheckCircle2 size={11} /> Saved to {saved.directory} — {saved.fileName}{saved.mp4 ? ` + ${saved.mp4.path.split(/[\\/]/).pop()} (${mp4Label(saved.mp4)})` : ''}</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”; still on the card{clip ? ' and in the working folder' : ''}.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions"><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={busyAnywhere} title={saved ? `Already saved to ${saved.directory}. Click to save another copy elsewhere (you will be asked first).` : 'Choose a folder; the hashed original and a playable MP4 are written there.'}>{saved ? <CheckCircle2 size={14} /> : <Download size={14} />} {extracting === key ? 'Saving…' : saved ? 'Saved' : 'Save to folder…'}</button></span></div>
               {isOpen && renderReview(item, clip, reviewState, send, isSkipped, `channel ${recording.channel} at ${formatClock(recording.start)}`)}</Fragment>; })}
             </div>)}</div>}
             {mode === 'files' && <div className="recording-days">{fileDays.map(([day, files]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((sum, file) => sum + file.bytes, 0))}</small></div>
@@ -956,4 +1101,4 @@ export default function App() {
 
 // The earlier prototype exported App without ever mounting it, so the installed window rendered blank.
 const root = document.getElementById('root');
-if (root) createRoot(root).render(<StrictMode><App /></StrictMode>);
+if (root) createRoot(root).render(<StrictMode>{IS_POPOUT ? <PopoutViewer /> : <App />}</StrictMode>);

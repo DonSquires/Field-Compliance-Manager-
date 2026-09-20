@@ -31,6 +31,8 @@
 .send-state--failed{color:#f0b0a7}
 .send-state--done{color:#9ad6b7}
 .send-state--skipped{color:#e4c37a}
+.send-state--saved{color:#9ad6b7;display:flex;align-items:center;gap:5px;white-space:normal;line-height:1.4}
+.review__note{color:#9cb0a9;font-size:11px;line-height:1.45;margin:10px 0 0}
 .recording.is-skipped .recording__time,.recording.is-skipped .recording__meta strong{color:#8ea39c}
 .review-panel{min-height:0}
 .inspect-panel{grid-column:auto}
@@ -47,6 +49,18 @@
 .review__actions small{color:#8ea39c;font-size:11px;line-height:1.4}
 .review__error{color:#f0b0a7;font-size:11px;line-height:1.45;margin:10px 0 0}
 .decoder-progress{max-width:420px}
+.review__popout{margin-left:auto;padding:6px 10px;font-size:11px;white-space:nowrap}
+.popout{min-height:100vh;display:flex;flex-direction:column;gap:14px;padding:22px 26px;background:#0f1a18;color:#edf5f2}
+.popout__head{display:flex;justify-content:space-between;align-items:start;gap:16px}
+.popout__head h1{font-size:22px;margin:6px 0 4px;letter-spacing:-.01em}
+.popout__head p{margin:0;color:#9cb0a9;font-size:12px;font-family:'Space Mono',monospace;overflow-wrap:anywhere}
+.popout__video{width:100%;max-height:calc(100vh - 330px);background:#000;border:1px solid #2c423e;border-radius:8px}
+.popout__stage{display:grid;place-items:center;gap:12px;min-height:38vh;border:1px dashed #35534a;border-radius:8px;background:#0b1513;padding:24px}
+.popout__stage .progress{width:min(420px,80%)}
+.popout__play{padding:14px 20px;font-size:14px}
+.popout__filmstrip{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+.popout__actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:auto;padding-top:12px;border-top:1px solid #2c3c39}
+.popout__actions small{font-size:11px;line-height:1.4}
 .clock-edit{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:10px;color:#8ea39c;flex-wrap:wrap}
 .clock-edit input{height:26px;border:1px solid #35534a;border-radius:5px;background:#0f1a18;color:#dbe9e3;font:11px 'Space Mono',monospace;padding:0 6px;color-scheme:dark}
 .clock-edit input:disabled{opacity:.55}

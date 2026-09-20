@@ -43,8 +43,12 @@ const cargo = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/
 
 test('Desktop V2 actually mounts its React app', () => {
   // The first prototype exported App without rendering it: the installed window was blank.
-  assert.match(source, /createRoot\(root\)\.render\(<StrictMode><App \/><\/StrictMode>\)/);
+  assert.match(source, /createRoot\(root\)\.render\(<StrictMode>\{IS_POPOUT \? <PopoutViewer \/> : <App \/>\}<\/StrictMode>\)/);
   assert.match(source, /document\.getElementById\('root'\)/);
+  // The pop-out preview is the same bundle in a second window; only the workstation decides, the viewer reports.
+  assert.match(source, /const IS_POPOUT = new URLSearchParams\(window\.location\.search\)\.get\('popout'\) === '1';/);
+  assert.match(source, /new WebviewWindow\(POPOUT_LABEL, \{ url: 'index\.html\?popout=1'/);
+  assert.match(source, /emitTo\('main', POPOUT_ACTION_EVENT/);
 });
 
 const indexHtml = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/index.html'), 'utf8');
@@ -84,9 +88,10 @@ const capability = JSON.parse(fs.readFileSync(path.join(root, 'apps/sd-card-brid
 
 test('Desktop V2 acquisition cannot fail silently and keeps the window alive for a 128 GB clone', () => {
   // Without a capability the save dialog was refused and the rejection vanished: "Acquire" did nothing.
-  assert.deepEqual(capability.windows, ['main']);
+  assert.deepEqual(capability.windows, ['main', 'preview']);
   assert.ok(capability.permissions.includes('core:default'));
   assert.ok(capability.permissions.includes('dialog:default'));
+  assert.ok(capability.permissions.includes('core:webview:allow-create-webview-window'));
   assert.match(source, /try \{\s*destination = await save\(/);
   assert.match(source, /window\.addEventListener\('unhandledrejection', onRejection\)/);
   // The clone runs off the main thread and reports progress; a sync command froze the window for the whole copy.

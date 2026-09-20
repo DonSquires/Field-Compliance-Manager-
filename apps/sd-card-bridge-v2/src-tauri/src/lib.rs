@@ -720,23 +720,58 @@ struct LocalVideoFile { path: String, file_name: String, extension: String, byte
 #[serde(rename_all = "camelCase")]
 struct VideoFolder { directory: String, files: Vec<LocalVideoFile>, subfolders: u32, other_files: u32 }
 
-/// The video files directly inside a folder (not its subfolders), newest name last. Nothing is opened yet.
+/// A file as the list shows it, or `None` when it is not a non-empty video file by extension.
+fn describe_video_file(path: &Path, metadata: &fs::Metadata) -> Option<LocalVideoFile> {
+    let extension = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if !VIDEO_EXTENSIONS.contains(&extension.as_str()) || metadata.len() == 0 { return None; }
+    let modified_epoch_ms = metadata.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+    Some(LocalVideoFile { path: path.to_string_lossy().to_string(), file_name: path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), extension, bytes: metadata.len(), modified_epoch_ms })
+}
+
+/// The video files directly inside a folder (not its subfolders), by name. Nothing is opened yet.
 #[tauri::command(async)]
 fn list_video_files(directory: String) -> Result<VideoFolder, String> {
     let entries = fs::read_dir(&directory).map_err(|error| format!("The folder could not be read: {error}"))?;
     let mut files = Vec::new();
     let (mut subfolders, mut other_files) = (0_u32, 0_u32);
     for entry in entries.flatten() {
-        let path = entry.path();
         let Ok(metadata) = entry.metadata() else { continue; };
         if metadata.is_dir() { subfolders += 1; continue; }
-        let extension = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-        if !VIDEO_EXTENSIONS.contains(&extension.as_str()) || metadata.len() == 0 { other_files += 1; continue; }
-        let modified_epoch_ms = metadata.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-        files.push(LocalVideoFile { path: path.to_string_lossy().to_string(), file_name: entry.file_name().to_string_lossy().to_string(), extension, bytes: metadata.len(), modified_epoch_ms });
+        match describe_video_file(&entry.path(), &metadata) { Some(file) => files.push(file), None => other_files += 1 }
     }
     files.sort_by(|a, b| a.file_name.cmp(&b.file_name));
     Ok(VideoFolder { directory, files, subfolders, other_files })
+}
+
+/// Files the operator picked one by one. Non-video or empty picks are counted, not listed, so the operator
+/// can see that a pick was set aside rather than wonder where it went.
+#[tauri::command(async)]
+fn describe_video_files(paths: Vec<String>) -> Result<VideoFolder, String> {
+    let mut files = Vec::new();
+    let mut other_files = 0_u32;
+    for path in &paths {
+        let path = Path::new(path);
+        let metadata = fs::metadata(path).map_err(|error| format!("{} could not be read: {error}", path.display()))?;
+        if metadata.is_dir() { other_files += 1; continue; }
+        match describe_video_file(path, &metadata) { Some(file) => files.push(file), None => other_files += 1 }
+    }
+    files.sort_by(|a, b| a.file_name.cmp(&b.file_name));
+    let parent_of = |path: &str| Path::new(path).parent().map(|p| p.to_string_lossy().to_string());
+    let directory = files.first().and_then(|file| parent_of(&file.path)).or_else(|| paths.first().and_then(|p| parent_of(p))).unwrap_or_default();
+    Ok(VideoFolder { directory, files, subfolders: 0, other_files })
+}
+
+/// The JPEGs of a picture-stream extraction, base64, so the review can show the pictures themselves.
+#[tauri::command(async)]
+fn read_pictures(paths: Vec<String>) -> Result<Vec<String>, String> {
+    const MAX_FILES: usize = 40;
+    const MAX_BYTES: u64 = 4 << 20;
+    paths.iter().take(MAX_FILES).map(|path| {
+        let metadata = fs::metadata(path).map_err(|error| format!("{path}: {error}"))?;
+        if metadata.len() > MAX_BYTES { return Err(format!("{path} is {} MB, larger than a picture-stream JPEG; not shown.", metadata.len() >> 20)); }
+        let bytes = fs::read(path).map_err(|error| format!("{path}: {error}"))?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    }).collect()
 }
 
 #[derive(Serialize)]
@@ -767,5 +802,5 @@ fn probe_video_file(app: tauri::AppHandle, path: String) -> Result<fcm_decoder::
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, export_mp4, list_video_files, hash_local_file, probe_video_file]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, export_mp4, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

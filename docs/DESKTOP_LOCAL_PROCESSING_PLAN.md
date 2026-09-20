@@ -40,6 +40,12 @@ The MP4 is a derived copy and never the evidence. Also fixed: the DHAV `0x80` ex
 0.4.0 parser stepped into the codec extension and reported "UNKNOWN video"; reused `-r2` files now have their
 frames counted, so the filmstrip spans the whole recording instead of its first 24 seconds.
 
+**0.4.2 (owner field notes 2026-09-20):** a saved recording is marked *Saved* with its folder and the operator is
+asked before a second copy is written (no accidental duplicates); the "Video files" source opens a file picker
+first because Windows' folder picker shows no files; a picture-stream review shows the pictures; and **Pop out**
+puts the preview in its own window for multi-screen work — the workstation window stays the only place that
+decides, the pop-out mirrors the open review and sends Play / Send / Skip back as events.
+
 ## Phase 2 — Analyse here (0.5.x)
 
 Goal: the laptop runs the same detection/recognition tier the VPS runs and FCM receives **results**, not footage,
