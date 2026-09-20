@@ -97,7 +97,10 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    (colour-coded review marks, place per day/recording with one import per client/place/camera, review state kept
    per card on the workstation, disk cleanup limited to FCM-verified sent copies, decided-no copies and `.part`
    files): SHA-256 `4ca94a372407f99607c3301f0683297abd9a232e97210bc9be5bb79a02e042ea` (3,059,760 bytes), verified
-   from the public URL; the web app's download link points at 0.4.3.
+   from the public URL; the web app's download link points at 0.4.3. **0.4.4 signed the same way on 2026-09-20**
+   (unwritten Tapo slots and blank files set aside at listing, content sniff without the decoder, first-key-frame
+   thumbnails on file rows): SHA-256 `f56a7c9c36683e436d191094b6a863f7b8b8d272bf7e87b1b2f7408f790eb156`
+   (3,073,200 bytes), verified from the public URL; the web app's download link points at 0.4.4.
 
 What it buys:
 
