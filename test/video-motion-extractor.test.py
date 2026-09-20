@@ -127,7 +127,7 @@ class ContainerClockIntegrationTests(unittest.TestCase):
         # A square walks 6 px per frame from index 60 to 74: its position identifies the frame it came from.
         frames = [_with_square(scene, 20 + (index - 60) * 6) if 60 <= index < 75 else scene.copy() for index in range(120)]
         with tempfile.TemporaryDirectory() as directory, \
-                patch.object(video_motion_extractor.cv2, 'VideoCapture', lambda _path: ScriptedCapture(frames, real_fps, nominal_fps, fail_at=64, skip=3)):
+                patch.object(video_motion_extractor.cv2, 'VideoCapture', lambda _path, *_backend_and_options: ScriptedCapture(frames, real_fps, nominal_fps, fail_at=64, skip=3)):
             video = Path(directory) / 'scripted.dav'
             video.write_bytes(b'x')
             summary = extract_motion_summary(video, output_dir=Path(directory) / 'frames', warmup_frames=15, pre_roll=1.0, post_roll=1.0)
