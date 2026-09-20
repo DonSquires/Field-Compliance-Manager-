@@ -296,6 +296,31 @@ def create_session(factory: Any, providers: list[str]) -> tuple[Any, list[str]]:
         return factory(cpu_only), cpu_only
 
 
+def intra_op_threads() -> int:
+    """CPU threads one ONNX session may use: INFERENCE_INTRA_OP_THREADS, else 4, never more than the cores present.
+    ONNX Runtime's default is every core per session; with the detector, plate detector, OCR and species models
+    each taking all eight on the VPS, beside the video extractors, nothing finished."""
+    cores = os.cpu_count() or 4
+    configured = os.getenv("INFERENCE_INTRA_OP_THREADS", "").strip()
+    if configured.isdigit() and int(configured) > 0:
+        return max(1, min(int(configured), cores))
+    return max(1, min(4, cores))
+
+
+def session_options() -> Any:
+    """Session options every staged model shares: the fixed intra-op budget above, one inter-op thread, sequential
+    execution. Returns None when onnxruntime is absent so callers can pass it straight through."""
+    try:
+        import onnxruntime as ort
+    except Exception:
+        return None
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = intra_op_threads()
+    options.inter_op_num_threads = 1
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    return options
+
+
 def cuda_available() -> bool:
     return "CUDAExecutionProvider" in onnx_providers()
 
@@ -375,12 +400,13 @@ def _load_detector() -> Any:
 
     providers = onnx_providers()
     model, providers = create_session(
-        lambda chosen: RFDETRDetector(str(path), _coco_labels(name), conf_thresh=DETECTOR_CONFIDENCE, providers=chosen), providers,
+        lambda chosen: RFDETRDetector(str(path), _coco_labels(name), conf_thresh=DETECTOR_CONFIDENCE, providers=chosen, sess_options=session_options()), providers,
     )
     input_size = getattr(model, "img_size", None)
     _detector_meta = {
         "name": name, "path": str(path), "provider": active_provider(getattr(model, "model", None), providers),
         "input_size": [int(value) for value in input_size] if input_size else None,
+        "intra_op_threads": intra_op_threads(),
     }
     _detector = model
     return _detector

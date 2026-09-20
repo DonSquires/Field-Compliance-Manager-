@@ -546,26 +546,31 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       const needLocalDetect = !runpodResult && LOCAL_DETECT_INFERENCE;
       // No triage answer at all: the VPS /infer/detect route (people + vehicles + animals + ALPR in one call)
       // fills it in. /infer/people alone is only needed when the answer came without a people list.
+      // Every route goes through classifyLocally: a timeout or a 503 from a busy server is that route's answer
+      // for this frame ({ success: false, error }), not a reason to fail the whole job.
       const localRequests = [
         runpodAlpr || needLocalDetect
           ? Promise.resolve(null)
-          : fetch(`${INFERENCE_SERVICE_URL}/infer/alpr`, { method: 'POST', headers, body: buildForm(null, { vehicle_bboxes: runpodVehicleBoxes.length ? runpodVehicleBoxes : null }), signal: AbortSignal.timeout(30_000) }),
+          : classifyLocally(INFERENCE_SERVICE_URL, '/infer/alpr', headers, () => buildForm(null, { vehicle_bboxes: runpodVehicleBoxes.length ? runpodVehicleBoxes : null })),
         runpodFace
           ? Promise.resolve(null)
-          : fetch(`${INFERENCE_SERVICE_URL}/infer/face`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) }),
+          : classifyLocally(INFERENCE_SERVICE_URL, '/infer/face', headers, buildForm),
         LOCAL_PEOPLE_INFERENCE && runpodResult && !Array.isArray(runpodResult.people)
-          ? fetch(`${INFERENCE_SERVICE_URL}/infer/people`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) })
+          ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm)
           : Promise.resolve(null),
         needLocalDetect ? classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, buildForm) : Promise.resolve(null),
       ];
-      const [alprResponse, faceResponse, peopleResponse, localDetect] = await Promise.all(localRequests);
+      const [alprResult, faceResult, peopleResult, localDetect] = await Promise.all(localRequests);
+      for (const [route, result] of [['/infer/alpr', alprResult], ['/infer/face', faceResult], ['/infer/people', peopleResult]]) {
+        if (result && result.success === false && result.detail) log('inference_route_unavailable', { route, frame_hash: frame.sha256_hash, error: result.error, detail: result.detail });
+      }
       if (localDetect) frame.detect = localDetect;
       if (runpodAlpr) {
         frame.alpr = { ...runpodAlpr, provider: triageProvider };
       } else if (frame.detect?.alpr?.success) {
         frame.alpr = { ...frame.detect.alpr, provider: 'local_detect' };
-      } else if (alprResponse) {
-        frame.alpr = alprResponse.ok ? await alprResponse.json() : { success: false, error: `alpr_http_${alprResponse.status}` };
+      } else if (alprResult) {
+        frame.alpr = alprResult;
       } else {
         // /infer/detect ran without a staged ALPR tier: ask the VPS ALPR route with the boxes it found.
         const localVehicleBoxes = Array.isArray(frame.detect?.vehicles) ? frame.detect.vehicles.map((vehicle) => vehicle?.bbox).filter(Boolean) : [];
@@ -573,8 +578,8 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       }
       if (runpodFace) {
         frame.face = { ...runpodFace, provider: triageProvider };
-      } else if (faceResponse) {
-        frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
+      } else if (faceResult) {
+        frame.face = faceResult;
       } else {
         frame.face = { success: false, error: 'face_unavailable' };
       }
@@ -583,13 +588,8 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
         ...(Array.isArray(frame.detect?.detector_coverage) ? frame.detect.detector_coverage : []),
       ]);
       const vehicleCovered = detectorCoverage.has('vehicle');
-      const inferenceResponse = !runpodResult?.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE
-        ? await fetch(`${INFERENCE_SERVICE_URL}/infer`, {
-          method: 'POST',
-          headers,
-          body: buildForm(frame.alpr.plate_bbox),
-          signal: AbortSignal.timeout(30_000),
-        })
+      const inferenceResult = !runpodResult?.vehicle && !vehicleCovered && LOCAL_VEHICLE_INFERENCE
+        ? await classifyLocally(INFERENCE_SERVICE_URL, '/infer', headers, () => buildForm(frame.alpr.plate_bbox))
         : null;
       frame.capture_recognition = await runCaptureRecognition(frame, image, job);
 
@@ -600,8 +600,8 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       } else if (frame.detect?.success && Array.isArray(frame.detect.people) && (frame.detect.people.length || frame.detect.people_provider || detectorCoverage.has('person'))) {
         // /infer/detect already ran a person detector; an empty list means nobody was seen, not "not checked".
         frame.people = { success: true, people: frame.detect.people, provider: frame.detect.people_provider || frame.detect.detector_provider || 'local_detect' };
-      } else if (peopleResponse) {
-        frame.people = peopleResponse.ok ? await peopleResponse.json() : { success: false, error: `people_http_${peopleResponse.status}` };
+      } else if (peopleResult) {
+        frame.people = peopleResult;
       } else {
         frame.people = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/people', headers, buildForm);
       }
@@ -610,8 +610,8 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       if (detectedVehicle) {
         frame.inference = { success: true, data: detectedVehicle, provider: runpodResult?.vehicle ? triageProvider : 'local_detect' };
         if (!frame.runpod?.vehicle) frame.runpod = { ...(frame.runpod || {}), vehicle: detectedVehicle };
-      } else if (inferenceResponse) {
-        frame.inference = inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` };
+      } else if (inferenceResult) {
+        frame.inference = inferenceResult;
       } else if (vehicleCovered) {
         frame.inference = { success: false, error: 'no_vehicle_detected', review_required: false };
       } else {

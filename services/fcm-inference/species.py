@@ -202,7 +202,7 @@ def _load() -> Any:
     import onnxruntime as ort
 
     providers = entity_detector.onnx_providers()
-    _session, providers = entity_detector.create_session(lambda chosen: ort.InferenceSession(str(SPECIESNET_ONNX_PATH), providers=chosen), providers)
+    _session, providers = entity_detector.create_session(lambda chosen: ort.InferenceSession(str(SPECIESNET_ONNX_PATH), providers=chosen, sess_options=entity_detector.session_options()), providers)
     _provider = entity_detector.active_provider(_session, providers)
     _labels = [line.strip() for line in SPECIESNET_LABELS_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
     _taxonomy_map = load_taxonomy_map(SPECIESNET_TAXONOMY_PATH)

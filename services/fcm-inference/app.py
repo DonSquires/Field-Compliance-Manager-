@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hmac
 import json
 import math
 import os
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Callable, TypeVar
 
 import cv2
 import numpy as np
 import pytesseract
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from openvino import Core
@@ -48,6 +50,40 @@ VEHICLE_COLOURS = ("white", "gray", "yellow", "red", "green", "blue", "black")
 VEHICLE_TYPES = ("car", "van", "truck", "bus")
 
 app = FastAPI(title="FCM Inference", docs_url=None, redoc_url=None)
+
+# Model work is CPU-bound and used to run inside the async handlers, blocking the event loop: a busy detector
+# meant /health could not answer (Docker marked the container unhealthy) and every request the caller had already
+# abandoned on timeout was still computed in full. Now each route hands its work to a worker thread through a
+# gate: INFERENCE_CONCURRENCY runs at once (1 by default — on CPU, serial is faster in aggregate than contending),
+# at most INFERENCE_MAX_WAITING queue behind it, and anything beyond that is refused at once with 503 so the
+# caller falls back to its next machine instead of waiting for work that will not arrive in time.
+INFERENCE_CONCURRENCY = max(1, int(os.getenv("INFERENCE_CONCURRENCY", "1") or 1))
+INFERENCE_MAX_WAITING = max(0, int(os.getenv("INFERENCE_MAX_WAITING", "6") or 6))
+cv2.setNumThreads(entity_detector.intra_op_threads())
+_cpu_gate = asyncio.Semaphore(INFERENCE_CONCURRENCY)
+_cpu_running = 0
+_cpu_waiting = 0
+_T = TypeVar("_T")
+
+
+async def _run_cpu(work: Callable[..., _T], *args: Any) -> _T:
+    global _cpu_running, _cpu_waiting
+    if _cpu_waiting >= INFERENCE_MAX_WAITING:
+        raise HTTPException(status_code=503, detail=f"inference busy: {_cpu_running} running, {_cpu_waiting} waiting", headers={"Retry-After": "5"})
+    _cpu_waiting += 1
+    admitted = False
+    try:
+        async with _cpu_gate:
+            _cpu_waiting -= 1
+            admitted = True
+            _cpu_running += 1
+            try:
+                return await run_in_threadpool(work, *args)
+            finally:
+                _cpu_running -= 1
+    finally:
+        if not admitted:
+            _cpu_waiting -= 1
 
 
 class CompareRequest(BaseModel):
@@ -574,12 +610,24 @@ def _health_payload() -> dict[str, Any]:
         "plate_detector_model": plate_state["plate_detector_model"],
         "plate_ocr_model": plate_state["plate_ocr_model"],
         "cuda": entity_detector.cuda_available(),
+        "cpu_threads_per_session": entity_detector.intra_op_threads(),
+        "queue": {"running": _cpu_running, "waiting": _cpu_waiting, "concurrency": INFERENCE_CONCURRENCY, "max_waiting": INFERENCE_MAX_WAITING},
     }
 
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return _health_payload()
+
+
+def _detect_sync(image: np.ndarray) -> dict[str, Any]:
+    triage = _triage_with_attributes(image)
+    if plate_reader.staged():
+        try:
+            triage["alpr"] = plate_reader.read_plates(image, [vehicle["bbox"] for vehicle in triage.get("vehicles") or []])
+        except Exception as error:  # ALPR failing must not hide the triage
+            triage["alpr"] = {"success": False, "error": str(error)[:300], "alpr_provider": plate_reader.PLATE_PROVIDER}
+    return triage
 
 
 @app.post("/infer/detect")
@@ -592,12 +640,7 @@ async def detect_entities(
     the trained ALPR tier is staged. Advisory: a human confirms every identity."""
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
-    triage = _triage_with_attributes(image)
-    if plate_reader.staged():
-        try:
-            triage["alpr"] = plate_reader.read_plates(image, [vehicle["bbox"] for vehicle in triage.get("vehicles") or []])
-        except Exception as error:  # ALPR failing must not hide the triage
-            triage["alpr"] = {"success": False, "error": str(error)[:300], "alpr_provider": plate_reader.PLATE_PROVIDER}
+    triage = await _run_cpu(_detect_sync, image)
     return JSONResponse({"success": True, "review_required": True, **triage})
 
 
@@ -801,10 +844,37 @@ async def alpr(
         except json.JSONDecodeError:
             raise HTTPException(status_code=422, detail="vehicle_bboxes must be valid JSON")
     try:
-        result = _infer_plate_from_image(image, vehicles)
+        result = await _run_cpu(_infer_plate_from_image, image, vehicles)
     except (pytesseract.TesseractError, OSError, RuntimeError, cv2.error) as error:
         raise HTTPException(status_code=503, detail=f"ALPR unavailable: {error}") from error
     return JSONResponse(result)
+
+
+def _face_sync(image: np.ndarray) -> list[dict[str, Any]]:
+    detector, recognizer = _face_models()
+    height, width = image.shape[:2]
+    detector.setInputSize((width, height))
+    _, detections = detector.detect(image)
+    results: list[dict[str, Any]] = []
+    for index, detection in enumerate(detections if detections is not None else []):
+        aligned = recognizer.alignCrop(image, detection)
+        embedding = recognizer.feature(aligned)
+        vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        norm = float(np.linalg.norm(vector))
+        if not np.isfinite(vector).all() or math.isclose(norm, 0.0):
+            continue
+        vector = vector / norm
+        x, y, box_width, box_height = [round(float(value), 3) for value in detection[:4]]
+        results.append({
+            "subject_label": f"Unidentified subject #{index + 1}",
+            "face_index": index,
+            "bbox": {"x": x, "y": y, "width": box_width, "height": box_height},
+            "embedding": [round(float(value), 7) for value in vector],
+            "embedding_dimension": int(vector.size),
+            "candidate_person_record_id": None,
+            "review_state": "manual_review_required",
+        })
+    return results
 
 
 @app.post("/infer/face")
@@ -816,29 +886,7 @@ async def face(
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
     try:
-        detector, recognizer = _face_models()
-        height, width = image.shape[:2]
-        detector.setInputSize((width, height))
-        _, detections = detector.detect(image)
-        results: list[dict[str, Any]] = []
-        for index, detection in enumerate(detections if detections is not None else []):
-            aligned = recognizer.alignCrop(image, detection)
-            embedding = recognizer.feature(aligned)
-            vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
-            norm = float(np.linalg.norm(vector))
-            if not np.isfinite(vector).all() or math.isclose(norm, 0.0):
-                continue
-            vector = vector / norm
-            x, y, box_width, box_height = [round(float(value), 3) for value in detection[:4]]
-            results.append({
-                "subject_label": f"Unidentified subject #{index + 1}",
-                "face_index": index,
-                "bbox": {"x": x, "y": y, "width": box_width, "height": box_height},
-                "embedding": [round(float(value), 7) for value in vector],
-                "embedding_dimension": int(vector.size),
-                "candidate_person_record_id": None,
-                "review_state": "manual_review_required",
-            })
+        results = await _run_cpu(_face_sync, image)
         return JSONResponse({"success": True, "faces": results, "identity_resolution": "manual_review_required"})
     except FileNotFoundError:
         return _capability_unavailable("yunet_sface_models")
@@ -863,7 +911,7 @@ async def infer(
         except json.JSONDecodeError:
             raise HTTPException(status_code=422, detail="vehicle_bbox must be valid JSON")
     cropped = _expand_vehicle_bbox(image, bbox)
-    result = _infer_vehicle_attributes(cropped)
+    result = await _run_cpu(_infer_vehicle_attributes, cropped)
     result["vehicle_crop_status"] = "plate_anchored_crop" if bbox else "full_frame_review_only"
     return JSONResponse({"success": True, "data": result})
 
@@ -877,7 +925,7 @@ async def people(
     _authorize(authorization, x_inference_api_key)
     image = await _read_image(photo)
     try:
-        detections = _detect_people(image)
+        detections = await _run_cpu(_detect_people, image)
         return JSONResponse({
             "success": True,
             "people": detections,
@@ -907,7 +955,7 @@ async def person_signature(
         bbox = {key: int(parsed[key]) for key in ('x', 'y', 'width', 'height')}
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise HTTPException(status_code=422, detail="person_bbox must contain integer x, y, width, and height") from error
-    attributes = _person_appearance_attributes(image, bbox)
+    attributes = await _run_cpu(_person_appearance_attributes, image, bbox)
     return JSONResponse({
         "success": True,
         "authority": "provisional_similarity_only",

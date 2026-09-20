@@ -68,6 +68,14 @@ services:
       DETECTOR_MODEL: rf-detr-small-512-coco
       DETECTOR_TILES: auto
       INFERENCE_DEVICE: cpu
+      # CPU budget (2026-09-21). ONNX Runtime otherwise takes every core per session and the async routes ran
+      # the model on the event loop: with three extractors decoding beside it the server could not answer
+      # /health, the watcher's 30 s timeouts fired, and abandoned requests kept being computed. Four threads per
+      # session, one request at a time, six queued, the rest refused at once (503) so the caller moves on.
+      INFERENCE_INTRA_OP_THREADS: ${INFERENCE_INTRA_OP_THREADS:-4}
+      INFERENCE_CONCURRENCY: ${INFERENCE_CONCURRENCY:-1}
+      INFERENCE_MAX_WAITING: ${INFERENCE_MAX_WAITING:-6}
+      OMP_NUM_THREADS: ${INFERENCE_INTRA_OP_THREADS:-4}
     # Models come from the host, not the image: stage new tiers with
     #   MODELS_DIR=/opt/fcm/models python3 services/fcm-inference/download_models.py
     # or, without a host python:  docker compose -p fcm ... run --rm -v /opt/fcm/models:/app/models -u root fcm-inference python download_models.py
@@ -211,7 +219,12 @@ services:
       RUNPOD_CAPTURE_API_KEY: ${RUNPOD_CAPTURE_API_KEY:-${RUNPOD_API_KEY:-}}
       VISION_MAX_CLASSIFICATION_FRAMES: 120
       VISION_RUNPOD_BATCH_SIZE: ${VISION_RUNPOD_BATCH_SIZE:-6}
-      VISION_WORKER_CONCURRENCY: ${VISION_WORKER_CONCURRENCY:-3}
+      # Two jobs at once, two FFmpeg decode threads each (2026-09-21): the extractor used to open one decode
+      # thread per core per capture, so three jobs ran 24 decode threads against the detector on eight cores
+      # and 1-3 minute clips took twenty minutes to scan. Raise both only on a box with cores to spare.
+      VISION_WORKER_CONCURRENCY: ${VISION_WORKER_CONCURRENCY:-2}
+      VISION_DECODE_THREADS: ${VISION_DECODE_THREADS:-2}
+      OMP_NUM_THREADS: ${VISION_DECODE_THREADS:-2}
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
       # Where detector work runs (owner ruling 2026-09-20, GPU cost): vps_first | vps_only | gpu_first.

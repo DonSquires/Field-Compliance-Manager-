@@ -148,7 +148,7 @@ def _load_plate_detector() -> Any:
 
     providers = entity_detector.onnx_providers()
     _plate_detector, providers = entity_detector.create_session(
-        lambda chosen: YoloV9Detector(str(PLATE_DETECTOR_PATH), ["License Plate"], conf_thresh=PLATE_DETECT_MIN_CONFIDENCE, providers=chosen), providers,
+        lambda chosen: YoloV9Detector(str(PLATE_DETECTOR_PATH), ["License Plate"], conf_thresh=PLATE_DETECT_MIN_CONFIDENCE, providers=chosen, sess_options=entity_detector.session_options()), providers,
     )
     _active_providers["detector"] = entity_detector.active_provider(getattr(_plate_detector, "model", None), providers)
     return _plate_detector
@@ -164,7 +164,7 @@ def _load_plate_ocr() -> Any:
 
     providers = entity_detector.onnx_providers()
     _plate_ocr, providers = entity_detector.create_session(
-        lambda chosen: LicensePlateRecognizer(onnx_model_path=str(PLATE_OCR_PATH), plate_config_path=str(PLATE_OCR_CONFIG_PATH), providers=chosen), providers,
+        lambda chosen: LicensePlateRecognizer(onnx_model_path=str(PLATE_OCR_PATH), plate_config_path=str(PLATE_OCR_CONFIG_PATH), providers=chosen, sess_options=entity_detector.session_options()), providers,
     )
     _active_providers["ocr"] = entity_detector.active_provider(getattr(_plate_ocr, "model", None), providers)
     return _plate_ocr

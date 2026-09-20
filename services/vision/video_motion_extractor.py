@@ -20,6 +20,20 @@ except ImportError as error:
     ) from error
 
 
+# Decoder threads per capture. OpenCV's FFmpeg backend otherwise opens one decode thread per core, so three
+# extractors on an eight-core box run 24 decode threads against the detector's own threads and none of them
+# finish; two per capture keeps a 2304x1296 HEVC stream decoding well ahead of the 3 fps it carries.
+DECODE_THREADS = max(1, int(os.getenv("VISION_DECODE_THREADS", "2") or 2))
+cv2.setNumThreads(DECODE_THREADS)
+
+
+def open_capture(video_path: Path) -> "cv2.VideoCapture":
+    """The FFmpeg backend with a fixed decode-thread budget; other backends ignore the property."""
+    if hasattr(cv2, "CAP_PROP_N_THREADS"):
+        return cv2.VideoCapture(str(video_path), cv2.CAP_FFMPEG, [cv2.CAP_PROP_N_THREADS, DECODE_THREADS])
+    return cv2.VideoCapture(str(video_path))
+
+
 class VideoExtractionError(RuntimeError):
     """Raised when a video cannot be safely processed."""
 
@@ -392,7 +406,7 @@ def extract_motion_summary(
         raise ValueError("warmup_frames must be non-negative and frame caps positive")
     video_path = Path(input_path).expanduser().resolve()
     _validate_input(video_path, max_input_bytes)
-    capture = cv2.VideoCapture(str(video_path))
+    capture = open_capture(video_path)
     if not capture.isOpened():
         capture.release()
         raise VideoExtractionError(f"Unable to read video headers: {video_path}")
@@ -485,7 +499,7 @@ def extract_motion_summary(
     truncated = False
     frames_skipped = 0
     if artifacts_dir and windows:
-        capture = cv2.VideoCapture(str(video_path))
+        capture = open_capture(video_path)
         reader = SequentialFrames(capture, fps)
         try:
             for segment, (start, end) in zip(segments, windows):
