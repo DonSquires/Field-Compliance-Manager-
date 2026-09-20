@@ -100,7 +100,11 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    from the public URL; the web app's download link points at 0.4.3. **0.4.4 signed the same way on 2026-09-20**
    (unwritten Tapo slots and blank files set aside at listing, content sniff without the decoder, first-key-frame
    thumbnails on file rows): SHA-256 `f56a7c9c36683e436d191094b6a863f7b8b8d272bf7e87b1b2f7408f790eb156`
-   (3,073,200 bytes), verified from the public URL; the web app's download link points at 0.4.4.
+   (3,073,200 bytes), verified from the public URL; the web app's download link points at 0.4.4. **0.4.5 signed
+   the same way on 2026-09-20** (motion clips inside one file found from the MP4 index and cut into selectable
+   clips, each its own hashed file; clip times sent as labelled lower bounds): SHA-256
+   `108ce472f0d714eb4d829e084261c8bc67c79615ed439d4d187fa19c2c27c8bc` (3,114,368 bytes), verified from the
+   public URL; the web app's download link points at 0.4.5.
 
 What it buys:
 
