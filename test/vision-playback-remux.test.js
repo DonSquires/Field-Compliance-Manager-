@@ -95,3 +95,27 @@ test('vision watcher meters GPU use per job and defers (never fails) when the da
   // The poll respects a deferred job's not-before time.
   assert.match(source, /\.or\(`lease_expires_at\.is\.null,lease_expires_at\.lt\.\$\{new Date\(\)\.toISOString\(\)\}`\)/);
 });
+
+test('an extractor timeout under hypervisor CPU steal defers the job instead of failing the evidence', () => {
+  const { stealRatioSince, extractorStarved, STARVED_STEAL_RATIO } = require('../services/vision/vision_job_watcher');
+  // /proc/stat deltas: 900 of 1000 jiffies withheld by the host.
+  assert.equal(stealRatioSince({ total: 5000, steal: 100 }, { total: 6000, steal: 1000 }), 0.9);
+  assert.equal(stealRatioSince({ total: 5000, steal: 100 }, { total: 6000, steal: 100 }), 0);
+  assert.equal(stealRatioSince(null, { total: 6000, steal: 100 }), null, 'no sample means no claim');
+  assert.equal(stealRatioSince({ total: 6000, steal: 100 }, { total: 6000, steal: 100 }), null, 'a zero-length window means no claim');
+  assert.equal(STARVED_STEAL_RATIO, 0.5);
+  const starved = Object.assign(new Error('motion extractor timed out'), { code: 'EXTRACTOR_TIMEOUT', cpu_steal_ratio: 0.93 });
+  const genuine = Object.assign(new Error('motion extractor timed out'), { code: 'EXTRACTOR_TIMEOUT', cpu_steal_ratio: 0.02 });
+  const unknown = Object.assign(new Error('motion extractor timed out'), { code: 'EXTRACTOR_TIMEOUT', cpu_steal_ratio: null });
+  assert.equal(extractorStarved(starved), true);
+  assert.equal(extractorStarved(genuine), false, 'a timeout with the CPU available is still a failure');
+  assert.equal(extractorStarved(unknown), false, 'without a steal reading the timeout is not excused');
+  assert.equal(extractorStarved(new Error('motion extractor exited 1: boom')), false);
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
+  assert.match(source, /if \(extractorStarved\(error\)\) \{[\s\S]*?supabase\.rpc\('defer_cctv_inference_job', \{ p_job_id: currentJobId, p_lease_token: currentLeaseToken, p_reason: reason, p_not_before_seconds: STARVED_DEFER_SECONDS \}\)/);
+  assert.match(source, /log\('extractor_starved_deferred'/);
+  // The fallback when the deferral itself is refused is still the honest failure, never a silent completion.
+  assert.match(source, /log\('extractor_starved_defer_failed'[\s\S]*?await failJob\(currentJobId, error\.message\)/);
+});

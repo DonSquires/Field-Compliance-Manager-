@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
@@ -45,6 +46,10 @@ const LOCAL_DETECT_TIMEOUT_MS = Number(process.env.VISION_LOCAL_DETECT_TIMEOUT_M
 // A sampled frame nobody looked at is a hole in the analysis: the job waits for a detector instead of
 // completing as "no sightings".
 const DETECTOR_DEFER_SECONDS = Math.min(86_400, Math.max(60, Number(process.env.VISION_DETECTOR_DEFER_SECONDS || 600)));
+// An extractor timeout while the hypervisor withheld most of the VM's CPU (steal) says nothing about the video:
+// the job is deferred for STARVED_DEFER_SECONDS instead of failed. Below the ratio a timeout still fails.
+const STARVED_STEAL_RATIO = Math.min(1, Math.max(0.05, Number(process.env.VISION_STARVED_STEAL_RATIO || 0.5)));
+const STARVED_DEFER_SECONDS = Math.min(86_400, Math.max(60, Number(process.env.VISION_STARVED_DEFER_SECONDS || 3600)));
 const STORAGE_DOWNLOAD_TIMEOUT_MS = Number(process.env.VISION_STORAGE_DOWNLOAD_TIMEOUT_MS || 120_000);
 const LOCAL_VEHICLE_INFERENCE = process.env.VISION_LOCAL_VEHICLE_INFERENCE !== 'false';
 const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'false';
@@ -209,8 +214,29 @@ async function updateProgress(job, stage, progress = {}) {
   if (error) throw new Error(`job progress update failed: ${error.message}`);
 }
 
+// Host-wide CPU counters from /proc/stat (a container sees the VM's). Field 8 is time the hypervisor withheld.
+function cpuSample() {
+  try {
+    const fields = readFileSync('/proc/stat', 'utf8').split('\n')[0].trim().split(/\s+/).slice(1).map(Number);
+    if (fields.length < 8 || fields.some((value) => !Number.isFinite(value))) return null;
+    return { total: fields.reduce((sum, value) => sum + value, 0), steal: fields[7] };
+  } catch {
+    return null;
+  }
+}
+
+function stealRatioSince(start, end = cpuSample()) {
+  if (!start || !end || end.total <= start.total) return null;
+  return Math.max(0, Math.min(1, (end.steal - start.steal) / (end.total - start.total)));
+}
+
+function extractorStarved(error) {
+  return error?.code === 'EXTRACTOR_TIMEOUT' && Number.isFinite(error.cpu_steal_ratio) && error.cpu_steal_ratio >= STARVED_STEAL_RATIO;
+}
+
 function runExtractor(videoPath, outputDir) {
   return new Promise((resolve, reject) => {
+    const cpuAtStart = cpuSample();
     const child = spawn('python3', [EXTRACTOR_PATH, videoPath, '--output-dir', outputDir], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONUNBUFFERED: '1' }
@@ -220,7 +246,10 @@ function runExtractor(videoPath, outputDir) {
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
       setTimeout(() => child.kill('SIGKILL'), 5000).unref();
-      reject(new Error('motion extractor timed out'));
+      const error = new Error('motion extractor timed out');
+      error.code = 'EXTRACTOR_TIMEOUT';
+      error.cpu_steal_ratio = stealRatioSince(cpuAtStart);
+      reject(error);
     }, EXTRACTOR_TIMEOUT_MS);
     child.stdout.on('data', (chunk) => {
       output += chunk;
@@ -938,6 +967,7 @@ async function recordSourceHash(job, evidence, videoPath) {
 async function processOne() {
   if (!INGESTION_URL || !WORKLOAD_SIGNING_SECRET) return;
   let currentJobId = null;
+  let currentLeaseToken = null;
   try {
     const { error: recoveryError } = await supabase.rpc('recover_stale_cctv_inference_jobs');
     if (recoveryError) throw new Error(`stale job recovery failed: ${recoveryError.message}`);
@@ -955,6 +985,7 @@ async function processOne() {
     const job = await claimJob(jobs[0]);
     if (!job) return;
     currentJobId = job.id;
+    currentLeaseToken = job.lease_token;
     await updateProgress(job, 'loading_evidence', { label: 'Loading evidence file' });
     const { data: evidence, error: evidenceError } = await supabase
       .from('evidence_items')
@@ -1015,8 +1046,20 @@ async function processOne() {
       quality_events: summary.quality_events?.length || 0,
     });
   } catch (error) {
-    log('watcher_error', { error: error.message });
-    if (currentJobId) await failJob(currentJobId, error.message);
+    log('watcher_error', { error: error.message, ...(error.code ? { code: error.code } : {}), ...(Number.isFinite(error.cpu_steal_ratio) ? { cpu_steal_ratio: Number(error.cpu_steal_ratio.toFixed(3)) } : {}) });
+    if (!currentJobId) return;
+    if (extractorStarved(error)) {
+      // The video was never the problem: the VM had a fraction of its CPU. Try again later, keep the evidence intact.
+      const stealPercent = Math.round(error.cpu_steal_ratio * 100);
+      const reason = `Deferred: the analysis server had only ${100 - stealPercent}% of its CPU (hypervisor steal ${stealPercent}%) and could not finish scanning in time; analysis retries automatically`;
+      const { data: deferred, error: deferError } = await supabase.rpc('defer_cctv_inference_job', { p_job_id: currentJobId, p_lease_token: currentLeaseToken, p_reason: reason, p_not_before_seconds: STARVED_DEFER_SECONDS });
+      if (!deferError && deferred === true) {
+        log('extractor_starved_deferred', { job_id: currentJobId, cpu_steal_ratio: Number(error.cpu_steal_ratio.toFixed(3)), not_before_seconds: STARVED_DEFER_SECONDS });
+        return;
+      }
+      log('extractor_starved_defer_failed', { job_id: currentJobId, error: deferError?.message || 'defer refused' });
+    }
+    await failJob(currentJobId, error.message);
   } finally {
   }
 }
@@ -1035,4 +1078,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, INFERENCE_POLICY };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, INFERENCE_POLICY, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };
