@@ -51,3 +51,19 @@ test('the ladder speaks in minutes after the alarm and says when the clock is on
   assert.match(ladder, /No alarm time is recorded, so the clock counts from when the job was created\./);
   assert.match(ladder, /Cancelled before anyone was on scene\./);
 });
+
+test('every ladder step is stamped when a job enters that status, whichever governed path moved it', () => {
+  const stamps = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260920030000_dispatch_job_milestone_stamps.sql'), 'utf8');
+  assert.match(stamps, /create trigger trg_dispatch_job_stamp_milestones before update of status on public\.dispatch_jobs/);
+  assert.match(stamps, /if new\.status = 'dispatched' and new\.dispatched_at is null then new\.dispatched_at := now\(\); end if;/);
+  assert.match(stamps, /if new\.status = 'on_scene' and new\.on_scene_at is null then new\.on_scene_at := now\(\); end if;/);
+  assert.match(stamps, /if new\.status in \('acknowledged', 'en_route', 'on_scene', 'completed'\) and new\.dispatched_at is null then new\.dispatched_at := now\(\); end if;/);
+});
+
+test('the console only offers agreements the operating branch holds, and lets the dispatcher pick one', () => {
+  assert.match(console, /const branchAgreements = useMemo\(\(\) => agreements\.filter\(\(agreement\) => agreement\.provider_organization_id === operatingBranchId\)/);
+  assert.match(console, /if \(!selectedAgreement \|\| selectedAgreement\.provider_organization_id !== operatingBranchId\) selectAgreement\(branchAgreements\[0\]\.id\);/);
+  assert.match(console, /<select id="dispatch-agreement" value=\{selectedAgreement\?\.id \?\? ''\} onChange=\{\(event\) => selectAgreement\(event\.target\.value \|\| null\)\}>/);
+  assert.match(console, /This branch holds no service agreement yet/);
+  assert.match(console, /disabled=\{saving \|\| !selectedAgreement \|\| selectedAgreement\.provider_organization_id !== operatingBranchId/);
+});

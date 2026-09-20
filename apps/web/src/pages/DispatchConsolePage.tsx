@@ -206,12 +206,20 @@ const DispatchConsolePage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const {
+    agreements,
+    selectAgreement,
     selectedAgreement,
     selectedAgreementSites,
     selectedAgreementZones,
     loading: relationshipLoading,
     error: relationshipError,
   } = useServiceRelationships();
+  // Jobs are created under an agreement this branch holds; the house-wide context also carries sibling branches' agreements.
+  const branchAgreements = useMemo(() => agreements.filter((agreement) => agreement.provider_organization_id === operatingBranchId), [agreements, operatingBranchId]);
+  useEffect(() => {
+    if (relationshipLoading || !branchAgreements.length) return;
+    if (!selectedAgreement || selectedAgreement.provider_organization_id !== operatingBranchId) selectAgreement(branchAgreements[0].id);
+  }, [branchAgreements, operatingBranchId, relationshipLoading, selectAgreement, selectedAgreement]);
 
   // State: Phase A (Load initial data)
   const [activeShifts, setActiveShifts] = useState<ActiveShift[]>([]);
@@ -818,10 +826,16 @@ const DispatchConsolePage: React.FC = () => {
       <div className="dispatch-console-form-title">Create New Job</div>
 
       <div className="dispatch-console-agreement-card">
-        <div className="dispatch-console-form-label">Service agreement</div>
-        <strong>{selectedAgreement?.name ?? 'No agreement selected'}</strong>
+        <label className="dispatch-console-form-label" htmlFor="dispatch-agreement">Service agreement</label>
+        {branchAgreements.length > 1 ? (
+          <select id="dispatch-agreement" value={selectedAgreement?.id ?? ''} onChange={(event) => selectAgreement(event.target.value || null)}>
+            {branchAgreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.name}{agreement.client_name ? ` · ${agreement.client_name}` : ''}</option>)}
+          </select>
+        ) : (
+          <strong id="dispatch-agreement">{branchAgreements[0]?.name ?? (relationshipLoading ? 'Loading agreements…' : 'This branch holds no service agreement yet')}</strong>
+        )}
         <div className="dispatch-console-form-note">
-          Client: {selectedAgreement?.client_name ?? selectedAgreement?.client_organization_id ?? 'Unavailable'}
+          {branchAgreements.length ? `Client: ${selectedAgreement?.client_name ?? selectedAgreement?.client_organization_id ?? 'Unavailable'}` : 'Jobs are created under an agreement this branch holds. Set one up in Client Portfolios first.'}
         </div>
       </div>
 
@@ -953,7 +967,7 @@ const DispatchConsolePage: React.FC = () => {
           type="button"
           className="dispatch-console-primary-button"
           onClick={handleCreateJob}
-          disabled={saving || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
+          disabled={saving || !selectedAgreement || selectedAgreement.provider_organization_id !== operatingBranchId || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
         >
           Create
         </button>
