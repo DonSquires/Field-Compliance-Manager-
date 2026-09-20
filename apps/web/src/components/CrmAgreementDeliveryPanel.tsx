@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Building2, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
-import { asDeliverySummary, deliveryHasGaps, deliveryPeriodBounds, deliveryWords, hoursOnPost, type DeliveryPeriod, type DeliverySummary } from '../lib/serviceDelivery';
+import { AlertTriangle, Building2, MapPin, RefreshCw, ShieldCheck, Siren } from 'lucide-react';
+import { asDeliverySummary, deliveryHasGaps, deliveryPeriodBounds, deliveryWords, hoursOnPost, responseWords, type DeliveryPeriod, type DeliverySummary } from '../lib/serviceDelivery';
 import { supabase } from '../lib/supabase';
 import './CrmAgreementDeliveryPanel.css';
 
@@ -56,6 +56,7 @@ export function CrmAgreementDeliveryPanel({ agreementId, providerName }: { agree
               ); })}
             </ul>
           )}
+          {(() => { const response = responseWords(summary); return response && <p className={`crm-agreement-delivery-note crm-agreement-delivery-responses is-${response.tone}`}><Siren size={14} aria-hidden="true" /> <span><b>Responses</b> {response.text}</span></p>; })()}
           {deliveryHasGaps(summary) && <p className="crm-agreement-delivery-note is-gap"><ShieldCheck size={14} aria-hidden="true" /> The client can see these gaps too. Check the roster and the officers' shift records before the monthly report goes out.</p>}
         </>
       )}

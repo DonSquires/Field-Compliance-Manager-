@@ -335,6 +335,11 @@
 .client-delivery-toolbar button { padding: 7px 12px; border: 0; border-radius: 5px; color: #9fb4c2; background: transparent; font-size: 12px; font-weight: 700; cursor: pointer; }
 .client-delivery-toolbar button.is-active { color: #0b1a17; background: #7dd3c7; }
 .client-delivery-note { margin: 14px 0 0; max-width: 720px; color: #7d92a1; font-size: 12px; line-height: 1.5; }
+.client-delivery-responses { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: #c9d6de; }
+.client-delivery-responses svg { flex: none; margin-top: 2px; }
+.client-delivery-responses b { color: #e7eef5; font-weight: 600; margin-right: 4px; }
+.client-delivery-responses.is-warn { color: #ffe1b8; }
+.client-delivery-responses.is-ok { color: #bfe9e1; }
 .client-delivery .client-status-summary { margin-top: 14px; grid-template-columns: repeat(5, 1fr); }
 .client-delivery-list { display: grid; gap: 7px; margin-top: 14px; }
 .client-delivery-list article { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; min-width: 0; padding: 10px 12px; border: 1px solid #293d4d; border-radius: 6px; background: #0e1b27; }

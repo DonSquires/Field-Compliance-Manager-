@@ -11,13 +11,14 @@ import {
   RefreshCw,
   ScanLine,
   ShieldCheck,
+  Siren,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import type { ClientPortalPage } from '../lib/clientPortalAccess';
 import { getClientPortalPages } from '../lib/clientPortalAccess';
 import { formatComplianceReason } from '../lib/freedomCampingStatus';
-import { asDeliverySummary, deliveryPeriodBounds, deliveryWords, hoursOnPost, type DeliveryPeriod, type DeliverySummary } from '../lib/serviceDelivery';
+import { asDeliverySummary, deliveryPeriodBounds, deliveryWords, hoursOnPost, responseWords, type DeliveryPeriod, type DeliverySummary } from '../lib/serviceDelivery';
 import { supabase } from '../lib/supabase';
 import './ClientPortalPage.css';
 
@@ -313,6 +314,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
                 <StatusCount label="Guard attendances" value={delivery.totals.post_attended} tone="success" />
                 <div className="client-status-count tone-neutral"><strong>{hoursOnPost(delivery.totals.post_minutes)}</strong><span>On post</span></div>
               </div>
+              {(() => { const response = responseWords(delivery); return response && <p className={`client-delivery-note client-delivery-responses is-${response.tone}`}><Siren size={15} aria-hidden="true" /><span><b>Alarms and incidents</b> {response.text}</span></p>; })()}
               {delivery.places.length === 0 ? <div className="client-compact-state">No places are linked to this agreement yet.</div> : (
                 <div className="client-delivery-list">
                   {delivery.places.map((place) => { const words = deliveryWords(place); return (

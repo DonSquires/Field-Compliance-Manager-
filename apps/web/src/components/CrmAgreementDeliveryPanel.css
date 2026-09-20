@@ -21,6 +21,11 @@
 .crm-agreement-delivery-places li small{color:#83c9b9;font-size:11px;text-align:right;white-space:nowrap}
 .crm-agreement-delivery-note{display:flex;gap:6px;align-items:center;margin:0;color:#8fa9b5;font-size:12px}
 .crm-agreement-delivery-note.is-gap{color:#f7d77a}
+.crm-agreement-delivery-responses{align-items:flex-start;line-height:1.4}
+.crm-agreement-delivery-responses svg{flex:none;margin-top:2px}
+.crm-agreement-delivery-responses b{color:#e7eef5;font-weight:600;margin-right:4px}
+.crm-agreement-delivery-responses.is-warn{color:#ffe1b8}
+.crm-agreement-delivery-responses.is-ok{color:#bfe9e1}
 .crm-agreement-delivery-error{display:flex;gap:6px;align-items:center;margin:0;color:#ffd7d7;font-size:12px}
 .crm-agreement-delivery .is-spinning{animation:crm-agreement-delivery-spin 1s linear infinite}
 @keyframes crm-agreement-delivery-spin{to{transform:rotate(360deg)}}
