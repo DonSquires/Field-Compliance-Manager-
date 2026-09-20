@@ -177,6 +177,35 @@ type SourceMode = 'card' | 'files';
 /** One thing the operator can preview, send or skip: a recording on the card or a video file in a folder. */
 type SourceItem = { kind: 'card'; key: string; recording: DhfsRecording } | { kind: 'file'; key: string; file: LocalVideoFile };
 
+// The operator's verdict on a recording, colour-coded so the list reads at a glance. Marks are the operator's
+// working notes, kept on this computer per card/folder; they travel to FCM only as manifest provenance.
+type ReviewMark = 'keep' | 'review_further' | 'reviewed' | 'nothing_here';
+const MARKS: Array<{ id: ReviewMark; label: string; hint: string }> = [
+  { id: 'keep', label: 'Keep', hint: 'Worth sending: send it, or leave it marked so it is not missed.' },
+  { id: 'review_further', label: 'Review further', hint: 'Not decided yet: come back to this one.' },
+  { id: 'reviewed', label: 'Reviewed', hint: 'Looked at, no further action needed here.' },
+  { id: 'nothing_here', label: 'Nothing here', hint: 'Seen, nothing of interest; left out of “Send all”.' },
+];
+const markLabel = (mark: ReviewMark) => MARKS.find((candidate) => candidate.id === mark)?.label ?? mark;
+/** Which recordings “Send all” takes: not sent yet, not skipped, and not marked as nothing / already reviewed. */
+const excludedFromSendAll = (mark: ReviewMark | undefined) => mark === 'nothing_here' || mark === 'reviewed';
+
+/** Where one recording was made. A portable covert camera moves between places; the client organisation does not. */
+type PlaceChoice = { houseId: string; cameraLabel: string };
+/** A send that completed: FCM holds the bytes under this path with the hash taken here. Kept so a restart still knows. */
+type SentRecord = { importId: string; storagePath: string; fileName: string; sentAt: string; bytes: number };
+type ReviewFile = { version: 1; marks: Record<string, ReviewMark>; places: Record<string, PlaceChoice>; sent: Record<string, SentRecord>; savedAt: string };
+const placeKeyOf = (place: PlaceChoice) => `${place.houseId}::${place.cameraLabel.trim().toLowerCase()}`;
+/** Six-digit descriptor and the camera's file stamp, exactly as the extractor names files: `-p0-d000722-2026-08-11_14-14-53-`. */
+const fileStamp = (time: DhfsTime) => `${time.year}-${pad(time.month)}-${pad(time.day)}_${pad(time.hour)}-${pad(time.minute)}-${pad(time.second)}`;
+const recordingStemMarker = (recording: DhfsRecording) => `-p${recording.partitionIndex}-d${String(recording.descriptor).padStart(6, '0')}-${fileStamp(recording.start)}-`;
+
+// Disk on this computer: what the app wrote and what may be removed.
+type DiskEntry = { path: string; name: string; bytes: number; kind: 'video' | 'pictures' | 'partial' | 'mp4' | 'image' | 'other'; modifiedEpochMs: number };
+type DiskReport = { directory: string; entries: DiskEntry[]; totalBytes: number; previewsDirectory: string; previewsBytes: number; previewsCount: number; toolsBytes: number; acquisitionsRoot: string; otherCardsBytes: number; otherCardsFolders: number };
+type RemovalReport = { removed: number; freedBytes: number; failures: Array<{ path: string; error: string }> };
+type FcmVerification = 'verified' | 'pending' | 'mismatch' | 'unknown';
+
 // The pop-out preview is this same bundle in a second window (`?popout=1`). The workstation window owns every
 // decision; the pop-out shows what it is told and sends the operator's choice back as an event.
 const POPOUT_LABEL = 'preview';
@@ -188,8 +217,9 @@ type PopoutState = {
   filmstrip: Filmstrip | null; clockBase: DhfsTime | null; clipKind: ContentKind | null;
   preview: PreviewRendition | null; busy: 'filmstrip' | 'preview' | null; note: string | null; error: string | null;
   canSend: boolean; sendStatus: SendStatus | null; skipped: boolean; sendHint: string | null;
+  mark: ReviewMark | null; placeName: string | null;
 };
-type PopoutAction = { itemKey: string; action: 'play' | 'send' | 'skip' | 'include' | 'close' };
+type PopoutAction = { itemKey: string; action: 'play' | 'send' | 'skip' | 'include' | 'close' } | { itemKey: string; action: 'mark'; mark: ReviewMark | null };
 const IS_POPOUT = new URLSearchParams(window.location.search).get('popout') === '1';
 
 const isValidTimeZone = (zone: string) => { try { new Intl.DateTimeFormat('en-US', { timeZone: zone }); return true; } catch { return false; } };
@@ -309,6 +339,11 @@ function Step({ number, title, detail, active, complete }: { number: string; tit
   return <div className={`step ${active ? 'is-active' : ''} ${complete ? 'is-complete' : ''}`}><span>{complete ? <CheckCircle2 size={16} /> : number}</span><div><strong>{title}</strong><small>{detail}</small></div></div>;
 }
 
+/** The mark picker: one row of colour-coded choices; clicking the active one clears it. */
+function MarkPicker({ value, onChange, compact }: { value: ReviewMark | null; onChange: (mark: ReviewMark | null) => void; compact?: boolean }) {
+  return <div className={`marks ${compact ? 'marks--compact' : ''}`} role="group" aria-label="Review mark">{MARKS.map((mark) => <button key={mark.id} type="button" className={`mark mark--${mark.id} ${value === mark.id ? 'is-active' : ''}`} title={mark.hint} aria-pressed={value === mark.id} onClick={() => onChange(value === mark.id ? null : mark.id)}><span className="mark__dot" />{compact ? '' : mark.label}</button>)}</div>;
+}
+
 /** The pop-out window: a viewer for whatever the workstation is reviewing, sized for a second screen. */
 function PopoutViewer() {
   const [state, setState] = useState<PopoutState | null>(null);
@@ -318,11 +353,12 @@ function PopoutViewer() {
     void emitTo('main', POPOUT_READY_EVENT, {});
     return () => { void pending.then((unlisten) => unlisten()); };
   }, []);
-  const act = (action: PopoutAction['action']) => { if (state) void emitTo('main', POPOUT_ACTION_EVENT, { itemKey: state.itemKey, action } satisfies PopoutAction); };
+  const act = (action: Exclude<PopoutAction, { action: 'mark' }>['action']) => { if (state) void emitTo('main', POPOUT_ACTION_EVENT, { itemKey: state.itemKey, action } satisfies PopoutAction); };
+  const mark = (value: ReviewMark | null) => { if (state) void emitTo('main', POPOUT_ACTION_EVENT, { itemKey: state.itemKey, action: 'mark', mark: value } satisfies PopoutAction); };
   const frames = state?.filmstrip?.frames ?? [];
   const clockBase = state?.clockBase ?? null;
   return <main className="popout">
-    <header className="popout__head"><div><span className="eyebrow">Preview · FCM Desktop V2 v{APP_VERSION}</span><h1>{state?.title ?? 'Waiting for the workstation…'}</h1><p>{state?.subtitle ?? 'Choose “Preview” on a recording in the main window; it appears here.'}</p></div><button className="secondary" onClick={() => void getCurrentWindow().close()}>Close</button></header>
+    <header className="popout__head"><div><span className="eyebrow">Preview · FCM Desktop V2 v{APP_VERSION}</span><h1>{state?.title ?? 'Waiting for the workstation…'}</h1><p>{state?.subtitle ?? 'Choose “Preview” on a recording in the main window; it appears here.'}</p>{state?.placeName && <p className="popout__place"><MapPin size={12} /> {state.placeName}</p>}</div><button className="secondary" onClick={() => void getCurrentWindow().close()}>Close</button></header>
     {state && <>
       {state.preview
         ? <video key={state.preview.path} className="popout__video" controls autoPlay preload="metadata" src={convertFileSrc(state.preview.path)} />
@@ -331,6 +367,7 @@ function PopoutViewer() {
       {state.note && <p className="review__note">{state.note}</p>}
       {state.error && <p className="review__error">{state.error}</p>}
       <footer className="popout__actions">
+        <MarkPicker value={state.mark} onChange={mark} />
         {state.canSend ? <button className="primary" onClick={() => act('send')} disabled={state.sendStatus === 'done' || (state.sendStatus !== null && state.sendStatus !== 'failed')}><Send size={15} /> {state.sendStatus === 'done' ? 'Sent to FCM' : state.sendStatus && state.sendStatus !== 'failed' ? sendLabel[state.sendStatus] : 'Send this recording to FCM'}</button> : <small className="muted">{state.sendHint}</small>}
         {state.sendStatus !== 'done' && <button className="secondary" onClick={() => act(state.skipped ? 'include' : 'skip')}>{state.skipped ? <><Undo2 size={15} /> Include again</> : <><EyeOff size={15} /> Skip — do not send</>}</button>}
         {state.preview && <small className="muted">{encoderLabel(state.preview)} · {formatBytes(state.preview.bytes)} · viewing copy only, never sent</small>}
@@ -388,9 +425,24 @@ export default function App() {
   const [fileClocks, setFileClocks] = useState<Record<string, FileClock>>({});
   const [fileFacts, setFileFacts] = useState<Record<string, FileFacts>>({});
   const [saves, setSaves] = useState<Record<string, SavedCopy>>({});
+  // The operator's marks and per-recording places, kept on this computer per card/folder (see reviewScope).
+  const [marks, setMarks] = useState<Record<string, ReviewMark>>({});
+  const [places, setPlaces] = useState<Record<string, PlaceChoice>>({});
+  const [placeEditor, setPlaceEditor] = useState<string | null>(null);
+  const [placeQuery, setPlaceQuery] = useState('');
+  // One import per (client organisation, place, camera label) in this session; a moved camera gets one per place.
+  const [imports, setImports] = useState<Record<string, ImportRow>>({});
+  const [markFilter, setMarkFilter] = useState<ReviewMark | 'unmarked' | 'all'>('all');
+  // Sends that completed, this session or earlier ones (persisted with the marks): the basis for "Sent" and for cleanup.
+  const [sentRecords, setSentRecords] = useState<Record<string, SentRecord>>({});
+  const [disk, setDisk] = useState<DiskReport | null>(null);
+  const [diskBusy, setDiskBusy] = useState(false);
+  const [fcmVerified, setFcmVerified] = useState<Record<string, FcmVerification>>({});
+  const [reviewScope, setReviewScope] = useState<string | null>(null);
+  const reviewLoadedRef = useRef<string | null>(null);
   const stopQueueRef = useRef(false);
   // Sends finished during a queue, readable after the loop without waiting for a re-render.
-  const doneClipsRef = useRef<Record<string, ExtractedClip>>({});
+  const doneClipsRef = useRef<Record<string, { clip: ExtractedClip; importId: string }>>({});
 
   const describeFailure = (cause: unknown, fallback: string) => (typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : fallback);
   const failWith = (cause: unknown, fallback: string) => setError(describeFailure(cause, fallback));
@@ -441,14 +493,66 @@ export default function App() {
     return (query ? pool.filter((house) => `${house.name} ${house.address ?? ''}`.toLowerCase().includes(query)) : pool).slice(0, 8);
   }, [houses, houseQuery, organizationId]);
   const selectedHouse = useMemo(() => houses.find((house) => house.id === houseId) ?? null, [houses, houseId]);
-  const sentCount = useMemo(() => Object.values(sends).filter((send) => send.status === 'done').length, [sends]);
-  const skippedCount = useMemo(() => Object.keys(skipped).length, [skipped]);
-  const previewCount = useMemo(() => Object.values(reviews).filter((review) => review.preview).length, [reviews]);
   /** Everything the active source offers, in the shape the review/send flow works on. */
   const items = useMemo<SourceItem[]>(() => (mode === 'card'
     ? (catalog?.recordings ?? []).map((recording) => ({ kind: 'card' as const, key: recordingKey(recording), recording }))
     : (videoFolder?.files ?? []).map((file) => ({ kind: 'file' as const, key: fileKey(file), file }))), [mode, catalog, videoFolder]);
-  const unsentItems = useMemo(() => items.filter((item) => sends[item.key]?.status !== 'done' && !skipped[item.key]), [items, sends, skipped]);
+  const sentCount = useMemo(() => items.filter((item) => sends[item.key]?.status === 'done' || sentRecords[item.key]).length, [items, sends, sentRecords]);
+  const isSent = (key: string) => sends[key]?.status === 'done' || Boolean(sentRecords[key]);
+  const skippedCount = useMemo(() => Object.keys(skipped).length, [skipped]);
+  const previewCount = useMemo(() => Object.values(reviews).filter((review) => review.preview).length, [reviews]);
+  const unsentItems = useMemo(() => items.filter((item) => sends[item.key]?.status !== 'done' && !sentRecords[item.key] && !skipped[item.key] && !excludedFromSendAll(marks[item.key])), [items, sends, sentRecords, skipped, marks]);
+  const markCounts = useMemo(() => {
+    const counts: Record<ReviewMark | 'unmarked', number> = { keep: 0, review_further: 0, reviewed: 0, nothing_here: 0, unmarked: 0 };
+    for (const item of items) { const mark = marks[item.key]; if (mark) counts[mark] += 1; else counts.unmarked += 1; }
+    return counts;
+  }, [items, marks]);
+  const passesFilter = (key: string) => markFilter === 'all' || (markFilter === 'unmarked' ? !marks[key] : marks[key] === markFilter);
+  const placeFor = (key: string): PlaceChoice | null => places[key] ?? (houseId && cameraLabel.trim() ? { houseId, cameraLabel: cameraLabel.trim() } : null);
+  const houseName = (id: string | null | undefined) => houses.find((house) => house.id === id)?.name ?? null;
+  const placesInUse = useMemo(() => { const seen = new Map<string, number>(); for (const item of items) { const place = placeFor(item.key); if (place) seen.set(place.houseId, (seen.get(place.houseId) ?? 0) + 1); } return seen; }, [items, places, houseId, cameraLabel]);
+
+  // ---- Review state kept on this computer, per card or folder ------------------------------------------
+  // A card recording is persisted under its key plus its start time, so a descriptor reused after the card
+  // wraps does not inherit an old mark.
+  const persistKey = (item: SourceItem) => (item.kind === 'card' ? `${item.key}|${fileStamp(item.recording.start)}` : item.key);
+  useEffect(() => {
+    if (mode === 'card') {
+      if (!catalog?.recordings.length) { setReviewScope(null); return; }
+      const first = catalog.recordings[0];
+      setReviewScope(`card:${catalog.volume.partitions[0]?.capacityBytes ?? 0}:${first.descriptor}:${fileStamp(first.start)}`);
+    } else setReviewScope(videoFolder ? `folder:${videoFolder.directory}` : null);
+  }, [mode, catalog, videoFolder]);
+  useEffect(() => {
+    if (!reviewScope || reviewLoadedRef.current === reviewScope) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = await invoke<ReviewFile | null>('load_review_state', { scope: reviewScope });
+        if (cancelled) return;
+        const byPersist = new Map(items.map((item) => [persistKey(item), item.key]));
+        const remap = <T,>(record: Record<string, T> | undefined) => Object.fromEntries(Object.entries(record ?? {}).flatMap(([persisted, value]) => { const key = byPersist.get(persisted); return key ? [[key, value]] : []; })) as Record<string, T>;
+        if (saved?.version === 1) {
+          setMarks(remap(saved.marks)); setPlaces(remap(saved.places)); setSentRecords(remap(saved.sent));
+          const restored = Object.keys(remap(saved.sent)).length;
+          if (restored) setStatus(`${restored} recording${restored === 1 ? '' : 's'} already sent to FCM in an earlier session; marks and places restored.`);
+        } else { setMarks({}); setPlaces({}); setSentRecords({}); }
+        reviewLoadedRef.current = reviewScope;
+      } catch (cause) { failWith(cause, 'The saved review state could not be read.'); reviewLoadedRef.current = reviewScope; }
+    })();
+    return () => { cancelled = true; };
+  }, [reviewScope, items]);
+  useEffect(() => {
+    if (!reviewScope || reviewLoadedRef.current !== reviewScope) return;
+    const byKey = new Map(items.map((item) => [item.key, persistKey(item)]));
+    const persist = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).flatMap(([key, value]) => { const persisted = byKey.get(key); return persisted ? [[persisted, value]] : []; }));
+    const file: ReviewFile = { version: 1, marks: persist(marks), places: persist(places), sent: persist(sentRecords), savedAt: new Date().toISOString() };
+    const timer = window.setTimeout(() => { invoke('save_review_state', { scope: reviewScope, state: file }).catch((cause: unknown) => failWith(cause, 'The review state could not be saved.')); }, 400);
+    return () => window.clearTimeout(timer);
+  }, [reviewScope, items, marks, places, sentRecords]);
+
+  const setMark = (item: SourceItem, mark: ReviewMark | null) => setMarks((current) => { const next = { ...current }; if (mark) next[item.key] = mark; else delete next[item.key]; return next; });
+  const setPlaceOverride = (keys: string[], place: PlaceChoice | null) => setPlaces((current) => { const next = { ...current }; for (const key of keys) { if (place) next[key] = place; else delete next[key]; } return next; });
   const fileDays = useMemo(() => {
     const groups = new Map<string, LocalVideoFile[]>();
     for (const file of videoFolder?.files ?? []) {
@@ -782,7 +886,23 @@ export default function App() {
 
   const signOut = async () => {
     try { await supabase.auth.signOut(); } catch { /* the in-memory session is dropped regardless */ }
-    setFcmSession(null); setFcmProfile(null); setOrganizations([]); setOrganizationId(null); setHouses([]); setHouseId(null); setImportRow(null); setSends({}); doneClipsRef.current = {};
+    setFcmSession(null); setFcmProfile(null); setOrganizations([]); setOrganizationId(null); setHouses([]); setHouseId(null); setImportRow(null); setImports({}); setSends({}); doneClipsRef.current = {};
+  };
+
+  /** One `cctv_imports` row for a client organisation, place and camera label; the RPCs the web import page uses. */
+  const createImportRow = async (place: PlaceChoice): Promise<ImportRow> => {
+    if (!organizationId) throw new Error('Choose the organisation this footage belongs to.');
+    if (!isValidTimeZone(timeZone)) throw new Error('Enter a valid time zone for the camera clock (for example Pacific/Auckland).');
+    const rootLabel = mode === 'files' ? (videoFolder?.directory ?? null) : selectedDevice ? `${selectedDevice.driveLetters.join(' ')} ${selectedDevice.label}`.trim() : catalogSource ? sourceLabel(catalogSource) : null;
+    const { data, error: createError } = await supabase.rpc('create_cctv_import', {
+      p_organization_id: organizationId, p_location_id: place.houseId, p_camera_label: place.cameraLabel.trim(), p_site_id: null, p_zone_id: null,
+      p_source_device_kind: mode === 'files' ? 'generic_folder' : 'dahua', p_source_timezone: timeZone, p_source_root_label: rootLabel, p_watermark_location_hint: null, p_notes: notes.trim() || null,
+    });
+    if (createError) throw new Error(createError.message);
+    const row = data as ImportRow;
+    const { error: manifestError } = await supabase.rpc('set_cctv_import_manifest', { p_import_id: row.id, p_manifest: [], p_status: 'uploading' });
+    if (manifestError) throw new Error(manifestError.message);
+    return row;
   };
 
   const createImport = async () => {
@@ -792,19 +912,26 @@ export default function App() {
     if (!isValidTimeZone(timeZone)) { setError('Enter a valid time zone for the camera clock (for example Pacific/Auckland).'); return; }
     setFcmBusy(true); setError(null);
     try {
-      const rootLabel = mode === 'files' ? (videoFolder?.directory ?? null) : selectedDevice ? `${selectedDevice.driveLetters.join(' ')} ${selectedDevice.label}`.trim() : catalogSource ? sourceLabel(catalogSource) : null;
-      const { data, error: createError } = await supabase.rpc('create_cctv_import', {
-        p_organization_id: organizationId, p_location_id: houseId, p_camera_label: cameraLabel.trim(), p_site_id: null, p_zone_id: null,
-        p_source_device_kind: mode === 'files' ? 'generic_folder' : 'dahua', p_source_timezone: timeZone, p_source_root_label: rootLabel, p_watermark_location_hint: null, p_notes: notes.trim() || null,
-      });
-      if (createError) throw new Error(createError.message);
-      const row = data as ImportRow;
-      const { error: manifestError } = await supabase.rpc('set_cctv_import_manifest', { p_import_id: row.id, p_manifest: [], p_status: 'uploading' });
-      if (manifestError) throw new Error(manifestError.message);
-      setImportRow(row); setSends({}); doneClipsRef.current = {};
-      setStatus(`Import created for ${selectedHouse?.name ?? 'the chosen place'}. Choose “Send to FCM” on a recording, or send them all.`);
+      const place = { houseId, cameraLabel: cameraLabel.trim() };
+      const row = await createImportRow(place);
+      setImportRow(row); setImports({ [placeKeyOf(place)]: row }); setSends({}); doneClipsRef.current = {};
+      setStatus(`Ready to send to ${selectedHouse?.name ?? 'the chosen place'}. Recordings made somewhere else can be given their own place on the row (or for a whole day) before sending.`);
     } catch (cause) { failWith(cause, 'The import could not be created.'); }
     finally { setFcmBusy(false); }
+  };
+
+  /** The import a recording belongs to: the default place's, or one created on first use for the place set on the row. */
+  const importFor = async (item: SourceItem): Promise<ImportRow> => {
+    if (!importRow) throw new Error('Create the import under “Send to FCM” first.');
+    const place = places[item.key];
+    if (!place) return importRow;
+    const placeKey = placeKeyOf(place);
+    const existing = imports[placeKey] ?? (placeKey === placeKeyOf({ houseId: importRow.location_id, cameraLabel: importRow.camera_label }) ? importRow : null);
+    if (existing) return existing;
+    setStatus(`Creating an import for ${houseName(place.houseId) ?? 'the chosen place'} (${place.cameraLabel})…`);
+    const row = await createImportRow(place);
+    setImports((current) => ({ ...current, [placeKey]: row }));
+    return row;
   };
 
   const updateSend = (key: string, patch: Partial<SendState>) => setSends((current) => ({ ...current, [key]: { ...(current[key] ?? { status: 'extracting', sent: 0, total: 0 }), ...patch } }));
@@ -859,9 +986,10 @@ export default function App() {
         updateSend(key, { status: 'registering', sent: clip.pictures.length, total: clip.pictures.length });
         const { error: eventsError } = await supabase.rpc('record_cctv_device_events', { p_import_id: importTarget.id, p_events: events });
         if (eventsError) throw new Error(eventsError.message);
-        doneClipsRef.current[key] = clip;
+        doneClipsRef.current[key] = { clip, importId: importTarget.id };
+        setSentRecords((current) => ({ ...current, [key]: { importId: importTarget.id, storagePath: storagePathFor(importTarget.organization_id, importTarget.id, clip.fileName), fileName: clip.fileName, sentAt: new Date().toISOString(), bytes: clip.bytes } }));
         updateSend(key, { status: 'done' });
-        setStatus(`${clip.pictures.length} event pictures from ${formatTime(clip.pictures[0].takenAt)} are on the timeline at ${selectedHouse?.name ?? 'the chosen place'}.`);
+        setStatus(`${clip.pictures.length} event pictures from ${formatTime(clip.pictures[0].takenAt)} are on the timeline at ${houseName(importTarget.location_id) ?? 'the chosen place'}.`);
         return true;
       }
       if (!clip.contentType.startsWith('video/')) throw new Error(`${clip.fileName} was not recognised as a video stream (${clip.codec}); it stays ${item.kind === 'card' ? 'in the working folder' : 'where it is'} and is not sent.`);
@@ -878,9 +1006,10 @@ export default function App() {
         p_recorded_start_at: wallClockToIso(recordedStart, timeZone), p_recorded_end_at: clip.kind === 'local_video' && clip.durationSeconds <= 0 ? null : wallClockToIso(recordedEnd, timeZone), p_source_ref: clip.fileName, p_content_type: clip.contentType,
       });
       if (registerError) throw new Error(registerError.message);
-      doneClipsRef.current[key] = clip;
+      doneClipsRef.current[key] = { clip, importId: importTarget.id };
+      setSentRecords((current) => ({ ...current, [key]: { importId: importTarget.id, storagePath: objectName, fileName: clip.fileName, sentAt: new Date().toISOString(), bytes: clip.bytes } }));
       updateSend(key, { status: 'done' });
-      setStatus(`${clip.fileName} is in FCM (SHA-256 anchored ${item.kind === 'card' ? 'from the card' : 'before it left this computer'}) and queued for analysis at ${selectedHouse?.name ?? 'the chosen place'}.`);
+      setStatus(`${clip.fileName} is in FCM (SHA-256 anchored ${item.kind === 'card' ? 'from the card' : 'before it left this computer'}) and queued for analysis at ${houseName(importTarget.location_id) ?? 'the chosen place'}.`);
       return true;
     } catch (cause) {
       const message = describeFailure(cause, 'The recording could not be sent.');
@@ -889,18 +1018,19 @@ export default function App() {
     } finally { setSendingKey(null); }
   };
 
-  const manifestFor = (target: ImportRow) => Object.entries(doneClipsRef.current).flatMap(([key, clip]) => {
+  const manifestFor = (target: ImportRow) => Object.entries(doneClipsRef.current).filter(([, done]) => done.importId === target.id).flatMap(([key, { clip }]) => {
+    const review_mark = marks[key] ?? null;
     if (clip.kind === 'pictures') {
-      return clip.pictures.map((picture) => ({ name: picture.fileName, relative_path: `${clip.fileName}/${picture.fileName}`, size_bytes: picture.bytes, kind: 'snapshot', slot_start_at: wallClockToIso(picture.takenAt, timeZone), sha256: picture.sha256, import_id: target.id }));
+      return clip.pictures.map((picture) => ({ name: picture.fileName, relative_path: `${clip.fileName}/${picture.fileName}`, size_bytes: picture.bytes, kind: 'snapshot', slot_start_at: wallClockToIso(picture.takenAt, timeZone), sha256: picture.sha256, import_id: target.id, review_mark }));
     }
     const start = clip.stats.contentStart ?? clip.start;
     const end = clip.stats.contentEnd ?? clip.end;
     const timing = clip.kind === 'local_video' ? { start_time_source: fileClocks[key]?.source ?? 'unknown', source_path: clip.path } : { frames: clip.stats.videoFrames, stale_bytes_skipped: clip.stats.staleBytes };
-    return [{ name: clip.fileName, relative_path: clip.fileName, size_bytes: clip.bytes, kind: 'video', slot_start_at: wallClockToIso(start, timeZone), slot_end_at: wallClockToIso(end, timeZone), sha256: clip.sha256, import_id: target.id, content_kind: clip.kind, ...timing }];
+    return [{ name: clip.fileName, relative_path: clip.fileName, size_bytes: clip.bytes, kind: 'video', slot_start_at: wallClockToIso(start, timeZone), slot_end_at: wallClockToIso(end, timeZone), sha256: clip.sha256, import_id: target.id, content_kind: clip.kind, review_mark, ...timing }];
   });
 
   const finishImport = async (target: ImportRow) => {
-    const anySent = Object.keys(doneClipsRef.current).length > 0;
+    const anySent = Object.values(doneClipsRef.current).some((done) => done.importId === target.id);
     const { error: manifestError } = await supabase.rpc('set_cctv_import_manifest', { p_import_id: target.id, p_manifest: manifestFor(target), p_status: anySent ? 'registered' : null });
     if (manifestError) setError(`Sent, but the import summary could not be updated: ${manifestError.message}`);
   };
@@ -909,26 +1039,100 @@ export default function App() {
     if (!importRow) return;
     // An explicit Send overrides an earlier Skip.
     setSkipped((current) => { const next = { ...current }; delete next[item.key]; return next; });
-    await sendItem(item, importRow);
-    await finishImport(importRow);
+    let target: ImportRow;
+    try { target = await importFor(item); } catch (cause) { failWith(cause, 'The import for this recording could not be created.'); return; }
+    await sendItem(item, target);
+    await finishImport(target);
   };
 
   const sendAll = async () => {
     if (!importRow) return;
     stopQueueRef.current = false;
     const queue = unsentItems;
+    const touched = new Map<string, ImportRow>();
     let sentNow = 0;
     for (let index = 0; index < queue.length; index += 1) {
       if (stopQueueRef.current) break;
       setQueueRemaining(queue.length - index);
-      if (await sendItem(queue[index], importRow)) sentNow += 1;
+      let target: ImportRow;
+      try { target = await importFor(queue[index]); } catch (cause) { failWith(cause, 'The import for a recording could not be created; sending stopped.'); break; }
+      touched.set(target.id, target);
+      if (await sendItem(queue[index], target)) sentNow += 1;
     }
     setQueueRemaining(0);
-    await finishImport(importRow);
-    setStatus(stopQueueRef.current ? `Stopped: ${sentNow} recording${sentNow === 1 ? '' : 's'} sent before the stop.` : `${sentNow} of ${queue.length} recording${queue.length === 1 ? '' : 's'} sent to FCM${skippedCount ? ` (${skippedCount} skipped by you)` : ''}. Open FCM → CCTV review to watch the analysis land.`);
+    for (const target of touched.values()) await finishImport(target);
+    const placeCount = touched.size;
+    setStatus(stopQueueRef.current ? `Stopped: ${sentNow} recording${sentNow === 1 ? '' : 's'} sent before the stop.` : `${sentNow} of ${queue.length} recording${queue.length === 1 ? '' : 's'} sent to FCM${placeCount > 1 ? ` across ${placeCount} places` : ''}${skippedCount ? ` (${skippedCount} skipped by you)` : ''}. Open FCM → CCTV review to watch the analysis land.`);
   };
 
   const stopQueue = async () => { stopQueueRef.current = true; try { await invoke('cancel_upload'); } catch (cause) { failWith(cause, 'Stop request failed.'); } };
+
+  // ---- Disk on this computer ------------------------------------------------------------------------------
+  // Removal never reaches past the working folder and the previews folder (enforced again in Rust), and never
+  // touches a recording that is undecided, marked Keep / Review further, saved on purpose, or not yet verified by FCM.
+  const refreshDisk = async () => {
+    setDiskBusy(true); setError(null);
+    try {
+      const directory = destinationDirectory ?? (catalogSource ? await invoke<string>('default_clip_directory', { sourceId: catalogSource.kind === 'device' ? catalogSource.id : 'image' }) : null);
+      if (!directory) { setDisk(null); return; }
+      if (!destinationDirectory) setDestinationDirectory(directory);
+      const report = await invoke<DiskReport>('disk_report', { directory });
+      setDisk(report);
+      // FCM's own verdict on what was sent: the worker re-hashes on intake and records the outcome on the evidence row.
+      const sentPaths = items.map((item) => sentRecords[item.key]?.storagePath).filter((path): path is string => Boolean(path));
+      if (sentPaths.length && fcmSession) {
+        const verdicts: Record<string, FcmVerification> = {};
+        for (let start = 0; start < sentPaths.length; start += 50) {
+          const { data, error: readError } = await supabase.from('evidence_items').select('storage_path, metadata').in('storage_path', sentPaths.slice(start, start + 50));
+          if (readError) throw new Error(`FCM's verification state could not be read: ${readError.message}`);
+          for (const row of (data ?? []) as Array<{ storage_path: string; metadata: { integrity?: { state?: string } } | null }>) {
+            const state = row.metadata?.integrity?.state;
+            verdicts[row.storage_path] = state === 'verified' ? 'verified' : state === 'mismatch' ? 'mismatch' : 'pending';
+          }
+        }
+        setFcmVerified(Object.fromEntries(items.flatMap((item) => { const record = sentRecords[item.key]; return record ? [[item.key, verdicts[record.storagePath] ?? 'unknown']] : []; })));
+      } else setFcmVerified({});
+    } catch (cause) { failWith(cause, 'The disk report could not be built.'); }
+    finally { setDiskBusy(false); }
+  };
+
+  type DiskGroups = { verifiedSent: DiskEntry[]; awaitingFcm: DiskEntry[]; decidedNo: DiskEntry[]; partial: DiskEntry[]; kept: DiskEntry[]; saved: DiskEntry[]; unknown: DiskEntry[] };
+  const diskGroups = useMemo<DiskGroups | null>(() => {
+    if (!disk) return null;
+    const groups: DiskGroups = { verifiedSent: [], awaitingFcm: [], decidedNo: [], partial: [], kept: [], saved: [], unknown: [] };
+    const savedNames = new Set(Object.values(saves).filter((copy) => copy.directory === disk.directory).flatMap((copy) => [copy.fileName, copy.mp4 ? copy.mp4.path.split(/[\\/]/).pop() ?? '' : '']));
+    for (const entry of disk.entries) {
+      if (entry.kind === 'partial') { groups.partial.push(entry); continue; }
+      if (entry.kind === 'mp4' || entry.kind === 'image' || savedNames.has(entry.name)) { groups.saved.push(entry); continue; }
+      const item = items.find((candidate) => candidate.kind === 'card' && entry.name.includes(recordingStemMarker(candidate.recording)));
+      if (!item) { groups.unknown.push(entry); continue; }
+      const mark = marks[item.key];
+      if (isSent(item.key)) { (fcmVerified[item.key] === 'verified' ? groups.verifiedSent : groups.awaitingFcm).push(entry); continue; }
+      if (mark === 'nothing_here' || mark === 'reviewed') { groups.decidedNo.push(entry); continue; }
+      groups.kept.push(entry);
+    }
+    return groups;
+  }, [disk, items, marks, saves, sentRecords, sends, fcmVerified]);
+  const sumBytes = (entries: DiskEntry[]) => entries.reduce((total, entry) => total + entry.bytes, 0);
+
+  const removeEntries = async (entries: DiskEntry[], what: string, why: string) => {
+    if (!disk || !entries.length) return;
+    let confirmed = false;
+    try { confirmed = await ask(`Remove ${entries.length} ${what} (${formatBytes(sumBytes(entries))}) from this computer?\n\n${why}`, { title: 'Free disk space', kind: 'warning', okLabel: 'Remove', cancelLabel: 'Keep' }); }
+    catch (cause) { failWith(cause, 'The confirmation dialog could not be opened.'); return; }
+    if (!confirmed) return;
+    setDiskBusy(true);
+    try {
+      const report = await invoke<RemovalReport>('remove_local_files', { paths: entries.map((entry) => entry.path), roots: [disk.directory] });
+      const removedPaths = new Set(entries.map((entry) => entry.path));
+      for (const failure of report.failures) removedPaths.delete(failure.path);
+      // A removed working copy is no longer "extracted" here; the send record stays because FCM still holds it.
+      setClips((current) => Object.fromEntries(Object.entries(current).filter(([, clip]) => !removedPaths.has(clip.path))));
+      setReviews((current) => Object.fromEntries(Object.entries(current).filter(([key]) => { const clip = clips[key]; return !clip || !removedPaths.has(clip.path); })));
+      setStatus(`${report.removed} ${what} removed, ${formatBytes(report.freedBytes)} freed.${report.failures.length ? ` ${report.failures.length} left alone: ${report.failures.map((failure) => `${failure.path.split(/[\\/]/).pop()} (${failure.error})`).join('; ')}` : ''}`);
+      await refreshDisk();
+    } catch (cause) { failWith(cause, 'Removal failed.'); setDiskBusy(false); }
+  };
 
   const jumpTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const switchMode = (next: SourceMode) => { setMode(next); setOpenReview(null); setError(null); window.scrollTo({ top: 0, behavior: 'smooth' }); };
@@ -947,10 +1151,11 @@ export default function App() {
       title, subtitle: clip ? `${clip.fileName} · ${describeClip(clip)}` : openItem.kind === 'card' ? 'Reading from the card…' : 'Hashing the file…', itemKey: openItem.key, sourceKind: openItem.kind,
       filmstrip: reviewState?.filmstrip ?? null, clockBase: clip ? (clip.stats.contentStart ?? clip.start) : null, clipKind: clip?.kind ?? null,
       preview: reviewState?.preview ?? null, busy: reviewState?.busy ?? null, note: reviewState?.note ?? null, error: reviewState?.error ?? null,
-      canSend: Boolean(importRow), sendStatus: send?.status ?? null, skipped: Boolean(skipped[openItem.key]),
+      canSend: Boolean(importRow), sendStatus: send?.status ?? (sentRecords[openItem.key] ? 'done' : null), skipped: Boolean(skipped[openItem.key]),
       sendHint: importRow ? null : fcmSession ? 'Create the import under “Send to FCM” in the main window to send this recording.' : 'Sign in under “Send to FCM” in the main window to send this recording.',
+      mark: marks[openItem.key] ?? null, placeName: (() => { const place = placeFor(openItem.key); return place ? `${houseName(place.houseId) ?? 'place'} · ${place.cameraLabel}` : null; })(),
     };
-  }, [openItem, clips, reviews, sends, skipped, importRow, fcmSession]);
+  }, [openItem, clips, reviews, sends, sentRecords, skipped, importRow, fcmSession, marks, places, houseId, cameraLabel, houses]);
   const popoutStateRef = useRef(popoutState);
   popoutStateRef.current = popoutState;
   useEffect(() => { if (popoutOpen) void emitTo(POPOUT_LABEL, POPOUT_STATE_EVENT, popoutState); }, [popoutOpen, popoutState]);
@@ -971,8 +1176,8 @@ export default function App() {
     } catch (cause) { failWith(cause, 'The preview window could not be opened.'); }
   };
   // Decisions taken in the pop-out land here, on the same handlers the workstation buttons use.
-  const actionHandlersRef = useRef({ playPreview, sendOne, toggleSkip });
-  actionHandlersRef.current = { playPreview, sendOne, toggleSkip };
+  const actionHandlersRef = useRef({ playPreview, sendOne, toggleSkip, setMark });
+  actionHandlersRef.current = { playPreview, sendOne, toggleSkip, setMark };
   const itemsRef = useRef(items);
   itemsRef.current = items;
   useEffect(() => {
@@ -980,7 +1185,8 @@ export default function App() {
       const item = itemsRef.current.find((candidate) => candidate.key === event.payload.itemKey);
       if (!item) return;
       const handlers = actionHandlersRef.current;
-      if (event.payload.action === 'play') void handlers.playPreview(item);
+      if (event.payload.action === 'mark') handlers.setMark(item, event.payload.mark);
+      else if (event.payload.action === 'play') void handlers.playPreview(item);
       else if (event.payload.action === 'send') void handlers.sendOne(item);
       else if (event.payload.action === 'skip' || event.payload.action === 'include') handlers.toggleSkip(item);
     });
@@ -997,6 +1203,7 @@ export default function App() {
     {reviewState?.note && <p className="review__note">{reviewState.note}</p>}
     {reviewState?.error && <p className="review__error">{reviewState.error}</p>}
     <div className="review__actions">
+      <MarkPicker value={marks[item.key] ?? null} onChange={(next) => setMark(item, next)} />
       {clip && clip.kind !== 'pictures' && !reviewState?.preview && <button className="secondary" onClick={() => void playPreview(item)} disabled={reviewState?.busy !== null && reviewState?.busy !== undefined}><Play size={14} /> {reviewState?.busy === 'preview' ? 'Rendering 480p copy…' : 'Play preview (480p, rendered here)'}</button>}
       {importRow ? <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent to FCM' : 'Send this recording to FCM'}</button> : <small>{fcmSession ? 'Create the import under “Send to FCM” to send this recording.' : 'Sign in under “Send to FCM” to send this recording.'}</small>}
       {send?.status !== 'done' && <button className="secondary" onClick={() => toggleSkip(item)}>{isSkipped ? <><Undo2 size={14} /> Include again</> : <><EyeOff size={14} /> Skip — do not send</>}</button>}
@@ -1007,6 +1214,29 @@ export default function App() {
   const catalogPartition = catalog?.volume.partitions[0];
   const reviewing = Object.values(reviews).some((review) => review.busy !== null);
   const reviewed = Object.values(reviews).some((review) => review.filmstrip);
+
+  /** Choose the place (and camera label) for one recording or a whole day; scoped to the client organisation of the import. */
+  const renderPlaceEditor = (keys: string[], close: () => void) => {
+    const current = keys.length === 1 ? places[keys[0]] ?? null : null;
+    const pool = houses.filter((house) => !organizationId || house.organization_id === organizationId);
+    const query = placeQuery.trim().toLowerCase();
+    const shown = (query ? pool.filter((house) => `${house.name} ${house.address ?? ''}`.toLowerCase().includes(query)) : pool).slice(0, 8);
+    const label = current?.cameraLabel ?? (cameraLabel.trim() || 'Covert cam');
+    return <div className="place-editor" role="group" aria-label="Place for this recording">
+      <div className="place-editor__head"><strong>{keys.length === 1 ? 'Where was this recording made?' : `Where were these ${keys.length} recordings made?`}</strong><small>Same client organisation ({organizations.find((organization) => organization.organizationId === organizationId)?.organizationName ?? 'chosen'}); a different place gets its own import when it is sent. Camera label stays “{label}” unless you change it below.</small></div>
+      <input type="search" placeholder="Search places by name or address" value={placeQuery} onChange={(event) => setPlaceQuery(event.target.value)} autoFocus />
+      <div className="house-list">{shown.map((house) => <button key={house.id} type="button" className={`device ${current?.houseId === house.id || (!current && importRow?.location_id === house.id) ? 'is-selected' : ''}`} onClick={() => { setPlaceOverride(keys, importRow && house.id === importRow.location_id && label === importRow.camera_label ? null : { houseId: house.id, cameraLabel: label }); close(); }}><span className="device-icon"><MapPin size={16} /></span><span><strong>{house.name}</strong><small>{house.address ?? 'no address recorded'}{house.id === importRow?.location_id ? ' · the import’s place' : ''}</small></span><CheckCircle2 size={16} /></button>)}{shown.length === 0 && <p className="muted small">{pool.length ? 'No place matches that search.' : 'No places are visible for this organisation yet. Add the place in FCM first.'}</p>}</div>
+      <div className="actions"><label className="field"><span>Camera label for this place</span><input type="text" value={label} maxLength={120} onChange={(event) => { const next = event.target.value; setPlaceOverride(keys, current ? { ...current, cameraLabel: next } : { houseId: importRow?.location_id ?? '', cameraLabel: next }); }} /></label>{current && <button type="button" className="secondary" onClick={() => { setPlaceOverride(keys, null); close(); }}><Undo2 size={14} /> Use the import’s place</button>}<button type="button" className="secondary" onClick={close}>Close</button></div>
+    </div>;
+  };
+
+  /** Mark counts for a day, as coloured dots, so a day reads at a glance. */
+  const renderDaySummary = (keys: string[]) => {
+    const counts = MARKS.map((mark) => ({ mark, n: keys.filter((key) => marks[key] === mark.id).length })).filter((entry) => entry.n > 0);
+    const sent = keys.filter((key) => isSent(key)).length;
+    if (!counts.length && !sent) return null;
+    return <span className="day-summary">{sent > 0 && <span className="day-summary__sent">{sent} sent</span>}{counts.map(({ mark, n }) => <span key={mark.id} className={`day-summary__mark mark__dot--${mark.id}`} title={`${n} ${mark.label}`}><span className="mark__dot" />{n}</span>)}</span>;
+  };
 
   return <main className="v2-shell">
     <aside className="rail"><div className="brand"><span><Waves size={19} /></span><div><b>FCM</b><small>Desktop V2 · v{APP_VERSION}</small></div></div>
@@ -1039,16 +1269,17 @@ export default function App() {
             <div className="actions">{importRow && <button className="primary" onClick={() => void sendAll()} disabled={busyAnywhere || unsentItems.length === 0}><UploadCloud size={15} /> {unsentItems.length === 0 ? (skippedCount ? `Nothing left to send (${skippedCount} skipped)` : mode === 'card' ? 'All recordings sent' : 'All files sent') : `Send all ${unsentItems.length} to FCM${skippedCount ? ` (${skippedCount} skipped)` : ''}`}</button>}{queueRemaining > 0 && <button className="secondary" onClick={() => void stopQueue()}>Stop sending ({queueRemaining} left)</button>}{mode === 'card' && <button className="secondary" onClick={() => void chooseDestination()} disabled={sendingKey !== null}><FolderOpen size={15} /> {destinationDirectory ? 'Change working folder' : 'Choose working folder'}</button>}{mode === 'card' && <small className="muted mono">{destinationDirectory ?? 'Working folder: Public Documents\\fcm-acquisitions, chosen automatically'}</small>}</div>
             {!importRow && <p className="muted small">{fcmSession ? `Create the import under “Send to FCM” to send ${mode === 'card' ? 'recordings straight from the card' : 'files from this folder'}. “Preview” shows what a recording holds on this computer first${mode === 'card' ? '; “Save to folder” writes the hashed original and a playable MP4 wherever you choose' : ''}.` : `Sign in under “Send to FCM” to send ${mode === 'card' ? 'recordings straight from the card' : 'files from this folder'}. “Preview” shows what a recording holds on this computer first${mode === 'card' ? '; “Save to folder” writes the hashed original and a playable MP4 wherever you choose' : ''}.`}</p>}
             {sentCount > 0 && <p className="muted small">{sentCount} recording{sentCount === 1 ? '' : 's'} sent to FCM{mode === 'card' ? `: video with the SHA-256 taken as it left the card (the analysis worker re-hashes on intake), pictures as dated timeline events. Copies stay in ${destinationDirectory ?? 'the working folder'}.` : ', each with the SHA-256 taken before it left this computer; the files themselves are untouched.'}</p>}
+            {items.length > 0 && <div className="mark-bar" role="toolbar" aria-label="Filter by mark"><button type="button" className={`mark-filter ${markFilter === 'all' ? 'is-active' : ''}`} onClick={() => setMarkFilter('all')}>All {items.length}</button><button type="button" className={`mark-filter ${markFilter === 'unmarked' ? 'is-active' : ''}`} onClick={() => setMarkFilter('unmarked')}>Unmarked {markCounts.unmarked}</button>{MARKS.map((mark) => <button key={mark.id} type="button" className={`mark-filter mark__dot--${mark.id} ${markFilter === mark.id ? 'is-active' : ''}`} onClick={() => setMarkFilter(mark.id)} title={mark.hint}><span className="mark__dot" />{mark.label} {markCounts[mark.id]}</button>)}<small className="muted">Marks are your working notes, kept on this computer for this {mode === 'card' ? 'card' : 'folder'}. “Reviewed” and “Nothing here” are left out of “Send all”; the mark travels with a sent recording as provenance only.</small></div>}
             {mode === 'card' && <p className="muted small">Sizes listed below are what the card reserves for a recording; what is actually sent is only the frames the camera dated inside it — a previous occupant's leftovers and the card's own bookkeeping are left behind.</p>}
             {mode === 'files' && <p className="muted small">Recorded start times come from the file name when the recorder wrote one there, otherwise from the file's own metadata, otherwise estimated from when the file was last written. Check them — type a correction if you know better — before sending; the camera clock time zone under “Send to FCM” turns them into real instants.</p>}
             {mode === 'card' && catalog?.recordings.length === 0 && <p className="muted">The volume is intact but holds no trustworthy recordings.</p>}
             {mode === 'files' && videoFolder?.files.length === 0 && <p className="muted">No video files directly in this folder{videoFolder.subfolders ? ' — its subfolders were not searched; choose one of them' : ''}.</p>}
-            {mode === 'card' && <div className="recording-days">{recordingDays.map(([day, recordings]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{recordings.length} recording{recordings.length === 1 ? '' : 's'} · {formatBytes(recordings.reduce((sum, recording) => sum + recording.bytes, 0))}</small></div>
-              {recordings.map((recording) => { const item: SourceItem = { kind: 'card', key: recordingKey(recording), recording }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const saved = saves[key]; return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''}`}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>Channel {recording.channel} · {formatDuration(recording.durationSeconds)}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{saved && <small className="send-state send-state--saved"><CheckCircle2 size={11} /> Saved to {saved.directory} — {saved.fileName}{saved.mp4 ? ` + ${saved.mp4.path.split(/[\\/]/).pop()} (${mp4Label(saved.mp4)})` : ''}</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”; still on the card{clip ? ' and in the working folder' : ''}.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions"><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={busyAnywhere} title={saved ? `Already saved to ${saved.directory}. Click to save another copy elsewhere (you will be asked first).` : 'Choose a folder; the hashed original and a playable MP4 are written there.'}>{saved ? <CheckCircle2 size={14} /> : <Download size={14} />} {extracting === key ? 'Saving…' : saved ? 'Saved' : 'Save to folder…'}</button></span></div>
+            {mode === 'card' && <div className="recording-days">{recordingDays.map(([day, recordings]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{recordings.length} recording{recordings.length === 1 ? '' : 's'} · {formatBytes(recordings.reduce((sum, recording) => sum + recording.bytes, 0))}{renderDaySummary(recordings.map(recordingKey))}</small>{importRow && <button type="button" className="secondary day-place" onClick={() => { setPlaceEditor(placeEditor === `day:${day}` ? null : `day:${day}`); setPlaceQuery(''); }}><MapPin size={12} /> Place for this day</button>}</div>{placeEditor === `day:${day}` && renderPlaceEditor(recordings.map(recordingKey).filter((key) => !isSent(key)), () => setPlaceEditor(null))}
+              {recordings.map((recording) => { const item: SourceItem = { kind: 'card', key: recordingKey(recording), recording }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const saved = saves[key]; if (!passesFilter(key)) return null; const mark = marks[key]; const sentRecord = sentRecords[key]; const rowSent = send?.status === 'done' || Boolean(sentRecord); const place = placeFor(key); const overridden = Boolean(places[key]); return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${rowSent ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''} ${mark ? `is-mark-${mark}` : ''}`}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>{mark && <span className={`mark__dot mark__dot--${mark}`} title={markLabel(mark)} aria-label={markLabel(mark)} />}Channel {recording.channel} · {formatDuration(recording.durationSeconds)}{importRow && place && <button type="button" className={`place-chip ${overridden ? 'is-overridden' : ''}`} onClick={() => { setPlaceEditor(placeEditor === key ? null : key); setPlaceQuery(''); }} disabled={rowSent} title={overridden ? 'This recording goes to a different place than the import default. Click to change.' : 'Goes to the import\u2019s place. Click to send this recording to a different place.'}><MapPin size={11} /> {houseName(place.houseId) ?? 'place'}{overridden ? ' · ' + place.cameraLabel : ''}</button>}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{saved && <small className="send-state send-state--saved"><CheckCircle2 size={11} /> Saved to {saved.directory} — {saved.fileName}{saved.mp4 ? ` + ${saved.mp4.path.split(/[\\/]/).pop()} (${mp4Label(saved.mp4)})` : ''}</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”; still on the card{clip ? ' and in the working folder' : ''}.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}{sentRecord && !send && <small className="send-state send-state--done">Sent to FCM {new Date(sentRecord.sentAt).toLocaleString()}{fcmVerified[key] === 'verified' ? ' · FCM verified the hash' : fcmVerified[key] === 'mismatch' ? ' · FCM reports a HASH MISMATCH — keep the local copy' : ''}</small>}{placeEditor === key && renderPlaceEditor([key], () => setPlaceEditor(null))}</span><span className="recording__actions"><MarkPicker compact value={mark ?? null} onChange={(next) => setMark(item, next)} /><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || rowSent}><Send size={14} /> {rowSent ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={busyAnywhere} title={saved ? `Already saved to ${saved.directory}. Click to save another copy elsewhere (you will be asked first).` : 'Choose a folder; the hashed original and a playable MP4 are written there.'}>{saved ? <CheckCircle2 size={14} /> : <Download size={14} />} {extracting === key ? 'Saving…' : saved ? 'Saved' : 'Save to folder…'}</button></span></div>
               {isOpen && renderReview(item, clip, reviewState, send, isSkipped, `channel ${recording.channel} at ${formatClock(recording.start)}`)}</Fragment>; })}
             </div>)}</div>}
-            {mode === 'files' && <div className="recording-days">{fileDays.map(([day, files]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((sum, file) => sum + file.bytes, 0))}</small></div>
-              {files.map((file) => { const item: SourceItem = { kind: 'file', key: fileKey(file), file }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const clock = fileClocks[key]; return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${send?.status === 'done' ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''}`}><span className="recording__time">{clock ? formatClock(clock.start) : '—'}</span><span className="recording__meta"><strong>{file.fileName}</strong><small>{formatBytes(file.bytes)} · {file.extension.toUpperCase()} · last written {formatWhen(file.modifiedEpochMs)}{clip && clip.durationSeconds > 0 ? ` · ${formatDuration(clip.durationSeconds)}` : ''}</small><label className="clock-edit"><span>Recorded start · {clock ? clockSourceLabel[clock.source] : 'not known'}</span><input type="datetime-local" step={1} value={clock ? clockToInputValue(clock.start) : ''} onChange={(event) => setFileStart(file, event.target.value)} disabled={send?.status === 'done' || sendingKey === key} aria-label={`Recorded start of ${file.fileName}`} /></label>{clip && <small className="mono">{describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}` : ''}{send.error ? ` — ${send.error}` : ''}</small>}</span><span className="recording__actions"><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : 'Send to FCM'}</button>}</span></div>
+            {mode === 'files' && <div className="recording-days">{fileDays.map(([day, files]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((sum, file) => sum + file.bytes, 0))}{renderDaySummary(files.map(fileKey))}</small>{importRow && <button type="button" className="secondary day-place" onClick={() => { setPlaceEditor(placeEditor === `day:${day}` ? null : `day:${day}`); setPlaceQuery(''); }}><MapPin size={12} /> Place for this day</button>}</div>{placeEditor === `day:${day}` && renderPlaceEditor(files.map(fileKey).filter((key) => !isSent(key)), () => setPlaceEditor(null))}
+              {files.map((file) => { const item: SourceItem = { kind: 'file', key: fileKey(file), file }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const clock = fileClocks[key]; if (!passesFilter(key)) return null; const mark = marks[key]; const sentRecord = sentRecords[key]; const rowSent = send?.status === 'done' || Boolean(sentRecord); const place = placeFor(key); const overridden = Boolean(places[key]); return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${rowSent ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''} ${mark ? `is-mark-${mark}` : ''}`}><span className="recording__time">{clock ? formatClock(clock.start) : '—'}</span><span className="recording__meta"><strong>{mark && <span className={`mark__dot mark__dot--${mark}`} title={markLabel(mark)} aria-label={markLabel(mark)} />}{file.fileName}{importRow && place && <button type="button" className={`place-chip ${overridden ? 'is-overridden' : ''}`} onClick={() => { setPlaceEditor(placeEditor === key ? null : key); setPlaceQuery(''); }} disabled={rowSent} title={overridden ? 'This recording goes to a different place than the import default. Click to change.' : 'Goes to the import\u2019s place. Click to send this recording to a different place.'}><MapPin size={11} /> {houseName(place.houseId) ?? 'place'}{overridden ? ' · ' + place.cameraLabel : ''}</button>}</strong><small>{formatBytes(file.bytes)} · {file.extension.toUpperCase()} · last written {formatWhen(file.modifiedEpochMs)}{clip && clip.durationSeconds > 0 ? ` · ${formatDuration(clip.durationSeconds)}` : ''}</small><label className="clock-edit"><span>Recorded start · {clock ? clockSourceLabel[clock.source] : 'not known'}</span><input type="datetime-local" step={1} value={clock ? clockToInputValue(clock.start) : ''} onChange={(event) => setFileStart(file, event.target.value)} disabled={send?.status === 'done' || sendingKey === key} aria-label={`Recorded start of ${file.fileName}`} /></label>{clip && <small className="mono">{describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}` : ''}{send.error ? ` — ${send.error}` : ''}</small>}{sentRecord && !send && <small className="send-state send-state--done">Sent to FCM {new Date(sentRecord.sentAt).toLocaleString()}{fcmVerified[key] === 'verified' ? ' · FCM verified the hash' : fcmVerified[key] === 'mismatch' ? ' · FCM reports a HASH MISMATCH — keep the local copy' : ''}</small>}{placeEditor === key && renderPlaceEditor([key], () => setPlaceEditor(null))}</span><span className="recording__actions"><MarkPicker compact value={mark ?? null} onChange={(next) => setMark(item, next)} /><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || rowSent}><Send size={14} /> {rowSent ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : 'Send to FCM'}</button>}</span></div>
               {isOpen && renderReview(item, clip, reviewState, send, isSkipped, file.fileName)}</Fragment>; })}
             </div>)}</div>}
             {mode === 'card' && catalog && catalog.warnings.length > 0 && <details className="warnings"><summary>{catalog.warnings.length} descriptor warning{catalog.warnings.length === 1 ? '' : 's'}</summary><ul>{catalog.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
@@ -1063,6 +1294,22 @@ export default function App() {
             {decoderBusy && <div className={`progress decoder-progress ${decoderProgress && decoderProgress.bytesDone > 0 ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={!decoderProgress || decoderProgress.bytesDone === 0} aria-valuemin={0} aria-valuemax={100} aria-valuenow={decoderProgress && decoderProgress.totalBytes ? Math.floor((decoderProgress.bytesDone / decoderProgress.totalBytes) * 100) : 0}><div style={decoderProgress && decoderProgress.bytesDone > 0 && decoderProgress.totalBytes ? { width: `${Math.min(100, (decoderProgress.bytesDone / decoderProgress.totalBytes) * 100)}%` } : undefined} /></div>}
           </>}
           {decoder?.installed && <div className="actions"><button className="secondary" onClick={() => void clearPreviews()} disabled={Object.values(reviews).some((review) => review.busy !== null)}><Trash2 size={15} /> Remove viewing copies</button><small className="muted">Frees disk under this app's local data. Extracted originals in the working folder and the card are untouched.</small></div>}
+          <div className="disk" id="panel-disk">
+            <div className="disk__head"><div><span className="eyebrow">Disk on this computer</span><strong>{disk ? `${formatBytes(disk.totalBytes)} in the working folder · ${formatBytes(disk.previewsBytes)} of viewing copies · ${formatBytes(disk.toolsBytes)} decoder` : 'Working copies, viewing copies and the decoder live on this computer.'}</strong></div><button className="secondary" onClick={() => void refreshDisk()} disabled={diskBusy || busyAnywhere || (!destinationDirectory && !catalogSource)}><HardDrive size={15} /> {diskBusy ? 'Checking…' : disk ? 'Check again' : 'Check disk use'}</button></div>
+            {disk && diskGroups && <>
+              <p className="muted small mono">{disk.directory}{disk.otherCardsFolders ? ` · ${disk.otherCardsFolders} other card folder${disk.otherCardsFolders === 1 ? '' : 's'} beside it hold ${formatBytes(disk.otherCardsBytes)} (open that card to tidy them)` : ''}</p>
+              <div className="disk__groups">
+                <div className="disk__group is-safe"><div><strong>Sent and verified by FCM</strong><small>{diskGroups.verifiedSent.length} file{diskGroups.verifiedSent.length === 1 ? '' : 's'} · {formatBytes(sumBytes(diskGroups.verifiedSent))} · FCM re-hashed each on intake and the hashes matched; the card still holds the original.</small></div><button className="secondary" disabled={diskBusy || !diskGroups.verifiedSent.length} onClick={() => void removeEntries(diskGroups.verifiedSent, 'verified working copies', 'FCM holds each of these and has verified its hash against the copy taken here. The recordings stay on the card.')}><Trash2 size={14} /> Remove</button></div>
+                <div className="disk__group"><div><strong>Sent, awaiting FCM’s check</strong><small>{diskGroups.awaitingFcm.length} file{diskGroups.awaitingFcm.length === 1 ? '' : 's'} · {formatBytes(sumBytes(diskGroups.awaitingFcm))} · uploaded, but the analysis worker has not yet confirmed the hash{fcmSession ? '' : ' (sign in to check)'}. Kept until it does.</small></div><span className="disk__hold">Kept</span></div>
+                <div className="disk__group is-safe"><div><strong>Marked “Nothing here” or “Reviewed”, not sent</strong><small>{diskGroups.decidedNo.length} file{diskGroups.decidedNo.length === 1 ? '' : 's'} · {formatBytes(sumBytes(diskGroups.decidedNo))} · you decided these need no further action; the originals stay on the card.</small></div><button className="secondary" disabled={diskBusy || !diskGroups.decidedNo.length} onClick={() => void removeEntries(diskGroups.decidedNo, 'working copies you marked as done', 'These were not sent to FCM. Their originals remain on the card and can be extracted again at any time.')}><Trash2 size={14} /> Remove</button></div>
+                <div className="disk__group is-safe"><div><strong>Half-written files</strong><small>{diskGroups.partial.length} · {formatBytes(sumBytes(diskGroups.partial))} · left by an interrupted extraction; never valid evidence.</small></div><button className="secondary" disabled={diskBusy || !diskGroups.partial.length || Boolean(extracting)} onClick={() => void removeEntries(diskGroups.partial, 'half-written files', 'A .part file is an extraction that did not finish. Nothing reads it.')}><Trash2 size={14} /> Remove</button></div>
+                <div className="disk__group"><div><strong>Undecided, or marked Keep / Review further</strong><small>{diskGroups.kept.length} file{diskGroups.kept.length === 1 ? '' : 's'} · {formatBytes(sumBytes(diskGroups.kept))} · not sent and not decided: kept until you mark or send them.</small></div><span className="disk__hold">Kept</span></div>
+                <div className="disk__group"><div><strong>Saved on purpose</strong><small>{diskGroups.saved.length} · {formatBytes(sumBytes(diskGroups.saved))} · MP4s, exact images and copies you chose “Save to folder” for. Yours to manage; this app does not remove them.</small></div><span className="disk__hold">Yours</span></div>
+                {diskGroups.unknown.length > 0 && <div className="disk__group"><div><strong>Not from this card</strong><small>{diskGroups.unknown.length} · {formatBytes(sumBytes(diskGroups.unknown))} · files this listing does not recognise (another card’s recordings, or renamed). Left alone.</small></div><span className="disk__hold">Left alone</span></div>}
+              </div>
+              <p className="muted small">Removal never reaches outside this working folder, never follows links, and never touches the card. Removed copies can be extracted again from the card while it is available.</p>
+            </>}
+          </div>
           {decoder && <p className="muted small">{decoder.licence}. The licence text ships with the download: <span className="mono">{decoder.licenceUrl}</span></p>}
           {decoderError && <p className="review__error">{decoderError}</p>}
         </section>
@@ -1085,7 +1332,8 @@ export default function App() {
             <div className="actions"><button className="primary" onClick={() => void createImport()} disabled={fcmBusy || !houseId || !cameraLabel.trim()}><MapPin size={15} /> {fcmBusy ? 'Creating…' : 'Create import for this card'}</button><small className="muted">Times on the card are the camera's wall clock; the time zone turns them into real instants.</small></div>
           </>}
           {importRow && <>
-            <div className="facts"><span>Camera<strong>{importRow.camera_label}</strong></span><span>Place<strong>{selectedHouse?.name ?? 'chosen place'}</strong></span><span>Sent<strong>{sentCount} of {catalog?.recordings.length ?? 0}</strong></span></div>
+            <div className="facts"><span>Client<strong>{organizations.find((organization) => organization.organizationId === importRow.organization_id)?.organizationName ?? 'organisation'}</strong></span><span>Camera<strong>{importRow.camera_label}</strong></span><span>Sent<strong>{sentCount} of {items.length}</strong></span></div>
+            <div className="place-list"><span className="eyebrow">Places on this {mode === 'card' ? 'card' : 'folder'}</span>{[...placesInUse.entries()].map(([id, n]) => <span key={id} className={`place-chip ${id === importRow.location_id ? '' : 'is-overridden'}`}><MapPin size={11} /> {houseName(id) ?? 'place'} · {n} recording{n === 1 ? '' : 's'}{id === importRow.location_id ? ' (import default)' : ''}</span>)}<small className="muted">A portable camera moves: set a different place on a recording or a whole day and it is sent under its own import for that place, same client, same camera label unless you change it.</small></div>
             <p className="muted small">Import {importRow.id.slice(0, 8)}… Recordings sent here appear in FCM → CCTV review under this camera at {selectedHouse?.name ?? 'the chosen place'}, each carrying the SHA-256 taken as it left the card.</p>
             <div className="actions"><button className="secondary" onClick={() => { setImportRow(null); setSends({}); doneClipsRef.current = {}; }} disabled={sendingKey !== null}>Start another import</button></div>
           </>}

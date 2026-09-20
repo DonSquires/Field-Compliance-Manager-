@@ -800,7 +800,150 @@ fn probe_video_file(app: tauri::AppHandle, path: String) -> Result<fcm_decoder::
     Ok(probe)
 }
 
+// ---------------------------------------------------------------------------------------------
+// Review state: the operator's marks and place choices for a card or folder, kept between sessions
+// ---------------------------------------------------------------------------------------------
+
+fn review_state_path(app: &tauri::AppHandle, scope: &str) -> Result<PathBuf, String> {
+    // The scope names the source (card layout or folder path); hashing it keeps the filename safe and short.
+    let digest = format!("{:x}", Sha256::digest(scope.as_bytes()));
+    Ok(app_local_data(app)?.join("review-state").join(format!("{digest}.json")))
+}
+
+/// The saved review state for a source, or null when none has been kept yet.
+#[tauri::command(async)]
+fn load_review_state(app: tauri::AppHandle, scope: String) -> Result<Option<serde_json::Value>, String> {
+    let path = review_state_path(&app, &scope)?;
+    match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|error| format!("The saved review state is unreadable and was ignored: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("The saved review state could not be read: {error}")),
+    }
+}
+
+/// Write the review state atomically (whole file replaced, never half-written).
+#[tauri::command(async)]
+fn save_review_state(app: tauri::AppHandle, scope: String, state: serde_json::Value) -> Result<(), String> {
+    let path = review_state_path(&app, &scope)?;
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|error| format!("Could not create {}: {error}", parent.display()))?; }
+    let partial = path.with_extension("json.part");
+    fs::write(&partial, serde_json::to_vec(&state).map_err(|error| error.to_string())?).map_err(|error| format!("Could not write {}: {error}", partial.display()))?;
+    fs::rename(&partial, &path).map_err(|error| format!("Could not commit {}: {error}", path.display()))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Disk on this computer: what the app has written, and removal that cannot reach outside its own folders
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiskEntry { path: String, name: String, bytes: u64, kind: String, modified_epoch_ms: u64 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiskReport { directory: String, entries: Vec<DiskEntry>, total_bytes: u64, previews_directory: String, previews_bytes: u64, previews_count: u32, tools_bytes: u64, acquisitions_root: String, other_cards_bytes: u64, other_cards_folders: u32 }
+
+fn dir_size(path: &Path) -> u64 {
+    let mut total = 0_u64;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue; };
+            total += if meta.is_dir() { dir_size(&entry.path()) } else { meta.len() };
+        }
+    }
+    total
+}
+
+fn disk_kind(path: &Path, is_dir: bool) -> &'static str {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    if name.ends_with(".part") || name.ends_with(".part-dir") { return "partial"; }
+    if is_dir { return "pictures"; }
+    match path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).as_deref() {
+        Some("dav") | Some("h264") | Some("h265") | Some("dhfs") => "video",
+        Some("mp4") => "mp4",
+        Some("img") => "image",
+        _ => "other",
+    }
+}
+
+/// Everything in one working folder by kind and size, plus the app's previews and tools, plus how much other
+/// cards' working folders hold beside it. Nothing is opened beyond metadata; nothing is changed.
+#[tauri::command(async)]
+fn disk_report(app: tauri::AppHandle, directory: String) -> Result<DiskReport, String> {
+    let dir = Path::new(&directory);
+    let mut entries = Vec::new();
+    let mut total = 0_u64;
+    if let Ok(read) = fs::read_dir(dir) {
+        for entry in read.flatten() {
+            let path = entry.path();
+            let Ok(meta) = fs::symlink_metadata(&path) else { continue; };
+            if meta.file_type().is_symlink() { continue; }
+            let bytes = if meta.is_dir() { dir_size(&path) } else { meta.len() };
+            total += bytes;
+            entries.push(DiskEntry {
+                path: path.to_string_lossy().to_string(), name: entry.file_name().to_string_lossy().to_string(), bytes, kind: disk_kind(&path, meta.is_dir()).to_string(),
+                modified_epoch_ms: meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0),
+            });
+        }
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    let data = app_local_data(&app)?;
+    let previews = data.join("previews");
+    let (mut previews_bytes, mut previews_count) = (0_u64, 0_u32);
+    if let Ok(read) = fs::read_dir(&previews) {
+        for entry in read.flatten() { if let Ok(meta) = entry.metadata() { if meta.is_file() { previews_bytes += meta.len(); previews_count += 1; } } }
+    }
+    let acquisitions_root = dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| dir.to_path_buf());
+    let (mut other_bytes, mut other_folders) = (0_u64, 0_u32);
+    if let Ok(read) = fs::read_dir(&acquisitions_root) {
+        for entry in read.flatten() {
+            let path = entry.path();
+            if path == dir { continue; }
+            if let Ok(meta) = fs::symlink_metadata(&path) { if meta.is_dir() { other_folders += 1; other_bytes += dir_size(&path); } }
+        }
+    }
+    Ok(DiskReport {
+        directory, entries, total_bytes: total, previews_directory: previews.to_string_lossy().to_string(), previews_bytes, previews_count, tools_bytes: dir_size(&data.join("tools")),
+        acquisitions_root: acquisitions_root.to_string_lossy().to_string(), other_cards_bytes: other_bytes, other_cards_folders: other_folders,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemovalFailure { path: String, error: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemovalReport { removed: u32, freed_bytes: u64, failures: Vec<RemovalFailure> }
+
+/// Remove the named files or picture folders, and only those: each must resolve to a path inside one of `roots`
+/// (the working folder or the previews folder), must not be a symlink, and is removed one by one with the
+/// outcome reported per path. The interface decides *what* is safe to remove; this decides *where* it may reach.
+#[tauri::command(async)]
+fn remove_local_files(paths: Vec<String>, roots: Vec<String>) -> Result<RemovalReport, String> {
+    let roots: Vec<PathBuf> = roots.iter().filter_map(|root| fs::canonicalize(root).ok()).collect();
+    if roots.is_empty() { return Err("No removal root could be resolved; nothing was removed.".to_string()); }
+    let mut report = RemovalReport { removed: 0, freed_bytes: 0, failures: Vec::new() };
+    for raw in paths {
+        let path = Path::new(&raw);
+        let outcome = (|| -> Result<u64, String> {
+            let meta = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+            if meta.file_type().is_symlink() { return Err("is a link, not a file; left alone".to_string()); }
+            let canonical = fs::canonicalize(path).map_err(|error| error.to_string())?;
+            if !roots.iter().any(|root| canonical.starts_with(root) && canonical != *root) { return Err("is outside the folders this app manages; left alone".to_string()); }
+            let bytes = if meta.is_dir() { dir_size(&canonical) } else { meta.len() };
+            if meta.is_dir() { fs::remove_dir_all(&canonical).map_err(|error| error.to_string())?; } else { fs::remove_file(&canonical).map_err(|error| error.to_string())?; }
+            Ok(bytes)
+        })();
+        match outcome {
+            Ok(bytes) => { report.removed += 1; report.freed_bytes += bytes; }
+            Err(error) => report.failures.push(RemovalFailure { path: raw, error }),
+        }
+    }
+    Ok(report)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, export_mp4, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, export_mp4, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures, load_review_state, save_review_state, disk_report, remove_local_files]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

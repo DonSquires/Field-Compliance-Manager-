@@ -46,6 +46,20 @@ first because Windows' folder picker shows no files; a picture-stream review sho
 puts the preview in its own window for multi-screen work — the workstation window stays the only place that
 decides, the pop-out mirrors the open review and sends Play / Send / Skip back as events.
 
+**0.4.3 (owner notes 2026-09-20):** colour-coded **marks** per recording — *Keep*, *Review further*, *Reviewed*,
+*Nothing here* — so the operator sees at a glance what still needs doing; they are working notes kept on this
+computer with the card's review state, travel only as `review_mark` in the import manifest, and *Reviewed* /
+*Nothing here* are left out of "Send all". **Place per day or per recording** for portable covert cameras: the
+client organisation is chosen once, the place (and camera label) can differ per day or per recording, and sending
+opens one import per client / place / camera so the console files each place's footage under that place. **Disk on
+this computer:** the working folder grouped by what is safe to remove — offered only for copies FCM has verified
+(`evidence_items.metadata.integrity.state = 'verified'` for the sent `storage_path`), for recordings marked
+*Nothing here* / *Reviewed* that were never sent, and for stray `.part` files; never for *Keep*, *Review further*,
+undecided, sent-but-unverified (or hash-mismatched, which the row flags), or copies the operator saved on purpose.
+Removal asks first, is bounded to the working folder on the native side, and review state forgets only what was
+actually removed. Review state lives under `<app local data>/review-state/<sha256(scope)>.json`, scoped by card
+identity or folder path, so the same card restores its notes.
+
 ## Phase 2 — Analyse here (0.5.x)
 
 Goal: the laptop runs the same detection/recognition tier the VPS runs and FCM receives **results**, not footage,

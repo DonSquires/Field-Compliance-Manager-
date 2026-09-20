@@ -88,6 +88,14 @@ the signed-in user under row-level security, and the session is held in memory o
   modified time — the source is shown next to an editable field and recorded in the import manifest
   (`start_time_source`).
 - `read_pictures` — the JPEGs of a picture-stream extraction, so its review shows the pictures themselves.
+- `load_review_state` / `save_review_state` — the operator's working notes for one card or folder (marks, per-day
+  and per-recording place, what was sent and to which import), kept on this computer under
+  `<app local data>/review-state/<sha256 of the scope>.json`. Scope is the card identity (capacity, first
+  descriptor, stamp) or the folder path, so pulling the same card out and back in restores the notes.
+- `disk_report` / `remove_local_files` — "Disk on this computer": every file under the working folder with size,
+  kind (`video`, `mp4`, `image`, `pictures`, `partial`, `other`) and its matching recording, plus what the app's
+  previews and tools hold and how much other cards' working folders take beside it. Removal takes explicit
+  paths, canonicalises them, refuses symlinks and anything outside the given roots, and reports per path.
 
 "Review here" (0.4.0) lets the operator preview a recording on the laptop and choose **Send** or **Skip** per
 recording; skipped recordings are left out of "Send all". Sending itself is unchanged: the `-r2` original with
@@ -98,6 +106,27 @@ reviews as pictures, and adds **Pop out**: the preview opens in its own window (
 bundle) for a second screen. The workstation window owns every decision; the pop-out mirrors the open review
 through events and sends Play / Send / Skip back the same way. The plan for local analysis is
 `docs/DESKTOP_LOCAL_PROCESSING_PLAN.md`.
+
+0.4.3 (owner notes 2026-09-20) adds three operator-workflow pieces:
+
+- **Marks.** Each recording carries one colour-coded mark — *Keep* (green), *Review further* (amber),
+  *Reviewed* (blue), *Nothing here* (grey) — set from the list, the review pane or the pop-out. Marks are the
+  operator's working notes, kept on this computer with the card's review state; the only thing that travels is
+  the mark at send time, recorded in the import manifest as `review_mark`. *Reviewed* and *Nothing here* leave
+  a recording out of **Send all** (it can still be sent one at a time). A filter bar above the list shows counts
+  per mark and narrows the list to one.
+- **Place per recording.** Portable covert cameras move; a card can hold days from several places. The client
+  organisation is chosen once; a place (and camera label) can then be set for a whole recorded day or for one
+  recording, on top of the default the operator picked in the send panel. Sending groups recordings by place:
+  one `create_cctv_import` per client / place / camera, each finished with its own manifest, so the console sees
+  each place's footage under that place. The send panel lists the places in use.
+- **Disk on this computer.** The working folder is grouped by what is safe to remove. Offered for removal:
+  copies FCM has verified (the row's `storage_path` exists in `evidence_items` with
+  `metadata.integrity.state = 'verified'`), recordings marked *Nothing here* or *Reviewed* that were never
+  sent, and stray `.part` files from interrupted extractions. Never offered: *Keep* and *Review further*,
+  undecided recordings, anything sent but not yet verified by FCM (or with a hash mismatch — the row says so),
+  and copies the operator saved on purpose with "Save to folder". Removal always asks first, is bounded to the
+  working folder by the native side, and the review state forgets only what was actually removed.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device
