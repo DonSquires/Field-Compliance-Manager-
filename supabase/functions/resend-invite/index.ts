@@ -6,9 +6,11 @@
  * Resends the invitation email to a user who is already registered
  * but may not have completed setup or needs a new invite link.
  *
- * Body: { user_id }
+ * Body: { user_id } or { organization_id } (the one user of that organisation who has never signed in).
  *
- * Auth: Requires a valid JWT from an admin/master/grand_master user.
+ * Auth: a grand_master/master/admin for a user in their own organisation; a client_admin for their own
+ * organisation; or anyone resolve_org_invitation authorises to seat that organisation's first user
+ * (the provider re-sending a client's invitation).
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -50,30 +52,57 @@ serve(async (req)=>{
     // Get caller profile to check role
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id').eq('id', caller.id).single();
-    if (!callerProfile || !CAN_INVITE.includes(callerProfile.role)) {
+    if (!callerProfile || !(CAN_INVITE.includes(callerProfile.role) || callerProfile.role === 'client_admin')) {
       return json({
         error: 'Forbidden: insufficient role'
       }, 403);
     }
     const body = await req.json();
-    const { user_id } = body;
-    if (!user_id) return json({
-      error: 'user_id is required'
+    let { user_id } = body;
+    const organization_id = body.organization_id;
+    if (!user_id && !organization_id) return json({
+      error: 'user_id or organization_id is required'
     }, 400);
-    // Verify user exists and is in same org
-    const { data: targetProfile } = await adminClient.from('user_profiles').select('id, organization_id, display_name, role').eq('id', user_id).single();
-    if (!targetProfile) {
-      return json({
+    let targetProfile = null;
+    if (user_id) {
+      const { data } = await adminClient.from('user_profiles').select('id, organization_id, display_name, role').eq('id', user_id).single();
+      targetProfile = data;
+      if (!targetProfile) return json({
         error: 'User not found'
       }, 404);
     }
-    // Verify same org (unless grand_master)
-    if (callerProfile.role !== 'grand_master' && targetProfile.organization_id !== callerProfile.organization_id) {
+    // Authority first, before anything about the target organisation is looked up (no enumeration through the answers).
+    const targetOrgId = targetProfile?.organization_id ?? organization_id;
+    const sameOrg = targetOrgId === callerProfile.organization_id;
+    if (callerProfile.role === 'client_admin' && !sameOrg) {
       return json({
         error: 'Cannot resend invite for users in other organizations'
       }, 403);
     }
-    // Get user email from auth.users
+    if (callerProfile.role !== 'grand_master' && !sameOrg) {
+      // the provider re-sending its client's invitation: the same authority that could have sent it
+      const { data: resolved, error: resolveError } = await callerClient.rpc('resolve_org_invitation', { p_target_organization_id: targetOrgId });
+      if (resolveError || !resolved?.role) return json({
+        error: 'Cannot resend invite for users in other organizations'
+      }, 403);
+    }
+    if (!targetProfile) {
+      // the organisation's users who have never signed in; exactly one means the first-user invitation is still pending
+      const { data: orgProfiles } = await adminClient.from('user_profiles').select('id, organization_id, display_name, role').eq('organization_id', targetOrgId).is('deactivated_at', null);
+      const pending = [];
+      for (const profile of orgProfiles ?? []) {
+        const { data: candidate } = await adminClient.auth.admin.getUserById(profile.id);
+        if (candidate?.user && !candidate.user.last_sign_in_at) pending.push(profile);
+      }
+      if (pending.length === 0) return json({
+        error: 'Nobody at this organisation is waiting for an invitation; they have already signed in.'
+      }, 404);
+      if (pending.length > 1) return json({
+        error: 'Several people at this organisation have not signed in yet; choose the person to re-invite.'
+      }, 400);
+      targetProfile = pending[0];
+      user_id = targetProfile.id;
+    }
     const { data: authUser, error: getUserError } = await adminClient.auth.admin.getUserById(user_id);
     if (getUserError || !authUser?.user?.email) {
       console.error('[resend-invite] get user error:', getUserError);
@@ -81,14 +110,22 @@ serve(async (req)=>{
         error: 'Could not retrieve user email'
       }, 500);
     }
-    // Resend invite
-    const siteUrl = Deno.env.get('SITE_URL') ?? 'https://fcmanager.vercel.app';
+    if (authUser.user.last_sign_in_at) return json({
+      error: 'This person has already signed in. If they cannot get in, they can use "Forgot password" on the sign-in page.'
+    }, 409);
+    const { data: targetOrg } = await adminClient.from('organizations').select('name, logo_url').eq('id', targetProfile.organization_id).maybeSingle();
+    const ROLE_LABELS: Record<string, string> = { grand_master: 'Grand Master', master: 'Master', admin: 'Administrator', admin_officer: 'Admin Officer', nzscv_monitor: 'NZSCV Monitor', officer: 'Officer', scan_operator: 'Scan Operator', client_admin: 'Client Administrator', client_officer: 'Client Officer', client_viewer: 'Client Viewer' };
+    const siteUrl = Deno.env.get('SITE_URL') ?? 'https://fcmanager.co.nz';
     const displayName = targetProfile.display_name || authUser.user.email.split('@')[0];
+    // the landing page reads organisation_name and role_label from the invited user's metadata
     const { error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(authUser.user.email, {
       data: {
         display_name: displayName,
         role: targetProfile.role,
-        organization_id: targetProfile.organization_id
+        role_label: ROLE_LABELS[targetProfile.role] ?? targetProfile.role,
+        organization_id: targetProfile.organization_id,
+        organization_name: targetOrg?.name ?? 'Field Compliance Manager',
+        organization_logo: targetOrg?.logo_url ?? ''
       },
       redirectTo: `${siteUrl}/auth/callback`
     });

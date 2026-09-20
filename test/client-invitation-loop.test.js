@@ -72,3 +72,17 @@ test('an invitation link lands on "set your password" and records acceptance onc
   assert.match(loginPage, /Choose a password to finish setting up your account; you will use it to sign in from now on\./);
   assert.match(loginPage, /invited \? 'Set password and continue'/);
 });
+
+test('resend-invite: authority is checked before anything about the target organisation is looked up; the provider may re-send its client\'s invitation', () => {
+  const resend = read('supabase/functions/resend-invite/index.ts');
+  assert.match(resend, /if \(!callerProfile \|\| !\(CAN_INVITE\.includes\(callerProfile\.role\) \|\| callerProfile\.role === 'client_admin'\)\)/);
+  assert.match(resend, /const targetOrgId = targetProfile\?\.organization_id \?\? organization_id;/);
+  assert.match(resend, /callerClient\.rpc\('resolve_org_invitation', \{ p_target_organization_id: targetOrgId \}\)/);
+  // the pending scan comes after the authority block
+  assert.ok(resend.indexOf("callerClient.rpc('resolve_org_invitation'") < resend.indexOf('const pending = [];'));
+  assert.match(resend, /Nobody at this organisation is waiting for an invitation; they have already signed in\./);
+  assert.match(resend, /This person has already signed in\. If they cannot get in, they can use "Forgot password" on the sign-in page\./);
+  // the landing page reads these
+  assert.match(resend, /role_label: ROLE_LABELS\[targetProfile\.role\] \?\? targetProfile\.role,/);
+  assert.match(resend, /organization_name: targetOrg\?\.name \?\? 'Field Compliance Manager',/);
+});

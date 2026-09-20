@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, Clock3, MailPlus, Rocket, UserRound, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, Clock3, MailPlus, RefreshCw, Rocket, UserRound, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface ReadinessDimension {
@@ -61,6 +61,7 @@ export function CrmOnboardingPanel({
   const [confirming, setConfirming] = useState(false);
   const [confirmingInvite, setConfirmingInvite] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [resending, setResending] = useState(false);
   const [activated, setActivated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -151,6 +152,16 @@ export function CrmOnboardingPanel({
     setInviting(false);
   };
 
+  const resendInvitation = async () => {
+    if (!row) return;
+    setResending(true); setError(null); setNotice(null);
+    // resend-invite finds the one person at the client who has never signed in
+    const { data, error: resendError } = await supabase.functions.invoke('resend-invite', { body: { organization_id: row.account_organization_id } });
+    if (resendError) setError(resendError.message);
+    else setNotice(`Invitation sent again to ${(data as { email?: string } | null)?.email ?? 'the client contact'}.`);
+    setResending(false);
+  };
+
   if (loading) return <section className="crm-onboarding-panel"><p className="crm-workspace-subtle"><Clock3 size={14} /> Loading activation evidence…</p></section>;
 
   if (!row) return <section className="crm-onboarding-panel is-ready"><div><CheckCircle2 size={17} /><div><strong>{activated || accountStatus === 'active' ? 'Account active' : 'No onboarding ledger open'}</strong><span>{activated || accountStatus === 'active' ? 'Activation is complete and this portfolio is operational.' : 'A prospect ledger will appear here when onboarding is required.'}</span></div></div>{notice && <p role="status">{notice}</p>}</section>;
@@ -197,6 +208,7 @@ export function CrmOnboardingPanel({
         {row.current_stage === 'review' && row.readiness?.ready && row.agreement_id && !confirming && invitationStatus === 'accepted' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setConfirming(true)}><Rocket size={14} />Activate account</button>}
         {canInvite && !confirmingInvite && <button type="button" className="btn btn-sm btn-secondary" disabled={saving || inviting} onClick={() => setConfirmingInvite(true)}><MailPlus size={14} />Invite client</button>}
         {seated && !clientAccepted && <span className="crm-invitation-next-state">Waiting for the client to set their password</span>}
+        {seated && !clientAccepted && <button type="button" className="btn btn-sm btn-secondary" disabled={resending} onClick={() => void resendInvitation()}><RefreshCw size={14} />{resending ? 'Sending' : 'Resend invitation'}</button>}
         {clientAccepted && !confirming && <span className="crm-invitation-next-state is-accepted">{row.readiness?.ready ? 'Client accepted · ready for activation' : 'Client accepted · finish the provider setup to activate'}</span>}
         {confirming && <><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => setConfirming(false)}>Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void activate()}>{saving ? 'Activating' : 'Confirm activation'}</button></>}
         {confirmingInvite && <><button type="button" className="btn btn-sm btn-secondary" disabled={inviting} onClick={() => setConfirmingInvite(false)}><X size={14} />Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={inviting} onClick={() => void inviteClient()}>{inviting ? 'Preparing invitation' : 'Confirm and invite'}</button></>}
