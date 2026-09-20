@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
 import { RosterRulesPanel } from '../components/RosterRulesPanel';
+import { CREDENTIAL_TYPES, credentialExpiryState, credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
@@ -288,17 +289,6 @@ const HR_TIMESHEET_STATUS: Record<string, string> = { draft: 'Draft', submitted:
 
 type EvidenceActionKind = 'add_skill' | 'assign_line_manager' | 'record_induction' | 'record_document' | 'record_credential';
 /** Same list the database accepts (record_staff_credential / apply_credential_promotion_proposal). */
-const CREDENTIAL_TYPES: Array<[string, string]> = [
-  ['security_licence', 'Security licence (PSPLA)'],
-  ['certificate_of_authority', 'Certificate of authority'],
-  ['warrant_of_authority', 'Warrant of authority'],
-  ['noise_control_warrant', 'Noise control warrant'],
-  ['biosecurity_warrant', 'Biosecurity warrant'],
-  ['first_aid', 'First aid'],
-  ['drivers_licence', 'Driver licence'],
-  ['firearms_licence', 'Firearms licence'],
-  ['other', 'Other'],
-];
 
 /** Mirrors manage_staff_onboarding's stage order and the readiness gate each advance checks. */
 const ONBOARDING_STEPS: Array<{ stage: string; label: string; needs: string }> = [
@@ -1484,14 +1474,14 @@ const RosterHRPage: React.FC = () => {
                   credentials.map((c) => (
                     <tr key={c.id} id={`credential-${c.id}`} className={c.id === requestedCredentialId ? 'is-context-focus' : undefined}>
                       <td>{staffNames[c.staff_id] || c.staff_id}</td>
-                      <td>{c.credential_type}</td>
+                      <td>{credentialTypeLabel(c.credential_type)}</td>
                       <td>{c.credential_number || '-'}</td>
                       <td>
-                        <span className={isExpiringSoon(c.expiry_date) ? 'severity-badge severity-high' : ''}>
-                          {c.expiry_date ? new Date(c.expiry_date).toLocaleDateString() : 'No expiry'}
+                        <span className={credentialExpiryState(c.expiry_date) === 'expired' || credentialExpiryState(c.expiry_date) === 'expiring' ? 'severity-badge severity-high' : ''}>
+                          {credentialExpiryWords(c.expiry_date)}
                         </span>
                       </td>
-                      <td>{c.verified ? '✓' : '—'}</td>
+                      <td>{c.verified ? 'Verified' : 'Not yet verified'}</td>
                       <td><button type="button" className="btn btn-sm btn-primary" disabled={!c.expiry_date} onClick={() => { credentialRequestId.current=crypto.randomUUID();setCredentialRenewal({ source:c,credentialNumber:c.credential_number??'',issuingAuthority:c.issuing_authority??'',issuedDate:new Date().toISOString().slice(0,10),expiryDate:'',evidenceNotes:'' }); }}>Record renewal</button></td>
                     </tr>
                   ))

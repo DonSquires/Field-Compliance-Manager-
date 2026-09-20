@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { DeputyImportWizard } from '../components/DeputyImportWizard';
 import { moveRosterPeriod, NZ_HOLIDAY_REGIONS, nzRosterHolidays, rosterPeriod, type RosterHorizon } from '../lib/rosterCalendar';
 import { plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from '../lib/rosterWords';
+import { credentialTypeLabel } from '../lib/credentialWords';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, workflowContextQuery } from '../lib/workflowNavigation';
 import './RosterOperationsPage.css';
@@ -43,7 +44,7 @@ export const assignmentWords = (preview: AssignmentPreview): { tone: 'ok' | 'war
   if (!preview.rules) notes.push({ tone: 'warn', text: 'No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in People & HR › Rostering › Rest & hours rules.' });
   else if (!preview.rules.enforced) notes.push({ tone: 'warn', text: 'The employer\'s rest and hours rules are recorded but not enforced — the roster will accept this even if it breaks them.' });
   if (preview.availability_conflict && !preview.conflict) notes.push({ tone: 'warn', text: 'The officer has marked themselves unavailable for part of this time.' });
-  for (const warning of preview.credential_warnings ?? []) notes.push({ tone: 'warn', text: warning.expiry_date ? `${warning.credential_type} expires ${dayWords(warning.expiry_date)}, before this shift ends.` : `${warning.credential_type} is not verified.` });
+  for (const warning of preview.credential_warnings ?? []) notes.push({ tone: 'warn', text: warning.expiry_date ? `${credentialTypeLabel(warning.credential_type)} expires ${dayWords(warning.expiry_date)}, before this shift ends.` : `${credentialTypeLabel(warning.credential_type)} is not verified.` });
   return notes;
 };
 

@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { credentialExpiryState, credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
 import './PageStyles.css';
 
 interface Credential {
@@ -19,12 +20,6 @@ interface Credential {
   verified: boolean;
 }
 
-function credentialExpiryState(expiryDate: string | null): 'expired' | 'expiring' | 'current' | 'none' {
-  if (!expiryDate) return 'none';
-  const days = (new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-  if (days < 0) return 'expired';
-  return days <= 30 ? 'expiring' : 'current';
-}
 
 const OfficerCredentialsPage: React.FC = () => {
   const { profile } = useAuth();
@@ -101,7 +96,7 @@ const OfficerCredentialsPage: React.FC = () => {
             return (
             <div key={c.id} className="contact-card">
               <div className="contact-header">
-                <h3>{c.credential_type}</h3>
+                <h3>{credentialTypeLabel(c.credential_type)}</h3>
                 <span className={`status-badge status-${c.verified ? 'active' : 'inactive'}`}>
                   {c.verified ? 'Verified' : 'Unverified'}
                 </span>
@@ -110,7 +105,7 @@ const OfficerCredentialsPage: React.FC = () => {
                 {c.credential_number && <p>{c.credential_number}</p>}
                 {c.issuing_authority && <p className="contact-meta">{c.issuing_authority}</p>}
                 <p className={expiryState === 'expired' || expiryState === 'expiring' ? 'severity-badge severity-high' : 'contact-meta'}>
-                  {expiryState === 'expired' ? `Expired ${new Date(c.expiry_date!).toLocaleDateString()}` : c.expiry_date ? `Expires ${new Date(c.expiry_date).toLocaleDateString()}` : 'No expiry'}
+                  {credentialExpiryWords(c.expiry_date)}
                 </p>
               </div>
             </div>
