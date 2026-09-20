@@ -7,7 +7,51 @@ use tauri::Emitter;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct DeviceCandidate { id: String, label: String, size_bytes: u64, removable: bool, read_only: bool, partitions: u32, partition_style: String, bus_type: String, drive_letters: Vec<String>, offline: bool }
+struct DeviceCandidate { id: String, label: String, size_bytes: u64, removable: bool, read_only: bool, partitions: u32, partition_style: String, bus_type: String, drive_letters: Vec<String>, offline: bool, volumes: Vec<VolumeInfo>, card_kind: Option<&'static str> }
+
+/// A mounted volume as Windows sees it. The serial number is written into the filesystem when the card is
+/// formatted, so it follows the card between readers and drive letters; the drive letter does not.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct VolumeInfo { drive_letter: String, serial: Option<String>, label: Option<String>, file_system: Option<String>, removable: bool, card_kind: Option<&'static str> }
+
+/// Windows' logical disks (`Win32_LogicalDisk`): letter, volume serial, label, filesystem, drive type.
+fn logical_disks() -> Result<Vec<VolumeInfo>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        const SCRIPT: &str = r#"$ErrorActionPreference='SilentlyContinue'; ConvertTo-Json -Compress @(Get-CimInstance Win32_LogicalDisk | ForEach-Object { [pscustomobject]@{ DeviceID = [string]$_.DeviceID; Serial = [string]$_.VolumeSerialNumber; Label = [string]$_.VolumeName; FileSystem = [string]$_.FileSystem; DriveType = [int]$_.DriveType } })"#;
+        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT]).output().map_err(|e| format!("PowerShell could not be started to list volumes: {e}"))?;
+        if !output.status.success() { return Err(format!("Volume listing failed: {}", String::from_utf8_lossy(&output.stderr).trim())); }
+        if output.stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("Volume list was not readable: {e}"))?;
+        let rows = if value.is_array() { value.as_array().cloned().unwrap_or_default() } else { vec![value] };
+        let text = |row: &serde_json::Value, key: &str| row.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        Ok(rows.iter().filter_map(|row| {
+            let drive_letter = text(row, "DeviceID")?;
+            let root = format!("{drive_letter}\\");
+            Some(VolumeInfo { card_kind: card_kind_at(Path::new(&root)), drive_letter, serial: text(row, "Serial"), label: text(row, "Label"), file_system: text(row, "FileSystem"), removable: row.get("DriveType").and_then(|v| v.as_i64()) == Some(2) })
+        }).collect())
+    }
+    #[cfg(not(target_os = "windows"))]
+    Ok(Vec::new())
+}
+
+/// What kind of camera card a volume root holds, from the files the camera leaves there. A Tapo card carries
+/// its event index `sys01.bin` and a `sys00.bin` beginning "TP-Link"; the recordings are ordinary MP4 files.
+fn card_kind_at(root: &Path) -> Option<&'static str> {
+    let has_index = fs::read_dir(root).ok()?.flatten().any(|entry| fcm_decoder::tapo::is_card_index_name(&entry.file_name().to_string_lossy()));
+    if !has_index { return None; }
+    let vendor = fs::read(root.join("sys00.bin")).ok().map(|bytes| bytes.starts_with(b"TP-Link")).unwrap_or(false);
+    Some(if vendor { "tapo" } else { "tapo_like" })
+}
+
+/// The volume a path lives on (Windows drive letter), or null on other platforms and for UNC paths.
+#[tauri::command(async)]
+fn identify_volume(path: String) -> Result<Option<VolumeInfo>, String> {
+    let letter = path.as_bytes().get(..2).filter(|p| p[0].is_ascii_alphabetic() && p[1] == b':').map(|p| format!("{}:", (p[0] as char).to_ascii_uppercase()));
+    let Some(letter) = letter else { return Ok(None); };
+    Ok(logical_disks()?.into_iter().find(|volume| volume.drive_letter.eq_ignore_ascii_case(&letter)))
+}
 
 /// Emitted as `acquisition-progress` while a card is being cloned and while the clone is re-read for verification.
 #[derive(Serialize, Clone)]
@@ -101,8 +145,12 @@ fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
         if output.stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("Disk list was not readable: {e}"))?;
         let rows = if value.is_array() { value.as_array().cloned().unwrap_or_default() } else { vec![value] };
+        let volumes = logical_disks().unwrap_or_default();
         let mut devices: Vec<DeviceCandidate> = rows.into_iter().enumerate().map(|(index, row)| {
             let bus_type = row.get("BusType").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+            let drive_letters: Vec<String> = row.get("DriveLetters").and_then(|v| v.as_array()).map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            let device_volumes: Vec<VolumeInfo> = volumes.iter().filter(|volume| drive_letters.iter().any(|letter| letter.eq_ignore_ascii_case(&volume.drive_letter))).cloned().collect();
+            let card_kind = device_volumes.iter().find_map(|volume| volume.card_kind);
             DeviceCandidate {
                 id: row.get("Number").and_then(|v| v.as_u64()).map(|n| format!("PhysicalDrive{n}")).unwrap_or_else(|| format!("removable-{index}")),
                 label: row.get("FriendlyName").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).unwrap_or("Removable camera media").to_string(),
@@ -112,8 +160,9 @@ fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
                 partitions: row.get("NumberOfPartitions").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 partition_style: row.get("PartitionStyle").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string(),
                 bus_type,
-                drive_letters: row.get("DriveLetters").and_then(|v| v.as_array()).map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect()).unwrap_or_default(),
+                drive_letters,
                 offline: row.get("IsOffline").and_then(|v| v.as_bool()).unwrap_or(false),
+                volumes: device_volumes, card_kind,
             }
         }).collect();
         // Removable buses first, then smallest disks: a camera card is rarely the biggest thing attached.
@@ -704,6 +753,47 @@ fn render_thumbnail(app: tauri::AppHandle, path: String) -> Result<Thumbnail, St
     Ok(Thumbnail { jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes), cached: false })
 }
 
+/// A card recording's thumbnail without extracting it: the first few frames are read straight from the card
+/// with the same frame filter as a full extraction (this recording's frames only, from its first key frame), so
+/// a new card lists with pictures before anything is stitched or sent. Cached against the recording's identity
+/// (source, partition, descriptor, start, size), never against a drive letter or PhysicalDrive number alone.
+#[tauri::command(async)]
+fn render_card_thumbnail(app: tauri::AppHandle, source: DhfsSourceSpec, volume: Volume, recording: fcm_dhfs::Recording) -> Result<Thumbnail, String> {
+    let ffmpeg = verified_ffmpeg(&app)?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"card-recording:");
+    hasher.update(volume.partitions.first().map(|p| p.capacity_bytes).unwrap_or(0).to_le_bytes());
+    hasher.update(recording.partition_index.to_le_bytes()); hasher.update(recording.descriptor.to_le_bytes());
+    hasher.update(recording.start.file_stamp().as_bytes()); hasher.update(recording.bytes.to_le_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    let thumbs = app_local_data(&app)?.join("previews").join("thumbs");
+    fs::create_dir_all(&thumbs).map_err(|error| error.to_string())?;
+    let output = thumbs.join(format!("card-{}.jpg", &digest[..32]));
+    if let Ok(bytes) = fs::read(&output) {
+        if !bytes.is_empty() { return Ok(Thumbnail { jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes), cached: true }); }
+    }
+    let mut block_source = open_source(&source)?;
+    let head_path = std::env::temp_dir().join(format!("fcm-head-{}-{}.dav", std::process::id(), &digest[..12]));
+    let mut head = File::create(&head_path).map_err(|error| error.to_string())?;
+    let report = fcm_dhfs::extract_recording_head(&mut block_source, &volume, &recording, &mut head, 6).map_err(|error| error.to_string());
+    let _ = head.flush();
+    drop(head);
+    let report = match report {
+        Ok(Some(report)) if report.stats.video_frames > 0 => report,
+        Ok(_) => { let _ = fs::remove_file(&head_path); return Err("This recording holds no DHAV video frames to picture (a raw stream or a picture stream).".to_string()); }
+        Err(error) => { let _ = fs::remove_file(&head_path); return Err(error); }
+    };
+    let run = run_ffmpeg(&ffmpeg, &fcm_decoder::thumbnail_args(&head_path.to_string_lossy(), &output.to_string_lossy()), Duration::from_secs(45));
+    let _ = fs::remove_file(&head_path);
+    let (ok, stderr) = run?;
+    let bytes = fs::read(&output).unwrap_or_default();
+    if bytes.is_empty() {
+        let _ = fs::remove_file(&output);
+        return Err(if ok { format!("The decoder produced no frame from the first {} frames.", report.stats.frames_kept) } else { format!("The decoder could not read this recording's first frames: {}", stderr.lines().last().unwrap_or("no detail").trim()) });
+    }
+    Ok(Thumbnail { jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes), cached: false })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Mp4Export { path: String, bytes: u64, mode: Option<fcm_decoder::Mp4Mode>, seconds: f64, existing: bool }
@@ -788,7 +878,7 @@ fn sniff_video_content(path: &Path, file_name: &str, metadata: &fs::Metadata) ->
     if let Some(container) = fcm_decoder::container_signature(&head) { return ("video", Some(container)); }
     let body: Vec<Vec<u8>> = if len > (SAMPLE as u64) * 4 { [len / 4, len / 2, len / 4 * 3].into_iter().map(&mut read_at).collect() } else { Vec::new() };
     let samples: Vec<&[u8]> = std::iter::once(head.as_slice()).chain(body.iter().map(Vec::as_slice)).collect();
-    if fcm_decoder::is_blank(&samples) { return ("blank", None); }
+    if fcm_decoder::is_fill(&samples) { return ("blank", None); }
     ("unrecognised", None)
 }
 
@@ -853,6 +943,11 @@ fn read_pictures(paths: Vec<String>) -> Result<Vec<String>, String> {
 // Motion clips inside one file: found from the container index, cut without re-encoding the video
 // ---------------------------------------------------------------------------------------------
 
+/// Everything the app writes for the operator lives under here: `<card>` working folders and `clips`.
+fn acquisitions_base() -> PathBuf {
+    std::env::var_os("PUBLIC").map(PathBuf::from).filter(|p| p.is_absolute()).map(|p| p.join("Documents")).unwrap_or_else(std::env::temp_dir).join("fcm-acquisitions")
+}
+
 /// Where one recording's clips are cut to: the app's working folder, never beside the source (which may be a
 /// card or a cloud-synced folder). The path hash keeps two files of the same name apart.
 fn split_directory(source: &Path) -> PathBuf {
@@ -861,8 +956,15 @@ fn split_directory(source: &Path) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(source.to_string_lossy().as_bytes());
     let digest = format!("{:x}", hasher.finalize());
-    let base = std::env::var_os("PUBLIC").map(PathBuf::from).filter(|p| p.is_absolute()).map(|p| p.join("Documents")).unwrap_or_else(std::env::temp_dir);
-    base.join("fcm-acquisitions").join("clips").join(format!("{safe}-{}", &digest[..8]))
+    acquisitions_base().join("clips").join(format!("{safe}-{}", &digest[..8]))
+}
+
+/// The folder every cut clip lives under, so "Disk on this computer" can account for clips in the Video files mode.
+#[tauri::command]
+fn clips_root() -> Result<String, String> {
+    let root = acquisitions_base().join("clips");
+    fs::create_dir_all(&root).map_err(|error| format!("Could not create {}: {error}", root.display()))?;
+    Ok(root.to_string_lossy().to_string())
 }
 
 /// The motion clips a file's own index describes; reads the `moov` only, never the media data. When the
@@ -1053,23 +1155,40 @@ fn disk_kind(path: &Path, is_dir: bool) -> &'static str {
 }
 
 /// Everything in one working folder by kind and size, plus the app's previews and tools, plus how much other
-/// cards' working folders hold beside it. Nothing is opened beyond metadata; nothing is changed.
+/// folders hold beside it. With `flatten_subfolders` the files inside each immediate subfolder are listed as
+/// entries themselves (the clips folder keeps one subfolder per source recording). Nothing is opened beyond
+/// metadata; nothing is changed.
 #[tauri::command(async)]
-fn disk_report(app: tauri::AppHandle, directory: String) -> Result<DiskReport, String> {
+fn disk_report(app: tauri::AppHandle, directory: String, flatten_subfolders: Option<bool>) -> Result<DiskReport, String> {
     let dir = Path::new(&directory);
+    let flatten = flatten_subfolders.unwrap_or(false);
     let mut entries = Vec::new();
     let mut total = 0_u64;
+    let mut push_entry = |entries: &mut Vec<DiskEntry>, path: PathBuf, meta: &fs::Metadata| {
+        let bytes = if meta.is_dir() { dir_size(&path) } else { meta.len() };
+        total += bytes;
+        entries.push(DiskEntry {
+            path: path.to_string_lossy().to_string(), name: path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), bytes, kind: disk_kind(&path, meta.is_dir()).to_string(),
+            modified_epoch_ms: meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0),
+        });
+    };
     if let Ok(read) = fs::read_dir(dir) {
         for entry in read.flatten() {
             let path = entry.path();
             let Ok(meta) = fs::symlink_metadata(&path) else { continue; };
             if meta.file_type().is_symlink() { continue; }
-            let bytes = if meta.is_dir() { dir_size(&path) } else { meta.len() };
-            total += bytes;
-            entries.push(DiskEntry {
-                path: path.to_string_lossy().to_string(), name: entry.file_name().to_string_lossy().to_string(), bytes, kind: disk_kind(&path, meta.is_dir()).to_string(),
-                modified_epoch_ms: meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0),
-            });
+            if flatten && meta.is_dir() {
+                if let Ok(inner) = fs::read_dir(&path) {
+                    for child in inner.flatten() {
+                        let child_path = child.path();
+                        let Ok(child_meta) = fs::symlink_metadata(&child_path) else { continue; };
+                        if child_meta.file_type().is_symlink() || child_meta.is_dir() { continue; }
+                        push_entry(&mut entries, child_path, &child_meta);
+                    }
+                }
+                continue;
+            }
+            push_entry(&mut entries, path, &meta);
         }
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1131,5 +1250,5 @@ fn remove_local_files(paths: Vec<String>, roots: Vec<String>) -> Result<RemovalR
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, render_thumbnail, export_mp4, analyze_recording_segments, split_recording_segments, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures, load_review_state, save_review_state, disk_report, remove_local_files]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, render_thumbnail, render_card_thumbnail, export_mp4, analyze_recording_segments, split_recording_segments, clips_root, identify_volume, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures, load_review_state, save_review_state, disk_report, remove_local_files]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

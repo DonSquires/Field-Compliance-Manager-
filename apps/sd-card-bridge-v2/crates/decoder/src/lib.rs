@@ -221,9 +221,21 @@ pub fn container_signature(head: &[u8]) -> Option<&'static str> {
     None
 }
 
-/// True when every sampled byte is the same filler value (0x00 or 0xFF): a slot the recorder pre-allocated
-/// but never wrote into, or erased flash. Callers sample several offsets so a recording whose header alone
-/// is zeroed is not mistaken for one.
+/// True when every sampled block is filler: one repeated byte (0x00 / 0xFF — an unwritten or erased slot) or a
+/// short repeating pattern (period ≤ 256 bytes — the sequence a recorder writes when it pre-formats a slot;
+/// Tapo fills with `7d 82 87 8c …` stepping by 5, alternating with zero blocks). Compressed video is never
+/// periodic like that. The first 64 bytes of each block are ignored so a short header before the pattern does
+/// not hide it. Callers sample several offsets so a recording whose header alone is zeroed is not mistaken.
+pub fn is_fill(samples: &[&[u8]]) -> bool {
+    const SKIP: usize = 64;
+    if samples.is_empty() || samples.iter().any(|sample| sample.len() < SKIP + 512) { return false; }
+    samples.iter().all(|sample| {
+        let body = &sample[SKIP..];
+        (1..=256).any(|period| body.iter().zip(body[period..].iter()).all(|(a, b)| a == b))
+    })
+}
+
+/// Kept for callers that only want the strict meaning: one filler byte throughout.
 pub fn is_blank(samples: &[&[u8]]) -> bool {
     let mut filler: Option<u8> = None;
     for &byte in samples.iter().flat_map(|sample| sample.iter()) {
@@ -386,6 +398,26 @@ mod tests {
         assert_eq!(container_signature(&[0_u8; 512]), None);
         assert_eq!(container_signature(b"hello world, not a video"), None);
         assert_eq!(container_signature(&[]), None);
+    }
+
+    #[test]
+    fn fill_means_constant_or_short_period_in_every_sampled_block() {
+        let zeros = vec![0_u8; 4096];
+        let ones = vec![0xFF_u8; 4096];
+        // Tapo's pre-format pattern: 8 zero bytes, then bytes stepping by 5 (period 256), as read from a real slot.
+        let mut tapo = vec![0_u8; 8];
+        tapo.extend((0..4088_u32).map(|i| (0x7d_u8).wrapping_add(((i % 256) as u8).wrapping_mul(5))));
+        let mut video = vec![0_u8; 4096];
+        for (i, byte) in video.iter_mut().enumerate() { *byte = ((i as u64).wrapping_mul(2654435761) >> 7) as u8; } // pseudo-random, no short period
+        let mut zeroed_header_real_body = vec![0_u8; 4096];
+        zeroed_header_real_body[3000] = 0x47;
+        assert!(is_fill(&[&zeros, &tapo, &zeros, &tapo]), "zero blocks alternating with the step-5 pattern");
+        assert!(is_fill(&[&ones, &ones]));
+        assert!(is_fill(&[&zeros, &ones]), "different fillers per block are still filler");
+        assert!(!is_fill(&[&zeros, &video]), "one block of real data is enough to keep the file");
+        assert!(!is_fill(&[&zeros, &zeroed_header_real_body]));
+        assert!(!is_fill(&[]));
+        assert!(!is_fill(&[&[0_u8; 100]]), "too short to judge");
     }
 
     #[test]

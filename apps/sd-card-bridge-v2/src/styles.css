@@ -92,6 +92,11 @@
 .recording--clip .recording__meta strong{color:#a9c4bb}
 .recording__time--bound{color:#9cb0a9;font-size:12px}
 .recording--clip.is-sent{background:#122319}
+.card-kind{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:14px;padding:12px 14px;border:1px solid #5a8a6e;border-radius:7px;background:#14261f}
+.card-kind>div{display:grid;gap:4px;min-width:0}
+.card-kind strong{font-size:13px;color:#d8f5e6}
+.card-kind small{font-size:11px;line-height:1.45;color:#9cb0a9}
+.card-kind button{flex-shrink:0}
 @media(max-width:1150px){.recording--thumb{grid-template-columns:86px 72px minmax(0,1fr) auto}.recording__thumb{width:72px}}
 .mark-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:14px;padding:10px 12px;border:1px solid #2c423e;border-radius:8px;background:#12201e}
 .mark-filter{display:inline-flex;align-items:center;border:1px solid #35534a;border-radius:99px;background:#15221f;color:#c9d9d3;padding:5px 10px;font:600 11px 'DM Sans';cursor:pointer}

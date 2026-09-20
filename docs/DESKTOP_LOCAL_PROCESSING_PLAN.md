@@ -115,6 +115,19 @@ clips show a plain time (plus date when it differs from the file's day), undated
 the file's start moves only undated clips; a `clips.json` from 0.4.5 is reused for its bytes and hashes but
 re-dated from today's analysis. Option (2), reading the OSD, is no longer needed for Tapo and stays parked.
 
+**0.4.7 (owner field test passed on the C:-drive copy; asked for the card in the reader and "new cards, uploading
+for the first time"):** the card itself is the source. Discovery recognises a Tapo card by `sys01.bin` +
+TP-Link `sys00.bin` at the volume root and routes it to Video files (the DHFS reader is disabled for it with the
+reason); the volume serial from `Win32_LogicalDisk` becomes the card's identity for review state
+(`volume:<serial>:<path>`, keys stripped of the drive letter, one-time adoption of the old letter-scoped state)
+and for manifest provenance (`source_volume`). A pulled card mid-send is explained in the operator's terms with
+the assurance that nothing was registered. Placeholder content was checked on the real card: not zeros but a
+256-byte stepping fill (`7d 82 87 8c …`) alternating with zero blocks — `is_fill` now recognises constant or
+short-period blocks as filler. Dahua card rows get thumbnails from a head-only read (`extract_recording_head`,
+same frame filter as extraction, ≤ 6 video frames / 3 MB, cached by recording identity) so a new card lists
+with pictures before any extraction; the disk section covers the clips folder in Video files mode. Sample folder
+trimmed to the two real slots, the six index files and three placeholders (1.4 GB).
+
 ## Phase 2 — Analyse here (0.5.x)
 
 Goal: the laptop runs the same detection/recognition tier the VPS runs and FCM receives **results**, not footage,

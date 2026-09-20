@@ -914,8 +914,10 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> { haystack.windows(need
 
 /// Walk the recording's bytes as DHAV frames: validate each header against its trailer, keep only frames
 /// the camera dated inside this recording, start at the first key frame, stop at erased flash or at the
-/// next recording. Writes nothing when no frame qualifies, so the caller can fall back.
-fn extract_dhav_frames(source: &mut dyn BlockSource, partition: &Partition, recording: &Recording, sink: &mut HashingSink<'_>) -> Result<Option<(StreamProbe, ExtractionStats)>, DhfsError> {
+/// next recording. Writes nothing when no frame qualifies, so the caller can fall back. With `head_frames`
+/// the walk stops once that many video frames have been written (or `HEAD_MAX_BYTES`): enough to decode a
+/// picture, read from a fraction of the recording.
+fn extract_dhav_frames(source: &mut dyn BlockSource, partition: &Partition, recording: &Recording, sink: &mut HashingSink<'_>, head_frames: Option<u32>) -> Result<Option<(StreamProbe, ExtractionStats)>, DhfsError> {
     let (window_begin, window_end) = window_for(recording);
     let mut reader = RecordingBytes::new(source, partition, recording);
     let mut buf: Vec<u8> = Vec::with_capacity(2 * COPY_CHUNK as usize);
@@ -985,6 +987,7 @@ fn extract_dhav_frames(source: &mut dyn BlockSource, partition: &Partition, reco
         if frame_kind_is_audio(header.kind) { stats.audio_frames += 1; }
         stats.content_end = Some(header.date);
         pos += header.length;
+        if let Some(limit) = head_frames { if stats.video_frames >= limit || sink.written >= HEAD_MAX_BYTES { break; } }
     }
     stats.structural_bytes_removed = reader.structural_removed;
     stats.source_bytes_read = reader.bytes_read;
@@ -1035,7 +1038,7 @@ pub fn extract_recording(source: &mut dyn BlockSource, volume: &Volume, recordin
         .ok_or_else(|| DhfsError::Layout(format!("partition {} is not part of this volume", recording.partition_index)))?;
     if recording.fragments.is_empty() { return Err(DhfsError::Layout("recording has no fragments".to_string())); }
     let mut sink = HashingSink { inner: sink, hasher: Sha256::new(), written: 0 };
-    if let Some((probe, stats)) = extract_dhav_frames(source, partition, recording, &mut sink)? {
+    if let Some((probe, stats)) = extract_dhav_frames(source, partition, recording, &mut sink, None)? {
         return Ok(ExtractReport {
             bytes_written: sink.written,
             sha256: format!("{:x}", sink.hasher.finalize()),
@@ -1046,6 +1049,24 @@ pub fn extract_recording(source: &mut dyn BlockSource, volume: &Volume, recordin
         });
     }
     extract_raw_stream(source, volume, recording, &mut sink)
+}
+
+/// Stop a head-only walk once this much has been written, whatever the frame count: one HEVC key frame at
+/// 2304×1296 is ~200 KB, so this is generous for a thumbnail and still a fraction of a recording.
+const HEAD_MAX_BYTES: u64 = 3 << 20;
+
+/// The first few decodable frames of a recording — enough for a thumbnail — read from the card with the
+/// same frame filter as a full extraction (only frames the camera dated inside this recording, from its
+/// first key frame), so the picture is this recording's and never a previous occupant's leftovers. `None`
+/// when the region holds no DHAV frames (raw-stream cards), which the caller treats as "no thumbnail".
+pub fn extract_recording_head(source: &mut dyn BlockSource, volume: &Volume, recording: &Recording, sink: &mut dyn Write, video_frames: u32) -> Result<Option<ExtractReport>, DhfsError> {
+    let partition = volume.partitions.iter().find(|partition| partition.index == recording.partition_index)
+        .ok_or_else(|| DhfsError::Layout(format!("partition {} is not part of this volume", recording.partition_index)))?;
+    if recording.fragments.is_empty() { return Err(DhfsError::Layout("recording has no fragments".to_string())); }
+    let mut sink = HashingSink { inner: sink, hasher: Sha256::new(), written: 0 };
+    Ok(extract_dhav_frames(source, partition, recording, &mut sink, Some(video_frames.max(1)))?.map(|(probe, stats)| ExtractReport {
+        bytes_written: sink.written, sha256: format!("{:x}", sink.hasher.finalize()), probe, fragments_copied: 0, kind: ContentKind::DhavVideo, stats,
+    }))
 }
 
 struct HashingSink<'a> { inner: &'a mut dyn Write, hasher: Sha256, written: u64 }
@@ -1325,7 +1346,7 @@ pub fn extract_recording_to_directory(source: &mut dyn BlockSource, volume: &Vol
 
     // 1. DHAV video frames dated inside the recording.
     let mut sink = HashingSink { inner: &mut part, hasher: Sha256::new(), written: 0 };
-    let video = match extract_dhav_frames(source, partition, recording, &mut sink) {
+    let video = match extract_dhav_frames(source, partition, recording, &mut sink, None) {
         Ok(video) => video,
         Err(error) => { drop(sink); let _ = fs::remove_file(&part_path); return Err(error); }
     };
@@ -1761,6 +1782,23 @@ mod tests {
         assert!(report.stats.stopped_at_next_recording);
         assert!(!report.stats.truncated_final_frame);
         assert_eq!(report.sha256, format!("{:x}", Sha256::digest(&out)));
+    }
+
+    #[test]
+    fn a_head_read_starts_at_the_same_key_frame_and_stops_early() {
+        let (image, expected, begin, _) = measured_layout_image();
+        let mut source = MemorySource(image);
+        let catalog = catalog(&mut source).expect("catalog");
+        let recording = &catalog.recordings[0];
+        let mut head = Vec::new();
+        let report = extract_recording_head(&mut source, &catalog.volume, recording, &mut head, 2).expect("head").expect("dhav frames");
+        assert_eq!(&head[..5], b"DHAV\xfd", "the head begins at the recording's first key frame, not a stale or leading frame");
+        assert_eq!(report.stats.video_frames, 2);
+        assert_eq!(report.stats.stale_frames, 2, "the same frame filter as a full extraction applies");
+        assert_eq!(report.stats.content_start, Some(begin));
+        assert!(head.len() < expected.len(), "a head is a fraction of the recording ({} of {} bytes)", head.len(), expected.len());
+        assert_eq!(&expected[..head.len()], &head[..], "the head is a byte-for-byte prefix of the full extraction");
+        assert!(report.bytes_written < HEAD_MAX_BYTES);
     }
 
     fn synthetic_jpeg(taken_at: Option<DhfsTime>, width: u16, height: u16, seed: u8) -> Vec<u8> {

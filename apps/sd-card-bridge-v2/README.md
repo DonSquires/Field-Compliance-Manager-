@@ -96,6 +96,19 @@ the signed-in user under row-level security, and the session is held in memory o
 - `render_thumbnail` — the list's thumbnail: one small JPEG of a file's first key frame, decoded on this
   computer, cached under `<app local data>/previews/thumbs/` against the file's path, size and modified time,
   requested only when a row scrolls into view and at most two at a time. A viewing aid; cleared with the previews.
+- `render_card_thumbnail` — the same for a card recording that has not been extracted: the first frames are read
+  straight from the card through `fcm_dhfs::extract_recording_head` — the full extraction's frame filter (this
+  recording's dated frames only, from its first key frame, a previous occupant's leftovers dropped) stopped after
+  six video frames or 3 MB — into a temporary `.dav` the decoder pictures. Cached against the recording's
+  identity (partition capacity, partition, descriptor, start, size), so a re-listed card is instant. Once a
+  recording has been extracted its working copy is used instead.
+- `identify_volume` — the volume a chosen folder lives on (`Win32_LogicalDisk`): drive letter, volume serial
+  (written at format time, so it follows a card between readers and letters), label, filesystem, removable, and
+  `cardKind: tapo` when `sys01.bin` and a TP-Link `sys00.bin` sit at the root. Device discovery carries the same
+  per volume, so a Tapo card in the reader is named as such under Camera card and handed to Video files.
+- `clips_root` — the folder every cut clip lives under (`Public Documents\fcm-acquisitions\clips`), for "Disk on
+  this computer" in Video files mode; `disk_report` takes `flattenSubfolders` to list the clips inside each
+  recording's folder as entries of their own.
 - `analyze_recording_segments` / `split_recording_segments` — the motion clips a camera wrote back to back into
   one file. `analyze` reads only the MP4 index (`moov`, plus Tapo's `stte` trigger table hidden in the `free`
   box) and returns the segments. Boundaries come first from the `stte` marks — the camera's own trigger list,
@@ -192,6 +205,33 @@ beside this file … copy the whole card folder, index files included"). The man
 `segment_offset_lower_bound` as before. A correction typed into the parent file's start moves only undated
 clips — the operator's guess does not outrank the camera's record. Copying a Tapo card: copy the **whole
 folder** (the `xxxxxxxx_000000_tp…` placeholders can be skipped, `sys01.bin` cannot).
+
+0.4.7 (owner: "ensure it works when pulling Tapo files from an SD card"; "consider that SD cards will be new and
+uploading for the first time") makes the card in the reader a first-class source and gives every list a picture.
+
+- **A Tapo card is an ordinary drive.** Under Camera card, discovery now names it ("E: · … · TP-Link Tapo card")
+  and offers "Open E: under Video files" instead of the DHFS reader, which cannot apply to it; under Video files
+  the drive letter is chosen as the folder. Either way the card is only read: thumbnails and review state go to
+  the app's local data, cut clips to Public Documents, nothing beside the source.
+- **The card's identity is its volume serial, not its letter.** Review state (marks, places, sent records,
+  splits) for a removable volume is scoped `volume:<serial>:<path>` with persisted keys stripped of the drive
+  letter, so the same card at F: next week restores what it was given at E:; a state saved by an earlier release
+  under the letter path is adopted once. The facts line shows "Card E:\ · “label” · TP-Link Tapo · FAT32 · serial
+  …", and the manifest of every file or clip sent carries `source_volume` (serial, label, filesystem, removable,
+  card kind) beside its path.
+- **A pulled card is explained, not just errored.** A send that fails with a Windows medium error (path not
+  found, device not ready, not connected) on a removable volume says the card is no longer readable, that
+  reinserting at any letter and choosing the folder again is enough, and that nothing was registered.
+- **Fill patterns are blank.** Tapo's placeholder slots are not zeros but a 256-byte stepping pattern alternating
+  with zero blocks; `is_fill` (decoder crate, tested against the real pattern) treats any block that is constant
+  or periodic within 256 bytes as filler, so pre-formatted slots from other recorders are set aside too.
+- **Card recordings get thumbnails without extraction.** Dahua card rows now carry the same thumbnail cell as
+  files: a head-only read straight from the card (see `render_card_thumbnail`), lazily as rows scroll, two at a
+  time, cached by recording identity. A brand-new card lists with pictures before anything is stitched or sent.
+- **Disk on this computer covers cut clips.** In Video files mode the section reports the clips folder; clips are
+  matched to their rows by path and grouped by the same rules (FCM-verified sent, decided-no, Keep / Review
+  further / undecided left alone); a removed unsent clip leaves the list, a removed sent one keeps its row as the
+  record of what FCM holds, and a split with no clips left is forgotten so the file lists whole again.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device
