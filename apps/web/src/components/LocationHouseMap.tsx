@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AlertTriangle, Building2, CheckCircle2, Crosshair, LandPlot, LoaderCircle, MapPin, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/mapPreferences';
 import './LocationHouseMap.css';
 import './LocationHouseMapSpine.css';
 
@@ -59,6 +60,8 @@ interface ZoneClosure {
 export function LocationHouseMap({ organizationId, house, sites, zones }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const overlayRef = useRef<L.LayerGroup | null>(null);
+  const framedRef = useRef<string>('');
   const [linzPreview, setLinzPreview] = useState<LinzPreview | null>(null);
   const [probePoint, setProbePoint] = useState<{ lat: number; lng: number } | null>(null);
   const [resolution, setResolution] = useState<GeofenceResolution | null>(null);
@@ -66,24 +69,30 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
   const [resolving, setResolving] = useState(false);
   const [probing, setProbing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One map per house: a probe click, a LINZ preview or a resolution result must not rebuild it and lose the person's zoom, position or base layer.
+  const viewKey = `house:${organizationId}:${house.name}`;
 
   useEffect(() => {
     if (!containerRef.current) return;
-    mapRef.current?.remove();
-    const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView([-41.2, 172.5], 5);
+    const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true });
     mapRef.current = map;
-    const linzTile = (layer: 'topographic' | 'aerial') => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
-    const topographic = L.tileLayer(linzTile('topographic'), {
-      maxZoom: 20,
-      attribution: '&copy; LINZ | CC BY 4.0',
-    }).addTo(map);
-    const aerial = L.tileLayer(linzTile('aerial'), { maxZoom: 20, attribution: '&copy; LINZ | CC BY 4.0' });
-    L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, undefined, { collapsed: false }).addTo(map);
+    addLinzBaseLayers(map, { collapsed: false });
+    overlayRef.current = L.layerGroup().addTo(map);
+    rememberViewport(map, viewKey);
+    map.on('click', ({ latlng }) => { setProbePoint({ lat: latlng.lat, lng: latlng.lng }); setResolution(null); setClosure(null); });
+    framedRef.current = '';
+    const invalidateTimer = window.setTimeout(() => map.invalidateSize(), 0);
+    return () => { window.clearTimeout(invalidateTimer); map.remove(); mapRef.current = null; overlayRef.current = null; };
+  }, [viewKey]);
 
+  useEffect(() => {
+    const map = mapRef.current; const overlay = overlayRef.current;
+    if (!map || !overlay) return;
+    overlay.clearLayers();
     const bounds = L.latLngBounds([]);
     const addBoundary = (geometry: GeoJSON.GeoJsonObject, style: L.PathOptions, label: string) => {
       const layer = L.geoJSON(geometry, { style }).bindTooltip(label);
-      layer.addTo(map);
+      layer.addTo(overlay);
       const layerBounds = layer.getBounds();
       if (layerBounds.isValid()) bounds.extend(layerBounds);
     };
@@ -91,7 +100,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
     sites.forEach((site) => {
       if (site.boundary) addBoundary(site.boundary, { color: '#2fc4a7', weight: 3, fillColor: '#2fc4a7', fillOpacity: 0.12 }, `Site: ${site.name}`);
       else if (site.gps_lat != null && site.gps_lng != null) {
-        const point = L.circleMarker([site.gps_lat, site.gps_lng], { radius: 7, color: '#2fc4a7', fillColor: '#0e705f', fillOpacity: 0.9 }).bindTooltip(`Site: ${site.name}`).addTo(map);
+        const point = L.circleMarker([site.gps_lat, site.gps_lng], { radius: 7, color: '#2fc4a7', fillColor: '#0e705f', fillOpacity: 0.9 }).bindTooltip(`Site: ${site.name}`).addTo(overlay);
         bounds.extend(point.getLatLng());
       }
     });
@@ -99,20 +108,24 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
       if (zone.boundary) addBoundary(zone.boundary, { color: '#f0b35a', weight: 2, dashArray: '7 5', fillColor: '#f0b35a', fillOpacity: 0.1 }, `Zone: ${zone.name}`);
       else if (zone.center_point?.coordinates?.length === 2) {
         const [lng, lat] = zone.center_point.coordinates;
-        const point = L.circleMarker([lat, lng], { radius: 6, color: '#f0b35a', fillColor: '#9a5f18', fillOpacity: 0.9 }).bindTooltip(`Zone: ${zone.name}`).addTo(map);
+        const point = L.circleMarker([lat, lng], { radius: 6, color: '#f0b35a', fillColor: '#9a5f18', fillOpacity: 0.9 }).bindTooltip(`Zone: ${zone.name}`).addTo(overlay);
         bounds.extend(point.getLatLng());
       }
     });
     if (linzPreview) addBoundary(linzPreview.geometry, { color: '#5da9ff', weight: 3, dashArray: '3 5', fillColor: '#5da9ff', fillOpacity: 0.08 }, `LINZ preview: ${linzPreview.address}`);
     if (probePoint) {
-      const probe = L.circleMarker([probePoint.lat, probePoint.lng], { radius: 7, color: '#f4f7f8', weight: 2, fillColor: resolution?.matched_zone_id ? '#2fc4a7' : '#d26a5c', fillOpacity: 1 }).bindTooltip('Geofence resolution point').addTo(map);
-      bounds.extend(probe.getLatLng());
+      L.circleMarker([probePoint.lat, probePoint.lng], { radius: 7, color: '#f4f7f8', weight: 2, fillColor: resolution?.matched_zone_id ? '#2fc4a7' : '#d26a5c', fillOpacity: 1 }).bindTooltip('Geofence resolution point').addTo(overlay);
     }
-    map.on('click', ({ latlng }) => { setProbePoint({ lat: latlng.lat, lng: latlng.lng }); setResolution(null); setClosure(null); });
-    if (bounds.isValid()) map.fitBounds(bounds.pad(0.18), { maxZoom: 18 });
-    const invalidateTimer = window.setTimeout(() => map.invalidateSize(), 0);
-    return () => { window.clearTimeout(invalidateTimer); map.remove(); mapRef.current = null; };
-  }, [sites, zones, linzPreview, probePoint, resolution, house.name]);
+    // Frame the house once per set of places (or when it comes back after a remembered viewport was left behind); never on a probe or preview.
+    const placeKey = [...sites.map((site) => site.id), ...zones.map((zone) => zone.id)].join('|');
+    if (framedRef.current !== placeKey) {
+      framedRef.current = placeKey;
+      restoreViewportOr(map, viewKey, () => {
+        if (bounds.isValid()) map.fitBounds(bounds.pad(0.18), { maxZoom: 18 });
+        else map.setView([-41.2, 172.5], 5);
+      });
+    }
+  }, [sites, zones, linzPreview, probePoint, resolution, viewKey]);
 
   useEffect(() => {
     if (!probePoint || !organizationId) return;

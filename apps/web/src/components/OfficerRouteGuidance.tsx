@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { LocateFixed, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { addLinzBaseLayers } from '../lib/mapPreferences';
 import './OfficerRouteGuidance.css';
 
 type Route = { distance_meters: number; duration_seconds: number; geometry: [number, number][]; steps: Array<{ instruction: string; distance_meters: number }>; destination_lat: number; destination_lng: number };
@@ -19,12 +20,9 @@ export function OfficerRouteGuidance({ job, onRecommendation }: { job: { id: str
     if (!mapElement.current || !route?.geometry.length) return;
     const points = route.geometry.map(([longitude, latitude]) => L.latLng(latitude, longitude));
     const map = L.map(mapElement.current, { zoomControl: true }).fitBounds(L.latLngBounds(points).pad(0.14));
-    const tileUrl = (layer: 'topographic' | 'aerial') => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
-    const topographic = L.tileLayer(tileUrl('topographic'), { maxZoom: 20, attribution: '&copy; LINZ' }).addTo(map);
-    const aerial = L.tileLayer(tileUrl('aerial'), { maxZoom: 20, attribution: '&copy; LINZ aerial imagery' });
     const overlays: Record<string, L.Layer> = {};
     if (parcel) overlays['LINZ parcel boundary'] = L.geoJSON(parcel, { style: { color: '#f0b35a', weight: 3, fillColor: '#f0b35a', fillOpacity: 0.08 } }).addTo(map);
-    L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, overlays, { collapsed: false }).addTo(map);
+    addLinzBaseLayers(map, { collapsed: false, overlays });
     L.polyline(points, { color: '#14c8d4', weight: 5, opacity: 0.9 }).addTo(map);
     L.marker(points.at(-1)!).addTo(map).bindTooltip(job.site?.name ?? 'Destination', { permanent: true, direction: 'top' });
     const timer = window.setTimeout(() => map.invalidateSize(), 0);

@@ -9,6 +9,8 @@ import {
   type HouseMapZone,
 } from "../components/LocationHouseMap";
 import { OperationalPlaceManager } from "../components/OperationalPlaceManager";
+import { ZoneScheduleEditor } from "../components/ZoneScheduleEditor";
+import { parseZoneSchedule, zoneScheduleWords } from "../lib/zoneSchedule";
 import "./PageStyles.css";
 import "./GeographyPages.css";
 import "./ZoneDetailPage.css";
@@ -337,13 +339,18 @@ export default function ZoneDetailPage() {
               </article>
               <article>
                 <span>Active schedule</span>
-                <strong>
-                  {selected.active_schedule
-                    ? JSON.stringify(selected.active_schedule)
-                    : "Always active"}
-                </strong>
+                <strong>{zoneScheduleWords(parseZoneSchedule(selected.active_schedule))}</strong>
               </article>
             </section>
+            <ZoneScheduleEditor
+              zone={selected}
+              moduleLabel={selected.module_key.replaceAll("_", " ")}
+              onSaved={(saved) => {
+                const updated = { ...selected, active_schedule: saved.active_schedule, configuration_version: saved.configuration_version };
+                setSelected(updated);
+                setZones((current) => current.map((zone) => (zone.id === updated.id ? updated : zone)));
+              }}
+            />
             <section className="reports-section">
               <h3>Compliance limits</h3>
               <div className="form-group">

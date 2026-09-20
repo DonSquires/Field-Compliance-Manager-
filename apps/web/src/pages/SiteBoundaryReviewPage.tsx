@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AlertTriangle, CheckCircle2, Clock3, Crosshair, History, Landmark, MapPin, PenTool, RefreshCw, Ruler, Search, ShieldCheck, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { resolveAddressCandidates, type AddressCandidate } from '../lib/locationAddress';
+import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/mapPreferences';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './SiteBoundaryReviewPage.css';
 import './SiteBoundaryVisualReview.css';
@@ -110,8 +112,24 @@ export function ringPolygon(ring: Ring): GeoJSON.Polygon {
   return { type: 'Polygon', coordinates: [[...ring, ring[0]]] };
 }
 
+/** Midpoints of each edge of the ring (index i sits between vertex i and i+1); dragging one inserts a vertex there. */
+export function ringMidpoints(ring: Ring): Ring {
+  return ring.map(([lng, lat], index) => {
+    const [nextLng, nextLat] = ring[(index + 1) % ring.length];
+    return [Number(((lng + nextLng) / 2).toFixed(7)), Number(((lat + nextLat) / 2).toFixed(7))];
+  });
+}
+
+/** The workbench keeps the selected place in the URL so refresh, back and shared links return to it. */
+const placeParam = (search: string): string | null => {
+  const value = new URLSearchParams(search).get('place');
+  return value && /^(client_site|location_zone):[0-9a-f-]{36}$/.test(value) ? value : null;
+};
+
 const SiteBoundaryReviewPage = () => {
   const { profile } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [queue, setQueue] = useState<QueueEntity[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [history, setHistory] = useState<BoundaryHistory[]>([]);
@@ -174,7 +192,8 @@ const SiteBoundaryReviewPage = () => {
       const { data, error: queueError } = await supabase.rpc('get_geofence_review_queue', { p_organization_id: null });
       if (queueError) throw queueError;
       const rows = (data as QueueEntity[]) ?? [];
-      const nextKey = preferredKey && rows.some((entity) => keyOf(entity) === preferredKey) ? preferredKey : rows[0] ? keyOf(rows[0]) : null;
+      const wanted = preferredKey ?? placeParam(window.location.search);
+      const nextKey = wanted && rows.some((entity) => keyOf(entity) === wanted) ? wanted : rows[0] ? keyOf(rows[0]) : null;
       setQueue(rows); setSelectedKey(nextKey);
       const next = rows.find((entity) => keyOf(entity) === nextKey);
       if (next) await Promise.all([loadHistory(next), loadCheckpoints(next)]); else { setHistory([]); setCheckpoints([]); }
@@ -186,6 +205,12 @@ const SiteBoundaryReviewPage = () => {
   useEffect(() => { void loadQueue(); }, [loadQueue]);
 
   useEffect(() => {
+    if (!selectedKey || placeParam(location.search) === selectedKey) return;
+    const params = new URLSearchParams(location.search); params.set('place', selectedKey);
+    navigate({ search: `?${params.toString()}` }, { replace: true });
+  }, [selectedKey, location.search, navigate]);
+
+  useEffect(() => {
     if (!selected) return;
     setCoordinates({ latitude: selected.center_lat?.toString() ?? '', longitude: selected.center_lng?.toString() ?? '', radius: '50' });
     setVisualReviewConfirmed(false); setDecisionNote(''); setRejectNote(''); setDrawPoints([]); setAddressCandidate(null); setAddressQuery('');
@@ -195,16 +220,13 @@ const SiteBoundaryReviewPage = () => {
 
   useEffect(() => { setEditRing(proposalRing); }, [proposalRing]);
 
-  // One map per selected entity; LINZ basemaps; the overlay group is re-rendered by the effect below.
+  // One map per selected entity; LINZ basemaps (remembered choice); the overlay group is re-rendered by the effect below.
   useEffect(() => {
     if (!mapContainerRef.current || !selected) return;
     mapRef.current?.remove();
     const map = L.map(mapContainerRef.current, { zoomControl: true, attributionControl: true, doubleClickZoom: false });
     mapRef.current = map;
-    const linzTile = (layer: 'topographic' | 'aerial') => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
-    const topographic = L.tileLayer(linzTile('topographic'), { maxZoom: 20, attribution: '&copy; LINZ | CC BY 4.0' }).addTo(map);
-    const aerial = L.tileLayer(linzTile('aerial'), { maxZoom: 20, attribution: '&copy; LINZ | CC BY 4.0' });
-    L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, undefined, { collapsed: true }).addTo(map);
+    addLinzBaseLayers(map, { collapsed: true });
     overlayRef.current = L.layerGroup().addTo(map);
     map.on('click', (event: L.LeafletMouseEvent) => {
       if (placingRef.current) {
@@ -215,14 +237,19 @@ const SiteBoundaryReviewPage = () => {
       setDrawPoints((points) => [...points, [Number(event.latlng.lng.toFixed(7)), Number(event.latlng.lat.toFixed(7))]]);
     });
     const focus = selected.boundary_geojson ?? selected.open_proposal_geojson;
-    if (focus) {
-      const bounds = L.geoJSON(focus).getBounds();
-      if (bounds.isValid()) map.fitBounds(bounds.pad(0.25), { maxZoom: 19 });
-    } else if (selected.center_lat != null && selected.center_lng != null) {
-      map.setView([selected.center_lat, selected.center_lng], 18);
-    } else {
-      map.fitBounds(L.latLngBounds([-47.3, 166.4], [-34.4, 178.6]));
-    }
+    // The person's last viewport for this place wins over the default framing (same tab).
+    const viewKey = `workbench:${selected.entity_type}:${selected.entity_id}`;
+    rememberViewport(map, viewKey);
+    restoreViewportOr(map, viewKey, () => {
+      if (focus) {
+        const bounds = L.geoJSON(focus).getBounds();
+        if (bounds.isValid()) map.fitBounds(bounds.pad(0.25), { maxZoom: 19 });
+      } else if (selected.center_lat != null && selected.center_lng != null) {
+        map.setView([selected.center_lat, selected.center_lng], 18);
+      } else {
+        map.fitBounds(L.latLngBounds([-47.3, 166.4], [-34.4, 178.6]));
+      }
+    });
     window.setTimeout(() => map.invalidateSize(), 0);
     return () => { map.remove(); mapRef.current = null; overlayRef.current = null; };
   }, [selected?.entity_id]);
@@ -236,10 +263,22 @@ const SiteBoundaryReviewPage = () => {
       const shape = editRing ? ringPolygon(editRing) : selected.open_proposal_geojson;
       L.geoJSON(shape as GeoJSON.GeoJsonObject, { style: { color: '#e0a93a', weight: 3, dashArray: '8 6', fillColor: '#e0a93a', fillOpacity: 0.12 } }).bindTooltip(`Proposed · ${SOURCE_LABEL[selected.open_proposal_source ?? ''] ?? selected.open_proposal_source ?? 'proposal'}`).addTo(overlay);
       editRing?.forEach(([lng, lat], index) => {
-        const marker = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ className: 'workbench-vertex', iconSize: [14, 14] }), title: `Vertex ${index + 1} — drag to adjust` }).addTo(overlay);
+        const marker = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ className: 'workbench-vertex', iconSize: [14, 14] }), title: `Vertex ${index + 1} — drag to adjust, right-click to remove` }).addTo(overlay);
         marker.on('dragend', () => {
           const position = marker.getLatLng();
           setEditRing((ring) => ring ? ring.map((point, i) => (i === index ? [Number(position.lng.toFixed(7)), Number(position.lat.toFixed(7))] : point)) : ring);
+        });
+        // A polygon needs three vertices; below that the removal is refused rather than silently ignored.
+        marker.on('contextmenu', (event) => {
+          L.DomEvent.stop(event);
+          setEditRing((ring) => (ring && ring.length > 3 ? ring.filter((_, i) => i !== index) : ring));
+        });
+      });
+      if (editRing) ringMidpoints(editRing).forEach(([lng, lat], index) => {
+        const handle = L.marker([lat, lng], { draggable: true, icon: L.divIcon({ className: 'workbench-vertex is-midpoint', iconSize: [10, 10] }), title: 'Drag to add a vertex here' }).addTo(overlay);
+        handle.on('dragend', () => {
+          const position = handle.getLatLng();
+          setEditRing((ring) => ring ? [...ring.slice(0, index + 1), [Number(position.lng.toFixed(7)), Number(position.lat.toFixed(7))], ...ring.slice(index + 1)] : ring);
         });
       });
     }
@@ -388,6 +427,13 @@ const SiteBoundaryReviewPage = () => {
     return propose(selected, ringPolygon(drawPoints), 'user_drawn', { vertices: drawPoints.length });
   });
 
+  // The live shape becomes an editable proposal: the person nudges vertices instead of redrawing a whole fence line.
+  const currentRing = useMemo(() => editableRing(selected?.boundary_geojson ?? null), [selected?.boundary_geojson]);
+  const adjustCurrent = () => run('adjust', async () => {
+    if (!selected || !currentRing) return;
+    return propose(selected, ringPolygon(currentRing), 'user_drawn', { adjusted_from: 'current_boundary', configuration_version: selected.configuration_version, vertices: currentRing.length });
+  });
+
   const acceptProposal = () => run('accept', async () => {
     if (!selected?.open_proposal_id) return;
     // ATLAS WRITES: accept_boundary_proposal (the human-confirmed shape becomes the live boundary; verify is a separate human act)
@@ -459,7 +505,7 @@ const SiteBoundaryReviewPage = () => {
         <section className="boundary-facts workbench-facts"><div><span>Geometry</span><strong>{selected.has_boundary ? 'Recorded' : 'Missing'}</strong></div><div><span>Centre</span><strong>{selected.center_lat != null && selected.center_lng != null ? `${selected.center_lat.toFixed(5)}, ${selected.center_lng.toFixed(5)}` : 'Not recorded'}</strong></div><div><span>Active agreements</span><strong>{selected.active_agreements}</strong></div><div><span>Configuration</span><strong>v{selected.configuration_version}</strong></div></section>
 
         <section className="boundary-action-panel">
-          <div className="boundary-panel-heading"><div><MapPin size={18} /><span><strong>Map inspection</strong><small>Current boundary in teal; proposal in amber (dashed). Drag amber vertices to correct a proposal before accepting.</small></span></div></div>
+          <div className="boundary-panel-heading"><div><MapPin size={18} /><span><strong>Map inspection</strong><small>Current boundary in teal; proposal in amber (dashed). Drag amber vertices to correct a proposal, drag a small midpoint handle to add a vertex, right-click a vertex to remove it. Your zoom, position and base layer are kept for this place.</small></span></div></div>
           <div className="boundary-map" ref={mapContainerRef} aria-label={`Boundary map for ${selected.name}`} />
           <div className="workbench-legend" aria-hidden="true"><span className="is-current" />Current<span className="is-proposed" />Proposed<span className="is-centre" />Centre</div>
           {!selected.has_boundary && !selected.open_proposal_id && <p className="workbench-hint"><AlertTriangle size={14} /> No boundary is recorded. Until one is accepted and verified, scans, dispatch and billing at this place resolve as <code>unresolved_no_geofence</code>.</p>}
@@ -469,7 +515,7 @@ const SiteBoundaryReviewPage = () => {
         {selected.open_proposal_id ? (
           <section className="boundary-action-panel workbench-proposal" aria-label="Open boundary proposal">
             <div className="boundary-panel-heading"><div><PenTool size={18} /><span><strong>Proposal awaiting your decision</strong><small>{SOURCE_LABEL[selected.open_proposal_source ?? ''] ?? selected.open_proposal_source}</small></span></div></div>
-            <div className="boundary-facts workbench-facts"><div><span>Proposed area</span><strong>{formatArea(selected.open_proposal_area_m2)}</strong></div><div><span>Area gate</span><strong className={selected.open_proposal_gate_ok ? 'is-ok' : 'is-fail'}>{selected.open_proposal_gate_ok ? 'Within band' : 'Outside band — cannot be accepted as drawn'}</strong></div><div><span>Drift from current</span><strong>{selected.open_proposal_drift_m != null ? `${Math.round(selected.open_proposal_drift_m)} m` : selected.has_boundary ? 'Not measured' : 'No current boundary'}</strong></div><div><span>Your edits</span><strong>{proposalRing ? (proposalEdited ? 'Vertices moved' : 'None') : 'Not editable (multi-part or holes)'}</strong></div></div>
+            <div className="boundary-facts workbench-facts"><div><span>Proposed area</span><strong>{formatArea(selected.open_proposal_area_m2)}</strong></div><div><span>Area gate</span><strong className={selected.open_proposal_gate_ok ? 'is-ok' : 'is-fail'}>{selected.open_proposal_gate_ok ? 'Within band' : 'Outside band — cannot be accepted as drawn'}</strong></div><div><span>Drift from current</span><strong>{selected.open_proposal_drift_m != null ? `${Math.round(selected.open_proposal_drift_m)} m` : selected.has_boundary ? 'Not measured' : 'No current boundary'}</strong></div><div><span>Your edits</span><strong>{proposalRing ? (proposalEdited ? `Vertices changed (${editRing?.length ?? 0} now)` : 'None') : 'Not editable (multi-part or holes)'}</strong></div></div>
             <div className="boundary-review-gate"><ShieldCheck size={18} /><div><strong>Visual verification</strong><span>Accepting writes this shape to the live {placeNoun} as unverified. Tick to also verify it now — only if you have inspected the full boundary on the map.</span><label><input type="checkbox" checked={visualReviewConfirmed} onChange={(event) => setVisualReviewConfirmed(event.target.checked)} />I inspected the full boundary against the {inspectionTarget}.</label></div></div>
             <div className="workbench-decision">
               <label><span>Decision note (optional)</span><input aria-label="Decision note" value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="e.g. nudged to the fence line" /></label>
@@ -496,6 +542,7 @@ const SiteBoundaryReviewPage = () => {
               <button type="button" onClick={() => void proposeFromLinz()} disabled={busy !== null || !centre}>{busy === 'linz' ? 'Querying LINZ' : 'Suggest boundary from LINZ'}</button>
             </div>}
             {sourcePanel === 'draw' && <div className="workbench-source" role="tabpanel">
+              {selected.has_boundary && <div className="workbench-adjust"><p className="workbench-hint"><PenTool size={14} /> {currentRing ? 'The fence line moved? Start from the current boundary and drag its vertices instead of redrawing it.' : 'The current boundary is multi-part or has holes, so it cannot be adjusted vertex by vertex; draw a new outline instead.'}</p>{currentRing && <button type="button" onClick={() => void adjustCurrent()} disabled={busy !== null}>{busy === 'adjust' ? 'Staging' : 'Adjust current boundary'}</button>}</div>}
               <p className="workbench-hint">Click the map to place vertices around the place; {drawPoints.length} placed{drawPoints.length < 3 ? ` (${3 - drawPoints.length} more needed)` : ''}. Keyboard users: use point + radius.</p>
               <div className="workbench-decision-actions"><button type="button" className="is-secondary" onClick={() => setDrawPoints((points) => points.slice(0, -1))} disabled={!drawPoints.length}>Undo point</button><button type="button" className="is-secondary" onClick={() => setDrawPoints([])} disabled={!drawPoints.length}>Clear</button><button type="button" onClick={() => void proposeDrawn()} disabled={busy !== null || drawPoints.length < 3}>{busy === 'draw' ? 'Proposing' : 'Propose drawn boundary'}</button></div>
             </div>}

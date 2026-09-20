@@ -1,0 +1,28 @@
+.zone-schedule{display:grid;gap:10px;margin:14px 0;padding:12px 14px;border:1px solid #2e4656;border-radius:6px;background:#0e1c27}
+.zone-schedule>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.zone-schedule>header>div{display:grid;gap:3px;min-width:0}
+.zone-schedule-kicker{display:inline-flex;align-items:center;gap:6px;color:#8fb3c4;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.zone-schedule>header strong{color:#e6f0f4;font-size:15px;overflow-wrap:anywhere}
+.zone-schedule>header small{color:#9fb6c2;font-size:12px;line-height:1.45}
+.zone-schedule-message{display:flex;align-items:flex-start;gap:8px;margin:0;padding:9px 11px;border-radius:5px;font-size:13px;line-height:1.45}
+.zone-schedule-message.is-success{background:rgba(47,196,167,.12);border:1px solid rgba(47,196,167,.45);color:#c9f2e8}
+.zone-schedule-message.is-error{background:rgba(210,106,92,.12);border:1px solid rgba(210,106,92,.5);color:#f6d3cd}
+.zone-schedule-form{display:grid;gap:12px}
+.zone-schedule-form fieldset{display:grid;gap:8px;margin:0;padding:10px 12px;border:1px solid #304b59;border-radius:5px}
+.zone-schedule-form legend{padding:0 4px;color:#cfe0e8;font-size:12px;font-weight:600;letter-spacing:.03em;text-transform:uppercase}
+.zone-schedule-form small{color:#9fb6c2;font-size:12px;line-height:1.45}
+.zone-schedule-toggles{display:flex;flex-wrap:wrap;gap:6px}
+.zone-schedule-toggles label{display:inline-flex;align-items:center;justify-content:center;min-width:46px;padding:6px 10px;border:1px solid #3b5a6b;border-radius:999px;background:#12283a;color:#bcd0da;font-size:13px;cursor:pointer;user-select:none}
+.zone-schedule-toggles label.is-on{background:#1f6f60;border-color:#2fc4a7;color:#eafaf6}
+.zone-schedule-toggles label:focus-within{outline:2px solid #5da9ff;outline-offset:2px}
+.zone-schedule-toggles input{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.zone-schedule-toggles.is-months label{min-width:52px}
+.zone-schedule-quick,.zone-schedule-times{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px}
+.zone-schedule-quick button,.zone-schedule-times button{padding:6px 10px;border:1px solid #3b5a6b;border-radius:5px;background:#12283a;color:#cfe0e8;font-size:12px;cursor:pointer}
+.zone-schedule-quick button:hover,.zone-schedule-times button:hover:not(:disabled){border-color:#5da9ff}
+.zone-schedule-times button:disabled{opacity:.5;cursor:default}
+.zone-schedule-times label{display:grid;gap:4px;font-size:12px;color:#9fb6c2}
+.zone-schedule-times input{padding:6px 8px;border:1px solid #3b5a6b;border-radius:5px;background:#0a1924;color:#e6f0f4;font-size:14px}
+.zone-schedule-preview{margin:0;padding:9px 11px;border-radius:5px;background:#12283a;color:#dbe8ee;font-size:13px;line-height:1.45}
+.zone-schedule-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+@media (max-width:720px){.zone-schedule>header{flex-direction:column}.zone-schedule-actions{justify-content:stretch}.zone-schedule-actions .btn{flex:1}}

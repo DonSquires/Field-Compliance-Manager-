@@ -54,7 +54,23 @@ test('Zone page retains legal authority, closure, and house geometry', async ({ 
   await expect(page.getByText('Operations plan section 4')).toBeVisible();
   await expect(page.getByText('Controlled loading access only')).toBeVisible();
   await expect(page.getByText('admin first')).toBeVisible();
-  await expect(page.getByText(/"start":"18:00"/)).toBeVisible();
+  // The stored schedule {days:[1..5], start 18:00, end 06:00} reads as words, Monday first, overnight named.
+  const schedule = page.getByRole('region', { name: 'Zone active schedule' });
+  await expect(schedule).toContainText('Mon–Fri, 18:00–06:00 (overnight)');
+  await expect(page.locator('.zone-facts article').filter({ hasText: 'Active schedule' })).toContainText('Mon–Fri, 18:00–06:00 (overnight)');
+  await schedule.getByRole('button', { name: 'Edit schedule' }).click();
+  const form = schedule.getByRole('form', { name: 'Edit active schedule' });
+  await form.getByRole('button', { name: 'Weekends' }).click();
+  await form.locator('.zone-schedule-toggles.is-months label').filter({ hasText: 'Dec' }).click();
+  await form.locator('.zone-schedule-toggles.is-months label').filter({ hasText: 'Jan' }).click();
+  await expect(form.locator('.zone-schedule-preview')).toContainText('This zone will be: Sat, Sun, 18:00–06:00 (overnight), Dec, Jan');
+  await form.locator('label:has(> span:text-is("Until")) input').fill('');
+  await expect(form.locator('.zone-schedule-preview')).toContainText('Give both a start and an end time');
+  await expect(form.getByRole('button', { name: 'Save schedule' })).toBeDisabled();
+  await form.locator('label:has(> span:text-is("Until")) input').fill('06:00');
+  await form.getByRole('button', { name: 'Save schedule' }).click();
+  await expect(schedule.getByRole('status')).toContainText('Saved: Sat, Sun, 18:00–06:00 (overnight), Dec, Jan (version 2). Outside this schedule the zone does not trigger static guarding and officers cannot pick it by hand.');
+  await expect(schedule.locator('header')).toContainText('Sat, Sun, 18:00–06:00 (overnight), Dec, Jan');
   await expect(page.getByText('Version 3')).toBeVisible();
   await expect(page.getByText('Operations administrator verified the council boundary on the map')).toBeVisible();
   await expect(page.getByText(/council_gis · verification/)).toBeVisible();

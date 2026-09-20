@@ -14,6 +14,7 @@ import 'leaflet/dist/leaflet.css';
 import { Building2, GitBranch, MapPin, Package, Ruler, ScrollText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { addLinzBaseLayers } from '../lib/mapPreferences';
 import { PLATFORM_MODULE_BY_KEY, type PlatformModuleKey } from '../config/platformModuleManifest';
 import './PageStyles.css';
 import './OrganizationSetupPage.css';
@@ -586,10 +587,7 @@ function JurisdictionPreviewMap({ geometry, label }: { geometry: GeoJSON.GeoJson
   useEffect(() => {
     if (!containerRef.current || !geometry) return;
     const map = L.map(containerRef.current, { zoomControl: true }).setView([-41.27, 173.28], 9);
-    const linzTile = (layer: 'topographic' | 'aerial') => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
-    const topographic = L.tileLayer(linzTile('topographic'), { attribution: '&copy; LINZ | CC BY 4.0', maxZoom: 18 }).addTo(map);
-    const aerial = L.tileLayer(linzTile('aerial'), { attribution: '&copy; LINZ | CC BY 4.0', maxZoom: 18 });
-    L.control.layers({ 'LINZ topographic': topographic, 'LINZ aerial': aerial }, undefined, { collapsed: false }).addTo(map);
+    addLinzBaseLayers(map, { collapsed: false, maxZoom: 18 });
     const layer = L.geoJSON(geometry, { style: { color: '#14c8d4', weight: 2, fillColor: '#14c8d4', fillOpacity: 0.16 } }).bindTooltip(label).addTo(map);
     const bounds = layer.getBounds();
     if (bounds.isValid()) map.fitBounds(bounds.pad(0.08));

@@ -147,6 +147,12 @@
   cursor: grab;
 }
 
+.workbench-vertex.is-midpoint {
+  border-width: 1px;
+  background: rgba(224, 169, 58, 0.55);
+  cursor: copy;
+}
+
 .workbench-hint {
   display: flex;
   align-items: flex-start;
@@ -207,6 +213,7 @@
 
 .workbench-source > button,
 .workbench-address > button,
+.workbench-adjust > button,
 .workbench-decision-actions > button {
   min-height: 36px;
   padding: 0 12px;
@@ -219,12 +226,22 @@
   cursor: pointer;
 }
 
-.workbench-source > button {
+.workbench-source > button,
+.workbench-adjust > button {
   justify-self: start;
+}
+
+.workbench-adjust {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed #40796c;
+  border-radius: 4px;
 }
 
 .workbench-source > button:disabled,
 .workbench-address > button:disabled,
+.workbench-adjust > button:disabled,
 .workbench-decision-actions > button:disabled {
   opacity: 0.5;
   cursor: not-allowed;

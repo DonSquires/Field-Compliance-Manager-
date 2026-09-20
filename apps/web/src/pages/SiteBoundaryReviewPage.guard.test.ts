@@ -76,4 +76,21 @@ describe('geofence workbench — every boundary is a proposal until a human acce
     // A checkpoint with no point cannot be verified (P1): the verify control is not offered for it.
     expect(page).toContain("checkpoint.checkpoint_verification !== 'verified' && checkpoint.gps_lat != null && <button");
   });
+
+  it('lets a person adjust the live boundary vertex by vertex — still as a proposal — and keeps the map where they left it', () => {
+    // Adjust = propose the current shape as user_drawn, then drag / insert / remove vertices; accept carries the edited ring.
+    expect(page).toContain("return propose(selected, ringPolygon(currentRing), 'user_drawn', { adjusted_from: 'current_boundary', configuration_version: selected.configuration_version, vertices: currentRing.length });");
+    expect(page).toContain('Adjust current boundary');
+    expect(page).toContain("marker.on('contextmenu', (event) => {");
+    expect(page).toContain('ring && ring.length > 3 ? ring.filter((_, i) => i !== index) : ring');
+    expect(page).toContain("className: 'workbench-vertex is-midpoint'");
+    expect(page).toContain('[...ring.slice(0, index + 1), [Number(position.lng.toFixed(7)), Number(position.lat.toFixed(7))], ...ring.slice(index + 1)]');
+    // Persistence: remembered base layer + viewport per place, and the selected place in the URL.
+    expect(page).toContain('addLinzBaseLayers(map, { collapsed: true });');
+    expect(page).toContain('const viewKey = `workbench:${selected.entity_type}:${selected.entity_id}`;');
+    expect(page).toContain('rememberViewport(map, viewKey);');
+    expect(page).toContain('restoreViewportOr(map, viewKey, () => {');
+    expect(page).toContain("params.set('place', selectedKey);");
+    expect(page).toContain('const wanted = preferredKey ?? placeParam(window.location.search);');
+  });
 });
