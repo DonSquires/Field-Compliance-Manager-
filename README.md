@@ -59,7 +59,7 @@ On the protected VPS, keep the production environment at `/var/lib/bob/control-p
 
 `BOB_WORKFLOW_MODE=local` keeps development jobs in the VPS JSON state file. Set `BOB_WORKFLOW_MODE=remote` only in the protected VPS environment after supplying `SUPABASE_SERVICE_ROLE_KEY`; Bob will then create workflow jobs through the Supabase `wf-create-job` Edge Function. Never expose the service-role key to a browser, worker, or repository.
 
-CCTV frame inference uses the configured RunPod Serverless endpoint first (`RUNPOD_API` and `RUNPOD_API_URL`). The local `fcm-inference` service remains an automatic fallback when RunPod is queued, unavailable, or returns a non-success response. Keep `RUNPOD_API` server-only; never expose it to the web app.
+CCTV frame inference runs on the VPS by default (`VISION_INFERENCE_POLICY=vps_first`, owner ruling 2026-09-20 on GPU cost): the local `fcm-inference` detector triages and recognises every sampled frame, and the configured RunPod Serverless endpoint (`RUNPOD_API` and `RUNPOD_API_URL`) is asked only about frames the VPS could not answer. `vps_only` never calls RunPod; `gpu_first` restores the earlier order. Whichever machine answers, a sampled frame that no detector examined is a gap, not a "no sighting": the job is deferred and retried rather than completed. Keep `RUNPOD_API` server-only; never expose it to the web app.
 
 Worker integrations use a separate `BOB_RUNNER_TOKEN` and these routes:
 

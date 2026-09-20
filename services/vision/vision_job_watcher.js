@@ -33,6 +33,18 @@ const BUDGET_DEFER_MIN_SECONDS = Number(process.env.VISION_BUDGET_DEFER_MIN_SECO
 const BUDGET_DEFER_MAX_SECONDS = Number(process.env.VISION_BUDGET_DEFER_MAX_SECONDS || 6 * 3600);
 const configuredRunpodBackoff = Number(process.env.VISION_RUNPOD_BACKOFF_MS);
 const RUNPOD_BACKOFF_MS = Number.isFinite(configuredRunpodBackoff) ? Math.max(0, configuredRunpodBackoff) : 5 * 60_000;
+// Cold starts on the serverless GPU run 45-90 s; a shorter limit turned every first call into a "timeout".
+const RUNPOD_TIMEOUT_MS = Number(process.env.VISION_RUNPOD_TIMEOUT_MS || 90_000);
+// Where detector work runs (owner ruling 2026-09-20: GPU cost). `vps_first`: the VPS detector triages and
+// recognises every frame and RunPod is asked only for frames the VPS could not answer; `vps_only` never asks
+// RunPod; `gpu_first` is the earlier order (RunPod, then VPS).
+const INFERENCE_POLICIES = ['vps_first', 'vps_only', 'gpu_first'];
+const INFERENCE_POLICY = INFERENCE_POLICIES.includes(process.env.VISION_INFERENCE_POLICY) ? process.env.VISION_INFERENCE_POLICY : 'vps_first';
+const LOCAL_DETECT_CONCURRENCY = Math.max(1, Number(process.env.VISION_LOCAL_DETECT_CONCURRENCY || 2));
+const LOCAL_DETECT_TIMEOUT_MS = Number(process.env.VISION_LOCAL_DETECT_TIMEOUT_MS || 90_000);
+// A sampled frame nobody looked at is a hole in the analysis: the job waits for a detector instead of
+// completing as "no sightings".
+const DETECTOR_DEFER_SECONDS = Math.min(86_400, Math.max(60, Number(process.env.VISION_DETECTOR_DEFER_SECONDS || 600)));
 const STORAGE_DOWNLOAD_TIMEOUT_MS = Number(process.env.VISION_STORAGE_DOWNLOAD_TIMEOUT_MS || 120_000);
 const LOCAL_VEHICLE_INFERENCE = process.env.VISION_LOCAL_VEHICLE_INFERENCE !== 'false';
 const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'false';
@@ -280,6 +292,7 @@ function selectFramesForClassification(segments, maxFrames) {
 }
 
 function applyTriageResult(frame, result) {
+  // `runpod` is the consolidator's name for "the triage answer"; `triage_provider` inside it says which machine gave it.
   frame.runpod = result;
   frame.detect = result;
   frame.people = Array.isArray(result?.people)
@@ -309,12 +322,23 @@ async function classifyFrames(summary, job) {
   const selectedFrames = selectFramesForClassification(summary.motion_segments, MAX_CLASSIFICATION_FRAMES);
   const triageBatches = Math.ceil(selectedFrames.length / RUNPOD_BATCH_SIZE);
   const checkpointFrames = await readClassificationCheckpoint(job.id);
-  // Metered per job: every GPU call, every frame sent, wall time spent waiting on the GPU.
-  const usage = { gpu_calls: 0, frames_sent: 0, gpu_ms: 0 };
+  // Metered per job: every call to either machine, every frame sent to the GPU, wall time spent waiting.
+  const usage = { gpu_calls: 0, frames_sent: 0, gpu_ms: 0, vps_calls: 0, vps_ms: 0 };
   const frameInputs = await Promise.all(selectedFrames.map(async (frame) => ({
     frame,
     image: await fs.readFile(frame.file_path),
   })));
+  const applyAnswers = (batch, answers) => {
+    for (const { frame } of batch) {
+      const checkpoint = checkpointFrames[frame.sha256_hash];
+      if (checkpoint?.triage) { applyTriageResult(frame, checkpoint.triage); continue; }
+      const triage = answers.get(frame.sha256_hash);
+      if (triage) {
+        applyTriageResult(frame, triage);
+        checkpointFrames[frame.sha256_hash] = { ...(checkpoint || {}), triage };
+      }
+    }
+  };
   for (let batchStart = 0; batchStart < frameInputs.length; batchStart += RUNPOD_BATCH_SIZE) {
     const batch = frameInputs.slice(batchStart, batchStart + RUNPOD_BATCH_SIZE);
     const batchNumber = Math.floor(batchStart / RUNPOD_BATCH_SIZE) + 1;
@@ -325,20 +349,17 @@ async function classifyFrames(summary, job) {
       percent: (batchStart / Math.max(1, selectedFrames.length)) * 100,
       label: pendingBatch.length ? `Detecting motion entities, batch ${batchNumber} of ${triageBatches}` : `Resuming detection batch ${batchNumber} of ${triageBatches}`,
     });
-    const runpodResults = await classifyWithRunpodBatch(pendingBatch, ['person', 'vehicle', 'animal', 'detect'], usage);
-    for (const { frame } of batch) {
-      const checkpoint = checkpointFrames[frame.sha256_hash];
-      if (checkpoint?.triage) applyTriageResult(frame, checkpoint.triage);
-      else {
-        const triage = runpodResults.get(frame.sha256_hash);
-        if (triage) {
-          applyTriageResult(frame, triage);
-          checkpointFrames[frame.sha256_hash] = { ...(checkpoint || {}), triage };
-        }
-      }
-    }
+    applyAnswers(batch, await triageBatch(pendingBatch, usage));
     await writeClassificationCheckpoint(job.id, checkpointFrames);
   }
+  // One more pass for frames neither machine answered (a transient error on one request must not cost a frame).
+  const unanswered = frameInputs.filter(({ frame }) => !frame.detect);
+  if (unanswered.length) {
+    await updateProgress(job, 'running_inference', { current: selectedFrames.length - unanswered.length, total: selectedFrames.length, percent: ((selectedFrames.length - unanswered.length) / Math.max(1, selectedFrames.length)) * 100, label: `Retrying ${unanswered.length} unanswered frame${unanswered.length === 1 ? '' : 's'}` });
+    applyAnswers(unanswered, await triageBatch(unanswered, usage));
+    await writeClassificationCheckpoint(job.id, checkpointFrames);
+  }
+  const coverage = triageCoverage(frameInputs.map(({ frame }) => frame));
 
   await consolidateMotionSummary(summary, { metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null });
   const representativeHashes = new Set(representativeFrameHashes(summary));
@@ -354,16 +375,17 @@ async function classifyFrames(summary, job) {
       percent: (batchStart / Math.max(1, representatives.length)) * 100,
       label: pendingBatch.length ? `Recognising ${representatives.length} best observation frame${representatives.length === 1 ? '' : 's'}, batch ${batchNumber} of ${recognitionBatches}` : `Resuming recognition batch ${batchNumber} of ${recognitionBatches}`,
     });
-    const runpodResults = await classifyWithRunpodBatch(pendingBatch, undefined, usage);
+    // Under `gpu_first` the GPU re-reads the best frames with every task; otherwise recognition builds on the
+    // triage answer already in hand and the VPS supplies faces and plates.
+    const gpuResults = INFERENCE_POLICY === 'gpu_first' ? await classifyWithRunpodBatch(pendingBatch, undefined, usage) : new Map();
     for (const { frame, image } of batch) {
       const checkpoint = checkpointFrames[frame.sha256_hash];
       if (checkpoint?.recognition) {
         Object.assign(frame, checkpoint.recognition);
         continue;
       }
-      const runpodResult = runpodResults.get(frame.sha256_hash);
-      if (!runpodResult) continue;
-      const recognition = await enrichRepresentativeFrame(frame, image, job, runpodResult);
+      const triageAnswer = gpuResults.has(frame.sha256_hash) ? { ...gpuResults.get(frame.sha256_hash), triage_provider: 'gpu' } : frame.runpod || null;
+      const recognition = await enrichRepresentativeFrame(frame, image, job, triageAnswer);
       Object.assign(frame, recognition);
       checkpointFrames[frame.sha256_hash] = { ...(checkpoint || {}), recognition };
     }
@@ -374,10 +396,98 @@ async function classifyFrames(summary, job) {
     sampled_frames: selectedFrames.length,
     representative_frames: representatives.length,
     policy: 'detector_triage_then_one_full_recognition_per_unique_observation',
+    inference_policy: INFERENCE_POLICY,
+    coverage,
     usage,
   };
   await recordInferenceUsage(job, { frames_sampled: selectedFrames.length, frames_recognised: representatives.length, ...usage });
   return summary;
+}
+
+// /infer/detect on the VPS answers in the shape of one RunPod infer_batch result, so triage, recognition and
+// the consolidator read either without caring which machine looked. Provenance stays inside the answer.
+function localTriageResult(detect) {
+  if (!detect?.success) return null;
+  const vehicles = Array.isArray(detect.vehicles) ? detect.vehicles : [];
+  const coverage = Array.isArray(detect.detector_coverage) ? detect.detector_coverage : [];
+  const result = {
+    success: true,
+    triage_provider: 'vps',
+    detector_status: detect.detector_status ?? null,
+    detector_provider: detect.detector_provider ?? null,
+    detector_coverage: coverage,
+    species_status: detect.species_status ?? null,
+    people: Array.isArray(detect.people) ? detect.people : [],
+    people_provider: detect.people_provider || detect.detector_provider || null,
+    vehicles,
+    vehicle: vehicles[0]?.attributes || null,
+    animals: Array.isArray(detect.animals) ? detect.animals : [],
+    animal_detection_status: !coverage.includes('animal') ? 'model_not_staged' : detect.species_status === 'ready' ? 'ready' : 'detector_only_species_not_staged',
+  };
+  for (const key of ['detector_model', 'detector_execution_provider', 'detector_passes', 'detector_error', 'suppressed_animals', 'alpr']) {
+    if (detect[key] !== undefined) result[key] = detect[key];
+  }
+  return result;
+}
+
+// The machines a policy asks, in order. Each is asked only about frames the previous one left unanswered.
+function triageOrderFor(policy) {
+  if (policy === 'gpu_first') return ['gpu', 'vps'];
+  if (policy === 'vps_only') return ['vps'];
+  return ['vps', 'gpu'];
+}
+
+function triageCoverage(frames) {
+  const providers = {};
+  let triaged = 0;
+  for (const frame of frames) {
+    if (!frame.detect?.success) continue;
+    triaged += 1;
+    const provider = frame.runpod?.triage_provider || 'gpu';
+    providers[provider] = (providers[provider] || 0) + 1;
+  }
+  return { frames_selected: frames.length, frames_triaged: triaged, frames_untriaged: frames.length - triaged, triage_providers: providers };
+}
+
+const photoForm = (frame, image) => {
+  const form = new FormData();
+  form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${frame.sha256_hash}.jpg`);
+  return form;
+};
+
+// The VPS detector, one frame per request, a few requests at a time (it shares eight cores with transcoding).
+async function triageWithLocalDetect(batch, usage) {
+  const results = new Map();
+  if (!LOCAL_DETECT_INFERENCE || batch.length === 0) return results;
+  const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
+  const queue = [...batch];
+  const worker = async () => {
+    while (queue.length) {
+      const { frame, image } = queue.shift();
+      const startedAt = Date.now();
+      const detect = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, () => photoForm(frame, image), LOCAL_DETECT_TIMEOUT_MS);
+      if (usage) { usage.vps_calls += 1; usage.vps_ms += Date.now() - startedAt; }
+      const result = localTriageResult(detect);
+      if (result) results.set(frame.sha256_hash, result);
+      else log('local_detect_unavailable', { frame_hash: frame.sha256_hash, error: detect?.error || 'no_answer', detail: detect?.detail });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(LOCAL_DETECT_CONCURRENCY, batch.length) }, worker));
+  return results;
+}
+
+async function triageBatch(batch, usage) {
+  let results = new Map();
+  if (batch.length === 0) return results;
+  for (const machine of triageOrderFor(INFERENCE_POLICY)) {
+    const remaining = batch.filter(({ frame }) => !results.has(frame.sha256_hash));
+    if (!remaining.length) break;
+    const answers = machine === 'gpu'
+      ? new Map([...await classifyWithRunpodBatch(remaining, ['person', 'vehicle', 'animal', 'detect'], usage)].map(([hash, answer]) => [hash, { ...answer, triage_provider: 'gpu' }]))
+      : await triageWithLocalDetect(remaining, usage);
+    results = new Map([...results, ...answers]);
+  }
+  return results;
 }
 
 // Counts only, attributed to the job's organisation, so a tenant's GPU use is visible and budgetable.
@@ -425,16 +535,17 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       };
       const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
       if (runpodResult) frame.runpod = runpodResult;
-      // GPU first: infer_batch now carries ALPR (plate detector + OCR anchored on the detected vehicles) and
-      // faces alongside the triage. The VPS is asked only for what the GPU answer lacks.
+      // The triage answer may have come from the GPU or the VPS; labels below say which. It carries ALPR (plate
+      // detector + OCR on the detected vehicles) and, from the GPU, faces. The VPS is asked only for what it lacks.
+      const triageProvider = runpodResult?.triage_provider === 'vps' ? 'local_detect' : 'runpod';
       const runpodAlpr = runpodResult?.alpr?.success ? runpodResult.alpr : null;
       const runpodFace = runpodResult?.face?.success && Array.isArray(runpodResult.face.faces) ? runpodResult.face : null;
       const runpodVehicleBoxes = Array.isArray(runpodResult?.vehicles)
         ? runpodResult.vehicles.map((vehicle) => vehicle?.bbox || vehicle?.attributes?.detection?.bbox).filter(Boolean)
         : [];
       const needLocalDetect = !runpodResult && LOCAL_DETECT_INFERENCE;
-      // Detector triage: RunPod first; the VPS /infer/detect route (people + vehicles + animals + ALPR in one
-      // call) when the batch had no GPU answer. /infer/people alone is only needed when RunPod answered without people.
+      // No triage answer at all: the VPS /infer/detect route (people + vehicles + animals + ALPR in one call)
+      // fills it in. /infer/people alone is only needed when the answer came without a people list.
       const localRequests = [
         runpodAlpr || needLocalDetect
           ? Promise.resolve(null)
@@ -450,7 +561,7 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       const [alprResponse, faceResponse, peopleResponse, localDetect] = await Promise.all(localRequests);
       if (localDetect) frame.detect = localDetect;
       if (runpodAlpr) {
-        frame.alpr = { ...runpodAlpr, provider: 'runpod' };
+        frame.alpr = { ...runpodAlpr, provider: triageProvider };
       } else if (frame.detect?.alpr?.success) {
         frame.alpr = { ...frame.detect.alpr, provider: 'local_detect' };
       } else if (alprResponse) {
@@ -461,7 +572,7 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
         frame.alpr = await classifyLocally(INFERENCE_SERVICE_URL, '/infer/alpr', headers, () => buildForm(null, { vehicle_bboxes: localVehicleBoxes.length ? localVehicleBoxes : null }));
       }
       if (runpodFace) {
-        frame.face = { ...runpodFace, provider: 'runpod' };
+        frame.face = { ...runpodFace, provider: triageProvider };
       } else if (faceResponse) {
         frame.face = faceResponse.ok ? await faceResponse.json() : { success: false, error: `face_http_${faceResponse.status}` };
       } else {
@@ -482,10 +593,10 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
         : null;
       frame.capture_recognition = await runCaptureRecognition(frame, image, job);
 
-      // RunPod is primary for vehicle and people work. The VPS is called only
-      // when the batch missed that capability or the GPU request failed.
+      // The triage answer is primary for vehicle and people work. The VPS routes are called only
+      // when it lacked that capability or no answer came at all.
       if (runpodResult?.people && Array.isArray(runpodResult.people)) {
-        frame.people = { success: true, people: runpodResult.people, provider: runpodResult.people_provider || 'runpod' };
+        frame.people = { success: true, people: runpodResult.people, provider: runpodResult.people_provider || triageProvider };
       } else if (frame.detect?.success && Array.isArray(frame.detect.people) && (frame.detect.people.length || frame.detect.people_provider || detectorCoverage.has('person'))) {
         // /infer/detect already ran a person detector; an empty list means nobody was seen, not "not checked".
         frame.people = { success: true, people: frame.detect.people, provider: frame.detect.people_provider || frame.detect.detector_provider || 'local_detect' };
@@ -497,7 +608,7 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       frame.animals = normaliseAnimals(runpodResult, frame.detect);
       const detectedVehicle = runpodResult?.vehicle || frame.detect?.vehicles?.[0]?.attributes || null;
       if (detectedVehicle) {
-        frame.inference = { success: true, data: detectedVehicle, provider: runpodResult?.vehicle ? 'runpod' : 'local_detect' };
+        frame.inference = { success: true, data: detectedVehicle, provider: runpodResult?.vehicle ? triageProvider : 'local_detect' };
         if (!frame.runpod?.vehicle) frame.runpod = { ...(frame.runpod || {}), vehicle: detectedVehicle };
       } else if (inferenceResponse) {
         frame.inference = inferenceResponse.ok ? await inferenceResponse.json() : { success: false, error: `inference_http_${inferenceResponse.status}` };
@@ -518,9 +629,9 @@ async function enrichRepresentativeFrame(frame, image, job, runpodResult) {
       };
 }
 
-async function classifyLocally(baseUrl, route, headers, buildForm) {
+async function classifyLocally(baseUrl, route, headers, buildForm, timeoutMs = 30_000) {
   try {
-    const response = await fetch(`${baseUrl}${route}`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(30_000) });
+    const response = await fetch(`${baseUrl}${route}`, { method: 'POST', headers, body: buildForm(), signal: AbortSignal.timeout(timeoutMs) });
     return response.ok ? await response.json() : { success: false, error: `${route}_http_${response.status}` };
   } catch (error) {
     return { success: false, error: `${route}_unavailable`, detail: error.message };
@@ -566,7 +677,7 @@ async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'ani
           tasks,
         },
       }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(RUNPOD_TIMEOUT_MS),
     });
     meter();
     if (!response.ok) {
@@ -871,6 +982,18 @@ async function processOne() {
     log('motion_extraction_completed', { job_id: job.id, total_frames_parsed: summary.total_frames_parsed });
     await heartbeatJob(job, 'classifying_frames');
     await classifyFrames(summary, job);
+    const coverage = summary.classification_plan?.coverage;
+    if (coverage?.frames_untriaged > 0) {
+      // Completing here would record "no sightings" for frames nobody examined. Wait for a detector instead;
+      // the checkpoint keeps every answered frame so the retry asks only about the rest.
+      const machines = INFERENCE_POLICY === 'vps_only' ? 'the VPS detector' : 'the VPS detector and the GPU';
+      const reason = `Deferred: ${machines} did not answer for ${coverage.frames_untriaged} of ${coverage.frames_selected} sampled frames; analysis retries automatically`;
+      const { data: deferred, error: deferError } = await supabase.rpc('defer_cctv_inference_job', { p_job_id: job.id, p_lease_token: job.lease_token, p_reason: reason, p_not_before_seconds: DETECTOR_DEFER_SECONDS });
+      if (deferError || deferred !== true) throw new Error(`detector unavailable for ${coverage.frames_untriaged} frames and the job could not be deferred${deferError ? `: ${deferError.message}` : ''}`);
+      log('detector_unavailable_deferred', { job_id: job.id, ...coverage, not_before_seconds: DETECTOR_DEFER_SECONDS, inference_policy: INFERENCE_POLICY });
+      currentJobId = null;
+      return;
+    }
     await updateProgress(job, 'consolidating_observations', { label: 'Consolidating observations' });
     await consolidateMotionSummary(summary, {
       metersPerPixel: Number(process.env.VISION_METERS_PER_PIXEL) || null,
@@ -912,4 +1035,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, INFERENCE_POLICY };

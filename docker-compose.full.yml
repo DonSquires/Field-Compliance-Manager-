@@ -214,7 +214,12 @@ services:
       VISION_WORKER_CONCURRENCY: ${VISION_WORKER_CONCURRENCY:-3}
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
-      # Local person/vehicle/animal triage for frames RunPod did not answer (needs vehicle-detection-0200 staged).
+      # Where detector work runs (owner ruling 2026-09-20, GPU cost): vps_first | vps_only | gpu_first.
+      VISION_INFERENCE_POLICY: ${VISION_INFERENCE_POLICY:-vps_first}
+      # The VPS detector shares eight cores with transcoding; two frames in flight per job keeps it responsive.
+      VISION_LOCAL_DETECT_CONCURRENCY: ${VISION_LOCAL_DETECT_CONCURRENCY:-2}
+      VISION_RUNPOD_TIMEOUT_MS: ${VISION_RUNPOD_TIMEOUT_MS:-90000}
+      # Local person/vehicle/animal triage on the VPS (/infer/detect); under vps_first this is the main path.
       VISION_LOCAL_DETECT_INFERENCE: ${VISION_LOCAL_DETECT_INFERENCE:-true}
       # Set per camera after calibration; without this, CCTV reports px/s only.
       VISION_METERS_PER_PIXEL: ${VISION_METERS_PER_PIXEL:-}

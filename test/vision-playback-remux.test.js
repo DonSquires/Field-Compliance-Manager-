@@ -78,8 +78,11 @@ test('vision watcher meters GPU use per job and defers (never fails) when the da
   const source = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
   // Every RunPod call is counted, including failed ones, so the meter reflects what was actually asked of the GPU.
   assert.match(source, /const meter = \(\) => \{ if \(usage\) \{ usage\.gpu_calls \+= 1; usage\.frames_sent \+= batch\.length; usage\.gpu_ms \+= Date\.now\(\) - startedAt; \} \};/);
-  assert.match(source, /classifyWithRunpodBatch\(pendingBatch, \['person', 'vehicle', 'animal', 'detect'\], usage\)/);
-  assert.match(source, /classifyWithRunpodBatch\(pendingBatch, undefined, usage\)/);
+  // Triage asks the GPU only for frames the VPS left unanswered (vps_first); recognition re-reads on the GPU only under gpu_first.
+  assert.match(source, /await classifyWithRunpodBatch\(remaining, \['person', 'vehicle', 'animal', 'detect'\], usage\)/);
+  assert.match(source, /INFERENCE_POLICY === 'gpu_first' \? await classifyWithRunpodBatch\(pendingBatch, undefined, usage\) : new Map\(\)/);
+  // VPS work is metered too, so the two machines' shares are visible per job.
+  assert.match(source, /usage\.vps_calls \+= 1; usage\.vps_ms \+= Date\.now\(\) - startedAt;/);
   assert.match(source, /supabase\.rpc\('record_cctv_inference_usage', \{ p_job_id: job\.id, p_usage: usage \}\)/);
   // The gate sits after the free work and before extraction/inference; a spent budget returns the job to the queue.
   const gate = source.indexOf('if (await deferIfBudgetExhausted(job)) { currentJobId = null; return; }');

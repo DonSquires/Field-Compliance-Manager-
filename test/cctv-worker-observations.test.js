@@ -6,7 +6,7 @@ const test = require('node:test');
 process.env.SUPABASE_URL ||= 'https://example.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
-const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals } = require('../services/vision/vision_job_watcher');
+const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, localTriageResult, triageOrderFor, triageCoverage, INFERENCE_POLICY } = require('../services/vision/vision_job_watcher');
 const { consolidateAnimals, consolidatePeople, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents, isReviewableCandidate } = require('../services/vision/motion_consolidator');
 
 const watcherSource = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
@@ -57,12 +57,16 @@ test('watcher skips the full-frame vehicle pass when a detector covered vehicles
   assert.match(watcherSource, /classifyLocally\(INFERENCE_SERVICE_URL, '\/infer\/detect', headers, buildForm\)/);
 });
 
-test('watcher takes ALPR and faces from the GPU answer and only asks the VPS for what is missing', () => {
-  // GPU infer_batch carries alpr + face; the VPS ALPR route is skipped when either the GPU or /infer/detect answered.
+test('watcher takes ALPR and faces from the triage answer and only asks the VPS for what is missing', () => {
+  // The triage answer (GPU or VPS) carries alpr + face; the VPS ALPR route is skipped when either answered.
   assert.match(watcherSource, /const runpodAlpr = runpodResult\?\.alpr\?\.success \? runpodResult\.alpr : null;/);
   assert.match(watcherSource, /const runpodFace = runpodResult\?\.face\?\.success && Array\.isArray\(runpodResult\.face\.faces\) \? runpodResult\.face : null;/);
   assert.match(watcherSource, /runpodAlpr \|\| needLocalDetect\s*\?\s*Promise\.resolve\(null\)/);
-  assert.match(watcherSource, /frame\.alpr = \{ \.\.\.runpodAlpr, provider: 'runpod' \};/);
+  // Provenance follows the machine that answered: a VPS triage is never labelled as the GPU's work.
+  assert.match(watcherSource, /const triageProvider = runpodResult\?\.triage_provider === 'vps' \? 'local_detect' : 'runpod';/);
+  assert.match(watcherSource, /frame\.alpr = \{ \.\.\.runpodAlpr, provider: triageProvider \};/);
+  assert.match(watcherSource, /frame\.face = \{ \.\.\.runpodFace, provider: triageProvider \};/);
+  assert.doesNotMatch(watcherSource, /provider: 'runpod' \}/, 'no answer is hard-labelled as RunPod');
   assert.match(watcherSource, /else if \(frame\.detect\?\.alpr\?\.success\) \{\s*frame\.alpr = \{ \.\.\.frame\.detect\.alpr, provider: 'local_detect' \};/);
   // the VPS ALPR is anchored on the vehicle boxes the detector already found
   assert.match(watcherSource, /vehicle_bboxes: runpodVehicleBoxes\.length \? runpodVehicleBoxes : null/);
@@ -252,4 +256,47 @@ test('watcher merges playback metadata through the governed RPC instead of repla
   assert.match(watcherSource, /supabase\.rpc\('set_cctv_playback_copy', \{\s*p_evidence_id: evidence\.id,\s*p_playback: \{/);
   assert.doesNotMatch(watcherSource, /from\('evidence_items'\)\s*\.update\(\{ metadata: \{\s*\.\.\.\(evidence\.metadata/);
   assert.doesNotMatch(watcherSource, /from\('evidence_items'\)\s*\.update\(/, 'the worker never writes evidence_items directly');
+});
+
+test('the VPS detector answer takes the shape of a GPU answer, with its own provenance', () => {
+  const detect = {
+    success: true, review_required: true, detector_status: 'ready', detector_provider: 'CPUExecutionProvider', detector_model: 'rf-detr-small-512-coco',
+    detector_coverage: ['person', 'vehicle', 'animal'], species_status: 'ready',
+    people: [{ bbox: { x: 10, y: 20, width: 100, height: 300 }, confidence: 0.91 }], people_provider: 'rf-detr-small-512-coco',
+    vehicles: [{ bbox: { x: 1, y: 2, width: 50, height: 40 }, confidence: 0.8, attributes: { colour: 'red', detection: { bbox: { x: 1, y: 2, width: 50, height: 40 }, confidence: 0.8 } } }],
+    animals: [], alpr: { success: true, plate: 'ABC123', confidence: 0.9 },
+  };
+  const answer = localTriageResult(detect);
+  assert.equal(answer.triage_provider, 'vps');
+  assert.equal(answer.people.length, 1);
+  assert.equal(answer.people_provider, 'rf-detr-small-512-coco');
+  assert.deepEqual(answer.vehicle, detect.vehicles[0].attributes, 'the first vehicle attributes sit under `vehicle`, as the GPU answer does');
+  assert.equal(answer.animal_detection_status, 'ready');
+  assert.equal(answer.alpr.plate, 'ABC123');
+  assert.equal(localTriageResult({ ...detect, detector_coverage: ['person', 'vehicle'], species_status: 'model_not_staged' }).animal_detection_status, 'model_not_staged');
+  assert.equal(localTriageResult({ ...detect, species_status: 'model_not_staged' }).animal_detection_status, 'detector_only_species_not_staged');
+  assert.equal(localTriageResult({ success: false, error: '/infer/detect_unavailable' }), null, 'no answer is not an answer');
+  assert.equal(localTriageResult(null), null);
+});
+
+test('inference runs on the VPS first by default; the GPU is asked only about frames the VPS left unanswered', () => {
+  assert.equal(INFERENCE_POLICY, 'vps_first');
+  assert.deepEqual(triageOrderFor('vps_first'), ['vps', 'gpu']);
+  assert.deepEqual(triageOrderFor('vps_only'), ['vps']);
+  assert.deepEqual(triageOrderFor('gpu_first'), ['gpu', 'vps']);
+  assert.deepEqual(triageOrderFor(undefined), ['vps', 'gpu']);
+  // Recognition follows the same policy: only gpu_first re-reads the best frames on the GPU.
+  assert.match(watcherSource, /const gpuResults = INFERENCE_POLICY === 'gpu_first' \? await classifyWithRunpodBatch\(pendingBatch, undefined, usage\) : new Map\(\);/);
+});
+
+test('coverage counts the frames nobody answered, and the watcher defers instead of completing on a gap', () => {
+  const answered = { detect: { success: true }, runpod: { triage_provider: 'vps' } };
+  const gpuAnswered = { detect: { success: true }, runpod: { triage_provider: 'gpu' } };
+  const coverage = triageCoverage([answered, answered, gpuAnswered, {}, { detect: { success: false } }]);
+  assert.deepEqual(coverage, { frames_selected: 5, frames_triaged: 3, frames_untriaged: 2, triage_providers: { vps: 2, gpu: 1 } });
+  assert.deepEqual(triageCoverage([]), { frames_selected: 0, frames_triaged: 0, frames_untriaged: 0, triage_providers: {} });
+  // The 2026-09-20 incident: RunPod timed out once, the circuit breaker skipped 19 batches, and the job completed
+  // as "no sightings" for 114 unexamined frames. A coverage gap now defers the job through the governed RPC.
+  assert.match(watcherSource, /if \(coverage\?\.frames_untriaged > 0\) \{[\s\S]*?supabase\.rpc\('defer_cctv_inference_job'/);
+  assert.match(watcherSource, /const unanswered = frameInputs\.filter\(\(\{ frame \}\) => !frame\.detect\);/, 'unanswered frames get one more pass before the gate');
 });
