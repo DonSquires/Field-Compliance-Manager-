@@ -104,7 +104,19 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    the same way on 2026-09-20** (motion clips inside one file found from the MP4 index and cut into selectable
    clips, each its own hashed file; clip times sent as labelled lower bounds): SHA-256
    `108ce472f0d714eb4d829e084261c8bc67c79615ed439d4d187fa19c2c27c8bc` (3,114,368 bytes), verified from the
-   public URL; the web app's download link points at 0.4.5.
+   public URL; the web app's download link points at 0.4.5. **0.4.6 signed the same way on 2026-09-20** (clips
+   dated from the camera's own card index, Tapo `sys01.bin`, event for event): SHA-256
+   `476282fb4dca4c68d77deb53b68a2a82de049dd5a0a123910208c86b01a6ff7e` (3,114,152 bytes), timestamped,
+   verified from the public URL; the web app's download link points at 0.4.6.
+
+   **Toolchain note (2026-09-20).** The signer is a self-signed *end-entity* certificate (CA:FALSE, keyUsage
+   digitalSignature). OpenSSL 1.1.1 will not accept such a certificate as its own trust anchor and reports
+   "unable to get local issuer certificate" even though the signature is sound; OpenSSL 3 accepts it. So the
+   signing side needs `osslsigncode` ≥ 2.1 (for `-CAfile`) **linked against OpenSSL 3** — Ubuntu 20.04's apt
+   package is 2.0 on libssl 1.1.1 and fails on both counts. `scripts/desktop-signing/install-osslsigncode.sh`
+   builds 2.9 (pinned tarball hash) against the dev container's conda OpenSSL 3 into `/usr/local/bin`; the
+   dev container runs it on create, and `sign-and-publish.mjs` refuses to start with an older tool or an
+   OpenSSL 1.1.1 build rather than reporting a false verification failure.
 
 What it buys:
 

@@ -34,7 +34,18 @@ if (!SUPABASE_URL || !SERVICE_KEY) fail('SUPABASE_URL and SUPABASE_SERVICE_ROLE_
 const version = TAG.replace(/^sd-card-bridge-v2-v/, '');
 if (!/^\d+\.\d+\.\d+/.test(version)) fail(`tag ${TAG} does not carry a version`);
 for (const tool of ['osslsigncode', 'openssl']) {
-  if (spawnSync('which', [tool]).status !== 0) fail(`${tool} is not installed (apt install ${tool})`);
+  if (spawnSync('which', [tool]).status !== 0) fail(`${tool} is not installed (scripts/desktop-signing/install-osslsigncode.sh)`);
+}
+// The signer is a self-signed end-entity certificate (CA:FALSE, keyUsage digitalSignature). OpenSSL 1.1.1 refuses
+// to treat such a certificate as its own trust anchor ("unable to get local issuer certificate"); OpenSSL 3 accepts
+// it, so verification only means anything when osslsigncode is linked against OpenSSL 3 and knows -CAfile (>= 2.1).
+{
+  const banner = spawnSync('osslsigncode', ['--version'], { encoding: 'utf8' });
+  const text = `${banner.stdout || ''}${banner.stderr || ''}`;
+  const tool = /osslsigncode\s+(\d+)\.(\d+)/.exec(text);
+  const ssl = /OpenSSL\s+(\d+)\./.exec(text);
+  if (!tool || Number(tool[1]) < 2 || (Number(tool[1]) === 2 && Number(tool[2]) < 1)) fail(`osslsigncode 2.1 or newer is required (found: ${text.split('\n')[0] || 'unknown'}); run scripts/desktop-signing/install-osslsigncode.sh`);
+  if (!ssl || Number(ssl[1]) < 3) fail(`osslsigncode must be linked against OpenSSL 3 to verify the self-signed signer (found: ${text.replace(/\s+/g, ' ').trim().slice(0, 120)}); run scripts/desktop-signing/install-osslsigncode.sh`);
 }
 
 function fail(message) { console.error(`sign-and-publish: ${message}`); process.exit(1); }
@@ -106,7 +117,8 @@ try {
   const verifyReport = spawnSync('osslsigncode', ['verify', '-in', signedPath, '-CAfile', certPemPath], { encoding: 'utf8' });
   const report = `${verifyReport.stdout}\n${verifyReport.stderr}`;
   if (verifyReport.status !== 0 || !/Signature verification: ok/i.test(report)) {
-    throw new Error(`signature verification did not pass: ${report.slice(0, 800)}`);
+    // The reason sits at the end of osslsigncode's report (after the certificate dump), so keep the tail.
+    throw new Error(`signature verification did not pass (osslsigncode exit ${verifyReport.status}): …${report.slice(-1600)}`);
   }
   const timestamped = /Timestamp Server Signature verification: ok/i.test(report);
   log('signed', { signer: subject, thumbprint, timestamped });
