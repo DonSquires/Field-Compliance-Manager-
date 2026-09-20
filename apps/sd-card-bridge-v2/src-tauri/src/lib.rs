@@ -849,6 +849,93 @@ fn read_pictures(paths: Vec<String>) -> Result<Vec<String>, String> {
     }).collect()
 }
 
+// ---------------------------------------------------------------------------------------------
+// Motion clips inside one file: found from the container index, cut without re-encoding the video
+// ---------------------------------------------------------------------------------------------
+
+/// Where one recording's clips are cut to: the app's working folder, never beside the source (which may be a
+/// card or a cloud-synced folder). The path hash keeps two files of the same name apart.
+fn split_directory(source: &Path) -> PathBuf {
+    let stem = source.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "recording".to_string());
+    let safe: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect();
+    let mut hasher = Sha256::new();
+    hasher.update(source.to_string_lossy().as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    let base = std::env::var_os("PUBLIC").map(PathBuf::from).filter(|p| p.is_absolute()).map(|p| p.join("Documents")).unwrap_or_else(std::env::temp_dir);
+    base.join("fcm-acquisitions").join("clips").join(format!("{safe}-{}", &digest[..8]))
+}
+
+/// The motion clips a file's own index describes; reads the `moov` only, never the media data.
+#[tauri::command(async)]
+fn analyze_recording_segments(path: String) -> Result<fcm_decoder::mp4::Mp4Segments, String> {
+    let mut file = File::open(&path).map_err(|error| format!("The file could not be opened: {error}"))?;
+    let len = file.metadata().map_err(|error| error.to_string())?.len();
+    fcm_decoder::mp4::analyze(&mut file, len, 3.0)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SegmentPlan { index: u32, start_seconds: f64, end_seconds: f64 }
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SplitClip { index: u32, path: String, file_name: String, bytes: u64, sha256: String, start_seconds: f64, end_seconds: f64, cut_start_seconds: f64, cut_end_seconds: f64 }
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SplitResult { directory: String, clips: Vec<SplitClip>, audio: fcm_decoder::mp4::SplitAudio, seconds: f64, existing: bool }
+
+/// Cut one recording into the clips its index describes. The video is copied frame for frame from the key
+/// frame that begins each clip; audio is copied when the container allows it and re-encoded to AAC when it
+/// does not (Tapo's µ-law), which is reported. A complete earlier cut in the working folder is reused as is.
+#[tauri::command(async)]
+fn split_recording_segments(app: tauri::AppHandle, path: String, segments: Vec<SegmentPlan>) -> Result<SplitResult, String> {
+    if segments.len() < 2 { return Err("This recording is one continuous clip; there is nothing to split.".to_string()); }
+    let ffmpeg = verified_ffmpeg(&app)?;
+    let source = Path::new(&path);
+    let directory = split_directory(source);
+    fs::create_dir_all(&directory).map_err(|error| format!("Could not create {}: {error}", directory.display()))?;
+    let record = directory.join("clips.json");
+    if let Ok(text) = fs::read_to_string(&record) {
+        if let Ok(previous) = serde_json::from_str::<SplitResult>(&text) {
+            let intact = previous.clips.len() == segments.len() && previous.clips.iter().all(|clip| fs::metadata(&clip.path).map(|m| m.len() == clip.bytes && clip.bytes > 0).unwrap_or(false));
+            if intact { return Ok(SplitResult { existing: true, seconds: 0.0, ..previous }); }
+        }
+    }
+    let stem = source.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "recording".to_string());
+    // Leftovers of an interrupted cut would be mistaken for clips: clear our own pattern only.
+    if let Ok(entries) = fs::read_dir(&directory) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if (name.starts_with(&format!("{stem}-clip-")) && name.ends_with(".mp4")) || name == "clips.csv" || name == "clips.json" { let _ = fs::remove_file(entry.path()); }
+        }
+    }
+    let pattern = directory.join(format!("{stem}-clip-%03d.mp4")).to_string_lossy().to_string();
+    let list = directory.join("clips.csv").to_string_lossy().to_string();
+    let cuts: Vec<f64> = segments.iter().map(|s| s.start_seconds).collect();
+    let started = Instant::now();
+    let mut audio = fcm_decoder::mp4::SplitAudio::Copy;
+    let (mut ok, mut stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4::split_args(&path, &pattern, &list, &cuts, audio), Duration::from_secs(1800))?;
+    if !ok && fcm_decoder::mp4::audio_codec_refused(&stderr) {
+        audio = fcm_decoder::mp4::SplitAudio::Aac;
+        (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4::split_args(&path, &pattern, &list, &cuts, audio), Duration::from_secs(1800))?;
+    }
+    if !ok { return Err(format!("The recording could not be cut: {}", stderr.lines().last().unwrap_or("no detail").trim())); }
+    let listed = fcm_decoder::mp4::parse_segment_list(&fs::read_to_string(&list).map_err(|error| format!("The cut list could not be read: {error}"))?);
+    if listed.len() != segments.len() { return Err(format!("The cut produced {} clips where {} were expected; nothing was kept.", listed.len(), segments.len())); }
+    let mut clips = Vec::with_capacity(listed.len());
+    for ((name, cut_start, cut_end), plan) in listed.iter().zip(segments.iter()) {
+        let clip_path = directory.join(Path::new(name).file_name().unwrap_or_default());
+        let mut file = File::open(&clip_path).map_err(|error| format!("{name}: {error}"))?;
+        let bytes = file.metadata().map_err(|error| error.to_string())?.len();
+        let sha256 = fcm_decoder::sha256_of(&mut file).map_err(|error| error.to_string())?;
+        clips.push(SplitClip { index: plan.index, path: clip_path.to_string_lossy().to_string(), file_name: clip_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), bytes, sha256, start_seconds: plan.start_seconds, end_seconds: plan.end_seconds, cut_start_seconds: *cut_start, cut_end_seconds: *cut_end });
+    }
+    let result = SplitResult { directory: directory.to_string_lossy().to_string(), clips, audio, seconds: started.elapsed().as_secs_f64(), existing: false };
+    let _ = fs::write(&record, serde_json::to_string_pretty(&result).unwrap_or_default());
+    Ok(result)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FileDigest { sha256: String, bytes: u64 }
@@ -1020,5 +1107,5 @@ fn remove_local_files(paths: Vec<String>, roots: Vec<String>) -> Result<RemovalR
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, render_thumbnail, export_mp4, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures, load_review_state, save_review_state, disk_report, remove_local_files]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
+    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![discover_read_only_devices, probe_device, acquire_read_only_device_image, cancel_acquisition, inspect_acquisition_image, read_dhfs_catalog, extract_dhfs_recording, default_clip_directory, upload_clip_resumable, cancel_upload, decoder_status, install_decoder, render_filmstrip, render_preview, clear_previews, render_thumbnail, export_mp4, analyze_recording_segments, split_recording_segments, list_video_files, describe_video_files, hash_local_file, probe_video_file, read_pictures, load_review_state, save_review_state, disk_report, remove_local_files]).run(tauri::generate_context!()).expect("error while running FCM Desktop V2");
 }

@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::Path;
 
+pub mod mp4;
+
 pub const FFMPEG_VERSION: &str = "8.1.2-c573a95381";
 pub const FFMPEG_SHA256: &str = "56f015b477f6fc7923409bb63217d2ee7b2b8d236c599ba94e1cf72220548e8c";
 pub const FFMPEG_BYTES: u64 = 132_239_360;

@@ -6,7 +6,7 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ask, open, save } from '@tauri-apps/plugin-dialog';
 import { createClient, type Session } from '@supabase/supabase-js';
-import { Activity, CheckCircle2, ChevronRight, Clapperboard, Cpu, Download, ExternalLink, EyeOff, Film, FolderOpen, HardDrive, LockKeyhole, LogIn, LogOut, MapPin, Play, Search, Send, ShieldCheck, Square, Trash2, Undo2, UploadCloud, Waves } from 'lucide-react';
+import { Activity, CheckCircle2, ChevronRight, Clapperboard, Cpu, Download, ExternalLink, EyeOff, Film, FolderOpen, HardDrive, LockKeyhole, LogIn, LogOut, MapPin, Play, Scissors, Search, Send, ShieldCheck, Square, Trash2, Undo2, UploadCloud, Waves } from 'lucide-react';
 import './styles.css';
 
 type AcquisitionStage = 'idle' | 'discovery' | 'ready' | 'cloning' | 'verifying' | 'complete' | 'failed';
@@ -125,6 +125,8 @@ type ExtractedClip = {
   kind: ContentKind;
   stats: ExtractionStats;
   pictures: ExtractedPicture[];
+  /** Set when this clip was cut out of a longer file on this computer (interface-side only; never from Rust). */
+  segment?: SegmentProvenance;
 };
 
 type InspectionResult = {
@@ -177,7 +179,18 @@ type FileClock = { start: DhfsTime; source: ClockSource };
 type FileFacts = { sha256: string; bytes: number; probe: MediaProbe | null };
 type SourceMode = 'card' | 'files';
 /** One thing the operator can preview, send or skip: a recording on the card or a video file in a folder. */
-type SourceItem = { kind: 'card'; key: string; recording: DhfsRecording } | { kind: 'file'; key: string; file: LocalVideoFile };
+type SourceItem = { kind: 'card'; key: string; recording: DhfsRecording } | { kind: 'file'; key: string; file: LocalVideoFile } | { kind: 'clip'; key: string; clip: SplitClip; file: LocalVideoFile };
+/** What the native side found in a file's own index: the motion clips a camera wrote back to back (see `crates/decoder/src/mp4.rs`). */
+type Mp4Segment = { index: number; startSeconds: number; endSeconds: number; frames: number; startsOnKeyFrame: boolean };
+type Mp4Segments = { timescale: number; frames: number; keyFrames: number; durationSeconds: number; typicalFrameSeconds: number; method: 'stretched_key_frame' | 'single'; segments: Mp4Segment[]; eventMarksSeconds: number[] };
+type SplitAudio = 'copy' | 'aac' | 'none';
+type SplitClip = { index: number; path: string; fileName: string; bytes: number; sha256: string; startSeconds: number; endSeconds: number; cutStartSeconds: number; cutEndSeconds: number };
+type SplitResult = { directory: string; clips: SplitClip[]; audio: SplitAudio; seconds: number; existing: boolean };
+/** One recording cut into its motion clips, kept with the review state so the clips reappear next session. */
+type SplitRecord = { directory: string; audio: SplitAudio; method: string; clips: SplitClip[]; splitAt: string };
+/** Where a clip came from, carried into the import manifest. The start is a lower bound: the camera pauses
+ *  between motion events and the file does not record the gaps; only the clock burnt into the picture does. */
+type SegmentProvenance = { index: number; count: number; startSeconds: number; endSeconds: number; cutStartSeconds: number; cutEndSeconds: number; sourcePath: string; sourceFileName: string; sourceBytes: number; method: string; audio: SplitAudio };
 
 // The operator's verdict on a recording, colour-coded so the list reads at a glance. Marks are the operator's
 // working notes, kept on this computer per card/folder; they travel to FCM only as manifest provenance.
@@ -196,7 +209,7 @@ const excludedFromSendAll = (mark: ReviewMark | undefined) => mark === 'nothing_
 type PlaceChoice = { houseId: string; cameraLabel: string };
 /** A send that completed: FCM holds the bytes under this path with the hash taken here. Kept so a restart still knows. */
 type SentRecord = { importId: string; storagePath: string; fileName: string; sentAt: string; bytes: number };
-type ReviewFile = { version: 1; marks: Record<string, ReviewMark>; places: Record<string, PlaceChoice>; sent: Record<string, SentRecord>; savedAt: string };
+type ReviewFile = { version: 1; marks: Record<string, ReviewMark>; places: Record<string, PlaceChoice>; sent: Record<string, SentRecord>; splits?: Record<string, SplitRecord>; savedAt: string };
 const placeKeyOf = (place: PlaceChoice) => `${place.houseId}::${place.cameraLabel.trim().toLowerCase()}`;
 /** Six-digit descriptor and the camera's file stamp, exactly as the extractor names files: `-p0-d000722-2026-08-11_14-14-53-`. */
 const fileStamp = (time: DhfsTime) => `${time.year}-${pad(time.month)}-${pad(time.day)}_${pad(time.hour)}-${pad(time.minute)}-${pad(time.second)}`;
@@ -215,7 +228,7 @@ const POPOUT_STATE_EVENT = 'preview-popout-state';
 const POPOUT_ACTION_EVENT = 'preview-popout-action';
 const POPOUT_READY_EVENT = 'preview-popout-ready';
 type PopoutState = {
-  title: string; subtitle: string; itemKey: string; sourceKind: 'card' | 'file';
+  title: string; subtitle: string; itemKey: string; sourceKind: 'card' | 'file' | 'clip';
   filmstrip: Filmstrip | null; clockBase: DhfsTime | null; clipKind: ContentKind | null;
   preview: PreviewRendition | null; busy: 'filmstrip' | 'preview' | null; note: string | null; error: string | null;
   canSend: boolean; sendStatus: SendStatus | null; skipped: boolean; sendHint: string | null;
@@ -313,6 +326,10 @@ const clockSourceLabel: Record<ClockSource, string> = { file_name: 'from the fil
 const CONTENT_TYPES: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', webm: 'video/webm', avi: 'video/x-msvideo', ts: 'video/mp2t', asf: 'video/x-ms-asf', wmv: 'video/x-ms-asf', dav: 'video/x-dahua-dav', h264: 'video/h264', '264': 'video/h264', h265: 'video/h265', '265': 'video/h265', hevc: 'video/h265' };
 const contentTypeFor = (extension: string) => CONTENT_TYPES[extension.toLowerCase()] ?? 'application/octet-stream';
 const fileKey = (file: LocalVideoFile) => `file:${file.path}`;
+const clipKey = (file: LocalVideoFile, index: number) => `clip:${file.path}#${index}`;
+/** The clip keys a saved split implies, from the file key it was saved under. */
+const clipKeysOf = (fileKeyValue: string, split: SplitRecord) => split.clips.map((clip) => `clip:${fileKeyValue.slice('file:'.length)}#${clip.index}`);
+const audioLabel: Record<SplitAudio, string> = { copy: 'audio copied', aac: 'audio re-encoded to AAC (MP4 cannot carry the camera’s µ-law audio); video untouched', none: 'no audio track' };
 /** Slots the recorder pre-allocated and never wrote into, and files that are filler bytes throughout: listed
  *  only on request and never part of “Send all”. Everything else stays in the list for the decoder to judge. */
 const isSetAside = (file: LocalVideoFile) => file.content === 'unwritten' || file.content === 'blank';
@@ -366,18 +383,19 @@ function MarkPicker({ value, onChange, compact }: { value: ReviewMark | null; on
 }
 
 /** A file row's thumbnail: the first key frame, asked for only when the row scrolls into view and only for
- *  files with something to decode. `enabled` is false without the decoder or for set-aside / cloud-only files. */
-function FileThumb({ file, state, enabled, onRequest }: { file: LocalVideoFile; state: string | 'failed' | undefined; enabled: boolean; onRequest: () => void }) {
+ *  files with something to decode. `onVisible` fires once the row is in view (and again if `enabled` changes),
+ *  so the parent can also read the file's index for motion clips; the parent guards against repeats. */
+function FileThumb({ file, state, enabled, onVisible }: { file: LocalVideoFile; state: string | 'failed' | undefined; enabled: boolean; onVisible: () => void }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const request = useRef(onRequest);
-  request.current = onRequest;
+  const visible = useRef(onVisible);
+  visible.current = onVisible;
   useEffect(() => {
     const node = ref.current;
-    if (!enabled || state || !node) return;
-    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) { observer.disconnect(); request.current(); } }, { rootMargin: '240px' });
+    if (!node) return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) { observer.disconnect(); visible.current(); } }, { rootMargin: '240px' });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [enabled, state, file.path]);
+  }, [enabled, file.path]);
   const loaded = state && state !== 'failed';
   const title = loaded ? 'First key frame' : state === 'failed' ? 'The decoder could not read a frame from this file' : file.content === 'video' || file.content === 'unrecognised' ? (enabled ? 'Thumbnail loads when the row is in view' : 'Install the decoder under “Review here” to see thumbnails') : contentBadge[file.content].label;
   return <span ref={ref} className={`recording__thumb ${loaded ? 'has-image' : ''} ${state === 'failed' ? 'is-failed' : ''}`} title={title}>{loaded ? <img src={`data:image/jpeg;base64,${state}`} alt="" /> : file.content === 'offline' ? <UploadCloud size={14} /> : state === 'failed' || file.content === 'blank' || file.content === 'unwritten' ? <EyeOff size={14} /> : <Film size={14} />}</span>;
@@ -464,6 +482,11 @@ export default function App() {
   /** Base64 JPEG of a file's first key frame, or `failed`; requested only once a row scrolls into view. */
   const [thumbnails, setThumbnails] = useState<Record<string, string | 'failed'>>({});
   const thumbnailPending = useRef(new Set<string>());
+  /** Motion clips a file's own index describes, by file key; `none` = one continuous recording. */
+  const [segments, setSegments] = useState<Record<string, Mp4Segments | 'none' | 'failed'>>({});
+  const segmentsPending = useRef(new Set<string>());
+  const [splits, setSplits] = useState<Record<string, SplitRecord>>({});
+  const [splitting, setSplitting] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
   const [fileClocks, setFileClocks] = useState<Record<string, FileClock>>({});
   const [fileFacts, setFileFacts] = useState<Record<string, FileFacts>>({});
@@ -545,16 +568,18 @@ export default function App() {
   }, [setAsideFiles]);
   /** The files the list shows: real candidates always; unwritten slots and blank files only on request. */
   const listedFiles = useMemo(() => (videoFolder?.files ?? []).filter((file) => showSetAside || !isSetAside(file)), [videoFolder, showSetAside]);
-  /** Everything the active source offers, in the shape the review/send flow works on. */
+  /** Everything the active source offers, in the shape the review/send flow works on. A file cut into clips
+   *  contributes itself (as the group) and each clip as its own item. */
   const items = useMemo<SourceItem[]>(() => (mode === 'card'
     ? (catalog?.recordings ?? []).map((recording) => ({ kind: 'card' as const, key: recordingKey(recording), recording }))
-    : listedFiles.map((file) => ({ kind: 'file' as const, key: fileKey(file), file }))), [mode, catalog, listedFiles]);
+    : listedFiles.flatMap((file) => { const key = fileKey(file); const split = splits[key]; return [{ kind: 'file' as const, key, file }, ...(split?.clips ?? []).map((clip) => ({ kind: 'clip' as const, key: clipKey(file, clip.index), clip, file }))]; })), [mode, catalog, listedFiles, splits]);
   const sentCount = useMemo(() => items.filter((item) => sends[item.key]?.status === 'done' || sentRecords[item.key]).length, [items, sends, sentRecords]);
   const isSent = (key: string) => sends[key]?.status === 'done' || Boolean(sentRecords[key]);
   const skippedCount = useMemo(() => Object.keys(skipped).length, [skipped]);
   const previewCount = useMemo(() => Object.values(reviews).filter((review) => review.preview).length, [reviews]);
-  // A set-aside file shown on request is still never swept up by “Send all”; it can only be sent one at a time.
-  const unsentItems = useMemo(() => items.filter((item) => sends[item.key]?.status !== 'done' && !sentRecords[item.key] && !skipped[item.key] && !excludedFromSendAll(marks[item.key]) && !(item.kind === 'file' && isSetAside(item.file))), [items, sends, sentRecords, skipped, marks]);
+  // A set-aside file shown on request is still never swept up by “Send all”; nor is a file that has been cut
+  // into clips (its clips are what get sent). Either can only be sent one at a time, deliberately.
+  const unsentItems = useMemo(() => items.filter((item) => sends[item.key]?.status !== 'done' && !sentRecords[item.key] && !skipped[item.key] && !excludedFromSendAll(marks[item.key]) && !(item.kind === 'file' && (isSetAside(item.file) || splits[item.key]))), [items, sends, sentRecords, skipped, marks, splits]);
   const markCounts = useMemo(() => {
     const counts: Record<ReviewMark | 'unmarked', number> = { keep: 0, review_further: 0, reviewed: 0, nothing_here: 0, unmarked: 0 };
     for (const item of items) { const mark = marks[item.key]; if (mark) counts[mark] += 1; else counts.unmarked += 1; }
@@ -586,10 +611,13 @@ export default function App() {
         const byPersist = new Map(items.map((item) => [persistKey(item), item.key]));
         const remap = <T,>(record: Record<string, T> | undefined) => Object.fromEntries(Object.entries(record ?? {}).flatMap(([persisted, value]) => { const key = byPersist.get(persisted); return key ? [[key, value]] : []; })) as Record<string, T>;
         if (saved?.version === 1) {
-          setMarks(remap(saved.marks)); setPlaces(remap(saved.places)); setSentRecords(remap(saved.sent));
+          // Clips of a saved split are items only once the split is restored, so admit their keys first.
+          const restoredSplits = remap(saved.splits);
+          for (const [key, split] of Object.entries(restoredSplits)) for (const clip of clipKeysOf(key, split)) byPersist.set(clip, clip);
+          setSplits(restoredSplits); setMarks(remap(saved.marks)); setPlaces(remap(saved.places)); setSentRecords(remap(saved.sent));
           const restored = Object.keys(remap(saved.sent)).length;
           if (restored) setStatus(`${restored} recording${restored === 1 ? '' : 's'} already sent to FCM in an earlier session; marks and places restored.`);
-        } else { setMarks({}); setPlaces({}); setSentRecords({}); }
+        } else { setSplits({}); setMarks({}); setPlaces({}); setSentRecords({}); }
         reviewLoadedRef.current = reviewScope;
       } catch (cause) { failWith(cause, 'The saved review state could not be read.'); reviewLoadedRef.current = reviewScope; }
     })();
@@ -599,10 +627,10 @@ export default function App() {
     if (!reviewScope || reviewLoadedRef.current !== reviewScope) return;
     const byKey = new Map(items.map((item) => [item.key, persistKey(item)]));
     const persist = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).flatMap(([key, value]) => { const persisted = byKey.get(key); return persisted ? [[persisted, value]] : []; }));
-    const file: ReviewFile = { version: 1, marks: persist(marks), places: persist(places), sent: persist(sentRecords), savedAt: new Date().toISOString() };
+    const file: ReviewFile = { version: 1, marks: persist(marks), places: persist(places), sent: persist(sentRecords), splits: persist(splits), savedAt: new Date().toISOString() };
     const timer = window.setTimeout(() => { invoke('save_review_state', { scope: reviewScope, state: file }).catch((cause: unknown) => failWith(cause, 'The review state could not be saved.')); }, 400);
     return () => window.clearTimeout(timer);
-  }, [reviewScope, items, marks, places, sentRecords]);
+  }, [reviewScope, items, marks, places, sentRecords, splits]);
 
   const setMark = (item: SourceItem, mark: ReviewMark | null) => setMarks((current) => { const next = { ...current }; if (mark) next[item.key] = mark; else delete next[item.key]; return next; });
   const setPlaceOverride = (keys: string[], place: PlaceChoice | null) => setPlaces((current) => { const next = { ...current }; for (const key of keys) { if (place) next[key] = place; else delete next[key]; } return next; });
@@ -743,8 +771,8 @@ export default function App() {
 
   /** Replace the file listing (and everything derived from it) with what the operator just chose. */
   const adoptVideoFolder = (folder: VideoFolder, how: string) => {
-    const dropFiles = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith('file:'))) as Record<string, T>;
-    setOpenReview(null); setReviews(dropFiles); setSkipped(dropFiles); setClips(dropFiles); setFileFacts({}); setThumbnails(dropFiles); setShowSetAside(false);
+    const dropFiles = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith('file:') && !key.startsWith('clip:'))) as Record<string, T>;
+    setOpenReview(null); setReviews(dropFiles); setSkipped(dropFiles); setClips(dropFiles); setFileFacts({}); setThumbnails(dropFiles); setShowSetAside(false); setSegments({}); setSplits({});
     setVideoFolder(folder);
     // First guess at each file's recorded start: the recorder's clock in the name, else when the file was last written.
     setFileClocks(Object.fromEntries(folder.files.map((file) => {
@@ -765,6 +793,53 @@ export default function App() {
       catch { setThumbnails((current) => ({ ...current, [key]: 'failed' })); }
       finally { thumbnailPending.current.delete(key); }
     });
+  };
+
+  /** Read an MP4's own index for motion clips written back to back (Tapo slots). No decoder needed; the media data is never read. */
+  const requestSegments = (key: string, file: LocalVideoFile) => {
+    if (file.container !== 'mp4' || segmentsPending.current.has(key)) return;
+    segmentsPending.current.add(key);
+    void thumbnailLimiter(async () => {
+      try { const found = await invoke<Mp4Segments>('analyze_recording_segments', { path: file.path }); setSegments((current) => ({ ...current, [key]: found.segments.length > 1 ? found : 'none' })); }
+      catch { setSegments((current) => ({ ...current, [key]: 'failed' })); }
+      finally { segmentsPending.current.delete(key); }
+    });
+  };
+
+  const splitFile = async (file: LocalVideoFile) => {
+    const key = fileKey(file);
+    const found = segments[key];
+    if (!found || typeof found === 'string') return;
+    if (!decoder?.installed) { setError('Install the decoder under “Review here” first; clips are cut on this computer.'); return; }
+    setSplitting(key); setError(null);
+    setStatus(`Cutting ${file.fileName} into ${found.segments.length} clips — video copied frame for frame from the key frame that starts each one…`);
+    try {
+      const result = await invoke<SplitResult>('split_recording_segments', { path: file.path, segments: found.segments.map(({ index, startSeconds, endSeconds }) => ({ index, startSeconds, endSeconds })) });
+      setSplits((current) => ({ ...current, [key]: { directory: result.directory, audio: result.audio, method: found.method, clips: result.clips, splitAt: new Date().toISOString() } }));
+      setStatus(`${result.clips.length} clips ${result.existing ? 'cut earlier and reused' : `cut in ${result.seconds.toFixed(1)} s`} into ${result.directory} (${audioLabel[result.audio]}). Each clip carries its own SHA-256; mark, preview and send them one by one or with “Send all”. Their start times are lower bounds — the camera pauses between motion events and the file does not record the gaps.`);
+    } catch (cause) { failWith(cause, 'The recording could not be cut into clips.'); }
+    finally { setSplitting(null); }
+  };
+
+  /** Remove the cut clips from this computer and list the file whole again. Refused once any clip has been sent. */
+  const undoSplit = async (file: LocalVideoFile) => {
+    const key = fileKey(file);
+    const split = splits[key];
+    if (!split) return;
+    const sentClip = split.clips.find((clip) => isSent(clipKey(file, clip.index)));
+    if (sentClip) { setError(`${sentClip.fileName} has already been sent to FCM; the clips stay in ${split.directory} so the sent record keeps its source on this computer.`); return; }
+    let confirmed = false;
+    try { confirmed = await ask(`Remove the ${split.clips.length} cut clips of ${file.fileName} from this computer? The original file is untouched.`, { title: 'Undo split', kind: 'warning', okLabel: 'Remove clips', cancelLabel: 'Keep' }); } catch { confirmed = false; }
+    if (!confirmed) return;
+    try {
+      const paths = [...split.clips.map((clip) => clip.path), `${split.directory}\\clips.csv`, `${split.directory}\\clips.json`];
+      await invoke<RemovalReport>('remove_local_files', { paths, roots: [split.directory] });
+      const keys = new Set(split.clips.map((clip) => clipKey(file, clip.index)));
+      const drop = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([k]) => !keys.has(k))) as Record<string, T>;
+      setSplits((current) => { const next = { ...current }; delete next[key]; return next; });
+      setMarks(drop); setSkipped(drop); setClips(drop); setReviews(drop); setThumbnails(drop);
+      setStatus(`${split.clips.length} clips removed; ${file.fileName} is listed whole again.`);
+    } catch (cause) { failWith(cause, 'The clips could not be removed.'); }
   };
 
   /** The way in that shows the files: Windows' folder picker lists folders only, which reads as "no files here". */
@@ -805,7 +880,15 @@ export default function App() {
     if (!start) return;
     const key = fileKey(file);
     setFileClocks((current) => ({ ...current, [key]: { start, source: 'operator' } }));
-    setClips((current) => (current[key] ? { ...current, [key]: { ...current[key], start, end: clockAdd(start, current[key].durationSeconds), stats: { ...current[key].stats, contentStart: start, contentEnd: clockAdd(start, current[key].durationSeconds) } } } : current));
+    // Cut clips take their lower bound from the parent's start, so a correction moves them too.
+    const cuts = splits[key]?.clips ?? [];
+    setClips((current) => {
+      const next = { ...current };
+      const rebase = (clipKeyValue: string, from: DhfsTime) => { const cached = next[clipKeyValue]; if (!cached) return; const end = clockAdd(from, cached.durationSeconds); next[clipKeyValue] = { ...cached, start: from, end, stats: { ...cached.stats, contentStart: from, contentEnd: end } }; };
+      rebase(key, start);
+      for (const cut of cuts) rebase(clipKey(file, cut.index), clockAdd(start, cut.startSeconds));
+      return next;
+    });
   };
 
   /** The bytes that will be sent, described the same way for both sources: for a card recording its `-r2`
@@ -821,6 +904,30 @@ export default function App() {
       if (!destinationDirectory) setDestinationDirectory(directory);
       setStatus(`Reading channel ${recording.channel}, ${formatTime(recording.start)} from the ${sourceLabel(catalogSource)} — only frames the camera dated inside this recording are kept…`);
       const clip = await invoke<ExtractedClip>('extract_dhfs_recording', { source: catalogSource, partitionIndex: recording.partitionIndex, descriptor: recording.descriptor, destinationDirectory: directory, reuseExisting: true });
+      setClips((current) => ({ ...current, [item.key]: clip }));
+      return clip;
+    }
+    if (item.kind === 'clip') {
+      const { clip: cut, file } = item;
+      // The cut record's hash is checked against the bytes on disk, so a clip altered or replaced since is never sent as that record.
+      setStatus(`Checking ${cut.fileName} against its cut record…`);
+      const digest = await invoke<{ sha256: string; bytes: number }>('hash_local_file', { path: cut.path });
+      if (digest.sha256 !== cut.sha256) throw new Error(`${cut.fileName} on disk no longer matches the cut record (its hash differs). Undo the split and cut the clips again before sending.`);
+      let probe: MediaProbe | null = null;
+      if (decoder?.installed) { try { probe = await invoke<MediaProbe>('probe_video_file', { path: cut.path }); } catch { probe = null; } }
+      const parentClock = fileClocks[fileKey(file)];
+      if (!parentClock) throw new Error(`No start time is known for ${file.fileName}; set one in the list first.`);
+      const split = splits[fileKey(file)];
+      const start = clockAdd(parentClock.start, cut.startSeconds);
+      const durationSeconds = probe?.durationSeconds ?? Math.max(0, cut.cutEndSeconds - cut.cutStartSeconds);
+      const end = clockAdd(start, durationSeconds);
+      const clip: ExtractedClip = {
+        path: cut.path, fileName: cut.fileName, bytes: digest.bytes, sha256: cut.sha256, contentType: 'video/mp4', codec: probe?.codec ?? 'unknown',
+        streamStartOffset: 0, channel: 0, start, end, durationSeconds, fragments: 0, descriptor: 0, partitionIndex: -1, kind: 'local_video',
+        stats: { framesKept: 0, videoFrames: 0, keyFrames: 0, audioFrames: 0, staleFrames: 0, staleBytes: 0, unstructuredBytes: 0, structuralBytesRemoved: 0, leadingFramesDropped: 0, sourceBytesRead: digest.bytes, pictures: 0, contentStart: start, contentEnd: end, stoppedAtNextRecording: false, truncatedFinalFrame: false },
+        pictures: [],
+        segment: { index: cut.index, count: split?.clips.length ?? 0, startSeconds: cut.startSeconds, endSeconds: cut.endSeconds, cutStartSeconds: cut.cutStartSeconds, cutEndSeconds: cut.cutEndSeconds, sourcePath: file.path, sourceFileName: file.fileName, sourceBytes: file.bytes, method: split?.method ?? 'stretched_key_frame', audio: split?.audio ?? 'copy' },
+      };
       setClips((current) => ({ ...current, [item.key]: clip }));
       return clip;
     }
@@ -1030,7 +1137,7 @@ export default function App() {
     if (item.kind === 'card' && !catalogSource) return false;
     const { key } = item;
     setSendingKey(key); setError(null);
-    updateSend(key, { status: 'extracting', sent: 0, total: item.kind === 'card' ? item.recording.bytes : item.file.bytes, error: undefined });
+    updateSend(key, { status: 'extracting', sent: 0, total: item.kind === 'card' ? item.recording.bytes : item.kind === 'clip' ? item.clip.bytes : item.file.bytes, error: undefined });
     try {
       const clip = await ensureClip(item);
       if (clip.kind === 'pictures') {
@@ -1089,7 +1196,13 @@ export default function App() {
     }
     const start = clip.stats.contentStart ?? clip.start;
     const end = clip.stats.contentEnd ?? clip.end;
-    const timing = clip.kind === 'local_video' ? { start_time_source: fileClocks[key]?.source ?? 'unknown', source_path: clip.path } : { frames: clip.stats.videoFrames, stale_bytes_skipped: clip.stats.staleBytes };
+    const timing = clip.kind !== 'local_video' ? { frames: clip.stats.videoFrames, stale_bytes_skipped: clip.stats.staleBytes }
+      : clip.segment ? {
+        start_time_source: 'segment_offset_lower_bound', source_path: clip.segment.sourcePath, source_file_name: clip.segment.sourceFileName, source_bytes: clip.segment.sourceBytes,
+        segment: { index: clip.segment.index, count: clip.segment.count, start_seconds: clip.segment.startSeconds, end_seconds: clip.segment.endSeconds, cut_start_seconds: clip.segment.cutStartSeconds, cut_end_seconds: clip.segment.cutEndSeconds, method: clip.segment.method, audio: clip.segment.audio },
+        clock_note: 'Lower bound: the camera pauses between motion events and the source file does not record the gaps; the clock burnt into the picture is authoritative.',
+      }
+      : { start_time_source: fileClocks[key]?.source ?? 'unknown', source_path: clip.path };
     return [{ name: clip.fileName, relative_path: clip.fileName, size_bytes: clip.bytes, kind: 'video', slot_start_at: wallClockToIso(start, timeZone), slot_end_at: wallClockToIso(end, timeZone), sha256: clip.sha256, import_id: target.id, content_kind: clip.kind, review_mark, ...timing }];
   });
 
@@ -1210,7 +1323,7 @@ export default function App() {
     const clip = clips[openItem.key];
     const reviewState = reviews[openItem.key];
     const send = sends[openItem.key];
-    const title = openItem.kind === 'card' ? `Channel ${openItem.recording.channel} · ${formatTime(openItem.recording.start)}` : openItem.file.fileName;
+    const title = openItem.kind === 'card' ? `Channel ${openItem.recording.channel} · ${formatTime(openItem.recording.start)}` : openItem.kind === 'clip' ? `${openItem.file.fileName} · clip ${openItem.clip.index + 1}` : openItem.file.fileName;
     return {
       title, subtitle: clip ? `${clip.fileName} · ${describeClip(clip)}` : openItem.kind === 'card' ? 'Reading from the card…' : 'Hashing the file…', itemKey: openItem.key, sourceKind: openItem.kind,
       filmstrip: reviewState?.filmstrip ?? null, clockBase: clip ? (clip.stats.contentStart ?? clip.start) : null, clipKind: clip?.kind ?? null,
@@ -1301,6 +1414,33 @@ export default function App() {
     if (!counts.length && !sent) return null;
     return <span className="day-summary">{sent > 0 && <span className="day-summary__sent">{sent} sent</span>}{counts.map(({ mark, n }) => <span key={mark.id} className={`day-summary__mark mark__dot--${mark.id}`} title={`${n} ${mark.label}`}><span className="mark__dot" />{n}</span>)}</span>;
   };
+  /** A day's item keys: each file and, where it has been cut, each of its clips. */
+  const dayKeys = (files: LocalVideoFile[]) => files.flatMap((file) => [fileKey(file), ...(splits[fileKey(file)]?.clips ?? []).map((cut) => clipKey(file, cut.index))]);
+
+  /** One cut clip under its source file: the same mark, place, preview and send controls as any recording.
+   *  Its time is a lower bound (file start + offset into the file): the camera pauses between motion events
+   *  and the file does not record the gaps. */
+  const renderClipRow = (item: Extract<SourceItem, { kind: 'clip' }>, split: SplitRecord) => {
+    const { key, clip: cut, file } = item;
+    const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key;
+    const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const mark = marks[key]; const sentRecord = sentRecords[key]; const rowSent = send?.status === 'done' || Boolean(sentRecord);
+    const place = placeFor(key); const overridden = Boolean(places[key]); const parentClock = fileClocks[fileKey(file)];
+    const lowerBound = parentClock ? clockAdd(parentClock.start, cut.startSeconds) : null;
+    const thumbFile: LocalVideoFile = { ...file, path: cut.path, fileName: cut.fileName, bytes: cut.bytes, content: 'video', container: 'mp4' };
+    return <Fragment key={key}><div className={`recording recording--thumb recording--clip ${clip ? 'is-extracted' : ''} ${rowSent ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''} ${mark ? `is-mark-${mark}` : ''}`}>
+      <span className="recording__time recording__time--bound" title="At or after this time. The camera pauses between motion events and the file does not record the gaps; the clock burnt into the picture is authoritative.">{lowerBound ? `≥ ${formatClock(lowerBound)}` : '—'}</span>
+      <FileThumb file={thumbFile} state={thumbnails[key]} enabled={Boolean(decoder?.installed)} onVisible={() => { if (decoder?.installed) requestThumbnail(key, cut.path); }} />
+      <span className="recording__meta"><strong>{mark && <span className={`mark__dot mark__dot--${mark}`} title={markLabel(mark)} aria-label={markLabel(mark)} />}Clip {cut.index + 1} of {split.clips.length} · {formatDuration(cut.cutEndSeconds - cut.cutStartSeconds)}{importRow && place && <button type="button" className={`place-chip ${overridden ? 'is-overridden' : ''}`} onClick={() => { setPlaceEditor(placeEditor === key ? null : key); setPlaceQuery(''); }} disabled={rowSent} title={overridden ? 'This clip goes to a different place than the import default. Click to change.' : 'Goes to the import\u2019s place. Click to send this clip to a different place.'}><MapPin size={11} /> {houseName(place.houseId) ?? 'place'}{overridden ? ' · ' + place.cameraLabel : ''}</button>}</strong>
+        <small>{formatBytes(cut.bytes)} · {formatDuration(cut.startSeconds)} into {file.fileName} · {cut.fileName}</small>
+        {clip && <small className="mono">{describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}
+        {isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”.</small>}
+        {inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}
+        {send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Checking clip…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}` : ''}{send.error ? ` — ${send.error}` : ''}</small>}
+        {sentRecord && !send && <small className="send-state send-state--done">Sent to FCM {new Date(sentRecord.sentAt).toLocaleString()}{fcmVerified[key] === 'verified' ? ' · FCM verified the hash' : fcmVerified[key] === 'mismatch' ? ' · FCM reports a HASH MISMATCH — keep the local copy' : ''}</small>}
+        {placeEditor === key && renderPlaceEditor([key], () => setPlaceEditor(null))}</span>
+      <span className="recording__actions"><MarkPicker compact value={mark ?? null} onChange={(next) => setMark(item, next)} /><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || rowSent}><Send size={14} /> {rowSent ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Checking clip…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : 'Send to FCM'}</button>}</span></div>
+      {isOpen && renderReview(item, clip, reviewState, send, isSkipped, `${file.fileName} clip ${cut.index + 1}`)}</Fragment>;
+  };
 
   return <main className="v2-shell">
     <aside className="rail"><div className="brand"><span><Waves size={19} /></span><div><b>FCM</b><small>Desktop V2 · v{APP_VERSION}</small></div></div>
@@ -1344,9 +1484,9 @@ export default function App() {
               {recordings.map((recording) => { const item: SourceItem = { kind: 'card', key: recordingKey(recording), recording }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const saved = saves[key]; if (!passesFilter(key)) return null; const mark = marks[key]; const sentRecord = sentRecords[key]; const rowSent = send?.status === 'done' || Boolean(sentRecord); const place = placeFor(key); const overridden = Boolean(places[key]); return <Fragment key={key}><div className={`recording ${clip ? 'is-extracted' : ''} ${rowSent ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''} ${mark ? `is-mark-${mark}` : ''}`}><span className="recording__time">{formatClock(recording.start)}</span><span className="recording__meta"><strong>{mark && <span className={`mark__dot mark__dot--${mark}`} title={markLabel(mark)} aria-label={markLabel(mark)} />}Channel {recording.channel} · {formatDuration(recording.durationSeconds)}{importRow && place && <button type="button" className={`place-chip ${overridden ? 'is-overridden' : ''}`} onClick={() => { setPlaceEditor(placeEditor === key ? null : key); setPlaceQuery(''); }} disabled={rowSent} title={overridden ? 'This recording goes to a different place than the import default. Click to change.' : 'Goes to the import\u2019s place. Click to send this recording to a different place.'}><MapPin size={11} /> {houseName(place.houseId) ?? 'place'}{overridden ? ' · ' + place.cameraLabel : ''}</button>}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{saved && <small className="send-state send-state--saved"><CheckCircle2 size={11} /> Saved to {saved.directory} — {saved.fileName}{saved.mp4 ? ` + ${saved.mp4.path.split(/[\\/]/).pop()} (${mp4Label(saved.mp4)})` : ''}</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”; still on the card{clip ? ' and in the working folder' : ''}.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}{sentRecord && !send && <small className="send-state send-state--done">Sent to FCM {new Date(sentRecord.sentAt).toLocaleString()}{fcmVerified[key] === 'verified' ? ' · FCM verified the hash' : fcmVerified[key] === 'mismatch' ? ' · FCM reports a HASH MISMATCH — keep the local copy' : ''}</small>}{placeEditor === key && renderPlaceEditor([key], () => setPlaceEditor(null))}</span><span className="recording__actions"><MarkPicker compact value={mark ?? null} onChange={(next) => setMark(item, next)} /><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || rowSent}><Send size={14} /> {rowSent ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={busyAnywhere} title={saved ? `Already saved to ${saved.directory}. Click to save another copy elsewhere (you will be asked first).` : 'Choose a folder; the hashed original and a playable MP4 are written there.'}>{saved ? <CheckCircle2 size={14} /> : <Download size={14} />} {extracting === key ? 'Saving…' : saved ? 'Saved' : 'Save to folder…'}</button></span></div>
               {isOpen && renderReview(item, clip, reviewState, send, isSkipped, `channel ${recording.channel} at ${formatClock(recording.start)}`)}</Fragment>; })}
             </div>)}</div>}
-            {mode === 'files' && <div className="recording-days">{fileDays.map(([day, files]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((sum, file) => sum + file.bytes, 0))}{renderDaySummary(files.map(fileKey))}</small>{importRow && <button type="button" className="secondary day-place" onClick={() => { setPlaceEditor(placeEditor === `day:${day}` ? null : `day:${day}`); setPlaceQuery(''); }}><MapPin size={12} /> Place for this day</button>}</div>{placeEditor === `day:${day}` && renderPlaceEditor(files.map(fileKey).filter((key) => !isSent(key)), () => setPlaceEditor(null))}
-              {files.map((file) => { const item: SourceItem = { kind: 'file', key: fileKey(file), file }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const clock = fileClocks[key]; if (!passesFilter(key)) return null; const mark = marks[key]; const sentRecord = sentRecords[key]; const rowSent = send?.status === 'done' || Boolean(sentRecord); const place = placeFor(key); const overridden = Boolean(places[key]); const setAside = isSetAside(file); return <Fragment key={key}><div className={`recording recording--thumb ${clip ? 'is-extracted' : ''} ${rowSent ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''} ${setAside ? 'is-set-aside' : ''} ${mark ? `is-mark-${mark}` : ''}`}><span className="recording__time">{clock ? formatClock(clock.start) : '—'}</span><FileThumb file={file} state={thumbnails[key]} enabled={Boolean(decoder?.installed) && (file.content === 'video' || file.content === 'unrecognised')} onRequest={() => requestThumbnail(key, file.path)} /><span className="recording__meta"><strong>{mark && <span className={`mark__dot mark__dot--${mark}`} title={markLabel(mark)} aria-label={markLabel(mark)} />}{file.fileName}{file.content !== 'video' && <span className={`content-badge content-badge--${file.content}`} title={contentBadge[file.content].hint}>{contentBadge[file.content].label}</span>}{importRow && place && <button type="button" className={`place-chip ${overridden ? 'is-overridden' : ''}`} onClick={() => { setPlaceEditor(placeEditor === key ? null : key); setPlaceQuery(''); }} disabled={rowSent} title={overridden ? 'This recording goes to a different place than the import default. Click to change.' : 'Goes to the import\u2019s place. Click to send this recording to a different place.'}><MapPin size={11} /> {houseName(place.houseId) ?? 'place'}{overridden ? ' · ' + place.cameraLabel : ''}</button>}</strong><small>{formatBytes(file.bytes)} · {file.extension.toUpperCase()}{file.container && file.container !== file.extension ? ` (${file.container})` : ''} · last written {formatWhen(file.modifiedEpochMs)}{clip && clip.durationSeconds > 0 ? ` · ${formatDuration(clip.durationSeconds)}` : ''}</small><label className="clock-edit"><span>Recorded start · {clock ? clockSourceLabel[clock.source] : 'not known'}</span><input type="datetime-local" step={1} value={clock ? clockToInputValue(clock.start) : ''} onChange={(event) => setFileStart(file, event.target.value)} disabled={send?.status === 'done' || sendingKey === key} aria-label={`Recorded start of ${file.fileName}`} /></label>{clip && <small className="mono">{describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}` : ''}{send.error ? ` — ${send.error}` : ''}</small>}{sentRecord && !send && <small className="send-state send-state--done">Sent to FCM {new Date(sentRecord.sentAt).toLocaleString()}{fcmVerified[key] === 'verified' ? ' · FCM verified the hash' : fcmVerified[key] === 'mismatch' ? ' · FCM reports a HASH MISMATCH — keep the local copy' : ''}</small>}{placeEditor === key && renderPlaceEditor([key], () => setPlaceEditor(null))}</span><span className="recording__actions"><MarkPicker compact value={mark ?? null} onChange={(next) => setMark(item, next)} /><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || rowSent}><Send size={14} /> {rowSent ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : 'Send to FCM'}</button>}</span></div>
-              {isOpen && renderReview(item, clip, reviewState, send, isSkipped, file.fileName)}</Fragment>; })}
+            {mode === 'files' && <div className="recording-days">{fileDays.map(([day, files]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((sum, file) => sum + file.bytes, 0))}{renderDaySummary(dayKeys(files))}</small>{importRow && <button type="button" className="secondary day-place" onClick={() => { setPlaceEditor(placeEditor === `day:${day}` ? null : `day:${day}`); setPlaceQuery(''); }}><MapPin size={12} /> Place for this day</button>}</div>{placeEditor === `day:${day}` && renderPlaceEditor(dayKeys(files).filter((key) => !isSent(key)), () => setPlaceEditor(null))}
+              {files.map((file) => { const item: SourceItem = { kind: 'file', key: fileKey(file), file }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const clock = fileClocks[key]; const split = splits[key]; const found = segments[key]; const clipItems = (split?.clips ?? []).map((cut) => ({ kind: 'clip' as const, key: clipKey(file, cut.index), clip: cut, file })); const visibleClips = clipItems.filter((clipItem) => passesFilter(clipItem.key)); if (!passesFilter(key) && visibleClips.length === 0) return null; const mark = marks[key]; const sentRecord = sentRecords[key]; const rowSent = send?.status === 'done' || Boolean(sentRecord); const place = placeFor(key); const overridden = Boolean(places[key]); const setAside = isSetAside(file); return <Fragment key={key}><div className={`recording recording--thumb ${clip ? 'is-extracted' : ''} ${rowSent ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''} ${setAside ? 'is-set-aside' : ''} ${split ? 'is-split' : ''} ${mark ? `is-mark-${mark}` : ''}`}><span className="recording__time">{clock ? formatClock(clock.start) : '—'}</span><FileThumb file={file} state={thumbnails[key]} enabled={Boolean(decoder?.installed) && (file.content === 'video' || file.content === 'unrecognised')} onVisible={() => { if (decoder?.installed && (file.content === 'video' || file.content === 'unrecognised')) requestThumbnail(key, file.path); requestSegments(key, file); }} /><span className="recording__meta"><strong>{mark && <span className={`mark__dot mark__dot--${mark}`} title={markLabel(mark)} aria-label={markLabel(mark)} />}{file.fileName}{file.content !== 'video' && <span className={`content-badge content-badge--${file.content}`} title={contentBadge[file.content].hint}>{contentBadge[file.content].label}</span>}{found && typeof found !== 'string' && !split && <button type="button" className="clip-chip" onClick={() => void splitFile(file)} disabled={splitting === key || busyAnywhere} title={decoder?.installed ? `The file's own index lists ${found.segments.length} motion clips written back to back${found.eventMarksSeconds.length ? ` (${found.eventMarksSeconds.length} camera triggers)` : ''}. Cut them into separate files on this computer — video copied frame for frame from the key frame that starts each one.` : 'Install the decoder under “Review here” to cut the clips.'}><Scissors size={11} /> {splitting === key ? 'Cutting…' : `${found.segments.length} motion clips · Split`}</button>}{split && <button type="button" className="clip-chip is-split" onClick={() => void undoSplit(file)} disabled={busyAnywhere} title={`Cut into ${split.clips.length} clips in ${split.directory} (${audioLabel[split.audio]}). Click to remove the clips and list the file whole again.`}><Scissors size={11} /> {split.clips.length} clips · Undo split</button>}{importRow && place && <button type="button" className={`place-chip ${overridden ? 'is-overridden' : ''}`} onClick={() => { setPlaceEditor(placeEditor === key ? null : key); setPlaceQuery(''); }} disabled={rowSent} title={overridden ? 'This recording goes to a different place than the import default. Click to change.' : 'Goes to the import\u2019s place. Click to send this recording to a different place.'}><MapPin size={11} /> {houseName(place.houseId) ?? 'place'}{overridden ? ' · ' + place.cameraLabel : ''}</button>}</strong><small>{formatBytes(file.bytes)} · {file.extension.toUpperCase()}{file.container && file.container !== file.extension ? ` (${file.container})` : ''} · last written {formatWhen(file.modifiedEpochMs)}{clip && clip.durationSeconds > 0 ? ` · ${formatDuration(clip.durationSeconds)}` : ''}</small><label className="clock-edit"><span>Recorded start · {clock ? clockSourceLabel[clock.source] : 'not known'}</span><input type="datetime-local" step={1} value={clock ? clockToInputValue(clock.start) : ''} onChange={(event) => setFileStart(file, event.target.value)} disabled={send?.status === 'done' || sendingKey === key} aria-label={`Recorded start of ${file.fileName}`} /></label>{clip && <small className="mono">{describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}` : ''}{send.error ? ` — ${send.error}` : ''}</small>}{sentRecord && !send && <small className="send-state send-state--done">Sent to FCM {new Date(sentRecord.sentAt).toLocaleString()}{fcmVerified[key] === 'verified' ? ' · FCM verified the hash' : fcmVerified[key] === 'mismatch' ? ' · FCM reports a HASH MISMATCH — keep the local copy' : ''}</small>}{placeEditor === key && renderPlaceEditor([key], () => setPlaceEditor(null))}</span><span className="recording__actions"><MarkPicker compact value={mark ?? null} onChange={(next) => setMark(item, next)} /><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || rowSent || Boolean(split)} title={split ? 'This file has been cut into clips; send the clips below, or undo the split to send it whole.' : undefined}><Send size={14} /> {rowSent ? 'Sent' : split ? 'Send the clips instead' : sendingKey === key && send ? (send.status === 'extracting' ? 'Hashing file…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : 'Send to FCM'}</button>}</span></div>{split && <div className="clip-group-note"><Scissors size={12} /> {split.clips.length} motion clips cut into <span className="mono">{split.directory}</span> · {audioLabel[split.audio]}. The whole file is left out of “Send all”; the clips are what get sent. Their times are lower bounds (≥): the camera pauses between motion events and the file does not record the gaps — the clock burnt into the picture is authoritative.</div>}
+              {isOpen && renderReview(item, clip, reviewState, send, isSkipped, file.fileName)}{visibleClips.map((clipItem) => renderClipRow(clipItem, split as SplitRecord))}</Fragment>; })}
             </div>)}</div>}
             {mode === 'card' && catalog && catalog.warnings.length > 0 && <details className="warnings"><summary>{catalog.warnings.length} descriptor warning{catalog.warnings.length === 1 ? '' : 's'}</summary><ul>{catalog.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
           </>}

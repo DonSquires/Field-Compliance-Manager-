@@ -96,6 +96,16 @@ the signed-in user under row-level security, and the session is held in memory o
 - `render_thumbnail` — the list's thumbnail: one small JPEG of a file's first key frame, decoded on this
   computer, cached under `<app local data>/previews/thumbs/` against the file's path, size and modified time,
   requested only when a row scrolls into view and at most two at a time. A viewing aid; cleared with the previews.
+- `analyze_recording_segments` / `split_recording_segments` — the motion clips a camera wrote back to back into
+  one file. `analyze` reads only the MP4 index (`moov`, plus Tapo's `stte` trigger table hidden in the `free`
+  box) and returns the segments: each begins on a key frame whose sample duration the muxer stretched (~0.5 s
+  against ~0.06 s) — the only mark Tapo leaves between clips. `split` cuts them with ffmpeg's segment muxer in
+  one pass, video copied frame for frame from the key frame that starts each clip, audio copied where MP4 allows
+  it and re-encoded to AAC where it does not (Tapo's µ-law), into `Public Documents\fcm-acquisitions\clips\<stem>-<hash>\`,
+  hashing every clip and writing `clips.json` so a complete earlier cut is reused rather than redone. The pure
+  parts (`container_signature`, box walking, `parse_stte`, `split_args`, `parse_segment_list`) live in
+  `crates/decoder/src/mp4.rs` with tests; `cargo run --example segments_probe -- <file> <out dir>` runs them
+  against a real file with the system ffmpeg.
 - `read_pictures` — the JPEGs of a picture-stream extraction, so its review shows the pictures themselves.
 - `load_review_state` / `save_review_state` — the operator's working notes for one card or folder (marks, per-day
   and per-recording place, what was sent and to which import), kept on this computer under
@@ -147,6 +157,18 @@ and never part of "Send all"; "Show" lists them, greyed with a badge, so the ope
 on its own if they must. Files with no recognised header stay listed with an amber badge for the decoder to
 judge; cloud-only placeholders are never opened during listing. Each listed file row carries a thumbnail of
 its first key frame (decoder required), loaded as rows scroll into view.
+
+0.4.5 (owner field notes 2026-09-20: "this one shows 23 minutes but it has multiple motion activations on
+separate time frames") cuts such a file into **selectable clips, each its own file**. Verified on the operator's
+real Tapo recording: one 256 MB slot held 71 motion clips (76 camera triggers in Tapo's own table), the
+presentation clock running on continuously across them. When a listed MP4's index shows more than one clip,
+the row offers "N motion clips · Split"; the clips then appear under the file as rows of their own —
+thumbnail, mark, place, preview, send — and the whole file drops out of "Send all" (it can still be sent on
+its own, or the split undone while no clip has been sent). Every clip carries its own SHA-256, checked against
+the bytes on disk again before sending; the manifest records the source file, segment index, planned and
+actual cut times, method and audio handling. **Timing is a lower bound and is shown as one (≥ 14:36:11):**
+the camera pauses between motion events and nothing in the file records those gaps — only the clock burnt
+into the picture does. Reading that clock is the next step, not assumed.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device

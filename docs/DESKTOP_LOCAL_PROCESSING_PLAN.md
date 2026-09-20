@@ -71,6 +71,28 @@ frame (`render_thumbnail`, cached under previews, two decodes at a time, request
 The pure rules (`container_signature`, `is_blank`, `is_unwritten_slot_name`, `thumbnail_args`) live in
 `crates/decoder` with tests.
 
+**0.4.5 (owner field notes 2026-09-20):** a Tapo slot that plays as one 24-minute video holds many motion
+clips. Read from the operator's real file (bucket copy, range reads of the index only): a single `mdat` with
+the `moov` at the tail; 21,123 frames at 16.67 fps in 30-frame GOPs; presentation time continuous across
+clips; each clip begins on a key frame whose `stts` duration is stretched to ~0.52 s (the muxer's only mark);
+a proprietary `stte` table inside the `free` box lists 76 trigger timestamps in the 90 kHz timescale (71 clip
+starts plus re-triggers inside long clips, then uninitialised memory); no SEI timestamps; audio is µ-law
+PCM. **Nothing in the file records the wall-clock gap between clips** — the burnt-in OSD clock does (at
+143 s of playback it read 256 s of wall clock). The desktop now finds the segments from the index alone
+(`fcm_decoder::mp4`, tested), cuts them in one ffmpeg segment-muxer pass with the video stream-copied and
+the audio re-encoded to AAC only because MP4 refuses µ-law (verified: 71 clips, frame counts 270 / 1443 /
+300 … exactly as planned, each starting on a key frame, 5.5 s for 256 MB), hashes each clip, and lists them
+as items with the same mark / place / preview / send controls. Clip times are shown and sent as **lower
+bounds** (`start_time_source: segment_offset_lower_bound`, `clock_note`), never as recorded times.
+
+Open question, deliberately not solved here: recovering the true wall clock per clip. Options in order of
+trust: (1) Tapo's card-level index, if the other files on the card carry event times (the operator's copy has
+"1 subfolder · 6 other files" — names unknown); (2) reading the burnt-in OSD clock on each clip's first key
+frame — a prototype on the real file read 35 of 71 correctly with fixed-pitch template matching and a
+monotonic guard; the rest failed on bright backgrounds behind the white digits, so it is not yet trustworthy
+enough to date evidence and would need a stricter outline mask plus a reject-when-unsure rule; (3) accepting
+the lower bound. Until (1) or (2) is proven, the lower bound stands and is labelled.
+
 ## Phase 2 — Analyse here (0.5.x)
 
 Goal: the laptop runs the same detection/recognition tier the VPS runs and FCM receives **results**, not footage,

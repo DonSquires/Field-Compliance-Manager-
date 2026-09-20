@@ -81,6 +81,17 @@
 .content-badge--offline{border-color:#3f6a86;color:#7fb6e8}
 .link-button{background:none;border:0;padding:0 2px;margin-left:6px;font:inherit;font-size:11px;color:#b7e4cf;text-decoration:underline;cursor:pointer}
 .link-button:hover{color:#d8f5e6}
+.clip-chip{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:9px;border:1px solid #5a8a6e;background:#14261f;font:600 10px 'DM Sans';color:#b7e4cf;cursor:pointer;vertical-align:middle;white-space:nowrap}
+.clip-chip:hover:not(:disabled){border-color:#7ad6a8;color:#d8f5e6}
+.clip-chip:disabled{opacity:.6;cursor:default}
+.clip-chip.is-split{border-color:#3f5e55;color:#9cb0a9;background:#101c19}
+.recording.is-split{background:#111f1b}
+.clip-group-note{display:flex;align-items:flex-start;gap:7px;padding:7px 12px 8px 110px;font-size:11px;line-height:1.45;color:#9cb0a9;background:#0f1917;border-top:1px dashed #2c423e}
+.clip-group-note .mono{font-size:10px;word-break:break-all}
+.recording--clip{padding-left:36px;background:#0d1715;border-top:1px dashed #1e2f2b}
+.recording--clip .recording__meta strong{color:#a9c4bb}
+.recording__time--bound{color:#9cb0a9;font-size:12px}
+.recording--clip.is-sent{background:#122319}
 @media(max-width:1150px){.recording--thumb{grid-template-columns:86px 72px minmax(0,1fr) auto}.recording__thumb{width:72px}}
 .mark-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:14px;padding:10px 12px;border:1px solid #2c423e;border-radius:8px;background:#12201e}
 .mark-filter{display:inline-flex;align-items:center;border:1px solid #35534a;border-radius:99px;background:#15221f;color:#c9d9d3;padding:5px 10px;font:600 11px 'DM Sans';cursor:pointer}
