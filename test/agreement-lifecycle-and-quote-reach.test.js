@@ -64,3 +64,14 @@ test('a patrol run belongs to the delivering branch; stop modules inherit the sc
   assert.match(workPanel, /supabase\.rpc\('get_descendant_organizations', \{ org_id: agreement\.provider_organization_id \}\)/);
   assert.match(workPanel, /p_operating_organization_id: \(isPatrol \? routes\.find\(\(route\) => route\.id === form\.routeId\)\?\.organization_id : null\) \?\? agreement\.provider_organization_id,/);
 });
+
+test("the account's readiness and next action count a patrol run, and an active account is told to roster and deliver", () => {
+  const orgReadiness = read('supabase/migrations/20260920110000_account_readiness_counts_patrol_runs.sql');
+  const activeNext = read('supabase/migrations/20260920120000_active_account_next_action.sql');
+  assert.match(orgReadiness, /OR sa\.id IN \(SELECT s\.service_agreement_id FROM public\.client_site_patrol_config c JOIN public\.service_agreement_delivery_schedules s ON s\.proposal_scope_schedule_id = c\.proposal_scope_schedule_id WHERE c\.patrol_route_id = wu\.patrol_route_id AND c\.active AND s\.active\)/);
+  assert.match(orgReadiness, /AND \(sa\.ends_on IS NULL OR sa\.ends_on >= current_date\)\s+AND wu\.active/);
+  assert.match(activeNext, /WHEN f\.status = 'active' AND f\.contact_ready AND f\.location_ready AND f\.agreement_ready AND f\.module_ready AND f\.billing_ready AND f\.operations_ready THEN 'Active: roster the work units and deliver'/);
+  // the portfolio re-reads readiness on every load and headlines the live agreement
+  assert.match(workspace, /supabase\.rpc\('get_crm_organization_readiness', \{ p_organization_ids: \[account\.id\] \}\)/);
+  assert.match(workspace, /const liveOperational = agreements\.filter\(\(agreement\) => agreement\.agreement_type === 'operational' && \['live', 'ending'\]\.includes\(agreementTermState\(agreement\)\)\);/);
+});
