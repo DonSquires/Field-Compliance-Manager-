@@ -90,7 +90,10 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    process, never loaded into FCM. **0.4.1 signed the same way on 2026-09-19** ("Video files" as a second source,
    "Save to folder" with a playable MP4, working rail navigation, DHAV header-parse fix): SHA-256
    `989c0ad68ba2103bd2498d1f26e1fe3e1b05bde9d989eb4f19103c6533bac23c` (3,007,128 bytes), verified from the
-   public URL; the web app's download link points at 0.4.1.
+   public URL; the web app's download link points at 0.4.1. **0.4.2 signed the same way on 2026-09-20** (saved
+   state per recording, file picker for the video-files source, picture-stream review, pop-out preview window):
+   SHA-256 `0d9b9a9620b20da1009effc72f63da2c36b6396c510c716284110e34e0c53ee0` (3,027,664 bytes), verified from
+   the public URL; the web app's download link points at 0.4.2.
 
 What it buys:
 
