@@ -169,6 +169,29 @@ registration; the console's enhancement/zoom gets the located box.
   weights must be staged there (`MODELS_DIR=/opt/fcm/models python3 services/fcm-inference/download_models.py`
   for downloadable files; the SpeciesNet ONNX + parity report are `docker cp`'d out of the built image).
   Env: `DETECTOR_MODEL=rf-detr-small-512-coco`, `DETECTOR_TILES=auto`, `INFERENCE_DEVICE=cpu`.
+* **CPU budget on the VPS (2026-09-21, after the queue stall).** On 2026-09-20/21 the queue stopped
+  draining: 14 jobs queued 8–27 h, 3 stuck in `extracting_motion`, 31 failed as `motion extractor timed
+  out` or `The operation was aborted due to timeout`, `fcm-inference` marked unhealthy, 1–3 minute clips
+  taking ~20 minutes to scan. Two causes, both measured on the box. (1) The hypervisor was giving the VM
+  about half a core: `vmstat 1 3` showed **steal 93 %** (since-boot steal 2 %), no container cpu limits, no
+  cgroup throttling — a Hostinger-side condition (noisy neighbour or fair-use throttling after three days at
+  saturation), fixable only by the provider or by moving the work. (2) Our own oversubscription: ONNX
+  Runtime defaults to every core per session (detector, plate detector, OCR and SpeciesNet each took eight),
+  every OpenCV capture opened one FFmpeg decode thread per core (three extractors → 24), and the FastAPI
+  routes ran the models *on the event loop*, so `/health` could not answer, the watcher's 30 s timeouts
+  fired, and the server kept computing requests nobody was waiting for — a feedback loop. Commit `43895aec`
+  gives the pipeline an explicit budget: `detector.session_options()` (`INFERENCE_INTRA_OP_THREADS`,
+  default 4; inter-op 1; sequential) on every staged session; every CPU route runs in a worker thread
+  behind a gate (`INFERENCE_CONCURRENCY=1`, `INFERENCE_MAX_WAITING=6`, beyond that an immediate 503 with
+  `Retry-After` so the caller moves to its next machine); `/health` stays on the loop and reports
+  `queue {running, waiting}` and `cpu_threads_per_session`; the extractor opens captures with
+  `CAP_PROP_N_THREADS=VISION_DECODE_THREADS` (2); the watcher's per-frame `/infer/alpr`, `/infer/face`,
+  `/infer/people` and `/infer` calls go through the tolerant `classifyLocally`, so a timeout or 503 is that
+  frame's answer (`success:false`, logged `inference_route_unavailable`) rather than a failed job; compose
+  runs two jobs at once (`VISION_WORKER_CONCURRENCY=2`). Steady-state target: eight cores = 2 jobs × 2
+  decode threads + 4 detector threads. A stuck `processing` job has no lease reaper —
+  `claim_cctv_inference_job` claims only `queued` — so after a watcher restart the orphans are reset by an
+  audited SQL update (`audit_log.action = 'cctv_inference_rerun'`), never by hand-editing results.
 * RunPod: template `bwway2hiwx` → `fcm-inference-gpu@sha256:944b93bb…` (commit `6363ae2`), env
   `DETECTOR_MODEL=rf-detr-large-704-coco`; endpoint `katqqnmds1dphs` set to 1 GPU per worker (was 2), GPU
   types 4090 / RTX 6000 Ada / L40S / A40 (all CUDA 12), network-volume pin removed, idle 30 s, execution
