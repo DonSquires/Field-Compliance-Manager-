@@ -55,6 +55,7 @@ services:
     image: fcm/fcm-inference:local
     container_name: fcm-inference
     restart: unless-stopped
+    init: true
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
     ports:
       - "127.0.0.1:3002:3000"
@@ -205,6 +206,10 @@ services:
     image: fcm/fcm-vision-watcher:local
     container_name: fcm-vision-watcher
     restart: unless-stopped
+    # PID 1 is tini (2026-09-21): the watcher spawns extractor processes; without an init, a `docker stop` that
+    # node answers slowly leaves the extractors orphaned until the PID namespace is torn down, and Docker can
+    # race the shim's reap ("PID … is zombie and can not be killed"). tini forwards signals and reaps children.
+    init: true
     env_file: /opt/fcm/.env
     environment:
       VISION_VIDEO_ROOT: /opt/fcm/storage
