@@ -63,7 +63,22 @@ export const endedWords = (reason: string | null | undefined): string => reason 
 import './RosterCalendar.css';
 import './RosterCommercialReadiness.css';
 
-interface Staff { id: string; staffId: string; name: string; workReady: boolean; employmentType: string | null; credentialRisk: 'clear' | 'expiring' | 'expired' | 'unverified'; }
+interface Staff { id: string; staffId: string; name: string; workReady: boolean; employmentType: string | null; credentialRisk: 'clear' | 'expiring' | 'expired' | 'unverified'; credentialExpiry: string | null; }
+/** Why this person cannot take this shift, in plain words — or null. A licence that expires after the shift ends is a warning (the preview says so), not a block. */
+export const credentialBlocker = (person: Pick<Staff, 'name' | 'credentialRisk' | 'credentialExpiry'>, endValue: string): string | null => {
+  if (person.credentialRisk === 'unverified') return `${person.name} has no verified licence or warrant on file. Verify it in People & HR › Credentials first.`;
+  if (person.credentialRisk === 'expired') return `${person.name}'s licence or warrant has expired${person.credentialExpiry ? ` (${dayWords(person.credentialExpiry)})` : ''}. Record the renewal in People & HR › Credentials first.`;
+  if (person.credentialExpiry && endValue && new Date(person.credentialExpiry).getTime() < new Date(endValue).getTime()) return `${person.name}'s licence or warrant expires ${dayWords(person.credentialExpiry)}, before this shift ends. Record the renewal in People & HR › Credentials first.`;
+  return null;
+};
+/** The badge under a name on the board: 'licence clear' · 'licence expires 1 Oct' · 'licence expired' · 'not verified' · 'not ready'. */
+export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credentialRisk' | 'credentialExpiry'>): string => {
+  if (!person.workReady) return 'not ready';
+  if (person.credentialRisk === 'unverified') return 'not verified';
+  if (person.credentialRisk === 'expired') return 'licence expired';
+  if (person.credentialRisk === 'expiring') return `licence expires ${person.credentialExpiry ? dayWords(person.credentialExpiry) : 'soon'}`;
+  return 'licence clear';
+};
 interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; external_refs?: { deputy?: { code?: string; name?: string } } | null; }
 interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
@@ -184,7 +199,7 @@ const RosterOperationsPage: React.FC = () => {
       let credentialRisk: Staff['credentialRisk'] = user.credential_verified === false ? 'unverified' : 'clear';
       if (user.credential_expiry && new Date(user.credential_expiry).getTime() < now) credentialRisk = 'expired';
       else if (user.credential_expiry && new Date(user.credential_expiry).getTime() - now < 30 * 86_400_000) credentialRisk = 'expiring';
-      return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk };
+      return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk, credentialExpiry: user.credential_expiry ?? null };
     }));
     setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setLoading(false);
   }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart]);
@@ -298,7 +313,7 @@ const RosterOperationsPage: React.FC = () => {
     setSaving(true); setError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId);
     if (!person) { setError('A work-ready staff member is required.'); setSaving(false); return; }
-    if (person.credentialRisk !== 'clear') { setError(`${person.name} cannot be assigned until their credential status is clear.`); setSaving(false); return; }
+    const blocker = credentialBlocker(person, form.end); if (blocker) { setError(blocker); setSaving(false); return; }
     const { error: updateError } = await supabase.rpc('update_roster_slot', {
       p_slot_id: editingSlot.id,
       p_expected_status: editingSlot.status,
@@ -319,7 +334,7 @@ const RosterOperationsPage: React.FC = () => {
     }
     event.preventDefault(); setSaving(true); setError(null); setNotice(null);
     const person = staff.find((candidate) => candidate.id === form.officerId); const unit = workUnits.find((candidate) => candidate.id === form.workUnitId);
-    if (person && person.credentialRisk !== 'clear') { setError(`${person.name} cannot be assigned until their credential status is clear.`); setSaving(false); return; }
+    const blocker = person ? credentialBlocker(person, form.end) : null; if (blocker) { setError(blocker); setSaving(false); return; }
     if (person && hasAvailabilityConflict(person.staffId, form.start, form.end)) { setError(`${person.name} is unavailable during the selected assignment time.`); setSaving(false); return; }
     const slotResponse = await supabase.rpc('create_roster_slot', { p_client_request_id: crypto.randomUUID(), p_work_unit_id: form.workUnitId, p_staff_id: person?.staffId, p_scheduled_start: new Date(form.start).toISOString(), p_scheduled_end: new Date(form.end).toISOString(), p_publish: form.publish, p_notes: form.notes.trim() || null });
     if (slotResponse.error || !slotResponse.data) { setError(slotResponse.error?.message ?? 'Roster slot creation was not confirmed.'); setSaving(false); return; }
@@ -480,7 +495,7 @@ const RosterOperationsPage: React.FC = () => {
       </div>}
       {visibleStaff.map((person) => (
         <div className="roster-row" key={person.id}>
-          <button className="roster-person" onClick={() => openCreate(person)}><span>{person.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{person.name}</strong><small>{person.employmentType ?? 'Employment unset'}</small></div><i className={person.workReady && person.credentialRisk === 'clear' ? 'is-ready' : 'is-risk'}>{person.workReady ? person.credentialRisk : 'not ready'}</i></button>
+          <button className="roster-person" onClick={() => openCreate(person)}><span>{person.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{person.name}</strong><small>{person.employmentType ?? 'Employment unset'}</small></div><i className={person.workReady && person.credentialRisk === 'clear' ? 'is-ready' : 'is-risk'}>{credentialBadgeWords(person)}</i></button>
           {days.map((day) => {
             const key = isoDate(day);
             const dayShifts = shifts.filter((shift) => shift.officer_user_id === person.id && isoDate(new Date(shift.scheduled_start)) === key);

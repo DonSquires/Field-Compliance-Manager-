@@ -70,3 +70,14 @@ test('People & HR owns the rules for the employing organisation, in plain words'
   assert.match(rulesPanel, /min="1" max="168"/);
   assert.match(rulesPanel, /min="1" max="31"/);
 });
+
+test('a licence that outlives the shift never blocks rostering; expired or unverified says exactly what to do', () => {
+  assert.doesNotMatch(rosterPage, /cannot be assigned until their credential status is clear/);
+  assert.match(rosterPage, /has no verified licence or warrant on file\. Verify it in People & HR › Credentials first\./);
+  assert.match(rosterPage, /licence or warrant has expired/);
+  assert.match(rosterPage, /expires \$\{dayWords\(person\.credentialExpiry\)\}, before this shift ends\. Record the renewal in People & HR › Credentials first\./);
+  assert.match(rosterPage, /const blocker = credentialBlocker\(person, form\.end\); if \(blocker\)/);
+  assert.match(rosterPage, /const blocker = person \? credentialBlocker\(person, form\.end\) : null; if \(blocker\)/);
+  assert.match(rosterPage, /\{credentialBadgeWords\(person\)\}<\/i>/);
+  assert.match(rosterPage, /return `licence expires \$\{person\.credentialExpiry \? dayWords\(person\.credentialExpiry\) : 'soon'\}`;/);
+});
