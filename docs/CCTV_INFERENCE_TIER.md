@@ -128,8 +128,25 @@ registration; the console's enhancement/zoom gets the located box.
 
 * RunPod `infer_batch` (`runpod_handler.py`) now returns `alpr` and `face` blocks per frame in addition to
   the triage; `ping` returns the full health payload including providers.
-* `services/vision/vision_job_watcher.js` prefers the GPU answer (`runpodResult.alpr/face`), then
-  `/infer/detect`'s embedded `alpr` on the VPS, and only then calls `/infer/alpr` — passing the detector's
+* **Where the work runs (owner ruling 2026-09-20, GPU cost).** `services/vision/vision_job_watcher.js`
+  runs under `VISION_INFERENCE_POLICY`: `vps_first` (default) — the VPS `/infer/detect` triages every
+  sampled frame and RunPod is asked only about frames the VPS left unanswered; `vps_only` never calls
+  RunPod; `gpu_first` restores the earlier order. A VPS answer is reshaped to the `infer_batch` result
+  (`localTriageResult`) with `triage_provider: 'vps'`, so recognition and the consolidator read either
+  machine's answer identically and every provenance label (`alpr.provider`, `face.provider`,
+  `people.provider`, `inference.provider`) names the machine that actually looked. Both machines are
+  metered per job (`usage.gpu_calls/frames_sent/gpu_ms` and `usage.vps_calls/vps_ms`) and the plan
+  records `coverage` (frames selected / triaged / untriaged, by provider).
+* **A frame nobody examined is a gap, not a "no sighting".** Before this ruling one RunPod timeout opened
+  the five-minute circuit breaker, the remaining batches were skipped, and the job completed with
+  `person_events: 0` for frames no detector had seen (2026-09-20: 38 of 139 jobs, most with 0 of 120
+  frames examined; a person walking through frame at 14:15:16 on `d000722` went unreported). Now, when
+  `coverage.frames_untriaged > 0` after a retry pass, the job is deferred through
+  `defer_cctv_inference_job` (label says how many frames went unanswered) and retried, keeping the
+  checkpointed answers. Those 38 were re-queued with
+  `scripts/rerun-prefix-cctv-jobs.mjs --scope unexamined --apply` (audited `cctv_inference_rerun`).
+* Recognition order within a frame is unchanged: the triage answer's own `alpr`/`face` first, then
+  `/infer/detect`'s embedded `alpr`, and only then `/infer/alpr` — passing the detector's
   `vehicle_bboxes` so the VPS reader is anchored too.
 * `services/vision/motion_consolidator.js` writes ALPR provenance onto plated vehicle events and observation
   attributes: `alpr_provider, alpr_models, alpr_evidence_quality, plate_raw_text, plate_corrections,
