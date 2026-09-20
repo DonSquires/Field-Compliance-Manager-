@@ -58,7 +58,10 @@ test('officer schedule and coverage claim are visually correct and operational',
   const browserErrors = monitorBrowserErrors(page);
   await signInAsOfficer(page);
   await expect(page.getByRole('heading', { name: 'My schedule' })).toBeVisible();
-  await expect(page.getByText('North district patrol')).toBeVisible();
+  // A linked field shift is headlined by the work it covers, with the service type and notes underneath.
+  const linkedShift = page.locator('#officer-roster-slot-33333333-3333-4333-8333-333333333334');
+  await expect(linkedShift.locator('strong', { hasText: 'North District Patrol' })).toBeVisible();
+  await expect(linkedShift).toContainText('patrol · 8 planned stops · North district patrol');
   const internalAssignment = page.getByText('Roster Administration', { exact: true }).locator('..').locator('..');
   await expect(internalAssignment).toBeVisible();
   await internalAssignment.getByRole('button', { name: 'Decline' }).click();
@@ -91,7 +94,7 @@ test('officer schedule and coverage claim are visually correct and operational',
 test('linked assignment acceptance returns the shared roster and shift identity', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsOfficer(page);
-  const fieldAssignment = page.getByText('North district patrol').locator('..').locator('..');
+  const fieldAssignment = page.locator('#officer-roster-slot-33333333-3333-4333-8333-333333333334');
   await fieldAssignment.getByRole('button', { name: 'Accept' }).click();
   await page.getByRole('dialog', { name: 'Accept assignment?' }).getByRole('button', { name: 'Confirm acceptance' }).click();
 

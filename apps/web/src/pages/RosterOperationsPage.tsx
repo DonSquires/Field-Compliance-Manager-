@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { DeputyImportWizard } from '../components/DeputyImportWizard';
 import { moveRosterPeriod, NZ_HOLIDAY_REGIONS, nzRosterHolidays, rosterPeriod, type RosterHorizon } from '../lib/rosterCalendar';
-import { plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from '../lib/rosterWords';
+import { contractedDaysWords, contractedHoursWords, plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from '../lib/rosterWords';
 import { credentialTypeLabel } from '../lib/credentialWords';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, workflowContextQuery } from '../lib/workflowNavigation';
@@ -12,17 +12,19 @@ import './RosterOperationsPage.css';
 import './RosterSlotActions.css';
 import './RosterAvailability.css';
 
-interface CoveragePreview { kind: 'patrol' | 'static' | string; ok: boolean; stop_count?: number; config_count?: number; contracted_days?: number[]; has_route?: boolean; day_of_week?: number; place_name?: string | null; place_kind?: string | null; boundary_verified?: boolean; has_module?: boolean; }
-const DAY_NAMES = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const dayList = (days: number[] | undefined) => (days ?? []).map((d) => DAY_NAMES[d]).join(', ');
+interface CoveragePreview { kind: 'patrol' | 'static' | string; ok: boolean; stop_count?: number; config_count?: number; contracted_days?: number[]; has_route?: boolean; day_of_week?: number; place_name?: string | null; place_kind?: string | null; boundary_verified?: boolean; has_module?: boolean; window_start?: string | null; window_end?: string | null; visits_max?: number; min_gap_minutes?: number; outside_window?: boolean; too_short_for_visits?: boolean; }
 const weekdayName = (value: string) => new Date(value).toLocaleDateString('en-NZ', { weekday: 'long' });
-/** What the rosterer reads under Start/End before creating the shift. */
+/** What the rosterer reads under Start/End before creating the shift. Patrols default to every day, any time of day. */
 export const coverageWords = (preview: CoveragePreview, startLocal: string): { tone: 'ok' | 'warn'; text: string } => {
   if (preview.kind === 'patrol') {
     if (!preview.has_route) return { tone: 'warn', text: 'This run has no patrol route yet, so the shift would have no stops. Set the route up on the work unit first.' };
     if (!preview.config_count) return { tone: 'warn', text: 'This route has no contracted stops at all yet, so the shift would have nothing to visit.' };
-    if (!preview.stop_count) return { tone: 'warn', text: `No contracted stops on a ${weekdayName(startLocal)} for this run — the contract covers ${dayList(preview.contracted_days)}. The shift would have nothing to visit unless stops are added.` };
-    return { tone: 'ok', text: `${plural(preview.stop_count, 'contracted stop')} on a ${weekdayName(startLocal)} for this run.` };
+    if (!preview.stop_count) return { tone: 'warn', text: `No contracted stops on a ${weekdayName(startLocal)} for this run — the contract covers ${contractedDaysWords(preview.contracted_days)}. The shift would have nothing to visit unless stops are added.` };
+    const hours = contractedHoursWords(preview.window_start, preview.window_end);
+    if (preview.outside_window) return { tone: 'warn', text: `This shift is outside the contracted hours (${hours}) for this run. Every visit would already be late when the officer starts — move the shift into the window or vary the agreement.` };
+    if (preview.too_short_for_visits) return { tone: 'warn', text: `${plural(preview.stop_count, 'contracted stop')} on a ${weekdayName(startLocal)}, but the contract wants ${preview.visits_max} visits at least ${preview.min_gap_minutes} min apart and this shift is too short to fit them. Lengthen the shift or expect the later visits to be missed.` };
+    const spread = (preview.visits_max ?? 1) > 1 ? (preview.window_start ? '; visits are spread across the part of that window the shift covers' : '; visits are spread across the shift') : '';
+    return { tone: 'ok', text: `${plural(preview.stop_count, 'contracted stop')} on a ${weekdayName(startLocal)} for this run (contracted ${contractedDaysWords(preview.contracted_days)}, ${hours}${spread}).` };
   }
   if (preview.kind === 'static') {
     if (!preview.has_module) return { tone: 'warn', text: 'This post has no static guarding module on its agreement, so the officer would have no task to work.' };
@@ -146,10 +148,11 @@ const RosterOperationsPage: React.FC = () => {
     if (!showCreate || !form.workUnitId || !form.start) { setUnitCoverage(null); return; }
     let cancelled = false;
     const startDate = new Date(form.start);
+    const endDate = form.end ? new Date(form.end) : null;
     const shiftDate = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
-    supabase.rpc('preview_work_unit_coverage', { p_work_unit_id: form.workUnitId, p_shift_date: shiftDate }).then(({ data }) => { const preview = data as CoveragePreview | null; if (!cancelled) setUnitCoverage(preview && typeof preview === 'object' && !Array.isArray(preview) && 'kind' in preview ? preview : null); });
+    supabase.rpc('preview_work_unit_coverage', { p_work_unit_id: form.workUnitId, p_shift_date: shiftDate, p_scheduled_start: startDate.toISOString(), p_scheduled_end: endDate && endDate > startDate ? endDate.toISOString() : null }).then(({ data }) => { const preview = data as CoveragePreview | null; if (!cancelled) setUnitCoverage(preview && typeof preview === 'object' && !Array.isArray(preview) && 'kind' in preview ? preview : null); });
     return () => { cancelled = true; };
-  }, [showCreate, form.workUnitId, form.start]);
+  }, [showCreate, form.workUnitId, form.start, form.end]);
   // ATLAS READS: preview_roster_assignment — the same rest/hours/days check the slot trigger enforces, shown before the slot exists
   // the last refusal was about the previous officer/times; a changed shift starts clean
   useEffect(() => { if (showCreate) setError(null); }, [showCreate, form.officerId, form.start, form.end]);

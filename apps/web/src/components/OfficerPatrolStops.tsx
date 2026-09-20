@@ -5,9 +5,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, MapPin, RefreshCw, Signpost, TriangleAlert } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { plainWords } from '../lib/rosterWords';
 import './OfficerPatrolStops.css';
 
 interface StopPlace { kind: 'site' | 'zone' | 'unknown'; name: string; address: string | null; access_instructions: string | null; hs_notes: string | null }
+interface StopModule { module_key: string; is_required: boolean; status: string | null }
 export interface PatrolStop {
   id: string; stop_order: number; visit_number: number; visits_total: number;
   status: 'pending' | 'en_route' | 'on_scene' | 'completed' | 'skipped' | 'cancelled';
@@ -15,12 +17,18 @@ export interface PatrolStop {
   required_dwell_minutes: number; officer_instructions: string | null;
   actual_arrived_at: string | null; actual_departed_at: string | null;
   arrival_verification: string | null; arrival_distance_m: number | null; officer_notes: string | null;
-  module_key: string; place: StopPlace;
+  module_key: string; modules?: StopModule[]; place: StopPlace;
 }
 interface StopsBundle { shift: { id: string; status: string; scheduled_start: string; scheduled_end: string; route_name: string | null }; stops: PatrolStop[] }
 interface StopReceipt { reference: string; action: 'arrive' | 'depart'; occurred_at: string; stop_status: string; sla_status: string; arrival_verification: string | null; dwell_minutes: number | null; dwell_short: boolean; completed_stops: number; total_stops: number }
 
 const time = (value: string | null) => value ? new Date(value).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' }) : null;
+/** The toolset at this stop, in plain words: the modules the contract asks for, required ones first ("Parking enforcement"). */
+export const stopToolset = (stop: Pick<PatrolStop, 'module_key' | 'modules'>): string => {
+  const keys = (stop.modules ?? []).filter((module) => module.module_key !== 'general_patrol').map((module) => module.module_key);
+  const source = keys.length ? keys : [stop.module_key];
+  return source.map((key) => key === 'general_patrol' ? 'General patrol' : plainWords(key)).join(' · ');
+};
 const VERIFICATION_TEXT: Record<string, string> = {
   verified_on_site: 'GPS confirmed you on site',
   near_site: 'GPS placed you near the site',
@@ -127,6 +135,7 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
                 <div className="patrol-stop-body">
                   <div className="patrol-stop-title">
                     <strong>{stop.place.name}</strong>
+                    <span className="patrol-stop-toolset">{stopToolset(stop)}</span>
                     <span>{stop.visits_total > 1 ? `Visit ${stop.visit_number} of ${stop.visits_total} · ` : ''}{stop.status === 'completed' ? `Done ${time(stop.actual_departed_at) ?? ''}` : stop.status === 'on_scene' ? `On site since ${time(stop.actual_arrived_at)}` : stop.status === 'skipped' ? 'Skipped by dispatch' : stop.status === 'cancelled' ? 'Cancelled by dispatch' : `Arrive ${stop.sla_window_open ? `between ${time(stop.sla_window_open)} and ` : 'by '}${time(stop.sla_arrive_by)}`} · stay {stop.required_dwell_minutes} min</span>
                   </div>
                   {stop.place.address && <p className="patrol-stop-address">{stop.place.address}</p>}

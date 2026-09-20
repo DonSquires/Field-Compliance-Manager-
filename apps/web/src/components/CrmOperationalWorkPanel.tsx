@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { CheckCircle2, ClipboardList, MapPinned, Plus, RefreshCw, Route, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { contractedDaysWords, contractedHoursWords, sentenceCase } from '../lib/rosterWords';
 
 interface AgreementRef {
   id: string;
@@ -37,9 +38,8 @@ interface PatrolConfigLink {
   patrol_route_id: string | null;
 }
 
-const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const describeDays = (days: number[]) => days.length >= 7 ? 'Every day' : days.length === 0 ? 'No days set' : days.map((day) => DAY_LABELS[day - 1] ?? day).join(', ');
-const describeWindow = (start: string | null, end: string | null) => start ? `${start.slice(0, 5)}${end ? `–${end.slice(0, 5)}` : ''}` : 'Any time in shift';
+const describeDays = (days: number[]) => sentenceCase(contractedDaysWords(days));
+const describeWindow = (start: string | null, end: string | null) => sentenceCase(contractedHoursWords(start, end));
 
 interface AgreementLocation {
   id: string;

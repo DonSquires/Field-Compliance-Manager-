@@ -23,8 +23,9 @@ test('the roster-time coverage preview uses the same day and month rule as gener
 });
 
 test('the Create shift dialog tells the rosterer, in plain words, and never blocks', () => {
-  assert.match(rosterPage, /supabase\.rpc\('preview_work_unit_coverage', \{ p_work_unit_id: form\.workUnitId, p_shift_date: shiftDate \}\)/);
-  assert.match(rosterPage, /No contracted stops on a \$\{weekdayName\(startLocal\)\} for this run — the contract covers \$\{dayList\(preview\.contracted_days\)\}\. The shift would have nothing to visit unless stops are added\./);
+  // the shift's hours travel with the request (20260920130000) so the contracted window can be checked
+  assert.match(rosterPage, /supabase\.rpc\('preview_work_unit_coverage', \{ p_work_unit_id: form\.workUnitId, p_shift_date: shiftDate, p_scheduled_start: startDate\.toISOString\(\), p_scheduled_end: endDate && endDate > startDate \? endDate\.toISOString\(\) : null \}\)/);
+  assert.match(rosterPage, /No contracted stops on a \$\{weekdayName\(startLocal\)\} for this run — the contract covers \$\{contractedDaysWords\(preview\.contracted_days\)\}\. The shift would have nothing to visit unless stops are added\./);
   assert.match(rosterPage, /has no verified boundary\$\{preview\.place_kind === 'zone' \? ' \(it is a zone, not a site\)' : ''\}, so the officer cannot record arriving or leaving the post\./);
   assert.match(rosterPage, /className=\{`roster-coverage-note is-\$\{words\.tone\}`\} role=\{words\.tone === 'warn' \? 'alert' : 'status'\}/);
   // the submit button's disabled condition does not depend on the preview

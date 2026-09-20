@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from './rosterWords';
+import { contractedDaysWords, contractedHoursWords, plainWords, plural, sentenceCase, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from './rosterWords';
 
 describe('roster plain words', () => {
   it('tells the rosterer what each field shift status means on the board', () => {
@@ -40,5 +40,23 @@ describe('roster plain words', () => {
     expect(plural(3, 'field shift record')).toBe('3 field shift records');
     const range = timeRange('2026-08-25T08:00:00+12:00', '2026-08-25T16:00:00+12:00');
     expect(range).toMatch(/\d{2}:\d{2}.*\u2013.*\d{2}:\d{2}/);
+  });
+
+  it('describes contracted days Monday-first and treats no restriction as every day (owner ruling 2026-09-20)', () => {
+    expect(contractedDaysWords([1, 2, 3, 4, 5, 6, 7])).toBe('every day');
+    expect(contractedDaysWords([])).toBe('every day');
+    expect(contractedDaysWords(null)).toBe('every day');
+    expect(contractedDaysWords([5, 1, 2, 3, 4])).toBe('Mon\u2013Fri');
+    expect(contractedDaysWords([6, 7])).toBe('Sat, Sun');
+    expect(contractedDaysWords([7, 1])).toBe('Mon, Sun');
+    expect(contractedDaysWords([1, 3, 5])).toBe('Mon, Wed, Fri');
+    expect(sentenceCase(contractedDaysWords([2, 3, 4]))).toBe('Tue\u2013Thu');
+  });
+
+  it('treats a patrol with no contracted window as 24-hour work', () => {
+    expect(contractedHoursWords(null, null)).toBe('any time of day (24-hour)');
+    expect(contractedHoursWords('07:00:00', '19:00:00')).toBe('07:00\u201319:00');
+    expect(contractedHoursWords('22:00', null)).toBe('22:00\u2013end of shift');
+    expect(sentenceCase('every day')).toBe('Every day');
   });
 });

@@ -27,6 +27,6 @@ describe('patrol run from an accepted agreement', () => {
     expect(source).toContain("'Build patrol run'");
     expect(source).toContain("'Add the new places to the run'");
     expect(source).toContain('Add work unit for this run');
-    expect(source).toContain("const describeDays = (days: number[]) => days.length >= 7 ? 'Every day'");
+    expect(source).toContain("const describeDays = (days: number[]) => sentenceCase(contractedDaysWords(days));");
   });
 });

@@ -48,10 +48,30 @@ test('the Create shift dialog says what the shift would contain on that day befo
         await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
         await page.getByRole('button', { name: 'Copy selected' }).click();
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
-        await expect(dialog.getByRole('alert')).toContainText(/No contracted stops on a \w+day for this run — the contract covers Mon, Tue, Wed, Thu, Fri\. The shift would have nothing to visit unless stops are added\./);
+        await expect(dialog.getByRole('alert')).toContainText(/No contracted stops on a \w+day for this run — the contract covers Mon–Fri\. The shift would have nothing to visit unless stops are added\./);
         expect(requested).toMatchObject({ p_work_unit_id: '23232323-2323-4323-8323-232323232323' });
         expect(String((requested as Record<string, unknown> | null)?.p_shift_date)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        // the shift's own hours travel with the request so the contract window can be checked
+        expect(String((requested as Record<string, unknown> | null)?.p_scheduled_start)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+        expect(String((requested as Record<string, unknown> | null)?.p_scheduled_end)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
         // still advisory: the shift can be created
+        await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeEnabled();
+});
+
+test('a shift outside the contracted hours, or too short for the contracted visits, is said plainly', async ({ page }) => {
+        let shape: 'night' | 'short' = 'night';
+        await page.route('**/rest/v1/rpc/preview_work_unit_coverage', async (route) => {
+                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ kind: 'patrol', ok: shape !== 'night', has_route: true, config_count: 1, stop_count: 2, day_of_week: 2, contracted_days: [1, 2, 3, 4, 5], window_start: '07:00', window_end: '19:00', visits_max: 2, min_gap_minutes: 60, outside_window: shape === 'night', too_short_for_visits: shape === 'short' }) });
+        });
+        await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+        await page.getByRole('button', { name: 'Copy selected' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Create shift' });
+        await expect(dialog.getByRole('alert')).toContainText('This shift is outside the contracted hours (07:00–19:00) for this run. Every visit would already be late when the officer starts — move the shift into the window or vary the agreement.');
+        shape = 'short';
+        await dialog.locator('label:has(> span:text-is("Start")) input').fill('2026-09-22T07:00');
+        await dialog.locator('label:has(> span:text-is("End")) input').fill('2026-09-22T07:45');
+        await expect(dialog.getByRole('alert')).toContainText('2 contracted stops on a Tuesday, but the contract wants 2 visits at least 60 min apart and this shift is too short to fit them. Lengthen the shift or expect the later visits to be missed.');
         await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeEnabled();
 });
 

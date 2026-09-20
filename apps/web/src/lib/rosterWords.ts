@@ -39,6 +39,23 @@ export const timeRange = (start: string, end: string): string =>
 /** `1 draft`, `3 drafts`. */
 export const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
 
+const ISO_DAY_SHORT = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** Contracted days (ISO 1 = Monday … 7 = Sunday; the week starts on Monday). None/all -> `every day`; runs -> `Mon–Fri`. */
+export const contractedDaysWords = (days: number[] | null | undefined): string => {
+  const set = Array.from(new Set((days ?? []).filter((day) => day >= 1 && day <= 7))).sort((left, right) => left - right);
+  if (set.length === 0 || set.length === 7) return 'every day';
+  const contiguous = set.every((day, index) => index === 0 || day === set[index - 1] + 1);
+  if (contiguous && set.length >= 3) return `${ISO_DAY_SHORT[set[0]]}\u2013${ISO_DAY_SHORT[set[set.length - 1]]}`;
+  return set.map((day) => ISO_DAY_SHORT[day]).join(', ');
+};
+
+/** Contracted hours. No window means the work can be required at any time of day (24-hour cover). */
+export const contractedHoursWords = (start: string | null | undefined, end: string | null | undefined): string =>
+  start ? `${start.slice(0, 5)}\u2013${end ? end.slice(0, 5) : 'end of shift'}` : 'any time of day (24-hour)';
+
+/** `every day` -> `Every day` for a standalone label. */
+export const sentenceCase = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
+
 const WORK_UNIT_TYPE_LABELS: Record<string, string> = { patrol: 'Patrol run', static: 'Static post', internal: 'Office / internal' };
 
 /** Work unit type code -> the words used everywhere else in the app. */

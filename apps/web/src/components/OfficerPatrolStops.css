@@ -24,6 +24,7 @@
 .patrol-stop-title { display: grid; gap: 2px; }
 .patrol-stop-title strong { font-size: 14px; }
 .patrol-stop-title span { color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.patrol-stop-title .patrol-stop-toolset { color: var(--color-accent, #5eead4); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
 .patrol-stop-address, .patrol-stop-notes { margin: 0; color: var(--color-text-secondary, #94a3b8); font-size: 12px; overflow-wrap: anywhere; }
 .patrol-stop-brief { display: grid; gap: 4px; padding: 8px 10px; border-left: 3px solid #4d7c96; border-radius: 4px; background: rgba(77, 124, 150, .1); font-size: 13px; }
 .patrol-stop-brief p { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; color: var(--color-text-secondary, #94a3b8); overflow-wrap: anywhere; }
