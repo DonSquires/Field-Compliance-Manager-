@@ -12,13 +12,14 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
+import { RosterRulesPanel } from '../components/RosterRulesPanel';
 import './PageStyles.css';
 import './RosterHRPage.css';
 
 // Keep the read path dormant until the corresponding Supabase table is deployed.
 const PAY_LINE_REVIEW_TABLE_DEPLOYED = false;
 
-type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'pay-review' | 'assets' | 'oncall' | 'court';
+type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'pay-review' | 'assets' | 'oncall' | 'court' | 'roster-rules';
 type RosterTabGroup = 'workforce' | 'people' | 'rostering' | 'pay-assets';
 
 interface StaffRow {
@@ -263,6 +264,7 @@ const TABS: { id: RosterTab; label: string }[] = [
   { id: 'cases', label: 'HR Cases' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'shift-templates', label: 'Shift Templates' },
+  { id: 'roster-rules', label: 'Rest & hours rules' },
   { id: 'coverage', label: 'Open Shifts' },
   { id: 'oncall', label: 'On-Call' },
   { id: 'court', label: 'Court' },
@@ -275,7 +277,7 @@ const TABS: { id: RosterTab; label: string }[] = [
 const TAB_GROUPS: { id: RosterTabGroup; label: string; tabs: RosterTab[] }[] = [
   { id: 'workforce', label: 'Workforce', tabs: ['staff', 'onboarding', 'credentials'] },
   { id: 'people', label: 'People', tabs: ['recruitment', 'performance', 'cases', 'leave'] },
-  { id: 'rostering', label: 'Rostering', tabs: ['shift-templates', 'coverage', 'oncall', 'court'] },
+  { id: 'rostering', label: 'Rostering', tabs: ['shift-templates', 'roster-rules', 'coverage', 'oncall', 'court'] },
   { id: 'pay-assets', label: 'Pay & Assets', tabs: ['timesheets', 'pay-review', 'assets'] },
 ];
 
@@ -314,7 +316,7 @@ const onboardingStatusLabel = (status: string | undefined) => ({ in_progress: 'I
 const RosterHRPage: React.FC = () => {
   const location = useLocation();
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
-  const { profile, operatingOrganizationId } = useAuth();
+  const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   // "Working in" the organisation itself sets operatingOrganizationId to the home org; only another org is branch mode.
   const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);
@@ -1651,6 +1653,11 @@ const RosterHRPage: React.FC = () => {
             )}
           </div>
         </section>
+      )}
+
+      {tab === 'roster-rules' && profile?.organizationId && (
+        // Rules belong to the employing organisation (staff_profiles.organization_id), not the branch being worked in.
+        <RosterRulesPanel organizationId={profile.employerOrganizationId ?? profile.organizationId} organizationName={operatingOrganizations.find((context) => context.organizationId === (profile.employerOrganizationId ?? profile.organizationId))?.organizationName ?? null} />
       )}
 
       {tab === 'shift-templates' && (

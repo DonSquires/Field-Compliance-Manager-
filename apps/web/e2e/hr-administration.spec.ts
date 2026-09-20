@@ -206,3 +206,28 @@ test('a first credential is recorded and verified from the onboarding card throu
   await expect(page.getByRole('status')).toContainText('Security licence recorded and verified for Ana Ngata. If nothing else is holding them up, you can mark them work ready.');
   expect(payload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_credential_type: 'security_licence', p_credential_number: 'COA-123456', p_issuing_authority: 'PSPLA', p_issued_date: '2026-01-15', p_expiry_date: '2028-01-14', p_verified: true });
 });
+test('administrator sets the rest and hours rules the roster enforces, in plain words', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  let saved: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/manage_organization_fatigue_rules', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>; saved = payload;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ organization_id: payload.p_organization_id, min_rest_hours_between_shifts: payload.p_min_rest_hours_between_shifts, max_hours_per_week: payload.p_max_hours_per_week, max_consecutive_days: payload.p_max_consecutive_days, enforced: payload.p_enforced, updated_at: '2026-08-30T09:31:00.000Z' }) });
+  });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Rostering', exact: true }).click();
+  await page.getByRole('button', { name: 'Rest & hours rules' }).click();
+  const panel = page.locator('.roster-rules');
+  await expect(panel.getByRole('heading', { name: 'Rest & hours rules' })).toBeVisible();
+  // no row yet: the rosterer is told the roster is not checking anything
+  await expect(panel.getByRole('status')).toContainText('Not set. The roster is not checking rest or hours for anyone yet');
+  await expect(panel.getByRole('button', { name: 'Set rules' })).toBeVisible();
+  await panel.getByLabel('Minimum rest between shifts (hours)').fill('10');
+  await panel.getByLabel('Most hours in a week').fill('60');
+  await panel.getByLabel('Most days in a row').fill('6');
+  await panel.getByRole('button', { name: 'Set rules' }).click();
+  await expect(panel.getByText('Saved. From now on the roster refuses a shift that breaks these rules and says which one.')).toBeVisible();
+  await expect(panel.getByRole('status').first()).toContainText('Enforced: at least 10 h rest between shifts, no more than 60 h in a Monday–Sunday week, no more than 6 days in a row.');
+  await expect(panel.getByRole('button', { name: 'Save rules' })).toBeVisible();
+  expect(saved).toMatchObject({ p_organization_id: '33333333-3333-4333-8333-333333333333', p_min_rest_hours_between_shifts: 10, p_max_hours_per_week: 60, p_max_consecutive_days: 6, p_enforced: true });
+  expect(errors, errors.join('\n')).toEqual([]);
+});

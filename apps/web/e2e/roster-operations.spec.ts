@@ -124,3 +124,41 @@ test('roster page explains what to set up first when the branch has nothing to r
         await expect(page.getByRole('button', { name: 'Open People, Pay & HR' })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Publish 0 drafts' })).toBeDisabled();
 });
+test('the Create shift dialog shows the officer\'s rest, hours and days in a row and says when the roster will refuse', async ({ page }) => {
+        let requested: Record<string, unknown> | null = null;
+        await page.route('**/rest/v1/rpc/preview_roster_assignment', async (route) => {
+                const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>; requested = payload;
+                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: payload.p_staff_id, work_ready: true, rules: { min_rest_hours_between_shifts: 10, max_hours_per_week: 60, max_consecutive_days: 6, enforced: true }, rest_hours: 4, week_start: '2026-08-24', week_hours: 44, consecutive_days: 3, availability_conflict: false, conflict: "Only 4 hours' rest from the nearest other shift; this organisation requires 10", credential_warnings: [{ credential_type: 'Security licence', expiry_date: '2026-08-28', verified: true }] }) });
+        });
+        await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+        await page.getByRole('button', { name: 'Copy selected' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Create shift' });
+        const notes = dialog.locator('.roster-assignment-note');
+        await expect(notes.nth(0)).toHaveClass(/is-stop/);
+        await expect(notes.nth(0)).toContainText("The roster will refuse this: Only 4 hours' rest from the nearest other shift; this organisation requires 10.");
+        await expect(notes.nth(1)).toContainText('Security licence expires 28 Aug, before this shift ends.');
+        expect(requested).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222' });
+        expect(String((requested as Record<string, unknown> | null)?.p_scheduled_start)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+        // the server decides; the dialog still lets the rosterer try and shows the refusal inline
+        await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeEnabled();
+});
+
+test('when the employer has no rest and hours rules the Create shift dialog says the roster is not checking fatigue', async ({ page }) => {
+        await page.route('**/rest/v1/rpc/preview_roster_assignment', async (route) => {
+                await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', work_ready: true, rules: null, rest_hours: null, week_start: '2026-08-24', week_hours: 4, consecutive_days: 1, availability_conflict: false, conflict: null, credential_warnings: [] }) });
+        });
+        await page.route('**/rest/v1/rpc/create_roster_slot', async (route) => {
+                await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: 'P0001', message: "Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10", details: null, hint: null }) });
+        });
+        await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+        await page.getByRole('button', { name: 'Copy selected' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Create shift' });
+        const notes = dialog.locator('.roster-assignment-note');
+        await expect(notes.nth(0)).toContainText('4 h in the week starting 24 Aug · no other shift nearby · day 1 in a row.');
+        await expect(notes.nth(1)).toContainText('No rest and hours rules are set for this officer\'s employer, so the roster is not checking fatigue. Set them in People & HR › Rostering › Rest & hours rules.');
+        // a server refusal lands inside the dialog, not behind it
+        await dialog.getByRole('button', { name: 'Create shift' }).click();
+        await expect(dialog.locator('.roster-dialog-error')).toContainText("Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10");
+});
