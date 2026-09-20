@@ -1,19 +1,26 @@
-// Re-run video_motion jobs that completed before the clock-keyed extractor was deployed (worker restart
-// 2026-09-19T08:51:12Z). Removes exactly what those jobs wrote — inference_results, entity observations,
-// inference-sourced device events, face observations — resets the scene-memory counters those results added,
-// clears the jobs' derived caches on the VPS, and requeues them. Evidence rows, hashes, playback copies,
-// custody and audit are untouched. Owner-authorised runs only.
+// Re-run video_motion jobs whose results cannot be trusted. Two scopes:
+//   prefix      — completed before the clock-keyed extractor was deployed (worker restart 2026-09-19T08:51:12Z)
+//   unexamined  — completed while some sampled frames were never examined by any detector (before commit 6f3c6085
+//                 the RunPod circuit breaker skipped whole batches and the job still completed as "no sightings")
+// Removes exactly what those jobs wrote — inference_results, entity observations, inference-sourced device events,
+// face observations — resets the scene-memory counters those results added, and requeues them; the caller clears
+// the jobs' derived caches on the VPS. Evidence rows, hashes, playback copies, custody and audit are untouched.
+// Owner-authorised runs only.
 //
-//   node scripts/rerun-prefix-cctv-jobs.mjs                     # inventory only
+//   node scripts/rerun-prefix-cctv-jobs.mjs                                   # inventory only (prefix scope)
 //   node scripts/rerun-prefix-cctv-jobs.mjs --apply --before 2026-09-19T08:51:12Z
+//   node scripts/rerun-prefix-cctv-jobs.mjs --scope unexamined                # inventory only
+//   node scripts/rerun-prefix-cctv-jobs.mjs --scope unexamined --apply
 
 const PROJECT_REF = process.env.SUPABASE_PROJECT_REF ?? 'dotczcyyzgabmtmnglqj';
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? process.env.FIELD_COMPLIANCE_CODESPACE;
 if (!TOKEN) throw new Error('SUPABASE_ACCESS_TOKEN or FIELD_COMPLIANCE_CODESPACE is required');
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
-const BEFORE = args[args.indexOf('--before') + 1];
-if (APPLY && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(BEFORE ?? '')) throw new Error('--apply requires --before <ISO UTC instant the fixed worker started>');
+const SCOPE_NAME = args.includes('--scope') ? args[args.indexOf('--scope') + 1] : 'prefix';
+if (!['prefix', 'unexamined'].includes(SCOPE_NAME)) throw new Error('--scope must be prefix or unexamined');
+const BEFORE = args.includes('--before') ? args[args.indexOf('--before') + 1] : undefined;
+if (SCOPE_NAME === 'prefix' && APPLY && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(BEFORE ?? '')) throw new Error('--apply requires --before <ISO UTC instant the fixed worker started>');
 const cutoff = BEFORE ?? '2026-09-19T08:51:12Z';
 
 async function sql(query) {
@@ -25,14 +32,27 @@ async function sql(query) {
   return text ? JSON.parse(text) : [];
 }
 
-// A job is "pre-fix" when its results were written before the fixed worker started. Jobs still processing
+// prefix: a job is "pre-fix" when its results were written before the fixed worker started. Jobs still processing
 // are left alone: they were claimed by the new worker.
-const SCOPE = `rerun AS (
+const PREFIX_SCOPE = `rerun AS (
   SELECT j.id, j.evidence_item_id, j.organization_id
     FROM public.inference_jobs j
    WHERE j.domain = 'video_motion' AND j.status = 'complete'
      AND EXISTS (SELECT 1 FROM public.inference_results r WHERE r.inference_job_id = j.id AND r.created_at < '${cutoff}'::timestamptz)
      AND NOT EXISTS (SELECT 1 FROM public.inference_results r WHERE r.inference_job_id = j.id AND r.created_at >= '${cutoff}'::timestamptz))`;
+// unexamined: the latest result's plan shows frames no detector looked at. Results written by the vps_first
+// worker carry `coverage.frames_untriaged` (always 0 on a completed job); older results only metered GPU sends,
+// so there the gap is sampled minus sent.
+const UNEXAMINED_SCOPE = `rerun AS (
+  SELECT j.id, j.evidence_item_id, j.organization_id
+    FROM public.inference_jobs j
+    JOIN LATERAL (SELECT result FROM public.inference_results r WHERE r.inference_job_id = j.id ORDER BY created_at DESC LIMIT 1) r ON true
+   WHERE j.domain = 'video_motion' AND j.status = 'complete'
+     AND coalesce((r.result->'classification_plan'->'coverage'->>'frames_untriaged')::int,
+                  coalesce((r.result->'classification_plan'->>'sampled_frames')::int, 0) - coalesce((r.result->'classification_plan'->'usage'->>'frames_sent')::int, 0)) > 0)`;
+const SCOPE = SCOPE_NAME === 'prefix' ? PREFIX_SCOPE : UNEXAMINED_SCOPE;
+const REQUEUE_LABEL = SCOPE_NAME === 'prefix' ? 'Re-queued: frame timing corrected' : 'Re-queued: sampled frames were never examined by a detector';
+const AUDIT_REASON = SCOPE_NAME === 'prefix' ? 'frame timing keyed to container clock (commit 292bcb7)' : 'sampled frames skipped by the RunPod circuit breaker; re-run under vps_first (commit 6f3c6085)';
 
 const inventory = await sql(`WITH ${SCOPE}
 SELECT 'jobs to re-run' AS item, count(*)::int AS rows FROM rerun
@@ -42,11 +62,11 @@ UNION ALL SELECT '  of which human-reviewed (kept)', count(*)::int FROM public.c
 UNION ALL SELECT 'face_observations', count(*)::int FROM public.face_observations WHERE evidence_item_id IN (SELECT evidence_item_id FROM rerun)
 UNION ALL SELECT 'inference device events (motion windows, quality)', count(*)::int FROM public.cctv_device_events d WHERE d.source = 'inference' AND split_part(d.source_ref, ':', 1) IN (SELECT evidence_item_id::text FROM rerun)
 UNION ALL SELECT 'scene profiles touched', count(DISTINCT p.id)::int FROM public.cctv_camera_scene_profiles p JOIN public.evidence_items e ON e.metadata->>'camera_key' = p.camera_key AND e.organization_id = p.organization_id WHERE e.id IN (SELECT evidence_item_id FROM rerun)
-UNION ALL SELECT 'jobs completed by the fixed worker (kept)', count(*)::int FROM public.inference_jobs j WHERE j.domain = 'video_motion' AND j.status = 'complete' AND j.id NOT IN (SELECT id FROM rerun)
+UNION ALL SELECT 'jobs completed and kept', count(*)::int FROM public.inference_jobs j WHERE j.domain = 'video_motion' AND j.status = 'complete' AND j.id NOT IN (SELECT id FROM rerun)
 UNION ALL SELECT 'jobs queued/processing (kept)', count(*)::int FROM public.inference_jobs WHERE domain = 'video_motion' AND status IN ('queued', 'processing')`);
-console.log(`Cutoff ${cutoff}${APPLY ? '' : ' (inventory only)'}:`);
+console.log(`Scope ${SCOPE_NAME}${SCOPE_NAME === 'prefix' ? `, cutoff ${cutoff}` : ''}${APPLY ? '' : ' (inventory only)'}:`);
 for (const row of inventory) console.log(`  ${String(row.item).padEnd(52)} ${row.rows}`);
-if (!APPLY) { console.log('\nRun with --apply --before <instant> to re-run these jobs.'); process.exit(0); }
+if (!APPLY) { console.log(`\nRun with --apply${SCOPE_NAME === 'prefix' ? ' --before <instant>' : ''} to re-run these jobs.`); process.exit(0); }
 
 const jobs = await sql(`WITH ${SCOPE} SELECT id FROM rerun`);
 const ids = jobs.map((row) => row.id);
@@ -75,11 +95,11 @@ DELETE FROM public.face_observations WHERE evidence_item_id IN (SELECT evidence_
 DELETE FROM public.cctv_device_events d WHERE d.source = 'inference' AND split_part(d.source_ref, ':', 1) IN (SELECT evidence_item_id::text FROM rerun);
 DELETE FROM public.inference_results WHERE inference_job_id IN (SELECT id FROM rerun);
 UPDATE public.inference_jobs SET status = 'queued', stage = 'queued', completed_at = NULL, lease_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL, error_message = NULL,
-       progress_percent = 0, progress_current = 0, progress_total = 0, progress_label = 'Re-queued: frame timing corrected'
+       progress_percent = 0, progress_current = 0, progress_total = 0, progress_label = '${REQUEUE_LABEL}'
  WHERE id IN (SELECT id FROM rerun);
 UPDATE public.cctv_imports i SET status = 'registered' WHERE i.status = 'review_ready' AND EXISTS (SELECT 1 FROM public.evidence_items e JOIN rerun x ON x.evidence_item_id = e.id WHERE e.cctv_import_id = i.id);
 INSERT INTO public.audit_log (organization_id, actor_user_id, action, target_table, target_id, metadata)
-SELECT organization_id, NULL, 'cctv_inference_rerun', 'inference_jobs', id, jsonb_build_object('reason', 'frame timing keyed to container clock (commit 292bcb7)', 'requeued_at', now()) FROM rerun;
+SELECT organization_id, NULL, 'cctv_inference_rerun', 'inference_jobs', id, jsonb_build_object('reason', '${AUDIT_REASON}', 'scope', '${SCOPE_NAME}', 'requeued_at', now()) FROM rerun;
 COMMIT;`);
 console.log('Database reset done. Job ids for cache clearing:');
 console.log(ids.join('\n'));
