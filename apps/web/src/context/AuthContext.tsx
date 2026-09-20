@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { supabase } from '../lib/supabase';
+import { initialAuthLinkType, supabase } from '../lib/supabase';
 
 export type AppRole =
   | 'admin'
@@ -38,6 +38,8 @@ interface AuthContextValue {
   profile: AppProfile | null;
   hasSession: boolean;
   recoveryMode: boolean;
+  /** Set when this page load came from an invitation link: the user has a session but no password yet. */
+  invitation: { organizationName: string | null; roleLabel: string | null } | null;
   loading: boolean;
   error: string | null;
   operatingOrganizationId: string | null;
@@ -54,6 +56,7 @@ export const AuthContext = createContext<AuthContextValue>({
   profile: null,
   hasSession: false,
   recoveryMode: false,
+  invitation: null,
   loading: true,
   error: null,
   operatingOrganizationId: null,
@@ -105,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AppProfile | null>(null);
   const [hasSession, setHasSession] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [invitation, setInvitation] = useState<AuthContextValue['invitation']>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [operatingOrganizationId, setOperatingOrganizationId] = useState<string | null>(null);
@@ -144,6 +148,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
+      // An invite link signs the user in without a password; treat it like recovery so they set one now.
+      if (event === 'SIGNED_IN' && initialAuthLinkType === 'invite' && session?.user) {
+        const metadata = (session.user.user_metadata ?? {}) as { organization_name?: string; role_label?: string };
+        setInvitation({ organizationName: metadata.organization_name ?? null, roleLabel: metadata.role_label ?? null });
+        setRecoveryMode(true);
+      }
       if (!session?.user) {
         setHasSession(false);
         setProfile(null);
@@ -189,6 +199,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(updateError.message);
       return { error: updateError.message };
     }
+    if (invitation) {
+      // ATLAS WRITES: accept_client_invitation (the invited user accepts on behalf of their organisation; idempotent)
+      const { error: acceptError } = await supabase.rpc('accept_client_invitation');
+      if (acceptError) console.warn('[auth] invitation acceptance was not recorded:', acceptError.message);
+      setInvitation(null);
+    }
     setRecoveryMode(false);
     return { error: null };
   };
@@ -197,6 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     setHasSession(false);
     setRecoveryMode(false);
+    setInvitation(null);
     setProfile(null);
     setOperatingOrganizations([]);
     setOperatingOrganizationId(null);
@@ -220,7 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ profile, hasSession, recoveryMode, loading, error, operatingOrganizationId, operatingOrganizations, setOperatingOrganization, refreshOperatingOrganizations, signInWithPassword, requestPasswordReset, updatePassword, signOut }}>
+    <AuthContext.Provider value={{ profile, hasSession, recoveryMode, invitation, loading, error, operatingOrganizationId, operatingOrganizations, setOperatingOrganization, refreshOperatingOrganizations, signInWithPassword, requestPasswordReset, updatePassword, signOut }}>
       {children}
     </AuthContext.Provider>
   );

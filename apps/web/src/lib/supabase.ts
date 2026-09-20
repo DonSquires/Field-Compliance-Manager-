@@ -17,6 +17,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from './env';
 
+import { readAuthLinkType, type AuthLinkType } from './authLink';
+
+/** Read synchronously at module load: createClient below consumes and clears the URL fragment. */
+export const initialAuthLinkType: AuthLinkType = typeof window !== 'undefined' ? readAuthLinkType(window.location.hash) : null;
+
 export const supabase = createClient(env.supabaseUrl, env.supabaseAnonKey, {
   auth: {
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,

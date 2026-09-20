@@ -6,7 +6,7 @@ import './LoginPage.css';
 type EntryMode = 'sign_in' | 'request_reset' | 'reset_sent' | 'update_password';
 
 const LoginPage: React.FC = () => {
-  const { signInWithPassword, requestPasswordReset, updatePassword, recoveryMode, error: authError } = useAuth();
+  const { signInWithPassword, requestPasswordReset, updatePassword, recoveryMode, invitation, error: authError } = useAuth();
   const [mode, setMode] = useState<EntryMode>(recoveryMode ? 'update_password' : 'sign_in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -56,12 +56,17 @@ const LoginPage: React.FC = () => {
   };
 
   const isResetRequest = mode === 'request_reset' || mode === 'reset_sent';
-  const title = mode === 'update_password' ? 'Set a new password' : isResetRequest ? 'Reset your password' : 'Sign in';
-  const subtitle = mode === 'update_password'
-    ? 'Choose a new password for your account.'
-    : isResetRequest
-      ? 'We will send a secure recovery link to your email.'
-      : 'Use your authorised Field Compliance Manager account.';
+  const invited = mode === 'update_password' && invitation !== null;
+  const passwordLabel = invited ? 'Choose a password' : mode === 'update_password' ? 'New password' : 'Password';
+  const confirmLabel = invited ? 'Confirm your password' : 'Confirm new password';
+  const title = invited ? `Welcome to ${invitation.organizationName ?? 'Field Compliance Manager'}` : mode === 'update_password' ? 'Set a new password' : isResetRequest ? 'Reset your password' : 'Sign in';
+  const subtitle = invited
+    ? `You have been invited${invitation.roleLabel ? ` as ${invitation.roleLabel.toLowerCase()}` : ''}. Choose a password to finish setting up your account; you will use it to sign in from now on.`
+    : mode === 'update_password'
+      ? 'Choose a new password for your account.'
+      : isResetRequest
+        ? 'We will send a secure recovery link to your email.'
+        : 'Use your authorised Field Compliance Manager account.';
 
   return (
     <main className="login-page">
@@ -79,7 +84,7 @@ const LoginPage: React.FC = () => {
         <div className="login-rule" />
 
         <div className="login-heading">
-          <span className="login-kicker">Authorised access</span>
+          <span className="login-kicker">{invited ? 'Invitation' : 'Authorised access'}</span>
           <h1 id="login-title">{title}</h1>
           <p>{subtitle}</p>
         </div>
@@ -104,10 +109,10 @@ const LoginPage: React.FC = () => {
 
             {mode !== 'request_reset' && (
               <div className="login-field">
-                <label htmlFor="login-password">{mode === 'update_password' ? 'New password' : 'Password'}</label>
+                <label htmlFor="login-password">{passwordLabel}</label>
                 <div>
                   {mode === 'update_password' ? <KeyRound size={17} aria-hidden="true" /> : <LockKeyhole size={17} aria-hidden="true" />}
-                  <input id="login-password" aria-label={mode === 'update_password' ? 'New password' : 'Password'} type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'update_password' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <input id="login-password" aria-label={passwordLabel} type={showPassword ? 'text' : 'password'} required autoComplete={mode === 'update_password' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} />
                   <button
                     type="button"
                     className="login-visibility"
@@ -125,8 +130,8 @@ const LoginPage: React.FC = () => {
 
             {mode === 'update_password' && (
               <div className="login-field">
-                <label htmlFor="login-confirm-password">Confirm new password</label>
-                <div><KeyRound size={17} aria-hidden="true" /><input id="login-confirm-password" aria-label="Confirm new password" type={showPassword ? 'text' : 'password'} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></div>
+                <label htmlFor="login-confirm-password">{confirmLabel}</label>
+                <div><KeyRound size={17} aria-hidden="true" /><input id="login-confirm-password" aria-label={confirmLabel} type={showPassword ? 'text' : 'password'} required autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></div>
               </div>
             )}
 
@@ -134,7 +139,7 @@ const LoginPage: React.FC = () => {
 
             <button type="submit" className="login-submit" disabled={submitting}>
               {submitting && <LoaderCircle size={18} className="is-spinning" aria-hidden="true" />}
-              {submitting ? 'Please wait' : mode === 'request_reset' ? 'Send recovery link' : mode === 'update_password' ? 'Update password' : 'Sign in'}
+              {submitting ? 'Please wait' : mode === 'request_reset' ? 'Send recovery link' : invited ? 'Set password and continue' : mode === 'update_password' ? 'Update password' : 'Sign in'}
             </button>
 
             {mode === 'request_reset' && <button type="button" className="login-back" onClick={() => changeMode('sign_in')}><ArrowLeft size={16} aria-hidden="true" /> Back to sign in</button>}

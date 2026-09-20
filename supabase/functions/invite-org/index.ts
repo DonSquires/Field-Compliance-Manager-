@@ -14,7 +14,10 @@
  *
  * Two modes:
  *   1. **invite** (default): Creates the org's first auth user + user_profile
- *      (master role) via `inviteUserByEmail`. The user receives an email and
+ *      via `inviteUserByEmail`. Role comes from `resolve_org_invitation`:
+ *      `client_admin` for a client under an operational agreement (client portal),
+ *      `master` for a platform subscriber under the owner's financial agreement
+ *      or the caller's own organisation. The user receives an email and
  *      sets their own password. No pre-authenticated/password-set-now path —
  *      that mode was removed per Bob's fourth-pass review (Blocker 5).
  *   2. **recovery**: Re-sends the invite for an org whose sole user has never
@@ -22,9 +25,11 @@
  *      recovery gap — works for a grand_master caller without requiring an
  *      authenticated in-tenant user.
  *
- * Auth: Requires a valid JWT from a master or grand_master user.
- * The caller's org must have an ACTIVE service_agreement with the target org
- * (directionally exact: caller = provider, target = client).
+ * Auth: Requires a valid JWT from a grand_master, master or admin user.
+ * `resolve_org_invitation` (run as the caller) must find an active agreement
+ * naming the target as client and held by the caller's organisation, one of its
+ * branches, or a branch the caller is authorised at (operational -> client_admin;
+ * financial, grand_master only -> master).
  *
  * ── ANTI-ENUMERATION (Bob's fifth-pass, Concern 1) ──────────────────────
  * All error responses are DELIBERATELY BLAND. Specific failure reasons
@@ -143,9 +148,10 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-/** Roles that may invoke this function. */ const CAN_INVITE_ORG = [
+/** Roles that may invoke this function; resolve_org_invitation decides what each may seat. */ const CAN_INVITE_ORG = [
   'grand_master',
-  'master'
+  'master',
+  'admin'
 ];
 // ── In-memory rate limiter (fallback when check_invite_rate_limit RPC is not migrated) ──
 // LIMITATION: This Map is NOT durable across cold starts. Each new Deno isolate
@@ -262,35 +268,19 @@ serve(async (req)=>{
         error: 'Too many requests. Please wait and try again.'
       }, 429);
     }
-    // ── 4. Verify service agreement — directionally exact + active (Blocker 3) ─
-    // The caller's org must be the PROVIDER and the target must be the CLIENT.
-    // Only the provider side can author the first user for the client org.
-    // Exception: grand_master operating on their own org (same-org) is allowed
-    // without an agreement.
-    //
-    // Blocker 3 — Active state: The agreement must be active. Active is defined
-    // as `ends_on IS NULL OR ends_on >= current_date` (the canonical pattern —
-    // service_agreements has NO status column; see migration 0271).
-    //
-    // Blocker 3 — Branch/parent relationships: Agreements are org-to-org
-    // (provider_organization_id ↔ client_organization_id). The check uses
-    // exact org IDs — it does NOT walk the org hierarchy. If the caller's org
-    // is a branch, the agreement must reference that specific branch as the
-    // provider. If the target is a branch, the agreement must reference that
-    // specific branch as the client. A parent org's agreement does NOT
-    // automatically extend to its branches for first-user creation. This is
-    // deliberate: branch-level agreements are the correct granularity.
-    const isSameOrg = callerProfile.organization_id === targetOrgId;
-    let agreement = null;
-    if (!isSameOrg) {
-      // Query for an active agreement where caller is provider and target is client.
-      // Active = ends_on IS NULL OR ends_on >= today (no status column on service_agreements).
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const { data: agreementData } = await adminClient.from('service_agreements').select('id, ends_on').eq('provider_organization_id', callerProfile.organization_id).eq('client_organization_id', targetOrgId).or(`ends_on.is.null,ends_on.gte.${today}`).limit(1).maybeSingle();
-      agreement = agreementData;
-      if (!agreement) {
-        // Anti-enumeration: bland response. Specific reason logged server-side.
-        console.warn(`[invite-org] agreement check failed: no active agreement where caller org ${callerProfile.organization_id} is provider for target org ${targetOrgId}`);
+    // ── 4. Which agreement authorises this, and which role the first user gets ──
+    // resolve_org_invitation (migration 20260920050000) runs as the caller: a client under an
+    // operational agreement held by the caller's organisation, one of its branches, or a branch
+    // the caller is authorised at -> 'client_admin'; a platform subscriber under the owner's
+    // financial agreement (grand_master only) -> 'master'; the caller's own organisation -> 'master'.
+    // Recovery keeps its own grand_master-only guard in handleRecovery.
+    let invitation = null;
+    if (mode !== 'recovery') {
+      const { data: resolved, error: resolveError } = await callerClient.rpc('resolve_org_invitation', {
+        p_target_organization_id: targetOrgId
+      });
+      if (resolveError || !resolved?.role) {
+        console.warn(`[invite-org] invitation not authorised for caller ${caller.id} -> org ${targetOrgId}: ${resolveError?.message ?? 'no role resolved'}`);
         try {
           await adminClient.rpc('log_user_management_action', {
             p_organization_id: targetOrgId,
@@ -300,12 +290,13 @@ serve(async (req)=>{
             p_old_value: null,
             p_new_value: null,
             p_metadata: {
-              failure_reason: 'no_active_agreement',
+              failure_reason: 'no_authorising_agreement',
               mode: mode,
               caller_user_id: caller.id,
               caller_email: callerProfile.email ?? 'unknown',
               caller_organization_id: callerProfile.organization_id,
-              target_organization_id: targetOrgId
+              target_organization_id: targetOrgId,
+              detail: resolveError?.message ?? null
             }
           });
         } catch  {}
@@ -313,12 +304,13 @@ serve(async (req)=>{
           error: 'Not authorised for this action'
         }, 403);
       }
+      invitation = resolved;
     }
     // ── Route to mode ────────────────────────────────────────────────────
     if (mode === 'recovery') {
       return await handleRecovery(adminClient, callerProfile, caller, targetOrgId, body, json);
     }
-    return await handleInvite(adminClient, callerProfile, caller, targetOrgId, body, agreement?.id ?? null, json);
+    return await handleInvite(adminClient, callerProfile, caller, targetOrgId, body, invitation, json);
   } catch (err) {
     console.error('[invite-org] unexpected error:', err);
     return json({
@@ -352,8 +344,12 @@ serve(async (req)=>{
 //     claim_first_org_user ensures the profile cannot be double-created.
 //   Net result: repeated submission produces one safe outcome, never duplicates.
 // ═══════════════════════════════════════════════════════════════════════════════
-async function handleInvite(adminClient, callerProfile, caller, targetOrgId, body, agreementId, json) {
+async function handleInvite(adminClient, callerProfile, caller, targetOrgId, body, invitation, json) {
   const { email, display_name } = body;
+  // role and agreement come from resolve_org_invitation: 'client_admin' for a client under an operational agreement, 'master' for a subscriber or own-org bootstrap
+  const role = invitation?.role ?? 'master';
+  const roleLabel = role === 'client_admin' ? 'Client Administrator' : 'Master';
+  const agreementId = invitation?.agreement_id ?? null;
   if (!email?.trim()) return json({
     error: 'email is required'
   }, 400);
@@ -378,8 +374,8 @@ async function handleInvite(adminClient, callerProfile, caller, targetOrgId, bod
   const result = await adminClient.auth.admin.inviteUserByEmail(normEmail, {
     data: {
       display_name: resolvedDisplayName,
-      role: 'master',
-      role_label: 'Master',
+      role,
+      role_label: roleLabel,
       organization_id: targetOrgId,
       organization_name: orgName,
       organization_logo: targetOrg?.logo_url ?? ''
@@ -462,7 +458,7 @@ async function handleInvite(adminClient, callerProfile, caller, targetOrgId, bod
       p_org_id: targetOrgId,
       p_user_id: inviteUserId,
       p_display_name: resolvedDisplayName,
-      p_role: 'master',
+      p_role: role,
       p_email: normEmail
     });
     if (claimError) {
@@ -544,8 +540,9 @@ async function handleInvite(adminClient, callerProfile, caller, targetOrgId, bod
     const { error: profileError } = await adminClient.from('user_profiles').upsert({
       id: inviteUserId,
       organization_id: targetOrgId,
+      employer_organization_id: targetOrgId,
       display_name: resolvedDisplayName,
-      role: 'master',
+      role,
       email: normEmail
     }, {
       onConflict: 'id'
@@ -588,7 +585,8 @@ async function handleInvite(adminClient, callerProfile, caller, targetOrgId, bod
         target_organization_name: orgName,
         target_email: normEmail,
         display_name: resolvedDisplayName,
-        role: 'master',
+        role,
+        invitation_kind: invitation?.kind ?? 'same_org',
         agreement_id: agreementId
       }
     });
@@ -596,12 +594,12 @@ async function handleInvite(adminClient, callerProfile, caller, targetOrgId, bod
     // Audit failure must not block user creation
     console.error('[invite-org] audit log failed:', auditErr);
   }
-  console.log(`[invite-org] invited ${normEmail} as master in org ${targetOrgId}`);
+  console.log(`[invite-org] invited ${normEmail} as ${role} in org ${targetOrgId}`);
   return json({
     success: true,
     user_id: inviteUserId,
     email: normEmail,
-    role: 'master',
+    role,
     organization_id: targetOrgId,
     agreement_id: agreementId
   });

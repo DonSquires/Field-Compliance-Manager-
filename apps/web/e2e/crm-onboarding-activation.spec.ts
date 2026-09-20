@@ -108,3 +108,26 @@ test('administrator records named ownership and immutable stage history', async 
   await expect(history.getByText(/Morgan Reed · by Morgan Reed/)).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
+test('administrator invites the client: the primary contact is seated as the client administrator through invite-org', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  let prepared: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/prepare_crm_client_invitation', async (route) => {
+    prepared = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ account_organization_id: '61616161-6161-4161-8161-616161616161', agreement_id: '62626262-6262-4262-8262-626262626262', provider_organization_id: '33333333-3333-4333-8333-333333333333', agreement_status: 'not_invited', email: 'ops@readyvenue.test', display_name: 'Priya Venue', site_count: 1, zone_count: 1 }) });
+  });
+  let invited: Record<string, unknown> | null = null;
+  await page.route('**/functions/v1/invite-org', async (route) => {
+    invited = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, user_id: '57575757-5757-4757-8757-575757575757', email: 'ops@readyvenue.test', role: 'client_admin', organization_id: '61616161-6161-4161-8161-616161616161', agreement_id: '62626262-6262-4262-8262-626262626262' }) });
+  });
+  await signInAsAdmin(page, '/admin/onboarding');
+  await page.getByRole('button', { name: /Ready Venue Trust/ }).click();
+  await page.getByRole('button', { name: 'Invite client' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Invite Ready Venue Trust?' });
+  await expect(dialog).toContainText("becomes the client's administrator in the client portal, and accepts by setting their password");
+  await dialog.getByRole('button', { name: 'Confirm and invite' }).click();
+  await expect(page.getByRole('status')).toContainText("Client invitation sent to ops@readyvenue.test. They become the client's administrator in the client portal");
+  expect(prepared).toMatchObject({ p_account_organization_id: '61616161-6161-4161-8161-616161616161' });
+  expect(invited).toMatchObject({ target_organization_id: '61616161-6161-4161-8161-616161616161', email: 'ops@readyvenue.test', display_name: 'Priya Venue' });
+  expect(errors, errors.join('\n')).toEqual([]);
+});

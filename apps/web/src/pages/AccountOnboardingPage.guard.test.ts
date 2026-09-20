@@ -54,6 +54,6 @@ describe('Account Onboarding failure state', () => {
     expect(source).toContain('functions.invoke("invite-org"');
     expect(source).toContain('Invite client');
     expect(source).toContain('Confirm and invite');
-    expect(source).toContain('Client access begins after the recipient accepts.');
+    expect(source).toContain('Client access begins when they do.');
   });
 });

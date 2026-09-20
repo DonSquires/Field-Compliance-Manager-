@@ -177,7 +177,7 @@ export default function AccountOnboardingPage({
     });
     if (inviteError) setError(inviteError.message);
     else {
-      setNotice(`Client invitation sent to ${invitation.email}. The account remains provider-managed until the client accepts.`);
+      setNotice(`Client invitation sent to ${invitation.email}. They become the client's administrator in the client portal; the account stays provider-managed until they set their password and accept.`);
       setConfirmingInvite(false);
       await loadQueue(selected.ledger_id);
     }
@@ -518,7 +518,7 @@ export default function AccountOnboardingPage({
         <div className="activation-backdrop">
           <section role="dialog" aria-modal="true" aria-labelledby="invite-client-title">
             <header><div><span>Provider handoff</span><h2 id="invite-client-title">Invite {selected.account_name}?</h2></div><button onClick={() => setConfirmingInvite(false)} aria-label="Close client invitation confirmation"><X size={17} /></button></header>
-            <p>The server will verify the primary client contact, service agreement, active site, and active zone. The invitation is sent only when the provider setup is ready. Client access begins after the recipient accepts.</p>
+            <p>The server will verify the primary client contact, service agreement, active site, and active zone, and that nobody at the client can sign in yet. The primary contact receives an email, becomes the client's administrator in the client portal, and accepts by setting their password. Client access begins when they do.</p>
             <footer><button onClick={() => setConfirmingInvite(false)}>Back</button><button className="is-primary" onClick={() => void inviteClient()} disabled={inviting}>{inviting ? "Preparing invitation" : "Confirm and invite"}</button></footer>
           </section>
         </div>

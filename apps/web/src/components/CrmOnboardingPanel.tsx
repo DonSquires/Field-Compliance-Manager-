@@ -30,6 +30,8 @@ interface OnboardingRow {
   assigned_to: string | null;
   assigned_name: string | null;
   stage_note: string | null;
+  /** Active users at the client organisation; the first is seated by the invitation itself. */
+  client_user_count?: number | null;
 }
 
 interface Assignee {
@@ -145,7 +147,7 @@ export function CrmOnboardingPanel({
     const invitation = prepared as { email: string; display_name?: string };
     const { error: inviteError } = await supabase.functions.invoke('invite-org', { body: { target_organization_id: row.account_organization_id, email: invitation.email, display_name: invitation.display_name?.trim() || row.account_name } });
     if (inviteError) setError(inviteError.message);
-    else { setConfirmingInvite(false); setNotice(`Client invitation sent to ${invitation.email}. Client access begins after acceptance.`); await load(); await onChanged?.(); }
+    else { setConfirmingInvite(false); setNotice(`Client invitation sent to ${invitation.email}. They will be the client's administrator in the client portal; when they set their password, 'Client accepted' ticks here and you can activate.`); await load(); await onChanged?.(); }
     setInviting(false);
   };
 
@@ -155,13 +157,22 @@ export function CrmOnboardingPanel({
 
   const blocked = row.readiness?.dimensions.filter((dimension) => dimension.status === 'blocked') ?? [];
   const invitationStatus = row.invitation_status ?? 'not_invited';
-  const canInvite = row.readiness?.ready && invitationStatus !== 'accepted' && invitationStatus !== 'invited';
+  const clientUserCount = row.client_user_count ?? 0;
+  // invite-org seats the client's administrator when the invitation is sent; accept_quote also writes 'accepted' with nobody seated
+  const seated = clientUserCount > 0;
+  const clientAccepted = seated && invitationStatus === 'accepted';
+  const canInvite = !seated && (row.readiness ? row.readiness.ready : row.has_primary_contact);
   const handoffStages = [
     { label: 'Provider setup', complete: Boolean(row.readiness?.ready) },
-    { label: 'Client invited', complete: invitationStatus === 'invited' || invitationStatus === 'accepted' },
-    { label: 'Client accepted', complete: invitationStatus === 'accepted' },
+    { label: 'Client invited', complete: seated },
+    { label: 'Client accepted', complete: clientAccepted },
     { label: 'Operational handoff', complete: activated || accountStatus === 'active' },
   ];
+  const seatWords = !seated
+    ? (row.agreement_id ? 'No one at the client can sign in yet.' : 'No operational agreement linked yet — inviting the client creates one and seats their administrator.')
+    : clientAccepted
+      ? `${clientUserCount} client user${clientUserCount === 1 ? '' : 's'} · the client has set their password and accepted.`
+      : 'Invitation sent · waiting for the client to set their password.';
 
   return <section className="crm-onboarding-panel" aria-label="Client activation">
     <header>
@@ -179,14 +190,14 @@ export function CrmOnboardingPanel({
       <label className="is-wide"><span>Stage note</span><textarea rows={2} value={stageNote} onChange={(event) => setStageNote(event.target.value)} /></label>
     </div>
     <footer>
-      <span>{row.agreement_name ? `Agreement: ${row.agreement_name} · ${row.invitation_status?.replace('_', ' ') ?? 'not invited'}` : 'No operational agreement linked yet'}</span>
+      <span>{row.agreement_name ? `Agreement: ${row.agreement_name} · ${row.invitation_status?.replace('_', ' ') ?? 'not invited'}` : 'No operational agreement linked yet'}<br /><small>{seatWords}</small></span>
       <div>
         <button type="button" className="btn btn-sm btn-secondary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(false)}>Save ownership</button>
         {nextStage && <button type="button" className="btn btn-sm btn-primary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(true)}>Advance to {nextStage}<ChevronRight size={14} /></button>}
         {row.current_stage === 'review' && row.readiness?.ready && row.agreement_id && !confirming && invitationStatus === 'accepted' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setConfirming(true)}><Rocket size={14} />Activate account</button>}
         {canInvite && !confirmingInvite && <button type="button" className="btn btn-sm btn-secondary" disabled={saving || inviting} onClick={() => setConfirmingInvite(true)}><MailPlus size={14} />Invite client</button>}
-        {invitationStatus === 'invited' && <span className="crm-invitation-next-state">Waiting for client acceptance</span>}
-        {invitationStatus === 'accepted' && !confirming && <span className="crm-invitation-next-state is-accepted">Client accepted · ready for activation</span>}
+        {seated && !clientAccepted && <span className="crm-invitation-next-state">Waiting for the client to set their password</span>}
+        {clientAccepted && !confirming && <span className="crm-invitation-next-state is-accepted">{row.readiness?.ready ? 'Client accepted · ready for activation' : 'Client accepted · finish the provider setup to activate'}</span>}
         {confirming && <><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => setConfirming(false)}>Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void activate()}>{saving ? 'Activating' : 'Confirm activation'}</button></>}
         {confirmingInvite && <><button type="button" className="btn btn-sm btn-secondary" disabled={inviting} onClick={() => setConfirmingInvite(false)}><X size={14} />Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={inviting} onClick={() => void inviteClient()}>{inviting ? 'Preparing invitation' : 'Confirm and invite'}</button></>}
       </div>

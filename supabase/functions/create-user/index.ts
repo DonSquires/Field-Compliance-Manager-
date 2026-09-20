@@ -67,7 +67,9 @@ serve(async (req)=>{
     // Get caller profile to check role
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: callerProfile } = await adminClient.from('user_profiles').select('role, organization_id, employer_organization_id').eq('id', caller.id).single();
-    if (!callerProfile || !CAN_INVITE.includes(callerProfile.role)) {
+    // A client administrator may add client users to their own organisation (client portal only).
+    const callerIsClientAdmin = callerProfile?.role === 'client_admin';
+    if (!callerProfile || !(CAN_INVITE.includes(callerProfile.role) || callerIsClientAdmin)) {
       return json({
         error: 'Forbidden: insufficient role'
       }, 403);
@@ -86,6 +88,14 @@ serve(async (req)=>{
     if (roleLevel(role) > roleLevel(callerProfile.role)) return json({
       error: 'Forbidden: cannot assign a role above your own authority level'
     }, 403);
+    const isClientRole = role.startsWith('client_');
+    if (callerIsClientAdmin && !isClientRole) return json({
+      error: 'A client administrator can add client administrators, client officers and client viewers only'
+    }, 403);
+    // Client users belong to the client: the first is seated by invite-org from Client Portfolios, the rest by the client's own administrator.
+    if (isClientRole && !callerIsClientAdmin && callerProfile.role !== 'grand_master') return json({
+      error: "Client users are added by the client's own administrator. Invite the client from Client Portfolios; their administrator then adds their people."
+    }, 400);
     // Pre-authenticated path: validate password server-side
     if (preauthenticated) {
       if (!CAN_INVITE.includes(callerProfile.role)) {
@@ -104,16 +114,21 @@ serve(async (req)=>{
     if (!targetOrgId) return json({
       error: 'organization_id is required'
     }, 400);
-    const employerOrgId = employer_organization_id ?? callerProfile.employer_organization_id ?? callerProfile.organization_id;
+    // Client users are employed by their own organisation; staff by the corporate employer.
+    const employerOrgId = isClientRole ? targetOrgId : employer_organization_id ?? callerProfile.employer_organization_id ?? callerProfile.organization_id;
     if (!employerOrgId) return json({
       error: 'An employing organization is required'
     }, 400);
     const callerEmployerOrgId = callerProfile.employer_organization_id ?? callerProfile.organization_id;
-    if (callerProfile.role !== 'grand_master' && employerOrgId !== callerEmployerOrgId) return json({
+    if (callerProfile.role !== 'grand_master' && employerOrgId !== callerEmployerOrgId && !(callerIsClientAdmin && employerOrgId === callerProfile.organization_id)) return json({
       error: 'Forbidden: staff can only be employed by your corporate organization'
     }, 403);
     const { data: employerOrg } = await adminClient.from('organizations').select('id, organization_type, active').eq('id', employerOrgId).maybeSingle();
-    if (!employerOrg?.active || !['owner', 'service_provider'].includes(employerOrg.organization_type)) return json({
+    if (!employerOrg) return json({
+      error: 'Organisation not found'
+    }, 400);
+    // a client organisation may still be a prospect (inactive) while its first users are seated
+    if (!isClientRole && (!employerOrg.active || !['owner', 'service_provider'].includes(employerOrg.organization_type))) return json({
       error: 'Employer must be an active provider organization'
     }, 400);
     if (staff && ['officer', 'admin_officer'].includes(role) && !branch_authorisations?.length) return json({
