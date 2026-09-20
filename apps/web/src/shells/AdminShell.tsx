@@ -457,6 +457,13 @@ const AdminShell: React.FC = () => {
       navigateToPage(destination.page as AdminPage);
       return true;
     }
+    if (destination.kind === 'admin_crm_account') {
+      // /admin/crm?account=<id> opens that Client Portfolio
+      setActivePage('crm');
+      setMobileMenuOpen(false);
+      navigate(destination.accountId ? `/admin/crm?account=${encodeURIComponent(destination.accountId)}` : '/admin/crm');
+      return true;
+    }
     return false;
   }, [navigate, navigateToFieldOps, navigateToPage, profile?.role]);
 

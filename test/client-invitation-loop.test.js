@@ -101,3 +101,18 @@ test("the client's administrator manages their own people from the client portal
   assert.match(deactivate, /'admin',\s*'client_admin'\s*\];/);
   assert.match(deactivate, /if \(currentProfile\.role === 'client_admin' && !String\(targetUser\.role\)\.startsWith\('client_'\)\)/);
 });
+
+test('when the client accepts, the person who invited them is told and the notification opens that Client Portfolio', () => {
+  const notify = read('supabase/migrations/20260920070000_client_accepted_notifies_provider.sql');
+  const resolver = read('apps/web/src/lib/notificationNavigation.ts');
+  const shell = read('apps/web/src/shells/AdminShell.tsx');
+  assert.match(notify, /'bob_self_memory', 'crm_client'\]\)\);/);
+  assert.match(notify, /where l\.action = 'crm_client_invitation_prepared' and l\.target_id = v_row\.id/);
+  assert.match(notify, /has accepted your invitation'/);
+  assert.match(notify, /Finish the provider setup, then activate the account\./);
+  assert.match(notify, /p_recipient_user_id => null, p_recipient_role => 'admin', p_link_page => 'crm'/);
+  // an admin inviter is not told twice
+  assert.match(notify, /if v_inviter is null or not exists \(select 1 from public\.user_profiles p where p\.id = v_inviter and p\.role = 'admin'\) then/);
+  assert.match(resolver, /if \(notification\.category === 'crm_client' \|\| link === 'crm'\) return \{ kind: 'admin_crm_account', accountId \};/);
+  assert.match(shell, /navigate\(destination\.accountId \? `\/admin\/crm\?account=\$\{encodeURIComponent\(destination\.accountId\)\}` : '\/admin\/crm'\);/);
+});

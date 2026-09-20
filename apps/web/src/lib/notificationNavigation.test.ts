@@ -13,6 +13,7 @@ describe('notification navigation', () => {
     expect(resolveNotificationDestination('admin', notification({ category: 'credential_expiry', link_payload: { credential_id: 'credential-1' } }))).toEqual({ kind: 'admin_hr_credential', credentialId: 'credential-1' });
     expect(resolveNotificationDestination('admin', notification({ category: 'document_review', link_page: 'approvals' }))).toEqual({ kind: 'admin_page', page: 'approvals' });
     expect(resolveNotificationDestination('admin', notification({ category: 'document_review', link_page: 'document-studio' }))).toEqual({ kind: 'admin_page', page: 'document-studio' });
+    expect(resolveNotificationDestination('admin', notification({ category: 'crm_client', link_page: 'crm', link_payload: { account_organization_id: 'client-1', agreement_id: 'a-1' } }))).toEqual({ kind: 'admin_crm_account', accountId: 'client-1' });
   });
 
   it('maps officer open work to home and client reports to reports', () => {

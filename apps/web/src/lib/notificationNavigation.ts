@@ -3,6 +3,7 @@ import type { NotificationRecord } from '../components/NotificationCenter';
 
 export type NotificationDestination =
   | { kind: 'admin_page'; page: string }
+  | { kind: 'admin_crm_account'; accountId: string | null }
   | { kind: 'admin_field_ops'; area: string }
   | { kind: 'admin_hr_credential'; credentialId: string | null }
   | { kind: 'officer_module'; module: string | null }
@@ -29,6 +30,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   const breachAlertId = typeof notification.link_payload?.breach_alert_id === 'string' ? notification.link_payload.breach_alert_id : null;
   const debriefId = typeof notification.link_payload?.debrief_id === 'string' ? notification.link_payload.debrief_id : null;
   const assessmentId = typeof notification.link_payload?.assessment_id === 'string' ? notification.link_payload.assessment_id : null;
+  const accountId = typeof notification.link_payload?.account_organization_id === 'string' ? notification.link_payload.account_organization_id : null;
 
   if (notification.category === 'bob_conversation' || link === 'bob_chat') return { kind: 'bob', conversationId };
 
@@ -40,6 +42,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
     if (notification.category === 'report_ready') return { kind: 'admin_page', page: 'reports' };
     if (notification.category === 'schema_change_request' || notification.category === 'bob_self_memory') return { kind: 'admin_page', page: 'approvals' };
     if (notification.category === 'document_review' || link === 'approvals' || link === 'document-studio') return { kind: 'admin_page', page: link === 'document-studio' ? 'document-studio' : 'approvals' };
+    if (notification.category === 'crm_client' || link === 'crm') return { kind: 'admin_crm_account', accountId };
     return null;
   }
 
