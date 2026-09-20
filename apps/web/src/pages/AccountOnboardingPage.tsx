@@ -50,6 +50,8 @@ interface QueueRow {
   assigned_to: string | null;
   assigned_name: string | null;
   stage_note: string | null;
+  invitation_status?: string | null;
+  client_user_count?: number | null;
 }
 interface Assignee { user_id: string; display_name: string; role: string }
 interface OnboardingEvent { event_id: string; event_type: string; from_stage: string | null; to_stage: string; ledger_status: string; assigned_name: string | null; note: string; actor_name: string | null; ledger_version: number; created_at: string }
@@ -160,6 +162,16 @@ export default function AccountOnboardingPage({
       await loadQueue();
     }
     setSaving(false);
+  };
+  const resendInvitation = async () => {
+    if (!selected) return;
+    setInviting(true);
+    setError(null);
+    // resend-invite finds the one person at the client who has never signed in
+    const { data, error: resendError } = await supabase.functions.invoke("resend-invite", { body: { organization_id: selected.account_organization_id } });
+    if (resendError) setError(resendError.message);
+    else setNotice(`Invitation sent again to ${(data as { email?: string } | null)?.email ?? "the client contact"}.`);
+    setInviting(false);
   };
   const inviteClient = async () => {
     if (!selected) return;
@@ -416,10 +428,19 @@ export default function AccountOnboardingPage({
                       Activate account
                     </button>
                   )}
-                  <button className="is-invite" onClick={() => setConfirmingInvite(true)} disabled={saving || inviting}>
-                    <MailPlus size={15} />
-                    Invite client
-                  </button>
+                  {(selected.client_user_count ?? 0) > 0 ? (
+                    selected.invitation_status === 'accepted'
+                      ? <span className="onboarding-client-state">Client signed in and accepted</span>
+                      : <button className="is-invite" onClick={() => void resendInvitation()} disabled={saving || inviting}>
+                          <MailPlus size={15} />
+                          {inviting ? "Sending" : "Resend invitation"}
+                        </button>
+                  ) : (
+                    <button className="is-invite" onClick={() => setConfirmingInvite(true)} disabled={saving || inviting}>
+                      <MailPlus size={15} />
+                      Invite client
+                    </button>
+                  )}
                 </div>
               </section>
               <section className="onboarding-history">
