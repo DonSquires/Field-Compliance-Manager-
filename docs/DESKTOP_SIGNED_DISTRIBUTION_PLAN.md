@@ -107,7 +107,12 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    public URL; the web app's download link points at 0.4.5. **0.4.6 signed the same way on 2026-09-20** (clips
    dated from the camera's own card index, Tapo `sys01.bin`, event for event): SHA-256
    `476282fb4dca4c68d77deb53b68a2a82de049dd5a0a123910208c86b01a6ff7e` (3,114,152 bytes), timestamped,
-   verified from the public URL; the web app's download link points at 0.4.6.
+   verified from the public URL; the web app's download link points at 0.4.6. **0.4.7 signed the same way on
+   2026-09-20** (Tapo card in the reader recognised and routed to Video files, volume serial as the card's
+   identity, fill-pattern placeholders set aside, thumbnails for Dahua card recordings without extraction, disk
+   section covers cut clips): SHA-256 `bef0dfe31e6a33be57d3fcced227711aeadaf5171bdccd4870fd8579664e2314`
+   (3,152,264 bytes), verified from the public URL with a DigiCert timestamp; the web app's download link points
+   at 0.4.7.
 
    **Toolchain note (2026-09-20).** The signer is a self-signed *end-entity* certificate (CA:FALSE, keyUsage
    digitalSignature). OpenSSL 1.1.1 will not accept such a certificate as its own trust anchor and reports
