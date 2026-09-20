@@ -161,4 +161,7 @@ test('when the employer has no rest and hours rules the Create shift dialog says
         // a server refusal lands inside the dialog, not behind it
         await dialog.getByRole('button', { name: 'Create shift' }).click();
         await expect(dialog.locator('.roster-dialog-error')).toContainText("Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10");
+        // changing the shift clears the refusal that was about the previous times
+        await dialog.getByLabel('End').fill('2026-09-05T23:00');
+        await expect(dialog.locator('.roster-dialog-error')).toHaveCount(0);
 });

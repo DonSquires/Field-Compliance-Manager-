@@ -135,6 +135,8 @@ const RosterOperationsPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [showCreate, form.workUnitId, form.start]);
   // ATLAS READS: preview_roster_assignment — the same rest/hours/days check the slot trigger enforces, shown before the slot exists
+  // the last refusal was about the previous officer/times; a changed shift starts clean
+  useEffect(() => { if (showCreate) setError(null); }, [showCreate, form.officerId, form.start, form.end]);
   useEffect(() => {
     const person = staff.find((candidate) => candidate.id === form.officerId);
     if (!showCreate || !person || !form.start || !form.end || new Date(form.end) <= new Date(form.start)) { setAssignmentPreview(null); return; }
