@@ -93,7 +93,11 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    public URL; the web app's download link points at 0.4.1. **0.4.2 signed the same way on 2026-09-20** (saved
    state per recording, file picker for the video-files source, picture-stream review, pop-out preview window):
    SHA-256 `0d9b9a9620b20da1009effc72f63da2c36b6396c510c716284110e34e0c53ee0` (3,027,664 bytes), verified from
-   the public URL; the web app's download link points at 0.4.2.
+   the public URL; the web app's download link points at 0.4.2. **0.4.3 signed the same way on 2026-09-20**
+   (colour-coded review marks, place per day/recording with one import per client/place/camera, review state kept
+   per card on the workstation, disk cleanup limited to FCM-verified sent copies, decided-no copies and `.part`
+   files): SHA-256 `4ca94a372407f99607c3301f0683297abd9a232e97210bc9be5bb79a02e042ea` (3,059,760 bytes), verified
+   from the public URL; the web app's download link points at 0.4.3.
 
 What it buys:
 
