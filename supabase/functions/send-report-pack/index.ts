@@ -97,7 +97,9 @@ serve(async (req)=>{
     if (!pack) return json({
       error: 'Pack not found'
     }, 404);
-    if (callerProfile.role !== 'grand_master' && pack.organization_id !== callerProfile.organization_id) {
+    // Packs belong to the agreement's provider, which may be a branch of the caller's organisation: resolve authority as the caller.
+    const { data: maySend } = await callerClient.rpc('is_admin_for_org', { target_org_id: pack.organization_id });
+    if (callerProfile.role !== 'grand_master' && maySend !== true) {
       return json({
         error: 'Cannot send packs for other organizations'
       }, 403);

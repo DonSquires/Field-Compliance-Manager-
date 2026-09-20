@@ -131,12 +131,21 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       setLoading(true);
       setError(null);
 
+      // Agreements are held at branch level (Model A): an employer-organisation user also works within its branches' agreements.
+      // Client-side users only ever see agreements where they are the client.
+      const isClientUser = profile.role.startsWith('client_');
+      let providerOrgIds = [profile.organizationId];
+      if (!isClientUser) {
+        const { data: descendants } = await supabase.rpc('get_descendant_organizations', { org_id: profile.organizationId });
+        if (Array.isArray(descendants) && descendants.length) providerOrgIds = [...new Set([profile.organizationId, ...descendants])];
+      }
+
       const { data: agreementRows, error: agreementsError } = await supabase
         .from('service_agreements')
         .select(
           'id, name, agreement_type, invitation_status, provider_organization_id, client_organization_id, client_portal_access_mode, client_portal_reports_enabled, client_portal_finance_enabled, allows_client_submission, enabled_modules, created_at, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
         )
-        .or(`provider_organization_id.eq.${profile.organizationId},client_organization_id.eq.${profile.organizationId}`)
+        .or(isClientUser ? `client_organization_id.eq.${profile.organizationId}` : `provider_organization_id.in.(${providerOrgIds.join(',')}),client_organization_id.eq.${profile.organizationId}`)
         .order('created_at', { ascending: false });
 
       if (agreementsError) throw agreementsError;
@@ -256,11 +265,11 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, selectedAgreementId]);
+  }, [profile?.organizationId, profile?.role, selectedAgreementId]);
 
   useEffect(() => {
     void refetch();
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, profile?.role]);
 
   const selectedAgreement = useMemo(
     () => agreements.find((agreement) => agreement.id === selectedAgreementId) ?? null,

@@ -8,5 +8,7 @@ const source = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/Re
 test('ReportsHubPage resolves the active place-first module context before loading report data', () => {
   assert.match(source, /useActiveModuleContext/);
   assert.match(source, /useServiceRelationships/);
-  assert.match(source, /selectedAgreementZones/);
+  // The reader chooses the agreement on the hub; its zones scope breaches and observations (owner walk 2026-09-19).
+  assert.match(source, /const \[agreementFilterId, setAgreementFilterId\] = useState\(''\);/);
+  assert.match(source, /\.from\('service_agreement_locations'\)\.select\('zone_id'\)\.eq\('service_agreement_id', selectedAgreement\.id\)/);
 });

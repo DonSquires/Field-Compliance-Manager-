@@ -8,7 +8,7 @@
  * — those were a screen-first guess and have been removed.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
@@ -59,7 +59,8 @@ interface MonthlyReportPack {
   sent_at: string | null;
   pdf_path: string | null;
   pdf_sha256: string | null;
-  agreement: Array<{ name: string }> | null;
+  // PostgREST embeds a to-one relation as an object; older fixtures send an array.
+  agreement: { name: string } | Array<{ name: string }> | null;
 }
 
 function exclusiveEndIso(date: string): string {
@@ -70,7 +71,11 @@ function exclusiveEndIso(date: string): string {
 
 const ReportsHubPage: React.FC = () => {
   const { profile } = useAuth();
-  const { selectedAgreement, selectedAgreementZones } = useServiceRelationships();
+  const relationships = useServiceRelationships();
+  // The hub filters by an agreement the reader chooses here, not by the app-wide place context.
+  const [agreementFilterId, setAgreementFilterId] = useState('');
+  const providerAgreements = useMemo(() => relationships.agreements.filter((agreement) => agreement.agreement_type === 'operational' && agreement.client_organization_id !== profile?.organizationId), [profile?.organizationId, relationships.agreements]);
+  const selectedAgreement = useMemo(() => providerAgreements.find((agreement) => agreement.id === agreementFilterId) ?? null, [agreementFilterId, providerAgreements]);
   const moduleContext = useActiveModuleContext('report');
   const [metrics, setMetrics] = useState<ReportMetrics>({
     totalBreaches: 0,
@@ -105,8 +110,16 @@ const ReportsHubPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+      let activeZoneIds: string[] | null = null;
+      if (selectedAgreement) {
+        const { data: links } = await supabase.from('service_agreement_locations').select('zone_id').eq('service_agreement_id', selectedAgreement.id).eq('status', 'active').not('zone_id', 'is', null);
+        const zoneIds = (links ?? []).map((link) => link.zone_id as string);
+        activeZoneIds = zoneIds.length > 0 ? zoneIds : null;
+      }
       const timestampEndExclusive = exclusiveEndIso(dateRange.end);
+      // Report packs belong to the agreement's provider, which is a branch under the Model A house; list the whole house.
+      const { data: descendantOrgIds } = await supabase.rpc('get_descendant_organizations', { org_id: profile.organizationId });
+      const houseOrgIds = [...new Set([profile.organizationId, ...(Array.isArray(descendantOrgIds) ? descendantOrgIds : [])])];
       const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
         activeZoneIds && activeZoneIds.length > 0
           ? supabase
@@ -149,13 +162,12 @@ const ReportsHubPage: React.FC = () => {
           : supabase
               .from('monthly_report_packs')
               .select('id, template_code, period_start, period_end, status, generated_at, sent_at, pdf_path, pdf_sha256, agreement:service_agreement_id(name)')
-              .eq('organization_id', profile.organizationId)
+              .in('organization_id', houseOrgIds)
               .gte('period_start', dateRange.start)
               .lte('period_end', dateRange.end)
               .order('period_end', { ascending: false }),
-        selectedAgreement?.id
-          ? supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_service_agreement_id: selectedAgreement.id, p_from: dateRange.start, p_to: dateRange.end })
-          : supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
+        // The overview is per branch of the house; there is no per-agreement overload (calling one 404'd and failed the whole page).
+        supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
       ]);
 
       const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error;
@@ -172,7 +184,7 @@ const ReportsHubPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, selectedAgreement?.id, selectedAgreementZones, dateRange.end, dateRange.start]);
+  }, [profile?.organizationId, selectedAgreement, dateRange.end, dateRange.start]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 
@@ -254,6 +266,15 @@ const ReportsHubPage: React.FC = () => {
       {notice && <div className="alert alert-success" role="status">{notice}</div>}
 
       <div className="reports-filter">
+        {providerAgreements.length > 0 && (
+          <label className="reports-agreement-filter">
+            <span>Agreement</span>
+            <select value={agreementFilterId} onChange={(event) => setAgreementFilterId(event.target.value)}>
+              <option value="">All agreements ({providerAgreements.length})</option>
+              {providerAgreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.client_name ? `${agreement.client_name} · ` : ''}{agreement.name}</option>)}
+            </select>
+          </label>
+        )}
         <label>Date Range</label>
         <div className="date-inputs">
           <input
@@ -300,7 +321,7 @@ const ReportsHubPage: React.FC = () => {
           <table className="reports-table">
             <thead><tr><th>Agreement</th><th>Period</th><th>Template</th><th>Status</th><th>Generated</th><th>PDF</th><th>Delivery</th></tr></thead>
             <tbody>
-              {reportPacks.length === 0 ? <tr><td colSpan={7} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => <tr key={pack.id}><td>{pack.agreement?.[0]?.name ?? 'Service agreement'}</td><td>{pack.period_start} to {pack.period_end}</td><td>{pack.template_code}</td><td><span className={`status-badge status-${pack.status}`}>{pack.status}</span></td><td>{pack.generated_at ? new Date(pack.generated_at).toLocaleString() : '-'}</td><td>{pack.pdf_path ? 'Ready' : <button type="button" className="btn btn-sm btn-secondary" onClick={() => void generateReportPackPdf(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Rendering...' : 'Generate PDF'}</button>}</td><td>{pack.status === 'sent' ? (pack.sent_at ? `Sent ${new Date(pack.sent_at).toLocaleString()}` : 'Sent') : <button type="button" className="btn btn-sm btn-primary" onClick={() => void sendReportPack(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Sending...' : 'Send to client'}</button>}</td></tr>)}
+              {reportPacks.length === 0 ? <tr><td colSpan={7} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => <tr key={pack.id}><td>{(Array.isArray(pack.agreement) ? pack.agreement[0]?.name : pack.agreement?.name) ?? 'Service agreement'}</td><td>{pack.period_start} to {pack.period_end}</td><td>{pack.template_code}</td><td><span className={`status-badge status-${pack.status}`}>{pack.status}</span></td><td>{pack.generated_at ? new Date(pack.generated_at).toLocaleString() : '-'}</td><td>{pack.pdf_path ? 'Ready' : <button type="button" className="btn btn-sm btn-secondary" onClick={() => void generateReportPackPdf(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Rendering...' : 'Generate PDF'}</button>}</td><td>{pack.status === 'sent' ? (pack.sent_at ? `Sent ${new Date(pack.sent_at).toLocaleString()}` : 'Sent') : <button type="button" className="btn btn-sm btn-primary" onClick={() => void sendReportPack(pack)} disabled={sendingPackId === pack.id}>{sendingPackId === pack.id ? 'Sending...' : 'Send to client'}</button>}</td></tr>)}
             </tbody>
           </table>
         </div>

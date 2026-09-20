@@ -65,7 +65,9 @@ serve(async (req) => {
     if (!packId) return json({ error: 'pack_id is required' }, 400);
     const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,generated_at').eq('id', packId).single();
     if (packError || !pack) return json({ error: 'Report pack not found' }, 404);
-    if (String(profile.role) !== 'grand_master' && pack.organization_id !== profile.organization_id) return json({ error: 'Forbidden' }, 403);
+    // Packs belong to the agreement's provider, which may be a branch of the caller's organisation: resolve authority as the caller.
+    const { data: mayRender } = await caller.rpc('is_admin_for_org', { target_org_id: pack.organization_id });
+    if (String(profile.role) !== 'grand_master' && mayRender !== true) return json({ error: 'Forbidden' }, 403);
     if (!['generated', 'sent'].includes(pack.status)) return json({ error: 'Only generated report packs can be rendered' }, 409);
     const bytes = await renderPdf(`${pack.template_code.replace(/_/g, ' ')} report pack`, `${pack.period_start} to ${pack.period_end}`, pack.id, pack.generated_at, pack.data ?? {});
     const checksum = await sha256(bytes);

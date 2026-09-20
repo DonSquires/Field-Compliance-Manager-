@@ -238,7 +238,11 @@
   align-items: center;
   gap: 12px;
   margin-top: 12px;
+  flex-wrap: wrap;
 }
+
+.reports-agreement-filter { display: flex; align-items: center; gap: 8px; }
+.reports-agreement-filter select { max-width: 360px; min-height: 34px; padding: 4px 8px; border: 1px solid var(--color-border, #334155); border-radius: 6px; color: var(--color-text-primary, #e2e8f0); background: var(--color-bg-elevated, #0f1b2d); }
 
 .date-inputs {
   display: flex;
