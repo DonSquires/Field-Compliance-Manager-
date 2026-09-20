@@ -188,10 +188,16 @@ registration; the console's enhancement/zoom gets the located box.
   `CAP_PROP_N_THREADS=VISION_DECODE_THREADS` (2); the watcher's per-frame `/infer/alpr`, `/infer/face`,
   `/infer/people` and `/infer` calls go through the tolerant `classifyLocally`, so a timeout or 503 is that
   frame's answer (`success:false`, logged `inference_route_unavailable`) rather than a failed job; compose
-  runs two jobs at once (`VISION_WORKER_CONCURRENCY=2`). Steady-state target: eight cores = 2 jobs × 2
-  decode threads + 4 detector threads. A stuck `processing` job has no lease reaper —
-  `claim_cctv_inference_job` claims only `queued` — so after a watcher restart the orphans are reset by an
-  audited SQL update (`audit_log.action = 'cctv_inference_rerun'`), never by hand-editing results.
+  runs two jobs at once (`VISION_WORKER_CONCURRENCY=2`; note `/opt/fcm/.env` on the VPS overrides the compose
+  default — it was still 3 there after the deploy and was set to 2 by hand on 2026-09-21). Steady-state target: eight cores = 2 jobs × 2
+  decode threads + 4 detector threads. Stale `processing` leases are recovered by
+  `recover_stale_cctv_inference_jobs`, which the watcher calls on every poll — so a reaper only runs while a
+  watcher is running; with the watcher stopped, orphans were reset by an audited SQL update
+  (`audit_log.action = 'cctv_inference_rerun'`), never by hand-editing results. Commit `28633986` adds the
+  last piece: the watcher samples `/proc/stat` around each extraction, and an extractor timeout during which
+  the host withheld ≥ `VISION_STARVED_STEAL_RATIO` (0.5) of the CPU **defers** the job for
+  `VISION_STARVED_DEFER_SECONDS` (1 h, `extractor_starved_deferred`) instead of failing it — the video was
+  never the problem. A timeout with the CPU available still fails, as it should.
 * RunPod: template `bwway2hiwx` → `fcm-inference-gpu@sha256:944b93bb…` (commit `6363ae2`), env
   `DETECTOR_MODEL=rf-detr-large-704-coco`; endpoint `katqqnmds1dphs` set to 1 GPU per worker (was 2), GPU
   types 4090 / RTX 6000 Ada / L40S / A40 (all CUDA 12), network-volume pin removed, idle 30 s, execution
