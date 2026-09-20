@@ -44,6 +44,7 @@ output.txt
 apps/web/src/shells/Sample Data/
 **/Sample Data/*.mp4
 **/Sample Data/*.bin
+Build-Plan/Taho-Sample/
 
 # Drop-zone for desktop signing material on its way to Supabase Vault (store-signing-material.mjs shreds it).
 desktop-signing-intake/

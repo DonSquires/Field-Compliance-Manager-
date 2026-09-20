@@ -12,6 +12,7 @@ use std::io::Read;
 use std::path::Path;
 
 pub mod mp4;
+pub mod tapo;
 
 pub const FFMPEG_VERSION: &str = "8.1.2-c573a95381";
 pub const FFMPEG_SHA256: &str = "56f015b477f6fc7923409bb63217d2ee7b2b8d236c599ba94e1cf72220548e8c";

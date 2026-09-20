@@ -98,14 +98,20 @@ the signed-in user under row-level security, and the session is held in memory o
   requested only when a row scrolls into view and at most two at a time. A viewing aid; cleared with the previews.
 - `analyze_recording_segments` / `split_recording_segments` — the motion clips a camera wrote back to back into
   one file. `analyze` reads only the MP4 index (`moov`, plus Tapo's `stte` trigger table hidden in the `free`
-  box) and returns the segments: each begins on a key frame whose sample duration the muxer stretched (~0.5 s
-  against ~0.06 s) — the only mark Tapo leaves between clips. `split` cuts them with ffmpeg's segment muxer in
-  one pass, video copied frame for frame from the key frame that starts each clip, audio copied where MP4 allows
+  box) and returns the segments. Boundaries come first from the `stte` marks — the camera's own trigger list,
+  every one of which must land on a key frame or the table is not trusted — and, when there is no such table,
+  from key frames whose sample duration the muxer stretched (~0.5 s against ~0.06 s). When the card's own
+  index `sys01.bin` sits beside the file (see `crates/decoder/src/tapo.rs`: 80-byte records, one per motion
+  event, with slot number, index within the slot and start/end in Unix seconds), and it lists exactly one
+  event per mark for that slot, every clip is dated from it (`clockSource: card_index`); otherwise
+  `clockNote` says why the times stay lower bounds. `split` cuts the clips with ffmpeg's segment muxer in one
+  pass, video copied frame for frame from the key frame that starts each clip, audio copied where MP4 allows
   it and re-encoded to AAC where it does not (Tapo's µ-law), into `Public Documents\fcm-acquisitions\clips\<stem>-<hash>\`,
-  hashing every clip and writing `clips.json` so a complete earlier cut is reused rather than redone. The pure
-  parts (`container_signature`, box walking, `parse_stte`, `split_args`, `parse_segment_list`) live in
-  `crates/decoder/src/mp4.rs` with tests; `cargo run --example segments_probe -- <file> <out dir>` runs them
-  against a real file with the system ffmpeg.
+  hashing every clip and writing `clips.json` so a complete earlier cut is reused rather than redone (bytes and
+  hashes reused; timing always from today's analysis). The pure parts (`container_signature`, box walking,
+  `parse_stte`, `apply_card_events`, `split_args`, `parse_segment_list`, the `tapo` index parser) live in
+  `crates/decoder` with tests; `cargo run --example segments_probe -- <file> <out dir>` runs them against a
+  real file with the system ffmpeg.
 - `read_pictures` — the JPEGs of a picture-stream extraction, so its review shows the pictures themselves.
 - `load_review_state` / `save_review_state` — the operator's working notes for one card or folder (marks, per-day
   and per-recording place, what was sent and to which import), kept on this computer under
@@ -169,6 +175,23 @@ the bytes on disk again before sending; the manifest records the source file, se
 actual cut times, method and audio handling. **Timing is a lower bound and is shown as one (≥ 14:36:11):**
 the camera pauses between motion events and nothing in the file records those gaps — only the clock burnt
 into the picture does. Reading that clock is the next step, not assumed.
+
+0.4.6 (owner supplied the whole card folder, 2026-09-20) dates every clip from the **camera's own card index**.
+Beside the slot files a Tapo card carries `sys01.bin`: one 80-byte record per motion event with the slot
+number, the event's index within the slot and its start and end in Unix seconds. Event *i* of a slot is the
+*i*th `stte` mark of that slot's file, so the two together date each clip; the first clip of a slot carries a
+few seconds of pre-roll before its trigger, which the first mark states. Verified on the real card against the
+clock burnt into the picture, to the second, on eight clips across both recorded slots — including slot 0,
+which turned out to span **four days** (its first 71 clips on 11 Sep, the last five on 15 Sep, a fact the
+0.4.5 lower bounds could not show). Boundaries now come from the `stte` marks themselves (76 clips, not 71:
+five restarts had no stretched frame), with the stretched-frame rule kept as the fallback for files without a
+table. In the list a dated clip shows a plain time (with its date when it differs from the file's day); an
+undated clip keeps the `≥` lower bound and the chip's tooltip says what is missing ("No card index (sys01.bin)
+beside this file … copy the whole card folder, index files included"). The manifest records
+`start_time_source: camera_card_index` with `camera_event_start_at` / `camera_event_end_at`, or
+`segment_offset_lower_bound` as before. A correction typed into the parent file's start moves only undated
+clips — the operator's guess does not outrank the camera's record. Copying a Tapo card: copy the **whole
+folder** (the `xxxxxxxx_000000_tp…` placeholders can be skipped, `sys01.bin` cannot).
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device

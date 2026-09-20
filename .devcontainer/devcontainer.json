@@ -2,8 +2,10 @@
   "name": "Field Compliance Manager",
   "image": "mcr.microsoft.com/devcontainers/universal:2",
   "features": {
-    "ghcr.io/devcontainers-extra/features/deno:1": {}
+    "ghcr.io/devcontainers-extra/features/deno:1": {},
+    "ghcr.io/devcontainers/features/rust:1": { "version": "latest", "profile": "minimal", "targets": "x86_64-pc-windows-gnu" }
   },
+  "postCreateCommand": "sudo apt-get update -qq && sudo apt-get install -y -qq gcc-mingw-w64-x86-64 ffmpeg",
   "customizations": {
     "vscode": {
       "extensions": [

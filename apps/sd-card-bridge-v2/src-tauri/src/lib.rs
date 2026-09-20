@@ -865,21 +865,38 @@ fn split_directory(source: &Path) -> PathBuf {
     base.join("fcm-acquisitions").join("clips").join(format!("{safe}-{}", &digest[..8]))
 }
 
-/// The motion clips a file's own index describes; reads the `moov` only, never the media data.
+/// The motion clips a file's own index describes; reads the `moov` only, never the media data. When the
+/// camera's card index (`sys01.bin`) sits beside the file and lists exactly one event per mark, every clip is
+/// dated from it; otherwise `clockNote` says why the times remain lower bounds.
 #[tauri::command(async)]
 fn analyze_recording_segments(path: String) -> Result<fcm_decoder::mp4::Mp4Segments, String> {
     let mut file = File::open(&path).map_err(|error| format!("The file could not be opened: {error}"))?;
     let len = file.metadata().map_err(|error| error.to_string())?.len();
-    fcm_decoder::mp4::analyze(&mut file, len, 3.0)
+    let mut result = fcm_decoder::mp4::analyze(&mut file, len, 3.0)?;
+    let source = Path::new(&path);
+    let file_name = source.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let index_path = source.parent().and_then(|dir| fs::read_dir(dir).ok()).and_then(|entries| entries.flatten().map(|e| e.path()).find(|p| p.file_name().map(|n| fcm_decoder::tapo::is_card_index_name(&n.to_string_lossy())).unwrap_or(false)));
+    result.clock_note = Some(match (index_path, fcm_decoder::tapo::slot_number(&file_name)) {
+        (Some(index_path), Some(slot)) => match fs::read(&index_path).map_err(|e| e.to_string()).and_then(|bytes| fcm_decoder::tapo::parse_card_index(&bytes)).and_then(|index| fcm_decoder::tapo::events_for_slot(&index, slot)) {
+            Ok(events) => match fcm_decoder::mp4::apply_card_events(&mut result, &events) {
+                Ok(()) => return Ok(result),
+                Err(reason) => format!("The card index beside this file could not be matched to it: {reason}. Times are lower bounds."),
+            },
+            Err(reason) => format!("The card index beside this file could not be read: {reason}. Times are lower bounds."),
+        },
+        (None, Some(_)) => "No card index (sys01.bin) beside this file, so the camera's own event times are not available; copy the whole card folder, index files included, to date each clip. Times are lower bounds.".to_string(),
+        (_, None) => "This recorder's file name carries no slot number, so no card index can date its clips. Times are lower bounds.".to_string(),
+    });
+    Ok(result)
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SegmentPlan { index: u32, start_seconds: f64, end_seconds: f64 }
+struct SegmentPlan { index: u32, start_seconds: f64, end_seconds: f64, #[serde(default)] trigger_offset_seconds: f64, #[serde(default)] event_start_unix: Option<u32>, #[serde(default)] event_end_unix: Option<u32> }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct SplitClip { index: u32, path: String, file_name: String, bytes: u64, sha256: String, start_seconds: f64, end_seconds: f64, cut_start_seconds: f64, cut_end_seconds: f64 }
+struct SplitClip { index: u32, path: String, file_name: String, bytes: u64, sha256: String, start_seconds: f64, end_seconds: f64, cut_start_seconds: f64, cut_end_seconds: f64, #[serde(default)] trigger_offset_seconds: f64, #[serde(default)] event_start_unix: Option<u32>, #[serde(default)] event_end_unix: Option<u32> }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -898,8 +915,15 @@ fn split_recording_segments(app: tauri::AppHandle, path: String, segments: Vec<S
     let record = directory.join("clips.json");
     if let Ok(text) = fs::read_to_string(&record) {
         if let Ok(previous) = serde_json::from_str::<SplitResult>(&text) {
-            let intact = previous.clips.len() == segments.len() && previous.clips.iter().all(|clip| fs::metadata(&clip.path).map(|m| m.len() == clip.bytes && clip.bytes > 0).unwrap_or(false));
-            if intact { return Ok(SplitResult { existing: true, seconds: 0.0, ..previous }); }
+            let intact = previous.clips.len() == segments.len() && previous.clips.iter().zip(segments.iter()).all(|(clip, plan)| clip.index == plan.index && (clip.start_seconds - plan.start_seconds).abs() < 0.01 && fs::metadata(&clip.path).map(|m| m.len() == clip.bytes && clip.bytes > 0).unwrap_or(false));
+            if intact {
+                // The bytes and hashes are what is reused; the timing comes from today's analysis, which may
+                // now carry the camera's event times an earlier cut did not have.
+                let clips = previous.clips.into_iter().zip(segments.iter()).map(|(clip, plan)| SplitClip { trigger_offset_seconds: plan.trigger_offset_seconds, event_start_unix: plan.event_start_unix, event_end_unix: plan.event_end_unix, end_seconds: plan.end_seconds, ..clip }).collect();
+                let refreshed = SplitResult { clips, existing: true, seconds: 0.0, ..previous };
+                let _ = fs::write(&record, serde_json::to_string_pretty(&refreshed).unwrap_or_default());
+                return Ok(refreshed);
+            }
         }
     }
     let stem = source.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "recording".to_string());
@@ -929,7 +953,7 @@ fn split_recording_segments(app: tauri::AppHandle, path: String, segments: Vec<S
         let mut file = File::open(&clip_path).map_err(|error| format!("{name}: {error}"))?;
         let bytes = file.metadata().map_err(|error| error.to_string())?.len();
         let sha256 = fcm_decoder::sha256_of(&mut file).map_err(|error| error.to_string())?;
-        clips.push(SplitClip { index: plan.index, path: clip_path.to_string_lossy().to_string(), file_name: clip_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), bytes, sha256, start_seconds: plan.start_seconds, end_seconds: plan.end_seconds, cut_start_seconds: *cut_start, cut_end_seconds: *cut_end });
+        clips.push(SplitClip { index: plan.index, path: clip_path.to_string_lossy().to_string(), file_name: clip_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), bytes, sha256, start_seconds: plan.start_seconds, end_seconds: plan.end_seconds, cut_start_seconds: *cut_start, cut_end_seconds: *cut_end, trigger_offset_seconds: plan.trigger_offset_seconds, event_start_unix: plan.event_start_unix, event_end_unix: plan.event_end_unix });
     }
     let result = SplitResult { directory: directory.to_string_lossy().to_string(), clips, audio, seconds: started.elapsed().as_secs_f64(), existing: false };
     let _ = fs::write(&record, serde_json::to_string_pretty(&result).unwrap_or_default());

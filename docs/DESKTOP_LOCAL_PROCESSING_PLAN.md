@@ -93,6 +93,28 @@ monotonic guard; the rest failed on bright backgrounds behind the white digits, 
 enough to date evidence and would need a stricter outline mask plus a reject-when-unsure rule; (3) accepting
 the lower bound. Until (1) or (2) is proven, the lower bound stands and is labelled.
 
+**0.4.6 (owner supplied the whole card folder, 2026-09-20): option (1) proven and built.** The Tapo card's
+other files are `sys00.bin` (124 B), `sys01.bin` and its byte-identical mirror `sys01b.bin` (37,480,256 B
+each), `index_info.bin`, `md5_check.bin` and a `diagnose_log`. `sys01.bin` is the event index: a 1,856-byte
+big-endian header (record size 80 @0x2c, slot size 256 MiB @0x30, slot count @0x34, header size @0x4c) then
+one 80-byte record per motion event — byte offset and length of the event's data in the slot, slot number,
+index within the slot, index across the card, **start and end in Unix seconds**, checksum, kind (4 = motion);
+unused records read `0x77770000…`. Event *i* of a slot is the *i*th `stte` mark of that slot's file, which
+makes the join exact rather than heuristic; the slot's first clip carries pre-roll before its trigger, stated
+by the first mark (6 s on the real card). Parser: `crates/decoder/src/tapo.rs` (refuses unknown layouts,
+implausible years, backwards or gapped per-slot sequences — a half-understood index is worse than none);
+join: `mp4::apply_card_events` (refuses unless boundaries came from the marks and counts match exactly).
+Boundaries are now taken from the `stte` marks first, each required to sit on a key frame (76 clips on slot
+0 where the stretched-frame rule found 71 — five restarts had no stretched frame); the stretched-frame rule
+remains the fallback for recorders without a table. **Verified to the second against the burnt-in clock on
+eight clips across both recorded slots**, including the pre-roll case (slot 0's file name `20260911_143156`
+= first event 14:32:02 − 6 s) and slot 0's last five clips, which fall on 15 Sep — four days after its first
+71. Consequences carried through: `clockSource: card_index | none` with a plain-language `clockNote`; dated
+clips show a plain time (plus date when it differs from the file's day), undated clips keep `≥`; manifest
+`start_time_source: camera_card_index` + `camera_event_start_at/end_at`; an operator's typed correction to
+the file's start moves only undated clips; a `clips.json` from 0.4.5 is reused for its bytes and hashes but
+re-dated from today's analysis. Option (2), reading the OSD, is no longer needed for Tapo and stays parked.
+
 ## Phase 2 — Analyse here (0.5.x)
 
 Goal: the laptop runs the same detection/recognition tier the VPS runs and FCM receives **results**, not footage,
