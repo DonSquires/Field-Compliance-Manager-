@@ -20,7 +20,7 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNavigation';
-import { CrmAccountWorkspace, type CrmWorkspaceAccount } from '../components/CrmAccountWorkspace';
+import { CrmAccountWorkspace, type CrmWorkspaceAccount, type WorkspaceQuote } from '../components/CrmAccountWorkspace';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
 import { PriceListPicker } from '../components/PriceListPicker';
@@ -83,6 +83,8 @@ interface PricingQuote {
   title: string;
   status: string;
   client: AccountRow;
+  /** Set when the quote varies an existing agreement rather than creating one. */
+  variedAgreementName?: string | null;
 }
 
 interface AgreementRow extends ServiceAgreement {
@@ -215,6 +217,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [editingProposalSchedule, setEditingProposalSchedule] = useState<ProposalScopeSchedule | null>(null);
   const [proposalScheduleForm, setProposalScheduleForm] = useState({ scopeId: '', capability: 'patrol', workModel: 'scheduled_patrol', activeDays: [1,2,3,4,5,6,7], activeMonths: [] as number[], visits: '1', minimumGap: '60', startTime: '', endTime: '', sla: '', departSla: '', dwell: '15', stopOrder: '0', rateRuleId: '', notes: '', officerInstructions: '' });
   const [quoteSaving, setQuoteSaving] = useState(false);
+  const [quoteAgreementsChecked, setQuoteAgreementsChecked] = useState(false);
   const [pricingQuote, setPricingQuote] = useState<PricingQuote | null>(null);
   const [lineForm, setLineForm] = useState({
     kind: 'labour',
@@ -233,7 +236,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [quoteAction, setQuoteAction] = useState<'send' | 'accept' | 'decline' | null>(null);
   const [quoteActionReason, setQuoteActionReason] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
-  const [quoteAcceptance, setQuoteAcceptance] = useState<{ quoteTitle: string; accountId: string; accountName: string; agreementId: string } | null>(null);
+  const [quoteAcceptance, setQuoteAcceptance] = useState<{ quoteTitle: string; accountId: string; accountName: string; agreementId: string; variedAgreementName?: string | null } | null>(null);
   const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
   const [workspaceInitialView, setWorkspaceInitialView] = useState<'overview' | 'sites'>('overview');
   const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
@@ -649,10 +652,13 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setProposalModules([]);
     setQuotedModuleKeys([]);
     setQuoteAgreements([]);
+    setQuoteAgreementsChecked(false);
     setQuoteVariationAgreementId('');
     // ATLAS READS: service_agreements (client's live operational agreements this quote may vary)
     void supabase.from('service_agreements').select('id,name,starts_on,ends_on,invitation_status,agreement_type').eq('client_organization_id', client.id).eq('agreement_type', 'operational').order('created_at', { ascending: false }).limit(50)
       .then(({ data, error }) => {
+        // a failed check must not let a duplicate agreement slip through unnoticed
+        setQuoteAgreementsChecked(true);
         if (error) { setState((current) => ({ ...current, error: `Existing agreements could not be checked: ${error.message}` })); return; }
         const today = new Date().toISOString().slice(0, 10);
         setQuoteAgreements(((data as Array<{ id: string; name: string; starts_on: string | null; ends_on: string | null; invitation_status: string }> | null) ?? []).filter((agreement) => !agreement.ends_on || agreement.ends_on >= today));
@@ -743,7 +749,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         }
       }
       setQuotedModuleKeys(proposalModules.map((module) => module.moduleKey));
-      setPricingQuote({ ...quote, client: quoteClient });
+      setPricingQuote({ ...quote, client: quoteClient, variedAgreementName: variedAgreement?.name ?? null });
       setLineForm({
         kind: 'labour',
         description: 'Service labour',
@@ -800,6 +806,19 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setQuoteSaving(false);
   };
 
+  // A draft that was closed (or a sent quote awaiting the client) comes back to the same pricing dialog.
+  const reopenQuote = async (account: CrmWorkspaceAccount, quote: WorkspaceQuote) => {
+    const sourceAccount = [...state.clients, ...state.branches].find((candidate) => candidate.id === account.id)
+      ?? { id: account.id, name: account.name, organization_type: 'client', active: true, status: account.status ?? 'active', updated_at: '', nzbn: null, company_registration_number: null, contact_email: null, contact_phone: null, billing_email: null, billing_address: null, account_notes: null, site_count: account.siteCount ?? 0, primary_contact_name: account.primaryContactName ?? null, latest_quote_status: null, sites: [], blockers: account.readinessBlockers ?? [], next_action: '' } as AccountRow;
+    let variedAgreementName: string | null = null;
+    if (quote.service_agreement_id) {
+      const { data } = await supabase.from('service_agreements').select('name').eq('id', quote.service_agreement_id).maybeSingle();
+      variedAgreementName = (data as { name: string } | null)?.name ?? null;
+    }
+    setQuoteAction(null);
+    setPricingQuote({ id: quote.id, title: quote.title, status: quote.status, client: sourceAccount, variedAgreementName });
+  };
+
   const manageQuote = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!pricingQuote || !quoteAction) return;
@@ -818,7 +837,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     } else {
       const nextStatus = String(receipt.quote_status);
       setNotice(quoteAction === 'send' ? `${pricingQuote.title} sent for acceptance.` : quoteAction === 'accept' ? null : `${pricingQuote.title} declined with reason retained.`);
-      if (quoteAction === 'accept' && agreementId) setQuoteAcceptance({ quoteTitle: pricingQuote.title, accountId: pricingQuote.client.id, accountName: pricingQuote.client.name, agreementId });
+      if (quoteAction === 'accept' && agreementId) setQuoteAcceptance({ quoteTitle: pricingQuote.title, accountId: pricingQuote.client.id, accountName: pricingQuote.client.name, agreementId, variedAgreementName: pricingQuote.variedAgreementName ?? null });
       if (quoteAction === 'send') setPricingQuote({ ...pricingQuote, status: nextStatus }); else setPricingQuote(null);
       setQuoteAction(null);
       setQuoteActionReason('');
@@ -1095,7 +1114,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           <div>
             <span>Quote accepted</span>
             <strong>{quoteAcceptance.quoteTitle}</strong>
-            <p>Service agreement {quoteAcceptance.agreementId.slice(0, 8)} established for {quoteAcceptance.accountName}.</p>
+            <p>{quoteAcceptance.variedAgreementName ? `Variation accepted on ${quoteAcceptance.variedAgreementName}; its prices and any new places now apply.` : `Service agreement ${quoteAcceptance.agreementId.slice(0, 8)} established for ${quoteAcceptance.accountName}.`}</p>
           </div>
           <button type="button" className="btn btn-primary" onClick={() => onNavigate('relationships', { accountId: quoteAcceptance.accountId, agreementId: quoteAcceptance.agreementId })}>Open service agreement</button>
         </section>
@@ -1250,6 +1269,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                 {state.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name} (operating branch)</option>)}
               </select>
             </label>
+            {!quoteAgreementsChecked && <p className="crm-quote-checking" role="status">Checking whether {quoteClient.name} already has a live agreement this quote should vary…</p>}
             {quoteAgreements.length > 0 && (
               <fieldset className="crm-quote-purpose">
                 <legend>What is this quote for?</legend>
@@ -1267,7 +1287,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
                     <select value={quoteVariationAgreementId} onChange={(event) => setQuoteVariationAgreementId(event.target.value)} aria-label="Agreement being varied">
                       {quoteAgreements.map((agreement) => (
                         <option key={agreement.id} value={agreement.id}>
-                          {agreement.name}{agreement.starts_on ? ` · from ${agreement.starts_on}` : ''}{agreement.invitation_status !== 'accepted' ? ' · not yet accepted by client' : ''}
+                          {agreement.name}{agreement.starts_on ? ` · in force since ${new Date(`${agreement.starts_on}T00:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}{agreement.invitation_status !== 'accepted' ? ' · not yet accepted by client' : ''}
                         </option>
                       ))}
                     </select>
@@ -1380,16 +1400,16 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={quoteSaving || !quoteForm.title.trim() || proposalModules.length === 0 || proposalModules.some((module) => module.pricingBasis === 'standard_rate_rule' && !module.rateRuleId)}
+                disabled={quoteSaving || !quoteAgreementsChecked || !quoteForm.title.trim() || proposalModules.length === 0 || proposalModules.some((module) => module.pricingBasis === 'standard_rate_rule' && !module.rateRuleId)}
               >
-                {quoteSaving ? 'Creating' : 'Create draft quote'}
+                {quoteSaving ? 'Creating' : !quoteAgreementsChecked ? 'Checking existing agreements…' : 'Create draft quote'}
               </button>
             </footer>
           </form>
         </div>
       )}
       {pricingDialog}
-      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} initialView={workspaceInitialView} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} onNavigate={onNavigate} onOpenAccount={(account) => { setWorkspaceInitialView('overview'); setWorkspaceAccount(account); }} onEditOrganization={(organization) => setOrganizationDialog(organization)} onSaveAsClient={state.clients.some((candidate) => candidate.id === workspaceAccount.id) || state.branches.some((candidate) => candidate.id === workspaceAccount.id) ? undefined : async () => { const { data, error } = await supabase.rpc('save_discovered_org_as_client', { p_client_request_id: crypto.randomUUID(), p_source_organization_id: workspaceAccount.id }); if (error || !data) setState((current) => ({ ...current, error: error?.message ?? 'Client account receipt was not confirmed.' })); else { const row = data as { id: string; name: string; status: string }; setNotice(`${row.name} is now saved as a provider client prospect.`); setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: row.id, name: row.name, status: row.status }); await loadCrm(); } }} onCreateProposal={(account, place) => { const sourceAccount = [...state.clients, ...state.branches].find((candidate) => candidate.id === account.id); setWorkspaceInitialView('sites'); openQuote(sourceAccount ?? { id: account.id, name: account.name, organization_type: 'client', active: true, status: account.status ?? 'active', updated_at: '', nzbn: null, company_registration_number: null, contact_email: null, contact_phone: null, billing_email: null, billing_address: null, account_notes: null, site_count: account.siteCount ?? 0, primary_contact_name: account.primaryContactName ?? null, latest_quote_status: null, sites: [], blockers: account.readinessBlockers ?? [], next_action: 'Add place-scoped proposal' }, place); }} />}
+      {workspaceAccount && <CrmAccountWorkspace account={workspaceAccount} initialView={workspaceInitialView} onClose={() => { setWorkspaceAccount(null); void loadCrm(); }} onNavigate={onNavigate} onOpenAccount={(account) => { setWorkspaceInitialView('overview'); setWorkspaceAccount(account); }} onEditOrganization={(organization) => setOrganizationDialog(organization)} onSaveAsClient={state.clients.some((candidate) => candidate.id === workspaceAccount.id) || state.branches.some((candidate) => candidate.id === workspaceAccount.id) ? undefined : async () => { const { data, error } = await supabase.rpc('save_discovered_org_as_client', { p_client_request_id: crypto.randomUUID(), p_source_organization_id: workspaceAccount.id }); if (error || !data) setState((current) => ({ ...current, error: error?.message ?? 'Client account receipt was not confirmed.' })); else { const row = data as { id: string; name: string; status: string }; setNotice(`${row.name} is now saved as a provider client prospect.`); setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: row.id, name: row.name, status: row.status }); await loadCrm(); } }} onOpenQuote={(account, quote) => void reopenQuote(account, quote)} onCreateProposal={(account, place) => { const sourceAccount = [...state.clients, ...state.branches].find((candidate) => candidate.id === account.id); setWorkspaceInitialView('sites'); openQuote(sourceAccount ?? { id: account.id, name: account.name, organization_type: 'client', active: true, status: account.status ?? 'active', updated_at: '', nzbn: null, company_registration_number: null, contact_email: null, contact_phone: null, billing_email: null, billing_address: null, account_notes: null, site_count: account.siteCount ?? 0, primary_contact_name: account.primaryContactName ?? null, latest_quote_status: null, sites: [], blockers: account.readinessBlockers ?? [], next_action: 'Add place-scoped proposal' }, place); }} />}
       {organizationDialog && <CrmOrganizationDialog organization={organizationDialog === 'create' ? null : organizationDialog} onClose={() => { setOrganizationDialog(null); void loadCrm(); }} onUpdated={(name) => { setOrganizationDialog(null); setNotice(`${name} organization details updated. Review its readiness steps next.`); void loadCrm(); }} onOpenAccount={(account) => { setOrganizationDialog(null); setWorkspaceInitialView('sites'); setWorkspaceAccount(account); }} onUseOrganization={(organization) => { setOrganizationDialog(null); setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: organization.id, name: organization.name, status: organization.status }); }} />}
       {siteAccount && <CrmSiteDialog account={siteAccount} onClose={() => setSiteAccount(null)} onCreated={(site) => { setSiteAccount(null); setNotice(`${site.name} created with a provisional boundary. Operations boundary review is required before activation.`); void loadCrm(); }} />}
       {invoiceAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-invoice-action-title" onSubmit={manageInvoice}><header><div><span>Invoice lifecycle</span><h2 id="crm-invoice-action-title">{invoiceAction.action === 'send' ? 'Send invoice' : invoiceAction.action === 'mark_paid' ? 'Confirm payment' : 'Void invoice'}</h2></div><button type="button" onClick={() => setInvoiceAction(null)} aria-label="Close invoice action">×</button></header><p>{invoiceAction.invoice.invoice_number} · {invoiceAction.invoice.client?.name ?? 'Unknown account'} · {invoiceAction.invoice.currency} {Number(invoiceAction.invoice.total_amount).toFixed(2)}</p>{invoiceAction.action === 'void' && <label><span>Void reason</span><textarea required rows={4} value={invoiceReason} onChange={(event) => setInvoiceReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setInvoiceAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (invoiceAction.action === 'void' && !invoiceReason.trim())}>{quoteSaving ? 'Saving' : 'Confirm action'}</button></footer></form></div>}
@@ -1419,7 +1439,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           </form>
         </div>
       )}
-      {pricingQuote && quoteAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog crm-lifecycle-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-lifecycle-title" onSubmit={manageQuote}><header><div><span>Quote lifecycle</span><h2 id="crm-lifecycle-title">{quoteAction === 'send' ? 'Send quote?' : quoteAction === 'accept' ? 'Accept quote?' : 'Decline quote?'}</h2></div><button type="button" onClick={() => setQuoteAction(null)} aria-label="Close quote action">×</button></header><p>{quoteAction === 'send' ? 'The server will recheck labour pricing, positive totals, validity, and achieved margin before sending.' : quoteAction === 'accept' ? 'Acceptance creates or links the operational service agreement and writes canonical commercial settings.' : 'The quote will close as declined and the reason will remain in its audit history.'}</p>{quoteAction === 'decline' && <label><span>Decline reason</span><textarea rows={4} required value={quoteActionReason} onChange={(event) => setQuoteActionReason(event.target.value)} /></label>}<footer><button type="button" className="btn btn-secondary" onClick={() => setQuoteAction(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (quoteAction === 'decline' && !quoteActionReason.trim())}>{quoteSaving ? 'Saving' : quoteAction === 'send' ? 'Confirm send' : quoteAction === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></footer></form></div>}
+      {pricingQuote && quoteAction && <div className="crm-quote-backdrop"><form className="crm-quote-dialog crm-lifecycle-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-lifecycle-title" onSubmit={manageQuote}><header><div><span>Quote lifecycle</span><h2 id="crm-lifecycle-title">{quoteAction === 'send' ? 'Send quote?' : quoteAction === 'accept' ? 'Accept quote?' : 'Decline quote?'}</h2></div><button type="button" onClick={() => setQuoteAction(null)} aria-label="Close quote action">×</button></header><p>{quoteAction === 'send' ? 'The server will recheck labour pricing, positive totals, validity, and achieved margin before sending.' : quoteAction === 'accept' ? (pricingQuote.variedAgreementName ? `Acceptance applies this variation to ${pricingQuote.variedAgreementName}: its prices become the agreement's commercial settings and any covered places and schedules are added.` : 'Acceptance creates the operational service agreement and writes its commercial settings.') : 'The quote will close as declined and the reason will remain in its audit history.'}</p>{quoteAction === 'decline' && <label><span>Decline reason</span><textarea rows={4} required value={quoteActionReason} onChange={(event) => setQuoteActionReason(event.target.value)} /></label>}{quoteAction !== 'decline' && quotedModuleKeys.length > 0 && (proposalServiceScopes.length === 0 || proposalScopeSchedules.length === 0) && <p className="crm-lifecycle-warning" role="alert">{proposalServiceScopes.length === 0 ? 'No place is covered by this quote yet.' : 'No delivery schedule is set for the covered places yet.'} It can still be {quoteAction === 'send' ? 'sent' : 'accepted'}, but nothing will be rostered from it until a variation adds the places and times{quoteAction === 'send' ? ' — add them under Module coverage and Places and schedules first if this is the service being sold' : ''}.</p>}<footer><button type="button" className="btn btn-secondary" onClick={() => setQuoteAction(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={quoteSaving || (quoteAction === 'decline' && !quoteActionReason.trim())}>{quoteSaving ? 'Saving' : quoteAction === 'send' ? 'Confirm send' : quoteAction === 'accept' ? 'Confirm acceptance' : 'Confirm decline'}</button></footer></form></div>}
     </div>
   );
 };

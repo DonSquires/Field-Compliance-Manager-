@@ -59,6 +59,7 @@ interface AgreementModule {
 interface PatrolRoute {
   id: string;
   name: string;
+  organization_id?: string;
 }
 
 interface WorkUnit {
@@ -106,8 +107,15 @@ export function CrmOperationalWorkPanel({
     const [locationResponse, moduleResponse, routeResponse, unitResponse, scheduleResponse] = await Promise.all([
       supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id,status').eq('service_agreement_id', agreement.id).eq('status', 'active'),
       supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key,enabled').eq('service_agreement_id', agreement.id).eq('enabled', true),
-      supabase.from('patrol_routes').select('id,name').eq('organization_id', agreement.provider_organization_id).eq('is_active', true).order('name'),
-      supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id').eq('organization_id', agreement.provider_organization_id).eq('active', true).order('name'),
+      // routes and work units belong to the delivering branch, which may be a branch of the agreement holder
+      supabase.rpc('get_descendant_organizations', { org_id: agreement.provider_organization_id }).then(async ({ data }) => {
+        const houseIds = Array.isArray(data) && data.length ? (data as string[]) : [agreement.provider_organization_id];
+        return supabase.from('patrol_routes').select('id,name,organization_id').in('organization_id', houseIds).eq('is_active', true).order('name');
+      }),
+      supabase.rpc('get_descendant_organizations', { org_id: agreement.provider_organization_id }).then(async ({ data }) => {
+        const houseIds = Array.isArray(data) && data.length ? (data as string[]) : [agreement.provider_organization_id];
+        return supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id').in('organization_id', houseIds).eq('active', true).order('name');
+      }),
       // ATLAS READS: service_agreement_delivery_schedules (the accepted quote's places and times)
       supabase.from('service_agreement_delivery_schedules').select('id,proposal_scope_schedule_id,site_id,zone_id,capability_key,work_model,active_days,visits_per_shift,window_start,window_end,dwell_minutes,response_sla_minutes,officer_instructions').eq('service_agreement_id', agreement.id).eq('active', true).order('preferred_stop_order'),
     ]);
@@ -195,7 +203,8 @@ export function CrmOperationalWorkPanel({
     setSaving(true); setError(null); setNotice(null);
     const isPatrol = form.type === 'patrol';
     const { data, error: createError } = await supabase.rpc('create_operating_roster_work_unit', {
-      p_operating_organization_id: agreement.provider_organization_id,
+      // a patrol work unit is rostered where its run lives (the delivering branch); a static post stays with the agreement holder
+      p_operating_organization_id: (isPatrol ? routes.find((route) => route.id === form.routeId)?.organization_id : null) ?? agreement.provider_organization_id,
       p_name: form.name.trim(),
       p_work_unit_type: form.type,
       p_service_type: isPatrol ? 'patrol' : 'static_guarding',

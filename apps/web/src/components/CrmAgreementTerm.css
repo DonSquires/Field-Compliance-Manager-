@@ -1,0 +1,15 @@
+.crm-agreement-term { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0 4px; font-size: 12.5px; color: var(--color-text-secondary, #94a3b8); }
+.crm-agreement-term.is-ended > span, .crm-agreement-term.is-cancelled > span { color: #ffe1b8; }
+.crm-agreement-term.is-ending > span { color: #ffe1b8; }
+.crm-agreement-term-end { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--color-border, #3a5064); border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.crm-agreement-term-end:hover { color: var(--color-text-primary, #e7eef5); border-color: #7f2f36; }
+.crm-agreement-term-form { flex-basis: 100%; display: grid; gap: 8px; padding: 10px 12px; border: 1px solid #7f2f36; border-radius: 6px; background: #2d1517; color: #ffd7d7; }
+.crm-agreement-term-form p { margin: 0; line-height: 1.45; }
+.crm-agreement-term-form label { display: grid; gap: 3px; }
+.crm-agreement-term-form label span { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #f0b8bc; }
+.crm-agreement-term-form input { padding: 7px 9px; border: 1px solid #7f2f36; border-radius: 5px; background: #1a0d0f; color: #ffe8e8; font: inherit; }
+.crm-agreement-term-form > div { display: flex; gap: 8px; justify-content: flex-end; }
+.crm-agreement-term-form button { padding: 6px 12px; border-radius: 5px; border: 1px solid #7f2f36; background: transparent; color: #ffd7d7; font: inherit; cursor: pointer; }
+.crm-agreement-term-form button.is-danger { background: #7f2f36; color: #fff; }
+.crm-agreement-term-form button:disabled { opacity: .6; cursor: default; }
+.crm-agreement-term-error { display: flex; gap: 6px; align-items: center; margin: 0; }
