@@ -1,5 +1,15 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+
+const execFileAsync = promisify(execFile);
+
+function log(event, fields = {}) {
+  console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
+}
 
 const DEFAULT_FACE_SIMILARITY_THRESHOLD = 0.65;
 const DEFAULT_MAX_GAP_SECONDS = 15.0;
@@ -39,13 +49,46 @@ function averageEmbedding(existingAvg, count, newEmbedding) {
 
 async function loadBase64Thumbnail(filePath, maxBytes = 250_000) {
   if (!filePath) return null;
+  let stat;
   try {
-    const stat = await fs.stat(filePath);
-    if (stat.size > maxBytes) return null;
-    const buf = await fs.readFile(filePath);
-    return `data:image/jpeg;base64,${buf.toString('base64')}`;
-  } catch {
+    stat = await fs.stat(filePath);
+  } catch (error) {
+    // Distinct from "too large below" so a reviewer's missing photo can be told apart from a resize failure.
+    log('thumbnail_source_unreadable', { file_path: filePath, error: error.message });
     return null;
+  }
+  if (stat.size <= maxBytes) {
+    try {
+      const buf = await fs.readFile(filePath);
+      return `data:image/jpeg;base64,${buf.toString('base64')}`;
+    } catch (error) {
+      log('thumbnail_source_unreadable', { file_path: filePath, error: error.message });
+      return null;
+    }
+  }
+  // A full-resolution motion-extractor frame (busy daylight scene, or a high-megapixel camera) commonly
+  // exceeds the byte budget; downscale/recompress it instead of silently dropping the photo the reviewer
+  // needs to see. ffmpeg is already in this image for the extractor itself.
+  const scaledPath = path.join(os.tmpdir(), `thumb-${crypto.randomUUID()}.jpg`);
+  try {
+    await execFileAsync('ffmpeg', [
+      '-y', '-i', filePath,
+      '-vf', "scale='min(960,iw)':-2",
+      '-q:v', '5',
+      scaledPath,
+    ], { timeout: 15_000 });
+    const scaledStat = await fs.stat(scaledPath);
+    if (scaledStat.size > maxBytes) {
+      log('thumbnail_still_oversized_after_resize', { file_path: filePath, bytes: scaledStat.size, max_bytes: maxBytes });
+      return null;
+    }
+    const buf = await fs.readFile(scaledPath);
+    return `data:image/jpeg;base64,${buf.toString('base64')}`;
+  } catch (error) {
+    log('thumbnail_resize_failed', { file_path: filePath, source_bytes: stat.size, error: error.message });
+    return null;
+  } finally {
+    await fs.rm(scaledPath, { force: true }).catch(() => {});
   }
 }
 
