@@ -112,7 +112,11 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    identity, fill-pattern placeholders set aside, thumbnails for Dahua card recordings without extraction, disk
    section covers cut clips): SHA-256 `bef0dfe31e6a33be57d3fcced227711aeadaf5171bdccd4870fd8579664e2314`
    (3,152,264 bytes), verified from the public URL with a DigiCert timestamp; the web app's download link points
-   at 0.4.7.
+   at 0.4.7. **0.4.8 signed the same way on 2026-09-21** (preview and MP4 export on computers without an NVIDIA
+   GPU: the LGPL sidecar has no `libx264`, so the encoder chain is now NVENC → AMF → Quick Sync → Media
+   Foundation → OpenH264): SHA-256 `4abd0d3df87d87af33aa647daebc8bc4cb744051c7e4ff6f301f055b8f974cfb`
+   (3,150,640 bytes), verified from the public URL with a DigiCert timestamp; the web app's download link points
+   at 0.4.8.
 
    **Toolchain note (2026-09-20).** The signer is a self-signed *end-entity* certificate (CA:FALSE, keyUsage
    digitalSignature). OpenSSL 1.1.1 will not accept such a certificate as its own trust anchor and reports
