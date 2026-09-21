@@ -121,6 +121,19 @@ const CCTVTriagePage: React.FC = () => {
   const selected = filtered.find((observation) => observation.id === selectedId) ?? filtered[0] ?? null;
   const selectedCamera = selected?.importId ? cameras[selected.importId] ?? null : null;
 
+  // Each newly-selected observation gets its own blank reviewer inputs - otherwise a name/note typed
+  // for one sighting would silently carry over and get saved against the next one.
+  useEffect(() => {
+    setNewName(selected?.kind === 'person' ? selected.profileName ?? '' : '');
+    setPersonDetails(selected?.kind === 'person' && typeof selected.profileDetails.notes === 'string' ? selected.profileDetails.notes : '');
+    setNewPlate('');
+    setNotes('');
+    setReviewMessage(null);
+    setCorrectingVehicleId(null);
+    setCorrectMake('');
+    setCorrectModel('');
+  }, [selected?.id]);
+
   const patchObservation = useCallback((updated: ConsoleObservation) => {
     setObservations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
   }, []);
