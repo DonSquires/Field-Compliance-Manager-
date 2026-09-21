@@ -233,8 +233,7 @@
 
 .roster-attendance-queue article.is-missed {
         border-left: 3px solid #ff8a80;
-}
-	color: #ffb4ad;
+        color: #ffb4ad;
 }
 
 .roster-shift.is-open {
