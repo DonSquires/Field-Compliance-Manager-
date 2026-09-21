@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
+import { agreementTermRank } from '../lib/agreementTerm';
 import { resolveAddressForCoordinates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 
@@ -16,6 +17,8 @@ export interface ServiceAgreementContextRow {
   allows_client_submission: boolean;
   enabled_modules: string[];
   created_at: string;
+  starts_on: string | null;
+  ends_on: string | null;
   provider_name: string | null;
   client_name: string | null;
 }
@@ -143,7 +146,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       const { data: agreementRows, error: agreementsError } = await supabase
         .from('service_agreements')
         .select(
-          'id, name, agreement_type, invitation_status, provider_organization_id, client_organization_id, client_portal_access_mode, client_portal_reports_enabled, client_portal_finance_enabled, allows_client_submission, enabled_modules, created_at, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
+          'id, name, agreement_type, invitation_status, provider_organization_id, client_organization_id, client_portal_access_mode, client_portal_reports_enabled, client_portal_finance_enabled, allows_client_submission, enabled_modules, created_at, starts_on, ends_on, provider:provider_organization_id(id, name), client:client_organization_id(id, name)'
         )
         .or(isClientUser ? `client_organization_id.eq.${profile.organizationId}` : `provider_organization_id.in.(${providerOrgIds.join(',')}),client_organization_id.eq.${profile.organizationId}`)
         .order('created_at', { ascending: false });
@@ -163,9 +166,13 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         allows_client_submission: Boolean(agreement.allows_client_submission),
         enabled_modules: Array.isArray(agreement.enabled_modules) ? agreement.enabled_modules : [],
         created_at: agreement.created_at,
+        starts_on: agreement.starts_on ?? null,
+        ends_on: agreement.ends_on ?? null,
         provider_name: agreement.provider?.name ?? null,
         client_name: agreement.client?.name ?? null,
-      }));
+      }))
+        // Live agreements first: an ended or cancelled one must never be the portal's or the console's default.
+        .sort((left: ServiceAgreementContextRow, right: ServiceAgreementContextRow) => agreementTermRank(left) - agreementTermRank(right) || right.created_at.localeCompare(left.created_at));
 
       setAgreements(normalizedAgreements);
 

@@ -1,30 +1,11 @@
 import { useState } from 'react';
 import { AlertTriangle, CalendarX2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { agreementTermState, agreementTermWords, dayWords, localToday } from '../lib/agreementTerm';
 import './CrmAgreementTerm.css';
 
 export interface AgreementTerm { id: string; name: string; starts_on: string | null; ends_on: string | null }
-
-const dayWords = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
-const localToday = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-/** 'live' while ends_on is null or today or later; 'ended' after; 'cancelled' when it ended before it started. */
-export const agreementTermState = (agreement: Pick<AgreementTerm, 'starts_on' | 'ends_on'>, today = localToday()): 'live' | 'ending' | 'ended' | 'cancelled' => {
-  if (!agreement.ends_on) return 'live';
-  if (agreement.starts_on && agreement.ends_on < agreement.starts_on) return 'cancelled';
-  if (agreement.ends_on < today) return 'ended';
-  return agreement.ends_on === today ? 'ending' : 'live';
-};
-
-/** 'In force since 20 Sep 2026' · 'In force since 20 Sep 2026 · ends 30 Sep 2026' · 'Ended 19 Sep 2026' · 'Cancelled before it took effect'. */
-export const agreementTermWords = (agreement: Pick<AgreementTerm, 'starts_on' | 'ends_on'>, today = localToday()): string => {
-  const state = agreementTermState(agreement, today);
-  if (state === 'cancelled') return 'Cancelled before it took effect';
-  if (state === 'ended') return `Ended ${dayWords(agreement.ends_on!)}`;
-  const since = agreement.starts_on ? `In force since ${dayWords(agreement.starts_on)}` : 'In force';
-  if (state === 'ending') return `${since} · ends today`;
-  return agreement.ends_on ? `${since} · ends ${dayWords(agreement.ends_on)}` : since;
-};
+export { agreementTermState, agreementTermWords };
 
 /** The agreement's term in plain words, and the provider's governed way to end it. */
 export function CrmAgreementTerm({ agreement, canEnd, onEnded }: { agreement: AgreementTerm; canEnd: boolean; onEnded: () => Promise<void> | void }) {

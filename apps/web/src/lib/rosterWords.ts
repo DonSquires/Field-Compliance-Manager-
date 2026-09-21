@@ -20,6 +20,7 @@ const SHIFT_STATUS_LABELS: Record<string, string> = {
   completed: 'Completed',
   declined: 'Declined – reassign',
   cancelled: 'Cancelled',
+  missed: 'Missed – nobody attended',
 };
 
 /** Field shift status code -> what the rosterer sees on the board. */

@@ -30,6 +30,7 @@ import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { resolveAddressCandidates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
+import { agreementOptionSuffix } from '../lib/agreementTerm';
 import { ALARM_INTAKE_CHANNELS, ALARM_SIGNAL_TYPES, localDateTimeValue, responseLadderWords, type AlarmIntakeChannel, type AlarmSignal, type AlarmSignalType } from '../lib/alarmResponse';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './DispatchConsolePage.css';
@@ -834,7 +835,7 @@ const DispatchConsolePage: React.FC = () => {
         <label className="dispatch-console-form-label" htmlFor="dispatch-agreement">Service agreement</label>
         {branchAgreements.length > 1 ? (
           <select id="dispatch-agreement" value={selectedAgreement?.id ?? ''} onChange={(event) => selectAgreement(event.target.value || null)}>
-            {branchAgreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.name}{agreement.client_name ? ` · ${agreement.client_name}` : ''}</option>)}
+            {branchAgreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.name}{agreement.client_name ? ` · ${agreement.client_name}` : ''}{agreementOptionSuffix(agreement)}</option>)}
           </select>
         ) : (
           <strong id="dispatch-agreement">{branchAgreements[0]?.name ?? (relationshipLoading ? 'Loading agreements…' : 'This branch holds no service agreement yet')}</strong>

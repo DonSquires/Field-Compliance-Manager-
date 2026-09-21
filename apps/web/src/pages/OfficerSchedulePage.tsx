@@ -57,7 +57,7 @@ function localDateIso(): string {
 }
 
 /** The officer's own view of a shift status (the rosterer's words live in rosterWords). */
-const OFFICER_SHIFT_STATUS: Record<string, string> = { scheduled: 'Scheduled', published: 'Waiting for your answer', accepted: 'Accepted', in_progress: 'On shift now', completed: 'Completed', declined: 'Declined', cancelled: 'Cancelled' };
+const OFFICER_SHIFT_STATUS: Record<string, string> = { scheduled: 'Scheduled', published: 'Waiting for your answer', accepted: 'Accepted', in_progress: 'On shift now', completed: 'Completed', declined: 'Declined', cancelled: 'Cancelled', missed: 'Missed – you did not start this shift' };
 export const officerShiftStatusLabel = (status: string): string => OFFICER_SHIFT_STATUS[status] ?? status.replaceAll('_', ' ');
 
 /** Mirrors start_officer_shift: a shift can be started from an hour before its rostered start. */

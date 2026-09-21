@@ -8,6 +8,7 @@ const endMigration = read('supabase/migrations/20260920080000_end_service_agreem
 const quoteRls = read('supabase/migrations/20260920090000_quote_visibility_follows_org_reach.sql');
 const patrolRun = read('supabase/migrations/20260920100000_patrol_run_belongs_to_the_branch.sql');
 const term = read('apps/web/src/components/CrmAgreementTerm.tsx');
+const termWords = read('apps/web/src/lib/agreementTerm.ts');
 const workspace = read('apps/web/src/components/CrmAccountWorkspace.tsx');
 const crmPage = read('apps/web/src/pages/CRMPage.tsx');
 const workPanel = read('apps/web/src/components/CrmOperationalWorkPanel.tsx');
@@ -26,8 +27,11 @@ test('an agreement can end: governed writer, reason required, cancel-before-star
 });
 
 test('the agreement card reads its term in plain words and ends it with a reason', () => {
-  assert.match(term, /if \(state === 'cancelled'\) return 'Cancelled before it took effect';/);
-  assert.match(term, /if \(state === 'ended'\) return `Ended \$\{dayWords\(agreement\.ends_on!\)\}`;/);
+  assert.match(termWords, /if \(state === 'cancelled'\) return 'Cancelled before it took effect';/);
+  assert.match(termWords, /if \(state === 'ended'\) return `Ended \$\{dayWords\(agreement\.ends_on as string\)\}`;/);
+  // live agreements sort first everywhere the app offers a choice of agreement
+  assert.match(termWords, /export const agreementTermRank = /);
+  assert.match(read('apps/web/src/context/ServiceRelationshipContext.tsx'), /\.sort\(\(left: ServiceAgreementContextRow, right: ServiceAgreementContextRow\) => agreementTermRank\(left\) - agreementTermRank\(right\)/);
   assert.match(term, /supabase\.rpc\('end_service_agreement', \{ p_agreement_id: agreement\.id, p_ends_on: endsOn, p_reason: reason\.trim\(\) \}\)/);
   assert.match(term, /Ending stops new quotes, invitations and activation on this agreement from the day after the end date\. Work already rostered or delivered stays on record\./);
   assert.match(workspace, /<CrmAgreementTerm agreement=\{agreement\} canEnd=\{agreement\.agreement_type === 'operational' && agreement\.client_organization_id === account\.id\} onEnded=\{loadWorkspace\} \/>/);

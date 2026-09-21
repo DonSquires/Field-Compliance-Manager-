@@ -10,6 +10,8 @@ export type NotificationCategory =
 
 export interface NotificationRecord {
   id: string;
+  organization_id?: string;
+  organization?: { name: string } | null;
   category: NotificationCategory;
   severity: 'info' | 'warning' | 'critical';
   title: string;
@@ -44,14 +46,15 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
     setLoading(true);
     setError(null);
     try {
+      // Everything addressed to this person or their role across the organisations they can reach (RLS scopes it):
+      // a branch manager's home is the parent, but the missed shifts, SLA breaches and welfare alerts live in the branch.
       const { data, error: queryError } = await supabase
         .from('notifications')
-        .select('id, category, severity, title, body, link_page, link_payload, read_at, created_at')
-        .eq('organization_id', profile.organizationId)
+        .select('id, organization_id, organization:organization_id(name), category, severity, title, body, link_page, link_payload, read_at, created_at')
         .order('created_at', { ascending: false })
         .limit(60);
       if (queryError) throw queryError;
-      setRows((data as NotificationRecord[]) ?? []);
+      setRows(((data ?? []) as unknown as Array<Omit<NotificationRecord, 'organization'> & { organization: { name: string } | Array<{ name: string }> | null }>).map((row) => ({ ...row, organization: Array.isArray(row.organization) ? row.organization[0] ?? null : row.organization })));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Notifications could not be loaded.');
     } finally {
@@ -67,7 +70,7 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
     if (!profile?.organizationId) return;
     const channel = supabase
       .channel(`notification_center_${profile.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `organization_id=eq.${profile.organizationId}` }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => void load())
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [load, profile?.id, profile?.organizationId]);
@@ -144,7 +147,7 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
                     <button type="button" className="notification-content" onClick={() => void openNotification(notification)}>
                       <strong>{notification.title}</strong>
                       {notification.body && <span>{notification.body}</span>}
-                      <small>{formatCategory(notification.category)} · {formatAge(notification.created_at)}</small>
+                      <small>{formatCategory(notification.category)}{notification.organization_id && notification.organization_id !== profile?.organizationId && notification.organization?.name ? ` · ${notification.organization.name}` : ''} · {formatAge(notification.created_at)}</small>
                     </button>
                     {!notification.read_at ? <button type="button" className="notification-read-button" onClick={() => void markRead([notification.id])} disabled={busy === notification.id} title="Mark as read"><Check size={15} /></button> : notification.link_page ? <ChevronRight size={16} className="notification-chevron" /> : null}
                   </article>

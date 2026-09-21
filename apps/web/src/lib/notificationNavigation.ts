@@ -37,6 +37,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   if (role === 'grand_master' || role === 'master' || role === 'admin' || role === 'admin_officer') {
     if (link === 'WelfareAlertsPage' || notification.category === 'welfare') return { kind: 'admin_field_ops', area: 'welfare-alerts' };
     if (link === 'open-jobs' || notification.category === 'dispatch') return { kind: 'admin_field_ops', area: 'dispatch' };
+    if (link === 'live-map' || link === 'live_map') return { kind: 'admin_field_ops', area: 'live-map' };
     if (link === 'roster') return { kind: 'admin_page', page: 'roster' };
     if (link === 'credential-expiry' || notification.category === 'credential_expiry') return { kind: 'admin_hr_credential', credentialId };
     if (notification.category === 'report_ready') return { kind: 'admin_page', page: 'reports' };

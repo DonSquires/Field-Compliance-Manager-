@@ -226,12 +226,14 @@
 	opacity: .7;
 }
 
-.roster-shift.status-declined {
-	border-left-color: #ff8a80;
-	background: #301719;
+.roster-shift.status-missed {
+        border-left-color: #ff8a80;
+        background: #3a1618;
 }
 
-.roster-shift.status-declined small {
+.roster-attendance-queue article.is-missed {
+        border-left: 3px solid #ff8a80;
+}
 	color: #ffb4ad;
 }
 

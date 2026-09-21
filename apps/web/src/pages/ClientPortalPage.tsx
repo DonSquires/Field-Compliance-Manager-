@@ -14,6 +14,7 @@ import {
   Siren,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { agreementOptionSuffix } from '../lib/agreementTerm';
 import { ClientPeoplePanel } from '../components/ClientPeoplePanel';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import type { ClientPortalPage } from '../lib/clientPortalAccess';
@@ -221,7 +222,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
             <label>
               <span className="sr-only">Service agreement</span>
               <select value={agreement.id} onChange={(event) => relationships.selectAgreement(event.target.value)}>
-                {relationships.agreements.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                {relationships.agreements.map((item) => <option key={item.id} value={item.id}>{item.name}{agreementOptionSuffix(item)}</option>)}
               </select>
             </label>
           )}
