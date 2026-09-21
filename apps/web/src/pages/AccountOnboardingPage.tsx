@@ -217,10 +217,10 @@ export default function AccountOnboardingPage({
         <header>
           <div>
             <span>Client setup</span>
-            <h1>Set up a new client</h1>
+            <h1>Clients being set up</h1>
             <p>
-              Work through the few things needed before service can start:
-              client details, agreement, places, and a final readiness check.
+              Every client part-way through setup, and what is still needed before
+              service can start. To add a new client, use the guided setup.
             </p>
           </div>
         </header>
@@ -252,15 +252,18 @@ export default function AccountOnboardingPage({
       <header>
         <div>
           <span>Client setup</span>
-          <h1>Set up a new client</h1>
+          <h1>Clients being set up</h1>
           <p>
-            Work through the few things needed before service can start:
-            client details, agreement, places, and a final readiness check.
+            Every client part-way through setup, and what is still needed before
+            service can start. To add a new client, use the guided setup.
           </p>
         </div>
         <div className="onboarding-header-actions">
-          <button className="is-new-account" onClick={() => setShowCreateAccount(true)}>
+          <button className="is-new-account" onClick={() => onNavigate('client-setup')}>
             <Plus size={16} />
+            Set up a new client
+          </button>
+          <button onClick={() => setShowCreateAccount(true)} title="Add a provider, council or other organisation without the guided client setup">
             New account
           </button>
           <button onClick={() => void loadQueue()} disabled={loading}>

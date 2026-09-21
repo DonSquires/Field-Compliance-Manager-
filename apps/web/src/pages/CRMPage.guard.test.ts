@@ -141,7 +141,9 @@ describe('governed CRM accounts', () => {
   it('searches and manages the organization spine with evidence-backed next actions', () => {
     expect(page).toContain('CrmOrganizationDialog');
     expect(page).toMatch(/\.rpc\(["']get_crm_organization_readiness["']/);
-    expect(page).toContain('Add organization');
+    expect(page).toContain('Set up a new client');
+    expect(page).toContain("onNavigate('client-setup')");
+    expect(page).toContain('Add other organisation');
     expect(page).toContain('client.next_action');
     expect(organizationDialog).toMatch(/Search all FCM organizations by name, NZBN, or an owned-place[\s\S]*address before creating/);
     expect(organizationDialog).toMatch(/Search results reveal identity details[\s\S]*service-specific contacts are added during setup/);

@@ -148,7 +148,7 @@ export function CrmOnboardingPanel({
     const invitation = prepared as { email: string; display_name?: string };
     const { error: inviteError } = await supabase.functions.invoke('invite-org', { body: { target_organization_id: row.account_organization_id, email: invitation.email, display_name: invitation.display_name?.trim() || row.account_name } });
     if (inviteError) setError(inviteError.message);
-    else { setConfirmingInvite(false); setNotice(`Client invitation sent to ${invitation.email}. They will be the client's administrator in the client portal; when they set their password, 'Client accepted' ticks here and you can activate.`); await load(); await onChanged?.(); }
+    else { setConfirmingInvite(false); setNotice(`Client login sent to ${invitation.email}. They will be the client's administrator in the client portal; when they set their password, 'Client logged in' ticks here. Service can start either way.`); await load(); await onChanged?.(); }
     setInviting(false);
   };
 
@@ -174,16 +174,16 @@ export function CrmOnboardingPanel({
   const clientAccepted = seated && invitationStatus === 'accepted';
   const canInvite = !seated && (row.readiness ? row.readiness.ready : row.has_primary_contact);
   const handoffStages = [
-    { label: 'Provider setup', complete: Boolean(row.readiness?.ready) },
-    { label: 'Client invited', complete: seated },
-    { label: 'Client accepted', complete: clientAccepted },
-    { label: 'Operational handoff', complete: activated || accountStatus === 'active' },
+    { label: 'Our setup', complete: Boolean(row.readiness?.ready) },
+    { label: 'Client login sent (optional)', complete: seated },
+    { label: 'Client logged in (optional)', complete: clientAccepted },
+    { label: 'Service started', complete: activated || accountStatus === 'active' },
   ];
   const seatWords = !seated
-    ? (row.agreement_id ? 'No one at the client can sign in yet.' : 'No operational agreement linked yet — inviting the client creates one and seats their administrator.')
+    ? (row.agreement_id ? 'No one at the client can log in yet. Optional — service can start without it.' : 'No service agreement yet — inviting the client creates one and gives their contact a login.')
     : clientAccepted
-      ? `${clientUserCount} client user${clientUserCount === 1 ? '' : 's'} · the client has set their password and accepted.`
-      : 'Invitation sent · waiting for the client to set their password.';
+      ? `${clientUserCount} client user${clientUserCount === 1 ? '' : 's'} · the client has set their password and can see their places, visits and reports.`
+      : 'Login sent · waiting for the client to set their password.';
 
   return <section className="crm-onboarding-panel" aria-label="Client activation">
     <header>
@@ -205,11 +205,11 @@ export function CrmOnboardingPanel({
       <div>
         <button type="button" className="btn btn-sm btn-secondary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(false)}>Save ownership</button>
         {nextStage && <button type="button" className="btn btn-sm btn-primary" disabled={saving || !assignedTo || stageNote.trim().length < 3} onClick={() => void saveWorkflow(true)}>Advance to {nextStage}<ChevronRight size={14} /></button>}
-        {row.current_stage === 'review' && row.readiness?.ready && row.agreement_id && !confirming && invitationStatus === 'accepted' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setConfirming(true)}><Rocket size={14} />Activate account</button>}
+        {row.current_stage === 'review' && row.readiness?.ready && row.agreement_id && !confirming && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setConfirming(true)}><Rocket size={14} />Activate account</button>}
         {canInvite && !confirmingInvite && <button type="button" className="btn btn-sm btn-secondary" disabled={saving || inviting} onClick={() => setConfirmingInvite(true)}><MailPlus size={14} />Invite client</button>}
         {seated && !clientAccepted && <span className="crm-invitation-next-state">Waiting for the client to set their password</span>}
         {seated && !clientAccepted && <button type="button" className="btn btn-sm btn-secondary" disabled={resending} onClick={() => void resendInvitation()}><RefreshCw size={14} />{resending ? 'Sending' : 'Resend invitation'}</button>}
-        {clientAccepted && !confirming && <span className="crm-invitation-next-state is-accepted">{row.readiness?.ready ? 'Client accepted · ready for activation' : 'Client accepted · finish the provider setup to activate'}</span>}
+        {clientAccepted && !confirming && <span className="crm-invitation-next-state is-accepted">{row.readiness?.ready ? 'Client logged in · ready to start service' : 'Client logged in · finish our setup to start service'}</span>}
         {confirming && <><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => setConfirming(false)}>Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void activate()}>{saving ? 'Activating' : 'Confirm activation'}</button></>}
         {confirmingInvite && <><button type="button" className="btn btn-sm btn-secondary" disabled={inviting} onClick={() => setConfirmingInvite(false)}><X size={14} />Cancel</button><button type="button" className="btn btn-sm btn-primary" disabled={inviting} onClick={() => void inviteClient()}>{inviting ? 'Preparing invitation' : 'Confirm and invite'}</button></>}
       </div>

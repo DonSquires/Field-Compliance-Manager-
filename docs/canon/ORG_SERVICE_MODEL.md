@@ -230,3 +230,15 @@ warning, strip identity") applied to humans as well as to Bob. All other
 of-interest flags (VOI/POI/LOI/trespass/welfare) stay org-scoped.
 
 
+
+## Ruling 2026-09-21 — configuring before acceptance
+
+The provider records what it has been contracted to do on its own live
+operational agreement (`invitation_status` in `not_invited`, `invited`,
+`accepted`): covered places, modules, delivery schedules, patrol runs. The
+client's acceptance of the invitation grants **portal access**; it is not the
+provider's permission to configure. A client can be invited once it has at
+least one place (a site address or an area) — a zone is not specifically
+required. Delivery schedules may be written directly
+(`manage_crm_agreement_delivery_schedule`) as well as through quote acceptance;
+both link the patrol config by `client_site_patrol_config.delivery_schedule_id`.

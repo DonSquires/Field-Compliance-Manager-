@@ -1089,8 +1089,11 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   return (
     <div className="page-container crm-page">
       <header className="page-header">
-        <div><h1>Client Portfolios</h1><p className="subtitle">{totalAccounts} accounts · Client and service provider management</p></div>
-        <button type="button" className="btn btn-primary" onClick={() => setOrganizationDialog('create')}>Add organization</button>
+        <div><h1>Client Portfolios</h1><p className="subtitle">{totalAccounts} accounts · every client and provider you work with, one page each</p></div>
+        <div className="crm-header-actions">
+          <button type="button" className="btn btn-primary" onClick={() => onNavigate('client-setup')}>Set up a new client</button>
+          <button type="button" className="btn btn-secondary" onClick={() => setOrganizationDialog('create')} title="Add a provider, council or other organisation without the guided setup">Add other organisation</button>
+        </div>
       </header>
 
       {state.error && (

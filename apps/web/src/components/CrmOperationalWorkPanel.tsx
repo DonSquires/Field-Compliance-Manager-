@@ -99,7 +99,7 @@ export function CrmOperationalWorkPanel({
   const [form, setForm] = useState({ name: '', type: 'static' as 'static' | 'patrol', locationId: '', moduleId: '', routeId: '' });
 
   const load = useCallback(async () => {
-    if (agreement.agreement_type !== 'operational' || agreement.invitation_status !== 'accepted') {
+    if (agreement.agreement_type !== 'operational') {
       setLocations([]); setModules([]); setRoutes([]); setWorkUnits([]); setSchedules([]); setConfigLinks([]); setLoading(false);
       return;
     }
@@ -226,7 +226,7 @@ export function CrmOperationalWorkPanel({
     setSaving(false);
   };
 
-  if (agreement.agreement_type !== 'operational' || agreement.invitation_status !== 'accepted') return null;
+  if (agreement.agreement_type !== 'operational') return null;
 
   return <section className="crm-operational-work" aria-label={`Operational work for ${agreement.name}`}>
     <header>

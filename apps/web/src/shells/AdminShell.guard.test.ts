@@ -18,7 +18,7 @@ describe('AdminShell access and routing boundaries', () => {
 
   it('aligns CRM management pages with server administrator roles', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
-    expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
+    expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
     expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
     expect(source).toContain("items.filter((item) => isPageEnabled(item.id as AdminPage))");
   });
@@ -97,7 +97,8 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("'Reports & Analytics': [");
     expect(source).toContain("{ id: 'reports', label: 'Reports'");
     expect(source).toContain("{ id: 'testing', label: 'E2E Testing'");
-    expect(source).toContain("{ id: 'onboarding', label: 'Set up a new client'");
+    expect(source).toContain("{ id: 'client-setup', label: 'Set up a new client'");
+    expect(source).toContain("{ id: 'onboarding', label: 'Clients being set up'");
     expect(source).toContain("{ id: 'handoffs', label: 'Start delivery'");
   });
 

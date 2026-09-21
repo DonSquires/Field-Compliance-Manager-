@@ -72,7 +72,7 @@ export function CrmRosterHandoffPanel({
   const [form, setForm] = useState({ officerId: '', workUnitId: '', start: initialWindow.start, end: initialWindow.end, notes: '' });
 
   const load = useCallback(async () => {
-    if (agreement.agreement_type !== 'operational' || agreement.invitation_status !== 'accepted') {
+    if (agreement.agreement_type !== 'operational') {
       setWorkUnits([]); setStaff([]); setSlots([]); setLoading(false);
       return;
     }
@@ -142,7 +142,7 @@ export function CrmRosterHandoffPanel({
     setSaving(false);
   };
 
-  if (agreement.agreement_type !== 'operational' || agreement.invitation_status !== 'accepted') return null;
+  if (agreement.agreement_type !== 'operational') return null;
 
   return <section className="crm-roster-handoff" aria-label={`Roster handoff for ${agreement.name}`}>
     <header>

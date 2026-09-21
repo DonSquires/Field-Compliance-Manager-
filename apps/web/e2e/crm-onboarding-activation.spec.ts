@@ -10,7 +10,7 @@ test('administrator resumes evidence-backed onboarding and activates a ready pro
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/onboarding');
 
-  await expect(page.getByRole('heading', { name: 'Set up a new client' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Clients being set up' })).toBeVisible();
   await page.getByRole('button', { name: /Blocked Harbour Prospect/ }).click();
   await expect(page.getByText('Target overdue')).toBeVisible();
   await expect(page.getByText('An active primary contact is required')).toBeVisible();

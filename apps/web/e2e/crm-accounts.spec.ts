@@ -214,7 +214,7 @@ test('location house lookup exposes only shared physical setup and blocks duplic
 
 test('administrator creates and edits organizations through the human account spine', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/crm');
-  await page.getByRole('button', { name: 'Add organization' }).click();
+  await page.getByRole('button', { name: 'Add other organisation' }).click();
   let dialog = page.getByRole('dialog', { name: 'Find or add an organization' });
   await dialog.getByLabel('Organization name').fill('Civic Events');
   await dialog.getByRole('button', { name: 'Search organizations' }).click();
@@ -223,7 +223,7 @@ test('administrator creates and edits organizations through the human account sp
   await expect(dialog.getByText(/Managed account/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Close organization dialog' }).click();
 
-  await page.getByRole('button', { name: 'Add organization' }).click();
+  await page.getByRole('button', { name: 'Add other organisation' }).click();
   dialog = page.getByRole('dialog', { name: 'Find or add an organization' });
   await dialog.getByLabel('Organization name').fill('Harbour Arts Trust');
   await dialog.getByRole('button', { name: 'Search organizations' }).click();

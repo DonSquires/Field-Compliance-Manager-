@@ -70,6 +70,7 @@ import { DESKTOP_V1_DOWNLOAD_URL, DESKTOP_V2_DOWNLOAD_URL, DESKTOP_V2_FILENAME, 
 
 // Lazy load pages for code-splitting
 const CRMPage = React.lazy(() => import('../pages/CRMPage'));
+const ClientSetupPage = React.lazy(() => import('../pages/ClientSetupPage'));
 const AccountOnboardingPage = React.lazy(() => import('../pages/AccountOnboardingPage'));
 const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHandoffsPage'));
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
@@ -122,7 +123,7 @@ const CCTVConsolePage = React.lazy(() => import('../pages/CCTVConsolePage'));
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
-  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
   | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-billing' | 'platform-subscribers' | 'builder' | 'workshop';
@@ -137,8 +138,10 @@ const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
-  'relationships', 'onboarding', 'handoffs', 'crm', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites',
+  'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites',
 ]);
+
+const FIELD_CONTEXT_PAGES = new Set<AdminPage>(['field-ops', 'site-360', 'locations', 'zones', 'sites', 'workshop', 'investigations']);
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
@@ -150,7 +153,7 @@ const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
 // that must be enabled for the caller's org to reach it. Pages absent here
 // have no module gate (role checks below still apply).
 const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
-  crm: 'crm', relationships: 'crm', onboarding: 'crm', handoffs: 'crm',
+  crm: 'crm', relationships: 'crm', onboarding: 'crm', handoffs: 'crm', 'client-setup': 'crm',
   roster: 'rostering', 'roster-targets': 'rostering',
   'people-hr': 'hr',
   'finance-bureau': 'finance', 'finance-connections': 'finance', 'finance-money': 'finance', 'finance-costing': 'finance', 'finance-pricing': 'finance', 'rate-rules': 'finance',
@@ -203,8 +206,9 @@ const NAVIGATION_MAP = {
     { id: 'workshop', label: 'Workshop', icon: Wrench },
   ],
   'Clients & Delivery': [
+    { id: 'client-setup', label: 'Set up a new client', icon: ClipboardCheck },
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
-    { id: 'onboarding', label: 'Set up a new client', icon: ClipboardCheck },
+    { id: 'onboarding', label: 'Clients being set up', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Start delivery', icon: ClipboardCheck },
   ],
   Finance: [
@@ -392,6 +396,8 @@ const AdminShell: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // GPS / geofence evidence belongs to field pages; on a desk page (clients, finance, roster, settings) it only confuses.
+  const showPlaceContext = FIELD_CONTEXT_PAGES.has(activePage);
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
     return canAccessAdminPage(page, profile?.role, isModuleEnabled);
   }, [profile?.role, isModuleEnabled]);
@@ -509,6 +515,8 @@ const AdminShell: React.FC = () => {
         return <ActivationHandoffsPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'crm':
         return <CRMPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
+      case 'client-setup':
+        return <ClientSetupPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'reports':
         return <ReportsHubPage />;
       case 'investigations':
@@ -687,7 +695,7 @@ const AdminShell: React.FC = () => {
           </header>
 
           <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
-            <PlaceContextBanner />
+            {showPlaceContext && <PlaceContextBanner />}
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
             {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
             <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />
@@ -757,7 +765,7 @@ const AdminShell: React.FC = () => {
       )}
 
       <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
-        <PlaceContextBanner />
+        {showPlaceContext && <PlaceContextBanner />}
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
         {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
         <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />
