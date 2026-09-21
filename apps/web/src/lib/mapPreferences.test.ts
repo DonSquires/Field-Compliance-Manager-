@@ -13,8 +13,10 @@ type Handler = (event: unknown) => void;
 const fakeMap = () => {
   const handlers: Record<string, Handler[]> = {};
   const state = { lat: -41.27, lng: 173.28, zoom: 9 };
+  const container = document.createElement('div');
   return {
     state,
+    getContainer: () => container,
     on: (name: string, handler: Handler) => { (handlers[name] ??= []).push(handler); },
     fire: (name: string, event?: unknown) => (handlers[name] ?? []).forEach((handler) => handler(event)),
     setView: vi.fn(([lat, lng]: [number, number], zoom: number) => { state.lat = lat; state.lng = lng; state.zoom = zoom; }),

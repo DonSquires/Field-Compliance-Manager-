@@ -11,29 +11,26 @@ describe('live officer safety layer', () => {
     expect(source).toContain('if (welfareEnabled)');
   });
 
-  it('derives safety from settings and active alerts, not GPS age', () => {
-    expect(source).toContain(".from('officer_welfare_settings')");
-    expect(source).toContain(".from('welfare_alerts')");
+  it('reads the live picture through one governed RPC for the operating branch, never the raw tables', () => {
+    expect(source).toContain("supabase.rpc('get_live_officer_positions', { p_organization_id: branchId, p_since_minutes: 240, p_zone_ids: zoneIds })");
+    expect(source).not.toContain(".from('officer_gps_log')");
+    expect(source).not.toContain(".from('welfare_alerts')");
+    expect(source).not.toContain(".from('officer_welfare_settings')");
     expect(source).toContain('deriveAdminSafetyStatus');
     expect(source).toContain('deriveOfficerPinStatus');
-    expect(source).toContain('...activeAlerts.keys()');
-    expect(source).toContain("activity_type: 'active_welfare_alert'");
   });
 
-  it('keeps tenant filters on GPS and welfare realtime paths', () => {
-    expect(source).toContain(".eq('organization_id', orgId)");
-    expect(source).toContain('filter: `organization_id=eq.${profile.organizationId}`');
-    expect(source).toContain("table: 'officer_welfare_settings'");
+  it('keeps tenant filters on the realtime paths and re-reads through the RPC on every change', () => {
+    expect(source).toContain("table: 'officer_gps_log', filter: `organization_id=eq.${orgId}` }, () => void loadPositions())");
+    expect(source).toContain("table: 'welfare_alerts', filter: `organization_id=eq.${orgId}` }, () => void loadPositions())");
   });
 
   it('never labels an unavailable safety state as ok', () => {
     expect(source).toContain('Safety unavailable');
-    expect(source).toContain('no officer is shown as safe');
+    expect(source).toContain('status-unknown');
   });
 
-  it('clears loading state when organization scope is unavailable', () => {
-    expect(source).toContain('if (!orgId) {');
-    expect(source).toContain("setError('Organisation access could not be confirmed. Live positions are unavailable.');");
-    expect(source).toContain('setLoading(false);');
+  it('clears loading state when the operating branch is unavailable', () => {
+    expect(source).toContain("if (!branchId) { setPicture(null); setError('Operating branch access could not be confirmed. Live positions are unavailable.'); setLoading(false); return; }");
   });
 });

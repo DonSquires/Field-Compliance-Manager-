@@ -27,7 +27,28 @@ export function addLinzBaseLayers(map: L.Map, options: { collapsed?: boolean; ov
   layers[readBaseLayer()].addTo(map);
   L.control.layers({ 'LINZ topographic': layers.topographic, 'LINZ aerial': layers.aerial }, options.overlays, { collapsed: options.collapsed ?? true }).addTo(map);
   map.on('baselayerchange', (event) => { rememberBaseLayer((event as L.LayersControlEvent).name === 'LINZ aerial' ? 'aerial' : 'topographic'); });
+  keepPageStillOnClick(map);
   return layers;
+}
+
+/**
+ * Leaflet's keyboard handler focuses the map container on pointer-down, and the browser scrolls the shell's scrolling pane
+ * to reveal the whole map — the pin slides out from under the pointer before mouseup, so the click never lands. Leaflet
+ * restores only window scroll, not a nested scroller. Record every scrolling ancestor before the focus and put it back.
+ */
+export function keepPageStillOnClick(map: L.Map): void {
+  const container = map.getContainer();
+  let saved: Array<[Element, number, number]> = [];
+  const remember = () => {
+    saved = [];
+    for (let node: Element | null = container.parentElement; node; node = node.parentElement) {
+      const overflow = getComputedStyle(node).overflowY;
+      if (overflow === 'auto' || overflow === 'scroll' || node === document.scrollingElement) saved.push([node, node.scrollTop, node.scrollLeft]);
+    }
+  };
+  container.addEventListener('pointerdown', remember, true);
+  container.addEventListener('mousedown', () => { if (!saved.length) remember(); }, true);
+  container.addEventListener('focus', () => { saved.forEach(([node, top, left]) => { if (node.scrollTop !== top) node.scrollTop = top; if (node.scrollLeft !== left) node.scrollLeft = left; }); saved = []; });
 }
 
 export interface RememberedView { lat: number; lng: number; zoom: number }

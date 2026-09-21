@@ -49,6 +49,8 @@ export interface AdminSafetyStatusInput {
   welfareEnabled: boolean | null;
   lastCheckinAt: string | null;
   checkIntervalMinutes: number | null;
+  /** When the officer's current shift began (only once it has actually begun). Used as the clock start before the first check-in. */
+  shiftStartedAt?: string | null;
   nowMs?: number;
 }
 
@@ -57,13 +59,16 @@ export function deriveAdminSafetyStatus({
   welfareEnabled,
   lastCheckinAt,
   checkIntervalMinutes,
+  shiftStartedAt = null,
   nowMs = Date.now(),
 }: AdminSafetyStatusInput): SafetyStatus | null {
   if (hasActiveAlert) return 'alerting';
-  if (welfareEnabled !== true || !lastCheckinAt || !checkIntervalMinutes) return null;
+  // Before the first check-in, a running shift starts the clock; off shift with no check-in, nothing was ever verified.
+  const since = lastCheckinAt ?? shiftStartedAt;
+  if (welfareEnabled !== true || !since || !checkIntervalMinutes) return null;
 
-  const elapsedMinutes = (nowMs - new Date(lastCheckinAt).getTime()) / 60_000;
-  if (!Number.isFinite(elapsedMinutes)) return null;
+  const elapsedMinutes = (nowMs - new Date(since).getTime()) / 60_000;
+  if (!Number.isFinite(elapsedMinutes) || elapsedMinutes < 0) return null;
   if (elapsedMinutes >= checkIntervalMinutes) return 'overdue';
   if (checkIntervalMinutes - elapsedMinutes <= 5) return 'due';
   return 'ok';

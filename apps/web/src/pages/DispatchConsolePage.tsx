@@ -286,7 +286,7 @@ const DispatchConsolePage: React.FC = () => {
 
   // Load Phase A: Active shifts, jobs, resources. Sites come from the selected
   // service agreement so contract/location access has one canonical owner.
-  const loadPhaseA = useCallback(async () => {
+  const loadPhaseA = useCallback(async (background = false) => {
     if (!operatingBranchId) {
       setError('Operating branch access could not be confirmed. Dispatch operations are unavailable.');
       setLoading(false);
@@ -294,7 +294,7 @@ const DispatchConsolePage: React.FC = () => {
     }
 
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
       const [shiftsRes, jobsRes, resourcesRes, selectedJobRes] = await Promise.all([
@@ -678,10 +678,15 @@ const DispatchConsolePage: React.FC = () => {
       shift.officerUserId === resource.assignedOfficerId && ['accepted', 'in_progress'].includes(shift.status),
     )), [activeShifts, resources]);
 
-  // Initial load
+  // Initial load, then every 30 s and whenever the tab comes back: officers acknowledge, arrive and complete
+  // from their own app, and SLA clocks run, so the console must not sit on a stale picture.
   useEffect(() => {
     loadPhaseA();
     loadPhaseD();
+    const interval = window.setInterval(() => void loadPhaseA(true), 30_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') void loadPhaseA(true); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, [loadPhaseA, loadPhaseD]);
 
   // Handle shift selection (Phase B)

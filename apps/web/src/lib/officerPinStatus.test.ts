@@ -62,4 +62,14 @@ describe('deriveAdminSafetyStatus', () => {
     expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: false, lastCheckinAt: '2026-08-30T07:50:00Z', checkIntervalMinutes: 30, nowMs })).toBeNull();
     expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: null, checkIntervalMinutes: 30, nowMs })).toBeNull();
   });
+
+  it('starts the check-in clock at shift start before the first check-in, and never off shift', () => {
+    // shift began 07:20, interval 30, now 08:00 -> the first check-in is overdue even though none was ever made
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: null, checkIntervalMinutes: 30, shiftStartedAt: '2026-08-30T07:20:00Z', nowMs })).toBe('overdue');
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: null, checkIntervalMinutes: 30, shiftStartedAt: '2026-08-30T07:45:00Z', nowMs })).toBe('ok');
+    // a real check-in wins over the shift start
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: '2026-08-30T07:55:00Z', checkIntervalMinutes: 30, shiftStartedAt: '2026-08-30T07:00:00Z', nowMs })).toBe('ok');
+    // a shift that has not begun yet (scheduled in the future) starts no clock
+    expect(deriveAdminSafetyStatus({ hasActiveAlert: false, welfareEnabled: true, lastCheckinAt: null, checkIntervalMinutes: 30, shiftStartedAt: '2026-08-30T09:00:00Z', nowMs })).toBeNull();
+  });
 });

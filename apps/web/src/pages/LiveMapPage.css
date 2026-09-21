@@ -21,20 +21,43 @@
 
 .live-ops-meta { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0 8px; color: #758b9b; font-size: 12px; }
 .live-ops-list { display: grid; gap: 6px; }
-.live-officer-row { display: grid; grid-template-columns: auto minmax(150px, 1fr) minmax(150px, .7fr) auto auto; align-items: center; gap: 11px; min-height: 65px; padding: 8px 10px; border: 1px solid #293d4e; border-left: 3px solid #6d8292; border-radius: 6px; background: #0d1926; }
+.live-officer-row { display: grid; grid-template-columns: auto minmax(120px, 1fr) minmax(110px, .7fr) minmax(0, auto) auto; align-items: center; gap: 11px; min-height: 65px; padding: 8px 10px; border: 1px solid #293d4e; border-left: 3px solid #6d8292; border-radius: 6px; background: #0d1926; }
 .live-officer-row.status-alerting { border-left-color: #ef6f6f; background: #1c151c; }
 .live-officer-row.status-overdue { border-left-color: #e99662; }
 .live-officer-row.status-due { border-left-color: #dfbd5f; }
 .live-officer-row.status-ok { border-left-color: #66c896; }
 .live-officer-row.status-offline { border-left-color: #5d6871; opacity: .78; }
-.live-officer-marker { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; color: #86cfc3; background: #102a29; }
+.live-officer-marker { display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 6px; color: #86cfc3; background: #102a29; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.live-officer-marker:disabled { cursor: default; opacity: .6; }
+.live-officer-row.is-selected { outline: 2px solid #5eead4; outline-offset: -2px; }
+
+.live-ops-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr); gap: 12px; align-items: start; }
+.live-ops-map { position: relative; border: 1px solid #2b3d50; border-radius: 7px; background: #0a1522; overflow: hidden; }
+.live-ops-map-canvas { height: min(62vh, 640px); min-height: 320px; background: #0b1a26; }
+.live-ops-map-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-top: 1px solid #2b3d50; }
+.live-ops-map-tools > button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 1px solid #344a5b; border-radius: 6px; color: #d9e6ec; background: #122130; font: inherit; font-size: 12px; cursor: pointer; }
+.live-ops-map-tools > button:disabled { opacity: .5; cursor: default; }
+.live-ops-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; color: #8497a8; font-size: 11px; }
+.live-ops-legend i { display: inline-block; width: 10px; height: 10px; margin-left: 6px; border-radius: 50%; background: #5d6871; }
+.live-ops-legend i.status-ok { background: #66c896; } .live-ops-legend i.status-due { background: #dfbd5f; } .live-ops-legend i.status-overdue { background: #e99662; } .live-ops-legend i.status-alerting { background: #ef6f6f; } .live-ops-legend i.is-job { border-radius: 2px; background: #5da9ff; }
+.live-ops-people { min-width: 0; max-height: min(62vh, 640px); overflow: auto; }
+
+.live-pin { display: grid; place-items: center; width: 30px !important; height: 30px !important; margin-left: -15px !important; margin-top: -15px !important; border: 2px solid #e7f0f2; border-radius: 50%; color: #08131c; background: #5d6871; font-size: 11px; font-weight: 800; box-shadow: 0 2px 6px rgba(0,0,0,.45); }
+.live-pin.status-ok { background: #66c896; } .live-pin.status-due { background: #dfbd5f; } .live-pin.status-overdue { background: #e99662; } .live-pin.status-alerting { background: #ef6f6f; animation: live-pin-pulse 1.4s ease-in-out infinite; } .live-pin.status-offline { background: #7a8794; } .live-pin.status-unknown { background: #9babb7; }
+.live-pin.is-selected { border-color: #5eead4; box-shadow: 0 0 0 4px rgba(94, 234, 212, .35); }
+.live-job-pin { width: 16px !important; height: 16px !important; margin-left: -8px !important; margin-top: -8px !important; }
+.live-job-pin > span { display: block; width: 100%; height: 100%; border: 2px solid #e7f0f2; border-radius: 3px; background: #5da9ff; transform: rotate(45deg); }
+.live-job-pin.priority-critical > span, .live-job-pin.priority-high > span { background: #f08d5a; }
+@keyframes live-pin-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239, 111, 111, .55); } 50% { box-shadow: 0 0 0 9px rgba(239, 111, 111, 0); } }
 .live-officer-row > div { display: grid; min-width: 0; gap: 3px; }
 .live-officer-row strong, .live-officer-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-officer-row > div > strong { font-size: 12px; }
-.live-officer-row > div > small { color: #788fa0; font-size: 12px; text-transform: capitalize; }
+.live-officer-row > div > small { color: #788fa0; font-size: 12px; }
 .live-gps-fact > span { color: #6f8798; font-size: 12px; font-weight: 800; text-transform: uppercase; }
 .live-gps-fact > strong { font-size: 12px; }
-.live-safety-status { min-width: 95px; padding: 5px 8px; border: 1px solid #3d4e5c; border-radius: 999px; color: #9bafbd; background: #111e2a; font-size: 12px; font-weight: 850; text-align: center; white-space: nowrap; }
+.live-safety-status { display: grid; gap: 2px; min-width: 110px; max-width: 200px; padding: 5px 9px; border: 1px solid #3d4e5c; border-radius: 10px; color: #9bafbd; background: #111e2a; font-size: 12px; line-height: 1.3; text-align: center; }
+.live-safety-status strong { font-weight: 850; white-space: normal; overflow: visible; }
+.live-safety-status small { font-size: 11px; font-weight: 500; opacity: .9; white-space: normal; overflow: visible; }
 .live-safety-status.status-alerting { color: #ffaaaa; border-color: #844141; background: #31191c; }
 .live-safety-status.status-overdue { color: #f3bb84; border-color: #79502c; background: #291c12; }
 .live-safety-status.status-due { color: #ead07b; border-color: #6a5a27; background: #28230f; }
@@ -45,6 +68,9 @@
 .live-ops-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 220px; border: 1px solid #2b3d50; border-radius: 7px; color: #738899; background: #0a1522; font-size: 12px; }
 
 @media (max-width: 760px) {
+  .live-ops-layout { grid-template-columns: 1fr; }
+  .live-ops-map-canvas { height: 320px; }
+  .live-ops-people { max-height: none; overflow: visible; }
   .live-ops-page { padding: 18px 12px 48px; }
   .live-ops-summary { grid-template-columns: 1fr 1fr; }
   .live-ops-summary > div:nth-child(3) { border-top: 1px solid #2b3d50; border-left: 0; }

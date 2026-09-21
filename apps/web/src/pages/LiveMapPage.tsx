@@ -1,5 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Crosshair, MapPin, RefreshCw, ShieldAlert, ShieldCheck, WifiOff } from 'lucide-react';
+/**
+ * Live officer map — where the branch's people are right now, and whether they are safe.
+ * One governed read (get_live_officer_positions) for the operating branch and its branches; one Leaflet map
+ * that keeps its viewport and base layer; realtime + 30 s polling so the picture never goes stale.
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { AlertTriangle, Crosshair, LocateFixed, MapPin, RefreshCw, ShieldAlert, ShieldCheck, WifiOff } from 'lucide-react';
 import type { SafetyStatus } from '../hooks/useOfficerSafety';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
@@ -7,235 +14,153 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { SafetyGate } from '../components/SafetyGate';
 import { deriveAdminSafetyStatus, deriveOfficerPinStatus, type OfficerPinStatus } from '../lib/officerPinStatus';
+import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/mapPreferences';
+import { STATUS_LABEL, alertWords, clock, gpsAgeWords, officerActivityWords, safetyWords, type LiveAlert, type LiveOfficer, type LiveShift } from '../lib/liveMapWords';
+import { plainWords } from '../lib/rosterWords';
 import { supabase } from '../lib/supabase';
 import './LiveMapPage.css';
 
-interface GpsPing {
-  id: string;
-  officer_id: string;
-  gps_lat: number | null;
-  gps_lng: number | null;
-  activity_type: string;
-  speed_kmh: number | null;
-  created_at: string;
-}
+export type { LiveOfficer } from '../lib/liveMapWords';
+interface LivePicture { organization_id: string; reach: string[]; since: string; refreshed_at: string; officers: LiveOfficer[] }
+interface OfficerView extends LiveOfficer { safety_status: SafetyStatus | null; pin_status: OfficerPinStatus }
+interface OpenJob { id: string; job_type: string; priority: string; status: string; site: { name: string; gps_lat: number | null; gps_lng: number | null } | null }
+interface ZoneShape { id: string; name: string; boundary: GeoJSON.GeoJsonObject | null }
 
-interface OfficerLatest extends GpsPing {
-  officer_name: string;
-  safety_status: SafetyStatus | null;
-  pin_status: OfficerPinStatus;
-}
-
-interface WelfareSetting {
-  officer_user_id: string;
-  welfare_check_enabled: boolean;
-  check_interval_minutes: number;
-  last_checkin_at: string | null;
-}
-
-interface ActiveWelfareAlert {
-  id: string;
-  officer_user_id: string;
-  gps_lat: number | null;
-  gps_lng: number | null;
-  triggered_at: string;
-}
-
-const STATUS_LABEL: Record<OfficerPinStatus, string> = {
-  ok: 'Safety OK',
-  due: 'Check-in due',
-  overdue: 'Check-in overdue',
-  alerting: 'Active alert',
-  offline: 'GPS offline',
-  unknown: 'Safety unknown',
-};
+const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'dispatched', 'acknowledged', 'en_route', 'on_scene'];
+/** Worst first: alerts, overdue and due check-ins, then people on shift, then everyone else seen recently. */
+const rank = (officer: { alert: LiveAlert | null; safety_status: SafetyStatus | null; shift: LiveShift | null }): number =>
+  officer.alert ? 0 : officer.safety_status === 'overdue' ? 1 : officer.safety_status === 'due' ? 2 : officer.shift ? 3 : 4;
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || '?';
 
 const LiveMapPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const { selectedAgreementZones } = useServiceRelationships();
-  const moduleContext = useActiveModuleContext('dispatch');
+  useActiveModuleContext('dispatch');
+  const branchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
-  const [positions, setPositions] = useState<OfficerLatest[]>([]);
+  const [picture, setPicture] = useState<LivePicture | null>(null);
+  const [jobs, setJobs] = useState<OpenJob[]>([]);
+  const [zoneShapes, setZoneShapes] = useState<ZoneShape[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [safetyError, setSafetyError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const [selectedOfficerId, setSelectedOfficerId] = useState<string | null>(null);
+  const [tick, setTick] = useState(Date.now());
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const overlayRef = useRef<L.LayerGroup | null>(null);
+  const framedRef = useRef(false);
+  const viewKey = `live-map:${branchId ?? 'none'}`;
 
   const loadPositions = useCallback(async () => {
-    const orgId = profile?.organizationId;
-    if (!orgId) {
-      setPositions([]);
-      setError('Organisation access could not be confirmed. Live positions are unavailable.');
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSafetyError(null);
-    let safetyLoadFailed = false;
-    try {
-      const since = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
-      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
-      const { data, error: gpsError } = activeZoneIds && activeZoneIds.length > 0
-        ? await supabase
-            .from('officer_gps_log')
-            .select('id, officer_id, gps_lat, gps_lng, activity_type, speed_kmh, created_at')
-            .in('zone_id', activeZoneIds)
-            .gte('created_at', since)
-            .order('created_at', { ascending: false })
-        : await supabase
-            .from('officer_gps_log')
-            .select('id, officer_id, gps_lat, gps_lng, activity_type, speed_kmh, created_at')
-            .eq('organization_id', orgId)
-            .gte('created_at', since)
-            .order('created_at', { ascending: false });
-      if (gpsError) throw gpsError;
-
-      const latestByOfficer = new Map<string, GpsPing>();
-      ((data as GpsPing[]) ?? []).forEach((row) => {
-        if (!latestByOfficer.has(row.officer_id)) latestByOfficer.set(row.officer_id, row);
-      });
-
-      const activeAlerts = new Map<string, ActiveWelfareAlert>();
-      if (welfareEnabled) {
-        const { data: alertRows, error: alertError } = activeZoneIds && activeZoneIds.length > 0
-          ? await supabase
-              .from('welfare_alerts')
-              .select('id, officer_user_id, gps_lat, gps_lng, triggered_at')
-              .in('zone_id', activeZoneIds)
-              .in('status', ['pending', 'acknowledged'])
-              .order('triggered_at', { ascending: false })
-          : await supabase
-              .from('welfare_alerts')
-              .select('id, officer_user_id, gps_lat, gps_lng, triggered_at')
-              .eq('organization_id', orgId)
-              .in('status', ['pending', 'acknowledged'])
-              .order('triggered_at', { ascending: false });
-        if (alertError) {
-          safetyLoadFailed = true;
-          setSafetyError(alertError.message);
-        } else {
-          (alertRows as ActiveWelfareAlert[] ?? []).forEach((alert) => {
-            if (!activeAlerts.has(alert.officer_user_id)) activeAlerts.set(alert.officer_user_id, alert);
-          });
-        }
-      }
-
-      const officerIds = Array.from(new Set([...latestByOfficer.keys(), ...activeAlerts.keys()]));
-      const names: Record<string, string> = {};
-      const safetyByOfficer = new Map<string, SafetyStatus | null>();
-
-      if (officerIds.length > 0) {
-        const { data: profiles, error: profileError } = await supabase
-          .from('user_profiles')
-          .select('id, display_name')
-          .in('id', officerIds);
-        if (profileError) throw profileError;
-        (profiles ?? []).forEach((officer: { id: string; display_name: string | null }) => {
-          names[officer.id] = officer.display_name || officer.id;
-        });
-
-        if (welfareEnabled) {
-          const settingsResponse = activeZoneIds && activeZoneIds.length > 0
-            ? await supabase
-                .from('officer_welfare_settings')
-                .select('officer_user_id, welfare_check_enabled, check_interval_minutes, last_checkin_at')
-                .in('zone_id', activeZoneIds)
-                .in('officer_user_id', officerIds)
-            : await supabase
-                .from('officer_welfare_settings')
-                .select('officer_user_id, welfare_check_enabled, check_interval_minutes, last_checkin_at')
-                .eq('organization_id', orgId)
-                .in('officer_user_id', officerIds);
-
-          if (settingsResponse.error) {
-            safetyLoadFailed = true;
-            setSafetyError(settingsResponse.error.message);
-          } else {
-            const settings = new Map((settingsResponse.data as WelfareSetting[] ?? []).map((setting) => [setting.officer_user_id, setting]));
-            officerIds.forEach((officerId) => {
-              const setting = settings.get(officerId);
-              safetyByOfficer.set(officerId, deriveAdminSafetyStatus({
-                hasActiveAlert: activeAlerts.has(officerId),
-                welfareEnabled: setting?.welfare_check_enabled ?? null,
-                lastCheckinAt: setting?.last_checkin_at ?? null,
-                checkIntervalMinutes: setting?.check_interval_minutes ?? null,
-              }));
-            });
-          }
-        }
-      }
-
-      const now = Date.now();
-      const allRows: GpsPing[] = [...latestByOfficer.values()];
-      activeAlerts.forEach((alert, officerId) => {
-        if (!latestByOfficer.has(officerId)) {
-          allRows.push({
-            id: alert.id,
-            officer_id: officerId,
-            gps_lat: alert.gps_lat,
-            gps_lng: alert.gps_lng,
-            activity_type: 'active_welfare_alert',
-            speed_kmh: null,
-            created_at: alert.triggered_at,
-          });
-        }
-      });
-
-      setPositions(allRows.map((row) => {
-        const safetyStatus = welfareEnabled && !safetyLoadFailed ? safetyByOfficer.get(row.officer_id) ?? null : null;
-        const hasGps = row.gps_lat != null && row.gps_lng != null;
-        return {
-          ...row,
-          officer_name: names[row.officer_id] || row.officer_id,
-          safety_status: safetyStatus,
-          pin_status: deriveOfficerPinStatus({ gpsAgeMs: hasGps ? now - new Date(row.created_at).getTime() : null, safetyStatus }),
-        };
-      }));
-      setRefreshedAt(new Date());
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Live positions could not be loaded.');
-    } finally {
-      setLoading(false);
-    }
-  }, [profile?.organizationId, selectedAgreementZones, welfareEnabled]);
+    if (!branchId) { setPicture(null); setError('Operating branch access could not be confirmed. Live positions are unavailable.'); setLoading(false); return; }
+    setLoading(true); setError(null);
+    const zoneIds = selectedAgreementZones.length ? selectedAgreementZones.map((zone) => zone.id) : null;
+    // ATLAS READS: get_live_officer_positions (officer_gps_log, shifts, welfare_alerts, officer_welfare_settings for the branch reach)
+    const [positionsResponse, jobsResponse, zonesResponse] = await Promise.all([
+      supabase.rpc('get_live_officer_positions', { p_organization_id: branchId, p_since_minutes: 240, p_zone_ids: zoneIds }),
+      supabase.from('dispatch_jobs').select('id, job_type, priority, status, site:client_site_id(name, gps_lat, gps_lng)').eq('organization_id', branchId).in('status', ACTIVE_JOB_STATUSES),
+      zoneIds ? supabase.from('location_zones').select('id, name, boundary').in('id', zoneIds) : Promise.resolve({ data: [] as ZoneShape[], error: null }),
+    ]);
+    if (positionsResponse.error) setError(positionsResponse.error.message);
+    else setPicture((positionsResponse.data as LivePicture | null) ?? null);
+    if (!jobsResponse.error) setJobs(((jobsResponse.data as unknown as Array<OpenJob & { site: OpenJob['site'] | OpenJob['site'][] }>) ?? []).map((job) => ({ ...job, site: Array.isArray(job.site) ? job.site[0] ?? null : job.site })));
+    if (!zonesResponse.error) setZoneShapes((zonesResponse.data as ZoneShape[]) ?? []);
+    setRefreshedAt(new Date());
+    setLoading(false);
+  }, [branchId, selectedAgreementZones]);
 
   useEffect(() => {
     void loadPositions();
     const interval = window.setInterval(() => void loadPositions(), 30_000);
-    return () => window.clearInterval(interval);
+    const onVisible = () => { if (document.visibilityState === 'visible') void loadPositions(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, [loadPositions]);
 
-  useEffect(() => {
-    if (!profile?.organizationId) return;
-    const gpsChannel = supabase
-      .channel(`live_positions_${profile.organizationId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'officer_gps_log', filter: `organization_id=eq.${profile.organizationId}` }, () => void loadPositions())
-      .subscribe();
-    const welfareChannel = welfareEnabled
-      ? supabase
-          .channel(`live_safety_${profile.organizationId}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'welfare_alerts', filter: `organization_id=eq.${profile.organizationId}` }, () => void loadPositions())
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'officer_welfare_settings', filter: `organization_id=eq.${profile.organizationId}` }, () => void loadPositions())
-          .subscribe()
-      : null;
-    return () => {
-      void supabase.removeChannel(gpsChannel);
-      if (welfareChannel) void supabase.removeChannel(welfareChannel);
-    };
-  }, [loadPositions, profile?.organizationId, welfareEnabled]);
+  // Ages and safety states move with the clock even when nothing new arrives.
+  useEffect(() => { const timer = window.setInterval(() => setTick(Date.now()), 15_000); return () => window.clearInterval(timer); }, []);
 
-  const counts = useMemo(() => positions.reduce<Record<OfficerPinStatus, number>>((result, officer) => {
-    result[officer.pin_status] += 1;
-    return result;
-  }, { ok: 0, due: 0, overdue: 0, alerting: 0, offline: 0, unknown: 0 }), [positions]);
+  // Realtime: one channel, one listener per organisation in the branch's reach (breadcrumbs are stamped with the shift's branch).
+  const reachKey = (picture?.reach ?? []).slice(0, 25).sort().join(',');
+  useEffect(() => {
+    if (!reachKey) return;
+    const orgIds = reachKey.split(',');
+    let channel = supabase.channel(`live_map_${branchId}`);
+    orgIds.forEach((orgId) => {
+      channel = channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'officer_gps_log', filter: `organization_id=eq.${orgId}` }, () => void loadPositions());
+      if (welfareEnabled) channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: 'welfare_alerts', filter: `organization_id=eq.${orgId}` }, () => void loadPositions());
+    });
+    channel.subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [reachKey, branchId, welfareEnabled, loadPositions]);
+
+  const officers = useMemo<OfficerView[]>(() => (picture?.officers ?? []).map((officer) => {
+    const shiftBegun = officer.shift && new Date(officer.shift.scheduled_start).getTime() <= tick ? officer.shift.scheduled_start : null;
+    const safety = welfareEnabled ? deriveAdminSafetyStatus({ hasActiveAlert: Boolean(officer.alert), welfareEnabled: officer.welfare?.enabled ?? null, lastCheckinAt: officer.welfare?.last_checkin_at ?? null, checkIntervalMinutes: officer.welfare?.check_interval_minutes ?? null, shiftStartedAt: shiftBegun, nowMs: tick }) : null;
+    const hasGps = officer.gps_lat != null && officer.gps_lng != null && officer.recorded_at;
+    return { ...officer, safety_status: safety, pin_status: deriveOfficerPinStatus({ gpsAgeMs: hasGps ? tick - new Date(officer.recorded_at as string).getTime() : null, safetyStatus: safety }) };
+  }).sort((left, right) => rank(left) - rank(right) || left.officer_name.localeCompare(right.officer_name)), [picture, welfareEnabled, tick]);
+
+  const counts = useMemo(() => officers.reduce<Record<OfficerPinStatus, number>>((result, officer) => { result[officer.pin_status] += 1; return result; }, { ok: 0, due: 0, overdue: 0, alerting: 0, offline: 0, unknown: 0 }), [officers]);
+  const positioned = useMemo(() => officers.filter((officer) => officer.gps_lat != null && officer.gps_lng != null), [officers]);
+
+  // One map for the life of the page; the overlay below is what changes.
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
+    const map = L.map(mapContainerRef.current, { zoomControl: true, attributionControl: true });
+    addLinzBaseLayers(map, { collapsed: true });
+    overlayRef.current = L.layerGroup().addTo(map);
+    framedRef.current = restoreViewportOr(map, viewKey, () => map.fitBounds(L.latLngBounds([-47.3, 166.4], [-34.4, 178.6])));
+    rememberViewport(map, viewKey);
+    mapRef.current = map;
+    window.setTimeout(() => map.invalidateSize(), 0);
+    return () => { map.remove(); mapRef.current = null; overlayRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const frameEveryone = useCallback(() => {
+    const map = mapRef.current; if (!map) return;
+    const bounds = L.latLngBounds([]);
+    positioned.forEach((officer) => bounds.extend([officer.gps_lat as number, officer.gps_lng as number]));
+    jobs.forEach((job) => { if (job.site?.gps_lat != null && job.site?.gps_lng != null) bounds.extend([job.site.gps_lat, job.site.gps_lng]); });
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.25), { maxZoom: 16 });
+  }, [positioned, jobs]);
+
+  useEffect(() => {
+    const map = mapRef.current; const overlay = overlayRef.current;
+    if (!map || !overlay) return;
+    overlay.clearLayers();
+    zoneShapes.forEach((zone) => { if (zone.boundary) L.geoJSON(zone.boundary, { style: { color: '#f0b35a', weight: 2, dashArray: '7 5', fillColor: '#f0b35a', fillOpacity: 0.06 } }).bindTooltip(`Zone: ${zone.name}`).addTo(overlay); });
+    jobs.forEach((job) => {
+      if (job.site?.gps_lat == null || job.site?.gps_lng == null) return;
+      L.marker([job.site.gps_lat, job.site.gps_lng], { keyboard: false, icon: L.divIcon({ className: `live-job-pin priority-${job.priority}`, html: '<span></span>', iconSize: [16, 16] }), title: `${plainWords(job.job_type)} at ${job.site.name}` })
+        .bindTooltip(`${plainWords(job.job_type)} · ${job.site.name} · ${plainWords(job.status)}`).addTo(overlay);
+    });
+    positioned.forEach((officer) => {
+      // Pins are pointer targets only; the officer list is the keyboard path. A focusable icon scrolls the shell's main pane
+      // on pointerdown and slides out from under the pointer before the click lands.
+      const marker = L.marker([officer.gps_lat as number, officer.gps_lng as number], {
+        keyboard: false,
+        icon: L.divIcon({ className: `live-pin status-${officer.pin_status}${selectedOfficerId === officer.officer_id ? ' is-selected' : ''}`, html: `<span>${initials(officer.officer_name)}</span>`, iconSize: [30, 30] }),
+        title: officer.officer_name, zIndexOffset: selectedOfficerId === officer.officer_id ? 1000 : officer.pin_status === 'alerting' ? 500 : 0,
+      }).bindTooltip(`${officer.officer_name} · ${STATUS_LABEL[officer.pin_status]} · ${gpsAgeWords(officer.recorded_at, tick)}`).addTo(overlay);
+      if (officer.accuracy_meters != null && officer.accuracy_meters > 15) L.circle([officer.gps_lat as number, officer.gps_lng as number], { radius: officer.accuracy_meters, color: '#7dd3c7', weight: 1, fillOpacity: 0.05 }).addTo(overlay);
+      marker.on('click', () => { setSelectedOfficerId(officer.officer_id); document.getElementById(`live-officer-${officer.officer_id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); });
+    });
+    if (!framedRef.current && (positioned.length || jobs.length)) { frameEveryone(); framedRef.current = true; }
+  }, [positioned, jobs, zoneShapes, selectedOfficerId, tick, frameEveryone]);
+
+  const showOnMap = (officer: OfficerView) => {
+    setSelectedOfficerId(officer.officer_id);
+    if (officer.gps_lat != null && officer.gps_lng != null) mapRef.current?.setView([officer.gps_lat, officer.gps_lng], Math.max(mapRef.current.getZoom(), 16));
+  };
 
   return (
     <div className="live-ops-page">
       <header className="live-ops-heading">
-        <div><span>Field operations</span><h1>Live officer status</h1><p>GPS position and welfare state are separate operational signals.</p></div>
+        <div><span>Field operations</span><h1>Live officer map</h1><p>Where your people are right now and whether they are safe. GPS position and welfare state are separate signals.</p></div>
         <button type="button" onClick={() => void loadPositions()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh</button>
       </header>
 
@@ -248,35 +173,48 @@ const LiveMapPage: React.FC = () => {
         safetyRelevant
         renderUnavailable={(message) => <div className="live-ops-message is-warning" role="status"><ShieldAlert size={17} /><div><strong>{message.title}</strong><span>{message.description}</span></div></div>}
       >
-        {safetyError ? <div className="live-ops-message is-error" role="alert"><AlertTriangle size={17} /><div><strong>Safety state unavailable</strong><span>{safetyError}. GPS positions remain visible, but no officer is shown as safe.</span></div></div> : (
-          <section className="live-ops-summary" aria-label="Officer safety status">
-            <div className="status-alerting"><ShieldAlert size={18} /><span>Active alerts</span><strong>{counts.alerting}</strong></div>
-            <div className="status-overdue"><AlertTriangle size={18} /><span>Overdue</span><strong>{counts.overdue}</strong></div>
-            <div className="status-due"><Crosshair size={18} /><span>Due</span><strong>{counts.due}</strong></div>
-            <div className="status-ok"><ShieldCheck size={18} /><span>Safety OK</span><strong>{counts.ok}</strong></div>
-          </section>
-        )}
+        <section className="live-ops-summary" aria-label="Officer safety status">
+          <div className="status-alerting"><ShieldAlert size={18} /><span>Active alerts</span><strong>{counts.alerting}</strong></div>
+          <div className="status-overdue"><AlertTriangle size={18} /><span>Overdue</span><strong>{counts.overdue}</strong></div>
+          <div className="status-due"><Crosshair size={18} /><span>Due</span><strong>{counts.due}</strong></div>
+          <div className="status-ok"><ShieldCheck size={18} /><span>Safety OK</span><strong>{counts.ok}</strong></div>
+        </section>
       </SafetyGate>
 
-      <div className="live-ops-meta"><span>{positions.length} officers seen in the last four hours</span><span>{refreshedAt ? `Updated ${refreshedAt.toLocaleTimeString('en-NZ')}` : 'Not yet refreshed'}</span></div>
+      <div className="live-ops-meta">
+        <span>{officers.length} {officers.length === 1 ? 'officer' : 'officers'} on shift or seen in the last four hours · {jobs.length} open {jobs.length === 1 ? 'job' : 'jobs'}{selectedAgreementZones.length ? ` · filtered to ${selectedAgreementZones.length} agreement ${selectedAgreementZones.length === 1 ? 'zone' : 'zones'}` : ''}</span>
+        <span>{refreshedAt ? `Updated ${refreshedAt.toLocaleTimeString('en-NZ')} · live` : 'Not yet refreshed'}</span>
+      </div>
 
-      {loading && positions.length === 0 ? <div className="live-ops-empty"><RefreshCw size={21} className="is-spinning" /> Loading live positions</div> : positions.length === 0 ? <div className="live-ops-empty"><WifiOff size={21} /> No officers have reported a position in the last four hours</div> : (
-        <div className="live-ops-list">{positions.map((officer) => <OfficerRow officer={officer} showSafety={welfareEnabled && !safetyError} key={officer.officer_id} />)}</div>
-      )}
+      <div className="live-ops-layout">
+        <section className="live-ops-map" aria-label="Live officer map">
+          <div className="live-ops-map-canvas" ref={mapContainerRef} />
+          <div className="live-ops-map-tools">
+            <button type="button" onClick={frameEveryone} disabled={!positioned.length && !jobs.length}><LocateFixed size={14} /> Fit to everyone</button>
+            <span className="live-ops-legend" aria-hidden="true"><i className="status-ok" />Safe<i className="status-due" />Due<i className="status-overdue" />Overdue<i className="status-alerting" />Alert<i className="status-offline" />No GPS<i className="is-job" />Open job</span>
+          </div>
+        </section>
+
+        <section className="live-ops-people" aria-label="Officers">
+          {loading && officers.length === 0 ? <div className="live-ops-empty"><RefreshCw size={21} className="is-spinning" /> Loading live positions</div>
+            : officers.length === 0 ? <div className="live-ops-empty"><WifiOff size={21} /> Nobody is on shift here now, and no officer has reported a position in the last four hours</div>
+            : <div className="live-ops-list">{officers.map((officer) => <OfficerRow officer={officer} selected={selectedOfficerId === officer.officer_id} showSafety={welfareEnabled} nowMs={tick} onShow={() => showOnMap(officer)} key={officer.officer_id} />)}</div>}
+        </section>
+      </div>
     </div>
   );
 };
 
-function OfficerRow({ officer, showSafety }: { officer: OfficerLatest; showSafety: boolean }) {
+function OfficerRow({ officer, selected, showSafety, nowMs, onShow }: { officer: OfficerView; selected: boolean; showSafety: boolean; nowMs: number; onShow: () => void }) {
   const hasGps = officer.gps_lat != null && officer.gps_lng != null;
-  const gpsAgeMinutes = hasGps ? Math.max(0, Math.floor((Date.now() - new Date(officer.created_at).getTime()) / 60_000)) : null;
+  const safety = safetyWords(officer, officer.pin_status, officer.safety_status, nowMs);
   return (
-    <article className={`live-officer-row status-${officer.pin_status}`}>
-      <span className="live-officer-marker"><MapPin size={18} /></span>
-      <div><strong>{officer.officer_name}</strong><small>{officer.activity_type.replace(/_/g, ' ')}{officer.speed_kmh != null ? ` · ${officer.speed_kmh.toFixed(0)} km/h` : ''}</small></div>
-      <div className="live-gps-fact"><span>GPS</span><strong>{gpsAgeMinutes == null ? 'No fix' : gpsAgeMinutes < 60 ? `${gpsAgeMinutes}m ago` : `${Math.floor(gpsAgeMinutes / 60)}h ago`}</strong><small>{hasGps ? `${officer.gps_lat?.toFixed(5)}, ${officer.gps_lng?.toFixed(5)}` : 'Location unavailable'}</small></div>
-      {showSafety ? <span className={`live-safety-status status-${officer.pin_status}`}>{STATUS_LABEL[officer.pin_status]}</span> : <span className="live-safety-status status-unknown">Safety unavailable</span>}
-      {hasGps ? <a href={`https://www.google.com/maps?q=${officer.gps_lat},${officer.gps_lng}`} target="_blank" rel="noreferrer" title="Open position"><MapPin size={16} /><span className="sr-only">Open position</span></a> : <span className="live-position-unavailable"><WifiOff size={15} /></span>}
+    <article id={`live-officer-${officer.officer_id}`} className={`live-officer-row status-${officer.pin_status}${selected ? ' is-selected' : ''}`} aria-current={selected ? 'true' : undefined}>
+      <button type="button" className="live-officer-marker" onClick={onShow} title={hasGps ? 'Show on map' : 'No position to show'} disabled={!hasGps}><span>{initials(officer.officer_name)}</span></button>
+      <div><strong>{officer.officer_name}</strong><small title={officerActivityWords(officer)}>{officerActivityWords(officer)}</small>{officer.shift?.organization_name && <small>{officer.shift.organization_name}</small>}</div>
+      <div className="live-gps-fact"><span>GPS</span><strong>{gpsAgeWords(officer.recorded_at, nowMs)}</strong><small>{hasGps ? officer.physical_address ?? `${officer.gps_lat?.toFixed(5)}, ${officer.gps_lng?.toFixed(5)}` : officer.shift ? 'No position yet this shift' : 'Location unavailable'}</small></div>
+      {showSafety ? <span className={`live-safety-status status-${officer.pin_status}`}><strong>{safety.headline}</strong>{safety.detail && <small>{safety.detail}</small>}</span> : <span className="live-safety-status status-unknown"><strong>Safety unavailable</strong></span>}
+      {hasGps ? <a href={`https://www.google.com/maps?q=${officer.gps_lat},${officer.gps_lng}`} target="_blank" rel="noreferrer" title="Open in Google Maps for directions"><MapPin size={16} /><span className="sr-only">Open in Google Maps</span></a> : <span className="live-position-unavailable"><WifiOff size={15} /></span>}
     </article>
   );
 }
