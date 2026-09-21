@@ -41,7 +41,11 @@ DETECTOR_MODEL_PATH = Path(os.getenv("DETECTOR_MODEL_PATH")) if os.getenv("DETEC
 DETECTOR_CONFIDENCE = float(os.getenv("DETECTOR_CONFIDENCE", "0.25"))
 KIND_MIN_CONFIDENCE = {
     "person": float(os.getenv("DETECTOR_PERSON_CONFIDENCE", "0.35")),
-    "vehicle": float(os.getenv("DETECTOR_VEHICLE_CONFIDENCE", "0.35")),
+    # Raised from 0.35 (owner-reported 2026-09-21: a 0.382-confidence, 66x33px wisp of industrial steam was
+    # accepted and persisted as "white bus"/"white car" sightings). COCO has no smoke/steam/vapour class, so an
+    # amorphous plume is forced into the nearest vehicle-shaped guess; a real, evidentially-useful vehicle
+    # sighting clears this comfortably.
+    "vehicle": float(os.getenv("DETECTOR_VEHICLE_CONFIDENCE", "0.45")),
     # COCO animal classes fire on tree trunks and fence posts at 0.3–0.4; an animal needs a stronger case.
     "animal": float(os.getenv("DETECTOR_ANIMAL_CONFIDENCE", "0.50")),
 }
@@ -60,10 +64,16 @@ MAX_BOX_AREA_RATIO = 0.85
 # Below this a "person" is a few pixels of tree line; real people at trail-camera range are far taller.
 MIN_PERSON_HEIGHT_RATIO = 0.05
 MIN_BOX_AREA_RATIO = 0.001
+# Vehicles get a stronger floor than the 0.1% global one: the steam-plume false positive above was 66x33px in a
+# 1920x1080 frame (0.105% — barely inside the old floor) and is too small to be a usable vehicle sighting anyway.
+KIND_MIN_AREA_RATIO = {"vehicle": float(os.getenv("DETECTOR_VEHICLE_MIN_AREA_RATIO", "0.0035"))}
 COCO_TO_KIND = {
     "person": ("person", None),
     "bicycle": ("vehicle", "bicycle"), "car": ("vehicle", "car"), "motorcycle": ("vehicle", "motorcycle"),
     "bus": ("vehicle", "bus"), "train": ("vehicle", "train"), "truck": ("vehicle", "truck"), "boat": ("vehicle", "boat"),
+    # Previously unmapped: a correct "airplane" call from the detector was silently dropped (no kind), so a site
+    # with real aircraft (taxiing/parked) never got credit even when the model got it right.
+    "airplane": ("vehicle", "airplane"),
     "bird": ("animal", "bird"), "cat": ("animal", "cat"), "dog": ("animal", "dog"), "horse": ("animal", "horse"),
     "sheep": ("animal", "sheep"), "cow": ("animal", "cattle"), "elephant": ("animal", "elephant"), "bear": ("animal", "bear"),
     "zebra": ("animal", "zebra"), "giraffe": ("animal", "giraffe"),
@@ -234,7 +244,7 @@ def plausible_box(kind: str, bbox: dict[str, int] | None, width: int, height: in
     if bbox is None or width <= 0 or height <= 0:
         return False
     area_ratio = (bbox["width"] * bbox["height"]) / float(width * height)
-    if area_ratio >= MAX_BOX_AREA_RATIO or area_ratio < MIN_BOX_AREA_RATIO:
+    if area_ratio >= MAX_BOX_AREA_RATIO or area_ratio < KIND_MIN_AREA_RATIO.get(kind, MIN_BOX_AREA_RATIO):
         return False
     if kind == "person" and bbox["height"] < height * MIN_PERSON_HEIGHT_RATIO:
         return False
