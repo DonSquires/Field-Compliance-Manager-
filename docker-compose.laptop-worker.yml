@@ -19,11 +19,15 @@ services:
     container_name: fcm-inference-laptop
     restart: unless-stopped
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
+    ports:
+      # Tailscale-only: lets the VPS's own vision watcher route triage work here under local_gpu_first,
+      # instead of paying for RunPod. Never bind 0.0.0.0 — this API key is shared, not internet-safe.
+      - "100.114.240.13:3000:3000"
     environment:
       DETECTOR_MODEL: rf-detr-large-704-coco
       DETECTOR_TILES: auto
       VEHICLE_ATTRS_PROVIDER: basic
-      # Only ever exchanged between these two co-located containers on this private compose network.
+      # Shared with the VPS's LOCAL_GPU_INFERENCE_API_KEY so it can call /infer/batch here too.
       INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:-laptop-local-shared-key}
     deploy:
       resources:
@@ -61,6 +65,12 @@ services:
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
       VISION_WORKER_CONCURRENCY: "1"
       VISION_MAX_CLASSIFICATION_FRAMES: "120"
+      # This machine already runs its own Ollama (native, GPU-capable) for other work - reuse it via Docker
+      # Desktop's host gateway instead of adding a second dockerized instance or a Tailscale hop to the VPS.
+      OLLAMA_VISION_URL: "${OLLAMA_VISION_URL:-http://host.docker.internal:11434}"
+      OLLAMA_VISION_MODEL: "${OLLAMA_VISION_MODEL:-moondream}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - fcm_laptop_derived:/opt/fcm/derived
     depends_on:

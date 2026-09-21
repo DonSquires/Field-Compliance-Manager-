@@ -77,6 +77,8 @@ import {
   parseMs,
   previousClipBefore,
   timelineBounds,
+  vehicleVisionHintFrom,
+  weaponHintFrom,
   zoomView,
   GRID_LAYOUTS,
   PLAYBACK_RATES,
@@ -994,7 +996,7 @@ const CCTVConsolePage: React.FC = () => {
                                   <span className="cctv-clip__name">{clip.fileName}</span>
                                   <small className="cctv-clip__facts">
                                     <span className={`cctv-clip__status is-${clip.jobStatus}`}>{clipStatusLabel(clip.jobStatus)}</span>
-                                    {counts ? <span>{counts.total} sighting{counts.total === 1 ? '' : 's'}{counts.pending ? ` · ${counts.pending} to review` : ''}{counts.alerts ? ` · ${counts.alerts} alert${counts.alerts === 1 ? '' : 's'}` : ''}{counts.busy ? <span className="cctv-clip__busy" title="Unusually many distinct people or vehicles for one clip"> · busy scene</span> : null}</span> : <span>No sightings</span>}
+                                    {counts ? <span>{counts.possibleWeapon ? <span className="cctv-clip__weapon-hint" title="Unverified AI hint - a person in this clip may be carrying something weapon-shaped. Review now."><AlertTriangle size={11} aria-hidden="true" /> possible weapon - review now · </span> : null}{counts.total} sighting{counts.total === 1 ? '' : 's'}{counts.pending ? ` · ${counts.pending} to review` : ''}{counts.alerts ? ` · ${counts.alerts} alert${counts.alerts === 1 ? '' : 's'}` : ''}{counts.busy ? <span className="cctv-clip__busy" title="Unusually many distinct people or vehicles for one clip"> · busy scene</span> : null}</span> : <span>No sightings</span>}
                                     <span>{bytesLabel(clip.sizeBytes)}</span>
                                     {(() => { const badge = custodyBadge(clip); return <span className={`cctv-clip__custody is-${badge.tone}`} title={badge.detail}>{badge.tone === 'locked' ? <Lock size={11} aria-hidden="true" /> : badge.tone === 'mismatch' ? <AlertTriangle size={11} aria-hidden="true" /> : null} {badge.label}</span>; })()}
                                   </small>
@@ -1243,10 +1245,20 @@ const CCTVConsolePage: React.FC = () => {
                     {selected ? (
                       <div className="cctv-entity__review">
                         {observation.kind === 'vehicle' ? (
-                          <dl className="cctv-entity__facts">
-                            {['colour', 'body_type', 'make', 'model'].filter((key) => observation.attributes[key]).map((key) => <div key={key}><dt>{key.replace('_', ' ')}</dt><dd>{String(observation.attributes[key])}</dd></div>)}
-                            {observation.attributes.plate_confidence ? <div><dt>plate read</dt><dd>{Math.round(Number(observation.attributes.plate_confidence) * 100)}%</dd></div> : null}
-                          </dl>
+                          <>
+                            <dl className="cctv-entity__facts">
+                              {['colour', 'body_type'].filter((key) => observation.attributes[key]).map((key) => <div key={key}><dt>{key.replace('_', ' ')}</dt><dd>{String(observation.attributes[key])}</dd></div>)}
+                              {observation.attributes.plate_confidence ? <div><dt>plate read</dt><dd>{Math.round(Number(observation.attributes.plate_confidence) * 100)}%</dd></div> : null}
+                            </dl>
+                            {(() => {
+                              const hint = vehicleVisionHintFrom(observation);
+                              return hint ? (
+                                <p className="cctv-entity__ai-hint" title="Self-hosted vision-LLM guess, not a verified registry lookup - confirm before relying on it.">
+                                  AI suggestion (unverified): {[hint.make, hint.model].filter(Boolean).join(' ')}
+                                </p>
+                              ) : null;
+                            })()}
+                          </>
                         ) : null}
                         {observation.kind === 'animal' ? (
                           <dl className="cctv-entity__facts">
@@ -1255,6 +1267,14 @@ const CCTVConsolePage: React.FC = () => {
                             {observation.attributes.species_status ? <div><dt>model</dt><dd>{String(observation.attributes.species_status).replace(/_/g, ' ')}</dd></div> : null}
                           </dl>
                         ) : null}
+                        {observation.kind === 'person' ? (() => {
+                          const weapon = weaponHintFrom(observation);
+                          return weapon?.present ? (
+                            <p className="cctv-entity__weapon-alert" role="alert">
+                              <AlertTriangle size={14} aria-hidden="true" /> Possible weapon flagged by AI (unverified){weapon.description ? `: ${weapon.description}` : ''}. Review this sighting now.
+                            </p>
+                          ) : null;
+                        })() : null}
                         {observation.kind === 'person' ? (
                           <dl className="cctv-entity__facts">
                             <div><dt>profile</dt><dd>{observation.profileName || 'Unknown person'}</dd></div>

@@ -125,6 +125,31 @@ export function isWeakInferenceCandidate(observation: ConsoleObservation): boole
   return frameCount <= 1 && (observation.confidence ?? 0) < 0.85 && !observation.attributes.face_event_id;
 }
 
+// Self-hosted vision-LLM hint (Moondream, via the in-house Ollama container) - never a validated
+// detection. `present: false` means the model looked and didn't flag anything; a missing/malformed hint
+// (Ollama unreachable, timed out, failed to parse) returns null here so "not checked" is never rendered
+// the same as "checked, nothing found".
+export type WeaponHint = { present: boolean; description: string | null };
+
+export function weaponHintFrom(observation: ConsoleObservation): WeaponHint | null {
+  const raw = observation.attributes.weapon_hint;
+  if (!raw || typeof raw !== 'object') return null;
+  const hint = raw as Record<string, unknown>;
+  if (typeof hint.present !== 'boolean') return null;
+  return { present: hint.present, description: typeof hint.description === 'string' ? hint.description : null };
+}
+
+// Same unverified-hint contract for vehicle make/model: only populated by the vision-LLM guess (marked by
+// make_model_source), never by a real registry lookup, so the console must label it as a suggestion.
+export type VehicleVisionHint = { make: string | null; model: string | null };
+
+export function vehicleVisionHintFrom(observation: ConsoleObservation): VehicleVisionHint | null {
+  if (observation.attributes.make_model_source !== 'vision_llm_hint_unverified') return null;
+  const make = typeof observation.attributes.make === 'string' ? observation.attributes.make : null;
+  const model = typeof observation.attributes.model === 'string' ? observation.attributes.model : null;
+  return make || model ? { make, model } : null;
+}
+
 export function inferenceReviewLabel(observation: ConsoleObservation): string {
   const frameCount = Math.max(1, Number(observation.attributes.frame_count) || 1);
   const confidence = observation.confidence === null ? 'confidence not reported' : `${Math.round(observation.confidence * 100)}%`;
@@ -201,7 +226,7 @@ export function groupClipsByDay(clips: ConsoleClip[], timeZone: string): ClipDay
   return groups;
 }
 
-export type EvidenceCounts = { total: number; pending: number; alerts: number; busy: boolean };
+export type EvidenceCounts = { total: number; pending: number; alerts: number; busy: boolean; possibleWeapon: boolean };
 
 // A clip with unusually many distinct people or vehicles is worth a reviewer's attention even when no
 // single sighting is individually alert-worthy (a readable plate, a pest). Starting thresholds only -
@@ -217,10 +242,14 @@ export function observationCountsByEvidence(observations: ConsoleObservation[]):
   const personCounts: Record<string, number> = {};
   const vehicleCounts: Record<string, number> = {};
   for (const observation of observations) {
-    const entry = counts[observation.evidenceId] ?? (counts[observation.evidenceId] = { total: 0, pending: 0, alerts: 0, busy: false });
+    const entry = counts[observation.evidenceId] ?? (counts[observation.evidenceId] = { total: 0, pending: 0, alerts: 0, busy: false, possibleWeapon: false });
     entry.total += 1;
     if (!isReviewed(observation)) entry.pending += 1;
     if ((observation.kind === 'vehicle' && observation.plate) || (observation.kind === 'animal' && observation.isPest)) entry.alerts += 1;
+    // Kept out of `alerts` on purpose: an unverified vision-LLM guess about a possible weapon is a
+    // different order of severity to a readable plate, and must never blend into a routine alert count a
+    // reviewer might scan past. See weaponHintFrom() for the never-treat-as-fact contract.
+    if (weaponHintFrom(observation)?.present) entry.possibleWeapon = true;
     if (observation.kind === 'person') personCounts[observation.evidenceId] = (personCounts[observation.evidenceId] ?? 0) + 1;
     if (observation.kind === 'vehicle') vehicleCounts[observation.evidenceId] = (vehicleCounts[observation.evidenceId] ?? 0) + 1;
   }

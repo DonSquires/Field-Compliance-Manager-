@@ -37,6 +37,8 @@ import {
   ticksFor,
   timeToX,
   timelineBounds,
+  vehicleVisionHintFrom,
+  weaponHintFrom,
   xToTime,
   zoomView,
   type ConsoleClip,
@@ -120,9 +122,33 @@ describe('recordings browser', () => {
       observation({ id: 'c', evidenceId: 'c149', kind: 'animal', species: 'possum', isPest: true }),
       observation({ id: 'd', evidenceId: 'c149', kind: 'person' }),
     ]);
-    expect(counts.c0).toEqual({ total: 2, pending: 1, alerts: 1, busy: false });
-    expect(counts.c149).toEqual({ total: 2, pending: 2, alerts: 1, busy: false });
+    expect(counts.c0).toEqual({ total: 2, pending: 1, alerts: 1, busy: false, possibleWeapon: false });
+    expect(counts.c149).toEqual({ total: 2, pending: 2, alerts: 1, busy: false, possibleWeapon: false });
     expect(counts.c400).toBeUndefined();
+  });
+
+  it('flags a clip when a person carries an unverified possible-weapon hint, without adding to alerts', () => {
+    const flagged = observation({ id: 'p0', evidenceId: 'armed', kind: 'person', attributes: { weapon_hint: { present: true, description: 'dark object in right hand' } } });
+    const cleared = observation({ id: 'p1', evidenceId: 'armed', kind: 'person', attributes: { weapon_hint: { present: false, description: null } } });
+    const untested = observation({ id: 'v0', evidenceId: 'quiet', kind: 'vehicle' });
+    const counts = observationCountsByEvidence([flagged, cleared, untested]);
+    expect(counts.armed).toEqual({ total: 2, pending: 2, alerts: 0, busy: false, possibleWeapon: true });
+    expect(counts.quiet).toEqual({ total: 1, pending: 1, alerts: 0, busy: false, possibleWeapon: false });
+  });
+
+  it('reads a weapon hint only when it is a well-formed object, and never confuses missing with cleared', () => {
+    expect(weaponHintFrom(observation({ attributes: { weapon_hint: { present: true, description: 'possible knife' } } }))).toEqual({ present: true, description: 'possible knife' });
+    expect(weaponHintFrom(observation({ attributes: { weapon_hint: { present: false, description: null } } }))).toEqual({ present: false, description: null });
+    expect(weaponHintFrom(observation({ attributes: {} }))).toBeNull();
+    expect(weaponHintFrom(observation({ attributes: { weapon_hint: 'not-an-object' } }))).toBeNull();
+  });
+
+  it('reads a vehicle vision-LLM hint only when explicitly marked as such, never a verified make/model', () => {
+    const hinted = observation({ attributes: { make: 'Toyota', model: 'Hilux', make_model_source: 'vision_llm_hint_unverified' } });
+    expect(vehicleVisionHintFrom(hinted)).toEqual({ make: 'Toyota', model: 'Hilux' });
+    const verified = observation({ attributes: { make: 'Toyota', model: 'Hilux' } });
+    expect(vehicleVisionHintFrom(verified)).toBeNull();
+    expect(vehicleVisionHintFrom(observation({ attributes: {} }))).toBeNull();
   });
 
   it('flags a clip as a busy scene when it has unusually many distinct people or vehicles, without adding to alerts', () => {
@@ -130,9 +156,9 @@ describe('recordings browser', () => {
     const fewPeople = Array.from({ length: 4 }, (_, index) => observation({ id: `p${index}`, evidenceId: 'quiet-people', kind: 'person' }));
     const manyVehicles = Array.from({ length: 4 }, (_, index) => observation({ id: `v${index}`, evidenceId: 'busy-vehicles', kind: 'vehicle' }));
     const counts = observationCountsByEvidence([...manyPeople, ...fewPeople, ...manyVehicles]);
-    expect(counts['busy-people']).toEqual({ total: 5, pending: 5, alerts: 0, busy: true });
-    expect(counts['quiet-people']).toEqual({ total: 4, pending: 4, alerts: 0, busy: false });
-    expect(counts['busy-vehicles']).toEqual({ total: 4, pending: 4, alerts: 0, busy: true });
+    expect(counts['busy-people']).toEqual({ total: 5, pending: 5, alerts: 0, busy: true, possibleWeapon: false });
+    expect(counts['quiet-people']).toEqual({ total: 4, pending: 4, alerts: 0, busy: false, possibleWeapon: false });
+    expect(counts['busy-vehicles']).toEqual({ total: 4, pending: 4, alerts: 0, busy: true, possibleWeapon: false });
   });
 
   it('labels durations, sizes and analysis states in plain words', () => {

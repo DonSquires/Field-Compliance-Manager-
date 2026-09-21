@@ -92,6 +92,124 @@ async function loadBase64Thumbnail(filePath, maxBytes = 250_000) {
   }
 }
 
+// ── Self-hosted vision-LLM hints (Moondream 2, Apache-2.0, via the in-house Ollama container) ─────────────
+// Owner ruling 2026-09-21: builds our own vehicle make/model and weapon-presence signal from footage we
+// already own, instead of a paid API or a scraped/non-commercial training set. Every result here is an
+// UNVERIFIED HINT, never a validated detection - callers must keep it labelled as such all the way to the
+// review console. Zero per-call cost (self-hosted, already-owned hardware); any failure (not configured,
+// network error, timeout, malformed reply) returns null/absent rather than guessing, so a missing hint is
+// never mistaken for a checked-and-clear result.
+const OLLAMA_VISION_URL = process.env.OLLAMA_VISION_URL || '';
+const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || 'moondream';
+const VISION_HINT_TIMEOUT_MS = Number(process.env.VISION_HINT_TIMEOUT_MS) || 20_000;
+
+async function cropFrameToBase64(filePath, bbox) {
+  if (!filePath || !bbox) return null;
+  const width = Math.max(1, Math.round(Number(bbox.width) || 0));
+  const height = Math.max(1, Math.round(Number(bbox.height) || 0));
+  const x = Math.max(0, Math.round(Number(bbox.x) || 0));
+  const y = Math.max(0, Math.round(Number(bbox.y) || 0));
+  if (width <= 1 || height <= 1) return null;
+  const cropPath = path.join(os.tmpdir(), `vision-hint-${crypto.randomUUID()}.jpg`);
+  try {
+    await execFileAsync('ffmpeg', [
+      '-y', '-i', filePath,
+      '-vf', `crop=${width}:${height}:${x}:${y}`,
+      '-q:v', '4',
+      cropPath,
+    ], { timeout: 10_000 });
+    const buf = await fs.readFile(cropPath);
+    return buf.toString('base64');
+  } catch (error) {
+    log('vision_hint_crop_failed', { file_path: filePath, bbox, error: error.message });
+    return null;
+  } finally {
+    await fs.rm(cropPath, { force: true }).catch(() => {});
+  }
+}
+
+async function queryVisionHint(base64Image, prompt) {
+  if (!OLLAMA_VISION_URL || !base64Image) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VISION_HINT_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${OLLAMA_VISION_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // num_predict bounds a degenerate-repetition loop (observed on a content-free test image) to a few
+      // hundred ms instead of running to the model's full context length for no benefit - the response is
+      // discarded either way once it fails to parse as the requested JSON shape.
+      body: JSON.stringify({ model: OLLAMA_VISION_MODEL, prompt, images: [base64Image], stream: false, format: 'json', options: { num_predict: 200 } }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      log('vision_hint_http_error', { status: response.status });
+      return null;
+    }
+    const body = await response.json();
+    try {
+      return JSON.parse(body.response);
+    } catch (parseError) {
+      log('vision_hint_unparseable_response', { error: parseError.message });
+      return null;
+    }
+  } catch (error) {
+    log('vision_hint_unavailable', { error: error.message });
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const VEHICLE_HINT_PROMPT = [
+  'You are looking at a cropped CCTV photo of a single vehicle.',
+  'Give your best guess for the manufacturer (make) and model, based on visible badges, body shape and style.',
+  'If you cannot make a reasonable guess, use null for that field. Do not invent a plate number or any other detail.',
+  'Respond with ONLY this JSON shape, no other text: {"make": string or null, "model": string or null}',
+].join(' ');
+
+// Runs once per finalized vehicle track (not per raw frame) so cost stays bounded to a handful of calls per
+// clip. Nothing else in this stack currently sets vehicle_make/vehicle_model, so this is additive.
+async function getVehicleVisionHint(filePath, bbox) {
+  const base64Image = await cropFrameToBase64(filePath, bbox);
+  const parsed = await queryVisionHint(base64Image, VEHICLE_HINT_PROMPT);
+  if (!parsed || typeof parsed !== 'object') {
+    return { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null };
+  }
+  const make = typeof parsed.make === 'string' && parsed.make.trim() ? parsed.make.trim().slice(0, 60) : null;
+  const model = typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model.trim().slice(0, 60) : null;
+  return {
+    vehicle_make: make,
+    vehicle_model: model,
+    vehicle_make_model_source: (make || model) ? 'vision_llm_hint_unverified' : null,
+  };
+}
+
+const WEAPON_HINT_PROMPT = [
+  'You are looking at a cropped CCTV photo of a person.',
+  'Look carefully at anything they are holding, carrying, or wearing.',
+  'Could any object plausibly be a firearm, knife, or other weapon? If you are at all unsure, still flag it so a human can check - false alarms are far cheaper than a missed weapon.',
+  'Respond with ONLY this JSON shape, no other text: {"possible_weapon": true or false, "description": "short description of what you see"}',
+].join(' ');
+
+// Same bounded-cost, once-per-track pattern as the vehicle hint. On any failure this returns null (the key
+// is omitted from the observation entirely) rather than {present: false} - "not checked" must never look
+// identical to "checked, nothing found" for something this safety-sensitive.
+async function getWeaponHint(filePath, bbox) {
+  const base64Image = await cropFrameToBase64(filePath, bbox);
+  const parsed = await queryVisionHint(base64Image, WEAPON_HINT_PROMPT);
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.possible_weapon !== 'boolean') {
+    return null;
+  }
+  return {
+    present: parsed.possible_weapon,
+    description: typeof parsed.description === 'string' && parsed.description.trim() ? parsed.description.trim().slice(0, 200) : null,
+    source: 'vision_llm_hint_requires_human_review',
+    model: OLLAMA_VISION_MODEL,
+    generated_at: new Date().toISOString(),
+  };
+}
+
 // Does a detection at (center, bbox, timestamp, embedding) continue an existing track?
 function continuesTrack(track, { center, bbox, timestamp, embedding }, maxGap) {
   const gap = timestamp - track.lastSeen;
@@ -314,6 +432,7 @@ async function consolidatePeople(frames, options = {}) {
     quality_state: track.bestFrame?.quality_state || (track.bestFrame?.visual_quality === 'degraded' ? 'degraded' : 'clear'),
     gait_signature: buildGaitSignature(track.gaitSamples),
     thumbnail: await loadBase64Thumbnail(track.bestFrame?.file_path),
+    weapon_hint: await getWeaponHint(track.bestFrame?.file_path, track.bestBbox),
     review_required: true,
   })));
   return events.map((event) => ({
@@ -565,6 +684,13 @@ async function consolidateVehicles(frames, options = {}) {
     const vehicleData = tr.bestFrame?.inference?.data || tr.bestFrame?.runpod?.vehicle || {};
     const alprData = tr.bestFrame?.alpr || {};
     const alprBest = Array.isArray(alprData.results) ? alprData.results.find((item) => item?.plate === tr.bestPlate) || alprData.results[0] : null;
+    // Never override an already-known make/model (any current or future deterministic source) with an
+    // unverified vision-LLM guess - only ask when nothing better is already on the frame.
+    const existingMake = vehicleData.vehicle_make ?? null;
+    const existingModel = vehicleData.vehicle_model ?? null;
+    const visionHint = (existingMake || existingModel)
+      ? null
+      : await getVehicleVisionHint(tr.bestFrame?.file_path, vehicleData.detection?.bbox ?? tr.bestFrame?.alpr?.plate_bbox ?? null);
     events.push({
       event_id: `vehicle-${tr.bestPlate}-${tr.trackIndex}`,
       event_type: 'vehicle',
@@ -588,8 +714,9 @@ async function consolidateVehicles(frames, options = {}) {
       best_frame_hash: tr.bestFrame?.sha256_hash || null,
       best_bbox: vehicleData.detection?.bbox ?? tr.bestFrame?.alpr?.plate_bbox ?? null,
       thumbnail,
-      vehicle_make: vehicleData.vehicle_make ?? null,
-      vehicle_model: vehicleData.vehicle_model ?? null,
+      vehicle_make: existingMake ?? visionHint?.vehicle_make ?? null,
+      vehicle_model: existingModel ?? visionHint?.vehicle_model ?? null,
+      vehicle_make_model_source: (existingMake || existingModel) ? (vehicleData.vehicle_make_model_source ?? null) : (visionHint?.vehicle_make_model_source ?? null),
       vehicle_year: vehicleData.vehicle_year ?? null,
       vehicle_colour: vehicleData.vehicle_colour ?? vehicleData.vehicle_color ?? null,
       vehicle_type: vehicleData.vehicle_type ?? null,
@@ -632,6 +759,9 @@ async function consolidateVehicles(frames, options = {}) {
   for (const [index, track] of genericTracks.entries()) {
     const thumbnail = await loadBase64Thumbnail(track.bestFrame?.file_path);
     const vehicleData = track.bestFrame?.runpod?.vehicle || {};
+    const existingMake = vehicleData.vehicle_make ?? null;
+    const existingModel = vehicleData.vehicle_model ?? null;
+    const visionHint = (existingMake || existingModel) ? null : await getVehicleVisionHint(track.bestFrame?.file_path, track.bestBbox);
     events.push({
       event_id: `vehicle-unconfirmed-${index + 1}`,
       event_type: 'vehicle',
@@ -646,8 +776,9 @@ async function consolidateVehicles(frames, options = {}) {
       best_frame_hash: track.bestFrame?.sha256_hash || null,
       best_bbox: track.bestBbox,
       thumbnail,
-      vehicle_make: vehicleData.vehicle_make ?? null,
-      vehicle_model: vehicleData.vehicle_model ?? null,
+      vehicle_make: existingMake ?? visionHint?.vehicle_make ?? null,
+      vehicle_model: existingModel ?? visionHint?.vehicle_model ?? null,
+      vehicle_make_model_source: (existingMake || existingModel) ? (vehicleData.vehicle_make_model_source ?? null) : (visionHint?.vehicle_make_model_source ?? null),
       vehicle_colour: vehicleData.vehicle_colour ?? null,
       vehicle_type: vehicleData.vehicle_type ?? null,
       vehicle_attribute_confidence: vehicleData.vehicle_attribute_confidence ?? null,
@@ -715,7 +846,8 @@ function buildEntityObservations(summary, context = {}) {
       model_confidence: clamp01(event.confidence),
       quality_state: event.quality_state || 'clear',
       attributes: stripNulls({
-        make: event.vehicle_make, model: event.vehicle_model, colour: event.vehicle_colour, body_type: event.vehicle_type, year: event.vehicle_year,
+        make: event.vehicle_make, model: event.vehicle_model, make_model_source: event.vehicle_make_model_source,
+        colour: event.vehicle_colour, body_type: event.vehicle_type, year: event.vehicle_year,
         attribute_confidence: event.vehicle_attribute_confidence, plate_confidence: plated ? event.confidence : null,
         bbox: event.best_bbox, frame_count: event.frame_count, visit_count: event.visit_count, temporal_consensus: event.temporal_consensus,
         speed_kmh: event.speed_kmh, inference_provider: event.inference_provider, appearance_embedding_model: event.appearance_embedding_model,
@@ -754,6 +886,7 @@ function buildEntityObservations(summary, context = {}) {
         bbox: event.best_bbox, frame_count: event.frame_count, upper_body_colour: event.attributes?.upper_body_colour, lower_body_colour: event.attributes?.lower_body_colour,
         visible_head_region: event.attributes?.visible_head_region?.colour, gait: event.gait_signature?.state === 'provisional_motion_signature' ? event.gait_signature : null,
         face_event_id: face?.event_id, face_visit_count: face?.visit_count, appearance_embedding_model: event.appearance_embedding_model,
+        weapon_hint: event.weapon_hint,
         review_candidate_basis: reviewCandidateBasis(event, Boolean(face)),
       }),
       frame_sha256: event.best_frame_hash || null,
@@ -938,4 +1071,6 @@ module.exports = {
   consolidateMotionSummary,
   buildEntityObservations,
   buildInferenceDeviceEvents,
+  getVehicleVisionHint,
+  getWeaponHint,
 };

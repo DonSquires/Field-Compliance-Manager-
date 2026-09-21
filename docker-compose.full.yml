@@ -246,6 +246,11 @@ services:
       # Set per camera after calibration; without this, CCTV reports px/s only.
       VISION_METERS_PER_PIXEL: ${VISION_METERS_PER_PIXEL:-}
       VISION_INGESTION_URL: ${VISION_INGESTION_URL:-}
+      # Self-hosted vision-LLM hints (Moondream 2, Apache-2.0) for vehicle make/model guesses and a
+      # weapon-shaped-object flag — both unverified, human-review-required. The laptop worker uses its own
+      # already-running native Ollama instead (host.docker.internal), so this stays docker-internal only.
+      OLLAMA_VISION_URL: "http://ollama:11434"
+      OLLAMA_VISION_MODEL: "${OLLAMA_VISION_MODEL:-moondream}"
     volumes:
       - /opt/fcm/storage:/opt/fcm/storage:ro
       - /opt/fcm/vision-derived:/opt/fcm/derived
@@ -255,8 +260,8 @@ services:
       options: {max-size: "5m", max-file: "2"}
 
   # In-house embedding server. CPU-only; nomic-embed-text is small + fast enough
-  # for the knowledge-card volume. Not exposed publicly — only fcm-api on fcm-net
-  # talks to it at http://ollama:11434.
+  # for the knowledge-card volume. Not exposed publicly — only fcm-api and fcm-vision-watcher on fcm-net
+  # talk to it at http://ollama:11434.
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -277,9 +282,9 @@ services:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}
 
-  # One-shot: pull nomic-embed-text into the ollama volume on (re)deploy, then
-  # exit. Idempotent — `ollama pull` is a no-op if the model is already present.
-  # This removes the manual `ollama pull` step that was previously forgotten.
+  # One-shot: pull nomic-embed-text + moondream into the ollama volume on (re)deploy, then exit. Idempotent —
+  # `ollama pull` is a no-op if the model is already present. moondream (Apache-2.0, ~1.7GB, 2B params) is the
+  # self-hosted vision-LLM behind the vehicle make/model and weapon-hint enrichment in motion_consolidator.js.
   ollama-init:
     image: ollama/ollama:latest
     container_name: ollama-init
@@ -288,7 +293,7 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_HOST: "http://ollama:11434"
-    entrypoint: ["/bin/sh", "-c", "ollama pull nomic-embed-text && echo 'nomic-embed-text ready'"]
+    entrypoint: ["/bin/sh", "-c", "ollama pull nomic-embed-text && ollama pull moondream && echo 'nomic-embed-text + moondream ready'"]
     restart: "no"
     networks: [fcm-net]
     logging:

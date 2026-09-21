@@ -8,6 +8,8 @@ const {
   representativeFrameScore,
   extractKeyframes,
   consolidateMotionSummary,
+  getVehicleVisionHint,
+  getWeaponHint,
 } = require('../services/vision/motion_consolidator');
 
 test('cosineSimilarity computes expected vector similarity', () => {
@@ -159,4 +161,22 @@ test('consolidateVehicles preserves a bounded no-plate vehicle candidate for rev
   assert.equal(result.events[0].plate, 'Unconfirmed vehicle');
   assert.equal(result.events[0].candidate_state, 'unconfirmed_vehicle_without_plate');
   assert.equal(result.events[0].review_required, true);
+});
+
+// OLLAMA_VISION_URL is unset in every test environment (no self-hosted Ollama running here), so these
+// lock in the fail-safe contract the whole feature depends on: an unreachable/unconfigured vision-LLM must
+// never throw, never block, and never be confused with "checked and clear".
+test('getVehicleVisionHint returns explicit unknown fields when no vision-LLM is configured', async () => {
+  const hint = await getVehicleVisionHint('/tmp/does-not-matter.jpg', { x: 0, y: 0, width: 100, height: 100 });
+  assert.deepEqual(hint, { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null });
+});
+
+test('getWeaponHint omits the flag entirely (not present:false) when no vision-LLM is configured', async () => {
+  const hint = await getWeaponHint('/tmp/does-not-matter.jpg', { x: 0, y: 0, width: 100, height: 100 });
+  assert.equal(hint, null, 'a hint that never ran must not be indistinguishable from one that ran and found nothing');
+});
+
+test('getVehicleVisionHint and getWeaponHint tolerate a missing bbox/file path without throwing', async () => {
+  assert.deepEqual(await getVehicleVisionHint(null, null), { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null });
+  assert.equal(await getWeaponHint(null, null), null);
 });
