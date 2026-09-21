@@ -201,15 +201,31 @@ export function groupClipsByDay(clips: ConsoleClip[], timeZone: string): ClipDay
   return groups;
 }
 
-export type EvidenceCounts = { total: number; pending: number; alerts: number };
+export type EvidenceCounts = { total: number; pending: number; alerts: number; busy: boolean };
+
+// A clip with unusually many distinct people or vehicles is worth a reviewer's attention even when no
+// single sighting is individually alert-worthy (a readable plate, a pest). Starting thresholds only -
+// what counts as "busy" varies a lot by site (a farm gate vs. a supermarket carpark), so tune these once
+// there is enough real footage from a camera to know its normal range. Kept separate from `alerts`
+// (rather than folded into that count) because no single observation carries the reason a busy clip was
+// flagged, unlike a readable plate or a pest sighting.
+const BUSY_PERSON_THRESHOLD = 5;
+const BUSY_VEHICLE_THRESHOLD = 4;
 
 export function observationCountsByEvidence(observations: ConsoleObservation[]): Record<string, EvidenceCounts> {
   const counts: Record<string, EvidenceCounts> = {};
+  const personCounts: Record<string, number> = {};
+  const vehicleCounts: Record<string, number> = {};
   for (const observation of observations) {
-    const entry = counts[observation.evidenceId] ?? (counts[observation.evidenceId] = { total: 0, pending: 0, alerts: 0 });
+    const entry = counts[observation.evidenceId] ?? (counts[observation.evidenceId] = { total: 0, pending: 0, alerts: 0, busy: false });
     entry.total += 1;
     if (!isReviewed(observation)) entry.pending += 1;
     if ((observation.kind === 'vehicle' && observation.plate) || (observation.kind === 'animal' && observation.isPest)) entry.alerts += 1;
+    if (observation.kind === 'person') personCounts[observation.evidenceId] = (personCounts[observation.evidenceId] ?? 0) + 1;
+    if (observation.kind === 'vehicle') vehicleCounts[observation.evidenceId] = (vehicleCounts[observation.evidenceId] ?? 0) + 1;
+  }
+  for (const evidenceId of Object.keys(counts)) {
+    counts[evidenceId].busy = (personCounts[evidenceId] ?? 0) >= BUSY_PERSON_THRESHOLD || (vehicleCounts[evidenceId] ?? 0) >= BUSY_VEHICLE_THRESHOLD;
   }
   return counts;
 }

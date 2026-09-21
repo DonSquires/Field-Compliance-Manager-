@@ -120,9 +120,19 @@ describe('recordings browser', () => {
       observation({ id: 'c', evidenceId: 'c149', kind: 'animal', species: 'possum', isPest: true }),
       observation({ id: 'd', evidenceId: 'c149', kind: 'person' }),
     ]);
-    expect(counts.c0).toEqual({ total: 2, pending: 1, alerts: 1 });
-    expect(counts.c149).toEqual({ total: 2, pending: 2, alerts: 1 });
+    expect(counts.c0).toEqual({ total: 2, pending: 1, alerts: 1, busy: false });
+    expect(counts.c149).toEqual({ total: 2, pending: 2, alerts: 1, busy: false });
     expect(counts.c400).toBeUndefined();
+  });
+
+  it('flags a clip as a busy scene when it has unusually many distinct people or vehicles, without adding to alerts', () => {
+    const manyPeople = Array.from({ length: 5 }, (_, index) => observation({ id: `p${index}`, evidenceId: 'busy-people', kind: 'person' }));
+    const fewPeople = Array.from({ length: 4 }, (_, index) => observation({ id: `p${index}`, evidenceId: 'quiet-people', kind: 'person' }));
+    const manyVehicles = Array.from({ length: 4 }, (_, index) => observation({ id: `v${index}`, evidenceId: 'busy-vehicles', kind: 'vehicle' }));
+    const counts = observationCountsByEvidence([...manyPeople, ...fewPeople, ...manyVehicles]);
+    expect(counts['busy-people']).toEqual({ total: 5, pending: 5, alerts: 0, busy: true });
+    expect(counts['quiet-people']).toEqual({ total: 4, pending: 4, alerts: 0, busy: false });
+    expect(counts['busy-vehicles']).toEqual({ total: 4, pending: 4, alerts: 0, busy: true });
   });
 
   it('labels durations, sizes and analysis states in plain words', () => {

@@ -994,7 +994,7 @@ const CCTVConsolePage: React.FC = () => {
                                   <span className="cctv-clip__name">{clip.fileName}</span>
                                   <small className="cctv-clip__facts">
                                     <span className={`cctv-clip__status is-${clip.jobStatus}`}>{clipStatusLabel(clip.jobStatus)}</span>
-                                    {counts ? <span>{counts.total} sighting{counts.total === 1 ? '' : 's'}{counts.pending ? ` · ${counts.pending} to review` : ''}{counts.alerts ? ` · ${counts.alerts} alert${counts.alerts === 1 ? '' : 's'}` : ''}</span> : <span>No sightings</span>}
+                                    {counts ? <span>{counts.total} sighting{counts.total === 1 ? '' : 's'}{counts.pending ? ` · ${counts.pending} to review` : ''}{counts.alerts ? ` · ${counts.alerts} alert${counts.alerts === 1 ? '' : 's'}` : ''}{counts.busy ? <span className="cctv-clip__busy" title="Unusually many distinct people or vehicles for one clip"> · busy scene</span> : null}</span> : <span>No sightings</span>}
                                     <span>{bytesLabel(clip.sizeBytes)}</span>
                                     {(() => { const badge = custodyBadge(clip); return <span className={`cctv-clip__custody is-${badge.tone}`} title={badge.detail}>{badge.tone === 'locked' ? <Lock size={11} aria-hidden="true" /> : badge.tone === 'mismatch' ? <AlertTriangle size={11} aria-hidden="true" /> : null} {badge.label}</span>; })()}
                                   </small>
