@@ -369,11 +369,15 @@ const CCTVTriagePage: React.FC = () => {
                     const mapped = candidateAction(selected, candidate);
                     return (
                       <div key={`${candidate.match_kind}-${candidate.match_id}-${index}`} className="cctv-entity__candidate">
+                        {candidate.thumbnail ? <img className="cctv-entity__candidate-thumb" src={candidate.thumbnail} alt="" /> : <span className="cctv-entity__candidate-thumb is-blank" aria-hidden="true" />}
                         <span>
                           <strong>{candidate.display_name || candidate.plate_number || (candidate.match_kind === 'observation' ? 'Earlier sighting' : 'Known record')}</strong>
                           <small>{candidate.basis?.replace(/_/g, ' ')} · {Math.round((candidate.score ?? 0) * 100)}%{candidate.last_seen_at ? ` · last seen ${formatDate(new Date(candidate.last_seen_at).getTime(), selectedCamera?.timeZone ?? 'Pacific/Auckland')}` : ''}</small>
                         </span>
-                        {mapped ? <button type="button" className="page-action" disabled={reviewBusy !== null || isReviewed(selected)} onClick={() => void runReview(selected, mapped.action, mapped.targetId)}>{mapped.label}</button> : null}
+                        <div className="cctv-entity__candidate-actions">
+                          {candidate.cctv_import_id ? <a className="page-action" href={`/admin/field-ops?area=cctv-console&import=${candidate.cctv_import_id}`} target="_blank" rel="noopener noreferrer" title="Open this earlier sighting's footage in a new tab to compare before confirming"><ExternalLink size={14} aria-hidden="true" /> View footage</a> : null}
+                          {mapped ? <button type="button" className="page-action" disabled={reviewBusy !== null || isReviewed(selected)} onClick={() => void runReview(selected, mapped.action, mapped.targetId)}>{mapped.label}</button> : null}
+                        </div>
                       </div>
                     );
                   })}

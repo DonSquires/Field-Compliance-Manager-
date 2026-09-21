@@ -94,6 +94,11 @@ export type PortfolioCandidate = {
   plate_number?: string | null;
   person_record_id?: string | null;
   canonical_vehicle_id?: string | null;
+  // Only populated for match_kind 'observation' (a face/appearance hit against another sighting) -
+  // legacy person-record and plate-based matches are cross-sighting/aggregate, with no single frame to show.
+  thumbnail?: string | null;
+  evidence_item_id?: string | null;
+  cctv_import_id?: string | null;
 };
 
 export type ConsoleObservation = {
