@@ -93,6 +93,7 @@ import {
   type GridLayout,
   type PortfolioCandidate,
   type ReviewAction,
+  type SceneSynopsis,
   type TimeView,
   type ViewItem,
 } from '../lib/cctvConsole';
@@ -384,9 +385,13 @@ const CCTVConsolePage: React.FC = () => {
     }
     const evidenceRows = (evidenceRes.data as Array<{ id: string; storage_path: string | null; captured_at: string; metadata: Record<string, unknown> | null; sha256_hash: string | null; is_court_ready: boolean | null; locked_at: string | null; retention_hold: boolean | null }>) ?? [];
     const evidenceIds = evidenceRows.map((row) => row.id);
-    const { data: jobRows, error: jobsError } = evidenceIds.length
-      ? await supabase.from('inference_jobs').select('id, evidence_item_id, status').in('evidence_item_id', evidenceIds).eq('domain', 'video_motion')
-      : { data: [], error: null };
+    const [jobsRes, synopsisRes] = evidenceIds.length
+      ? await Promise.all([
+          supabase.from('inference_jobs').select('id, evidence_item_id, status').in('evidence_item_id', evidenceIds).eq('domain', 'video_motion'),
+          supabase.from('evidence_summary_approvals').select('evidence_id, approval_status, generated_summary, generated_at').in('evidence_id', evidenceIds).eq('generated_mode', 'cctv_vision_llm_scene_synopsis'),
+        ])
+      : [{ data: [], error: null }, { data: [], error: null }];
+    const { data: jobRows, error: jobsError } = jobsRes;
     if (jobsError) {
       setError({ ...describeConsoleFailure(jobsError.message, 'analysis status for this camera', navigator.onLine), retry: () => void loadImportDetail(importId) });
       setDetailLoading(false);
@@ -395,6 +400,10 @@ const CCTVConsolePage: React.FC = () => {
     setError((current) => (current?.retryable ? null : current));
     const jobByEvidence = new Map<string, { id: string; status: string }>();
     for (const job of (jobRows as Array<{ id: string; evidence_item_id: string; status: string }>) ?? []) jobByEvidence.set(job.evidence_item_id, { id: job.id, status: job.status });
+    const synopsisByEvidence = new Map<string, SceneSynopsis>();
+    for (const row of (synopsisRes.data as Array<{ evidence_id: string; approval_status: string; generated_summary: string | null; generated_at: string | null }>) ?? []) {
+      if (row.generated_summary) synopsisByEvidence.set(row.evidence_id, { text: row.generated_summary, approvalStatus: row.approval_status, generatedAt: row.generated_at });
+    }
     const clips: ConsoleClip[] = evidenceRows.flatMap((row) => {
       const metadata = row.metadata ?? {};
       const startMs = parseMs(typeof metadata.recorded_start_at === 'string' ? metadata.recorded_start_at : null) ?? parseMs(row.captured_at);
@@ -421,6 +430,7 @@ const CCTVConsolePage: React.FC = () => {
         lockedAt: row.locked_at,
         retentionHold: Boolean(row.retention_hold),
         integrity: parseClipIntegrity(metadata.integrity),
+        sceneSynopsis: synopsisByEvidence.get(row.id) ?? null,
       }];
     });
     const marks: ConsoleMark[] = ((marksRes.data as Array<Record<string, unknown>>) ?? []).flatMap((row) => {
@@ -994,6 +1004,7 @@ const CCTVConsolePage: React.FC = () => {
                                 <span className="cctv-clip__time"><strong>{formatClock(clip.startMs, timeZone)}</strong><small>{durationLabel(clip.endMs - clip.startMs)}</small></span>
                                 <span className="cctv-clip__text">
                                   <span className="cctv-clip__name">{clip.fileName}</span>
+                                  {clip.sceneSynopsis ? <small className="cctv-clip__synopsis" title="Self-hosted vision-LLM draft, unverified until a reviewer confirms it">AI draft (unreviewed): {clip.sceneSynopsis.text}</small> : null}
                                   <small className="cctv-clip__facts">
                                     <span className={`cctv-clip__status is-${clip.jobStatus}`}>{clipStatusLabel(clip.jobStatus)}</span>
                                     {counts ? <span>{counts.possibleWeapon ? <span className="cctv-clip__weapon-hint" title="Unverified AI hint - a person in this clip may be carrying something weapon-shaped. Review now."><AlertTriangle size={11} aria-hidden="true" /> possible weapon - review now · </span> : null}{counts.total} sighting{counts.total === 1 ? '' : 's'}{counts.pending ? ` · ${counts.pending} to review` : ''}{counts.alerts ? ` · ${counts.alerts} alert${counts.alerts === 1 ? '' : 's'}` : ''}{counts.busy ? <span className="cctv-clip__busy" title="Unusually many distinct people or vehicles for one clip"> · busy scene</span> : null}</span> : <span>No sightings</span>}

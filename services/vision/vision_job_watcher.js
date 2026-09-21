@@ -969,6 +969,27 @@ async function recordEntityObservations(job, evidence, summary) {
   return data;
 }
 
+// Unverified vision-LLM scene synopsis for the whole clip; stored as a pending evidence_summary_approvals
+// draft, never wired to anything that treats it as confirmed. A missing synopsis (no self-hosted vision-LLM
+// configured, or the model produced nothing usable) is a normal no-op, not a job failure.
+async function recordSceneSynopsis(job, evidence, summary) {
+  const synopsis = summary.consolidated_events?.scene_synopsis;
+  if (!synopsis?.text) return null;
+  const { data, error } = await supabase.rpc('record_cctv_scene_synopsis', {
+    p_job_id: job.id,
+    p_evidence_id: job.evidence_item_id,
+    p_organization_id: job.organization_id,
+    p_summary: synopsis.text,
+    p_metadata: { source: synopsis.source, model: synopsis.model, generated_at: synopsis.generated_at },
+  });
+  if (error) {
+    log('scene_synopsis_persistence_failed', { job_id: job.id, error: error.message });
+    return null;
+  }
+  log('scene_synopsis_recorded', { job_id: job.id, summary_approval_id: data });
+  return data;
+}
+
 // Timeline marks for the review console; only imports carry a device timeline, so legacy evidence is skipped.
 async function recordInferenceDeviceEvents(job, evidence, summary) {
   if (!evidence.cctv_import_id) return 0;
@@ -1092,6 +1113,7 @@ async function processOne() {
     // Observations first: a failure here fails the job while it is still 'processing', so a re-run can repair it.
     await recordEntityObservations(job, evidence, summary);
     await recordInferenceDeviceEvents(job, evidence, summary);
+    await recordSceneSynopsis(job, evidence, summary);
     await ingest(job, summary);
     await recordSceneMemory(job, evidence, summary);
     await fs.rm(classificationCheckpointPath(job.id), { force: true });

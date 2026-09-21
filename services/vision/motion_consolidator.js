@@ -210,6 +210,37 @@ async function getWeaponHint(filePath, bbox) {
   };
 }
 
+const SCENE_SYNOPSIS_PROMPT = [
+  'You are looking at one representative frame from a CCTV clip.',
+  'In one short plain-English sentence, describe what is happening (for example: "person walking near the gate",',
+  '"white ute parked in the yard", "industrial steam or smoke, no people or vehicles visible").',
+  'Do not guess at identity, intent, or anything not visible in the frame.',
+  'Respond with ONLY this JSON shape, no other text: {"synopsis": "one short sentence"}',
+].join(' ');
+
+function stripDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string') return null;
+  const commaIndex = dataUrl.indexOf(',');
+  return dataUrl.startsWith('data:image/') && commaIndex !== -1 ? dataUrl.slice(commaIndex + 1) : null;
+}
+
+// Runs once per CLIP (not per track) against a single representative keyframe already extracted for the
+// review console - no extra file read. Same unverified-hint contract as the vehicle/weapon hints: a
+// failed/malformed reply returns null rather than a guessed placeholder sentence.
+async function getSceneSynopsis(keyframeDataUrl) {
+  const base64Image = stripDataUrl(keyframeDataUrl);
+  if (!base64Image) return null;
+  const parsed = await queryVisionHint(base64Image, SCENE_SYNOPSIS_PROMPT);
+  const text = typeof parsed?.synopsis === 'string' ? parsed.synopsis.trim() : '';
+  if (!text) return null;
+  return {
+    text: text.slice(0, 300),
+    source: 'vision_llm_hint_unverified',
+    model: OLLAMA_VISION_MODEL,
+    generated_at: new Date().toISOString(),
+  };
+}
+
 // Does a detection at (center, bbox, timestamp, embedding) continue an existing track?
 function continuesTrack(track, { center, bbox, timestamp, embedding }, maxGap) {
   const gap = timestamp - track.lastSeen;
@@ -1017,6 +1048,7 @@ async function consolidateMotionSummary(summary, options = {}) {
     counts[state] = (counts[state] || 0) + 1;
     return counts;
   }, {});
+  const sceneSynopsis = await getSceneSynopsis(keyframes.find((frame) => frame.thumbnail)?.thumbnail);
 
   summary.consolidated_events = {
     vehicle_events: vehicleResult.events,
@@ -1024,6 +1056,7 @@ async function consolidateMotionSummary(summary, options = {}) {
     face_events: faceResult.events,
     animal_events: animalResult.events,
     keyframes,
+    scene_synopsis: sceneSynopsis,
     summary_counts: {
       vehicle_events: vehicleResult.events.length,
       unique_vehicles: vehicleResult.uniqueVehiclesCount,
@@ -1073,4 +1106,5 @@ module.exports = {
   buildInferenceDeviceEvents,
   getVehicleVisionHint,
   getWeaponHint,
+  getSceneSynopsis,
 };

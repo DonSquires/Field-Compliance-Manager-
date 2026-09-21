@@ -10,6 +10,7 @@ const {
   consolidateMotionSummary,
   getVehicleVisionHint,
   getWeaponHint,
+  getSceneSynopsis,
 } = require('../services/vision/motion_consolidator');
 
 test('cosineSimilarity computes expected vector similarity', () => {
@@ -179,4 +180,10 @@ test('getWeaponHint omits the flag entirely (not present:false) when no vision-L
 test('getVehicleVisionHint and getWeaponHint tolerate a missing bbox/file path without throwing', async () => {
   assert.deepEqual(await getVehicleVisionHint(null, null), { vehicle_make: null, vehicle_model: null, vehicle_make_model_source: null });
   assert.equal(await getWeaponHint(null, null), null);
+});
+
+test('getSceneSynopsis returns null when no vision-LLM is configured or the keyframe is missing', async () => {
+  assert.equal(await getSceneSynopsis('data:image/jpeg;base64,Zm9v'), null);
+  assert.equal(await getSceneSynopsis(null), null);
+  assert.equal(await getSceneSynopsis('not-a-data-url'), null);
 });

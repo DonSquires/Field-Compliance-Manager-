@@ -111,6 +111,7 @@
 .cctv-clip__time small { color: var(--cc-text-3); font-size: 11px; }
 .cctv-clip__text { display: grid; gap: 2px; min-width: 0; }
 .cctv-clip__name { color: var(--cc-text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cctv-clip__synopsis { color: var(--cc-text-3); display: block; font-size: 11px; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-clip__facts { color: var(--cc-text-3); display: flex; flex-wrap: wrap; font-size: 11px; gap: 4px 8px; }
 .cctv-clip__status.is-complete { color: var(--cc-normal); }
 .cctv-clip__status.is-processing, .cctv-clip__status.is-queued { color: var(--cc-watch); }

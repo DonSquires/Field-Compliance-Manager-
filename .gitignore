@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+.supabase-token.tmp
 
 supabase/.temp/
 supabase/.branches/

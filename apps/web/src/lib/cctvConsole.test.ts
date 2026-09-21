@@ -50,7 +50,7 @@ const T0 = Date.parse('2026-09-15T02:18:19.000Z');
 const clip = (start: number, end: number, id = `c${start}`): ConsoleClip => ({
   evidenceId: id, importId: 'imp', jobId: null, jobStatus: 'complete', fileName: id, startMs: T0 + start * 1000, endMs: T0 + end * 1000,
   bucket: 'bob-uploads', playbackPath: null, sourcePath: `org/x/cctv/imp/${id}.mp4`, fileType: 'video/mp4',
-  sizeBytes: null, sha256: null, courtReady: false, lockedAt: null, retentionHold: false, integrity: null,
+  sizeBytes: null, sha256: null, courtReady: false, lockedAt: null, retentionHold: false, integrity: null, sceneSynopsis: null,
 });
 const mark = (start: number, end: number, severity: ConsoleMark['severity'], id = `m${start}`): ConsoleMark => ({
   id, startMs: T0 + start * 1000, endMs: T0 + end * 1000, severity, source: 'device_snapshot', kind: 'motion', thumbnailPath: null, label: id,

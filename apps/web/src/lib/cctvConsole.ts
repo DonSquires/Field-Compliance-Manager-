@@ -30,7 +30,13 @@ export type ConsoleClip = {
   retentionHold: boolean;
   /** Latest re-measurement of the stored bytes against the recorded hash (record_cctv_integrity_check). */
   integrity: ClipIntegrity | null;
+  /** Self-hosted vision-LLM draft of the whole clip, unverified until a reviewer approves it. */
+  sceneSynopsis: SceneSynopsis | null;
 };
+
+// From evidence_summary_approvals (generated_mode = 'cctv_vision_llm_scene_synopsis'). approvalStatus stays
+// 'pending' until a reviewer acts - there is no auto-approve path anywhere in this pipeline.
+export type SceneSynopsis = { text: string; approvalStatus: string; generatedAt: string | null };
 
 export type ClipIntegrityState = 'verified' | 'mismatch' | 'unanchored';
 export type ClipIntegrity = { state: ClipIntegrityState; checkedAt: string | null; checkCount: number; mismatchCount: number };
