@@ -678,7 +678,24 @@ fn render_filmstrip(app: tauri::AppHandle, clip_path: String, key_frames: u32, c
     Ok(Filmstrip { frames, key_frames_used: match plan { fcm_decoder::FilmstripPlan::Stride(stride) => stride, fcm_decoder::FilmstripPlan::Interval(_) => 0 } })
 }
 
-/// A 480p H.264 viewing copy under the app's local data folder (GPU encoder first, software fallback).
+/// Run the H.264 encoders in order until one succeeds. A hardware encoder that fails before writing a frame
+/// (not present, no device, driver refused) is skipped; a failure after frames were written, or of the software
+/// encoder, is the real error. Returns the encoder that produced `output`.
+fn encode_h264(ffmpeg: &Path, output: &Path, timeout: Duration, args_for: impl Fn(fcm_decoder::PreviewEncoder) -> Vec<String>) -> Result<fcm_decoder::PreviewEncoder, String> {
+    let mut encoder = fcm_decoder::PreviewEncoder::first();
+    loop {
+        let (ok, stderr) = run_ffmpeg(ffmpeg, &args_for(encoder), timeout)?;
+        if ok { return Ok(encoder); }
+        let wrote_frames = fs::metadata(output).map(|m| m.len() > 0).unwrap_or(false);
+        let _ = fs::remove_file(output);
+        match encoder.next() {
+            Some(next) if encoder.is_hardware() && (fcm_decoder::encoder_unavailable(&stderr) || !wrote_frames) => encoder = next,
+            _ => return Err(stderr.lines().last().unwrap_or("no detail").trim().to_string()),
+        }
+    }
+}
+
+/// A 480p H.264 viewing copy under the app's local data folder (GPU encoders first, OpenH264 last).
 /// Never uploaded, never registered: the evidence is the extracted original.
 #[tauri::command(async)]
 fn render_preview(app: tauri::AppHandle, clip_path: String) -> Result<PreviewRendition, String> {
@@ -692,18 +709,11 @@ fn render_preview(app: tauri::AppHandle, clip_path: String) -> Result<PreviewRen
         if metadata.len() > 0 { return Ok(PreviewRendition { path: output.to_string_lossy().to_string(), bytes: metadata.len(), encoder: None, seconds: 0.0, cached: true }); }
     }
     let started = Instant::now();
-    let mut encoder = fcm_decoder::PreviewEncoder::Nvenc;
-    let (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::preview_args(&clip_path, &output.to_string_lossy(), encoder), Duration::from_secs(600))?;
-    let (ok, stderr) = if !ok && fcm_decoder::encoder_unavailable(&stderr) {
-        encoder = fcm_decoder::PreviewEncoder::Software;
-        run_ffmpeg(&ffmpeg, &fcm_decoder::preview_args(&clip_path, &output.to_string_lossy(), encoder), Duration::from_secs(900))?
-    } else { (ok, stderr) };
-    if !ok {
-        let _ = fs::remove_file(&output);
-        return Err(format!("The preview could not be rendered: {}", stderr.lines().last().unwrap_or("no detail").trim()));
-    }
+    let out = output.to_string_lossy().to_string();
+    let encoder = encode_h264(&ffmpeg, &output, Duration::from_secs(900), |encoder| fcm_decoder::preview_args(&clip_path, &out, encoder))
+        .map_err(|detail| format!("The preview could not be rendered: {detail}"))?;
     let bytes = fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
-    Ok(PreviewRendition { path: output.to_string_lossy().to_string(), bytes, encoder: Some(encoder), seconds: started.elapsed().as_secs_f64(), cached: false })
+    Ok(PreviewRendition { path: out, bytes, encoder: Some(encoder), seconds: started.elapsed().as_secs_f64(), cached: false })
 }
 
 /// Previews are derived viewing copies; clearing them frees disk without touching evidence.
@@ -813,18 +823,14 @@ fn export_mp4(app: tauri::AppHandle, clip_path: String, output_directory: String
     let started = Instant::now();
     let out = output.to_string_lossy().to_string();
     let mut mode = fcm_decoder::mp4_mode_for(&codec);
-    let (mut ok, mut stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4_args(&clip_path, &out, mode), Duration::from_secs(1800))?;
-    if !ok && mode == fcm_decoder::Mp4Mode::StreamCopy {
-        mode = fcm_decoder::Mp4Mode::H264(fcm_decoder::PreviewEncoder::Nvenc);
-        (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4_args(&clip_path, &out, mode), Duration::from_secs(1800))?;
+    if mode == fcm_decoder::Mp4Mode::StreamCopy {
+        let (ok, _) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4_args(&clip_path, &out, mode), Duration::from_secs(1800))?;
+        if !ok { let _ = fs::remove_file(&output); mode = fcm_decoder::Mp4Mode::H264(fcm_decoder::PreviewEncoder::first()); }
     }
-    if !ok && fcm_decoder::encoder_unavailable(&stderr) {
-        mode = fcm_decoder::Mp4Mode::H264(fcm_decoder::PreviewEncoder::Software);
-        (ok, stderr) = run_ffmpeg(&ffmpeg, &fcm_decoder::mp4_args(&clip_path, &out, mode), Duration::from_secs(3600))?;
-    }
-    if !ok {
-        let _ = fs::remove_file(&output);
-        return Err(format!("The MP4 could not be written: {}", stderr.lines().last().unwrap_or("no detail").trim()));
+    if mode != fcm_decoder::Mp4Mode::StreamCopy {
+        let encoder = encode_h264(&ffmpeg, &output, Duration::from_secs(3600), |encoder| fcm_decoder::mp4_args(&clip_path, &out, fcm_decoder::Mp4Mode::H264(encoder)))
+            .map_err(|detail| format!("The MP4 could not be written: {detail}"))?;
+        mode = fcm_decoder::Mp4Mode::H264(encoder);
     }
     let bytes = fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
     Ok(Mp4Export { path: out, bytes, mode: Some(mode), seconds: started.elapsed().as_secs_f64(), existing: false })

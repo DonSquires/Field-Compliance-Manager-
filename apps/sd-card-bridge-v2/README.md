@@ -72,7 +72,10 @@ the signed-in user under row-level security, and the session is held in memory o
 - `render_filmstrip` — key frames spread across an extracted recording as small JPEGs (base64) with each frame's
   offset from the clip start, so the interface can label them with the camera clock.
 - `render_preview` / `clear_previews` — a 480p H.264 viewing copy under `<app local data>/previews/`
-  (`h264_nvenc` first, `libx264` when no NVENC device answers), played in-app through the asset protocol whose
+  (encoders tried in order: `h264_nvenc`, `h264_amf`, `h264_qsv`, `h264_mf`, then `libopenh264` — every one of
+  them is in the pinned LGPL sidecar; `libx264` is GPL and is not, which is why the old "software fallback"
+  failed with `Unknown encoder 'libx264'` on any computer without an NVIDIA GPU, fixed in 0.4.8), played in-app
+  through the asset protocol whose
   scope is exactly that folder. A reused copy from an earlier run is reported as `cached` with no encoder
   claim. Previews are derived viewing aids: never uploaded, never registered, and removable at any time.
 - `export_mp4` — "Save to folder": next to the hashed `.dav` the operator asked for, a full-resolution `.mp4` for their
@@ -232,6 +235,16 @@ uploading for the first time") makes the card in the reader a first-class source
   matched to their rows by path and grouped by the same rules (FCM-verified sent, decided-no, Keep / Review
   further / undecided left alone); a removed unsent clip leaves the list, a removed sent one keeps its row as the
   record of what FCM holds, and a split with no clips left is forgotten so the file lists whole again.
+
+0.4.8 (owner, on a second computer: "preview says encoder not found, but the thumbnails show and the file
+decodes") fixes the preview and MP4 export on computers without an NVIDIA GPU. The pinned sidecar is
+FFmpeg's LGPL build, which carries NVENC, AMF, Quick Sync, Media Foundation and OpenH264 but not `libx264`
+(GPL) — so the old "software fallback" could only ever fail with `Unknown encoder 'libx264'`, and every
+machine that was not the NVIDIA laptop hit it. Encoders are now tried in order (`h264_nvenc`, `h264_amf`,
+`h264_qsv`, `h264_mf`, `libopenh264`); a hardware encoder that fails before writing a frame is skipped, a
+failure after frames were written or of the software encoder is reported as the real error. The label
+under the player names the encoder that actually produced the copy. Thumbnails and filmstrips were never
+affected: they write JPEGs, which need no H.264 encoder.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device

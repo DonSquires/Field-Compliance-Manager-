@@ -107,7 +107,39 @@ pub fn parse_showinfo_times(stderr: &str) -> Vec<f64> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PreviewEncoder { Nvenc, Software }
+pub enum PreviewEncoder { Nvenc, Amf, Qsv, MediaFoundation, OpenH264 }
+
+/// What the encode is for: the 480p viewing copy or the full-resolution export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum H264Target { Preview, Export }
+
+impl PreviewEncoder {
+    /// Fastest first. Every entry is present in the pinned LGPL build; libx264 is not (GPL), which is why the
+    /// old "software" fallback failed with `Unknown encoder 'libx264'` on any computer without an NVIDIA GPU.
+    pub const ORDER: [PreviewEncoder; 5] = [PreviewEncoder::Nvenc, PreviewEncoder::Amf, PreviewEncoder::Qsv, PreviewEncoder::MediaFoundation, PreviewEncoder::OpenH264];
+    pub fn first() -> PreviewEncoder { PreviewEncoder::ORDER[0] }
+    pub fn next(self) -> Option<PreviewEncoder> { PreviewEncoder::ORDER.iter().skip_while(|encoder| **encoder != self).nth(1).copied() }
+    /// Hardware encoders are opportunistic; OpenH264 is the one every Windows install can run.
+    pub fn is_hardware(self) -> bool { self != PreviewEncoder::OpenH264 }
+    pub fn codec(self) -> &'static str {
+        match self {
+            PreviewEncoder::Nvenc => "h264_nvenc", PreviewEncoder::Amf => "h264_amf", PreviewEncoder::Qsv => "h264_qsv",
+            PreviewEncoder::MediaFoundation => "h264_mf", PreviewEncoder::OpenH264 => "libopenh264",
+        }
+    }
+    /// Encoder options. NVENC is quality-driven; the others take a bitrate, the only knob they all share.
+    pub fn args(self, target: H264Target) -> Vec<String> {
+        let mut args = vec!["-c:v".to_string(), self.codec().to_string()];
+        match (self, target) {
+            (PreviewEncoder::Nvenc, H264Target::Preview) => args.extend(["-preset", "p4", "-rc", "vbr", "-cq", "28", "-b:v", "0"].map(String::from)),
+            (PreviewEncoder::Nvenc, H264Target::Export) => args.extend(["-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0"].map(String::from)),
+            (_, H264Target::Preview) => args.extend(["-b:v", "1500k", "-maxrate", "2500k", "-bufsize", "3000k"].map(String::from)),
+            (_, H264Target::Export) => args.extend(["-b:v", "8M", "-maxrate", "12M", "-bufsize", "16M"].map(String::from)),
+        }
+        if self == PreviewEncoder::MediaFoundation { args.extend(["-hw_encoding", "1"].map(String::from)); }
+        args
+    }
+}
 
 /// ffmpeg arguments for the 480p H.264 viewing rendition. A viewing aid only: never uploaded, never evidence.
 pub fn preview_args(input: &str, output: &str, encoder: PreviewEncoder) -> Vec<String> {
@@ -116,18 +148,16 @@ pub fn preview_args(input: &str, output: &str, encoder: PreviewEncoder) -> Vec<S
         "-fflags".into(), "+genpts".into(), "-i".into(), input.into(),
         "-map".into(), "0:v:0".into(), "-vf".into(), "scale=-2:480".into(),
     ];
-    match encoder {
-        PreviewEncoder::Nvenc => args.extend(["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "28", "-b:v", "0"].map(String::from)),
-        PreviewEncoder::Software => args.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "26"].map(String::from)),
-    }
+    args.extend(encoder.args(H264Target::Preview));
     args.extend(["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-y", output].map(String::from));
     args
 }
 
-/// A stderr that means "this encoder is not available here", so software encoding should be tried.
+/// A stderr that means "this encoder is not available here", so the next encoder should be tried.
 pub fn encoder_unavailable(stderr: &str) -> bool {
     let text = stderr.to_ascii_lowercase();
-    ["unknown encoder", "cannot load nvcuda", "no capable devices", "cuda_error", "driver does not support", "no nvenc capable"]
+    ["unknown encoder", "cannot load nvcuda", "no capable devices", "cuda_error", "driver does not support", "no nvenc capable",
+     "error initializing", "no device available", "failed to create", "failed to initialise", "failed to initialize"]
         .iter().any(|needle| text.contains(needle))
 }
 
@@ -143,7 +173,7 @@ pub enum Mp4Mode {
 
 /// The first MP4 mode to try for a stream's codec: H.264 sources are copied; everything else is re-encoded.
 pub fn mp4_mode_for(codec: &str) -> Mp4Mode {
-    if codec.to_ascii_lowercase().contains("h264") { Mp4Mode::StreamCopy } else { Mp4Mode::H264(PreviewEncoder::Nvenc) }
+    if codec.to_ascii_lowercase().contains("h264") { Mp4Mode::StreamCopy } else { Mp4Mode::H264(PreviewEncoder::first()) }
 }
 
 /// ffmpeg arguments for the MP4 export. Video only: Dahua audio (G.711) has no place in MP4 and is not evidence.
@@ -154,8 +184,7 @@ pub fn mp4_args(input: &str, output: &str, mode: Mp4Mode) -> Vec<String> {
     ];
     match mode {
         Mp4Mode::StreamCopy => args.extend(["-c:v", "copy"].map(String::from)),
-        Mp4Mode::H264(PreviewEncoder::Nvenc) => args.extend(["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-pix_fmt", "yuv420p"].map(String::from)),
-        Mp4Mode::H264(PreviewEncoder::Software) => args.extend(["-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p"].map(String::from)),
+        Mp4Mode::H264(encoder) => { args.extend(encoder.args(H264Target::Export)); args.extend(["-pix_fmt", "yuv420p"].map(String::from)); }
     }
     args.extend(["-movflags", "+faststart", "-y", output].map(String::from));
     args
@@ -315,8 +344,10 @@ mod tests {
         let copy = mp4_args("in.dav", "out.mp4", Mp4Mode::StreamCopy);
         assert!(copy.windows(2).any(|w| w == ["-c:v", "copy"]));
         assert!(!copy.iter().any(|a| a.starts_with("scale=")));
-        let soft = mp4_args("in.dav", "out.mp4", Mp4Mode::H264(PreviewEncoder::Software));
-        assert!(soft.windows(2).any(|w| w == ["-c:v", "libx264"]));
+        let soft = mp4_args("in.dav", "out.mp4", Mp4Mode::H264(PreviewEncoder::OpenH264));
+        assert!(soft.windows(2).any(|w| w == ["-c:v", "libopenh264"]));
+        assert!(soft.windows(2).any(|w| w == ["-b:v", "8M"]));
+        assert!(soft.windows(2).any(|w| w == ["-pix_fmt", "yuv420p"]));
         for args in [&copy, &soft] {
             assert!(args.windows(2).any(|w| w == ["-map", "0:v:0"]));
             assert!(args.windows(2).any(|w| w == ["-movflags", "+faststart"]));
@@ -358,9 +389,12 @@ mod tests {
     fn preview_args_switch_encoder_and_stay_480p_h264() {
         let nvenc = preview_args("in.dav", "out.mp4", PreviewEncoder::Nvenc);
         assert!(nvenc.windows(2).any(|w| w == ["-c:v", "h264_nvenc"]));
-        let soft = preview_args("in.dav", "out.mp4", PreviewEncoder::Software);
-        assert!(soft.windows(2).any(|w| w == ["-c:v", "libx264"]));
-        for args in [&nvenc, &soft] {
+        let soft = preview_args("in.dav", "out.mp4", PreviewEncoder::OpenH264);
+        assert!(soft.windows(2).any(|w| w == ["-c:v", "libopenh264"]));
+        assert!(soft.windows(2).any(|w| w == ["-b:v", "1500k"]));
+        let mf = preview_args("in.dav", "out.mp4", PreviewEncoder::MediaFoundation);
+        assert!(mf.windows(2).any(|w| w == ["-c:v", "h264_mf"]) && mf.windows(2).any(|w| w == ["-hw_encoding", "1"]));
+        for args in [&nvenc, &soft, &mf] {
             assert!(args.windows(2).any(|w| w == ["-vf", "scale=-2:480"]));
             assert!(args.windows(2).any(|w| w == ["-movflags", "+faststart"]));
             assert_eq!(args.last().map(String::as_str), Some("out.mp4"));
@@ -368,9 +402,28 @@ mod tests {
     }
 
     #[test]
+    fn the_encoder_chain_uses_only_encoders_in_the_lgpl_build_and_ends_in_software() {
+        // The pinned sidecar is BtbN's LGPL configuration: no libx264 (GPL). A chain step naming it can never work.
+        for encoder in PreviewEncoder::ORDER {
+            assert_ne!(encoder.codec(), "libx264");
+            for target in [H264Target::Preview, H264Target::Export] { assert_eq!(encoder.args(target)[..2], ["-c:v".to_string(), encoder.codec().to_string()]); }
+        }
+        assert_eq!(PreviewEncoder::first(), PreviewEncoder::Nvenc);
+        assert_eq!(PreviewEncoder::Nvenc.next(), Some(PreviewEncoder::Amf));
+        assert_eq!(PreviewEncoder::Amf.next(), Some(PreviewEncoder::Qsv));
+        assert_eq!(PreviewEncoder::Qsv.next(), Some(PreviewEncoder::MediaFoundation));
+        assert_eq!(PreviewEncoder::MediaFoundation.next(), Some(PreviewEncoder::OpenH264));
+        assert_eq!(PreviewEncoder::OpenH264.next(), None, "software is the last resort; its failure is final");
+        assert!(PreviewEncoder::ORDER.iter().filter(|encoder| !encoder.is_hardware()).eq([&PreviewEncoder::OpenH264]));
+        assert_eq!(serde_json::to_string(&PreviewEncoder::OpenH264).unwrap(), "\"open_h264\"");
+        assert_eq!(serde_json::to_string(&PreviewEncoder::MediaFoundation).unwrap(), "\"media_foundation\"");
+    }
+
+    #[test]
     fn recognises_a_missing_nvenc() {
         assert!(encoder_unavailable("Unknown encoder 'h264_nvenc'"));
         assert!(encoder_unavailable("[h264_nvenc @ 0x1] Cannot load nvcuda.dll"));
+        assert!(encoder_unavailable("[h264_qsv @ 0x1] Error initializing an internal MFX session: unsupported (-3)"));
         assert!(!encoder_unavailable("Invalid data found when processing input"));
     }
 

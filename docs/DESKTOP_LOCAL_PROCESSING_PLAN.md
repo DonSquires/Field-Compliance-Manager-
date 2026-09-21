@@ -22,7 +22,8 @@ Goal: see what a recording holds *before* it leaves the machine, and send only w
   refuses anything else. The licence notice and source link are shown in-app.
 - **Filmstrip.** Per recording, key frames spread across the clip (from the `-r2` extraction, so only the
   recording's own frames), labelled with the camera clock — enough to tell "van at the gate" from "nothing".
-- **Preview playback.** On request, a 480p H.264 rendition (NVENC when present, libx264 otherwise) written under
+- **Preview playback.** On request, a 480p H.264 rendition (NVENC, AMF, Quick Sync or Media Foundation when a
+  GPU answers, OpenH264 in software otherwise — the sidecar is an LGPL build and carries no libx264) written under
   the app's local data folder and played in-app. This is a viewing aid only: it is never uploaded and never
   registered as evidence.
 - **Choice per recording.** Preview → Send / Skip. Sending is unchanged: the `-r2` original with its card-side
@@ -127,6 +128,12 @@ short-period blocks as filler. Dahua card rows get thumbnails from a head-only r
 same frame filter as extraction, ≤ 6 video frames / 3 MB, cached by recording identity) so a new card lists
 with pictures before any extraction; the disk section covers the clips folder in Video files mode. Sample folder
 trimmed to the two real slots, the six index files and three placeholders (1.4 GB).
+
+**0.4.8 (owner, second computer: "preview says encoder not found, thumbnails show, the file decodes"):** the
+sidecar is FFmpeg's LGPL build — no `libx264` — so the preview/export "software fallback" had never worked on a
+non-NVIDIA machine. The encoder chain is now `h264_nvenc` → `h264_amf` → `h264_qsv` → `h264_mf` → `libopenh264`,
+all present in the pinned binary (verified by reading its configure flags and encoder names); hardware encoders
+that fail before writing a frame are skipped, the software encoder's failure is final and shown verbatim.
 
 ## Phase 2 — Analyse here (0.5.x)
 

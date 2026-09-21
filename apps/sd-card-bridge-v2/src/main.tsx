@@ -168,9 +168,10 @@ type UploadOutcome = { status: 'complete' | 'exists' | 'unauthorized'; uploadUrl
 type DecoderStatus = { installed: boolean; version: string; path: string | null; licence: string; licenceUrl: string; downloadBytes: number; rejectedReason: string | null };
 type DecoderProgress = { bytesDone: number; totalBytes: number };
 type Filmstrip = { frames: Array<{ atSeconds: number; jpegBase64: string }>; keyFramesUsed: number };
-type PreviewRendition = { path: string; bytes: number; encoder: 'nvenc' | 'software' | null; seconds: number; cached: boolean };
+type H264Encoder = 'nvenc' | 'amf' | 'qsv' | 'media_foundation' | 'open_h264';
+type PreviewRendition = { path: string; bytes: number; encoder: H264Encoder | null; seconds: number; cached: boolean };
 type ReviewState = { busy: 'filmstrip' | 'preview' | null; filmstrip?: Filmstrip; preview?: PreviewRendition; error?: string; note?: string };
-type Mp4Mode = 'stream_copy' | { h264: 'nvenc' | 'software' };
+type Mp4Mode = 'stream_copy' | { h264: H264Encoder };
 type Mp4Export = { path: string; bytes: number; mode: Mp4Mode | null; seconds: number; existing: boolean };
 /** Where the operator chose to save a recording this session; shown on the row so it is not saved twice by accident. */
 type SavedCopy = { directory: string; fileName: string; mp4: Mp4Export | null };
@@ -302,8 +303,9 @@ const clockPlus = (time: DhfsTime, seconds: number) => {
   const at = new Date(Date.UTC(time.year, time.month - 1, time.day, time.hour, time.minute, time.second) + Math.round(seconds) * 1000);
   return `${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}:${pad(at.getUTCSeconds())}`;
 };
-const encoderLabel = (preview: PreviewRendition) => (preview.cached ? 'viewing copy from an earlier run' : preview.encoder === 'nvenc' ? 'rendered on the GPU (NVENC)' : 'rendered in software (libx264)');
-const mp4Label = (mp4: Mp4Export) => (mp4.existing ? 'MP4 already in that folder, kept' : mp4.mode === 'stream_copy' ? 'MP4 with the original frames (no re-encoding)' : mp4.mode && typeof mp4.mode === 'object' ? `H.264 MP4 re-encoded ${mp4.mode.h264 === 'nvenc' ? 'on the GPU' : 'in software'} so it plays anywhere` : 'MP4');
+const ENCODER_NAMES: Record<H264Encoder, string> = { nvenc: 'on the NVIDIA GPU (NVENC)', amf: 'on the AMD GPU (AMF)', qsv: 'on the Intel GPU (Quick Sync)', media_foundation: 'by Windows Media Foundation', open_h264: 'in software (OpenH264)' };
+const encoderLabel = (preview: PreviewRendition) => (preview.cached ? 'viewing copy from an earlier run' : `rendered ${preview.encoder ? ENCODER_NAMES[preview.encoder] : ''}`.trim());
+const mp4Label = (mp4: Mp4Export) => (mp4.existing ? 'MP4 already in that folder, kept' : mp4.mode === 'stream_copy' ? 'MP4 with the original frames (no re-encoding)' : mp4.mode && typeof mp4.mode === 'object' ? `H.264 MP4 re-encoded ${ENCODER_NAMES[mp4.mode.h264] ?? 'in software'} so it plays anywhere` : 'MP4');
 /** The camera's wall clock `seconds` after `time`, as a clock value. */
 const clockAdd = (time: DhfsTime, seconds: number): DhfsTime => {
   const at = new Date(Date.UTC(time.year, time.month - 1, time.day, time.hour, time.minute, time.second) + Math.round(seconds) * 1000);
