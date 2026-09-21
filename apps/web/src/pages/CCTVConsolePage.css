@@ -273,7 +273,10 @@
 .cctv-entity__facts dt { color: var(--cc-text-3); text-transform: capitalize; }
 .cctv-entity__facts dd { color: var(--cc-text); font-weight: 600; margin: 0; }
 .cctv-entity__ai-hint { color: var(--cc-text-3); font-size: 12px; font-style: italic; margin: 0; }
-.cctv-entity__weapon-alert { align-items: center; background: rgba(216, 80, 80, .18); border: 1px solid var(--cc-critical); border-radius: 6px; color: #ffb4ad; display: flex; font-size: 12px; font-weight: 700; gap: 6px; margin: 0; padding: 8px; }
+.cctv-entity__ai-hint-block { display: grid; gap: 6px; }
+.cctv-entity__ai-hint-correct { display: grid; gap: 6px; }
+.cctv-entity__weapon-alert { background: rgba(216, 80, 80, .18); border: 1px solid var(--cc-critical); border-radius: 6px; color: #ffb4ad; display: grid; gap: 8px; padding: 8px; }
+.cctv-entity__weapon-alert p { align-items: center; display: flex; font-size: 12px; font-weight: 700; gap: 6px; margin: 0; }
 .cctv-entity__candidates { background: var(--cc-surface); border-radius: 6px; display: grid; gap: 6px; padding: 8px; }
 .cctv-entity__candidates > strong { color: var(--cc-text-3); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
 .cctv-entity__candidate { align-items: center; display: flex; gap: 8px; justify-content: space-between; }

@@ -267,6 +267,9 @@ const CCTVConsolePage: React.FC = () => {
   const [personDetails, setPersonDetails] = useState('');
   const [newPlate, setNewPlate] = useState('');
   const [notes, setNotes] = useState('');
+  const [correctingVehicleId, setCorrectingVehicleId] = useState<string | null>(null);
+  const [correctMake, setCorrectMake] = useState('');
+  const [correctModel, setCorrectModel] = useState('');
   const [showKeys, setShowKeys] = useState(false);
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
   const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
@@ -893,6 +896,39 @@ const CCTVConsolePage: React.FC = () => {
     if (next && action !== 'merge_portfolio') selectObservation(next);
   };
 
+  const runVehicleAttributeReview = async (observation: ConsoleObservation, action: 'confirm' | 'correct' | 'reject') => {
+    setReviewBusy(`${observation.id}:attrs:${action}`);
+    setReviewMessage(null);
+    const { error: attrError } = await supabase.rpc('confirm_cctv_vehicle_attributes', {
+      p_observation_id: observation.id,
+      p_action: action,
+      p_make: action === 'correct' ? correctMake.trim() || null : null,
+      p_model: action === 'correct' ? correctModel.trim() || null : null,
+      p_notes: notes.trim() || null,
+    });
+    setReviewBusy(null);
+    if (attrError) { setReviewMessage(attrError.message); return; }
+    setCorrectingVehicleId(null);
+    setCorrectMake('');
+    setCorrectModel('');
+    if (observation.importId) void loadImportDetail(observation.importId);
+    setReviewMessage(action === 'reject' ? 'AI suggestion dismissed.' : action === 'correct' ? 'Correction saved to the vehicle record.' : 'Confirmed and saved to the vehicle record.');
+  };
+
+  const runWeaponHintReview = async (observation: ConsoleObservation, status: 'confirmed' | 'dismissed') => {
+    setReviewBusy(`${observation.id}:weapon:${status}`);
+    setReviewMessage(null);
+    const { error: weaponError } = await supabase.rpc('confirm_cctv_weapon_hint', {
+      p_observation_id: observation.id,
+      p_status: status,
+      p_notes: notes.trim() || null,
+    });
+    setReviewBusy(null);
+    if (weaponError) { setReviewMessage(weaponError.message); return; }
+    if (observation.importId) void loadImportDetail(observation.importId);
+    setReviewMessage(status === 'confirmed' ? 'Weapon flag confirmed.' : 'Weapon flag dismissed as a false positive.');
+  };
+
   const updatePersonProfile = async (observation: ConsoleObservation) => {
     if (!newName.trim()) return;
     setReviewBusy(`${observation.id}:profile`);
@@ -1259,15 +1295,42 @@ const CCTVConsolePage: React.FC = () => {
                           <>
                             <dl className="cctv-entity__facts">
                               {['colour', 'body_type'].filter((key) => observation.attributes[key]).map((key) => <div key={key}><dt>{key.replace('_', ' ')}</dt><dd>{String(observation.attributes[key])}</dd></div>)}
+                              {observation.attributes.make_model_source === 'human_confirmed' && observation.attributes.make ? <div><dt>make</dt><dd>{String(observation.attributes.make)}</dd></div> : null}
+                              {observation.attributes.make_model_source === 'human_confirmed' && observation.attributes.model ? <div><dt>model</dt><dd>{String(observation.attributes.model)}</dd></div> : null}
                               {observation.attributes.plate_confidence ? <div><dt>plate read</dt><dd>{Math.round(Number(observation.attributes.plate_confidence) * 100)}%</dd></div> : null}
                             </dl>
                             {(() => {
                               const hint = vehicleVisionHintFrom(observation);
-                              return hint ? (
-                                <p className="cctv-entity__ai-hint" title="Self-hosted vision-LLM guess, not a verified registry lookup - confirm before relying on it.">
-                                  AI suggestion (unverified): {[hint.make, hint.model].filter(Boolean).join(' ')}
-                                </p>
-                              ) : null;
+                              if (!hint) return null;
+                              const label = [hint.make, hint.model].filter(Boolean).join(' ');
+                              const busyPrefix = `${observation.id}:attrs:`;
+                              return (
+                                <div className="cctv-entity__ai-hint-block">
+                                  <p className="cctv-entity__ai-hint" title="Self-hosted vision-LLM guess, not a verified registry lookup - confirm before relying on it.">
+                                    AI suggestion (unverified): {label}
+                                  </p>
+                                  {!hint.reviewed ? (
+                                    correctingVehicleId === observation.id ? (
+                                      <div className="cctv-entity__ai-hint-correct">
+                                        <label className="cctv-entity__field">Make <input value={correctMake} onChange={(event) => setCorrectMake(event.target.value)} placeholder={hint.make ?? 'e.g. Toyota'} /></label>
+                                        <label className="cctv-entity__field">Model <input value={correctModel} onChange={(event) => setCorrectModel(event.target.value)} placeholder={hint.model ?? 'e.g. Hilux'} /></label>
+                                        <div className="cctv-entity__actions">
+                                          <button type="button" className="page-action is-primary" disabled={reviewBusy !== null || (!correctMake.trim() && !correctModel.trim())} onClick={() => void runVehicleAttributeReview(observation, 'correct')}><Check size={14} aria-hidden="true" /> Save correction</button>
+                                          <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => { setCorrectingVehicleId(null); setCorrectMake(''); setCorrectModel(''); }}>Cancel</button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="cctv-entity__actions">
+                                        <button type="button" className="page-action is-primary" disabled={reviewBusy !== null} onClick={() => void runVehicleAttributeReview(observation, 'confirm')}><Check size={14} aria-hidden="true" /> {reviewBusy === `${busyPrefix}confirm` ? 'Saving…' : 'Confirm'}</button>
+                                        <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => setCorrectingVehicleId(observation.id)}>Correct</button>
+                                        <button type="button" className="page-action is-danger" disabled={reviewBusy !== null} onClick={() => void runVehicleAttributeReview(observation, 'reject')}><X size={14} aria-hidden="true" /> Dismiss</button>
+                                      </div>
+                                    )
+                                  ) : (
+                                    <small className="cctv-console__muted">Reviewed.</small>
+                                  )}
+                                </div>
+                              );
                             })()}
                           </>
                         ) : null}
@@ -1280,11 +1343,22 @@ const CCTVConsolePage: React.FC = () => {
                         ) : null}
                         {observation.kind === 'person' ? (() => {
                           const weapon = weaponHintFrom(observation);
-                          return weapon?.present ? (
-                            <p className="cctv-entity__weapon-alert" role="alert">
-                              <AlertTriangle size={14} aria-hidden="true" /> Possible weapon flagged by AI (unverified){weapon.description ? `: ${weapon.description}` : ''}. Review this sighting now.
-                            </p>
-                          ) : null;
+                          if (!weapon?.present) return null;
+                          return (
+                            <div className="cctv-entity__weapon-alert" role="alert">
+                              <p>
+                                <AlertTriangle size={14} aria-hidden="true" /> Possible weapon flagged by AI (unverified){weapon.description ? `: ${weapon.description}` : ''}. Review this sighting now.
+                              </p>
+                              {!weapon.reviewed ? (
+                                <div className="cctv-entity__actions">
+                                  <button type="button" className="page-action is-primary" disabled={reviewBusy !== null} onClick={() => void runWeaponHintReview(observation, 'confirmed')}><Check size={14} aria-hidden="true" /> Confirm</button>
+                                  <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => void runWeaponHintReview(observation, 'dismissed')}><X size={14} aria-hidden="true" /> False positive</button>
+                                </div>
+                              ) : (
+                                <small className="cctv-console__muted">Reviewed.</small>
+                              )}
+                            </div>
+                          );
                         })() : null}
                         {observation.kind === 'person' ? (
                           <dl className="cctv-entity__facts">

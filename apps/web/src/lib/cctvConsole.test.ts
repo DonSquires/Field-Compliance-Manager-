@@ -137,18 +137,30 @@ describe('recordings browser', () => {
   });
 
   it('reads a weapon hint only when it is a well-formed object, and never confuses missing with cleared', () => {
-    expect(weaponHintFrom(observation({ attributes: { weapon_hint: { present: true, description: 'possible knife' } } }))).toEqual({ present: true, description: 'possible knife' });
-    expect(weaponHintFrom(observation({ attributes: { weapon_hint: { present: false, description: null } } }))).toEqual({ present: false, description: null });
+    expect(weaponHintFrom(observation({ attributes: { weapon_hint: { present: true, description: 'possible knife' } } }))).toEqual({ present: true, description: 'possible knife', reviewed: false });
+    expect(weaponHintFrom(observation({ attributes: { weapon_hint: { present: false, description: null } } }))).toEqual({ present: false, description: null, reviewed: false });
     expect(weaponHintFrom(observation({ attributes: {} }))).toBeNull();
     expect(weaponHintFrom(observation({ attributes: { weapon_hint: 'not-an-object' } }))).toBeNull();
   });
 
+  it('marks a weapon hint as reviewed once a reviewer has confirmed or dismissed it', () => {
+    const reviewed = observation({ attributes: { weapon_hint: { present: true, description: null, review: { status: 'dismissed' } } } });
+    expect(weaponHintFrom(reviewed)).toEqual({ present: true, description: null, reviewed: true });
+  });
+
   it('reads a vehicle vision-LLM hint only when explicitly marked as such, never a verified make/model', () => {
     const hinted = observation({ attributes: { make: 'Toyota', model: 'Hilux', make_model_source: 'vision_llm_hint_unverified' } });
-    expect(vehicleVisionHintFrom(hinted)).toEqual({ make: 'Toyota', model: 'Hilux' });
+    expect(vehicleVisionHintFrom(hinted)).toEqual({ make: 'Toyota', model: 'Hilux', reviewed: false });
     const verified = observation({ attributes: { make: 'Toyota', model: 'Hilux' } });
     expect(vehicleVisionHintFrom(verified)).toBeNull();
     expect(vehicleVisionHintFrom(observation({ attributes: {} }))).toBeNull();
+  });
+
+  it('marks a vehicle vision-LLM hint as reviewed once a reviewer has confirmed, corrected or dismissed it, and stops surfacing it once the source flips to human_confirmed', () => {
+    const dismissed = observation({ attributes: { make: 'Toyota', model: 'Hilux', make_model_source: 'vision_llm_hint_unverified', make_model_review: { status: 'rejected' } } });
+    expect(vehicleVisionHintFrom(dismissed)).toEqual({ make: 'Toyota', model: 'Hilux', reviewed: true });
+    const corrected = observation({ attributes: { make: 'Ford', model: 'Ranger', make_model_source: 'human_confirmed', make_model_review: { status: 'corrected' } } });
+    expect(vehicleVisionHintFrom(corrected)).toBeNull();
   });
 
   it('flags a clip as a busy scene when it has unusually many distinct people or vehicles, without adding to alerts', () => {

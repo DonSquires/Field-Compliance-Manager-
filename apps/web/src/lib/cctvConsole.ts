@@ -135,25 +135,29 @@ export function isWeakInferenceCandidate(observation: ConsoleObservation): boole
 // detection. `present: false` means the model looked and didn't flag anything; a missing/malformed hint
 // (Ollama unreachable, timed out, failed to parse) returns null here so "not checked" is never rendered
 // the same as "checked, nothing found".
-export type WeaponHint = { present: boolean; description: string | null };
+export type WeaponHint = { present: boolean; description: string | null; reviewed: boolean };
 
 export function weaponHintFrom(observation: ConsoleObservation): WeaponHint | null {
   const raw = observation.attributes.weapon_hint;
   if (!raw || typeof raw !== 'object') return null;
   const hint = raw as Record<string, unknown>;
   if (typeof hint.present !== 'boolean') return null;
-  return { present: hint.present, description: typeof hint.description === 'string' ? hint.description : null };
+  const review = hint.review && typeof hint.review === 'object' ? (hint.review as Record<string, unknown>) : null;
+  return { present: hint.present, description: typeof hint.description === 'string' ? hint.description : null, reviewed: Boolean(review?.status) };
 }
 
 // Same unverified-hint contract for vehicle make/model: only populated by the vision-LLM guess (marked by
 // make_model_source), never by a real registry lookup, so the console must label it as a suggestion.
-export type VehicleVisionHint = { make: string | null; model: string | null };
+export type VehicleVisionHint = { make: string | null; model: string | null; reviewed: boolean };
 
 export function vehicleVisionHintFrom(observation: ConsoleObservation): VehicleVisionHint | null {
   if (observation.attributes.make_model_source !== 'vision_llm_hint_unverified') return null;
   const make = typeof observation.attributes.make === 'string' ? observation.attributes.make : null;
   const model = typeof observation.attributes.model === 'string' ? observation.attributes.model : null;
-  return make || model ? { make, model } : null;
+  if (!make && !model) return null;
+  const review = observation.attributes.make_model_review;
+  const reviewed = Boolean(review && typeof review === 'object' && (review as Record<string, unknown>).status);
+  return { make, model, reviewed };
 }
 
 export function inferenceReviewLabel(observation: ConsoleObservation): string {
