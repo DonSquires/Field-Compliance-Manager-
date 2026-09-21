@@ -230,7 +230,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchJobs, setBatchJobs] = useState<CCTVJob[]>([]);
   const [resultLoading, setResultLoading] = useState(false);
-  const [jobAction, setJobAction] = useState<'retry' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
+  const [jobAction, setJobAction] = useState<'retry' | 'reprocess' | 'cancel' | 'close' | 'archive' | 'delete' | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');
@@ -440,7 +440,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     }
   };
 
-  const manageJob = useCallback(async (job: CCTVJob, action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
+  const manageJob = useCallback(async (job: CCTVJob, action: 'retry' | 'reprocess' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (!profile?.organizationId) return;
     const confirmation = action === 'archive'
       ? 'Archive this CCTV queue item? The video and inference record will be retained and available under Archived.'
@@ -450,6 +450,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
           ? 'Close this failed CCTV job without retrying it?'
       : action === 'cancel'
         ? 'Cancel this CCTV job?'
+        : action === 'reprocess'
+          ? 'Reprocess this completed job with the current inference code? Every AI observation from it that no one has reviewed yet will be cleared and replaced with fresh results; anything already accepted, rejected or linked is left untouched.'
         : 'Retry this CCTV job?';
     if (!window.confirm(confirmation)) return;
     setJobAction(action);
@@ -470,7 +472,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     }
   }, [loadJobs, profile?.organizationId]);
 
-  const manageSelectedJob = useCallback((action: 'retry' | 'cancel' | 'close' | 'archive' | 'delete') => {
+  const manageSelectedJob = useCallback((action: 'retry' | 'reprocess' | 'cancel' | 'close' | 'archive' | 'delete') => {
     if (selected) void manageJob(selected, action);
   }, [manageJob, selected]);
 
@@ -1329,6 +1331,11 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
                   <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('retry')}>
                     <RotateCcw size={13} /> {jobAction === 'retry' ? 'Retrying...' : 'Retry'}
+                  </button>
+                )}
+                {selected.status === 'complete' && (
+                  <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('reprocess')} title="Re-run this footage through today's inference code; unreviewed AI observations are replaced, reviewed ones are untouched">
+                    <RotateCcw size={13} /> {jobAction === 'reprocess' ? 'Reprocessing...' : 'Reprocess'}
                   </button>
                 )}
                 {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
