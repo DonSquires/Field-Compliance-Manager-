@@ -34,6 +34,11 @@ DEFAULT_MODELS_DIR = Path("/app/models") if Path("/app/models").is_dir() else RE
 MODELS_DIR = Path(os.getenv("MODELS_DIR", str(DEFAULT_MODELS_DIR)))
 YUNET_MODEL_PATH = Path(os.getenv("YUNET_MODEL_PATH", MODELS_DIR / "face_detection_yunet_2023mar.onnx"))
 SFACE_MODEL_PATH = Path(os.getenv("SFACE_MODEL_PATH", MODELS_DIR / "face_recognition_sface_2021dec.onnx"))
+# Below this many pixels across, a detected face has little more than a blob of skin tone left; SFace's
+# alignCrop would resize it to its 112x112 input in one low-quality step. Re-detecting on an INTER_CUBIC
+# upscaled crop first (capped like plates.py's vehicle-crop upscale) gives sharper landmarks to align from.
+MIN_FACE_CROP_WIDTH = float(os.getenv("MIN_FACE_CROP_WIDTH", "112"))
+FACE_CROP_MAX_UPSCALE = 3.0
 VEHICLE_MODEL_PATH = Path(os.getenv("VEHICLE_MODEL_PATH", MODELS_DIR / "vehicle-attributes-recognition-barrier-0039.xml"))
 PERSON_MODEL_PATH = Path(os.getenv("PERSON_MODEL_PATH", MODELS_DIR / "person-detection-retail-0013.xml"))
 PERSON_REID_MODEL_PATH = Path(os.getenv("PERSON_REID_MODEL_PATH", MODELS_DIR / "person-reidentification-retail-0288.xml"))
@@ -541,6 +546,32 @@ def _face_models() -> tuple[Any, Any]:
     return _face_detector, _face_recognizer
 
 
+def _upscale_face_region(image: np.ndarray, detection: np.ndarray, detector: Any) -> tuple[np.ndarray, np.ndarray] | None:
+    """Pad and upscale the small crop around one detected face, then re-detect on just that crop so
+    alignCrop has sharper, higher-resolution landmarks to work from. Returns None (caller keeps the
+    original detection) whenever the crop is degenerate or re-detection finds nothing to align on."""
+    height, width = image.shape[:2]
+    x, y, box_width, box_height = (float(value) for value in detection[:4])
+    if box_width <= 0 or box_height <= 0:
+        return None
+    pad_x, pad_y = box_width * 0.3, box_height * 0.3
+    x0, y0 = max(0, int(x - pad_x)), max(0, int(y - pad_y))
+    x1, y1 = min(width, int(x + box_width + pad_x)), min(height, int(y + box_height + pad_y))
+    crop = image[y0:y1, x0:x1]
+    if crop.size == 0 or crop.shape[1] < 8 or crop.shape[0] < 8:
+        return None
+    scale = min(FACE_CROP_MAX_UPSCALE, MIN_FACE_CROP_WIDTH / box_width)
+    if scale <= 1.0:
+        return None
+    upscaled = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    detector.setInputSize((upscaled.shape[1], upscaled.shape[0]))
+    _, refined = detector.detect(upscaled)
+    if refined is None or len(refined) == 0:
+        return None
+    best = max(refined, key=lambda item: item[-1])
+    return upscaled, best
+
+
 def _crop_to_bbox(image: np.ndarray, bbox: dict[str, Any], padding: float = 0.1) -> np.ndarray:
     try:
         x, y, width, height = (int(bbox[key]) for key in ('x', 'y', 'width', 'height'))
@@ -857,7 +888,13 @@ def _face_sync(image: np.ndarray) -> list[dict[str, Any]]:
     _, detections = detector.detect(image)
     results: list[dict[str, Any]] = []
     for index, detection in enumerate(detections if detections is not None else []):
-        aligned = recognizer.alignCrop(image, detection)
+        align_image, align_detection = image, detection
+        if 0 < detection[2] < MIN_FACE_CROP_WIDTH:
+            enhanced = _upscale_face_region(image, detection, detector)
+            if enhanced is not None:
+                align_image, align_detection = enhanced
+                detector.setInputSize((width, height))  # restore before this detector is reused for the next face/request
+        aligned = recognizer.alignCrop(align_image, align_detection)
         embedding = recognizer.feature(aligned)
         vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
         norm = float(np.linalg.norm(vector))
