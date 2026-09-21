@@ -38,11 +38,19 @@ const RUNPOD_BACKOFF_MS = Number.isFinite(configuredRunpodBackoff) ? Math.max(0,
 const RUNPOD_TIMEOUT_MS = Number(process.env.VISION_RUNPOD_TIMEOUT_MS || 90_000);
 // Where detector work runs (owner ruling 2026-09-20: GPU cost). `vps_first`: the VPS detector triages and
 // recognises every frame and RunPod is asked only for frames the VPS could not answer; `vps_only` never asks
-// RunPod; `gpu_first` is the earlier order (RunPod, then VPS).
-const INFERENCE_POLICIES = ['vps_first', 'vps_only', 'gpu_first'];
+// RunPod; `gpu_first` is the earlier order (RunPod, then VPS); `local_gpu_first` asks a technician's own GPU
+// (reachable over Tailscale, e.g. a laptop) before the VPS, and RunPod only as the last resort.
+const INFERENCE_POLICIES = ['vps_first', 'vps_only', 'gpu_first', 'local_gpu_first'];
 const INFERENCE_POLICY = INFERENCE_POLICIES.includes(process.env.VISION_INFERENCE_POLICY) ? process.env.VISION_INFERENCE_POLICY : 'vps_first';
 const LOCAL_DETECT_CONCURRENCY = Math.max(1, Number(process.env.VISION_LOCAL_DETECT_CONCURRENCY || 2));
 const LOCAL_DETECT_TIMEOUT_MS = Number(process.env.VISION_LOCAL_DETECT_TIMEOUT_MS || 90_000);
+// A technician's own GPU (e.g. a laptop reachable over Tailscale), running the same fcm-inference image RunPod
+// runs, exposing /infer/batch. Unset by default; the local_gpu machine is skipped when this is empty.
+const LOCAL_GPU_INFERENCE_URL = (process.env.LOCAL_GPU_INFERENCE_URL || '').replace(/\/+$/, '');
+const LOCAL_GPU_INFERENCE_API_KEY = process.env.LOCAL_GPU_INFERENCE_API_KEY || INFERENCE_API_KEY;
+const LOCAL_GPU_TIMEOUT_MS = Number(process.env.VISION_LOCAL_GPU_TIMEOUT_MS || 30_000);
+const configuredLocalGpuBackoff = Number(process.env.VISION_LOCAL_GPU_BACKOFF_MS);
+const LOCAL_GPU_BACKOFF_MS = Number.isFinite(configuredLocalGpuBackoff) ? Math.max(0, configuredLocalGpuBackoff) : 60_000;
 // A sampled frame nobody looked at is a hole in the analysis: the job waits for a detector instead of
 // completing as "no sightings".
 const DETECTOR_DEFER_SECONDS = Math.min(86_400, Math.max(60, Number(process.env.VISION_DETECTOR_DEFER_SECONDS || 600)));
@@ -56,6 +64,7 @@ const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'fa
 // /infer/detect on the VPS (person + vehicle + animal triage in one call) when RunPod returned nothing for a frame.
 const LOCAL_DETECT_INFERENCE = process.env.VISION_LOCAL_DETECT_INFERENCE !== 'false';
 let runpodUnavailableUntil = 0;
+let localGpuUnavailableUntil = 0;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
@@ -433,15 +442,16 @@ async function classifyFrames(summary, job) {
   return summary;
 }
 
-// /infer/detect on the VPS answers in the shape of one RunPod infer_batch result, so triage, recognition and
-// the consolidator read either without caring which machine looked. Provenance stays inside the answer.
-function localTriageResult(detect) {
+// /infer/detect on the VPS (and /infer/batch on a local GPU tier) answer in the shape of one RunPod
+// infer_batch result, so triage, recognition and the consolidator read any of them without caring which
+// machine looked. Provenance stays inside the answer via `triage_provider`.
+function localTriageResult(detect, provider = 'vps') {
   if (!detect?.success) return null;
   const vehicles = Array.isArray(detect.vehicles) ? detect.vehicles : [];
   const coverage = Array.isArray(detect.detector_coverage) ? detect.detector_coverage : [];
   const result = {
     success: true,
-    triage_provider: 'vps',
+    triage_provider: provider,
     detector_status: detect.detector_status ?? null,
     detector_provider: detect.detector_provider ?? null,
     detector_coverage: coverage,
@@ -453,7 +463,7 @@ function localTriageResult(detect) {
     animals: Array.isArray(detect.animals) ? detect.animals : [],
     animal_detection_status: !coverage.includes('animal') ? 'model_not_staged' : detect.species_status === 'ready' ? 'ready' : 'detector_only_species_not_staged',
   };
-  for (const key of ['detector_model', 'detector_execution_provider', 'detector_passes', 'detector_error', 'suppressed_animals', 'alpr']) {
+  for (const key of ['detector_model', 'detector_execution_provider', 'detector_passes', 'detector_error', 'suppressed_animals', 'alpr', 'face', 'faces']) {
     if (detect[key] !== undefined) result[key] = detect[key];
   }
   return result;
@@ -463,6 +473,7 @@ function localTriageResult(detect) {
 function triageOrderFor(policy) {
   if (policy === 'gpu_first') return ['gpu', 'vps'];
   if (policy === 'vps_only') return ['vps'];
+  if (policy === 'local_gpu_first') return ['local_gpu', 'vps', 'gpu'];
   return ['vps', 'gpu'];
 }
 
@@ -513,6 +524,8 @@ async function triageBatch(batch, usage) {
     if (!remaining.length) break;
     const answers = machine === 'gpu'
       ? new Map([...await classifyWithRunpodBatch(remaining, ['person', 'vehicle', 'animal', 'detect'], usage)].map(([hash, answer]) => [hash, { ...answer, triage_provider: 'gpu' }]))
+      : machine === 'local_gpu'
+      ? await classifyWithLocalGpuBatch(remaining, ['person', 'vehicle', 'animal', 'detect'], usage)
       : await triageWithLocalDetect(remaining, usage);
     results = new Map([...results, ...answers]);
   }
@@ -730,6 +743,52 @@ async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'ani
     return new Map();
   }
 }
+
+// A technician's own GPU (over Tailscale), running the fcm-inference image's /infer/batch route — same
+// answer shape as RunPod's infer_batch, no per-second billing, no cold start. Same circuit-breaker pattern
+// as RunPod: a failure opens the breaker for LOCAL_GPU_BACKOFF_MS so a job never waits on an offline laptop.
+async function classifyWithLocalGpuBatch(batch, tasks = ['person', 'vehicle', 'animal', 'plate', 'face'], usage = null) {
+  if (!LOCAL_GPU_INFERENCE_URL || batch.length === 0) return new Map();
+  if (Date.now() < localGpuUnavailableUntil) {
+    log('local_gpu_inference_circuit_open', { retry_after_ms: localGpuUnavailableUntil - Date.now(), batch_size: batch.length });
+    return new Map();
+  }
+  const startedAt = Date.now();
+  const meter = () => { if (usage) { usage.gpu_calls += 1; usage.frames_sent += batch.length; usage.gpu_ms += Date.now() - startedAt; } };
+  try {
+    const response = await fetch(`${LOCAL_GPU_INFERENCE_URL}/infer/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${LOCAL_GPU_INFERENCE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        frames: batch.map(({ frame, image }) => ({ frame_id: frame.sha256_hash, image_base64: image.toString('base64') })),
+        tasks,
+      }),
+      signal: AbortSignal.timeout(LOCAL_GPU_TIMEOUT_MS),
+    });
+    meter();
+    if (!response.ok) {
+      localGpuUnavailableUntil = Date.now() + LOCAL_GPU_BACKOFF_MS;
+      log('local_gpu_inference_degraded', { status: response.status, retry_after_ms: LOCAL_GPU_BACKOFF_MS });
+      return new Map();
+    }
+    const payload = await response.json();
+    const items = Array.isArray(payload.results) ? payload.results : [];
+    localGpuUnavailableUntil = 0;
+    const results = new Map();
+    for (const item of items) {
+      if (!item?.frame_id) continue;
+      const triage = localTriageResult(item.result, 'local_gpu');
+      if (triage) results.set(item.frame_id, triage);
+    }
+    return results;
+  } catch (error) {
+    meter();
+    localGpuUnavailableUntil = Date.now() + LOCAL_GPU_BACKOFF_MS;
+    log('local_gpu_inference_unavailable', { error: error.message, retry_after_ms: LOCAL_GPU_BACKOFF_MS });
+    return new Map();
+  }
+}
+
 
 async function runCaptureRecognition(frame, image, job) {
   if (!RUNPOD_CAPTURE_API_URL || !RUNPOD_CAPTURE_API_KEY) {

@@ -53,3 +53,9 @@ desktop-signing-intake/
 
 # Local, never-committed live-test drivers and evidence (identities file is 0600)
 /.local/
+
+# Real (non-example) worker env files named "<name>.env" - the patterns above only match names starting
+# with ".env", not ending in it.
+deploy/laptop-worker/*.env
+!deploy/laptop-worker/*.env.example
+

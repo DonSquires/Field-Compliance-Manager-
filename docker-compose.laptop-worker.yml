@@ -1,0 +1,75 @@
+# Second CCTV worker, running the full pipeline (motion extraction + GPU inference) on a technician's own
+# GPU laptop instead of the VPS (owner ruling 2026-09-21: shift CCTV load off the VPS now that a local GPU
+# tier exists). This claims jobs from the same Supabase queue as the VPS's own fcm-vision-watcher — both
+# compete safely via the claim_cctv_inference_job lease, so running this alongside the VPS worker is safe.
+#
+# Usage:
+#   1. Copy deploy/laptop-worker/laptop-worker.env.example to deploy/laptop-worker/laptop-worker.env and fill
+#      in the same SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / WORKLOAD_SIGNING_SECRET / VISION_INGESTION_URL
+#      already configured on the VPS's /opt/fcm/.env.
+#   2. docker compose -f docker-compose.laptop-worker.yml up -d --build
+
+services:
+  fcm-inference:
+    build:
+      context: ./services/fcm-inference
+      args:
+        GPU: "1"
+    image: fcm/fcm-inference:gpu-local
+    container_name: fcm-inference-laptop
+    restart: unless-stopped
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
+    environment:
+      DETECTOR_MODEL: rf-detr-large-704-coco
+      DETECTOR_TILES: auto
+      VEHICLE_ATTRS_PROVIDER: basic
+      # Only ever exchanged between these two co-located containers on this private compose network.
+      INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:-laptop-local-shared-key}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks: [fcm-laptop-net]
+
+  fcm-vision-watcher:
+    build: ./services/vision
+    image: fcm/fcm-vision-watcher:local
+    container_name: fcm-vision-watcher-laptop
+    restart: unless-stopped
+    # tini (PID 1) reaps orphaned ffmpeg/extractor children on stop — same reasoning as docker-compose.full.yml.
+    init: true
+    env_file: ./deploy/laptop-worker/laptop-worker.env
+    environment:
+      VISION_VIDEO_ROOT: /opt/fcm/storage
+      VISION_DERIVED_ROOT: /opt/fcm/derived
+      VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
+      INFERENCE_SERVICE_URL: http://fcm-inference:3000
+      INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:-laptop-local-shared-key}
+      # This instance's own GPU tier is already the "vps" slot below; no separate RunPod ask from here.
+      VISION_INFERENCE_POLICY: vps_only
+      VISION_LOCAL_DETECT_INFERENCE: "true"
+      VISION_LOCAL_PEOPLE_INFERENCE: "false"
+      VISION_LOCAL_VEHICLE_INFERENCE: "false"
+      VISION_WORKER_CONCURRENCY: "1"
+      VISION_MAX_CLASSIFICATION_FRAMES: "120"
+    volumes:
+      - fcm_laptop_derived:/opt/fcm/derived
+    depends_on:
+      fcm-inference:
+        condition: service_healthy
+    networks: [fcm-laptop-net]
+
+networks:
+  fcm-laptop-net:
+
+volumes:
+  fcm_laptop_derived:

@@ -15,6 +15,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3001:3000"
+      # Tailscale-only: lets a technician's own worker (e.g. a laptop CCTV GPU tier) reach the motion-ingestion
+      # route directly, without exposing fcm-api to the public internet. Owner ruling 2026-09-21.
+      - "${FCM_API_TAILSCALE_IP:-100.85.95.104}:3001:3000"
     env_file: /opt/fcm/.env
     environment:
       NODE_ENV: production

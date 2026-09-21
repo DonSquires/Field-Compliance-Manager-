@@ -963,3 +963,103 @@ async def person_signature(
         "attributes": attributes,
         "prohibited_inferences": ["identity_truth", "weight", "health", "ethnicity", "age", "gender"],
     })
+
+
+def _infer_face_if_requested(image: np.ndarray) -> dict[str, Any]:
+    try:
+        faces = _face_sync(image)
+        return {"state": "candidate", "result": {"success": True, "faces": faces, "identity_resolution": "manual_review_required"}, "review_required": True}
+    except Exception as error:
+        return {"state": "unavailable", "reason": str(error), "review_required": True}
+
+
+def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
+    """One frame, every requested task. Mirrors runpod_handler.py's per-frame answer shape so this endpoint
+    and RunPod are interchangeable triage sources for the same caller (services/vision/vision_job_watcher.js)."""
+    result: dict[str, Any] = {"success": True}
+    triage = _triage_with_attributes(image) if tasks & {"person", "vehicle", "animal", "detect", "plate"} else None
+    coverage = set((triage or {}).get("detector_coverage") or [])
+    if triage is not None:
+        result["detector_status"] = triage["detector_status"]
+        result["detector_provider"] = triage.get("detector_provider")
+        result["detector_model"] = triage.get("detector_model")
+        result["detector_execution_provider"] = triage.get("detector_execution_provider")
+        result["detector_passes"] = triage.get("detector_passes")
+        result["detector_coverage"] = sorted(coverage)
+        result["species_status"] = triage["species_status"]
+        if triage.get("detector_error"):
+            result["detector_error"] = triage["detector_error"]
+    if "vehicle" in tasks or "plate" in tasks:
+        vehicles = (triage or {}).get("vehicles") or []
+        if vehicles:
+            result["vehicles"] = vehicles
+            result["vehicle"] = vehicles[0]["attributes"]
+        else:
+            result["vehicles"] = []
+            result["vehicle"] = _infer_vehicle_attributes(image) if "vehicle" not in coverage else None
+    if "plate" in tasks or "alpr" in tasks:
+        try:
+            result["alpr"] = _infer_plate_from_image(image, [vehicle["bbox"] for vehicle in (triage or {}).get("vehicles") or []])
+        except Exception as error:
+            result["alpr"] = {"success": False, "error": str(error)[:300], "review_required": True}
+    if "person" in tasks:
+        result["people"] = (triage or {}).get("people") if triage is not None else _detect_people(image)
+        result["people_provider"] = (triage or {}).get("people_provider") or (triage or {}).get("detector_provider")
+    animals = (triage or {}).get("animals") or []
+    result["animals"] = animals
+    if (triage or {}).get("suppressed_animals"):
+        result["suppressed_animals"] = triage["suppressed_animals"]
+    result["animal_detection_status"] = (
+        "model_not_staged" if "animal" not in coverage
+        else ("ready" if triage["species_status"] == "ready" else "detector_only_species_not_staged")
+    )
+    if "face" in tasks:
+        face = _infer_face_if_requested(image)
+        if face.get("state") == "candidate":
+            result["face"] = face["result"]
+        else:
+            result["face"] = {"success": False, "error": face.get("reason"), "faces": []}
+        result["faces"] = result["face"].get("faces", [])
+        result["face_review_required"] = True
+    return result
+
+
+class BatchFrameInput(BaseModel):
+    frame_id: str
+    image_base64: str
+
+
+class BatchInferRequest(BaseModel):
+    frames: list[BatchFrameInput] = Field(default_factory=list, max_length=64)
+    tasks: list[str] | None = None
+
+
+def _batch_sync(frames: list[BatchFrameInput], tasks: set[str]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for frame in frames:
+        image = _decode_image_data(frame.image_base64)
+        if image is None:
+            results.append({"frame_id": frame.frame_id, "result": {"success": False, "error": "undecodable_image"}})
+            continue
+        try:
+            results.append({"frame_id": frame.frame_id, "result": _infer_frame(image, tasks)})
+        except Exception as error:
+            results.append({"frame_id": frame.frame_id, "result": {"success": False, "error": str(error)[:300]}})
+    return results
+
+
+@app.post("/infer/batch")
+async def infer_batch(
+    payload: BatchInferRequest,
+    authorization: Annotated[str | None, Header()] = None,
+    x_inference_api_key: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Local-GPU equivalent of RunPod's `infer_batch` action: one call answers a whole batch of frames, so a
+    Tailscale-reachable tier (e.g. a technician's own GPU) can stand in for RunPod without protocol changes
+    on the caller side beyond the URL and response envelope."""
+    _authorize(authorization, x_inference_api_key)
+    if not payload.frames:
+        return {"success": True, "results": []}
+    tasks = set(payload.tasks or ["person", "vehicle", "animal", "plate", "face"])
+    results = await _run_cpu(_batch_sync, payload.frames, tasks)
+    return {"success": True, "results": results}
