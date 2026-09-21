@@ -73,10 +73,12 @@ import {
   nextRate,
   normalizeCCTVInspection,
   observationCountsByEvidence,
+  OBSERVATION_SELECT,
   parseClipIntegrity,
   parseMs,
   previousClipBefore,
   timelineBounds,
+  toObservation,
   vehicleVisionHintFrom,
   weaponHintFrom,
   zoomView,
@@ -167,53 +169,6 @@ function placeLabelOf(row: ImportRow): string {
   const place = Array.isArray(row.locations) ? row.locations[0] : row.locations;
   if (!place) return 'Place not loaded';
   return place.address ? `${place.name} · ${place.address}` : place.name;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function singleRecord(value: unknown): Record<string, unknown> {
-  return asRecord(Array.isArray(value) ? value[0] : value);
-}
-
-function toObservation(row: Record<string, unknown>): ConsoleObservation | null {
-  const observedAtMs = parseMs(typeof row.observed_at === 'string' ? row.observed_at : null);
-  if (observedAtMs === null || typeof row.id !== 'string') return null;
-  const kind = row.entity_kind === 'person' || row.entity_kind === 'vehicle' || row.entity_kind === 'animal' ? row.entity_kind : null;
-  if (!kind) return null;
-  const personProfile = singleRecord(row.person_records);
-  const profileName = typeof personProfile.display_name === 'string' ? personProfile.display_name : null;
-  const profileMetadata = asRecord(personProfile.metadata);
-  return {
-    id: row.id,
-    evidenceId: String(row.evidence_item_id ?? ''),
-    importId: typeof row.cctv_import_id === 'string' ? row.cctv_import_id : null,
-    sourceEventId: String(row.source_event_id ?? ''),
-    kind,
-    observedAtMs,
-    observedToMs: parseMs(typeof row.observed_to === 'string' ? row.observed_to : null),
-    label: kind === 'person' && profileName ? profileName : typeof row.candidate_label === 'string' ? row.candidate_label : null,
-    plate: typeof row.candidate_plate === 'string' ? row.candidate_plate : null,
-    species: typeof row.animal_type === 'string' ? row.animal_type : null,
-    speciesConfidence: typeof row.species_confidence === 'number' ? row.species_confidence : null,
-    isPest: typeof row.is_pest === 'boolean' ? row.is_pest : null,
-    confidence: typeof row.model_confidence === 'number' ? row.model_confidence : null,
-    qualityState: typeof row.quality_state === 'string' ? row.quality_state : 'clear',
-    attributes: asRecord(row.attributes),
-    thumbnail: typeof row.thumbnail === 'string' ? row.thumbnail : null,
-    reviewState: typeof row.review_state === 'string' ? row.review_state : 'unreviewed',
-    portfolioKey: typeof row.portfolio_key === 'string' ? row.portfolio_key : null,
-    portfolioState: typeof row.portfolio_state === 'string' ? row.portfolio_state : 'unmatched',
-    candidates: Array.isArray(row.portfolio_candidates) ? row.portfolio_candidates as PortfolioCandidate[] : [],
-    personRecordId: typeof row.person_record_id === 'string' ? row.person_record_id : null,
-    canonicalPersonId: typeof row.canonical_person_id === 'string' ? row.canonical_person_id : null,
-    profileName,
-    profileDetails: asRecord(profileMetadata.profile_details),
-    canonicalVehicleId: typeof row.canonical_vehicle_id === 'string' ? row.canonical_vehicle_id : null,
-    reviewedAt: typeof row.reviewed_at === 'string' ? row.reviewed_at : null,
-    reviewNotes: typeof row.review_notes === 'string' ? row.review_notes : null,
-  };
 }
 
 function markSeverity(value: unknown, source: unknown, kind: unknown): ConsoleMark['severity'] {
@@ -376,7 +331,7 @@ const CCTVConsolePage: React.FC = () => {
     const [evidenceRes, marksRes, observationsRes] = await Promise.all([
       supabase.from('evidence_items').select('id, storage_path, captured_at, metadata, sha256_hash, is_court_ready, locked_at, retention_hold').eq('organization_id', organizationId).eq('cctv_import_id', importId).order('captured_at'),
       supabase.from('cctv_device_events').select('id, source, source_ref, event_start_at, event_end_at, severity, thumbnail_path, metadata').eq('cctv_import_id', importId).order('event_start_at').limit(5000),
-      supabase.from('cctv_entity_observations').select('id, evidence_item_id, cctv_import_id, source_event_id, entity_kind, observed_at, observed_to, candidate_label, candidate_plate, animal_type, species_confidence, is_pest, model_confidence, quality_state, attributes, thumbnail, review_state, portfolio_key, portfolio_state, portfolio_candidates, person_record_id, canonical_person_id, canonical_vehicle_id, reviewed_at, review_notes, person_records(display_name, metadata)').eq('organization_id', organizationId).eq('cctv_import_id', importId).order('observed_at').limit(2000),
+      supabase.from('cctv_entity_observations').select(OBSERVATION_SELECT).eq('organization_id', organizationId).eq('cctv_import_id', importId).order('observed_at').limit(2000),
     ]);
     const failed = evidenceRes.error ? 'recordings' : marksRes.error ? 'camera events' : observationsRes.error ? 'observations' : null;
     const failure = evidenceRes.error ?? marksRes.error ?? observationsRes.error;

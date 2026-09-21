@@ -9,6 +9,7 @@ const timeline = readFileSync(resolve(process.cwd(), 'src/components/CCTVTimelin
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
 const fieldOps = readFileSync(resolve(process.cwd(), 'src/pages/FieldOperationsPage.tsx'), 'utf8');
 const importPage = readFileSync(resolve(process.cwd(), 'src/pages/CCTVImportPage.tsx'), 'utf8');
+const lib = readFileSync(resolve(process.cwd(), 'src/lib/cctvConsole.ts'), 'utf8');
 
 describe('CCTV console', () => {
   it('is driven by the place-anchored CCTV spine, scoped to the organisation', () => {
@@ -55,8 +56,8 @@ describe('CCTV console', () => {
   });
 
   it('shows the inferred person profile and lets a reviewer name and enrich it', () => {
-    expect(page).toContain('person_records(display_name, metadata)');
-    expect(page).toContain("label: kind === 'person' && profileName ? profileName");
+    expect(lib).toContain('person_records(display_name, metadata)');
+    expect(lib).toContain("label: kind === 'person' && profileName ? profileName");
     expect(page).toContain('Person name');
     expect(page).toContain('Profile details');
     expect(page).toContain('Save person profile');
@@ -242,10 +243,11 @@ describe('CCTV console', () => {
     expect(page).toContain('window.clearInterval(timer)');
   });
 
-  it('is wired as the CCTV review surface, with the job queue kept for exports', () => {
+  it('is wired as the CCTV wall & playback surface, with review split into its own triage queue and the job queue kept for exports', () => {
     expect(shell).toContain("case 'cctv-console':");
     expect(shell).toContain('<CCTVConsolePage />');
-    expect(fieldOps).toContain("area: 'cctv-console', label: 'CCTV review'");
+    expect(fieldOps).toContain("area: 'cctv-console', label: 'CCTV wall & playback'");
+    expect(fieldOps).toContain("area: 'cctv-triage', label: 'Review observations'");
     expect(fieldOps).toContain("area: 'cctv-review', label: 'CCTV job queue & exports'");
     expect(importPage).toContain('/admin/field-ops?area=cctv-console&import=${importRow.id}');
     expect(page).toContain("const requestedImportId = search.get('import');");
