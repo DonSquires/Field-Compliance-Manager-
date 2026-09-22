@@ -259,7 +259,7 @@ export default function ZoneDetailPage() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => navigate("/admin/sites")}
+            onClick={() => navigate(selected ? `/admin/sites?place=location_zone:${selected.id}` : "/admin/sites")}
           >
             <LandPlot size={15} />
             Boundary review
@@ -312,6 +312,15 @@ export default function ZoneDetailPage() {
               house={house}
               sites={sites}
               zones={[selected]}
+              editableEntity={{
+                type: "location_zone",
+                id: selected.id,
+                organizationId: selected.organization_id,
+                zoneType: selected.zone_type,
+                centerLat: selected.center_point?.coordinates?.[1] ?? null,
+                centerLng: selected.center_point?.coordinates?.[0] ?? null,
+                onSaved: () => setRefreshRevision((revision) => revision + 1),
+              }}
             />
             <section className="zone-facts">
               <article>

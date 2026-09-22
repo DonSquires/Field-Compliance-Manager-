@@ -35,6 +35,32 @@ interface LinzPreview {
   match: string;
   kind: 'parcel' | 'building';
   properties: Record<string, unknown>;
+  lat: number;
+  lng: number;
+}
+
+/** When set, the map becomes actionable for this one site or zone: accept the LINZ preview or a simple radius as its real boundary, right here. */
+export interface EditableEntity {
+  type: 'client_site' | 'location_zone';
+  id: string;
+  organizationId: string;
+  zoneType?: string | null;
+  centerLat?: number | null;
+  centerLng?: number | null;
+  onSaved?: () => void;
+}
+
+function circlePolygon(lat: number, lng: number, radiusM: number, vertices = 64): GeoJSON.Polygon {
+  const earth = 6_378_137;
+  const dLat = (radiusM / earth) * (180 / Math.PI);
+  const dLng = dLat / Math.cos((lat * Math.PI) / 180);
+  const ring: Array<[number, number]> = [];
+  for (let i = 0; i < vertices; i += 1) {
+    const angle = (i / vertices) * 2 * Math.PI;
+    ring.push([Number((lng + dLng * Math.cos(angle)).toFixed(7)), Number((lat + dLat * Math.sin(angle)).toFixed(7))]);
+  }
+  ring.push(ring[0]);
+  return { type: 'Polygon', coordinates: [ring] };
 }
 
 interface GeofenceResolution {
@@ -57,7 +83,7 @@ interface ZoneClosure {
   effective_to: string | null;
 }
 
-export function LocationHouseMap({ organizationId, house, sites, zones }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[] }) {
+export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const overlayRef = useRef<L.LayerGroup | null>(null);
@@ -69,6 +95,9 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
   const [resolving, setResolving] = useState(false);
   const [probing, setProbing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [radiusMeters, setRadiusMeters] = useState('30');
+  const [savingBoundary, setSavingBoundary] = useState<'linz' | 'radius' | null>(null);
+  const [boundaryNotice, setBoundaryNotice] = useState<string | null>(null);
   // One map per house: a probe click, a LINZ preview or a resolution result must not rebuild it and lose the person's zoom, position or base layer.
   const viewKey = `house:${organizationId}:${house.name}`;
 
@@ -164,8 +193,54 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
     }
     const { data: boundaryData, error: boundaryError } = await supabase.functions.invoke('linz-lookup', { body: { action: 'boundary_for_point_escalating', lat: candidate.lat, lng: candidate.lng } });
     if (boundaryError || !boundaryData?.geometry) setError(boundaryError?.message ?? 'LINZ returned an address point but no parcel or building polygon.');
-    else setLinzPreview({ address: candidate.label, source: candidate.source, geometry: boundaryData.geometry as GeoJSON.GeoJsonObject, kind: boundaryData.kind === 'building' ? 'building' : 'parcel', properties: (boundaryData.properties ?? {}) as Record<string, unknown>, match: boundaryData.matched_via?.exact ? `Exact ${boundaryData.matched_via.layer}` : `${boundaryData.matched_via?.layer ?? 'boundary'} within ${boundaryData.matched_via?.radius_m ?? 0} m` });
+    else { setLinzPreview({ address: candidate.label, source: candidate.source, geometry: boundaryData.geometry as GeoJSON.GeoJsonObject, kind: boundaryData.kind === 'building' ? 'building' : 'parcel', properties: (boundaryData.properties ?? {}) as Record<string, unknown>, match: boundaryData.matched_via?.exact ? `Exact ${boundaryData.matched_via.layer}` : `${boundaryData.matched_via?.layer ?? 'boundary'} within ${boundaryData.matched_via?.radius_m ?? 0} m`, lat: candidate.lat, lng: candidate.lng }); setBoundaryNotice(null); }
     setResolving(false);
+  };
+
+  const proposeAndAccept = async (geometry: GeoJSON.Geometry, source: string, sourceRef: Record<string, unknown>) => {
+    if (!editableEntity) return;
+    const { data: proposeData, error: proposeError } = await supabase.rpc('propose_boundary', {
+      p_organization_id: editableEntity.organizationId, p_entity_type: editableEntity.type, p_entity_id: editableEntity.id,
+      p_geojson: geometry, p_source: source, p_source_ref: sourceRef, p_address_candidate: null,
+      p_zone_type: editableEntity.type === 'location_zone' ? editableEntity.zoneType ?? null : null, p_proposed_via: 'house_map',
+    });
+    const proposal = (proposeData as Array<{ proposal_id: string }> | null)?.[0];
+    if (proposeError || !proposal?.proposal_id) throw proposeError ?? new Error('The boundary proposal was not confirmed.');
+    const { data: acceptData, error: acceptError } = await supabase.rpc('accept_boundary_proposal', { p_proposal_id: proposal.proposal_id, p_final_geojson: null, p_verify: true, p_note: null });
+    if (acceptError || !(acceptData as Array<{ entity_id: string }> | null)?.[0]?.entity_id) throw acceptError ?? new Error('The boundary could not be confirmed.');
+  };
+
+  const saveLinzBoundary = () => {
+    if (!editableEntity || !linzPreview) return;
+    void (async () => {
+      setSavingBoundary('linz'); setError(null); setBoundaryNotice(null);
+      try {
+        await proposeAndAccept(linzPreview.geometry as GeoJSON.Geometry, linzPreview.kind === 'building' ? 'linz_building' : 'linz_parcel', { matched_via: linzPreview.match, queried_at: { lat: linzPreview.lat, lng: linzPreview.lng } });
+        setBoundaryNotice(`Boundary saved from LINZ (${linzPreview.kind === 'building' ? 'building outline' : 'legal parcel'}).`);
+        editableEntity.onSaved?.();
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : 'The boundary could not be saved.');
+      } finally { setSavingBoundary(null); }
+    })();
+  };
+
+  const saveRadiusBoundary = () => {
+    if (!editableEntity) return;
+    const centerLat = linzPreview?.lat ?? editableEntity.centerLat ?? null;
+    const centerLng = linzPreview?.lng ?? editableEntity.centerLng ?? null;
+    const radius = Number(radiusMeters);
+    if (centerLat == null || centerLng == null) { setError('Resolve an address or a LINZ preview first so there is a centre to draw the circle from.'); return; }
+    if (!Number.isFinite(radius) || radius < 5) { setError('Enter a radius of at least 5 metres.'); return; }
+    void (async () => {
+      setSavingBoundary('radius'); setError(null); setBoundaryNotice(null);
+      try {
+        await proposeAndAccept(circlePolygon(centerLat, centerLng, radius), 'google_point_radius', { center: { lat: centerLat, lng: centerLng }, radius_m: radius });
+        setBoundaryNotice(`Boundary saved as a ${radius} m radius.`);
+        editableEntity.onSaved?.();
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : 'The boundary could not be saved.');
+      } finally { setSavingBoundary(null); }
+    })();
   };
 
   const verifiedZones = zones.filter((zone) => zone.boundary && zone.boundary_verification === 'verified').length;
@@ -176,6 +251,8 @@ export function LocationHouseMap({ organizationId, house, sites, zones }: { orga
     {error && <div className="house-map-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
     {linzPreview && <><div className="house-map-message is-success" role="status"><CheckCircle2 size={15} /><span><strong>Read-only LINZ {linzPreview.kind === 'parcel' ? 'land-lot' : 'building'} preview</strong>{linzPreview.address} · {linzPreview.match}</span></div><div className="house-map-lot-details"><div><span>Canonical address</span><strong>{linzPreview.address}</strong></div><div><span>Source</span><strong>{linzPreview.source.replaceAll('_', ' ')}</strong></div><div><span>Geometry</span><strong>{linzPreview.kind === 'parcel' ? 'LINZ parcel / land lot' : 'LINZ building outline'}</strong></div>{Object.entries(linzPreview.properties).filter(([, value]) => value !== null && value !== '').slice(0, 6).map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></div>)}</div></>}
     {resolution && <div className={`house-map-resolution is-${resolution.resolution_status === 'resolved' ? 'resolved' : 'unresolved'}`} role="status"><div><span>Resolution</span><strong>{resolution.resolution_status.replaceAll('_', ' ')}</strong></div><div><span>Operating bounds</span><strong>{resolution.in_operating_bounds ? 'Inside' : resolution.out_of_bounds_district ? `Outside · ${resolution.out_of_bounds_district}` : 'Outside'}</strong></div><div><span>Runtime zone</span><strong>{resolution.matched_zone_id ? zones.find((zone) => zone.id === resolution.matched_zone_id)?.name ?? 'Matched zone' : 'No verified active zone'}</strong></div><div><span>Site state</span><strong>{resolution.site_id ? resolution.on_site ? 'On site' : 'Zone match · off site' : 'No site match'}</strong></div><div><span>Module trigger</span><strong>{resolution.matched_module_key?.replaceAll('_', ' ') ?? 'None'}</strong></div><div><span>Effective rules</span><strong>{resolution.effective_rules ? `${Object.keys(resolution.effective_rules).length} resolved values` : 'None'}</strong></div><div className={closure ? 'is-warning' : ''}><span>Operational overlay</span><strong>{closure ? `${closure.closure_type.replaceAll('_', ' ')} · ${closure.reason ?? 'No reason recorded'}` : 'No in-force closure'}</strong></div>{resolution.governor_overlap_flag && <div className="is-warning"><span>Jurisdiction</span><strong>Governor overlap review</strong></div>}</div>}
+    {boundaryNotice && <div className="house-map-message is-success" role="status"><CheckCircle2 size={15} />{boundaryNotice}</div>}
+    {editableEntity && <div className="house-map-editable"><span>Set the boundary right here — no separate workbench needed.</span><div className="house-map-editable-actions">{linzPreview && <button type="button" onClick={saveLinzBoundary} disabled={savingBoundary !== null}><LandPlot size={14} />{savingBoundary === 'linz' ? 'Saving' : 'Save this LINZ boundary'}</button>}<label><span>Or a simple radius (m)</span><input type="number" min="5" max="5000" value={radiusMeters} onChange={(event) => setRadiusMeters(event.target.value)} /></label><button type="button" onClick={saveRadiusBoundary} disabled={savingBoundary !== null || (linzPreview?.lat == null && editableEntity.centerLat == null)}><Crosshair size={14} />{savingBoundary === 'radius' ? 'Saving' : 'Save as point + radius'}</button></div></div>}
     <div className="house-map-canvas" ref={containerRef} />
     <footer><span><Building2 size={13} />Geometry answers where</span><span><MapPin size={13} />Rules and closures answer what</span><span><LandPlot size={13} />LINZ source preview</span><em>LINZ preview is not saved, verified, or used by runtime resolution.</em></footer>
   </section>;

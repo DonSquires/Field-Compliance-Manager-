@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Building2, CheckCircle2, ClipboardList, MapPin, Search, Send, Shield, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { LocationHouseMap } from '../components/LocationHouseMap';
 import { resolveAddressCandidates, type AddressCandidate } from '../lib/locationAddress';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { supabase } from '../lib/supabase';
@@ -85,6 +86,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
   const [placeForm, setPlaceForm] = useState({ name: '', address: '', type: 'commercial_premises' });
   const [addressCandidates, setAddressCandidates] = useState<AddressCandidate[]>([]);
   const [chosenAddress, setChosenAddress] = useState<AddressCandidate | null>(null);
+  const [justAddedPlace, setJustAddedPlace] = useState<{ id: string; name: string; address: string | null; lat: number; lng: number } | null>(null);
   const placeRequest = useRef(crypto.randomUUID());
   // Step 3
   const [agreementId, setAgreementId] = useState<string | null>(null);
@@ -197,6 +199,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
       const row = (Array.isArray(data) ? data[0] : data) as { id: string; name: string; address: string | null; site_type: string | null } | undefined;
       if (!row?.id) throw new Error('The place was saved but could not be read back. Refresh and it will appear.');
       setPlaces((current) => [...current, { id: row.id, name: row.name, address: row.address, site_type: row.site_type }]);
+      setJustAddedPlace({ id: row.id, name: row.name, address: row.address, lat: chosenAddress.lat, lng: chosenAddress.lng });
       placeRequest.current = crypto.randomUUID();
       setPlaceForm({ name: '', address: '', type: placeForm.type }); setAddressCandidates([]); setChosenAddress(null);
       return `${row.name} added at ${row.address ?? 'the chosen address'}.`;
@@ -306,7 +309,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
     {step === 1 && <form className="client-setup-card" onSubmit={saveClient} aria-labelledby="step-who">
       <div className="client-setup-card-head"><UserRound size={20} aria-hidden="true" /><div><h2 id="step-who">Who is the client?</h2><p>The business, council or person you are working for, and the person you deal with there.</p></div></div>
       <label><span>Client name</span><input value={clientForm.name} onChange={(event) => setClientForm({ ...clientForm, name: event.target.value })} placeholder="e.g. Trafalgar Street Dairy Ltd" required disabled={Boolean(client)} /></label>
-      {matches.length > 0 && !client && <div className="client-setup-matches" role="status"><Search size={14} aria-hidden="true" /><span>Already on the books?</span>{matches.map((match) => <button type="button" key={match.id} onClick={() => onNavigate('crm', { accountId: match.id })}>{match.name}{match.status ? ` · ${match.status}` : ''}</button>)}</div>}
+      {matches.length > 0 && !client && <div className="client-setup-matches" role="status"><Search size={14} aria-hidden="true" /><span>Already on the books?</span>{matches.map((match) => <button type="button" key={match.id} onClick={() => { navigate(`${location.pathname}?account=${match.id}`, { replace: true }); void loadClient(match.id); }}>{match.name}{match.status ? ` · ${match.status}` : ''}</button>)}</div>}
       <div className="client-setup-two">
         <label><span>Contact first name</span><input value={clientForm.firstName} onChange={(event) => setClientForm({ ...clientForm, firstName: event.target.value })} placeholder="Jamie" /></label>
         <label><span>Contact last name</span><input value={clientForm.lastName} onChange={(event) => setClientForm({ ...clientForm, lastName: event.target.value })} placeholder="Rangi" /></label>
@@ -334,7 +337,8 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
           <button type="button" className="btn btn-primary" disabled={places.length === 0 || busy !== null} onClick={() => { setServicePlaceId(places[0]?.id ?? ''); setStep(3); }}>Continue <ArrowRight size={15} aria-hidden="true" /></button>
         </footer>
       </form>
-      <p className="client-setup-hint">The exact boundary of each place is checked on the map later (Geofence workbench). Officers can be rostered before that; arrivals are recorded as unverified until it is done.</p>
+      {justAddedPlace && <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: justAddedPlace.name, address: justAddedPlace.address }} sites={[{ id: justAddedPlace.id, name: justAddedPlace.name, gps_lat: justAddedPlace.lat, gps_lng: justAddedPlace.lng, boundary: null, boundary_status: 'provisional', boundary_verification: 'unverified' }]} zones={[]} editableEntity={{ type: 'client_site', id: justAddedPlace.id, organizationId: client?.id ?? '', centerLat: justAddedPlace.lat, centerLng: justAddedPlace.lng }} />}
+      <p className="client-setup-hint">Officers can be rostered before the boundary is confirmed; arrivals are recorded as unverified until it is done.</p>
     </section>}
 
     {step === 3 && <section className="client-setup-card" aria-labelledby="step-what">
