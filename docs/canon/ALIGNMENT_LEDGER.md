@@ -389,6 +389,49 @@ record" candidates and `review_cctv_entity_observation`'s `link_person` /
 That is the intended behaviour, not a leak: the identity is global, the evidence
 behind it is not.
 
+### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)
+
+> "We should only have 1 person canonical record, 1 vehicle canonical record and
+> 1 location/place canonical record. This is the entire purpose of this app...
+> everything has a home and each org, system, module all go to those places to
+> get the data that is required for their purpose and writes to those canonical
+> records as observations."
+
+**Finding.** The 2026-09-19 ruling above named `canonical_people` as the global
+registry, but a second, older design (`persons`: richer columns - welfare_flag,
+homeless_status, date_of_birth - with real FKs from `notices`, `person_interactions`,
+`person_vehicle_links`, `ems_devices`) had never been reconciled with it. Audit
+found zero live dependency: no function anywhere ever INSERTs/UPDATEs a `persons`
+row; `person_interactions` and `person_vehicle_links` have RLS enabled with no
+INSERT policy at all (structurally unwritable, not just unwritten); neither
+`generate-notice` nor `generate-parking-notice` ever touches `notices.person_id`;
+no frontend page references `persons`, `person_interactions`, `person_vehicle_links`
+or `ems_devices`. `persons`' own RLS (`org_access_allowed`, org-scoped) was also
+inconsistent with the ratified global-canonical-plus-org-scoped-observations
+shape - a further sign it was the abandoned design, not the current one.
+
+**Ruling.** `persons` is retired. Its two enforcement-relevant fields migrate to
+`canonical_people`, mirroring `canonical_vehicles`' existing pattern exactly:
+`date_of_birth` and the `homeless_status` / `homeless_verified_at` /
+`homeless_notes` trio (lifecycle none -> claiming -> investigating -> confirmed,
+reconciled to a vehicle via `entity_links`). `welfare_flag` / `welfare_notes`
+do NOT migrate: `entity_flags` (`hazard_class`, `get_safety_warnings`) already
+replaced standalone `person_flags` for exactly this ("Replaces standalone
+vehicle_flags/person_flags/location_flags, retired in 0115") - a person's welfare
+concern is raised there, against `canonical_people.id`, not as a bespoke column.
+Because `canonical_people` can now hold personal information, its RLS is brought
+in line with `canonical_vehicles`: the base table is Bob-only, and
+`canonical_person_public` (mirroring `canonical_vehicle_public`) is the read path
+for everyone else - identity, review state, and `homeless_status` only;
+`date_of_birth` and `homeless_notes` stay behind governed paths.
+
+**Live status (migration `20260922050000`).** `notices.person_id`,
+`person_interactions.person_id`, `person_vehicle_links.person_id` and
+`ems_devices.person_id` now reference `canonical_people(id)`. `persons` is
+dropped. Noted separately, not acted on here: `entity_links`' own comment says
+it "generalises `person_vehicle_links`" - that table looks like further legacy
+debt of the same shape, but retiring it is a separate decision.
+
 ### 2026-09-16 — Manufacturing & maintenance is its own module (Don Squires)
 
 > "Let's put the materials in scope as we will need to create another module
