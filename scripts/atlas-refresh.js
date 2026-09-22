@@ -42,6 +42,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/OfficerMapPage.tsx',
   'apps/web/src/pages/OfficerOvernightVerificationPage.tsx',
   'apps/web/src/pages/OfficerVehicleLookupPage.tsx',
+  'apps/web/src/pages/VehicleSearchPage.tsx',
   'apps/web/src/pages/OfficerParkingPage.tsx',
   'apps/web/src/pages/BreachReviewPage.tsx',
   'apps/web/src/pages/ParkingOversightPage.tsx',

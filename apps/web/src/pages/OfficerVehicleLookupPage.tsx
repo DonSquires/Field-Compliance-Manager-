@@ -73,6 +73,20 @@ interface VehicleBreach {
   zone_name: string | null;
 }
 
+interface PermitRecord {
+  id: string;
+  holder_name: string | null;
+  permit_number: string;
+  permit_type: string | null;
+  forest_areas: string[] | null;
+  date_from: string | null;
+  date_to: string | null;
+  status: string;
+  firearm_licence_valid: boolean | null;
+  conditions: string | null;
+  vehicle_plates: string[] | null;
+}
+
 const OfficerVehicleLookupPage: React.FC = () => {
   const { selectedAgreementZones } = useServiceRelationships();
   const [plate, setPlate] = useState('');
@@ -81,6 +95,7 @@ const OfficerVehicleLookupPage: React.FC = () => {
   const [flags, setFlags] = useState<EntityFlag[]>([]);
   const [observations, setObservations] = useState<RecentObservation[]>([]);
   const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
+  const [permits, setPermits] = useState<PermitRecord[]>([]);
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,12 +114,13 @@ const OfficerVehicleLookupPage: React.FC = () => {
       setFlags([]);
       setObservations([]);
       setBreaches([]);
+      setPermits([]);
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
-      // ATLAS READS: canonical_vehicle_public, canonical_scv_public, observations, breach_alerts
+      // ATLAS READS: canonical_vehicle_public, canonical_scv_public, person_permits_fieldwork, observations, breach_alerts
       // Resolve the canonical vehicle first so observation history follows the
       // global identity link, not only the plate text recorded at scan time.
-      const [vehRes, scvRes] = await Promise.all([
+      const [vehRes, scvRes, permitRes] = await Promise.all([
         supabase
           .from('canonical_vehicle_public')
           .select(
@@ -117,6 +133,11 @@ const OfficerVehicleLookupPage: React.FC = () => {
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
           .ilike('plate_number', cleanPlate)
           .maybeSingle(),
+        supabase
+          .from('person_permits_fieldwork')
+          .select('id, holder_name, permit_number, permit_type, forest_areas, date_from, date_to, status, firearm_licence_valid, conditions, vehicle_plates')
+          .contains('vehicle_plates', [cleanPlate])
+          .order('date_to', { ascending: false }),
       ]);
       const canonicalVehicleId = (vehRes.data as Vehicle | null)?.id ?? null;
       const historyFilter = vehicleHistoryOrFilter(cleanPlate, canonicalVehicleId);
@@ -151,11 +172,12 @@ const OfficerVehicleLookupPage: React.FC = () => {
           .limit(10)),
       ]);
 
-      const queryError = vehRes.error ?? scvRes.error ?? obsRes.error ?? breachRes.error;
+      const queryError = vehRes.error ?? scvRes.error ?? permitRes.error ?? obsRes.error ?? breachRes.error;
       if (queryError) throw new Error(queryError.message);
       const vehData = vehRes.data as Vehicle | null;
       setVehicle(vehData);
       setScv((scvRes.data as ScvRecord) || null);
+      setPermits((permitRes.data as PermitRecord[]) || []);
 
       setObservations(
         ((obsRes.data as any[]) || []).map((row) => ({
@@ -244,9 +266,9 @@ const OfficerVehicleLookupPage: React.FC = () => {
 
       {searched && !loading && !error && (
         <div style={{ marginTop: '20px' }}>
-          {!vehicle && !scv && observations.length === 0 && breaches.length === 0 ? (
+          {!vehicle && !scv && permits.length === 0 && observations.length === 0 && breaches.length === 0 ? (
             <div className="empty-state">
-              <p>No vehicle records, SCV certifications, or observations found for "{plate}".</p>
+              <p>No vehicle records, SCV certifications, permits, or observations found for "{plate}".</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '16px' }}>
@@ -361,6 +383,52 @@ const OfficerVehicleLookupPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Forest / Site Access Permits */}
+              {permits.length > 0 && (
+                <div className="contact-card">
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Forest / Site Access Permits ({permits.length})</h3>
+                  <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                    {permits.map((p) => (
+                      <div
+                        key={p.id}
+                        style={{
+                          background: 'var(--color-bg-primary)',
+                          border: p.status === 'active' ? '1px solid var(--color-success)' : '1px solid var(--color-border)',
+                          padding: '10px 14px',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                              Permit #{p.permit_number} {p.permit_type ? `· ${p.permit_type}` : ''}
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                              {p.holder_name || 'Holder not recorded'}
+                              {p.forest_areas && p.forest_areas.length > 0 ? ` · ${p.forest_areas.join(', ')}` : ''}
+                            </div>
+                            {(p.date_from || p.date_to) && (
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                Valid {p.date_from ? new Date(p.date_from).toLocaleDateString() : '?'} – {p.date_to ? new Date(p.date_to).toLocaleDateString() : 'no end date'}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <span className={`badge ${p.status === 'active' ? 'badge-success' : p.status === 'expired' ? 'badge-warning' : 'badge-danger'}`}>
+                              {p.status.toUpperCase()}
+                            </span>
+                            {p.firearm_licence_valid === false && <span className="badge badge-danger">NO VALID FIREARMS LICENCE</span>}
+                          </div>
+                        </div>
+                        {p.conditions && (
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '8px', whiteSpace: 'pre-wrap' }}>{p.conditions}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Recent Observations Timeline */}
               <div className="contact-card">
