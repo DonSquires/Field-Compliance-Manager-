@@ -11,10 +11,14 @@ const migrationPath = existsSync(resolve(process.cwd(), 'supabase/migrations/202
 const rlsFixPath = existsSync(resolve(process.cwd(), 'supabase/migrations/20260922070000_fix_search_observations_vehicle_rls.sql'))
   ? resolve(process.cwd(), 'supabase/migrations/20260922070000_fix_search_observations_vehicle_rls.sql')
   : resolve(process.cwd(), '../../supabase/migrations/20260922070000_fix_search_observations_vehicle_rls.sql');
+const welfarePath = existsSync(resolve(process.cwd(), 'supabase/migrations/20260922080000_search_observations_welfare_and_category.sql'))
+  ? resolve(process.cwd(), 'supabase/migrations/20260922080000_search_observations_welfare_and_category.sql')
+  : resolve(process.cwd(), '../../supabase/migrations/20260922080000_search_observations_welfare_and_category.sql');
 
 const source = readFileSync(sourcePath, 'utf8');
 const searchMigration = readFileSync(migrationPath, 'utf8');
 const rlsFixMigration = readFileSync(rlsFixPath, 'utf8');
+const welfareMigration = readFileSync(welfarePath, 'utf8');
 
 describe('Observation Search canonical entity contract', () => {
   it('exposes every governed search_observations filter', () => {
@@ -45,6 +49,17 @@ describe('Observation Search canonical entity contract', () => {
     // never match.
     expect(rlsFixMigration).toContain('LEFT JOIN public.canonical_vehicle_public cv ON cv.id = o.canonical_vehicle_id');
     expect(rlsFixMigration).not.toContain('LEFT JOIN public.canonical_vehicles cv');
+  });
+
+  it('surfaces vehicle and person welfare status plus person category so the lookup is actually useful', () => {
+    expect(welfareMigration).toContain('vehicle_homeless_status');
+    expect(welfareMigration).toContain('person_homeless_status');
+    expect(welfareMigration).toContain('person_category');
+    expect(welfareMigration).toContain("pr.metadata -> 'profile_details' ->> 'category'");
+    expect(source).toContain('vehicle_homeless_status');
+    expect(source).toContain('person_homeless_status');
+    expect(source).toContain('Welfare:');
+    expect(source).toContain('person_category');
   });
 
   it('does not reset the search box on every keystroke', () => {
