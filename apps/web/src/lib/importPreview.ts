@@ -68,7 +68,11 @@ function mappingFor(headers: string[]): ImportSchemaPreview['mappings'] {
 }
 
 function formatDate(timestamp: number): string {
-  return new Intl.DateTimeFormat('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(timestamp);
+  // Explicit timeZone, not just the en-NZ locale: locale only controls DD/MM/YYYY formatting
+  // style, not which timezone the timestamp is converted into. Without pinning it, this would
+  // silently use whatever timezone the runtime machine happens to be set to - CI, production,
+  // and a developer's laptop could each show a different calendar date for the same import.
+  return new Intl.DateTimeFormat('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Pacific/Auckland' }).format(timestamp);
 }
 
 export function parseCsvPreview(text: string, fileName: string): ImportSchemaPreview {

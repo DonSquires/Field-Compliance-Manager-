@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
+// Normalised to LF: a negative assertion below embeds a literal '\n' for a multi-line pattern.
+// Without normalising, git's CRLF checkout on Windows would make that pattern never match
+// regardless of whether the bad code is genuinely absent - a silent false pass, not a real check.
+const source = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8').replace(/\r\n/g, '\n');
 
 describe('AdminShell access and routing boundaries', () => {
   it('integrates tenant-scoped role-aware notifications', () => {

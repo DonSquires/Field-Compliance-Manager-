@@ -2,8 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const page = readFileSync(resolve(process.cwd(), 'src/pages/RosterHRPage.tsx'), 'utf8');
-const credentialSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql'), 'utf8');
+// Normalised to LF: assertions below embed literal '\n' for multi-line patterns, but git on
+// Windows checks these files out as CRLF - an exact substring match would otherwise fail even
+// when every individual token it checks for is genuinely present.
+const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
+const page = read('src/pages/RosterHRPage.tsx');
+const credentialSql = read('../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql');
 
 describe('governed HR administration', () => {
   it('matches live roster schema and branch context', () => {

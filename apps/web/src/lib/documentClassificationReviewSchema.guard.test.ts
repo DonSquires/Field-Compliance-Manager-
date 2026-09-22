@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260908100000_review_document_classification.sql'), 'utf8');
+// Normalised to LF: this file's assertions embed literal '\n' for multi-line SQL, but git on
+// Windows checks the migration out as CRLF - an exact substring match would otherwise fail even
+// when every individual token it checks for is genuinely present.
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260908100000_review_document_classification.sql'), 'utf8').replace(/\r\n/g, '\n');
 
 describe('governed document classification review', () => {
   it('derives the reviewer from auth and validates the tenant boundary', () => {

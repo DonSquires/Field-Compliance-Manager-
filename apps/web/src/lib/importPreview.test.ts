@@ -10,7 +10,9 @@ describe('CSV import preview', () => {
       expect.objectContaining({ source: 'REGO', target: 'vehicle.registration' }),
       expect.objectContaining({ source: 'RecordedDate', target: 'observation.observed_at' }),
     ]));
-    expect(preview.date_range).toContain('02/01/2026');
+    // 2026-01-02T11:00:00Z is 2026-01-03T00:00:00 in NZDT (+13, January is NZ summer) - the date
+    // range is deliberately shown in the operating timezone, not the raw UTC calendar date.
+    expect(preview.date_range).toContain('03/01/2026');
     expect(preview.warnings).toContain('Preview only: no canonical records will be written');
     expect(preview.headers).toEqual(['ID', 'RecordedDate', 'REGO', 'Title']);
     expect(preview.sample_rows).toHaveLength(3);

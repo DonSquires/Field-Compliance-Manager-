@@ -2,14 +2,18 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const page = readFileSync(resolve(process.cwd(), 'src/pages/CCTVConsolePage.tsx'), 'utf8');
-const styles = readFileSync(resolve(process.cwd(), 'src/pages/CCTVConsolePage.css'), 'utf8');
-const tile = readFileSync(resolve(process.cwd(), 'src/components/CCTVPlayerTile.tsx'), 'utf8');
-const timeline = readFileSync(resolve(process.cwd(), 'src/components/CCTVTimeline.tsx'), 'utf8');
-const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
-const fieldOps = readFileSync(resolve(process.cwd(), 'src/pages/FieldOperationsPage.tsx'), 'utf8');
-const importPage = readFileSync(resolve(process.cwd(), 'src/pages/CCTVImportPage.tsx'), 'utf8');
-const lib = readFileSync(resolve(process.cwd(), 'src/lib/cctvConsole.ts'), 'utf8');
+// Normalised to LF: guard-test assertions embed literal '\n' for multi-line patterns, but git on
+// Windows checks these source files out as CRLF - an exact substring match would otherwise fail
+// even when every individual token it checks for is genuinely present in the file.
+const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
+const page = read('src/pages/CCTVConsolePage.tsx');
+const styles = read('src/pages/CCTVConsolePage.css');
+const tile = read('src/components/CCTVPlayerTile.tsx');
+const timeline = read('src/components/CCTVTimeline.tsx');
+const shell = read('src/shells/AdminShell.tsx');
+const fieldOps = read('src/pages/FieldOperationsPage.tsx');
+const importPage = read('src/pages/CCTVImportPage.tsx');
+const lib = read('src/lib/cctvConsole.ts');
 
 describe('CCTV console', () => {
   it('is driven by the place-anchored CCTV spine, scoped to the organisation', () => {

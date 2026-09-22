@@ -2,8 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const page = readFileSync(resolve(process.cwd(), 'src/pages/GrandMasterPlatformPage.tsx'), 'utf8');
-const edge = readFileSync(resolve(process.cwd(), '../../supabase/functions/import-scv-csv/index.ts'), 'utf8');
+// Normalised to LF: a negative assertion below embeds a literal '\n' for a multi-line pattern.
+// Without normalising, git's CRLF checkout on Windows would make that pattern never match
+// regardless of whether the bad code is genuinely absent - a silent false pass, not a real check.
+const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
+const page = read('src/pages/GrandMasterPlatformPage.tsx');
+const edge = read('../../supabase/functions/import-scv-csv/index.ts');
 
 describe('grand master SCV infrastructure ownership', () => {
   it('keeps the import control on the grand master platform surface', () => {

@@ -2,8 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(resolve(process.cwd(), 'src/pages/BuilderControlRoomPage.tsx'), 'utf8');
-const relay = readFileSync(resolve(process.cwd(), '../../supabase/functions/bob-builder-control-room/index.ts'), 'utf8');
+// Normalised to LF: an assertion below embeds a literal '\n' for a multi-line pattern, but git
+// on Windows checks these files out as CRLF - an exact substring match would otherwise fail even
+// when every individual token it checks for is genuinely present.
+const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
+const source = read('src/pages/BuilderControlRoomPage.tsx');
+const relay = read('../../supabase/functions/bob-builder-control-room/index.ts');
 
 describe('Builder control room boundary', () => {
   it('uses the authenticated Edge Function instead of control-plane credentials', () => {
