@@ -21,6 +21,7 @@ const MANAGED_SOURCES = [
   'apps/web/src/pages/AccountOnboardingPage.tsx',
   'apps/web/src/pages/ActivationHandoffsPage.tsx',
   'apps/web/src/components/OperationalPlaceManager.tsx',
+  'apps/web/src/components/FinanceControlPanel.tsx',
   'apps/web/src/pages/LocationsPage.tsx',
   'apps/web/src/pages/SiteDetailPage.tsx',
   'apps/web/src/pages/ZoneDetailPage.tsx',
