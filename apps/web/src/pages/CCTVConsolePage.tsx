@@ -797,9 +797,16 @@ const CCTVConsolePage: React.FC = () => {
     setPersonDetails(selectedObservation?.kind === 'person' && typeof selectedObservation.profileDetails.notes === 'string' ? selectedObservation.profileDetails.notes : '');
     setPersonCategory(selectedObservation?.kind === 'person' && typeof selectedObservation.profileDetails.category === 'string' ? selectedObservation.profileDetails.category : '');
     setNewPlate('');
-    setVehicleNotes(selectedObservation?.kind === 'vehicle' && typeof selectedObservation.vehicleNotes === 'string' ? selectedObservation.vehicleNotes : '');
+    setVehicleNotes('');
+    let cancelled = false;
+    if (selectedObservation?.kind === 'vehicle' && selectedObservation.canonicalVehicleId) {
+      void supabase.rpc('get_cctv_vehicle_note', { p_observation_id: selectedObservation.id }).then(({ data }) => {
+        if (!cancelled) setVehicleNotes(typeof data === 'string' ? data : '');
+      });
+    }
     setNotes('');
     setReviewMessage(null);
+    return () => { cancelled = true; };
   }, [selectedObservationId]);
 
   const selectObservation = (observation: ConsoleObservation) => {
@@ -917,7 +924,6 @@ const CCTVConsolePage: React.FC = () => {
     });
     setReviewBusy(null);
     if (notesError) { setReviewMessage(notesError.message); return; }
-    if (observation.importId) void loadImportDetail(observation.importId);
     setReviewMessage('Vehicle note saved.');
   };
 

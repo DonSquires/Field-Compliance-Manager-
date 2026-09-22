@@ -58,7 +58,7 @@ const mark = (start: number, end: number, severity: ConsoleMark['severity'], id 
 const observation = (overrides: Partial<ConsoleObservation>): ConsoleObservation => ({
   id: 'o1', evidenceId: 'c0', importId: 'imp', sourceEventId: 'vehicle-1', kind: 'vehicle', observedAtMs: T0 + 30_000, observedToMs: T0 + 35_000,
   label: null, plate: null, species: null, speciesConfidence: null, isPest: null, confidence: 0.9, qualityState: 'clear', attributes: {}, thumbnail: null,
-  reviewState: 'unreviewed', portfolioKey: null, portfolioState: 'unmatched', candidates: [], personRecordId: null, canonicalPersonId: null, profileName: null, profileDetails: {}, canonicalVehicleId: null, vehicleNotes: null, reviewedAt: null, reviewNotes: null,
+  reviewState: 'unreviewed', portfolioKey: null, portfolioState: 'unmatched', candidates: [], personRecordId: null, canonicalPersonId: null, profileName: null, profileDetails: {}, canonicalVehicleId: null, reviewedAt: null, reviewNotes: null,
   ...overrides,
 });
 

@@ -130,12 +130,19 @@ const CCTVTriagePage: React.FC = () => {
     setPersonDetails(selected?.kind === 'person' && typeof selected.profileDetails.notes === 'string' ? selected.profileDetails.notes : '');
     setPersonCategory(selected?.kind === 'person' && typeof selected.profileDetails.category === 'string' ? selected.profileDetails.category : '');
     setNewPlate('');
-    setVehicleNotes(selected?.kind === 'vehicle' && typeof selected.vehicleNotes === 'string' ? selected.vehicleNotes : '');
+    setVehicleNotes('');
+    let cancelled = false;
+    if (selected?.kind === 'vehicle' && selected.canonicalVehicleId) {
+      void supabase.rpc('get_cctv_vehicle_note', { p_observation_id: selected.id }).then(({ data }) => {
+        if (!cancelled) setVehicleNotes(typeof data === 'string' ? data : '');
+      });
+    }
     setNotes('');
     setReviewMessage(null);
     setCorrectingVehicleId(null);
     setCorrectMake('');
     setCorrectModel('');
+    return () => { cancelled = true; };
   }, [selected?.id]);
 
   const patchObservation = useCallback((updated: ConsoleObservation) => {
@@ -220,16 +227,14 @@ const CCTVTriagePage: React.FC = () => {
   const updateVehicleNotes = useCallback(async (observation: ConsoleObservation) => {
     setReviewBusy(`${observation.id}:vehicle-notes`);
     setReviewMessage(null);
-    const { data, error: notesError } = await supabase.rpc('update_cctv_vehicle_notes', {
+    const { error: notesError } = await supabase.rpc('update_cctv_vehicle_notes', {
       p_observation_id: observation.id,
       p_notes: vehicleNotes.trim() || null,
     });
     setReviewBusy(null);
     if (notesError) { setReviewMessage(notesError.message); return; }
-    const updated = data && typeof data === 'object' ? toObservation(data as Record<string, unknown>) : null;
-    if (updated) patchObservation(updated);
     setReviewMessage('Vehicle note saved.');
-  }, [vehicleNotes, patchObservation]);
+  }, [vehicleNotes]);
 
   return (
     <div className="page-container cctv-console cctv-triage">

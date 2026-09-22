@@ -67,11 +67,12 @@ describe('CCTV console', () => {
     expect(page).toContain('p_profile_details: profileDetails');
   });
 
-  it('lets a reviewer attach a persistent note to the vehicle record, independent of accept/reject', () => {
-    expect(lib).toContain('canonical_vehicles(notes)');
+  it('lets a reviewer attach a persistent note to the vehicle record, independent of accept/reject, scoped to their own organisation', () => {
+    expect(lib).not.toContain('canonical_vehicles(notes)');
     expect(page).toContain('Vehicle note');
     expect(page).toContain('Save vehicle note');
     expect(page).toContain("supabase.rpc('update_cctv_vehicle_notes'");
+    expect(page).toContain("supabase.rpc('get_cctv_vehicle_note'");
   });
 
   it('plays every camera on one shared clock with NVR controls and keyboard shortcuts', () => {

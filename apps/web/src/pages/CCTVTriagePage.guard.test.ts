@@ -45,7 +45,8 @@ describe('CCTV observation triage', () => {
     expect(page).toContain('if (personCategory.trim()) profileDetails.category = personCategory.trim();');
     expect(page).toContain('Vehicle note');
     expect(page).toContain('Save vehicle note');
-    expect(lib).toContain('canonical_vehicles(notes)');
+    expect(page).toContain("supabase.rpc('get_cctv_vehicle_note'");
+    expect(lib).not.toContain('canonical_vehicles(notes)');
   });
 
   it('never turns a weapon hint into an automated alert - only a recorded human confirm/dismiss decision', () => {
