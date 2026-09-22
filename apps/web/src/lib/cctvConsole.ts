@@ -127,6 +127,7 @@ export type ConsoleObservation = {
   profileName: string | null;
   profileDetails: Record<string, unknown>;
   canonicalVehicleId: string | null;
+  vehicleNotes: string | null;
   reviewedAt: string | null;
   reviewNotes: string | null;
 };
@@ -155,6 +156,7 @@ export function toObservation(row: Record<string, unknown>): ConsoleObservation 
   const personProfile = singleRecord(row.person_records);
   const profileName = typeof personProfile.display_name === 'string' ? personProfile.display_name : null;
   const profileMetadata = asRecord(personProfile.metadata);
+  const vehicleRecord = singleRecord(row.canonical_vehicles);
   return {
     id: row.id,
     evidenceId: String(row.evidence_item_id ?? ''),
@@ -181,6 +183,7 @@ export function toObservation(row: Record<string, unknown>): ConsoleObservation 
     profileName,
     profileDetails: asRecord(profileMetadata.profile_details),
     canonicalVehicleId: typeof row.canonical_vehicle_id === 'string' ? row.canonical_vehicle_id : null,
+    vehicleNotes: typeof vehicleRecord.notes === 'string' ? vehicleRecord.notes : null,
     reviewedAt: typeof row.reviewed_at === 'string' ? row.reviewed_at : null,
     reviewNotes: typeof row.review_notes === 'string' ? row.review_notes : null,
   };
@@ -188,7 +191,7 @@ export function toObservation(row: Record<string, unknown>): ConsoleObservation 
 
 // The full select() column list every screen reading cctv_entity_observations should use, so a future
 // column addition (or the person_records join) only needs updating in one place.
-export const OBSERVATION_SELECT = 'id, evidence_item_id, cctv_import_id, source_event_id, entity_kind, observed_at, observed_to, candidate_label, candidate_plate, animal_type, species_confidence, is_pest, model_confidence, quality_state, attributes, thumbnail, review_state, portfolio_key, portfolio_state, portfolio_candidates, person_record_id, canonical_person_id, canonical_vehicle_id, reviewed_at, review_notes, person_records(display_name, metadata)';
+export const OBSERVATION_SELECT = 'id, evidence_item_id, cctv_import_id, source_event_id, entity_kind, observed_at, observed_to, candidate_label, candidate_plate, animal_type, species_confidence, is_pest, model_confidence, quality_state, attributes, thumbnail, review_state, portfolio_key, portfolio_state, portfolio_candidates, person_record_id, canonical_person_id, canonical_vehicle_id, reviewed_at, review_notes, person_records(display_name, metadata), canonical_vehicles(notes)';
 
 // Self-hosted vision-LLM hint (Moondream, via the in-house Ollama container) - never a validated
 // detection. `present: false` means the model looked and didn't flag anything; a missing/malformed hint

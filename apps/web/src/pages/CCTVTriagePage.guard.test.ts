@@ -33,9 +33,19 @@ describe('CCTV observation triage', () => {
     expect(page).toContain("supabase.rpc('confirm_cctv_vehicle_attributes'");
     expect(page).toContain("supabase.rpc('confirm_cctv_weapon_hint'");
     expect(page).toContain("supabase.rpc('update_cctv_person_profile'");
+    expect(page).toContain("supabase.rpc('update_cctv_vehicle_notes'");
     expect(page).not.toMatch(/from\('cctv_entity_observations'\)[\s\S]{0,400}\.(update|insert|delete)\(/);
     expect(page).not.toContain("from('canonical_vehicles')");
     expect(page).not.toContain("from('person_records')");
+  });
+
+  it('lets a reviewer record a person category and a persistent vehicle note beyond just a name', () => {
+    expect(page).toContain('Category');
+    expect(page).toContain('Person of interest');
+    expect(page).toContain('if (personCategory.trim()) profileDetails.category = personCategory.trim();');
+    expect(page).toContain('Vehicle note');
+    expect(page).toContain('Save vehicle note');
+    expect(lib).toContain('canonical_vehicles(notes)');
   });
 
   it('never turns a weapon hint into an automated alert - only a recorded human confirm/dismiss decision', () => {

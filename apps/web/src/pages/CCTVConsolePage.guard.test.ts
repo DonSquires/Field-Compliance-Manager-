@@ -59,9 +59,19 @@ describe('CCTV console', () => {
     expect(lib).toContain('person_records(display_name, metadata)');
     expect(lib).toContain("label: kind === 'person' && profileName ? profileName");
     expect(page).toContain('Person name');
+    expect(page).toContain('Category');
     expect(page).toContain('Profile details');
     expect(page).toContain('Save person profile');
-    expect(page).toContain('p_profile_details: personDetails.trim() ? { notes: personDetails.trim() } : {}');
+    expect(page).toContain('if (personDetails.trim()) profileDetails.notes = personDetails.trim();');
+    expect(page).toContain('if (personCategory.trim()) profileDetails.category = personCategory.trim();');
+    expect(page).toContain('p_profile_details: profileDetails');
+  });
+
+  it('lets a reviewer attach a persistent note to the vehicle record, independent of accept/reject', () => {
+    expect(lib).toContain('canonical_vehicles(notes)');
+    expect(page).toContain('Vehicle note');
+    expect(page).toContain('Save vehicle note');
+    expect(page).toContain("supabase.rpc('update_cctv_vehicle_notes'");
   });
 
   it('plays every camera on one shared clock with NVR controls and keyboard shortcuts', () => {

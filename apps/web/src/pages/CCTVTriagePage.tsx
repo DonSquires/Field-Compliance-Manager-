@@ -65,6 +65,8 @@ const CCTVTriagePage: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [newPlate, setNewPlate] = useState('');
   const [personDetails, setPersonDetails] = useState('');
+  const [personCategory, setPersonCategory] = useState('');
+  const [vehicleNotes, setVehicleNotes] = useState('');
   const [correctingVehicleId, setCorrectingVehicleId] = useState<string | null>(null);
   const [correctMake, setCorrectMake] = useState('');
   const [correctModel, setCorrectModel] = useState('');
@@ -126,7 +128,9 @@ const CCTVTriagePage: React.FC = () => {
   useEffect(() => {
     setNewName(selected?.kind === 'person' ? selected.profileName ?? '' : '');
     setPersonDetails(selected?.kind === 'person' && typeof selected.profileDetails.notes === 'string' ? selected.profileDetails.notes : '');
+    setPersonCategory(selected?.kind === 'person' && typeof selected.profileDetails.category === 'string' ? selected.profileDetails.category : '');
     setNewPlate('');
+    setVehicleNotes(selected?.kind === 'vehicle' && typeof selected.vehicleNotes === 'string' ? selected.vehicleNotes : '');
     setNotes('');
     setReviewMessage(null);
     setCorrectingVehicleId(null);
@@ -197,10 +201,13 @@ const CCTVTriagePage: React.FC = () => {
     if (!newName.trim()) return;
     setReviewBusy(`${observation.id}:profile`);
     setReviewMessage(null);
+    const profileDetails: Record<string, string> = {};
+    if (personDetails.trim()) profileDetails.notes = personDetails.trim();
+    if (personCategory.trim()) profileDetails.category = personCategory.trim();
     const { error: profileError } = await supabase.rpc('update_cctv_person_profile', {
       p_observation_id: observation.id,
       p_display_name: newName.trim(),
-      p_profile_details: personDetails.trim() ? { notes: personDetails.trim() } : {},
+      p_profile_details: profileDetails,
       p_notes: notes.trim() || null,
     });
     setReviewBusy(null);
@@ -208,7 +215,21 @@ const CCTVTriagePage: React.FC = () => {
     // The RPC updates every sighting of this person, not just the selected row - reload rather than patch one.
     void load();
     setReviewMessage('Person profile updated.');
-  }, [newName, notes, personDetails, load]);
+  }, [newName, notes, personDetails, personCategory, load]);
+
+  const updateVehicleNotes = useCallback(async (observation: ConsoleObservation) => {
+    setReviewBusy(`${observation.id}:vehicle-notes`);
+    setReviewMessage(null);
+    const { data, error: notesError } = await supabase.rpc('update_cctv_vehicle_notes', {
+      p_observation_id: observation.id,
+      p_notes: vehicleNotes.trim() || null,
+    });
+    setReviewBusy(null);
+    if (notesError) { setReviewMessage(notesError.message); return; }
+    const updated = data && typeof data === 'object' ? toObservation(data as Record<string, unknown>) : null;
+    if (updated) patchObservation(updated);
+    setReviewMessage('Vehicle note saved.');
+  }, [vehicleNotes, patchObservation]);
 
   return (
     <div className="page-container cctv-console cctv-triage">
@@ -412,8 +433,23 @@ const CCTVTriagePage: React.FC = () => {
               {selected.kind === 'person' && selected.personRecordId ? (
                 <div className="cctv-entity__profile-editor">
                   <label className="cctv-entity__field">Person name <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Unknown Person #1" /></label>
+                  <label className="cctv-entity__field">Category <select value={personCategory} onChange={(event) => setPersonCategory(event.target.value)}>
+                    <option value="">Not set</option>
+                    <option value="Visitor">Visitor</option>
+                    <option value="Staff">Staff</option>
+                    <option value="Contractor">Contractor</option>
+                    <option value="Resident or tenant">Resident or tenant</option>
+                    <option value="Known to site">Known to site</option>
+                    <option value="Person of interest">Person of interest</option>
+                  </select></label>
                   <label className="cctv-entity__field">Profile details <textarea value={personDetails} onChange={(event) => setPersonDetails(event.target.value)} placeholder="Optional details confirmed by the reviewer" rows={2} /></label>
                   <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void updatePersonProfile(selected)}><UserRound size={14} aria-hidden="true" /> Save person profile</button>
+                </div>
+              ) : null}
+              {selected.kind === 'vehicle' && (selected.plate || selected.canonicalVehicleId) ? (
+                <div className="cctv-entity__profile-editor">
+                  <label className="cctv-entity__field">Vehicle note <textarea value={vehicleNotes} onChange={(event) => setVehicleNotes(event.target.value)} placeholder="e.g. Regular contractor, seen loitering near the fence line" rows={2} /></label>
+                  <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => void updateVehicleNotes(selected)}><Car size={14} aria-hidden="true" /> Save vehicle note</button>
                 </div>
               ) : null}
 

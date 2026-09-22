@@ -221,7 +221,9 @@ const CCTVConsolePage: React.FC = () => {
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [personDetails, setPersonDetails] = useState('');
+  const [personCategory, setPersonCategory] = useState('');
   const [newPlate, setNewPlate] = useState('');
+  const [vehicleNotes, setVehicleNotes] = useState('');
   const [notes, setNotes] = useState('');
   const [correctingVehicleId, setCorrectingVehicleId] = useState<string | null>(null);
   const [correctMake, setCorrectMake] = useState('');
@@ -793,7 +795,9 @@ const CCTVConsolePage: React.FC = () => {
   useEffect(() => {
     setNewName(selectedObservation?.kind === 'person' ? selectedObservation.profileName ?? '' : '');
     setPersonDetails(selectedObservation?.kind === 'person' && typeof selectedObservation.profileDetails.notes === 'string' ? selectedObservation.profileDetails.notes : '');
+    setPersonCategory(selectedObservation?.kind === 'person' && typeof selectedObservation.profileDetails.category === 'string' ? selectedObservation.profileDetails.category : '');
     setNewPlate('');
+    setVehicleNotes(selectedObservation?.kind === 'vehicle' && typeof selectedObservation.vehicleNotes === 'string' ? selectedObservation.vehicleNotes : '');
     setNotes('');
     setReviewMessage(null);
   }, [selectedObservationId]);
@@ -889,16 +893,32 @@ const CCTVConsolePage: React.FC = () => {
     if (!newName.trim()) return;
     setReviewBusy(`${observation.id}:profile`);
     setReviewMessage(null);
+    const profileDetails: Record<string, string> = {};
+    if (personDetails.trim()) profileDetails.notes = personDetails.trim();
+    if (personCategory.trim()) profileDetails.category = personCategory.trim();
     const { error: profileError } = await supabase.rpc('update_cctv_person_profile', {
       p_observation_id: observation.id,
       p_display_name: newName.trim(),
-      p_profile_details: personDetails.trim() ? { notes: personDetails.trim() } : {},
+      p_profile_details: profileDetails,
       p_notes: notes.trim() || null,
     });
     setReviewBusy(null);
     if (profileError) { setReviewMessage(profileError.message); return; }
     if (observation.importId) void loadImportDetail(observation.importId);
     setReviewMessage('Person profile updated.');
+  };
+
+  const updateVehicleNotes = async (observation: ConsoleObservation) => {
+    setReviewBusy(`${observation.id}:vehicle-notes`);
+    setReviewMessage(null);
+    const { error: notesError } = await supabase.rpc('update_cctv_vehicle_notes', {
+      p_observation_id: observation.id,
+      p_notes: vehicleNotes.trim() || null,
+    });
+    setReviewBusy(null);
+    if (notesError) { setReviewMessage(notesError.message); return; }
+    if (observation.importId) void loadImportDetail(observation.importId);
+    setReviewMessage('Vehicle note saved.');
   };
 
   const columns = gridColumns(layout);
@@ -1373,8 +1393,23 @@ const CCTVConsolePage: React.FC = () => {
                         {observation.kind === 'person' && observation.personRecordId ? (
                           <div className="cctv-entity__profile-editor">
                             <label className="cctv-entity__field">Person name <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Unknown Person #1" /></label>
+                            <label className="cctv-entity__field">Category <select value={personCategory} onChange={(event) => setPersonCategory(event.target.value)}>
+                              <option value="">Not set</option>
+                              <option value="Visitor">Visitor</option>
+                              <option value="Staff">Staff</option>
+                              <option value="Contractor">Contractor</option>
+                              <option value="Resident or tenant">Resident or tenant</option>
+                              <option value="Known to site">Known to site</option>
+                              <option value="Person of interest">Person of interest</option>
+                            </select></label>
                             <label className="cctv-entity__field">Profile details <textarea value={personDetails} onChange={(event) => setPersonDetails(event.target.value)} placeholder="Optional details confirmed by the reviewer" rows={2} /></label>
                             <button type="button" className="page-action" disabled={reviewBusy !== null || !newName.trim()} onClick={() => void updatePersonProfile(observation)}><UserRound size={14} aria-hidden="true" /> Save person profile</button>
+                          </div>
+                        ) : null}
+                        {observation.kind === 'vehicle' && (observation.plate || observation.canonicalVehicleId) ? (
+                          <div className="cctv-entity__profile-editor">
+                            <label className="cctv-entity__field">Vehicle note <textarea value={vehicleNotes} onChange={(event) => setVehicleNotes(event.target.value)} placeholder="e.g. Regular contractor, seen loitering near the fence line" rows={2} /></label>
+                            <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => void updateVehicleNotes(observation)}><Car size={14} aria-hidden="true" /> Save vehicle note</button>
                           </div>
                         ) : null}
                         {reviewBusy?.startsWith(observation.id) ? <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Saving…</p> : null}
