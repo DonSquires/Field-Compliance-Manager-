@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-type AddressSource = 'linz_address' | 'google_address' | 'google_reverse';
+type AddressSource = 'linz_address' | 'google_address' | 'google_reverse' | 'google_place' | 'council_registry';
 
 export interface ResolvedAddress {
   label: string;
@@ -11,6 +11,11 @@ export interface AddressCandidate extends ResolvedAddress {
   lat: number;
   lng: number;
   address_id?: string | null;
+  /** 'address' | 'business' | 'reserve' — a hint for disambiguation, not a hard type. */
+  kind?: string;
+  /** Present for council_registry hits: the real boundary, ready to accept without a second lookup. */
+  boundary?: GeoJSON.Geometry | null;
+  agency_id?: string;
 }
 
 export async function resolveAddressForCoordinates(lat: number, lng: number): Promise<ResolvedAddress | null> {

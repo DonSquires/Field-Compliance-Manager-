@@ -21,6 +21,7 @@
  *   - LINZ_API_KEY lives in edge-function secrets only; never sent to the browser.
  *   - JWT-verified caller (any authenticated app user). Read-only proxy; no writes.
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const LINZ_API_KEY = Deno.env.get('LINZ_API_KEY') ?? '';
 // Google is the SECONDARY geo provider (policy #19): used to seed the LINZ
 // point lookup from free text. OpenStreetMap / Nominatim is REMOVED from the
@@ -33,59 +34,91 @@ const PARCEL_LAYER = Deno.env.get('LINZ_PARCEL_LAYER') ?? '50772'; // NZ Primary
 const BUILDING_LAYER = Deno.env.get('LINZ_BUILDING_LAYER') ?? '101292'; // NZ Building Outlines
 const ROADS_LAYER = Deno.env.get('LINZ_ROADS_LAYER') ?? '123110'; // NZ Addresses: Roads (centreline names)
 const QUERY_URL = 'https://data.linz.govt.nz/services/query/v1/vector.json';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const admin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 const snippet = (s)=>s.replace(/\s+/g, ' ').trim().slice(0, 400);
-async function googleGeocode(q) {
-  if (!GOOGLE_API_TOKEN) return null;
-  // NZ viewport bias so ambiguous names resolve within New Zealand.
-  const NZ_BOUNDS = '-47.5,166.0|-34.0,179.0'; // SW|NE (lat,lng)
-  // Stage 1: Geocoding API. Capture formatted_address (the real street address
-  // Google returns, e.g. "1390 Tarras-Cromwell Road, Bendigo 9383") so callers
-  // get an address even when LINZ has no feature at the point.
+// Humans searching by name expect a Google-style results LIST to pick from, not
+// one silent best guess (a wrong first result previously meant the LINZ lookup
+// that followed was seeded from the wrong point, with no way to notice). Runs
+// both Google APIs and keeps up to `max` hits from EACH, tagged by kind so the
+// picker can show "address" vs "business/place" distinctly.
+async function googlePlacesCandidates(q, max) {
+  const candidates = [];
+  if (!GOOGLE_API_TOKEN) return candidates;
+  const NZ_BOUNDS = '-47.5,166.0|-34.0,179.0';
   try {
     const url = 'https://maps.googleapis.com/maps/api/geocode/json' + `?address=${encodeURIComponent(q)}` + `&components=country:NZ` + `&bounds=${encodeURIComponent(NZ_BOUNDS)}` + `&key=${GOOGLE_API_TOKEN}`;
-    const res = await fetch(url, {
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
     const data = await res.json();
-    const hit = data.results?.[0];
-    const loc = hit?.geometry?.location;
-    if (data.status === 'OK' && loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng))) {
-      return {
-        lat: Number(loc.lat),
-        lng: Number(loc.lng),
-        address: hit?.formatted_address ?? null
-      };
+    if (data.status === 'OK') {
+      for (const hit of (data.results ?? []).slice(0, max)) {
+        const loc = hit?.geometry?.location;
+        if (loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng))) {
+          candidates.push({ label: hit.formatted_address ?? q, lat: Number(loc.lat), lng: Number(loc.lng), source: 'google_address', kind: 'address' });
+        }
+      }
     }
   } catch  {}
-  // Stage 2: Places Text Search (name-only / partial input). formatted_address
-  // here is the place's address/vicinity.
   try {
     const url = 'https://maps.googleapis.com/maps/api/place/textsearch/json' + `?query=${encodeURIComponent(`${q}, New Zealand`)}` + `&region=nz` + `&key=${GOOGLE_API_TOKEN}`;
-    const res = await fetch(url, {
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
     const data = await res.json();
-    const hit = data.results?.[0];
-    const loc = hit?.geometry?.location;
-    if ((data.status === 'OK' || data.status === 'ZERO_RESULTS') && loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng))) {
-      const addr = hit?.formatted_address ?? hit?.name ?? null;
-      return {
-        lat: Number(loc.lat),
-        lng: Number(loc.lng),
-        address: addr
-      };
+    if (data.status === 'OK' || data.status === 'ZERO_RESULTS') {
+      for (const hit of (data.results ?? []).slice(0, max)) {
+        const loc = hit?.geometry?.location;
+        if (loc && isFinite(Number(loc.lat)) && isFinite(Number(loc.lng))) {
+          const label = hit.name ? (hit.formatted_address ? `${hit.name} — ${hit.formatted_address}` : hit.name) : (hit.formatted_address ?? q);
+          candidates.push({ label, lat: Number(loc.lat), lng: Number(loc.lng), source: 'google_place', kind: 'business' });
+        }
+      }
     }
   } catch  {}
-  return null;
+  return candidates;
+}
+// Centroid of a GeoJSON Polygon/MultiPolygon outer ring -- good enough for a
+// disambiguation-list marker point; not used as the accepted boundary itself.
+function ringCentroid(geometry) {
+  const ring = geometry?.type === 'Polygon' ? geometry.coordinates?.[0] : geometry?.type === 'MultiPolygon' ? geometry.coordinates?.[0]?.[0] : null;
+  if (!Array.isArray(ring) || ring.length === 0) return null;
+  let sumLng = 0, sumLat = 0;
+  for (const [lng, lat] of ring) { sumLng += lng; sumLat += lat; }
+  return { lat: sumLat / ring.length, lng: sumLng / ring.length };
+}
+// Name search against every verified geo_source_registry agency (council
+// reserves, parks, etc.) -- LINZ has no equivalent (legal parcels only), so
+// this is genuinely new coverage, not a duplicate of the address candidates.
+// A registry hit already carries real polygon geometry, so picking one of
+// these can skip straight to accept/adjust instead of a second boundary lookup.
+async function registryNameCandidates(q, max) {
+  const candidates = [];
+  if (!admin) return candidates;
+  try {
+    const { data: sources } = await admin.from('geo_source_registry').select('agency_id, base_url, layer_id, search_field').eq('status', 'verified').eq('source_class', 'arcgis_featureserver');
+    for (const reg of sources ?? []) {
+      if (!reg.base_url || !reg.search_field) continue;
+      try {
+        const where = `UPPER(${reg.search_field}) LIKE UPPER('%${q.replace(/'/g, "''")}%')`;
+        const url = `${reg.base_url}/${reg.layer_id}/query?where=${encodeURIComponent(where)}&outFields=*&returnGeometry=true&outSR=4326&resultRecordCount=${max}&f=geojson`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) continue;
+        const data = await res.json();
+        for (const feature of (data.features ?? []).slice(0, max)) {
+          const props = feature.properties ?? {};
+          const name = props[reg.search_field];
+          const centroid = ringCentroid(feature.geometry);
+          if (!name || !centroid) continue;
+          candidates.push({ label: String(name), lat: centroid.lat, lng: centroid.lng, source: 'council_registry', kind: 'reserve', agency_id: reg.agency_id, boundary: feature.geometry ?? null });
+        }
+      } catch  {}
+    }
+  } catch  {}
+  return candidates;
 }
 // Run a Koordinates Vector Query against one LINZ layer at a point.
 async function vectorQuery(layer, lng, lat, opts = {}) {
@@ -165,56 +198,82 @@ serve(async (req)=>{
       if (!q) return json({
         error: 'q is required'
       }, 400);
-      // Forward-geocode the free text to a point using GOOGLE (policy #19;
-      // OSM/Nominatim removed). LINZ's Vector Query needs a point; this only
-      // SEEDS the lookup, then the authoritative LINZ address is what we
-      // return/store. Handles both full addresses (Geocoding API) and
-      // name-only / partial input (Places Text Search).
       if (!GOOGLE_API_TOKEN) return json({
         error: 'GOOGLE_API_TOKEN is not configured'
       }, 500);
-      const hit = await googleGeocode(q);
-      if (!hit) return json({
-        candidates: []
-      });
-      const { lat, lng, address: googleAddress } = hit;
       const max = Math.min(Number(body.max ?? 5) || 5, 20);
-      const features = await vectorQuery(ADDRESS_LAYER, lng, lat, {
-        maxResults: max,
-        radius: 200,
-        geometry: false
-      });
-      const candidates = features.map((f)=>{
-        const props = f.properties ?? {};
-        // Prefer the LINZ feature's own coords; fall back to the Google seed
-        // point when the layer's coord fields are absent/renamed (avoids the
-        // gd2000_* vs latitude/longitude mismatch silently returning null).
-        const flat = typeof props.gd2000_ycoord === 'number' ? props.gd2000_ycoord : typeof props.latitude === 'number' ? props.latitude : lat;
-        const flng = typeof props.gd2000_xcoord === 'number' ? props.gd2000_xcoord : typeof props.longitude === 'number' ? props.longitude : lng;
-        return {
-          label: addressLabel(props),
-          address_id: props.address_id ?? props.id ?? null,
-          lat: flat,
-          lng: flng,
-          source: 'linz_address',
-          properties: props
-        };
-      });
-      // Rural / unaddressed places (foreshore FC areas, camping reserves) often
-      // have NO LINZ address feature near the geocoded point. Google still gave
-      // us a real formatted_address + point — return THAT rather than reporting
-      // "no address found" and throwing a usable location away.
-      if (candidates.length === 0) {
-        candidates.push({
-          label: googleAddress ?? q,
-          address_id: null,
-          lat,
-          lng,
-          source: 'google_address',
-          properties: googleAddress ? {
-            full_address: googleAddress
-          } : {}
+      // A human searching by name expects a Google-style results LIST to
+      // disambiguate from -- council reserves (real boundary already in hand,
+      // coverage LINZ has none of), then the authoritative LINZ address near
+      // the best geocoded guess, then named businesses/places Google knows
+      // but LINZ doesn't -- not one silently-picked point (the previous
+      // design took only Google's results[0] before ever consulting LINZ).
+      const [registryHits, placeHits] = await Promise.all([
+        registryNameCandidates(q, max),
+        googlePlacesCandidates(q, max)
+      ]);
+      const topGeocode = placeHits.find((c)=>c.source === 'google_address') ?? null;
+      const businessHits = placeHits.filter((c)=>c.source === 'google_place');
+      let linzHits = [];
+      if (topGeocode) {
+        const features = await vectorQuery(ADDRESS_LAYER, topGeocode.lng, topGeocode.lat, {
+          maxResults: max,
+          radius: 200,
+          geometry: false
         });
+        linzHits = features.map((f)=>{
+          const props = f.properties ?? {};
+          // Prefer the LINZ feature's own coords; fall back to the Google seed
+          // point when the layer's coord fields are absent/renamed (avoids the
+          // gd2000_* vs latitude/longitude mismatch silently returning null).
+          const flat = typeof props.gd2000_ycoord === 'number' ? props.gd2000_ycoord : typeof props.latitude === 'number' ? props.latitude : topGeocode.lat;
+          const flng = typeof props.gd2000_xcoord === 'number' ? props.gd2000_xcoord : typeof props.longitude === 'number' ? props.longitude : topGeocode.lng;
+          return {
+            label: addressLabel(props),
+            address_id: props.address_id ?? props.id ?? null,
+            lat: flat,
+            lng: flng,
+            source: 'linz_address',
+            kind: 'address',
+            properties: props
+          };
+        });
+        // Rural / unaddressed places (foreshore FC areas, camping reserves) often
+        // have NO LINZ address feature near the geocoded point. Google still gave
+        // us a real formatted_address + point — return THAT rather than reporting
+        // "no address found" and throwing a usable location away.
+        if (linzHits.length === 0) {
+          linzHits.push({
+            label: topGeocode.label,
+            address_id: null,
+            lat: topGeocode.lat,
+            lng: topGeocode.lng,
+            source: 'google_address',
+            kind: 'address',
+            properties: {
+              full_address: topGeocode.label
+            }
+          });
+        }
+      }
+      // Merge and dedupe by label: reserves first (already-known boundary),
+      // then named businesses/places (the distinctive answer to a name
+      // search), then nearby LINZ addresses last -- addresses alone can fill
+      // the whole cap with near-identical neighbours and crowd out the one
+      // named result a person was actually searching for.
+      const merged = [
+        ...registryHits,
+        ...businessHits,
+        ...linzHits
+      ];
+      const seen = new Set();
+      const candidates = [];
+      for (const candidate of merged){
+        const key = candidate.label.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push(candidate);
+        if (candidates.length >= max) break;
       }
       return json({
         candidates

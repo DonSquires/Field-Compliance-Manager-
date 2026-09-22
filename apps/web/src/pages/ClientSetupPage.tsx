@@ -45,6 +45,8 @@ export const PLACE_TYPES: Array<{ key: string; label: string }> = [
   { key: 'residential', label: 'Home or residential block' },
   { key: 'industrial', label: 'Yard or industrial site' },
 ];
+/** How each address-candidate `kind` reads next to its label, so a person can tell two similarly-named results apart. */
+const KIND_LABEL: Record<string, string> = { address: 'Address', business: 'Business or place', reserve: 'Council reserve (boundary known)' };
 const DAY_PRESETS: Array<{ key: string; label: string; days: number[] }> = [
   { key: 'every', label: 'Every day', days: [1, 2, 3, 4, 5, 6, 7] },
   { key: 'weekdays', label: 'Weekdays', days: [1, 2, 3, 4, 5] },
@@ -86,7 +88,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
   const [placeForm, setPlaceForm] = useState({ name: '', address: '', type: 'commercial_premises' });
   const [addressCandidates, setAddressCandidates] = useState<AddressCandidate[]>([]);
   const [chosenAddress, setChosenAddress] = useState<AddressCandidate | null>(null);
-  const [justAddedPlace, setJustAddedPlace] = useState<{ id: string; name: string; address: string | null; lat: number; lng: number } | null>(null);
+  const [justAddedPlace, setJustAddedPlace] = useState<{ id: string; name: string; address: string | null; lat: number; lng: number; boundary: GeoJSON.Geometry | null; boundaryLabel: string | null } | null>(null);
   const placeRequest = useRef(crypto.randomUUID());
   // Step 3
   const [agreementId, setAgreementId] = useState<string | null>(null);
@@ -199,7 +201,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
       const row = (Array.isArray(data) ? data[0] : data) as { id: string; name: string; address: string | null; site_type: string | null } | undefined;
       if (!row?.id) throw new Error('The place was saved but could not be read back. Refresh and it will appear.');
       setPlaces((current) => [...current, { id: row.id, name: row.name, address: row.address, site_type: row.site_type }]);
-      setJustAddedPlace({ id: row.id, name: row.name, address: row.address, lat: chosenAddress.lat, lng: chosenAddress.lng });
+      setJustAddedPlace({ id: row.id, name: row.name, address: row.address, lat: chosenAddress.lat, lng: chosenAddress.lng, boundary: chosenAddress.boundary ?? null, boundaryLabel: chosenAddress.boundary ? chosenAddress.label : null });
       placeRequest.current = crypto.randomUUID();
       setPlaceForm({ name: '', address: '', type: placeForm.type }); setAddressCandidates([]); setChosenAddress(null);
       return `${row.name} added at ${row.address ?? 'the chosen address'}.`;
@@ -331,13 +333,13 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
           <label><span>What kind of place</span><select value={placeForm.type} onChange={(event) => setPlaceForm({ ...placeForm, type: event.target.value })}>{PLACE_TYPES.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}</select></label>
         </div>
         <label><span>Address</span><div className="client-setup-address"><input value={placeForm.address} onChange={(event) => { setPlaceForm({ ...placeForm, address: event.target.value }); setChosenAddress(null); }} placeholder="12 Trafalgar Street, Nelson" /><button type="button" onClick={findAddress} disabled={busy !== null || placeForm.address.trim().length < 4}>{busy === 'address' ? 'Finding…' : 'Find address'}</button></div></label>
-        {addressCandidates.length > 0 && <div className="client-setup-candidates" role="radiogroup" aria-label="Address matches">{addressCandidates.map((candidate, index) => <label key={`${candidate.label}-${index}`} className={chosenAddress?.label === candidate.label ? 'is-chosen' : ''}><input type="radio" name="address" checked={chosenAddress?.label === candidate.label} onChange={() => setChosenAddress(candidate)} />{candidate.label}</label>)}</div>}
+        {addressCandidates.length > 0 && <div className="client-setup-candidates" role="radiogroup" aria-label="Address matches">{addressCandidates.map((candidate, index) => <label key={`${candidate.label}-${index}`} className={chosenAddress?.label === candidate.label ? 'is-chosen' : ''}><input type="radio" name="address" checked={chosenAddress?.label === candidate.label} onChange={() => setChosenAddress(candidate)} />{candidate.label}{candidate.kind && <em> · {KIND_LABEL[candidate.kind] ?? candidate.kind}</em>}</label>)}</div>}
         <footer>
           <button type="submit" className="btn btn-secondary" disabled={busy !== null}>{busy === 'place' ? 'Saving…' : places.length ? 'Add another place' : 'Add this place'}</button>
           <button type="button" className="btn btn-primary" disabled={places.length === 0 || busy !== null} onClick={() => { setServicePlaceId(places[0]?.id ?? ''); setStep(3); }}>Continue <ArrowRight size={15} aria-hidden="true" /></button>
         </footer>
       </form>
-      {justAddedPlace && <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: justAddedPlace.name, address: justAddedPlace.address }} sites={[{ id: justAddedPlace.id, name: justAddedPlace.name, gps_lat: justAddedPlace.lat, gps_lng: justAddedPlace.lng, boundary: null, boundary_status: 'provisional', boundary_verification: 'unverified' }]} zones={[]} editableEntity={{ type: 'client_site', id: justAddedPlace.id, organizationId: client?.id ?? '', centerLat: justAddedPlace.lat, centerLng: justAddedPlace.lng }} />}
+      {justAddedPlace && <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: justAddedPlace.name, address: justAddedPlace.address }} sites={[{ id: justAddedPlace.id, name: justAddedPlace.name, gps_lat: justAddedPlace.lat, gps_lng: justAddedPlace.lng, boundary: null, boundary_status: 'provisional', boundary_verification: 'unverified' }]} zones={[]} editableEntity={{ type: 'client_site', id: justAddedPlace.id, organizationId: client?.id ?? '', centerLat: justAddedPlace.lat, centerLng: justAddedPlace.lng }} seedBoundary={justAddedPlace.boundary ? { geometry: justAddedPlace.boundary, kind: 'reserve', label: justAddedPlace.boundaryLabel ?? justAddedPlace.name, lat: justAddedPlace.lat, lng: justAddedPlace.lng } : null} />}
       <p className="client-setup-hint">Officers can be rostered before the boundary is confirmed; arrivals are recorded as unverified until it is done.</p>
     </section>}
 
