@@ -61,6 +61,36 @@ turn beats false completeness.
 - `seed-forestry-sector-rm.mjs` extended to accept `--file <path>` so the same
   idempotent org/site/zone/agreement seeding logic is reusable for new data
   files without duplicating the SQL.
+- **Wave 3 real clients seeded**: Department of Conservation (DOC) — this
+  corrects an earlier, wrong claim that DOC was already seeded; a direct
+  live-database check found it did not exist. 8 real zones geocoded from the
+  full 164-row raw log (not just the 3 visible in the pivot summary): Hackett
+  Carpark, Mt Robert Carparks, Graham Valley Rd, Flora Carpark, Wairoa Gorge,
+  Tennyson Inlet, Paton Rd, St Arnaud.
+- **8 real R&M officer accounts created** (owner instruction: "you can add the
+  users, I'll resend the invitation later, Rob is a master user the rest are
+  officers"): Rob Crawford (master, real email found in an NCC intel note),
+  Colin Eathorne, Susan Finigan, Evan Garland, Marty Lucas, Wade
+  Sutherland-Berkett, Pete Crawford, Reuben Stanfield (all officer). These are
+  R&M's actual historical patrolling staff, who previously had zero system
+  accounts — only the owner (Don Squires) had one.
+- **Phase 2 patrol-log importer built and proven end-to-end**
+  (`scripts/import-patrol-log.mjs`): parses a client's raw patrol-log CSV
+  (exported from the source spreadsheet), resolves vehicle plates (with
+  proper multi-plate-cell splitting and shape validation — a real
+  concatenation bug was found and fixed during testing), resolves the
+  Patroller column against the 8 real officer accounts, and writes to the
+  correct table: vehicle-plate sightings with a resolvable officer go to
+  `observations` (verified live via `search_observations`); everything else
+  (camera-only activations, unattributed entries) goes to `location_events`
+  via the governed `create_location_event()` RPC. Idempotent via
+  `external_ref`. Run against DOC's full real history: 16 observations + 86
+  location_events, all verified live, zero duplicates, zero data-quality
+  issues after the fix.
+- **`location_events` wired into the UI** for the first time — it existed in
+  the schema with zero frontend references before this session. Added a
+  "Recent activity" section to `ZoneDetailPage.tsx` and an "Activity" tab to
+  `SiteDetailPage.tsx`, both querying `location_events` directly.
 
 ## Known gaps / real bugs found this effort (fix before relying on them again)
 
@@ -105,28 +135,23 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone** has no confident geocode yet — created
    unplaced; needs a better reference point (e.g. from a company map or a
    council LINZ parcel search) before it can be placed.
-4. **Phase 2 — the generic patrol-log importer** (biggest remaining piece):
-   one reusable dry-run/apply script that, per log row, resolves/creates
-   `canonical_vehicles` from the `Reg` column and any plate mentioned in
-   free-text comments; resolves the `Patroller` column (literal "Camera" =
-   no-person camera event; a real name should match an R&M staff
-   `user_profile` first — these are R&M's own officers, not new third
-   parties); resolves site/zone by matching `Location`/`Reserve`/`Forest`
-   text against that client's now-seeded `location_zones`; writes to the
-   correct target (CONFIRM the exact table/RPC — do not assume `observations`
-   is directly insertable without checking for a governed RPC first, same
-   discipline used everywhere else in this effort); carries `Job Time`/`Job
-   KMs` through to a cost/billing field if one already fits. Test against DOC
-   or NCC first as the smallest, best-understood proof of concept.
-5. **Phase 3 — end-to-end verification**: after each client's log import,
-   confirm `search_observations` / `ObservationSearchPage` and the vehicle
-   lookup pages actually surface the new real data.
-6. **Whole-build live-org shakedown** (the other half of this task): with a
-   real, populated org now in the system, walk through the actual operational
-   surfaces a real R&M admin/officer would use — CRM account view, dispatch,
-   rostering, finance/invoicing, permit lookup, vehicle/observation search —
-   and fix anything that breaks or looks wrong against real data, not just
-   synthetic/seed data. Record findings here as they're found.
+4. **Run the Phase 2 importer against the remaining ~15 clients** (NCC, TDC,
+   STAND, M&R, Taylors, Birdhurst, Thomas Bros, Stringer, Fulton Hogan, DART,
+   PVT, Private-Parks, Private-Redvale-Merc) — proven against DOC only so far.
+   Each client needs its own zone-name-to-zone-id map built from its actual
+   Location/Reserve/Forest column values (same process used for DOC: export
+   full raw sheet to CSV, count distinct location values, geocode any new
+   real places, build the map, dry-run, apply). More officer names will
+   likely surface — add them as real `user_profiles` the same way (role
+   'officer' unless told otherwise), don't block waiting to catalogue every
+   name first.
+5. **Whole-build live-org shakedown** (the other half of this task): with
+   real, populated org data now flowing all the way through to
+   `search_observations` and `location_events`, walk through the remaining
+   operational surfaces a real R&M admin/officer would use — CRM account
+   view, dispatch, rostering, finance/invoicing, permit lookup — and fix
+   anything that breaks or looks wrong against real data. Record findings
+   here as they're found.
 
 ## Conventions established / reusable
 
