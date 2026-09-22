@@ -2,7 +2,13 @@
 -- signal and category context that VehicleSearchPage/OfficerVehicleLookupPage already show for
 -- vehicles, and the CCTV review pages already capture for people - closing the loop on data that
 -- was captured earlier this session but had no lookup surface.
-CREATE OR REPLACE FUNCTION "public"."search_observations"(p_organization_id uuid, p_search text DEFAULT NULL::text, p_site_id uuid DEFAULT NULL::uuid, p_zone_id uuid DEFAULT NULL::uuid, p_location_id uuid DEFAULT NULL::uuid, p_vehicle_id uuid DEFAULT NULL::uuid, p_person_id uuid DEFAULT NULL::uuid, p_incident_id uuid DEFAULT NULL::uuid, p_poi boolean DEFAULT NULL::boolean, p_loi boolean DEFAULT NULL::boolean, p_limit integer DEFAULT 50)
+--
+-- Adding columns to a RETURNS TABLE changes the function's row type, which CREATE OR REPLACE
+-- cannot do in Postgres ("cannot change return type of existing function", 42P13) - the drop is
+-- required, not optional, here.
+DROP FUNCTION IF EXISTS public.search_observations(uuid, text, uuid, uuid, uuid, uuid, uuid, uuid, boolean, boolean, integer);
+
+CREATE FUNCTION "public"."search_observations"(p_organization_id uuid, p_search text DEFAULT NULL::text, p_site_id uuid DEFAULT NULL::uuid, p_zone_id uuid DEFAULT NULL::uuid, p_location_id uuid DEFAULT NULL::uuid, p_vehicle_id uuid DEFAULT NULL::uuid, p_person_id uuid DEFAULT NULL::uuid, p_incident_id uuid DEFAULT NULL::uuid, p_poi boolean DEFAULT NULL::boolean, p_loi boolean DEFAULT NULL::boolean, p_limit integer DEFAULT 50)
  RETURNS TABLE(observation_id uuid, observed_at timestamp with time zone, organization_id uuid, plate_number text, vehicle_id uuid, vehicle_label text, vehicle_homeless_status text, person_id uuid, person_label text, person_category text, person_homeless_status text, site_id uuid, site_name text, zone_id uuid, zone_name text, location_id uuid, location_name text, incident_id uuid, incident_label text, poi boolean, loi boolean, compliance_status text, officer_notes text, photo_url text)
  LANGUAGE sql
  STABLE
@@ -64,3 +70,9 @@ AS $function$
   ORDER BY o.observed_at DESC
   LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 100);
 $function$;
+
+-- DROP FUNCTION drops its grants too - reapply exactly what the function had before.
+REVOKE ALL ON FUNCTION "public"."search_observations"(uuid, text, uuid, uuid, uuid, uuid, uuid, uuid, boolean, boolean, integer) FROM PUBLIC, "anon", "authenticated", "service_role";
+GRANT EXECUTE ON FUNCTION "public"."search_observations"(uuid, text, uuid, uuid, uuid, uuid, uuid, uuid, boolean, boolean, integer) TO "postgres";
+GRANT EXECUTE ON FUNCTION "public"."search_observations"(uuid, text, uuid, uuid, uuid, uuid, uuid, uuid, boolean, boolean, integer) TO "authenticated";
+GRANT EXECUTE ON FUNCTION "public"."search_observations"(uuid, text, uuid, uuid, uuid, uuid, uuid, uuid, boolean, boolean, integer) TO "service_role";
