@@ -1,0 +1,31 @@
+{
+  "seed_key": "rm_active_clients_wave3b_2026-09-23",
+  "title": "R&M wave 3b - additional DOC zones found in the full 164-row raw log (beyond the first 3 spotted in the pivot summary)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "provider_modules_basis": "No new provider-level module enablement in this wave.",
+  "notes": [
+    "Adds zones to the already-seeded Department of Conservation organization (matched by name, existing org row untouched). Full CSV export of the raw DOC log sheet (164 rows) revealed 5 more distinct real Location values beyond the 3 already seeded in wave 3: Flora Carpark, Wairoa Gorge, Tennyson Inlet, Paton Rd (Patons Rock), St Arnaud. Geocoded live via linz-lookup. Some other Location values in the raw data (blank, 'E', 'N/A', 'Enter', 'West Coast', 'Tasman', 'Whataroa') were judged too vague/junk/geographically-implausible to seed as zones and are intentionally excluded — rows referencing them will be skipped by the Phase 2 importer rather than force-placed."
+  ],
+  "organizations": [
+    {
+      "key": "doc",
+      "name": "Department of Conservation",
+      "organization_type": "government",
+      "status": "active",
+      "active": true,
+      "modules": [],
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 500 },
+      "zones": [
+        { "key": "doc:flora-carpark", "name": "Flora Carpark (DOC)", "lat": -41.19012379999999, "lng": 172.7470522, "gazetteer": { "name": "Flora Car Park", "source": "google_place" } },
+        { "key": "doc:wairoa-gorge", "name": "Wairoa Gorge (DOC)", "lat": -41.5275792, "lng": 173.1059425, "gazetteer": { "name": "Wairoa Gorge Bike Park", "source": "google_place" }, "radius_m": 1500 },
+        { "key": "doc:tennyson-inlet", "name": "Tennyson Inlet (DOC)", "lat": -41.0761997, "lng": 173.7916015, "gazetteer": { "name": "Tennyson Inlet", "source": "google_place" }, "radius_m": 2000 },
+        { "key": "doc:paton-rd", "name": "Paton Rd / Patons Rock (DOC)", "lat": -40.78975, "lng": 172.75986, "gazetteer": { "name": "Patons Rock", "source": "google_place" } },
+        { "key": "doc:st-arnaud", "name": "St Arnaud (DOC)", "lat": -41.8012348, "lng": 172.8477475, "gazetteer": { "name": "Saint Arnaud", "source": "google_place" }, "radius_m": 1500 }
+      ]
+    }
+  ]
+}

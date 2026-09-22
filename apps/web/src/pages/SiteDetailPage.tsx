@@ -63,8 +63,9 @@ interface PatrolRoute { id: string; name: string; route_type: string; default_sh
 interface RosterShift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; officer: Array<{ display_name: string | null; email: string | null }> | null; }
 interface SiteContact { id: string; first_name: string; last_name: string; role_title: string | null; email: string | null; phone: string | null; mobile: string | null; is_primary: boolean; is_emergency: boolean; }
 interface SiteContract { id: string; status: string; share_contract_price: boolean | null; share_actual_cost: boolean | null; agreement: Array<{ name: string; agreement_type: string; invitation_status: string }> | null; }
+interface ActivityEventRow { id: string; event_type: string; module_key: string | null; occurred_at: string; status: string | null; source: string | null; payload: Record<string, unknown> | null; }
 
-type SiteWorkspaceTab = 'overview' | 'services' | 'zones' | 'routes' | 'roster' | 'contacts' | 'contracts' | 'finance' | 'notes';
+type SiteWorkspaceTab = 'overview' | 'services' | 'zones' | 'routes' | 'roster' | 'contacts' | 'contracts' | 'finance' | 'notes' | 'activity';
 
 const SiteDetailPage: React.FC = () => {
   const location = useLocation();
@@ -79,6 +80,7 @@ const SiteDetailPage: React.FC = () => {
   const [rosterShifts, setRosterShifts] = useState<RosterShift[]>([]);
   const [contacts, setContacts] = useState<SiteContact[]>([]);
   const [contracts, setContracts] = useState<SiteContract[]>([]);
+  const [recentActivity, setRecentActivity] = useState<ActivityEventRow[]>([]);
   const [workspaceTab, setWorkspaceTab] = useState<SiteWorkspaceTab>('overview');
   const [newNote, setNewNote] = useState('');
   const [house, setHouse] = useState<{ name: string; address: string | null } | null>(null);
@@ -126,8 +128,8 @@ const SiteDetailPage: React.FC = () => {
 
   const loadSiteDetail = async (siteId: string, site?: ClientSite) => {
     try {
-      // ATLAS READS: site_services, site_financial_config, location_notes, patrol_routes, shifts, crm_contacts, service_agreement_locations
-      const [servicesRes, financialRes, notesRes, routesRes, contactsRes, contractsRes] = await Promise.all([
+      // ATLAS READS: site_services, site_financial_config, location_notes, patrol_routes, shifts, crm_contacts, service_agreement_locations, location_events
+      const [servicesRes, financialRes, notesRes, routesRes, contactsRes, contractsRes, activityRes] = await Promise.all([
         supabase
           .from('site_services')
           .select('id, module_key, enabled, response_sla_minutes, special_instructions')
@@ -145,6 +147,7 @@ const SiteDetailPage: React.FC = () => {
         supabase.from('patrol_routes').select('id,name,route_type,default_shift,is_active,guards_required').eq('site_id', siteId).order('name'),
         supabase.from('crm_contacts').select('id,first_name,last_name,role_title,email,phone,mobile,is_primary,is_emergency').eq('organization_id', (site ?? sites.find((row) => row.id === siteId))?.client_organization_id ?? '').order('is_primary', { ascending: false }).order('last_name'),
         supabase.from('service_agreement_locations').select('id,status,share_contract_price,share_actual_cost,agreement:service_agreement_id(name,agreement_type,invitation_status)').eq('site_id', siteId).order('created_at', { ascending: false }),
+        supabase.from('location_events').select('id,event_type,module_key,occurred_at,status,source,payload').eq('client_site_id', siteId).order('occurred_at', { ascending: false }).limit(25),
       ]);
 
       if (servicesRes.error) throw servicesRes.error;
@@ -153,6 +156,7 @@ const SiteDetailPage: React.FC = () => {
       if (routesRes.error) throw routesRes.error;
       if (contactsRes.error) throw contactsRes.error;
       if (contractsRes.error) throw contractsRes.error;
+      if (activityRes.error) throw activityRes.error;
 
       setServices((servicesRes.data as SiteService[]) || []);
       setFinancial((financialRes.data as FinancialConfig) || null);
@@ -160,6 +164,7 @@ const SiteDetailPage: React.FC = () => {
       setPatrolRoutes((routesRes.data as PatrolRoute[]) || []);
       setContacts((contactsRes.data as SiteContact[]) || []);
       setContracts((contractsRes.data as SiteContract[]) || []);
+      setRecentActivity((activityRes.data as ActivityEventRow[]) || []);
       const currentSite = site ?? sites.find((row) => row.id === siteId);
       if (currentSite?.location_id) {
         const [houseRes, zonesRes, shiftsRes] = await Promise.all([
@@ -300,7 +305,7 @@ const SiteDetailPage: React.FC = () => {
                 {selectedSite.active ? 'Active' : 'Inactive'}
               </span>
             </div>
-            <nav className="site-workspace-tabs" aria-label="Site workspace"><button type="button" className={workspaceTab === 'overview' ? 'is-active' : ''} onClick={() => setWorkspaceTab('overview')}>Overview</button><button type="button" className={workspaceTab === 'services' ? 'is-active' : ''} onClick={() => setWorkspaceTab('services')}>Services <strong>{services.length}</strong></button><button type="button" className={workspaceTab === 'zones' ? 'is-active' : ''} onClick={() => setWorkspaceTab('zones')}>Zones <strong>{zones.length}</strong></button><button type="button" className={workspaceTab === 'routes' ? 'is-active' : ''} onClick={() => setWorkspaceTab('routes')}>Patrol routes <strong>{patrolRoutes.length}</strong></button><button type="button" className={workspaceTab === 'roster' ? 'is-active' : ''} onClick={() => setWorkspaceTab('roster')}>Active roster <strong>{rosterShifts.length}</strong></button><button type="button" className={workspaceTab === 'contacts' ? 'is-active' : ''} onClick={() => setWorkspaceTab('contacts')}>Contacts <strong>{contacts.length}</strong></button><button type="button" className={workspaceTab === 'contracts' ? 'is-active' : ''} onClick={() => setWorkspaceTab('contracts')}>Contracts <strong>{contracts.length}</strong></button><button type="button" className={workspaceTab === 'finance' ? 'is-active' : ''} onClick={() => setWorkspaceTab('finance')}>Finance</button><button type="button" className={workspaceTab === 'notes' ? 'is-active' : ''} onClick={() => setWorkspaceTab('notes')}>Notes <strong>{notes.length}</strong></button></nav>
+            <nav className="site-workspace-tabs" aria-label="Site workspace"><button type="button" className={workspaceTab === 'overview' ? 'is-active' : ''} onClick={() => setWorkspaceTab('overview')}>Overview</button><button type="button" className={workspaceTab === 'services' ? 'is-active' : ''} onClick={() => setWorkspaceTab('services')}>Services <strong>{services.length}</strong></button><button type="button" className={workspaceTab === 'zones' ? 'is-active' : ''} onClick={() => setWorkspaceTab('zones')}>Zones <strong>{zones.length}</strong></button><button type="button" className={workspaceTab === 'routes' ? 'is-active' : ''} onClick={() => setWorkspaceTab('routes')}>Patrol routes <strong>{patrolRoutes.length}</strong></button><button type="button" className={workspaceTab === 'roster' ? 'is-active' : ''} onClick={() => setWorkspaceTab('roster')}>Active roster <strong>{rosterShifts.length}</strong></button><button type="button" className={workspaceTab === 'contacts' ? 'is-active' : ''} onClick={() => setWorkspaceTab('contacts')}>Contacts <strong>{contacts.length}</strong></button><button type="button" className={workspaceTab === 'contracts' ? 'is-active' : ''} onClick={() => setWorkspaceTab('contracts')}>Contracts <strong>{contracts.length}</strong></button><button type="button" className={workspaceTab === 'finance' ? 'is-active' : ''} onClick={() => setWorkspaceTab('finance')}>Finance</button><button type="button" className={workspaceTab === 'notes' ? 'is-active' : ''} onClick={() => setWorkspaceTab('notes')}>Notes <strong>{notes.length}</strong></button><button type="button" className={workspaceTab === 'activity' ? 'is-active' : ''} onClick={() => setWorkspaceTab('activity')}>Activity <strong>{recentActivity.length}</strong></button></nav>
             <div className="site-workspace-body">
               {workspaceTab === 'overview' && <><div className="site-info"><div className="info-item"><label>Risk level</label><p>{selectedSite.risk_level || 'Not assessed'}</p></div><div className="info-item"><label>Boundary</label><p>{selectedSite.boundary_status} · {selectedSite.boundary_verification}</p></div><div className="info-item"><label>Services</label><p>{services.filter((service) => service.enabled).length} active</p></div><div className="info-item"><label>Rostered staff</label><p>{new Set(rosterShifts.map((shift) => shift.officer_user_id)).size}</p></div><div className="info-item"><label>Site brief</label><p>{selectedSite.site_brief || 'No site brief recorded.'}</p></div><div className="info-item"><label>Access instructions</label><p>{selectedSite.access_instructions || 'No access instructions recorded.'}</p></div><div className="info-item"><label>H&S notes</label><p>{selectedSite.hs_notes || 'No H&S notes recorded.'}</p></div></div><SafetyWarningsPanel entityType="site" entityId={selectedSite.id} entityLabel="this place" />{house && <LocationHouseMap organizationId={profile?.organizationId ?? ''} house={house} sites={[selectedSite]} zones={zones} editableEntity={{ type: 'client_site', id: selectedSite.id, organizationId: selectedSite.client_organization_id, centerLat: selectedSite.gps_lat, centerLng: selectedSite.gps_lng, onSaved: () => void refreshSiteBoundary(selectedSite.id) }} />}</>}
               {workspaceTab === 'services' && <section className="reports-section"><h3>Services required at this site</h3><div className="contacts-list">{services.length === 0 ? <div className="empty-state"><p>No services configured for this site.</p></div> : services.map((service) => <div key={service.id} className="contact-card"><div className="contact-header"><h3>{service.module_key}</h3><button className={`btn btn-sm ${service.enabled ? 'btn-primary' : 'btn-secondary'}`} onClick={() => handleToggleService(service)}>{service.enabled ? 'Enabled' : 'Disabled'}</button></div>{service.response_sla_minutes && <p className="contact-meta">SLA: {service.response_sla_minutes} minutes</p>}{service.special_instructions && <p>{service.special_instructions}</p>}</div>)}</div></section>}
@@ -311,6 +316,7 @@ const SiteDetailPage: React.FC = () => {
               {workspaceTab === 'contracts' && <section className="reports-section"><h3>Contracts anchored to this site</h3><div className="contacts-list">{contracts.length === 0 ? <div className="empty-state"><p>No location-level contracts. Self-managed services may still be active.</p></div> : contracts.map((contract) => <div className="contact-card" key={contract.id}><div className="contact-header"><h3>{contract.agreement?.[0]?.name ?? 'Agreement unavailable'}</h3><span className={`status-badge status-${contract.status}`}>{contract.status}</span></div><p>{contract.agreement?.[0]?.agreement_type ?? 'Agreement'} · {contract.agreement?.[0]?.invitation_status ?? 'Unknown'}</p><p className="contact-meta">Contract price: {contract.share_contract_price ? 'shared' : 'private'} · Actual cost: {contract.share_actual_cost ? 'shared' : 'private'}</p></div>)}</div></section>}
               {workspaceTab === 'finance' && <section className="reports-section"><h3>Site financial configuration</h3>{financial ? <div className="site-info"><div className="info-item"><label>Billing model</label><p>{financial.billing_model}</p></div><div className="info-item"><label>Payment terms</label><p>{financial.payment_terms_days} days</p></div>{financial.hourly_rate != null && <div className="info-item"><label>Hourly rate</label><p>NZ${financial.hourly_rate}</p></div>}{financial.per_visit_rate != null && <div className="info-item"><label>Per visit</label><p>NZ${financial.per_visit_rate}</p></div>}{financial.flat_rate_monthly != null && <div className="info-item"><label>Monthly rate</label><p>NZ${financial.flat_rate_monthly}</p></div>}</div> : <div className="empty-state"><p>No site financial configuration recorded.</p></div>}</section>}
               {workspaceTab === 'notes' && <section className="reports-section"><h3>Operational notes</h3><form className="assessment-form" onSubmit={handleAddNote}><div className="form-group"><textarea value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Add a note about this site..." rows={3} /></div><button type="submit" className="btn btn-primary btn-sm">Add note</button></form><div className="contacts-list" style={{ marginTop: '12px' }}>{notes.length === 0 ? <div className="empty-state"><p>No notes recorded.</p></div> : notes.map((note) => <div key={note.id} className="contact-card"><p>{note.body}</p><p className="contact-meta">{new Date(note.created_at).toLocaleString()}</p></div>)}</div></section>}
+              {workspaceTab === 'activity' && <section className="reports-section"><h3>Recent activity</h3><div className="contacts-list">{recentActivity.length === 0 ? <div className="empty-state"><p>No recorded activity for this site yet.</p></div> : recentActivity.map((event) => { const payload = event.payload ?? {}; const summary = (typeof payload.description === 'string' && payload.description) || (typeof payload.comments === 'string' && payload.comments) || (typeof payload.patroller === 'string' && `Patroller: ${payload.patroller}`) || 'No further detail recorded'; return <div key={event.id} className="contact-card"><div className="contact-header"><h3>{event.event_type.replaceAll('_', ' ')}</h3>{event.status && <span className="status-badge status-active">{event.status}</span>}</div><p>{summary}</p><p className="contact-meta">{event.module_key ?? 'module not recorded'} · {event.source ?? 'source not recorded'} · {new Date(event.occurred_at).toLocaleString('en-NZ')}</p></div>; })}</div></section>}
             </div>
           </div>
         )}

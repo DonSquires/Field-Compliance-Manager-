@@ -53,6 +53,15 @@ interface BoundaryEvent {
   created_at: string;
   has_boundary: boolean;
 }
+interface ActivityEventRow {
+  id: string;
+  event_type: string;
+  module_key: string | null;
+  occurred_at: string;
+  status: string | null;
+  source: string | null;
+  payload: Record<string, unknown> | null;
+}
 interface OperationalLocation {
   id: string;
   organization_id: string;
@@ -78,6 +87,7 @@ export default function ZoneDetailPage() {
   const [sites, setSites] = useState<HouseMapSite[]>([]);
   const [closures, setClosures] = useState<ClosureRow[]>([]);
   const [boundaryHistory, setBoundaryHistory] = useState<BoundaryEvent[]>([]);
+  const [recentActivity, setRecentActivity] = useState<ActivityEventRow[]>([]);
   const [operationalLocations, setOperationalLocations] = useState<
     OperationalLocation[]
   >([]);
@@ -138,7 +148,7 @@ export default function ZoneDetailPage() {
     availableLocations = operationalLocations,
     availableSites = operationalSites,
   ) => {
-    const [closuresRes, historyRes] = await Promise.all([
+    const [closuresRes, historyRes, activityRes] = await Promise.all([
       supabase
         .from("zone_closures")
         .select("id,closure_type,status,effective_from,effective_to,reason")
@@ -148,6 +158,12 @@ export default function ZoneDetailPage() {
         p_entity_type: "location_zone",
         p_entity_id: zone.id,
       }),
+      supabase
+        .from("location_events")
+        .select("id,event_type,module_key,occurred_at,status,source,payload")
+        .eq("zone_id", zone.id)
+        .order("occurred_at", { ascending: false })
+        .limit(25),
     ]);
     if (closuresRes.error || historyRes.error) {
       setError(
@@ -175,6 +191,7 @@ export default function ZoneDetailPage() {
     );
     setClosures((closuresRes.data as ClosureRow[]) ?? []);
     setBoundaryHistory((historyRes.data as BoundaryEvent[]) ?? []);
+    setRecentActivity((activityRes.data as ActivityEventRow[]) ?? []);
   };
 
   const selectZone = (zone: ZoneRow) => {
@@ -472,6 +489,42 @@ export default function ZoneDetailPage() {
               ) : (
                 <div className="empty-state">
                   <p>No versioned boundary history exists for this Zone.</p>
+                </div>
+              )}
+            </section>
+            <section className="reports-section">
+              <h3>Recent activity ({recentActivity.length})</h3>
+              {recentActivity.length ? (
+                <div className="contacts-list">
+                  {recentActivity.map((event) => {
+                    const payload = event.payload ?? {};
+                    const summary =
+                      (typeof payload.description === "string" && payload.description) ||
+                      (typeof payload.comments === "string" && payload.comments) ||
+                      (typeof payload.patroller === "string" && `Patroller: ${payload.patroller}`) ||
+                      "No further detail recorded";
+                    return (
+                      <article className="contact-card" key={event.id}>
+                        <div className="contact-header">
+                          <strong>{event.event_type.replaceAll("_", " ")}</strong>
+                          {event.status && (
+                            <span className="status-badge status-active">{event.status}</span>
+                          )}
+                        </div>
+                        <p>{summary}</p>
+                        <small>
+                          {event.module_key ?? "module not recorded"} ·{" "}
+                          {event.source ?? "source not recorded"} ·{" "}
+                          {new Date(event.occurred_at).toLocaleString("en-NZ")}
+                        </small>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <MapPin size={18} />
+                  <p>No recorded activity for this zone yet.</p>
                 </div>
               )}
             </section>

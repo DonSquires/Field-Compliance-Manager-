@@ -1,0 +1,137 @@
+{
+  "seed_key": "rm_active_clients_wave2_2026-09-23",
+  "title": "R&M active patrol/security clients, wave 2 (DART pest-control project, private-client umbrella, small forestry properties)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "provider_modules_basis": "No new provider-level module enablement in this wave.",
+  "notes": [
+    "Continues rm_active_clients_wave1_2026-09-22. Every organization/site/zone here is backed by REAL R&M patrol-log spreadsheet data, not invented.",
+    "DART / 'Operation Lizard' site coordinates were given directly as exact NZTM2000 (EPSG:2193) grid references in R&M's own file, converted to WGS84 via Snyder's Transverse Mercator inverse formulas with LINZ's published NZTM2000 parameters (not text geocoding) — the most precise data of any client seeded so far. Only ACTIVE sites with usable coordinates were placed; deactivated sites (6, 8, 9, 10, 11) and sites with incomplete coordinates (2B, 3A, 7A) were excluded rather than guessed.",
+    "OtherPrivate/PVT is a genuine grouped bucket of unrelated private individuals sharing one R&M billing file — modelled as ONE umbrella organization with one client_sites row per distinct contact/property. Birdhurst's duplicate rows in this file were excluded (Birdhurst already has its own dedicated organization from wave 1) and R&M's own internal 'Admin/BASE' row was excluded (not an external client).",
+    "Private - Parks and Private - Redvale - Merc are small standalone forestry/property clients confirmed via their own List-sheet GL codes (not tied to any existing org). Cycle Trails, Digger work, and OFO Culling REMSEC project logs were checked and confirmed to be activity tied to already-seeded TPFL/OFO (their DATA/Summary sheets show 'Company'/'Sum of ... TPFL'/'OFO Forest Protection' directly) — no new organizations created for those three."
+  ],
+  "organizations": [
+    {
+      "key": "operation-lizard-dart",
+      "name": "Operation Lizard (DART)",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Real, distinct commercial security/pest-control contract (own PO/billing, rates on file) referred to only by an internal R&M project codename in the source spreadsheet ('ACTIVE OperationLizard camera and patrol log DART.xlsx') — the underlying client's real legal name is not yet confirmed and should be corrected here once known. Feral cat trapping/pest-control camera network on Trig Rd and Thomas Creek (Nelson/Tasman region), rates: Standard $62.50/hr, Labourer $50/hr, 2 Up $110/hr, mileage 99c/km. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log with named contract rates", "real_name_confirmed": false },
+      "source_urls": [],
+      "modules": ["patrol", "biosecurity"],
+      "agreement": {
+        "name": "Pest control camera monitoring and patrols — Operation Lizard (DART)",
+        "enabled_modules": ["patrol", "biosecurity"],
+        "evidence": "R&M's own patrol log records ongoing feral cat trapping/camera jobs across a numbered site grid in 2025-2026.",
+        "evidence_urls": [],
+        "external_refs": { "rate_standard": "$62.50/hr", "rate_labourer": "$50/hr", "rate_2up": "$110/hr", "rate_mileage": "99c/km" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real jobs for this client (own patrol log with named rates); recorded as accepted on the owner's instruction (2026-09-23).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "biosecurity", "rule_type": "unrestricted", "radius_m": 800 },
+      "zones": [
+        { "key": "dart:trig-road", "name": "Trig Road pest-control area (sites 1, 2A, 3B, 4A, 4B, 5)", "lat": -41.4448957, "lng": 172.6673771, "gazetteer": { "name": "Trig Rd, Nelson Lakes area", "source": "nztm2000_conversion", "note": "Centroid of 6 real NZTM2000 camera/trap sites converted via Snyder's inverse Transverse Mercator formula; individual site identifiers carried through to observation-level detail during the Phase 2 patrol-log import, not modelled as separate zones." } },
+        { "key": "dart:thomas-creek", "name": "Thomas Creek pest-control area (site 7B)", "lat": -41.4522483, "lng": 172.6529625, "radius_m": 350, "gazetteer": { "name": "Thomas Creek, Nelson Lakes area", "source": "nztm2000_conversion" } }
+      ]
+    },
+    {
+      "key": "rm-other-private-clients",
+      "name": "R&M Other Private Clients",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Umbrella CRM organization for several small, unrelated private residential/farm security clients that share one R&M billing file ('ACTIVE OtherPrivate camera and patrol log PVT.xlsx') rather than each having their own dedicated log. Real named clients: Gary Adams (Deepdale Rd, driveway alarm), Sonja and Dave / 'Big Bush' farm (Korere/Tophouse Rd camera + Andrews Rd covert farm camera), Bella Vista Motel (Nelson). Rates: Standard $85/hr, Labourer $60/hr, 2 Up $145/hr, mileage 126c/km. Client identity/address fields here are real private-individual PII — access should stay scoped the same as any other organization record (org_access_allowed), not exposed more broadly than existing CRM/org conventions already require. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log with named contract rates", "is_umbrella_grouping": true },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Residential/farm security — R&M Other Private Clients",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (ACTIVE OtherPrivate camera and patrol log PVT.xlsx) records ongoing camera/patrol jobs with named contract rates across several small private clients.",
+        "evidence_urls": [],
+        "external_refs": { "rate_standard": "$85/hr", "rate_labourer": "$60/hr", "rate_2up": "$145/hr", "rate_mileage": "126c/km" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real jobs for these clients (own patrol log with named rates); recorded as accepted on the owner's instruction (2026-09-23).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [
+        { "key": "pvt:gary-adams", "name": "Gary Adams — driveway alarm (Deepdale Rd)", "address": "Deepdale Road, Upper Moutere 7173", "suburb": "Upper Moutere", "postcode": "7173", "site_type": "other", "lat": -41.308684, "lng": 173.0076063, "geocode": { "match": "google_address", "linz_label": "Deepdale Road, Upper Moutere" }, "source": "R&M internal Details sheet" },
+        { "key": "pvt:sonja-dave-tophouse", "name": "Sonja and Dave / Big Bush — Korere-Tophouse Rd camera", "address": "Korere-Tophouse Road, Tasman Region", "suburb": "Tasman", "postcode": null, "site_type": "other", "lat": -41.6536343, "lng": 172.8615392, "geocode": { "match": "google_address" }, "source": "R&M internal Details sheet" },
+        { "key": "pvt:sonja-dave-andrews", "name": "Sonja and Dave / Big Bush — Andrews Rd covert farm camera", "address": "106 Andrews Road, Wairoa Valley, Brightwater", "suburb": "Wairoa Valley, Brightwater", "postcode": null, "site_type": "other", "lat": -41.4479895, "lng": 173.0922953, "geocode": { "match": "linz_exact", "linz_label": "106 Andrews Road, Wairoa Valley, Brightwater" }, "source": "R&M internal Details sheet" },
+        { "key": "pvt:bella-vista-motel", "name": "Bella Vista Motel (Nelson)", "address": "178 Tahunanui Drive, Tahunanui, Nelson 7011", "suburb": "Tahunanui, Nelson", "postcode": "7011", "site_type": "commercial_premises", "lat": -41.2911946, "lng": 173.2460636, "geocode": { "match": "google_place_exact", "linz_label": "178 Tahunanui Drive, Tāhunanui, Nelson" }, "source": "R&M internal Details sheet" }
+      ],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 200 },
+      "zones": []
+    },
+    {
+      "key": "private-parks",
+      "name": "Private - Parks",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Small private-property camera security client (2022 REMSEC log) near the Eighty Eight Valley area (Wakefield, Tasman) — camera positions: '1 - Road (ANPR)', 'C3 - Driveway', 'C4 - Shed and Tanks'. No specific street address recorded in R&M's file, so the zone is placed at the general Eighty Eight Valley locality point rather than a guessed exact address. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log, own billing GL codes 8558-745xx-0xx" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Property camera security — Private (Parks, Eighty Eight Valley)",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (REMSEC Private - Parks Patrol Log 2022.xlsx) records ongoing camera-review jobs (ANPR road camera, driveway, shed/tanks) in 2022.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "GL code 8558-745xx series", "log_window": "2022 — verify if still active" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M performed and billed real jobs for this client in 2022 (own patrol log); recorded as accepted on the owner's instruction (2026-09-23). Contract currency not re-verified for 2026.",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 1000 },
+      "zones": [
+        { "key": "parks:eighty-eight-valley", "name": "Eighty Eight Valley property (Private - Parks)", "lat": -41.4904364, "lng": 172.9751223, "gazetteer": { "name": "Eighty Eight Valley", "source": "google_place", "note": "General locality point — no specific street address on file; do not treat as an exact property boundary." } }
+      ]
+    },
+    {
+      "key": "private-redvale-merc",
+      "name": "Private - Redvale - Merc",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Small private forestry-style property client — real named blocks 'Redvale Top' and 'Redvale Bottom' (Redwood Valley area, Tasman). Source: R&M's own patrol log spreadsheet (REMSEC Private - Redvale - Merc.xlsx).",
+      "facts": { "relationship_evidence": "R&M internal patrol log, own billing GL codes 8558-745xx-0xx" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Property security and patrols — Private (Redvale - Merc)",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (REMSEC Private - Redvale - Merc.xlsx) records ongoing patrol jobs across two named blocks.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "GL code 8558-745xx series" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real jobs for this client (own patrol log); recorded as accepted on the owner's instruction (2026-09-23).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 1500 },
+      "zones": [
+        { "key": "redvale:top-bottom", "name": "Redvale Top / Bottom (Redwood Valley)", "lat": -41.2908699, "lng": 173.0676383, "gazetteer": { "name": "Redvale Estate, Redwood Valley", "source": "google_place" } }
+      ]
+    }
+  ]
+}

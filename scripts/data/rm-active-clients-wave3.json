@@ -1,0 +1,46 @@
+{
+  "seed_key": "rm_active_clients_wave3_2026-09-23",
+  "title": "R&M active patrol/security clients, wave 3 (Department of Conservation - corrects a prior-session claim that DOC was already seeded; it was not)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "provider_modules_basis": "No new provider-level module enablement in this wave.",
+  "notes": [
+    "A direct live-database check this session found NO organization named Department of Conservation / DOC existed despite an earlier (inherited) session note claiming it was already seeded — that note was wrong. This wave creates it properly from R&M's own patrol-log evidence.",
+    "Real DOC recreation-area sites patrolled by R&M per 'ACTIVE DOC camera and patrol.xlsx': Hackett Carpark, Mt Robert Carparks, Graham Valley Rd. Geocoded live via linz-lookup address_autocomplete on 2026-09-23."
+  ],
+  "organizations": [
+    {
+      "key": "doc",
+      "name": "Department of Conservation",
+      "organization_type": "government",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "DOC (Department of Conservation) recreation sites patrolled and camera-monitored by R&M since at least 2021 per R&M's own 'ACTIVE DOC camera and patrol.xlsx' log. Real named sites: Hackett Carpark (Aniseed Valley Rd track carpark), Mt Robert Carparks (St Arnaud / Nelson Lakes), Graham Valley Rd (Motueka Valley). Source: R&M's own patrol log spreadsheet.",
+      "facts": { "org_kind": "government_agency", "relationship_evidence": "R&M internal patrol log" },
+      "source_urls": [],
+      "modules": ["patrol", "access_control"],
+      "agreement": {
+        "name": "Recreation-site patrol and camera monitoring — Department of Conservation",
+        "enabled_modules": ["patrol", "access_control"],
+        "evidence": "R&M's own patrol log (ACTIVE DOC camera and patrol.xlsx) records ongoing camera/patrol jobs at DOC recreation sites since 2021.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "per-site job time/kms" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real patrol/camera jobs for DOC since at least 2021 (own patrol log); recorded as accepted on the owner's instruction (2026-09-23).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 500 },
+      "zones": [
+        { "key": "doc:hackett-carpark", "name": "Hackett Carpark (DOC)", "lat": -41.3884702, "lng": 173.2151895, "gazetteer": { "name": "Hacket Track Car Park", "source": "google_place", "note": "Aniseed Valley Road, Hope" } },
+        { "key": "doc:mt-robert-carparks", "name": "Mt Robert Carparks (DOC)", "lat": -41.8220702, "lng": 172.8116339, "gazetteer": { "name": "Mt Robert Circuit", "source": "google_place" }, "radius_m": 1500 },
+        { "key": "doc:graham-valley-rd", "name": "Graham Valley Rd (DOC)", "lat": -41.2026929, "lng": 172.8256959, "gazetteer": { "name": "Graham Valley Road, Motueka Valley", "source": "linz_address", "linz_label": "197 Graham Valley Road, Motueka Valley, Motueka" }, "radius_m": 1500 }
+      ]
+    }
+  ]
+}
