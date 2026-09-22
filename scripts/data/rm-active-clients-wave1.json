@@ -1,0 +1,296 @@
+{
+  "seed_key": "rm_active_clients_wave1_2026-09-22",
+  "title": "R&M active patrol/security clients, wave 1 (real log data, forestry + council + orchard security) — from RemSec patrol log spreadsheets",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-22",
+  "provider_modules": [],
+  "provider_modules_basis": "No new provider-level module enablement in this wave; access_control/patrol already enabled on R&M from the forestry_sector_rm_2026-09-16 seed.",
+  "notes": [
+    "Every organization/site/zone here is backed by REAL R&M patrol-log spreadsheet data (RemSec - Documents/Patrol Log Entries/All Log Spreadsheets), not invented. Zone place-names were geocoded live via the app's own linz-lookup edge function (action: address_autocomplete, LINZ+Google) on 2026-09-22; a zone with no confident match is created UNPLACED (no geometry) rather than guessing coordinates, same convention as forestry-sector-rm.json.",
+    "PF Olsen Ltd already exists as a CRM prospect org from forestry-sector-rm.json (key 'pfo') — this file's org uses the SAME name 'PF Olsen Ltd' so the script's existing lower(name) match reuses that row (upgrades status to active, adds real sites/zones/agreement) instead of creating a duplicate.",
+    "Mainland Pest Control (MPC) log data is NOT a separate org here: its DATA sheet shows Company=TPFL for sampled rows, meaning it is pest-control activity performed on Tasman Pine Forests' own already-seeded land. Handled separately by attributing MPC log rows to TPFL's existing zones with a biosecurity tag, not by creating a new organization.",
+    "Wrattens, DART/OperationLizard, and OtherPrivate/PVT are deliberately NOT in this wave: Wrattens' raw comments contain an active third-party trespass dispute (names, phone numbers) needing the same locked-base-table treatment already used for firearm_licence_number; DART has precise NZTM2000 site-by-site coordinates needing its own conversion pass; PVT is a multi-person umbrella bucket needing a dedicated privacy-scoped design. See /memories/session/rm-full-population.md for the follow-up plan."
+  ],
+  "organizations": [
+    {
+      "key": "ncc",
+      "name": "Nelson City Council",
+      "organization_type": "government",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Nelson City Council (NCC) reserves and facilities patrolled/monitored by R&M under a purchase-order-based arrangement (POs recorded per reserve in R&M's own billing log, e.g. PO331161, PO329221). Real reserves patrolled per R&M's 'ACTIVE NelsonCityCouncil patrol NCC.xlsx' log: Marsden, Maitai Valley Rd, Atawhai, Trafalgar Park, Atkersen St, plus homeless/security callouts across 'All Facilities'. Source: R&M's own patrol log spreadsheet (internal, not a public website) — this organization is created from the provider's own operational records, not external research.",
+      "facts": { "org_kind": "territorial_authority", "region": "Nelson", "relationship_evidence": "R&M internal patrol log PO references" },
+      "source_urls": [],
+      "modules": ["patrol", "access_control"],
+      "agreement": {
+        "name": "Reserve and facility patrol / camera monitoring — Nelson City Council",
+        "enabled_modules": ["patrol", "access_control"],
+        "evidence": "R&M's own patrol log (ACTIVE NelsonCityCouncil patrol NCC.xlsx) records ongoing per-reserve PO-funded patrol and camera monitoring jobs from 2021 onward.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "per-reserve purchase order" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real patrol jobs against NCC purchase orders since at least 2021 (own patrol log); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 400 },
+      "zones": [
+        { "key": "ncc:marsden", "name": "Marsden Cemetery / Reserve (NCC)", "lat": -41.3200626, "lng": 173.2515507, "gazetteer": { "name": "Marsden Cemetery", "source": "google_place", "note": "Marsden Valley Road, Stoke, Nelson" } },
+        { "key": "ncc:maitai-valley", "name": "Maitai Valley Rd (NCC)", "lat": -41.2858215, "lng": 173.3312962, "gazetteer": { "name": "Maitai Valley Road", "source": "google_address" }, "radius_m": 1200 },
+        { "key": "ncc:atawhai", "name": "Atawhai (NCC)", "lat": -41.2461079, "lng": 173.3148284, "gazetteer": { "name": "Atawhai Drive", "source": "linz_address", "linz_label": "514 Atawhai Drive, Atawhai, Nelson" } },
+        { "key": "ncc:trafalgar-park", "name": "Trafalgar Park (NCC)", "lat": -41.2668591, "lng": 173.2831736, "gazetteer": { "name": "Trafalgar Park", "source": "linz_address", "linz_label": "30 Trafalgar Street, The Wood, Nelson" } }
+      ]
+    },
+    {
+      "key": "tdc",
+      "name": "Tasman District Council",
+      "organization_type": "government",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Tasman District Council (TDC) reserves patrolled/monitored by R&M, per-reserve purchase orders (e.g. PO478619 Appleby Reserve, PO498237 Haldane Rd). Real reserves per R&M's 'ACTIVE TasmanDistrictCouncil-camera and patrol TDC.xlsx' log (76-row reserve reference list): Appleby Reserve, Rabbit Island, Haldane Rd, Rototai Reserve, Baigents Reserve, and many others. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "org_kind": "territorial_authority", "region": "Tasman", "relationship_evidence": "R&M internal patrol log PO references" },
+      "source_urls": [],
+      "modules": ["patrol", "access_control"],
+      "agreement": {
+        "name": "Reserve and facility patrol / camera monitoring — Tasman District Council",
+        "enabled_modules": ["patrol", "access_control"],
+        "evidence": "R&M's own patrol log (ACTIVE TasmanDistrictCouncil-camera and patrol TDC.xlsx) records ongoing per-reserve PO-funded patrol and camera monitoring jobs from 2019 onward.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "per-reserve purchase order" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real patrol jobs against TDC purchase orders since at least 2019 (own patrol log); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 500 },
+      "zones": [
+        { "key": "tdc:rabbit-island", "name": "Rabbit Island (TDC)", "lat": -41.2726191, "lng": 173.1488186, "gazetteer": { "name": "Moturoa / Rabbit Island", "source": "google_place" }, "radius_m": 2500 },
+        { "key": "tdc:appleby-reserve", "name": "Appleby Recreation Reserve (TDC)", "lat": -41.3082976, "lng": 173.1270365, "gazetteer": { "name": "Appleby Recreation Reserve", "source": "google_place" } }
+      ]
+    },
+    {
+      "key": "pfo",
+      "name": "STAND",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Formerly PF Olsen Ltd, rebranded STAND following the PF Olsen / Forest360 merger (Aug 2026) — R&M's own patrol log already uses the name STAND (PFO retained as legacy billing code). UPGRADE of existing CRM-prospect org (forestry_sector_rm_2026-09-16 seed) to an active operational client: R&M's own 'ACTIVE STAND camera and patrol PFO.xlsx' log shows real forest-security patrol/camera work since 2023 across Rabbit Island, Borlace Forest, Howard Forest blocks, billed under PF Olsen GL codes (Security: Patrols, Monitoring & Surveillance, Permits/Access, Gates and Signs, etc). Source: R&M's own patrol log spreadsheet (supplements the external-website facts already on this org from the earlier seed).",
+      "facts": { "relationship_evidence": "R&M internal patrol log, own billing GL codes 8558-745xx-0xx" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Forest security, patrols and camera monitoring — PF Olsen managed forest blocks",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (ACTIVE STAND camera and patrol PFO.xlsx) records ongoing PF Olsen forest-block patrol/camera jobs since 2023.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "GL code 8558-745xx series" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real patrol jobs for PF Olsen since at least 2023 (own patrol log); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 2000 },
+      "zones": [
+        { "key": "pfo:rabbit-island", "name": "Rabbit Island (PF Olsen)", "lat": -41.2726191, "lng": 173.1488186, "gazetteer": { "name": "Moturoa / Rabbit Island", "source": "google_place", "note": "Same physical island as TDC's Rabbit Island zone; PF Olsen manages forestry operations there commercially, TDC owns the reserve land — kept as separate per-org zone rows per this codebase's existing precedent (TPFL/OFO also have independently-seeded zones despite real-world geographic proximity)." }, "radius_m": 2500 },
+        { "key": "pfo:howard-forest", "name": "Howard Forest (PF Olsen)", "lat": -41.760505, "lng": 172.6733919, "gazetteer": { "name": "Howard Valley", "source": "google_place", "linz_label": "450 Howard Valley Road, Howard, St. Arnaud" } },
+        { "key": "pfo:borlace-forest", "name": "Borlace Forest (PF Olsen)", "gazetteer": null, "status": { "note": "No confident geocode match found (2026-09-22) — created unplaced; place via the CRM boundary tool once a precise reference point is available." } }
+      ]
+    },
+    {
+      "key": "mr-forestland",
+      "name": "Merril and Ring Forestland Management Ltd",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Small forestry client, real patrol/security work since 2023 per R&M's own 'ACTIVE Merril and Ring Forestland Mangement Ltd M&R.xlsx' log. Two named forest blocks: Kaimua (code KAIU — resolves to Kaiuma Bay, Marlborough Sounds) and Waihopai (code WAIH — Waihopai Valley, Marlborough). Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log, own billing GL codes 8558-745xx-0xx" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Forest security and patrols — Merril and Ring Forestland Management",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (ACTIVE Merril and Ring Forestland Mangement Ltd M&R.xlsx) records ongoing forest-block patrol jobs since 2023.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "GL code 8558-745xx series" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real patrol jobs for Merril and Ring since at least 2023 (own patrol log); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 3000 },
+      "zones": [
+        { "key": "mr:kaiuma", "name": "Kaiuma Forest Block (M&R)", "lat": -41.2348035, "lng": 173.7907936, "gazetteer": { "name": "Kaiuma Bay", "source": "google_place", "note": "List sheet spelled 'Kaimua'; 'Kaiuma Bay' (Marlborough Sounds) is the confirmed real place matching code KAIU." } },
+        { "key": "mr:waihopai", "name": "Waihopai Forest Block (M&R)", "lat": -41.5714441, "lng": 173.7513328, "gazetteer": { "name": "Waihōpai Valley", "source": "google_place", "linz_label": "748 Waihopai Valley Road, Waihōpai Valley" } }
+      ]
+    },
+    {
+      "key": "stringer-private",
+      "name": "Private - Stringer",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Small single-site private forestry-block security client, real work since 2021 per R&M's own 'ACTIVE Private - Stringer camera and patrol STRN.xlsx' log. One named block: Moutere Hill (code MTRN — NOT the same place as MPC's unrelated 'Moutere North' block which happens to share the same 4-letter code). Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log, own billing GL codes 8558-745xx-0xx" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Property security and patrols — Stringer (Moutere Hill)",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (ACTIVE Private - Stringer camera and patrol STRN.xlsx) records ongoing patrol/camera jobs since 2021.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "GL code 8558-745xx series" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real patrol jobs for this client since at least 2021 (own patrol log); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 1500 },
+      "zones": [
+        { "key": "strn:moutere-hill", "name": "Moutere Hill (Stringer)", "lat": -41.2872908, "lng": 173.0056036, "gazetteer": { "name": "Moutere Hill / Upper Moutere area", "source": "linz_address", "linz_label": "42 Eggers Road, Upper Moutere", "note": "Approximate area point; precise boundary not yet available." } }
+      ]
+    },
+    {
+      "key": "fulton-hogan",
+      "name": "Fulton Hogan Ltd",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Major NZ infrastructure contractor. R&M's own 'REMSEC Fulton Hogan Patrol Log 2022.xlsx' shows facility-protection camera/patrol work at the Maitai Dam (Nelson water-supply facility) under Fulton Hogan's GL codes ('Facility Protection'). Log window is 2022 — may be a completed/lapsed contract rather than ongoing; status recorded as active pending confirmation of current contract state. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log, own billing GL codes 8558-745xx-0xx", "log_window": "2022" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Facility protection — Maitai Dam (Fulton Hogan)",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (REMSEC Fulton Hogan Patrol Log 2022.xlsx) records facility-protection camera/patrol jobs at Maitai Dam in 2022.",
+        "evidence_urls": [],
+        "external_refs": { "billing_basis": "GL code 8558-745xx series", "log_window": "2022 — verify if still active" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M performed and billed real facility-protection jobs for Fulton Hogan in 2022 (own patrol log); recorded as accepted on the owner's instruction (2026-09-22). Contract currency not re-verified for 2026.",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 300 },
+      "zones": [
+        { "key": "fh:maitai-dam", "name": "Maitai Dam (Fulton Hogan)", "lat": -41.2940231, "lng": 173.3756, "gazetteer": { "name": "Maitai Dam", "source": "google_place" } }
+      ]
+    },
+    {
+      "key": "taylors-contracting",
+      "name": "Taylors Contracting",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": "027 653 1703",
+      "account_notes": "Commercial + family residential security client, real work per R&M's own 'ACTIVE TaylorsContracting camera and patrol log.xlsx'. Sites: Taylors Quarry/Office (Lee Valley Rd), Taylors Yard/Office (River Terrace Rd), plus family members' homes (Wakefield/Mapua area). Rates on file: Standard $60/hr, 2 Up $120/hr, Personal Protection $80/hr, mileage 99c/km. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log with named contract rates" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Commercial and residential security — Taylors Contracting",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (ACTIVE TaylorsContracting camera and patrol log.xlsx) records ongoing camera/patrol jobs with named contract rates.",
+        "evidence_urls": [],
+        "external_refs": { "rate_standard": "$60/hr", "rate_2up": "$120/hr", "rate_personal_protection": "$80/hr", "rate_mileage": "99c/km" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real jobs for Taylors Contracting (own patrol log with named rates); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [
+        { "key": "taylors:quarry-office", "name": "Taylors Quarry / Office", "address": "437 Lee Valley Road, Brightwater 7091", "suburb": "Lee Valley, Brightwater", "postcode": "7091", "site_type": "commercial_premises", "lat": -41.417398, "lng": 173.1568378, "geocode": { "match": "linz_nearby", "linz_label": "470 Lee Valley Road, Lee Valley, Brightwater" }, "source": "R&M internal Details sheet" },
+        { "key": "taylors:yard-office", "name": "Taylors Yard / Office", "address": "17 River Terrace Road, Brightwater 7022", "suburb": "Brightwater", "postcode": "7022", "site_type": "commercial_premises", "lat": -41.3800434, "lng": 173.1159994, "geocode": { "match": "linz_exact", "linz_label": "17 River Terrace Road, Brightwater" }, "source": "R&M internal Details sheet" }
+      ],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 150 },
+      "zones": [
+        { "key": "taylors:heslington-rd", "name": "Heslington Rd residence (Taylors — Charlie)", "lat": -41.4005283, "lng": 173.0811757, "gazetteer": { "name": "Mount Heslington Road", "source": "google_place", "note": "Approximate road point; exact house number 481 not confidently matched." } },
+        { "key": "taylors:moore-rd", "name": "Moore Rd residence (Taylors — Matt)", "lat": -41.4190406, "lng": 173.0807942, "gazetteer": { "name": "38 Moore Road, Wakefield", "source": "google_place" } }
+      ]
+    },
+    {
+      "key": "birdhurst",
+      "name": "Birdhurst",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Orchard/packhouse commercial security client (Golden Bay Fruit / Birdhurst brand), real work per R&M's own 'ACTIVE Birdhurst camera and patrol log.xlsx'. Rates: Standard $85/hr, Labourer $60/hr, 2 Up $145/hr, mileage 126c/km. Sites: Golden Bay Fruit/Birdhurst Sheds, Motueka Orchard, Davies Orchard, Strongs Block Shed, Birdhurst Packhouse, Martins Block. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log with named contract rates" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Orchard and packhouse security — Birdhurst",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (ACTIVE Birdhurst camera and patrol log.xlsx) records ongoing camera/patrol jobs with named contract rates.",
+        "evidence_urls": [],
+        "external_refs": { "rate_standard": "$85/hr", "rate_labourer": "$60/hr", "rate_2up": "$145/hr", "rate_mileage": "126c/km" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real jobs for Birdhurst (own patrol log with named rates); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [
+        { "key": "birdhurst:packhouse-lyndhurst", "name": "Birdhurst Packhouse (Lyndhurst Dr)", "address": "61 Lyndhurst Drive, Motueka 7120", "suburb": "Motueka", "postcode": "7120", "site_type": "industrial_site", "lat": -41.0956058, "lng": 173.0119279, "geocode": { "match": "linz_exact", "linz_label": "61 Lyndhurst Drive, Motueka" }, "source": "R&M internal Details sheet" }
+      ],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 400 },
+      "zones": [
+        { "key": "birdhurst:motueka-orchard", "name": "Motueka Orchard (Birdhurst)", "lat": -41.1983814, "lng": 172.8645426, "gazetteer": { "name": "Motueka Valley", "source": "google_place" }, "radius_m": 2000 },
+        { "key": "birdhurst:davies-orchard", "name": "Davies Orchard (Birdhurst)", "lat": -41.0337855, "lng": 172.9011004, "gazetteer": { "name": "Riwaka Valley area", "source": "google_place", "note": "Approximate — exact Davies Rd point not confidently matched." } },
+        { "key": "birdhurst:eden-rd", "name": "Strongs Block Shed (Eden Rd, Birdhurst)", "lat": -41.1775994, "lng": 173.0209953, "gazetteer": { "name": "Eden Road, Upper Moutere", "source": "linz_address", "linz_label": "175 Eden Road, Tasman, Upper Moutere" } },
+        { "key": "birdhurst:whakarewa-st", "name": "Martins Block (Whakarewa St, Birdhurst)", "lat": -41.1149283, "lng": 172.9887289, "gazetteer": { "name": "Whakarewa Street, Motueka", "source": "linz_address", "linz_label": "215 Whakarewa Street, Motueka" } }
+      ]
+    },
+    {
+      "key": "thomas-bros",
+      "name": "Thomas Bros",
+      "organization_type": "private_enterprise",
+      "status": "active",
+      "active": true,
+      "contact_email": null,
+      "contact_phone": null,
+      "account_notes": "Orchard/packhouse commercial security client (Riwaka), real work per R&M's own 'ACTIVE ThomasBros camera and patrol log.xlsx'. Rates: Standard $60/hr, Engineer $75/hr, Labourer $50/hr, 2 Up $110/hr, mileage 99c/km. Sites: Dehra Doon Packhouse, Main Rd Accommodation, Main Rd Shop, Talasea Packhouse (confirmed real business: 'Thomas Bros LTD Talasea Packhouse, 394 Main Road Riwaka'), Kelso. Source: R&M's own patrol log spreadsheet.",
+      "facts": { "relationship_evidence": "R&M internal patrol log with named contract rates; confirmed real business name via live geocode lookup" },
+      "source_urls": [],
+      "modules": ["patrol"],
+      "agreement": {
+        "name": "Orchard and packhouse security — Thomas Bros",
+        "enabled_modules": ["patrol"],
+        "evidence": "R&M's own patrol log (ACTIVE ThomasBros camera and patrol log.xlsx) records ongoing camera/patrol jobs with named contract rates.",
+        "evidence_urls": [],
+        "external_refs": { "rate_standard": "$60/hr", "rate_engineer": "$75/hr", "rate_labourer": "$50/hr", "rate_2up": "$110/hr", "rate_mileage": "99c/km" },
+        "invitation_status": "accepted",
+        "accepted_basis": "R&M has performed and billed real jobs for Thomas Bros (own patrol log with named rates); recorded as accepted on the owner's instruction (2026-09-22).",
+        "link_all_sites": true,
+        "link_all_zones": true
+      },
+      "sites": [
+        { "key": "thomasbros:talasea-packhouse", "name": "Talasea Packhouse (Thomas Bros)", "address": "394 Main Road Riwaka, Riwaka 7198", "suburb": "Riwaka", "postcode": "7198", "site_type": "industrial_site", "lat": -41.0866484, "lng": 172.9984883, "geocode": { "match": "google_place_exact", "linz_label": "Thomas Bros LTD Talasea Packhouse, 394 Main Road Riwaka" }, "source": "R&M internal Details sheet" }
+      ],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 400 },
+      "zones": [
+        { "key": "thomasbros:dehra-doon", "name": "Dehra Doon Packhouse (Thomas Bros)", "lat": -41.0685701, "lng": 172.9722662, "gazetteer": { "name": "Dehra Doon Road, Riwaka", "source": "linz_address", "linz_label": "111 Dehra Doon Road, Riwaka, Motueka" } }
+      ]
+    }
+  ]
+}

@@ -42,6 +42,7 @@
 .crm-account-register-row strong, .crm-account-register-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crm-account-register-row strong { color: #e6f0f4; font-size: 12px; }
 .crm-account-register-row strong small{display:block;margin-top:3px;color:#8faab6;font-size: 12px;font-weight:500}
+.crm-account-register-row strong .crm-former-name{display:block;margin-top:2px;color:#7a8b93;font-size:11px;font-style:italic;font-weight:400}
 .crm-account-register-row .is-ready { color: #83ddae; }
 .crm-account-register-row .is-attention { color: #f7d77a; }
 

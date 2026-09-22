@@ -68,6 +68,7 @@ interface AccountRow {
   next_action: string;
   operating_provider_organization_id?: string;
   operating_provider_name?: string;
+  former_names?: string[];
 }
 
 interface ProviderPortfolioRow {
@@ -303,7 +304,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       const branches = (directChildren ?? []).filter((account) => account.organization_type === 'branch');
       const accountIds = [...new Set([...(accounts ?? []).map((account) => account.id), ...branches.map((branch) => branch.id)])];
       const providerOrgIds = [orgId, ...branches.map((branch) => branch.id)];
-      const [sitesRes, contactsRes, quotesRes, readinessRes, moduleCatalogRes, billingRulesRes] = accountIds.length
+      const [sitesRes, contactsRes, quotesRes, readinessRes, moduleCatalogRes, billingRulesRes, formerNamesRes] = accountIds.length
         ? await Promise.all([
             supabase
               .from('client_sites')
@@ -325,6 +326,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             supabase.rpc('get_crm_organization_readiness', { p_organization_ids: accountIds }),
             supabase.from('module_catalog').select('module_key,billing_period').eq('active', true).order('module_key'),
             supabase.from('rate_rules').select('id,organization_id,name,rate_type,amount,module_key').in('organization_id', providerOrgIds).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
+            supabase.from('import_org_aliases').select('organization_id,alias_value').eq('alias_kind', 'former_name').in('organization_id', accountIds),
           ])
         : [
             { data: [], error: null },
@@ -333,6 +335,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
             { data: [], error: null },
             await supabase.from('module_catalog').select('module_key,billing_period').eq('active', true).order('module_key'),
             await supabase.from('rate_rules').select('id,organization_id,name,rate_type,amount,module_key').in('organization_id', providerOrgIds).eq('rule_kind', 'billing').eq('active', true).order('priority', { ascending: false }).order('name'),
+            { data: [], error: null },
           ];
       if (sitesRes.error) throw sitesRes.error;
       if (contactsRes.error) throw contactsRes.error;
@@ -340,6 +343,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       if (readinessRes.error) throw readinessRes.error;
       if (moduleCatalogRes.error) throw moduleCatalogRes.error;
       if (billingRulesRes.error) throw billingRulesRes.error;
+      if (formerNamesRes.error) throw formerNamesRes.error;
       const readiness = new Map(((readinessRes.data as Array<{ organization_id: string; blockers: string[]; next_action: string }>) ?? []).map((row) => [row.organization_id, row]));
       setModuleCatalog((moduleCatalogRes.data as ModuleCatalogRow[]) ?? []);
       setProviderBillingRules((billingRulesRes.data as ProviderBillingRateRule[]) ?? []);
@@ -360,6 +364,9 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         if (quote.client_org_id && !latestQuotes.has(quote.client_org_id))
           latestQuotes.set(quote.client_org_id, quote.status);
       const operatingProviderByAccount = new Map(portfolioRows.map((row) => [row.organization_id, row]));
+      const formerNamesByAccount = new Map<string, string[]>();
+      for (const alias of (formerNamesRes.data as Array<{ organization_id: string; alias_value: string }>) ?? [])
+        formerNamesByAccount.set(alias.organization_id, [...(formerNamesByAccount.get(alias.organization_id) ?? []), alias.alias_value]);
       const accountsWithCounts: AccountRow[] = (accounts ?? []).map((acct) => ({
         ...acct,
         id: acct.id,
@@ -376,6 +383,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         next_action: readiness.get(acct.id)?.next_action ?? 'Review account readiness',
         operating_provider_organization_id: operatingProviderByAccount.get(acct.id)?.operating_provider_organization_id,
         operating_provider_name: operatingProviderByAccount.get(acct.id)?.operating_provider_name,
+        former_names: formerNamesByAccount.get(acct.id) ?? [],
       }));
       const branchAccounts: AccountRow[] = branches.map((branch) => ({
         ...branch,
@@ -1153,7 +1161,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <div className="crm-account-register-row is-header" role="row"><span>Client and operating provider</span><span>Primary contact</span><span>Sites</span><span>Readiness</span><span>Quote</span><span>Next action</span></div>
               {state.clients.map((client) => (
                 <button id={`crm-account-${client.id}`} type="button" role="row" key={client.id} className={`crm-account-register-row ${client.id === requestedAccountId ? 'is-context-focus' : ''}`} onClick={() => setWorkspaceAccount({ id: client.id, name: client.name, status: client.status, primaryContactName: client.primary_contact_name, siteCount: client.site_count, readinessBlockers: client.blockers, nextAction: client.next_action, latestQuoteStatus: client.latest_quote_status })}>
-                  <strong>{client.name}<small>{client.operating_provider_name ? `Operating provider: ${client.operating_provider_name}` : 'Operating provider not recorded'}</small></strong><span>{client.primary_contact_name ?? 'Not assigned'}</span><span>{client.site_count}</span><span className={client.blockers.length ? 'is-attention' : 'is-ready'}>{client.blockers.length ? `${client.blockers.length} open` : 'Ready'}</span><span>{client.latest_quote_status ?? 'None'}</span><span>{client.next_action}</span>
+                  <strong>{client.name}{client.former_names?.length ? <em className="crm-former-name">formerly {client.former_names.join(', ')}</em> : null}<small>{client.operating_provider_name ? `Operating provider: ${client.operating_provider_name}` : 'Operating provider not recorded'}</small></strong><span>{client.primary_contact_name ?? 'Not assigned'}</span><span>{client.site_count}</span><span className={client.blockers.length ? 'is-attention' : 'is-ready'}>{client.blockers.length ? `${client.blockers.length} open` : 'Ready'}</span><span>{client.latest_quote_status ?? 'None'}</span><span>{client.next_action}</span>
                 </button>
               ))}
             </>

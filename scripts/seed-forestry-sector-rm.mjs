@@ -10,6 +10,7 @@
  *
  *   node scripts/seed-forestry-sector-rm.mjs --dry-run   # BEGIN … report … ROLLBACK
  *   node scripts/seed-forestry-sector-rm.mjs --apply     # BEGIN … report … COMMIT
+ *   node scripts/seed-forestry-sector-rm.mjs --apply --file scripts/data/other-seed.json
  *
  * Required: FIELD_COMPLIANCE_CODESPACE (Supabase management token; never printed).
  */
@@ -19,7 +20,10 @@ import { fileURLToPath } from 'node:url';
 
 const PROJECT_REF = 'dotczcyyzgabmtmnglqj';
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dataPath = path.join(here, 'data', 'forestry-sector-rm.json');
+const fileArgIndex = process.argv.indexOf('--file');
+const dataPath = fileArgIndex !== -1 && process.argv[fileArgIndex + 1]
+  ? path.resolve(process.argv[fileArgIndex + 1])
+  : path.join(here, 'data', 'forestry-sector-rm.json');
 const mode = process.argv.includes('--apply') ? 'apply' : 'dry-run';
 const token = process.env.FIELD_COMPLIANCE_CODESPACE;
 if (!token) { console.error('FIELD_COMPLIANCE_CODESPACE is required'); process.exit(1); }
