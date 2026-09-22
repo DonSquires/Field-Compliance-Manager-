@@ -97,12 +97,18 @@ export default function ObservationSearchPage() {
     else setResults((data ?? []) as Observation[]);
   }, [profile?.organizationId, search, siteId, zoneId, locationId, vehicleId, personId, incidentId, poi, loi]);
 
-  useEffect(() => { void loadOptions(); void runSearch(); }, [loadOptions, runSearch]);
+  useEffect(() => { void loadOptions(); }, [loadOptions]);
+
+  // Runs on mount and whenever a filter dropdown changes. The free-text box is submitted
+  // explicitly (Enter or the Search button), not on every keystroke - runSearch's identity
+  // changes with `search` too, so including it here would fire a query on every character typed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void runSearch(); }, [siteId, zoneId, locationId, vehicleId, personId, incidentId, poi, loi]);
 
   useEffect(() => {
     const routedSearch = searchParams.get('search') ?? '';
-    if (routedSearch !== search) setSearch(routedSearch);
-  }, [searchParams, search]);
+    setSearch((current) => (routedSearch !== current ? routedSearch : current));
+  }, [searchParams]);
 
   const selected = results.find((row) => row.observation_id === selectedId) ?? results[0] ?? null;
 
