@@ -68,6 +68,11 @@ const KNOWN_OFFICERS = {
   // Found in Private-Redvale-Merc's raw log (2026-09-23) - same person as
   // "wade sutherland-berkett" above, just spelled without the hyphen.
   'wade sutherland berkett': '9e96c281-3dc1-449b-819f-57b61f91c739',
+  // Found in OFO's culling logs + confirmed via R&M's own historical staff roster
+  // (RMSEC Forestry Staff Rosters/Roster.xlsx, "Steve"/"Sheryl" columns, 2026-09-24)
+  // - profile-only records (no auth.users row), same pattern as the officers above.
+  'steve savage': 'a9342300-f1c7-4402-8c2e-4de5689fda5a',
+  'sheryl murray': 'ce9f16b8-bb7f-4e60-929a-64458fefb347',
 };
 
 function parseCsv(text) {
