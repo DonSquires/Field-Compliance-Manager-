@@ -703,7 +703,78 @@ turn beats false completeness.
   hand-reviewed list (not a loop over every candidate in a reference sheet)
   — avoids the OFO duplicate-seeding bug entirely by construction, no
   cleanup needed afterward.
-- Still open: OFO Culling Log 2023 (~23 rows).
+- Still open: none (OFO Culling Log 2023 done, see below). A mis-filed TPFL
+  in-house pest-control kill-return log was found while looking for it (see
+  below) and is deferred as a separate future item.
+
+## OFO Culling Log 2023 (2026-09-24) — pest-control compliance records, hunter-vs-staff identity care
+
+- No file literally named "OFO Culling Log 2023" exists; the real source
+  turned out to be **three** small files under R&M's OneDrive
+  `OFO\Pest Control` / `OFO\Culling` folders, totalling 26 real events (close
+  to the ~23 originally estimated):
+  1. `Pest Control Kill Return.xlsx` (Berrymans, 6 real rows) — informal
+     kill-return format (Forest/Date/species-counts/Hunter name/Comments), no
+     job-time/cost/km tracking at all.
+  2. `Berrymans Goat Culling .xlsx` (12 real rows, 1 pure-totals row
+     correctly excluded) — correspondence-driven organised cull operation,
+     authorised by OneFortyOne (Liam Watson) addressed to "Admin Remsec",
+     GL-coded, job-time/km tracked.
+  3. `August goat cull_CANV and WILS.xlsx` "Data" sheet (8 real rows) — same
+     header shape as OFO's main patrol log (Patroller/Date/Forest/Job Time/
+     Job KM/Job Cost), R&M patrol staff performing organised culls as part of
+     a paid, cost-tracked operation.
+  - A fourth candidate, `Pest Control kill returns .xlsx` (334 rows, labelled
+    "R&M Pest Control"), was found in the same OFO folder but its forest
+    codes (Pearse/Orinoco/Greenhill/Waimea) are **TPFL's real zone codes**
+    (confirmed against `scripts/data/zone-maps/tpfl-zone-map.json`) — this is
+    a mis-filed TPFL record, not OFO's. Deliberately excluded from this
+    import; deferred as its own future TPFL task rather than misattributed to
+    OFO's compliance record.
+- All 4 zone codes needed (BERR/CANV/WILS/ALLF) already existed as real OFO
+  zones (Berrymans, Canvastown, Wilsons, General/All Forests) — no new zones
+  to seed, unlike every other client this session.
+- **Identity care (owner-flagged mid-task):** names appearing in a culling
+  log are not automatically R&M staff — some are genuinely independent
+  hunters/permit-holders who may already have a `canonical_people` record
+  (the same registry `person_permits` uses for OFO's 141 RAMS hunting
+  permits). Checked before attributing:
+  - `canonical_people` has surname-only records "Crawford" (permit
+    #16967/#17249) and "Porter" (permit #17014) under OFO — but with no
+    first name, forest_areas, or other corroborating detail, there was not
+    enough evidence to safely link these to "Rob Crawford"/"Dave Porter" as
+    the SAME people (a false merge would misattribute an independent
+    hunter's personal activity as R&M staff work, or vice versa — exactly
+    the kind of accountability-anchor error FOUNDATION.md warns against).
+  - Resolution used the FILE'S OWN structure as the deciding evidence, not
+    name-matching alone: the Kill Return file has zero cost/job-time
+    tracking and no correspondence — a genuinely informal/personal-capacity
+    report — so **every row was imported with Patroller left blank**
+    (no officer_id, no canonical_person_id), with the reported name kept as
+    plain text in the comments plus an explicit "unattributed, see identity
+    note" caveat. The Berrymans and August-cull files are unambiguously
+    R&M's own paid, cost-tracked, correspondence-authorised work (GL codes,
+    job-time/km, "Admin Remsec" as the contracted party) — there, known
+    R&M staff (Rob/Pete Crawford, Dave Porter, Wade Sutherland-Berkett)
+    were attributed via the existing `KNOWN_OFFICERS` map as usual. Steve
+    Savage and Sheryl Murray matched neither `KNOWN_OFFICERS` nor
+    `canonical_people` anywhere — left unattributed with raw name preserved,
+    no id invented for either.
+  - Lesson: when a name could plausibly be either R&M staff or an
+    independent member of the public, judge by the **surrounding record's
+    own structure** (paid/cost-tracked/correspondence-authorised vs
+    informal/untracked/no correspondence) rather than by name-matching
+    alone, and when genuinely unresolvable, leave it unattributed rather
+    than force a link either way.
+- Zone-map: `scripts/data/zone-maps/ofo-culling-zone-map.json`. Client codes:
+  `OFOCULLKR` (Kill Return), `OFOCULLBERR` (Berrymans Goat Culling),
+  `OFOCULLAUG` (August cull) — all distinct from OFO's main `OFO2025`/
+  `OFO2026` codes, confirmed via live query before picking them.
+  Live-verified: 0 duplicate `external_ref`s across all three; `OFOCULLKR`
+  0/6 staff-attributed (correct), `OFOCULLBERR` 1/12, `OFOCULLAUG` 7/8 (both
+  correct per the identity reasoning above). 0 observations / 26
+  location_events total (no vehicle plates in culling data, matching the
+  MPC pest-control pattern).
 - **Cycle Trails + MPC pest-control log, same day**: both genuinely belong
   to TPFL (Cycle Trails' GL codes are TPFL's own "8558-" family; MPC's DATA
   sheet's own `Company` column literally reads "TPFL" for every real row —
