@@ -137,7 +137,7 @@ const col = {
   location: pick('Location'), // fallback zone key: free-text detail, or the only place column on non-council sheets
   comments: pick('Comments', 'Description/Comments'),
   reg: pick('Reg'),
-  jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO'),
+  jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO', 'Job KM'),
   issue: pick('Issue'), actionBy: pick('Action by', 'Action By'),
 };
 
@@ -233,9 +233,10 @@ BEGIN
       INSERT INTO public.canonical_vehicles (plate_number, compliance_source)
       VALUES (v_plate, 'canonical') RETURNING id INTO v_vehicle_id;
     END IF;
-    INSERT INTO public.observations (organization_id, officer_id, plate_number, zone_id, site_id, observed_at, module_key, canonical_vehicle_id, officer_notes, plate_source, external_refs)
+    INSERT INTO public.observations (organization_id, officer_id, plate_number, zone_id, site_id, observed_at, module_key, canonical_vehicle_id, officer_notes, plate_source, external_refs, distance_km)
     VALUES (v_org, (v_obs->>'officer_id')::uuid, v_plate, NULLIF(v_obs->>'zone_id','')::uuid, NULLIF(v_obs->>'site_id','')::uuid, (v_obs->>'occurred_at')::timestamptz, 'patrol', v_vehicle_id, v_obs->>'officer_notes', 'manual',
-            jsonb_build_object('external_ref', v_obs->>'external_ref', 'import', v_obs->'payload'));
+            jsonb_build_object('external_ref', v_obs->>'external_ref', 'import', v_obs->'payload'),
+            CASE WHEN v_obs->'payload'->>'job_kms' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_obs->'payload'->>'job_kms')::numeric ELSE NULL END);
     v_obs_count := v_obs_count + 1;
   END LOOP;
 
@@ -250,6 +251,11 @@ BEGIN
       p_observed_entity_type => v_evt->>'observed_entity_type', p_observed_entity_id => NULLIF(v_evt->>'observed_entity_id','')::uuid,
       p_provider_organization_id => '${PROVIDER_ORG_ID}'::uuid, p_client_organization_id => v_org
     );
+    -- create_location_event has no distance_km param (shared RPC, not extended for this) - set it directly after insert.
+    IF v_evt->'payload'->>'job_kms' ~ '^[0-9]+([.][0-9]+)?$' THEN
+      UPDATE public.location_events SET distance_km = (v_evt->'payload'->>'job_kms')::numeric
+      WHERE organization_id = v_org AND external_ref = v_evt->>'external_ref';
+    END IF;
     v_evt_count := v_evt_count + 1;
   END LOOP;
 

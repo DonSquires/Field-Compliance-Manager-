@@ -587,6 +587,56 @@ turn beats false completeness.
   user does as little as possible; the app and Bob do the work) as a
   standing design lens — see open item 5 above.
 
+## PHASE 2 RUN AGAINST OFO/OneFortyOne (2026-09-23) — 15th client, largest single import, real km tracking proven
+
+- **Correction to the earlier "all clients seeded" claim**: OFO and TPFL were
+  both structurally seeded (org/sites/zones/agreement) in an earlier wave but
+  had **zero** patrol history rows — "seeded" only ever meant the org
+  scaffold, not the actual patrol log import. Found by checking live row
+  counts directly rather than trusting the earlier session summary.
+- OFO's real forest estate is far larger than its 7 originally-seeded zones:
+  128 distinct active forest codes found across the real 2025+2026 logs
+  (11,786 rows). Cross-referenced every code against OFO's own "List"
+  reference sheet (Forest Name/Forest Code columns — a real, authoritative
+  lookup table, not something to guess from map images) to get real names.
+  Real forestry maps (`OFO/Maps/Golden Downs.jpg`, `Rai.jpg`) confirmed ~30
+  of these codes are genuine sub-blocks of the already-seeded Golden Downs
+  Forest / Rai Forest zones — `parent_zone_id` (reinstated earlier today) was
+  set for exactly those, everything else seeded as an independent flat zone
+  rather than guessing at unverified geography.
+- 3 codes (MANU, KAIN, TEET) mapped directly onto OFO's existing Manuka
+  Island/Kainui/Teetotal zones rather than creating duplicates. One code
+  (WAIR) mapped onto the existing Northbank Wairau zone.
+  One single-row code (`PFO` — literally STAND's old "PF Olsen" abbreviation)
+  was investigated for cross-org contamination like the PVT/Birdhurst case,
+  but the single row's content gave no evidence it belongs to STAND — left
+  unresolved rather than force a low-confidence reroute.
+- **Real bugs found and fixed while wiring this up**: the `Job KM` picker had
+  a wrong assumed header (`'Job KM OFO'`) that doesn't match OFO's actual
+  bare `Job KM` header — fixed. The `distance_km` migration created earlier
+  today (2026-09-23) had never actually been applied (a context-switch during
+  the session left it un-run) — applied now, confirmed live. The importer's
+  new `distance_km` population used `\d`/`\.` regex escapes inside a JS
+  template literal — JS silently drops backslashes before unrecognised escape
+  sequences in string literals, so Postgres received the literal (broken)
+  pattern `^d+(.d+)?$` — fixed by switching to bracket-expression syntax
+  (`[0-9]`, `[.]`) which needs no backslashes at all. Verified the ODO
+  (running trip odometer, resets at shift/day start) vs Job KM (spreadsheet
+  pre-computed delta between consecutive ODO readings) relationship against
+  real consecutive rows before trusting `job_kms` as the real distance value.
+- Result: 703 observations + 8,703 location_events, verified live (0 garbage
+  plates, 0 duplicate refs). **`distance_km` populated on 703 observations
+  (1,664.2km total) and 8,700 location_events (114,080.8km total)** — the
+  first real proof the km-tracking work from earlier today actually works
+  end-to-end on live data, not just the schema existing.
+- Not yet done: TPFL's own main patrol file, "Cycle Trails Patrol Log 2021"
+  (belongs to TPFL), "MPC log" (belongs to TPFL — Mainland Pest Control's own
+  pest-control activity stream), "Digger work 2023" and "OFO Culling Log
+  2023" (both belong to OFO). Mainland Pest Control now exists as its own
+  `organization_type='contractor'` org with a service_agreement to R&M
+  (`1ccdd3fb-0b0a-478d-8441-6f14a85172aa`), per owner clarification it's a
+  real subcontracting pest-control company, not a subsidiary/division of R&M.
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from
@@ -600,3 +650,11 @@ turn beats false completeness.
   repo root), then commit.
 - Org rename/merger: add a row to `import_org_aliases`
   (`alias_kind='former_name'`), don't invent a new mechanism.
+- **JS template-literal gotcha**: never embed a regex with `\d`/`\.`/`\s`/`\w`
+  etc. directly inside a backtick string meant to become SQL/other text — JS
+  silently drops the backslash before any character that isn't a recognised
+  JS escape sequence. Use POSIX bracket-expression syntax (`[0-9]`, `[.]`)
+  instead, which needs no backslashes and survives JS string literals intact.
+- After creating a migration file, actually apply-and-verify it in the same
+  turn — a mid-session topic change is enough to leave a real migration file
+  committed but never run against the live database.
