@@ -1,0 +1,23 @@
+{
+  "seed_key": "rm_active_clients_wave11_pvt_2026-09-23",
+  "title": "R&M — Other Private Clients (PVT umbrella): 2 new real properties found in the 1,172-row raw log (Phase 2 import prep)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 2 seeded the 4 documented COMPANY/CLIENT rows (Gary Adams, Sonja and Dave x2, Bella Vista Motel). This pass found 2 more real properties never in the Details table: GLEN (Holland Rd/Glenrae Rd, Tapawera - farm gate/fencing installation, a genuine new umbrella client) and BATO (Baton Valley Road - vehicle/stock/poaching incidents on a farm property, also coded MOT once - a miscoding, not related to the Birdhurst-coded MOT rows).",
+    "CONFIRMED the memory hypothesis: this raw log ALSO contains 7 real MOT-coded rows describing genuine early-stage Birdhurst camera-install setup work (contacting Flash Electrical, liaising with Andrea Wilkins, assessing camera sites) - these are NOT PVT's own client, they belong to Birdhurst and were imported under Birdhurst's own organization/zones instead (see scripts/import-pvt-birdhurst-rows.csv split), not this umbrella org, to avoid recording real Birdhurst activity under the wrong client."
+  ],
+  "organizations": [
+    {
+      "key": "pvt",
+      "name": "R&M Other Private Clients",
+      "organization_type": "private_enterprise",
+      "sites": [
+        { "key": "pvt:glenrae", "name": "Glenrae / Holland Rd", "address": "Glenrae Road, Tapawera", "site_type": "other", "lat": -41.3834838, "lng": 172.7768597, "source": "linz-lookup" },
+        { "key": "pvt:baton-valley", "name": "Baton Valley - Lublow", "address": "Baton Valley Road, Tasman", "site_type": "other", "lat": -41.2868033, "lng": 172.7614618, "source": "linz-lookup" }
+      ]
+    }
+  ]
+}

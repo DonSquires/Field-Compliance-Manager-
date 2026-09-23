@@ -343,10 +343,15 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
    `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
    area) — see the STAND write-up below.
-4. **Run the Phase 2 importer against the remaining ~4 clients** (PVT,
-   Private-Parks, Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R,
-   Taylors, STAND, Birdhurst, Thomas Bros, Stringer, Fulton Hogan, AND DART
-   now (eleven clients). Each client needs
+4. **Run the Phase 2 importer against the remaining ~2 clients** (Private-Parks,
+   Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R, Taylors, STAND,
+   Birdhurst, Thomas Bros, Stringer, Fulton Hogan, DART, AND PVT now (twelve
+   clients). PVT additionally proved a genuinely cross-org scenario: a shared
+   overflow log file can contain rows that really belong to a DIFFERENT
+   already-seeded client, not the umbrella org itself — split the source CSV
+   and run the importer once per target org/zone-map, using a distinct
+   `--client-code` for the split-off subset so its `external_ref`s can never
+   collide with that client's own primary import. Each client needs
    its own zone/site-name-to-id map built from its actual
    Location/Reserve/CODE/Forest/Site column values (same process used so
    far: export full raw sheet to CSV, count distinct location values,
@@ -518,6 +523,34 @@ turn beats false completeness.
 - Result: 681 (2025) + 1105 (2026) = 1786 location_events, the largest single
   client import this session, verified live (0 duplicate refs, correctly
   split 1272/514 between the Trig Road and Thomas Creek zones).
+
+## PHASE 2 RUN AGAINST PVT/R&M Other Private Clients (2026-09-23) — 12th client, cross-org split
+
+- Wave 2 seeded the 4 documented CLIENT rows (Gary Adams, Sonja and Dave x2,
+  Bella Vista Motel). This pass found 2 more real properties never in the
+  Details table: Glenrae (Holland Rd/Glenrae Rd, Tapawera — farm gate/fencing
+  installation) and Baton Valley - Lublow (vehicle/stock/poaching incidents,
+  coded inconsistently as both `BATO` and `MOT`).
+  Both geocoded confidently via `linz-lookup` and added as `client_sites`,
+  matching the umbrella org's existing "per-contact site record" pattern.
+- **Real cross-org finding, confirming a memory hypothesis from wave 2**: 7 of
+  this file's `MOT`-coded rows are NOT PVT's own client at all — they are
+  genuine early-stage Birdhurst camera-install setup history (contacting Flash
+  Electrical, liaising with "Andrea Wilkins" — the same family already seeded
+  as a Birdhurst site), predating Birdhurst's own dedicated log file. Split the
+  raw CSV in two before importing: the 7 Birdhurst-relevant rows were imported
+  under Birdhurst's own organization and zone-map (client-code
+  `BIRDHURSTPVT`, a distinct code from Birdhurst's own `BIRDHURST` import so
+  the two runs' `external_ref`s could never collide), and everything else
+  under PVT's own organization and zone-map (client-code `PVT`). **Reusable
+  pattern**: when a shared/overflow log plausibly contains another client's
+  real activity (matching names, matching location text seen elsewhere),
+  check for it — do not assume every row in "a client's own file" belongs to
+  that client.
+- Result: PVT — 12 observations + 33 location_events; Birdhurst (via the
+  split) — 7 more location_events. Verified live for both (0 garbage plates,
+  0 duplicate refs in either organization, confirmed no collision with
+  Birdhurst's existing import).
 
 ## Conventions established / reusable
 
